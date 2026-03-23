@@ -951,6 +951,223 @@
 - 结果：通过
 - 备注：仍存在既有依赖 `num-bigint-dig v0.8.4` 的 future-incompat 警告，与本次改动无关
 
+## 编码前检查 - ci-machete-four-crates
+时间：2026-03-20 17:38:07 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-ci-machete-four-crates.md`
+□ 将使用以下可复用组件：
+- `/.github/workflows/ci.yml`：确认 CI 实际执行的是 `cargo machete`
+- `/Cargo.toml`：确认工作区依赖来源和声明风格
+- `/crates/macros/Cargo.toml`：确认仅误报场景才用 `package.metadata.cargo-machete`
+□ 将遵循命名约定：不新增 crate 和接口，只调整现有依赖声明
+□ 将遵循代码风格：优先删除真实未使用依赖，不扩大 ignored 范围
+□ 确认不重复造轮子，证明：不改 workflow，不加新脚本，只修四个 crate 的 `Cargo.toml`
+
+## 编码后声明 - ci-machete-four-crates
+时间：2026-03-20 17:39:45 +0800
+
+### 1. 复用了以下既有组件
+- `/.github/workflows/ci.yml` 的 `Machete` 步骤，作为本地复现与验收标准
+- `/Cargo.toml` 的工作区依赖声明方式，保持 crate 内依赖最小集
+- `/crates/macros/Cargo.toml` 的包级 metadata 模式，作为“误报时才忽略”的对照样例
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增依赖别名，沿用原有工作区依赖写法
+- 代码风格：四处改动均为删除未使用依赖，没有引入新的 metadata 或脚本
+- 文件组织：只修改目标 crate 的 `Cargo.toml`
+
+### 3. 对比了以下相似实现
+- `/.github/workflows/ci.yml`：确认 CI 仅执行普通 `cargo machete`
+- `/Cargo.toml`：确认工作区依赖统一维护，允许 crate 局部裁剪
+- `/crates/macros/Cargo.toml`：确认仓库已有 `cargo-machete` 忽略配置范式，但本次无需使用
+
+### 4. 未重复造轮子的证明
+- 没有改动 CI workflow，只修失败源头
+- 没有新增 ignore 规避真实问题，而是直接清理冗余依赖
+
+## 实施与验证记录 - ci-machete-four-crates
+时间：2026-03-20 17:39:45 +0800
+
+### 已完成修改
+- `crates/db_view/Cargo.toml`
+  - 删除未使用依赖 `once_cell`
+- `crates/redis_view/Cargo.toml`
+  - 删除未使用依赖 `chrono`、`smol`
+- `crates/terminal_view/Cargo.toml`
+  - 删除未使用依赖 `serde_json`、`once_cell`
+- `crates/one_ui/Cargo.toml`
+  - 删除未使用依赖 `anyhow`、`chrono`、`enum-iterator`、`futures`、`gpui-macros`、`itertools`、`notify`、`once_cell`、`one-core`、`paste`、`regex`、`ropey`、`rust-i18n`、`schemars`、`serde`、`serde_json`、`serde_repr`、`smallvec`、`smol`、`sum-tree`、`unicode-segmentation`、`uuid`
+
+### 本地验证
+- `cargo check -p db_view`
+- `cargo check -p redis_view`
+- `cargo check -p terminal_view`
+- `cargo check -p one-ui`
+- `cargo machete`
+- 结果：全部通过
+- 备注：`db_view` 与 `terminal_view` 的 `cargo check` 仍提示既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次改动无关
+
+## 编码前检查 - file-manager-upload-conflict
+时间：2026-03-20 18:00:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-file-manager-upload-conflict.md`
+□ 将使用以下可复用组件：
+- `crates/sftp_view/src/lib.rs`：现有上传冲突检测与冲突对话框实现
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：现有传输队列与上传执行逻辑
+- `crates/sftp/src/russh_impl.rs`：确认底层直接覆盖的上传行为
+□ 将遵循命名约定：新增辅助结构与函数使用 Rust 现有命名风格
+□ 将遵循代码风格：优先复用现有 dialog/button/notification 模式和 i18n 文案组织
+□ 确认不重复造轮子，证明：不新建上传抽象，不改 sftp crate 接口，只把 sftp_view 已有策略接入侧边栏上传入口
+
+## 编码后声明 - file-manager-upload-conflict
+时间：2026-03-20 18:07:00 +0800
+
+### 1. 复用了以下既有组件
+- `crates/sftp_view/src/lib.rs` 的 `generate_unique_name`、重名改名策略和冲突对话框按钮设计
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs` 既有的传输队列与上传执行逻辑
+- `crates/sftp/src/russh_impl.rs` 既有上传实现，未修改底层 SFTP 接口
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `PendingUpload` 和辅助函数保持 Rust 现有命名风格
+- 代码风格：上传入口继续走异步 `list_dir` -> `update_in` -> 队列排队，与现有文件选择/上传模式一致
+- 文件组织：仅修改 `file_manager_panel.rs` 和 `terminal_view.yml`
+
+### 3. 对比了以下相似实现
+- `crates/sftp_view/src/lib.rs`：完整上传冲突检测和冲突对话框
+- `main/src/home_tab.rs`：项目中现有确认对话框构建模式
+- `crates/sftp/src/russh_impl.rs`：底层上传直接覆盖的行为证据
+
+### 4. 未重复造轮子的证明
+- 没有新增新的上传抽象层
+- 没有修改 `RusshSftpClient` 接口，而是在现有面板层补前置冲突检测
+
+## 实施与验证记录 - file-manager-upload-conflict
+时间：2026-03-20 18:07:00 +0800
+
+### 已完成修改
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`
+  - 为文件选择上传、文件夹选择上传、拖拽上传统一增加远端重名检测
+  - 新增上传冲突对话框，支持跳过、保留两者、目录合并、覆盖四种策略
+  - 保留现有传输队列与上传执行逻辑，仅在入队前插入冲突处理
+- `crates/terminal_view/locales/terminal_view.yml`
+  - 补充 `Dialog.file_conflict` 和 `Conflict.*` 文案
+  - 补充 `FileManager.read_dir_failed` 错误提示
+
+### 本地验证
+- `cargo check -p terminal_view`
+- 结果：通过
+- 备注：仍存在既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次改动无关
+
+## 编码前检查 - file-manager-toolbar-path-edit
+时间：2026-03-20 18:11:31 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-file-manager-toolbar-path-edit.md`
+□ 将使用以下可复用组件：
+- `crates/sftp_view/src/lib.rs`：路径编辑状态与输入订阅模式
+- `crates/sftp_view/src/lib.rs`：`show_new_folder_dialog` 对话框实现模式
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：既有 `select_and_upload_files`、`navigate_to`、`refresh_dir`
+□ 将遵循命名约定：新增字段和方法使用 Rust 现有 `snake_case`
+□ 将遵循代码风格：继续使用 `InputState`、`Notification`、`open_dialog`、紧凑工具栏布局
+□ 确认不重复造轮子，证明：上传按钮仅复用既有上传入口，路径编辑与新建文件夹直接沿用 `sftp_view` 交互模式
+
+## 编码后声明 - file-manager-toolbar-path-edit
+时间：2026-03-20 18:11:31 +0800
+
+### 1. 复用了以下既有组件
+- `crates/sftp_view/src/lib.rs` 的 `path_editing + path_input + PressEnter/Blur` 输入交互模式
+- `crates/sftp_view/src/lib.rs` 的 `show_new_folder_dialog` 对话框结构
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs` 既有的 `select_and_upload_files`、`navigate_to`、`refresh_dir`
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `path_input`、`path_editing`、`start_path_editing`、`confirm_path` 等字段与方法，风格与仓库一致
+- 代码风格：继续使用 `InputState` 订阅事件、`Notification` 异步反馈、工具栏 `Button`/图标混合布局
+- 文件组织：仅修改 `file_manager_panel.rs` 与 `terminal_view.yml`，并新增本轮 `.claude` 摘要文件
+
+### 3. 对比了以下相似实现
+- `crates/sftp_view/src/lib.rs`：路径点击进入编辑态、Enter 确认、Blur 取消
+- `crates/sftp_view/src/lib.rs`：新建文件夹对话框与远程 `mkdir` 调度
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：上传入口与远程目录刷新逻辑
+
+### 4. 未重复造轮子的证明
+- 没有新增新的上传流程，头部上传按钮直接复用 `select_and_upload_files`
+- 没有抽离新的 dialog/helper 模块，而是在现有面板内按 `sftp_view` 模式最小接入
+
+## 实施与验证记录 - file-manager-toolbar-path-edit
+时间：2026-03-20 18:11:31 +0800
+
+### 已完成修改
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`
+  - 新增路径编辑状态和输入框订阅，支持点击路径后输入、Enter 导航、Blur 取消
+  - 在工具栏新增“上传文件”“新建文件夹”按钮
+  - 新增新建文件夹对话框，调用远程 `mkdir` 成功后刷新目录，失败通过通知提示
+- `crates/terminal_view/locales/terminal_view.yml`
+  - 新增路径编辑、新建文件夹、非法名称、创建失败等文案
+
+### 本地验证
+- `cargo check -p terminal_view`
+- 结果：通过
+- 备注：仍存在既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次改动无关
+
+## 编码前检查 - terminal-sidebar-sync-path
+时间：2026-03-20 18:36:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-terminal-sidebar-sync-path.md`
+□ 将使用以下可复用组件：
+- `main/src/home/home_tabs.rs`：终端设置持久化与广播同步
+- `crates/terminal_view/src/view.rs`：`apply_terminal_settings` 统一应用入口
+- `crates/terminal/src/terminal.rs`：SSH 初始化命令构造与重连逻辑
+□ 将遵循命名约定：新增字段与方法继续使用 Rust `snake_case`
+□ 将遵循代码风格：沿用 `HomePage -> TerminalView -> Terminal` 的单向设置传播，不新增旁路同步逻辑
+□ 确认不重复造轮子，证明：仅补齐现有设置同步链路到 `Terminal` 内部状态，不新增独立配置系统
+
+## 实施计划 - terminal-sidebar-sync-path
+时间：2026-03-20 18:36:00 +0800
+
+1. 在 `crates/terminal/src/terminal.rs` 拆分 SSH 基础初始化命令与 OSC7 注入逻辑，提供运行时刷新方法。
+2. 在 `crates/terminal_view/src/view.rs` 的 `apply_terminal_settings` 中同步调用该刷新方法。
+3. 为 SSH 初始化命令构造补单元测试，并执行 `cargo check -p terminal`、`cargo check -p terminal_view`。
+
+## 编码后声明 - terminal-sidebar-sync-path
+时间：2026-03-20 18:45:00 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home/home_tabs.rs` 的终端设置持久化与广播同步链路
+- `crates/terminal_view/src/view.rs` 的 `apply_terminal_settings` 统一入口
+- `crates/terminal/src/terminal.rs` 既有 SSH 初始化命令构造与 `reconnect` 机制
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `ssh_base_init_commands`、`build_ssh_base_init_commands`、`compose_ssh_init_commands`、`set_sync_path_with_terminal`，保持 Rust `snake_case`
+- 代码风格：继续沿用 `HomePage -> TerminalView -> Terminal` 的单向设置传播，不新增跨层旁路
+- 文件组织：仅修改 `crates/terminal/src/terminal.rs` 与 `crates/terminal_view/src/view.rs`，并补充 `.claude` 记录
+
+### 3. 对比了以下相似实现
+- `main/src/home/home_tabs.rs`：`SyncPathChanged` 与其它终端设置事件的持久化/广播模式
+- `crates/terminal_view/src/view.rs`：`apply_terminal_settings` 处理 `auto_copy`、`middle_click_paste` 的现有同步模式
+- `crates/terminal/src/terminal.rs`：`new_ssh` 与 `reconnect` 的连接生命周期管理模式
+
+### 4. 未重复造轮子的证明
+- 没有新增新的终端设置对象或同步总线
+- 没有改写 SSH 连接流程，只是在现有 `Terminal` 内部补齐未来连接所需的初始化命令重建逻辑
+
+## 实施与验证记录 - terminal-sidebar-sync-path
+时间：2026-03-20 18:45:00 +0800
+
+### 已完成修改
+- `crates/terminal/src/terminal.rs`
+  - 拆分 SSH 基础初始化命令与 OSC7 注入逻辑
+  - 为 `Terminal` 新增 `ssh_base_init_commands` 和 `set_sync_path_with_terminal`
+  - 补充初始化命令构造单元测试
+- `crates/terminal_view/src/view.rs`
+  - 在 `apply_terminal_settings` 中同步刷新底层 `Terminal` 的路径同步配置
+
+### 本地验证
+- `cargo fmt --package terminal --package terminal_view`
+- `cargo test -p terminal build_ssh_init_commands -- --nocapture`
+- `cargo check -p terminal`
+- `cargo check -p terminal_view`
+- 结果：全部通过
+- 备注：仍存在既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次改动无关
+
 ## 编码前检查 - macOS 本地快速打包
 时间：2026-03-23 12:37:59 +0800
 

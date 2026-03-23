@@ -43,5 +43,8 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Local-only scripts
+/supabase.sql
+
 # vibe coding
 .omc/

@@ -49,6 +49,10 @@ Common:
     en: OK
     zh-CN: 确定
     zh-HK: 確定
+  create:
+    en: Create
+    zh-CN: 创建
+    zh-HK: 建立
   cancel:
     en: Cancel
     zh-CN: 取消
@@ -315,6 +319,18 @@ Settings:
     en: Sync path with terminal
     zh-CN: 路径与终端同步
     zh-HK: 路徑與終端同步
+  sync_path_confirm_title:
+    en: Enable Path Sync
+    zh-CN: 开启路径同步
+    zh-HK: 開啟路徑同步
+  sync_path_confirm_message:
+    en: "Enabling this will inject an OSC 7 sequence (PROMPT_COMMAND) into the shell at connection startup to sync the working directory with the file manager. The command will be visible in the terminal. This setting will take effect on the next reconnection."
+    zh-CN: 开启后将在连接启动时向 Shell 注入 OSC 7 序列（PROMPT_COMMAND），用于将工作目录同步到文件管理器。该命令会在终端中可见。此设置将在下次重新连接后生效。
+    zh-HK: 開啟後將在連接啟動時向 Shell 注入 OSC 7 序列（PROMPT_COMMAND），用於將工作目錄同步到文件管理器。該命令會在終端中可見。此設置將在下次重新連接後生效。
+  sync_path_confirm_ok:
+    en: Enable
+    zh-CN: 开启
+    zh-HK: 開啟
 
 # 右键菜单
 ContextMenu:
@@ -636,6 +652,18 @@ FileManager:
     en: Refresh
     zh-CN: 刷新
     zh-HK: 刷新
+  go_back:
+    en: Go Back
+    zh-CN: 返回上一级历史
+    zh-HK: 返回上一級歷史
+  go_home:
+    en: Go Home
+    zh-CN: 回到初始目录
+    zh-HK: 回到初始目錄
+  go_parent:
+    en: Go Parent Directory
+    zh-CN: 进入上级目录
+    zh-HK: 進入上級目錄
   toggle_hidden:
     en: Toggle Hidden Files
     zh-CN: 显示/隐藏文件
@@ -660,6 +688,14 @@ FileManager:
     en: Current Path
     zh-CN: 当前路径
     zh-HK: 當前路徑
+  edit_path:
+    en: Click to edit path
+    zh-CN: 点击编辑路径
+    zh-HK: 點擊編輯路徑
+  path_placeholder:
+    en: Enter remote path
+    zh-CN: 输入远程路径
+    zh-HK: 輸入遠程路徑
   sync_terminal_dir:
     en: Sync Terminal Directory
     zh-CN: 同步终端目录
@@ -672,10 +708,18 @@ FileManager:
     en: Upload File
     zh-CN: 上传文件
     zh-HK: 上傳文件
+  new_folder:
+    en: New Folder
+    zh-CN: 新建文件夹
+    zh-HK: 新建文件夾
   upload_folder:
     en: Upload Folder
     zh-CN: 上传文件夹
     zh-HK: 上傳文件夾
+  new_folder_placeholder:
+    en: Enter folder name
+    zh-CN: 输入文件夹名称
+    zh-HK: 輸入文件夾名稱
   select_upload_files:
     en: Select files to upload
     zh-CN: 选择要上传的文件
@@ -712,6 +756,54 @@ FileManager:
     en: Transfer connection failed
     zh-CN: 传输连接建立失败
     zh-HK: 傳輸連接建立失敗
+  read_dir_failed:
+    en: "Failed to read directory: %{error}"
+    zh-CN: "读取目录失败: %{error}"
+    zh-HK: "讀取目錄失敗: %{error}"
+  invalid_name:
+    en: Invalid file or folder name
+    zh-CN: 文件或文件夹名称无效
+    zh-HK: 文件或文件夾名稱無效
+  create_folder_failed:
+    en: "Failed to create folder: %{error}"
+    zh-CN: "创建文件夹失败: %{error}"
+    zh-HK: "建立文件夾失敗: %{error}"
+
+Dialog:
+  file_conflict:
+    en: File Conflict
+    zh-CN: 文件冲突
+    zh-HK: 文件衝突
+
+Conflict:
+  files_exist:
+    en: "The following files already exist at destination:"
+    zh-CN: "以下文件在目标位置已存在："
+    zh-HK: "以下文件在目標位置已存在："
+  choose_action:
+    en: "Choose how to proceed:"
+    zh-CN: "请选择处理方式："
+    zh-HK: "請選擇處理方式："
+  skip:
+    en: Skip
+    zh-CN: 跳过
+    zh-HK: 跳過
+  keep_both:
+    en: Keep Both
+    zh-CN: 保留两者
+    zh-HK: 保留兩者
+  merge:
+    en: Merge
+    zh-CN: 合并
+    zh-HK: 合併
+  overwrite:
+    en: Overwrite
+    zh-CN: 覆盖
+    zh-HK: 覆蓋
+  n_files:
+    en: "%{name} and %{count} other files"
+    zh-CN: "%{name} 等 %{count} 个文件"
+    zh-HK: "%{name} 等 %{count} 個文件"
 
 # 团队同步
 TeamSync:
