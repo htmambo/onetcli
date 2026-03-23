@@ -183,6 +183,14 @@ lto = "fat"
 codegen-units = 1
 strip = true
 
+[profile.release-fast]
+inherits = "release"
+opt-level = 2
+lto = "thin"
+codegen-units = 16
+incremental = true
+strip = false
+
 [profile.dev.package]
 resvg = { opt-level = 3 }
 rustybuzz = { opt-level = 3 }

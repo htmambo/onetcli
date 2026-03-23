@@ -537,3 +537,105 @@
 ### 本地验证
 - `cargo test -p db csv::tests -- --nocapture`：通过（2 passed）
 - `cargo check -p db_view`：通过（仅既有 warning）
+
+
+## 编码前检查 - macOS 本地快速打包
+时间：2026-03-23 12:37:59 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-macos-local-fast-package.md`
+□ 将使用以下可复用组件：
+- `script/bundle-macos.sh`：复用 `.app` 组装逻辑
+- `script/bundle-macos-dmg.sh`：复用 `.dmg` 组装入口和目标架构约定
+- `Cargo.toml` 中的 `profile.release`：作为 `release-fast` 的基线
+□ 将遵循命名约定：脚本文件使用 kebab-case，环境变量使用全大写蛇形
+□ 将遵循代码风格：Shell 脚本统一 `set -euo pipefail`，路径通过 `SCRIPT_DIR/PROJECT_DIR` 计算
+□ 确认不重复造轮子，证明：不新建第二套 `.app` 组装逻辑，只在现有 bundle 脚本外层增加本地快速入口
+
+## 编码后声明 - macOS 本地快速打包
+时间：2026-03-23 12:37:59 +0800
+
+### 1. 复用了以下既有组件
+- `script/bundle-macos.sh`：继续负责 `.app` 目录结构和资源复制
+- `script/bundle-macos-dmg.sh`：保留 DMG 输出逻辑，仅补默认 target 识别
+- `Cargo.toml` 的 `release` profile：通过 `inherits = "release"` 构建 `release-fast`
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增脚本命名为 `package-macos-local.sh`
+- 代码风格：继续使用 `set -euo pipefail` 和路径变量
+- 文件组织：构建 profile 放在根 `Cargo.toml`，打包入口放在 `script/`
+
+### 3. 对比了以下相似实现
+- `script/bundle-macos.sh`：我的方案在其外层补构建入口，不重写 `.app` 打包细节
+- `script/bundle-macos-dmg.sh`：沿用参数风格和产物命名，仅修复默认 target
+- `Cargo.toml` 的 `profile.release`：保留正式发布配置不变，仅派生本地快速 profile
+
+### 4. 未重复造轮子的证明
+- 未新增第二套 `.app`/`.dmg` 组装流程
+- 仅新增一个“本地快速打包”编排脚本，并让既有脚本支持按 profile 读取二进制
+
+## 实施与验证记录 - macOS 本地快速打包
+时间：2026-03-23 12:50:10 +0800
+
+### 已完成修改
+- 在 `Cargo.toml` 新增 `profile.release-fast`，用于本地快速构建
+- 在 `script/bundle-macos.sh` 增加默认 macOS 架构识别和 `ONETCLI_BUILD_PROFILE` 支持
+- 在 `script/bundle-macos-dmg.sh` 增加默认 macOS 架构识别
+- 新增 `script/package-macos-local.sh`，统一执行本地快速构建和 `.app` 打包
+
+### 本地验证
+- `bash script/package-macos-local.sh`
+- 第一次结果：通过，`release-fast` 首次全量构建完成并输出 `target/OnetCli.app`，总耗时约 `10:36.06`
+- 第二次结果：通过，增量构建 `Finished release-fast profile` 耗时 `2.59s`，整套脚本耗时约 `4.426s`
+- 产物校验：
+  - `target/x86_64-apple-darwin/release-fast/onetcli`
+  - `target/OnetCli.app/Contents/MacOS/onetcli`
+  - 两者均存在，文件大小均为约 `94M`
+
+
+## 编码前检查 - 标题栏双击常规功能
+时间：2026-03-23 13:31:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-titlebar-double-click.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/window_ext.rs`：统一窗口辅助行为
+- `crates/ui/src/title_bar.rs`：通用标题栏双击入口
+- `crates/core/src/tab_container.rs`：主工作区顶部条双击入口
+□ 将遵循命名约定：扩展行为放在 `WindowExt`，组件层只保留调用
+□ 将遵循代码风格：最小改动、避免重复平台判断
+□ 确认不重复造轮子，证明：复用现有 `zoom_window` / `minimize_window`，只补系统偏好兼容
+
+## 编码后声明 - 标题栏双击常规功能
+时间：2026-03-23 13:31:00 +0800
+
+### 1. 复用了以下既有组件
+- `WindowExt`：新增统一标题栏双击兼容入口
+- `TitleBar`：继续作为通用标题栏绑定点
+- `TabContainer`：继续作为工作区顶部条绑定点
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增方法 `handle_titlebar_double_click`
+- 代码风格：平台兼容逻辑集中在一个文件，两个调用点只替换方法名
+- 文件组织：测试内聚在 `crates/ui/src/window_ext.rs`
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/title_bar.rs`：原先直接调用 `window.titlebar_double_click()`
+- `crates/core/src/tab_container.rs`：原先同样直接调用 `window.titlebar_double_click()`
+- `gpui` macOS 平台实现：只读取 `AppleActionOnDoubleClick`，缺少本机可见的旧 key 兼容
+
+### 4. 未重复造轮子的证明
+- 未自建窗口缩放/最小化实现，仍调用 `gpui::Window` 的平台动作
+- 仅补充系统偏好解析与统一入口
+
+## 实施与验证记录 - 标题栏双击常规功能
+时间：2026-03-23 13:31:00 +0800
+
+### 已完成修改
+- 在 `crates/ui/src/window_ext.rs` 新增 macOS 标题栏双击偏好兼容逻辑
+- 在 `crates/ui/src/title_bar.rs` 和 `crates/core/src/tab_container.rs` 统一改为调用 `handle_titlebar_double_click`
+- 新增 5 个单元测试覆盖 `AppleActionOnDoubleClick` 与 `AppleMiniaturizeOnDoubleClick` 的解析分支
+
+### 本地验证
+- `cargo test -p gpui-component window_ext::tests --lib`
+- 结果：通过（5 passed）
+- `cargo check -p main`
+- 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）

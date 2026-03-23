@@ -1,3 +1,5 @@
+use std::{env, path::PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 /// Terminal backend trait - abstracts local PTY and SSH backends
@@ -22,15 +24,39 @@ impl Default for LocalConfig {
     fn default() -> Self {
         Self {
             shell: None,
-            working_dir: None,
-            env: vec![
-                ("TERM".to_string(), "xterm-256color".to_string()),
-                ("COLORTERM".to_string(), "truecolor".to_string()),
-                ("CLICOLOR".to_string(), "1".to_string()),
-                ("CLICOLOR_FORCE".to_string(), "1".to_string()),
-            ],
+            working_dir: default_working_dir(),
+            env: default_env(),
         }
     }
+}
+
+fn default_working_dir() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
+
+    #[cfg(not(target_os = "windows"))]
+    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"));
+
+    home.or_else(|| env::current_dir().ok().map(|path| path.into_os_string()))
+        .map(|path| PathBuf::from(path).to_string_lossy().into_owned())
+}
+
+fn default_env() -> Vec<(String, String)> {
+    let mut env_vars = Vec::with_capacity(if cfg!(target_os = "windows") { 2 } else { 5 });
+    env_vars.push(("TERM".to_string(), "xterm-256color".to_string()));
+    env_vars.push(("COLORTERM".to_string(), "truecolor".to_string()));
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        env_vars.push(("CLICOLOR".to_string(), "1".to_string()));
+        env_vars.push(("CLICOLOR_FORCE".to_string(), "1".to_string()));
+        env_vars.push((
+            "LANG".to_string(),
+            env::var("LANG").unwrap_or_else(|_| "zh_CN.UTF-8".to_string()),
+        ));
+    }
+
+    env_vars
 }
 
 /// Terminal dimensions

@@ -11,7 +11,7 @@ use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable, Sizable, Size,
-    h_flex, v_flex,
+    WindowExt as _, h_flex, v_flex,
 };
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -1543,7 +1543,7 @@ impl TabContainer {
                     this.on_double_click(|_, window, _| window.zoom_window())
                 })
                 .when(is_macos, |this| {
-                    this.on_double_click(|_, window, _| window.titlebar_double_click())
+                    this.on_double_click(|_, window, _| window.handle_titlebar_double_click())
                 })
                 .on_mouse_down_out(window.listener_for(&drag_state, |state, _, _, _| {
                     state.should_move = false;

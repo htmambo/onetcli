@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
+    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, WindowExt,
+    h_flex,
 };
 use gpui::{
     AnyElement, App, ClickEvent, Context, Decorations, Hsla, InteractiveElement, IntoElement,
@@ -274,7 +275,7 @@ impl RenderOnce for TitleBar {
                     this.on_double_click(|_, window, _| window.zoom_window())
                 })
                 .when(is_macos, |this| {
-                    this.on_double_click(|_, window, _| window.titlebar_double_click())
+                    this.on_double_click(|_, window, _| window.handle_titlebar_double_click())
                 })
                 .on_mouse_down_out(window.listener_for(&state, |state, _, _, _| {
                     state.should_move = false;

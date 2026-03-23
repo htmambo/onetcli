@@ -2,7 +2,65 @@ use crate::{
     Placement, Root, dialog::Dialog, input::InputState, notification::Notification, sheet::Sheet,
 };
 use gpui::{App, Entity, Window};
-use std::rc::Rc;
+use std::{process::Command, rc::Rc};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacTitlebarDoubleClickAction {
+    None,
+    Minimize,
+    Zoom,
+}
+
+fn resolve_macos_titlebar_double_click_action(
+    action_on_double_click: Option<&str>,
+    miniaturize_on_double_click: Option<&str>,
+) -> MacTitlebarDoubleClickAction {
+    let action = action_on_double_click.map(str::trim).filter(|value| !value.is_empty());
+
+    match action {
+        Some(value) if value.eq_ignore_ascii_case("none") => {
+            MacTitlebarDoubleClickAction::None
+        }
+        Some(value) if value.eq_ignore_ascii_case("minimize") => {
+            MacTitlebarDoubleClickAction::Minimize
+        }
+        Some(value)
+            if value.eq_ignore_ascii_case("maximize") || value.eq_ignore_ascii_case("fill") =>
+        {
+            MacTitlebarDoubleClickAction::Zoom
+        }
+        Some(_) => MacTitlebarDoubleClickAction::Zoom,
+        None => match miniaturize_on_double_click
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES") => {
+                MacTitlebarDoubleClickAction::Minimize
+            }
+            _ => MacTitlebarDoubleClickAction::Zoom,
+        },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_global_defaults(key: &str) -> Option<String> {
+    let output = Command::new("defaults")
+        .args(["read", "-g", key])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let value = String::from_utf8(output.stdout).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
 
 /// Extension trait for [`Window`] to add dialog, sheet .. functionality.
 pub trait WindowExt: Sized {
@@ -52,6 +110,9 @@ pub trait WindowExt: Sized {
     fn focused_input(&mut self, cx: &mut App) -> Option<Entity<InputState>>;
     /// Returns true if there is a focused Input entity.
     fn has_focused_input(&mut self, cx: &mut App) -> bool;
+
+    /// 按照 macOS 系统设置执行标题栏双击动作。
+    fn handle_titlebar_double_click(&self);
 }
 
 impl WindowExt for Window {
@@ -149,5 +210,62 @@ impl WindowExt for Window {
     #[inline]
     fn focused_input(&mut self, cx: &mut App) -> Option<Entity<InputState>> {
         Root::read(self, cx).focused_input.clone()
+    }
+
+    #[inline]
+    fn handle_titlebar_double_click(&self) {
+        #[cfg(target_os = "macos")]
+        {
+            let action = resolve_macos_titlebar_double_click_action(
+                read_global_defaults("AppleActionOnDoubleClick").as_deref(),
+                read_global_defaults("AppleMiniaturizeOnDoubleClick").as_deref(),
+            );
+
+            match action {
+                MacTitlebarDoubleClickAction::None => {}
+                MacTitlebarDoubleClickAction::Minimize => self.minimize_window(),
+                MacTitlebarDoubleClickAction::Zoom => self.zoom_window(),
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.zoom_window();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MacTitlebarDoubleClickAction, resolve_macos_titlebar_double_click_action};
+
+    #[test]
+    fn respects_explicit_none_action() {
+        let action = resolve_macos_titlebar_double_click_action(Some("None"), Some("1"));
+        assert_eq!(action, MacTitlebarDoubleClickAction::None);
+    }
+
+    #[test]
+    fn respects_explicit_minimize_action() {
+        let action = resolve_macos_titlebar_double_click_action(Some("Minimize"), Some("0"));
+        assert_eq!(action, MacTitlebarDoubleClickAction::Minimize);
+    }
+
+    #[test]
+    fn falls_back_to_legacy_miniaturize_key() {
+        let action = resolve_macos_titlebar_double_click_action(None, Some("1"));
+        assert_eq!(action, MacTitlebarDoubleClickAction::Minimize);
+    }
+
+    #[test]
+    fn defaults_to_zoom_when_no_preference_is_available() {
+        let action = resolve_macos_titlebar_double_click_action(None, None);
+        assert_eq!(action, MacTitlebarDoubleClickAction::Zoom);
+    }
+
+    #[test]
+    fn treats_fill_as_zoom() {
+        let action = resolve_macos_titlebar_double_click_action(Some("Fill"), Some("1"));
+        assert_eq!(action, MacTitlebarDoubleClickAction::Zoom);
     }
 }

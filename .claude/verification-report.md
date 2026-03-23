@@ -230,3 +230,64 @@
 - 验证：
   - `cargo test -p db csv::tests -- --nocapture` 通过
   - `cargo check -p db_view` 通过
+
+
+---
+
+## 审查报告（macos-local-fast-package）
+生成时间：2026-03-23 12:37:59 +0800
+
+### 技术维度评分
+- 代码质量：94/100（复用现有打包脚本，只增加 profile 切换和本地编排入口）
+- 测试覆盖：86/100（以真实脚本执行作为验证，未新增自动化 shell 测试）
+- 规范遵循：95/100（正式 `release` 配置保持不变，本地快速配置独立）
+
+### 战略维度评分
+- 需求匹配：97/100（直接覆盖“macOS/intel 本地快速打包”场景）
+- 架构一致：95/100（沿用现有 `script/` 和 Cargo profile 分层）
+- 风险评估：91/100（主要风险是 `release-fast` 仅适合本地验证，不应用于正式发布）
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 已新增 `profile.release-fast`，通过 `thin LTO + 更高 codegen-units + incremental` 降低本地 macOS 打包等待时间。
+- 已让 `script/bundle-macos.sh` 和 `script/bundle-macos-dmg.sh` 默认按当前 macOS 架构自动选择 target，并支持通过 `ONETCLI_BUILD_PROFILE` 读取对应目录下的二进制。
+- 已新增 `script/package-macos-local.sh`，用于 macOS 本地一键快速构建并输出 `.app`，可选生成 `.dmg`。
+- 本地验证：
+  - `bash script/package-macos-local.sh` 第一次通过，首次全量构建耗时约 `10:36.06`
+  - `bash script/package-macos-local.sh` 第二次通过，增量构建耗时约 `4.426s`
+  - 产物存在：
+    - `target/x86_64-apple-darwin/release-fast/onetcli`
+    - `target/OnetCli.app/Contents/MacOS/onetcli`
+
+
+---
+
+## 审查报告（titlebar-double-click）
+生成时间：2026-03-23 13:31:00 +0800
+
+### 技术维度评分
+- 代码质量：95/100（平台兼容逻辑集中在 `WindowExt`，避免两个调用点重复实现）
+- 测试覆盖：90/100（新增 5 个解析单测，并完成主程序编译校验）
+- 规范遵循：95/100（最小改动，沿用现有窗口 API）
+
+### 战略维度评分
+- 需求匹配：97/100（直接修复“标题栏双击无常规功能”）
+- 架构一致：94/100（复用 `WindowExt` 作为统一入口）
+- 风险评估：91/100（主要风险是 `defaults` 调用依赖系统命令，但触发频率低）
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 根因是上游 `gpui` 在 macOS 上只读取 `AppleActionOnDoubleClick`，而当前机器只暴露 `AppleMiniaturizeOnDoubleClick=0`，导致标题栏双击落空。
+- 已在本仓库新增兼容层：优先读取 `AppleActionOnDoubleClick`，缺失时回退到 `AppleMiniaturizeOnDoubleClick`；无配置时默认执行缩放。
+- 已修复两个入口：
+  - `crates/ui/src/title_bar.rs`
+  - `crates/core/src/tab_container.rs`
+- 本地验证：
+  - `cargo test -p gpui-component window_ext::tests --lib` 通过（5 passed）
+  - `cargo check -p main` 通过
