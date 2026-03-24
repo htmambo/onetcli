@@ -1,5 +1,6 @@
 [workspace]
 default-members = ["crates/ui", "crates/story", "crates/assets", "main"]
+exclude = ["vendor/zed"]
 members = [
     "crates/macros",
     "crates/story",
@@ -139,6 +140,9 @@ percent-encoding = "2.3.1"
 [workspace.dependencies.windows]
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]
 version = "0.58.0"
+
+[patch."https://github.com/zed-industries/zed"]
+gpui = { path = "vendor/zed/crates/gpui" }
 
 [workspace.lints.clippy]
 almost_complete_range = "allow"

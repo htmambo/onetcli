@@ -51,6 +51,19 @@ use reqwest_client::ReqwestClient;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+const APP_WINDOW_TITLE: &str = "OnetCli";
+
+fn build_window_title(active_tab_title: Option<&str>) -> String {
+    let title = active_tab_title
+        .map(str::trim)
+        .filter(|title| !title.is_empty() && *title != APP_WINDOW_TITLE);
+
+    match title {
+        Some(title) => format!("{APP_WINDOW_TITLE} - {title}"),
+        None => APP_WINDOW_TITLE.to_string(),
+    }
+}
+
 fn activate_tab_by_number(number: usize, cx: &mut App) {
     let Some(active_window) = cx.active_window() else {
         return;
@@ -274,6 +287,7 @@ pub struct OnetCliApp {
     tab_container: Entity<TabContainer>,
     last_layout_state: Option<TabContainerState>,
     _save_layout_task: Option<Task<()>>,
+    window_title: String,
 }
 
 impl OnetCliApp {
@@ -369,6 +383,7 @@ impl OnetCliApp {
             tab_container,
             last_layout_state: None,
             _save_layout_task: None,
+            window_title: String::new(),
         }
     }
 
@@ -383,6 +398,21 @@ impl OnetCliApp {
 
 impl Render for OnetCliApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let next_window_title = {
+            let active_title = self
+                .tab_container
+                .read(cx)
+                .current_title(cx)
+                .map(|title| title.to_string());
+
+            build_window_title(active_title.as_deref())
+        };
+
+        if self.window_title != next_window_title {
+            self.window_title = next_window_title.clone();
+            window.set_window_title(&next_window_title);
+        }
+
         let sheet_layer = Root::render_sheet_layer(window, cx);
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
@@ -395,5 +425,21 @@ impl Render for OnetCliApp {
             .children(sheet_layer)
             .children(dialog_layer)
             .children(notification_layer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_window_title;
+
+    #[test]
+    fn 活动标签存在时拼接应用名和标签名() {
+        assert_eq!(build_window_title(Some("终端")), "OnetCli - 终端");
+    }
+
+    #[test]
+    fn 空标题时回退到应用名() {
+        assert_eq!(build_window_title(Some("   ")), "OnetCli");
+        assert_eq!(build_window_title(None), "OnetCli");
     }
 }

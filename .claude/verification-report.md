@@ -3,6 +3,72 @@
 
 ---
 
+## 审查报告（deepin-client-decorations）
+生成时间：2026-03-25 02:27:00 +0800
+
+### 需求完整性检查
+- 目标明确：在 Deepin 25 + X11 下彻底隐藏系统标题栏，并让应用标题栏按钮接管窗口控制
+- 范围明确：`gpui` X11 装饰能力探测、Deepin 专有原子写入、应用标题栏按钮显示条件
+- 交付物明确：平台层修复、应用层联动、本地构建验证、真实 X11 属性验证、`.claude/` 留痕
+- 风险与依赖明确：最终视觉与交互仍需你在真实 GUI 中确认
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：91/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 根因定位准确：Deepin 25 的系统标题栏隐藏并不走标准 `_GTK_FRAME_EXTENTS` 路径，而是额外识别 `_DEEPIN_NO_TITLEBAR`；此前 `gpui` 的 X11 客户端装饰能力判定把这条路径漏掉了。
+- 平台层修复到位：[`client.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs#L365) 现在会探测 `_DEEPIN_NO_TITLEBAR`；[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1857) 在客户端装饰时会写 `_DEEPIN_NO_TITLEBAR=1` 和 `_DEEPIN_FORCE_DECORATE=0`。
+- 应用层联动正确：[`title_bar.rs`](/usr/htdocs/onetcli/crates/ui/src/title_bar.rs#L45) 不再按桌面环境名一刀切隐藏自绘按钮，而是只根据真实 `window.window_decorations()` 决定是否渲染。
+- 实机属性验证通过：对当前测试窗口执行 `xprop`，已确认 `_DEEPIN_NO_TITLEBAR(CARDINAL) = 1`、`_DEEPIN_FORCE_DECORATE(CARDINAL) = 0`，同时 `_MOTIF_WM_HINTS = 0x2, 0x0, 0x0, 0x0, 0x0`，说明窗口已切到客户端装饰协商路径。
+- 本地验证闭环成立：`cargo clean -p gpui` 后重新执行 `cargo build -p main`，并补跑 `gpui` 平台单测与 `main` 现有标题单测，全部通过。
+- 残余风险可控：仍需你确认 Deepin GUI 中“系统标题栏完全消失、只剩应用标题栏按钮、最大化/还原交互正常”这三项最终体验。
+
+---
+
+## 审查报告（deepin-window-restore-x11-zoom）
+生成时间：2026-03-25 01:28:00 +0800
+
+### 需求完整性检查
+- 目标明确：修复 Deepin 25 + X11 下窗口最大化后无法通过主“还原”按钮或双击标题栏恢复的问题
+- 范围明确：保持既有“单组按钮”和 A 方案标题同步不回退，只修 `gpui` X11 平台层状态切换语义
+- 交付物明确：平台层代码修复、最小单测、本地构建验证、`.claude/` 留痕
+- 风险与依赖明确：最终行为仍依赖 Deepin 窗口管理器，必须做一次真实 GUI 回归
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：90/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：97/100
+- 风险评估：91/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 根因定位收敛：[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1590) 的 X11 `zoom()` 之前始终发送 `WmHintPropertyState::Toggle`，而 Wayland 对照实现并不是这种语义。
+- 修复方向最小且正确：[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L873) 重新启用 `Remove` / `Add`，并在 [`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L879) 通过 `maximized_wm_hint_property_state` 按当前状态显式区分“还原”和“最大化”。
+- 影响范围受控：应用层已确认有效的 Deepin 双按钮修复、系统标题跟随活动标签的 A 方案都未被回退；主工程 `cargo check`、`cargo test -p main onetcli_app::tests`、`cargo build -p main` 均通过。
+- 平台层验证充分：[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1889) 与 [`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1897) 两个新增单测分别验证了“已最大化走 Remove”和“普通窗口走 Add”。
+- 新增诊断已把边界划清：在真实调试窗口 `0x8c00002` 上，手工发送标准 X11 `_NET_WM_STATE Add/Toggle` 可以正常最大化和恢复；因此剩余的“系统主按钮和双击标题栏不能还原”更接近 Deepin/KWin `com.deepin.chameleon` 装饰插件路径，而不是 OnetCli 窗口属性仍然缺失。
+- 残余风险与限制：如果目标是“必须修复系统标题栏主按钮本身”，当前应用侧补丁空间已经很小，后续更现实的方向是改为彻底绕开这条系统装饰路径，或转向 Deepin/KWin 侧规则/插件排查。
+
+---
+
 ## 审查报告（sync-server-url-settings）
 生成时间：2026-03-24 22:45:33 +0800
 
@@ -1249,3 +1315,129 @@
 ### 残余风险
 - 当前兼容分支是面向 Deepin/DDE 的最小修复，并非上游 X11 装饰行为的通用根治
 - 本次缺少图形界面实机截图验证，若你需要，我下一步可以继续补一次实际运行后的视觉确认
+
+
+---
+
+## 审查报告（window-title-sync）
+生成时间：2026-03-24 23:31:55 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“先尝试 A，让系统标题栏不再空白”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已按 A 方案实现系统窗口标题跟随当前活动标签变化，没有提前进入 B 的结构重构
+- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `OnetCliApp`、`TabContainer`、固定首页标签状态和现有窗口标题 API
+- 结论留痕：本地验证命令和残余视觉验证边界已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 主要结论
+- 主窗口当前没有独立标题栏层，因此 A 方案的可执行实现只有“同步系统窗口标题文本”。
+- 修复已让窗口标题在首页、普通标签切换和空标题回退场景下都能稳定生成 `OnetCli - 当前标签名`。
+- 本次没有改动主布局结构，所以如果你实际测试后仍觉得标题区域不够像“标签在标题上”，下一步就应切到 B。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个新增测试全部通过
+
+### 残余风险
+- A 方案只能改善系统标题栏信息密度，不能把真实标签控件移动到系统标题栏区域
+- 是否达到你的视觉预期，仍需要实际运行界面后确认
+
+
+---
+
+## 审查报告（title-bar-tabs-b）
+生成时间：2026-03-25 00:08:30 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“尝试 B，把标签移动到窗口标题区域”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已按 B 方案做主窗口结构改造，没有删除 A 方案的窗口标题同步后备能力
+- 交付物映射：已产出代码改动、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `OnetCliApp`、`TabContainer`、`TitleBar`、Linux 主窗口选项以及 Deepin 控件兼容逻辑
+- 结论留痕：本地验证命令、工具限制和视觉验证边界已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：93/100
+- 测试覆盖：87/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：96/100
+- 风险评估：90/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 主要结论
+- 主窗口现在采用“`TitleBar` + 内容区”的结构，标签条已从 `TabContainer` 顶部拆出并嵌入标题栏区域。
+- `TabContainer` 的标签状态、拖拽、关闭、固定首页标签和内容区渲染逻辑保持原有实现，只新增“嵌入标题栏”模式。
+- Deepin 下是否渲染应用自绘控件仍复用既有兼容逻辑，因此 B 方案不会回退到修复前的双按钮状态。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个既有测试全部通过
+- `cargo test -p gpui-component --lib title_bar`：通过，2 个 Deepin 兼容测试全部通过
+- `cargo test -p one-core --no-run`：通过
+
+### 残余风险
+- 目前缺少自动化 GUI 测试，标题栏是否真正贴近你在 Deepin 25 上的视觉预期，仍需要实机观察
+- Linux 主窗口本次也启用了 `titlebar` 选项，若 Deepin 对该区域的处理与弹窗不同，仍可能需要微调间距或回退到 A
+
+
+---
+
+## 审查报告（deepin-window-restore）
+生成时间：2026-03-25 00:31:30 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“Deepin 25 下系统最大化后无法通过主还原动作恢复”的目标、范围、交付物与验证要点
+- 原始意图覆盖：没有再回到 A/B 方案分支，聚焦在窗口管理兼容路径
+- 交付物映射：已产出代码改动、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `gpui` X11 平台回退日志、主窗口背景、窗口边框 inset 和 Deepin 桌面判断
+- 结论留痕：本地构建验证与 GUI 启动日志已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：92/100
+- 测试覆盖：84/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：90/100
+- 架构一致：95/100
+- 风险评估：91/100
+
+### 综合评分
+- 91/100
+- 建议：通过
+
+### 主要结论
+- 当前环境下 `gpui` 实际已自动回退到 `Server decorations`，因此继续声明客户端边框 inset 是不合理的。
+- 本次改动收掉了 Deepin 系统装饰路径下的 `client inset` 和透明背景两个干扰项，方向与问题现象一致。
+- 由于系统“还原”主按钮属于 Deepin GUI 行为，最终是否完全修复仍需实机点击确认，但当前修改比继续调整标签栏或应用按钮更贴近根因。
+
+### 本地验证
+- `cargo fmt --all`：已执行
+- `cargo check -p main`：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`：通过
+- `cargo test -p gpui-component --lib title_bar -- --nocapture`：通过
+
+### 残余风险
+- 还原按钮行为没有自动化 GUI 回归测试，仍依赖 Deepin 25 实机验证
+- 若问题根因最终位于 `gpui` X11 对 `_NET_WM_STATE_TOGGLE` 的处理语义，本次改动只能消除干扰项，不能替代底层补丁

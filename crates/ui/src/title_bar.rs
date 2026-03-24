@@ -30,7 +30,7 @@ fn desktop_prefers_system_window_controls(
 }
 
 #[cfg(target_os = "linux")]
-fn linux_prefers_system_window_controls() -> bool {
+pub fn linux_prefers_system_window_controls() -> bool {
     let current_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
     let desktop_session = std::env::var("DESKTOP_SESSION").ok();
 
@@ -38,7 +38,7 @@ fn linux_prefers_system_window_controls() -> bool {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn linux_prefers_system_window_controls() -> bool {
+pub fn linux_prefers_system_window_controls() -> bool {
     false
 }
 
@@ -48,11 +48,6 @@ pub fn should_render_custom_window_controls(window: &Window) -> bool {
     }
 
     if cfg!(target_os = "linux") {
-        // Deepin 25 的 X11 会话下可能同时保留系统标题栏和应用自绘按钮。
-        if linux_prefers_system_window_controls() {
-            return false;
-        }
-
         return matches!(window.window_decorations(), Decorations::Client { .. });
     }
 

@@ -1,5 +1,164 @@
 ## 操作日志
 
+## 编码前检查 - deepin-client-decorations
+时间：2026-03-25 02:06:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-deepin-client-decorations.md`
+- 已分析相似实现：
+  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs`
+  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
+  - `crates/ui/src/title_bar.rs`
+- 将使用以下可复用组件：
+  - `check_gtk_frame_extents_supported(...)`：沿用 `_NET_SUPPORTED` 探测模式扩展 Deepin 原子支持
+  - `request_decorations(...)`：沿用现有 `_MOTIF_WM_HINTS` 切换路径补写 `_DEEPIN_NO_TITLEBAR`
+  - `window.window_decorations()`：作为应用层是否显示自绘按钮的唯一真实来源
+- 将遵循命名约定：新增能力标记继续使用 `*_supported`，不引入业务层特判状态
+- 将遵循代码风格：平台兼容逻辑集中在 `gpui` X11 层，OnetCli 仅做标题栏联动修正
+- 确认不重复造轮子，证明：已检查现有窗口装饰探测、请求路径和标题栏渲染入口，当前问题属于既有平台链路缺少 Deepin 分支，不需要新增并行装饰系统
+
+## 编码后声明 - deepin-client-decorations
+时间：2026-03-25 02:22:00 +0800
+
+### 1. 复用了以下既有组件
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs::check_root_atom_supported`：沿用 `_NET_SUPPORTED` 探测模式，补入 Deepin 原子判断
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs::request_decorations`：沿用既有 `_MOTIF_WM_HINTS` 写入链路，补写 Deepin 专有属性
+- `crates/ui/src/title_bar.rs::should_render_custom_window_controls`：继续用真实 `window.window_decorations()` 决定按钮是否显示
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增字段和能力探测继续使用 `*_supported`
+- 代码风格：Deepin 兼容性优先放在 `gpui` 平台层；OnetCli UI 层只做最小联动
+- 文件组织：保留既有 Deepin 双按钮修复和 A 方案标题同步，不回退已确认有效的仓库内改动
+
+### 3. 对比了以下相似实现
+- `client.rs` 原实现：客户端装饰能力只依赖 `compositor_present && _GTK_FRAME_EXTENTS`
+- Deepin 现场结论：系统标题栏隐藏实际依赖 `_DEEPIN_NO_TITLEBAR`
+- `title_bar.rs` 原实现：按桌面环境名隐藏自绘按钮，和真实窗口装饰状态可能分叉
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/main.rs`、`crates/ui/src/window_border.rs`、`crates/ui/src/title_bar.rs` 与 `gpui` 的 X11 装饰链路
+- 结论：根因在平台层装饰协商和 UI 显示条件不一致，继续在业务层兜底会形成重复分叉
+
+## 实施与验证记录 - deepin-client-decorations
+时间：2026-03-25 02:27:00 +0800
+
+### 已完成修改
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs`
+  - 新增 Deepin `_DEEPIN_NO_TITLEBAR` 能力探测
+  - 将 Deepin 客户端装饰路径从“必须依赖 `_GTK_FRAME_EXTENTS` / 合成器”中独立出来
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
+  - 新增 `_DEEPIN_NO_TITLEBAR` / `_DEEPIN_FORCE_DECORATE` 原子
+  - `request_decorations(WindowDecorations::Client)` 时写入 `_DEEPIN_NO_TITLEBAR=1`、`_DEEPIN_FORCE_DECORATE=0`
+  - `request_decorations(WindowDecorations::Server)` 时写回对应服务端值
+- `crates/ui/src/title_bar.rs`
+  - 不再仅按 Deepin 桌面环境名隐藏应用自绘按钮
+  - 改为只依据真实 `window.window_decorations()` 判断是否显示
+
+### 本地验证
+- `cargo clean -p gpui`
+  - 结果：通过，用于强制主工程重新编译外部 git `gpui` 依赖
+- `cargo build -p main`
+  - 结果：通过，并确认日志出现 `Compiling gpui v0.2.2`
+- `CARGO_TARGET_DIR=/usr/htdocs/onetcli/target/gpui-x11-restore-test cargo test --manifest-path /home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/Cargo.toml --lib maximized_windows_use_remove_for_restore -- --nocapture`
+  - 结果：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`
+  - 结果：通过，2 个测试全部成功
+- `DISPLAY=:0 xprop -id 150994946 _DEEPIN_NO_TITLEBAR _DEEPIN_FORCE_DECORATE _MOTIF_WM_HINTS _NET_WM_STATE WM_CLASS WM_NAME`
+  - 结果：`_DEEPIN_NO_TITLEBAR(CARDINAL) = 1`
+  - 结果：`_DEEPIN_FORCE_DECORATE(CARDINAL) = 0`
+  - 结果：`_MOTIF_WM_HINTS(_MOTIF_WM_HINTS) = 0x2, 0x0, 0x0, 0x0, 0x0`
+
+### 当前限制
+- 真实 GUI 交互仍需你确认：系统标题栏是否已经完全消失、应用标题栏按钮是否位置和交互都符合预期
+
+## 编码前检查 - deepin-window-restore-x11-zoom
+时间：2026-03-25 01:06:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-restore.md`
+- 已分析相似实现：
+  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
+  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/wayland/window.rs`
+  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/window.rs`
+- 将使用以下可复用组件：
+  - `X11Window::is_maximized()`：作为 X11 当前状态判断入口
+  - `X11Window::set_wm_hints(...)`：沿用既有 EWMH 发送通道
+  - Wayland `zoom()` 的显式状态切换模式：作为语义对照
+- 将遵循命名约定：仅在 `gpui` X11 平台层补齐状态语义，不改应用层 API
+- 将遵循代码风格：最小改动，只修 `zoom()` 的状态选择并补最小单测
+- 确认不重复造轮子，证明：已检查 OnetCli UI 层双击/按钮入口和 `gpui` 上层 `window.rs`，所有入口最终都收敛到平台层 `zoom()`，继续在 UI 层兜底会重复并放大分叉
+
+## 编码后声明 - deepin-window-restore-x11-zoom
+时间：2026-03-25 01:12:00 +0800
+
+### 1. 复用了以下既有组件
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs::set_wm_hints`：继续通过既有 `_NET_WM_STATE` 发送链路修改最大化状态
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs::is_maximized`：作为 X11 当前窗口状态判定依据
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/wayland/window.rs::zoom`：作为显式最大化/还原语义的对照实现
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增辅助函数 `maximized_wm_hint_property_state`，保持 `snake_case`
+- 代码风格：未新增新的窗口状态字段，也未改动 OnetCli 业务层；修复集中在 `gpui` X11 平台层
+- 文件组织：应用层已确认有效的 Deepin 双按钮修复和 A 方案标题同步均保持不动
+
+### 3. 对比了以下相似实现
+- X11 旧实现：`zoom()` 固定使用 `WmHintPropertyState::Toggle`
+- Wayland 对照实现：`zoom()` 已根据 `state.maximized` 显式 `set_maximized` / `unset_maximized`
+- `gpui/src/window.rs` 上层抽象：所有“最大化/还原”入口最终都只会调用平台层 `zoom()`
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/main.rs`、`crates/ui/src/title_bar.rs`、`crates/core/src/tab_container.rs` 与 `gpui` 上层 `window.rs`
+- 结论：问题根因位于 X11 平台层状态切换语义，继续修改 UI 层会形成重复补丁，且无法覆盖系统标题栏主按钮路径
+
+## 实施与验证记录 - deepin-window-restore-x11-zoom
+时间：2026-03-25 01:28:00 +0800
+
+### 已完成修改
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
+  - 恢复 `WmHintPropertyState::Remove` / `Add`
+  - 新增 `maximized_wm_hint_property_state(is_maximized)`，统一决定 X11 最大化/还原动作
+  - `zoom()` 不再固定发送 `Toggle`，改为“已最大化则 `Remove`，未最大化则 `Add`”
+  - 新增 2 个最小单测，分别验证恢复和最大化分支
+
+### 本地验证
+- `CARGO_TARGET_DIR=/usr/htdocs/onetcli/target/gpui-x11-restore-test cargo test --manifest-path /home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/Cargo.toml --lib maximized_windows_use_remove_for_restore -- --nocapture`
+  - 结果：通过，`platform::linux::x11::window::tests::maximized_windows_use_remove_for_restore ... ok`
+- `CARGO_TARGET_DIR=/usr/htdocs/onetcli/target/gpui-x11-restore-test cargo test --manifest-path /home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/Cargo.toml --lib windowed_windows_use_add_for_maximize -- --nocapture`
+  - 结果：通过，`platform::linux::x11::window::tests::windowed_windows_use_add_for_maximize ... ok`
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`
+  - 结果：通过，2 个测试全部成功
+- `cargo build -p main`
+  - 结果：通过
+
+### 当前限制
+- Deepin 25 的系统标题栏主按钮与双击恢复仍需要你在真实 GUI 上复测；本地自动验证只能证明 X11 平台层现在已具备“显式最大化/显式还原”的语义
+
+## 追加诊断记录 - deepin-window-restore-x11-zoom
+时间：2026-03-25 01:36:00 +0800
+
+### 现场观察
+- 通过 `qdbus org.kde.KWin /KWin supportInformation` 确认当前窗口管理器为 `KWin 5.27.2`，装饰插件为 `com.deepin.chameleon`
+- 当前配置中：
+  - `operationTitlebarDblClick=5000`
+  - `operationMaxButtonLeftClick=5000`
+  - `operationMaxButtonMiddleClick=5015`
+- 新开的 OnetCli 调试窗口 `0x8c00002` 在普通态下具备：
+  - `WM_NORMAL_HINTS`：`user specified location/size` + `gravity: NorthWest`
+  - `WM_HINTS`
+  - `WM_CLIENT_LEADER`
+  - `_MOTIF_WM_HINTS = 0x3, 0x3e, 0x7e, 0x0, 0x0`
+
+### 手工 X11 对照实验
+- 用 `libX11` 直接发送 `_NET_WM_STATE Add(MAXIMIZED_VERT, MAXIMIZED_HORZ)`：
+  - 结果：窗口成功最大化到 `3840x2080 +0+80`
+- 再直接发送 `_NET_WM_STATE Toggle(MAXIMIZED_VERT, MAXIMIZED_HORZ)`：
+  - 结果：窗口成功恢复到 `3200x1836 +322+242`
+
+### 当前判断
+- 标准 EWMH 最大化/还原链路在 OnetCli 窗口上是正常的
+- 用户仍遇到“系统主按钮和双击标题栏不能还原”，剩余问题更接近 Deepin/KWin `com.deepin.chameleon` 装饰插件路径
+- 结论：继续在 OnetCli 应用层或 `gpui` 的普通 `_NET_WM_STATE` 切换上加补丁，预计不能修复系统主按钮这条路径
+
 ## 编码前检查 - sync-server-url-settings
 时间：2026-03-24 22:35:21 +0800
 
@@ -2275,6 +2434,73 @@
 - 本次没有在图形界面里直接截图验证，只能依赖编译、单测和当前桌面环境信息进行确认
 - `cargo check` 与 `cargo test` 仍输出既有 `crates/ui/src/window_ext.rs` 未使用代码警告，以及 `num-bigint-dig` future incompatibility 提示，均与本次改动无关
 
+## 编码前检查 - window-title-sync
+时间：2026-03-24 23:31:55 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-window-title-sync.md`
+□ 将使用以下可复用组件：
+- `main/src/onetcli_app.rs`：主窗口渲染和 `TabContainerEvent` 订阅入口
+- `crates/core/src/tab_container.rs::active_tab`：当前普通活动标签读取
+- `crates/core/src/tab_container.rs::pinned_tab_active`：首页固定标签状态判断
+□ 将遵循命名约定：使用 `current_title`、`window_title`、`build_window_title` 这种状态/构造命名
+□ 将遵循代码风格：保持小型辅助函数 + 主窗口局部状态缓存，不改主布局结构
+□ 确认不重复造轮子，证明：直接复用 `window.set_window_title` 和现有标签状态，不新增标题同步管理器
+
+## 执行记录 - window-title-sync
+时间：2026-03-24 23:31:55 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/onetcli_app.rs`
+- `crates/core/src/tab_container.rs`
+- `main/src/home_tab.rs`
+- `crates/core/src/popup_window.rs`
+
+### 2. 对比的相似实现
+- `main/src/onetcli_app.rs:338`：主窗口已订阅 `TabContainerEvent`，是标签状态外溢的天然挂点
+- `crates/core/src/tab_container.rs:1322`：普通活动标签读取入口
+- `crates/core/src/popup_window.rs:120`：窗口标题设置的既有调用方式
+
+### 3. 当前发现
+- 主窗口现在没有独立 `TitleBar`，所以 A 方案唯一可控手段是同步系统窗口标题文本
+- 普通标签和固定首页标签是两套状态，不能只读取 `active_tab()`
+- `activate_pinned_tab` 本身不发激活事件，因此仅靠事件订阅不足以覆盖“切回首页”场景
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Cargo 验证完成检索与确认
+
+## 编码后声明 - window-title-sync
+时间：2026-03-24 23:31:55 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/tab_container.rs::active_tab`：继续作为普通活动标签来源
+- `crates/core/src/tab_container.rs::pinned_tab_active`：继续判断首页固定标签是否为当前活动项
+- `gpui::Window::set_window_title`：继续使用框架现有窗口标题 API
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `current_title`、`window_title`、`build_window_title`，符合既有状态/辅助函数命名风格
+- 代码风格：采用最小辅助函数和渲染期缓存同步，没有拆出额外服务层
+- 文件组织：通用标题读取落在 `crates/core`，主窗口标题拼接和同步落在 `main`
+
+### 3. 对比了以下相似实现
+- `crates/core/src/popup_window.rs:120`：沿用同一个 `set_window_title` API，不引入平台分支
+- `crates/core/src/tab_container.rs:1322`：在此基础上扩展为 `current_title`，补齐首页固定标签场景
+- `main/src/onetcli_app.rs:384`：继续以主窗口 `render` 作为顶层状态同步点，不额外插入新的观察层
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/onetcli_app.rs`、`crates/core/src/tab_container.rs`、`crates/core/src/popup_window.rs`
+- 最终只补了一个当前标题读取方法和一个窗口标题拼接函数，没有新增标题栏组件或标签同步框架
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，新增 2 个窗口标题测试全部通过
+
+### 6. 风险与限制
+- A 方案只能让系统标题栏显示当前标签名，不能把真实标签控件放进系统标题栏
+- 当前没有自动化图形验证链路，A 是否“视觉上足够好”仍需要你实际观察
+- 验证输出里仍有既有 `crates/ui/src/window_ext.rs` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，与本次改动无关
+
 ## 编码后声明 - sync-server-only
 时间：2026-03-24 22:08:05 +0800
 
@@ -2455,3 +2681,147 @@
 ### 4. 工具限制留痕
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
+
+## 编码前检查 - title-bar-tabs-b
+时间：2026-03-24 23:59:30 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-title-bar-tabs-b.md`
+□ 将使用以下可复用组件：
+- `gpui_component::TitleBar`：主窗口标题栏容器
+- `crates/core/src/tab_container.rs::render_tab_content`：保留内容区渲染
+- `crates/ui/src/title_bar.rs::should_render_custom_window_controls`：延续 Deepin 控件兼容
+□ 将遵循命名约定：新 builder 使用 `with_embedded_tab_bar_in_title_bar`，新渲染方法使用 `render_title_bar_tabs`
+□ 将遵循代码风格：只拆分渲染层，不引入新的全局状态或额外标签状态机
+□ 确认不重复造轮子，证明：沿用 `TitleBar` 和 `TabContainer` 现有能力，只补最小连接层
+
+## 执行记录 - title-bar-tabs-b
+时间：2026-03-24 23:59:30 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/onetcli_app.rs`
+- `main/src/main.rs`
+- `crates/core/src/tab_container.rs`
+- `crates/story/src/lib.rs`
+- `crates/story/src/title_bar.rs`
+- `crates/core/src/popup_window.rs`
+
+### 2. 对比的相似实现
+- `crates/story/src/lib.rs:649`：窗口层已存在 `TitleBar + 内容区` 组合模式
+- `crates/story/src/title_bar.rs:57`：`TitleBar` 已支持承载复杂交互子元素
+- `crates/core/src/tab_container.rs:1491`：标签条和内容区当前耦合在同一实体渲染中
+- `main/src/main.rs:49` 与 `crates/core/src/popup_window.rs:98`：主窗口和弹窗在标题栏选项上此前并不一致
+
+### 3. 当前发现
+- B 方案要成立，必须同时做两件事：主窗口启用 `TitleBar` 区域，`TabContainer` 将标签条从自身根布局中拆出
+- 直接在 `OnetCliApp::render` 中返回 `tab_container.update(... -> impl IntoElement)` 会触发生命周期问题，需要转成 `AnyElement`
+- Deepin 双按钮兼容逻辑可以直接复用，不需要再发明新的平台判断
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
+
+## 编码后声明 - title-bar-tabs-b
+时间：2026-03-25 00:08:30 +0800
+
+### 1. 复用了以下既有组件
+- `gpui_component::TitleBar`：主窗口标题栏承载标签区
+- `gpui_component::TitleBar::title_bar_options`：主窗口窗口选项层标题栏能力
+- `crates/core/src/tab_container.rs::render_tab_content`：保留原有内容区渲染
+- `crates/ui/src/title_bar.rs::should_render_custom_window_controls`：继续控制 Deepin 下是否渲染应用自绘按钮
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 builder 为 `with_embedded_tab_bar_in_title_bar`，新增渲染方法为 `render_title_bar_tabs`
+- 代码风格：采用小范围 builder 配置和渲染拆分，没有引入新的全局状态
+- 文件组织：`TabContainer` 负责渲染模式拆分，`OnetCliApp` 负责窗口级组装，`main.rs` 负责窗口选项
+
+### 3. 对比了以下相似实现
+- `crates/story/src/lib.rs:659`：主窗口布局对齐为 `TitleBar + 内容区` 结构
+- `crates/story/src/title_bar.rs:57`：标题栏内放交互内容的模式被直接复用到主窗口标签区
+- `crates/core/src/tab_container.rs:1491`：原有标签状态机、拖拽和关闭逻辑全部保留，仅新增嵌入标题栏模式
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/onetcli_app.rs`、`main/src/main.rs`、`crates/core/src/tab_container.rs`、`crates/ui/src/title_bar.rs`
+- 最终没有新增第二套标签组件，只让现有 `TabContainer` 提供“独立标签条渲染”和“内容区渲染”两种输出
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个既有测试全部通过
+- `cargo test -p gpui-component --lib title_bar`：通过，2 个 Deepin 兼容测试全部通过
+- `cargo test -p one-core --no-run`：通过，确认核心包测试目标可编译
+
+### 6. 风险与限制
+- B 方案已经完成代码级尝试，但是否真正达到“标签进入标题栏”的视觉预期，仍需要你在 Deepin 25 实机确认
+- 当前没有自动化 GUI 测试覆盖标题栏布局和鼠标交互，本次主要依靠编译、单测和现有交互代码复用来兜底
+- 验证输出中仍有既有 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，与本次改动无关
+
+## 编码前检查 - deepin-window-restore
+时间：2026-03-25 00:31:30 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-restore.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/title_bar.rs::linux_prefers_system_window_controls`：判断 Deepin/DDE 系统控件路径
+- `crates/ui/src/window_border.rs::WindowBorder`：收敛窗口边框与 `client inset`
+- `main/src/main.rs::WindowOptions`：收敛主窗口背景策略
+□ 将遵循命名约定：只增加 `prefers_system_frame` 这类平台语义变量，不引入新的状态实体
+□ 将遵循代码风格：最小化修改窗口创建和边框逻辑，不碰标签状态机
+□ 确认不重复造轮子，证明：沿用现有 Deepin 桌面判断和窗口边框封装，不新建第二套 Linux 窗口策略
+
+## 执行记录 - deepin-window-restore
+时间：2026-03-25 00:31:30 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/main.rs`
+- `crates/ui/src/window_border.rs`
+- `crates/ui/src/title_bar.rs`
+- `crates/ui/src/root.rs`
+- `crates/core/src/tab_container.rs`
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
+
+### 2. 对比的相似实现
+- `main/src/main.rs:47`：主窗口背景和装饰的唯一入口
+- `crates/ui/src/window_border.rs:69`：此前无条件写入 `set_client_inset(SHADOW_SIZE)`
+- `crates/ui/src/title_bar.rs:33`：已有 Deepin/DDE 桌面环境识别
+- `gpui x11 window.rs:1697`：平台侧会在无合成器时强制回退到 `Server decorations`
+
+### 3. 当前发现
+- 当前 Deepin 25 会话是 `X11`，并且 `gpui` 启动日志明确显示“无合成器，回退到系统装饰”
+- 这意味着主窗口实际由系统标题栏托管，继续声明客户端边框 inset 会向窗口管理器传递错误信号
+- Linux 主窗口仍使用 `Transparent` 背景，也会继续保留一层不必要的窗口外观歧义
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg`、本地构建和一次 GUI 启动日志完成诊断
+
+## 编码后声明 - deepin-window-restore
+时间：2026-03-25 00:31:30 +0800
+
+### 1. 复用了以下既有组件
+- `linux_prefers_system_window_controls`：复用 Deepin/DDE 判断，不新增桌面检测代码
+- `WindowBorder`：继续沿用统一窗口边框封装，只调整系统装饰路径的行为
+- `WindowOptions`：继续沿用主窗口参数集中配置
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增局部变量 `prefers_system_frame`、`client_inset`、`window_background`
+- 代码风格：只改窗口兼容路径，不改现有标签栏渲染和标题同步逻辑
+- 文件组织：窗口行为改动仍集中在 `main/src/main.rs` 和 `crates/ui/src/window_border.rs`
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/window_border.rs:69`：原先无条件写 inset；现在只在真正需要自绘边框时才声明 inset
+- `main/src/main.rs:62`：原先 Linux 一律透明背景；现在在 Deepin 系统控件路径下改为不透明
+- `gpui x11 window.rs:1700`：平台已经会回退系统装饰，因此应用层不再继续伪装客户端边框
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/main.rs`、`crates/ui/src/window_border.rs`、`crates/ui/src/title_bar.rs`、`crates/ui/src/root.rs`
+- 最终没有新增新的窗口管理抽象，只是纠正现有窗口兼容分支的输入参数
+
+### 5. 本地验证结果
+- `cargo fmt --all`：已执行
+- `cargo check -p main`：通过
+- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个测试通过
+- `cargo test -p gpui-component --lib title_bar -- --nocapture`：通过，2 个 Deepin 兼容测试通过
+- 启动 `target/debug/onetcli` 观察日志：确认当前环境出现 `x11: no compositor present, falling back to server-side window decorations`
+
+### 6. 风险与限制
+- 当前仍缺少自动化 GUI 手段去点击 Deepin 的系统“还原”主按钮，所以最终结论仍需你实机确认
+- 现有 `window_ext.rs` 仍有既有未使用代码告警，与本次改动无关

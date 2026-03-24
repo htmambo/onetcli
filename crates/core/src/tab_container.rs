@@ -1323,6 +1323,14 @@ impl TabContainer {
         self.tabs.get(self.active_index)
     }
 
+    pub fn current_title(&self, cx: &App) -> Option<SharedString> {
+        if self.pinned_tab_active {
+            self.pinned_tab.as_ref().map(|tab| tab.content().title(cx))
+        } else {
+            self.active_tab().map(|tab| tab.content().title(cx))
+        }
+    }
+
     pub fn set_size(&mut self, size: Size, cx: &mut Context<Self>) {
         self.size = size;
         cx.notify();

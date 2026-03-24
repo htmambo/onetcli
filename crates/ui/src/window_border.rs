@@ -7,6 +7,8 @@ use gpui::{
 };
 
 use crate::ActiveTheme;
+#[cfg(target_os = "linux")]
+use crate::title_bar::linux_prefers_system_window_controls;
 
 #[cfg(not(target_os = "linux"))]
 const SHADOW_SIZE: Pixels = px(0.0);
@@ -66,14 +68,27 @@ impl ParentElement for WindowBorder {
 impl RenderOnce for WindowBorder {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let decorations = window.window_decorations();
-        window.set_client_inset(SHADOW_SIZE);
+        #[cfg(target_os = "linux")]
+        let prefers_system_frame =
+            matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
+        #[cfg(not(target_os = "linux"))]
+        let prefers_system_frame = matches!(decorations, Decorations::Server);
+        let client_inset = if prefers_system_frame {
+            px(0.0)
+        } else {
+            SHADOW_SIZE
+        };
+
+        // Deepin/X11 的系统标题栏路径下不要继续声明自绘边框范围，
+        // 否则窗口管理器可能把窗口当成仍在使用客户端边框。
+        window.set_client_inset(client_inset);
 
         div()
             .id("window-backdrop")
             .bg(gpui::transparent_black())
             .map(|div| match decorations {
                 Decorations::Server => div,
-                Decorations::Client { tiling, .. } => div
+                Decorations::Client { tiling, .. } if !prefers_system_frame => div
                     .bg(gpui::transparent_black())
                     .child(
                         canvas(
@@ -133,6 +148,7 @@ impl RenderOnce for WindowBorder {
                             None => {}
                         };
                     }),
+                Decorations::Client { .. } => div,
             })
             .size_full()
             .child(
@@ -140,7 +156,7 @@ impl RenderOnce for WindowBorder {
                     .cursor(CursorStyle::default())
                     .map(|div| match decorations {
                         Decorations::Server => div,
-                        Decorations::Client { tiling } => div
+                        Decorations::Client { tiling } if !prefers_system_frame => div
                             .when(!(tiling.top || tiling.right), |div| {
                                 div.rounded_tr(BORDER_RADIUS)
                             })
@@ -165,6 +181,7 @@ impl RenderOnce for WindowBorder {
                                     offset: point(px(0.0), px(0.0)),
                                 }])
                             }),
+                        Decorations::Client { .. } => div,
                     })
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
