@@ -15,6 +15,8 @@ pub enum SyncError {
     NotUnlocked,
     /// 主密钥错误
     InvalidMasterKey,
+    /// 云端主密钥与当前本地主密钥不一致
+    CloudMasterKeyMismatch(String),
     /// 密钥版本不匹配
     KeyVersionMismatch,
     /// 网络错误
@@ -34,6 +36,7 @@ impl std::fmt::Display for SyncError {
         match self {
             SyncError::NotUnlocked => write!(f, "请先输入主密钥解锁"),
             SyncError::InvalidMasterKey => write!(f, "主密钥错误"),
+            SyncError::CloudMasterKeyMismatch(message) => write!(f, "{}", message),
             SyncError::KeyVersionMismatch => write!(f, "密钥版本不匹配，请重新同步"),
             SyncError::NetworkError(e) => write!(f, "网络错误: {}", e),
             SyncError::CryptoError(e) => write!(f, "加解密错误: {}", e),

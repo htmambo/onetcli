@@ -144,6 +144,97 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// 确保个人主密钥配置已经同步到云端
+    ///
+    /// 首次同步时自动创建 `user_config`，后续同步则从云端恢复正确的 `key_version`。
+    async fn ensure_personal_key_config(&self) -> Result<(), SyncError> {
+        let raw_key = crypto::get_raw_master_key().ok_or(SyncError::NotUnlocked)?;
+        let cloud_config = self
+            .cloud_client
+            .get_user_config()
+            .await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+        match cloud_config {
+            Some(config) => {
+                let unlock_result = {
+                    let mut service = self
+                        .crypto_service
+                        .write()
+                        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+
+                    if service.key_version() != config.key_version {
+                        tracing::info!(
+                            "[同步引擎] 从云端用户配置恢复 key_version={}",
+                            config.key_version
+                        );
+                    }
+
+                    service.unlock(&raw_key, &config)
+                };
+
+                match unlock_result {
+                    Ok(()) => Ok(()),
+                    Err(SyncError::InvalidMasterKey) => {
+                        let cloud_items = self
+                            .cloud_client
+                            .list_sync_data(None, None, None)
+                            .await
+                            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+                        if cloud_items.is_empty() {
+                            tracing::warn!(
+                                "[同步引擎] 云端密钥配置与当前主密钥不匹配，但账号下没有同步数据，自动重建云端密钥配置"
+                            );
+
+                            let new_config = {
+                                let mut service = self.crypto_service.write().map_err(|_| {
+                                    SyncError::StorageError("同步服务锁获取失败".to_string())
+                                })?;
+                                service.setup_master_key(&raw_key)?
+                            };
+
+                            self.cloud_client
+                                .save_user_config(&new_config)
+                                .await
+                                .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+                            Ok(())
+                        } else {
+                            Err(SyncError::CloudMasterKeyMismatch(
+                                "云端同步密钥与当前本地主密钥不一致，请使用原主密钥解锁，或清空该账号的云端同步数据后重试"
+                                    .to_string(),
+                            ))
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            None => {
+                let config = {
+                    let mut service = self
+                        .crypto_service
+                        .write()
+                        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+
+                    if service.key_version() >= 1 {
+                        return Ok(());
+                    }
+
+                    tracing::info!("[同步引擎] 云端缺少用户密钥配置，自动初始化");
+                    service.setup_master_key(&raw_key)?
+                };
+
+                self.cloud_client
+                    .save_user_config(&config)
+                    .await
+                    .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+                Ok(())
+            }
+        }
+    }
+
     /// 执行完整同步
     ///
     /// ## 同步流程
@@ -154,6 +245,7 @@ impl SyncEngine {
         tracing::info!("========== 开始云同步 ==========");
 
         self.ensure_unlocked()?;
+        self.ensure_personal_key_config().await?;
 
         // 获取并缓存团队列表
         match self.cloud_client.list_teams().await {

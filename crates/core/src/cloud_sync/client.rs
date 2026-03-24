@@ -3,11 +3,11 @@
 //! 定义云端 API 的通用接口，支持多种后端实现（如 Supabase）。
 
 use crate::cloud_sync::models::*;
-use crate::license::SubscriptionInfo;
 use crate::llm::ChatStream;
 use async_trait::async_trait;
 use llm_connector::ChatRequest;
 use std::fmt;
+use std::sync::Arc;
 
 /// 云端 API 错误类型
 #[derive(Debug, Clone)]
@@ -60,6 +60,11 @@ impl CloudApiError {
 
 impl std::error::Error for CloudApiError {}
 
+/// 会话过期事件回调类型
+pub type SessionExpiredCallback = Arc<dyn Fn() + Send + Sync>;
+/// 自动刷新成功回调类型
+pub type TokenRefreshedCallback = Arc<dyn Fn(AuthResponse) + Send + Sync>;
+
 /// 云端 API 客户端 trait
 ///
 /// 定义与云端服务交互的通用接口。
@@ -110,15 +115,6 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 保存用户的加密配置
     async fn save_user_config(&self, config: &CloudUserConfig) -> Result<(), CloudApiError>;
-
-    // ========================================================================
-    // 订阅相关
-    // ========================================================================
-
-    /// 获取用户订阅信息
-    ///
-    /// 返回用户当前的订阅计划和状态，用于 License 功能控制。
-    async fn get_subscription(&self) -> Result<Option<SubscriptionInfo>, CloudApiError>;
 
     // ========================================================================
     // OnetCli 模型列表

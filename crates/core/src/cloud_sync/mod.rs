@@ -27,6 +27,7 @@ pub mod queue;
 mod service;
 pub mod state_manager;
 pub mod supabase;
+pub mod sync_server;
 pub mod sync_type;
 mod workspace_sync;
 

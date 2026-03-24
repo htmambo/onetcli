@@ -7,7 +7,6 @@ mod auth;
 mod encourage;
 mod home;
 mod home_tab;
-mod license;
 mod onetcli_app;
 mod setting_tab;
 mod settings;

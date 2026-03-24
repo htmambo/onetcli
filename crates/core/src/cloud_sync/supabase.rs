@@ -5,7 +5,6 @@
 
 use crate::cloud_sync::client::*;
 use crate::cloud_sync::models::*;
-use crate::license::SubscriptionInfo;
 use crate::llm::ChatStream;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -42,11 +41,6 @@ struct AuthState {
     /// 令牌过期时间（Unix 时间戳）
     expires_at: i64,
 }
-
-/// 会话过期事件回调类型
-pub type SessionExpiredCallback = Arc<dyn Fn() + Send + Sync>;
-/// 自动刷新成功回调类型
-pub type TokenRefreshedCallback = Arc<dyn Fn(AuthResponse) + Send + Sync>;
 
 /// Token 刷新状态
 struct RefreshState {
@@ -848,34 +842,6 @@ struct UserConfigRow {
     updated_at: Option<String>,
 }
 
-/// 用户订阅表记录
-#[derive(Debug, Serialize, Deserialize)]
-struct SubscriptionRow {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<String>,
-    user_id: String,
-    plan: String,
-    status: String,
-    expires_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    created_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    updated_at: Option<String>,
-}
-
-impl From<SubscriptionRow> for SubscriptionInfo {
-    fn from(row: SubscriptionRow) -> Self {
-        SubscriptionInfo {
-            plan: row.plan,
-            status: row.status,
-            expires_at: row
-                .expires_at
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-                .map(|dt| dt.timestamp()),
-        }
-    }
-}
-
 /// 模型列表记录
 #[derive(Debug, Serialize, Deserialize)]
 struct ModelListRow {
@@ -1475,28 +1441,6 @@ impl CloudApiClient for SupabaseClient {
             Ok(())
         } else {
             Err(CloudApiError::ServerError("保存用户配置失败".to_string()))
-        }
-    }
-
-    // ========================================================================
-    // 订阅相关
-    // ========================================================================
-
-    async fn get_subscription(&self) -> Result<Option<SubscriptionInfo>, CloudApiError> {
-        let url = format!("{}?&select=*", self.rest_url("user_subscriptions"));
-
-        let (status, result) = self
-            .get_json_with_retry::<Vec<SubscriptionRow>>(&url)
-            .await?;
-
-        if status.is_success() {
-            let rows = result.map_err(|e| CloudApiError::ParseError(e))?;
-            Ok(rows.into_iter().next().map(SubscriptionInfo::from))
-        } else {
-            Err(CloudApiError::ServerError(format!(
-                "获取订阅信息失败: {}",
-                status
-            )))
         }
     }
 

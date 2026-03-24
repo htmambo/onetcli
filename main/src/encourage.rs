@@ -4,8 +4,7 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, FocusHandle, Focusable, FontWeight, Image, ImageFormat,
-    IntoElement, ParentElement, Render, SharedString, Styled, StyledImage,
-    Window, div, img, px,
+    IntoElement, ParentElement, Render, SharedString, Styled, StyledImage, Window, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::clipboard::Clipboard;

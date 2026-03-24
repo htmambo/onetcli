@@ -11,7 +11,6 @@ pub mod crypto;
 pub mod gpui_tokio;
 pub mod key_storage;
 pub mod layout;
-pub mod license;
 pub mod llm;
 pub mod popup_window;
 pub mod storage;

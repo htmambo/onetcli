@@ -1268,3 +1268,599 @@
 - 结果：通过（5 passed）
 - `cargo check -p main`
 - 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+
+
+## 审查前检查 - 升级Pro与同步功能
+时间：2026-03-24 15:18:53 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-upgrade-pro-sync-review.md`
+□ 本次优先复用以下既有组件进行审查：
+- `main/src/license.rs`：升级 Pro 入口与 License 门禁
+- `main/src/home_tab.rs`：登录、订阅、同步与冲突解决的 UI 编排
+- `crates/core/src/license/service.rs`：License 降级/缓存语义
+- `crates/core/src/cloud_sync/engine.rs`：同步与单独冲突解决的执行入口
+- `crates/core/src/cloud_sync/service.rs`：团队密钥版本选择
+□ 将遵循命名约定：按“UI 编排 / 服务逻辑 / 存储与测试”三层检查，不臆造不存在的职责
+□ 将遵循代码风格：基于现有源码和本地验证结果给出结论，不做无证据推断
+□ 确认不重复造轮子，证明：审查完全沿用项目现有 `LicenseService`、`AuthService`、`SyncEngine`、`CloudSyncService`
+
+### 工具与替代记录
+- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
+  - 代码检索：`rg`
+  - 文件阅读：`sed` / `nl`
+  - 本地验证：`cargo test` / `cargo check`
+
+## 审查执行记录 - 升级Pro与同步功能
+时间：2026-03-24 15:18:53 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/license.rs`
+- `main/src/home_tab.rs`
+- `main/src/auth.rs`
+- `crates/core/src/license/service.rs`
+- `crates/core/src/license/models.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/cloud_sync/connection_sync.rs`
+- `crates/core/src/cloud_sync/generic_sync.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `crates/core/src/storage/repository.rs`
+
+### 2. 对比的相似实现
+- `main/src/home_tab.rs:319`：常规同步完整入口
+- `main/src/home_tab.rs:717`：会话恢复后的 License 刷新与自动同步
+- `main/src/home_tab.rs:751`：OTP 登录后的 License 刷新与自动同步
+- `crates/core/src/cloud_sync/engine.rs:143`：常规 `sync()` 的团队缓存预热逻辑
+
+### 3. 发现的主要问题
+- Pro 状态会因订阅接口瞬时失败被错误降级为 Free：`get_subscription().await.ok().flatten()` 把请求失败和“无订阅”混为同一 `None`，随后 `LicenseService::update_from_subscription` 会落盘免费版 License
+- 单独冲突解决绕过团队缓存预热：`apply_conflict_resolutions` 不会像 `sync()` 一样先拉团队列表，团队数据冲突在 `UseLocal/KeepBoth` 下会走 `select_key_version(...).unwrap_or(1)`
+- 升级 Pro 购买完成后缺少回流刷新：升级对话框只打开外链，代码里只有“会话恢复/OTP 登录”会拉取订阅
+
+### 4. 本地验证
+- `cargo test -p one-core license::`
+- 结果：通过（8 passed）
+- `cargo test -p one-core cloud_sync::`
+- 结果：通过（13 passed）
+- `cargo check -p main`
+- 结果：通过（存在既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+
+## 审查后声明 - 升级Pro与同步功能
+时间：2026-03-24 15:18:53 +0800
+
+### 1. 复用了以下既有组件和证据
+- `LicenseService::update_from_subscription`：用于确认 `None` 会直接降级到 Free
+- `HomePage::try_restore_session` / `verify_otp`：用于确认订阅拉取错误被静默吞掉
+- `SyncEngine::sync` 与 `SyncEngine::apply_conflict_resolutions`：用于对比常规同步和单独冲突解决的初始化差异
+
+### 2. 遵循了以下项目约定
+- 命名和职责按现有分层分析：UI 在 `main`，核心逻辑在 `crates/core`
+- 审查结论全部引用现有源码和本地验证结果
+- 不修改任何业务代码，只新增审查留痕文件
+
+### 3. 未重复造轮子的证明
+- 没有引入新的验证脚本，直接使用项目既有 `cargo test` / `cargo check`
+- 没有复写已有结论，所有问题都直接定位到现有实现链路
+
+## 编码前检查 - 云同步服务端开发方案
+时间：2026-03-24 15:35:05 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-server-plan.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/config.rs`：确认 Supabase 服务器地址来自环境注入
+- `crates/core/src/cloud_sync/client.rs`：确认客户端强依赖的服务端接口集合
+- `crates/core/src/cloud_sync/supabase.rs`：确认表名、字段映射、RLS 依赖点、RPC 名称
+- `crates/core/src/cloud_sync/models.rs`：确认统一 `sync_data` 结构与冲突字段
+- `crates/core/src/cloud_sync/generic_sync.rs`：确认同步流程、软删除与增量拉取约束
+- `crates/core/src/cloud_sync/service.rs`：确认加密 blob、`checksum`、`key_version` 语义
+□ 将遵循命名约定：沿用现有 Supabase 表名、字段名、RPC 名称，不发明新的协议层命名
+□ 将遵循代码风格：文档中的所有结论都必须能回溯到当前仓库代码实现或本地环境检查
+□ 确认不重复造轮子，证明：方案明确要求继续使用 Supabase 官方能力，不设计自研认证和自研同步网关
+
+### 工具与替代记录
+- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
+  - 代码检索：`rg`
+  - 文件阅读：`sed`
+  - 环境核对：`printenv`
+  - 文档校验：`test` / `rg`
+
+## 执行记录 - 云同步服务端开发方案
+时间：2026-03-24 15:35:05 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/config.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/models.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/generic_sync.rs`
+- `crates/core/src/cloud_sync/connection_sync.rs`
+- `crates/core/src/cloud_sync/workspace_sync.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/storage/models.rs`
+- `crates/core/src/storage/repository.rs`
+- `crates/core/migrations/20260315000001_team_sync.sql`
+- `crates/core/migrations/20260317000001_connection_owner.sql`
+
+### 2. 对比的相似实现
+- `crates/core/src/config.rs:88`：Supabase URL 和 Key 的注入方式
+- `crates/core/src/cloud_sync/supabase.rs:208`：Auth/REST/Functions URL 拼接规则
+- `crates/core/src/cloud_sync/models.rs:203`：统一 `sync_data` 结构
+- `crates/core/src/cloud_sync/engine.rs:147`：同步前团队列表预热逻辑
+- `crates/core/src/cloud_sync/supabase.rs:1530`：`list_sync_data` 依赖 RLS 自动过滤
+
+### 3. 本次输出
+- 新增 `.claude/context-summary-cloud-sync-server-plan.md`
+- 新增 `.claude/cloud-sync-server-development-plan.md`
+- 追加 `.claude/operations-log.md`
+- 追加 `.claude/verification-report.md`
+
+### 4. 关键结论
+- 当前云同步服务端类型已经明确为 Supabase，而非自研 API。
+- 当前无法从仓库和本地环境确定真实生产服务器域名或地域，因为 `SUPABASE_URL` 未写死且当前环境变量为空。
+- 客户端已强依赖 `user_configs`、`user_subscriptions`、`sync_data`、`teams`、`team_members` 与 `rpc/add_team_member_by_email`。
+- 正确的服务端开发重点是：表结构、RLS、触发器、RPC、订阅回写，而不是重写同步协议。
+
+### 5. 本地验证
+- `test -f .claude/context-summary-cloud-sync-server-plan.md`
+- `test -f .claude/cloud-sync-server-development-plan.md`
+- `rg -n "SUPABASE_URL|sync_data|add_team_member_by_email|云同步服务器在哪里|正确实现清单" .claude/cloud-sync-server-development-plan.md`
+- `printenv | rg '^SUPABASE_(URL|ANON_KEY)=' -n -S || true`
+
+## 编码后声明 - 云同步服务端开发方案
+时间：2026-03-24 15:35:05 +0800
+
+### 1. 复用了以下既有组件
+- `SupabaseConfig::get()`：用于确认服务端地址来源
+- `SupabaseClient`：用于确认服务端协议边界、表名和 RPC 名称
+- `CloudSyncData`：用于约束统一同步表设计
+- `generic_sync` / `SyncEngine`：用于约束软删除、增量拉取和团队缓存语义
+
+### 2. 遵循了以下项目约定
+- 文档全部落在项目内 `.claude/` 目录
+- 使用现有表名、字段名和同步概念，不引入新的抽象层
+- 所有关键结论均可映射回仓库源码或本地环境检查结果
+
+### 3. 未重复造轮子的证明
+- 方案明确采用 Supabase 官方能力，不新增自研认证、会话或同步服务
+- 方案中的“正确实现清单”全部围绕现有客户端契约展开，没有发明新的客户端协议
+
+## 编码前检查 - 移除 Pro 验证
+时间：2026-03-24 15:56:22 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-remove-pro-validation.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs`：云同步按钮门禁与登录后状态更新
+- `main/src/license.rs`：应用启动时的 License 接入点
+- `main/src/setting_tab.rs`：账户区域中的离线 License 入口与登出清理
+- `crates/core/src/license/service.rs`：核心 License 行为
+□ 将遵循命名约定：保留 `LicenseService`、`Feature`、`PlanTier` 等接口名，避免跨模块连锁重构
+□ 将遵循代码风格：以删门禁、删入口、改默认值为主，不引入新的授权抽象
+□ 确认不重复造轮子，证明：直接复用现有 License 模块做兼容层，不重新设计一套功能开关系统
+
+### 工具与替代记录
+- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
+  - 代码检索：`rg`
+  - 文件阅读：`sed`
+  - 本地验证：`cargo test` / `cargo check`
+
+## 执行记录 - 移除 Pro 验证
+时间：2026-03-24 15:56:22 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `main/src/license.rs`
+- `main/src/setting_tab.rs`
+- `crates/core/src/license/service.rs`
+- `crates/core/src/license/models.rs`
+- `crates/core/src/license/mod.rs`
+
+### 2. 对比的相似实现
+- `main/src/home_tab.rs:319`：同步门禁
+- `main/src/home_tab.rs:717`：恢复会话后同步订阅
+- `main/src/home_tab.rs:751`：OTP 登录后同步订阅
+- `main/src/license.rs:1`：全局 License 初始化与升级入口
+- `main/src/setting_tab.rs:720`：离线 License 导入入口
+
+### 3. 本次改动
+- 删除了 `home_tab` 中的 Pro/License 门禁与升级提示逻辑
+- 删除了恢复会话和 OTP 登录后的订阅同步回写
+- 将 `main/src/license.rs` 改为空兼容层，不再初始化 Pro 校验
+- 删除了设置页中的“导入离线 License”入口
+- 将 `LicenseService` 改为默认返回 Pro 并始终启用 `CloudSync`
+- 更新了 `one_core::license` 模块说明和相关测试预期
+
+### 4. 本地验证
+- `cargo test -p one-core license:: --lib`
+- 结果：通过（8 passed）
+- `cargo check -p main`
+- 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+- `rg -n "show_upgrade_dialog|offline_license_public_key|get_license_service\\(|License.upgrade_to_pro|License.pro_required|导入离线 License|从服务端获取订阅信息|用户无订阅记录" main/src crates/core/src -S`
+- 结果：无匹配，确认关键旧入口已移除
+
+## 编码后声明 - 移除 Pro 验证
+时间：2026-03-24 15:56:22 +0800
+
+### 1. 复用了以下既有组件
+- `HomePage::trigger_sync`：作为同步统一入口，直接去掉 License 前置门禁
+- `LicenseService`：保留原接口，改为默认 Pro 行为
+- `main/src/license.rs::init`：保留主程序接入点，改为空兼容层
+
+### 2. 遵循了以下项目约定
+- 仍保持 UI 在 `main`、核心逻辑在 `crates/core`
+- 没有改动云同步协议和存储模型，只移除授权验证与相关 UI
+- 所有结论均经过本地编译和单测验证
+
+### 3. 未重复造轮子的证明
+- 没有新增新的功能开关模块
+- 没有重写同步逻辑，只移除了 Pro 校验及其衍生入口
+
+## 编码前检查 - 删除 License 模块
+时间：2026-03-24 16:04:47 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-delete-license-module.md`
+□ 将使用以下可复用组件：
+- `main/src/main.rs`：删除顶层 `mod license;`
+- `main/src/onetcli_app.rs`：删除运行时 License 初始化接入
+- `crates/core/src/lib.rs`：删除公共模块导出
+- `crates/core/src/cloud_sync/client.rs` / `supabase.rs`：删除仅供 License 使用的订阅接口
+- `Cargo.toml`：移除 `crates/license_tool` 工作区成员
+□ 将遵循命名约定：只保留账号登录与云同步相关接口，不保留任何 License 兼容层命名
+□ 将遵循代码风格：以删除式改动为主，直接清理无用模块、文件与依赖
+□ 确认不重复造轮子，证明：继续复用现有 `auth` 与 `cloud_sync`，不新增新的授权/配置层
+
+### 工具与替代记录
+- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
+  - 代码检索：`rg`
+  - 文件阅读：`sed`
+  - 本地验证：`cargo check` / `cargo test`
+
+## 执行记录 - 删除 License 模块
+时间：2026-03-24 16:04:47 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/main.rs`
+- `main/src/onetcli_app.rs`
+- `crates/core/src/lib.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `Cargo.toml`
+- `crates/core/Cargo.toml`
+- `main/Cargo.toml`
+- `crates/license_tool/Cargo.toml`
+
+### 2. 对比的相似实现
+- `main/src/main.rs:1`：顶层模块接入
+- `main/src/onetcli_app.rs:147`：应用初始化链路
+- `crates/core/src/cloud_sync/client.rs:1`：对外 trait 收口
+- `crates/core/src/lib.rs:1`：公共模块导出
+- `Cargo.toml:19`：工作区成员管理
+
+### 3. 本次改动
+- 删除 `main/src/license.rs`
+- 删除 `crates/core/src/license/` 整个模块目录
+- 删除 `crates/license_tool/` 工具源码并移出工作区
+- 删除 `main` 和 `one-core` 对 License 模块的启动/导出接入
+- 删除 `CloudApiClient::get_subscription()` 与 `SupabaseClient` 中对应实现
+- 清理 `main` 与 `one-core` 中已无用的授权依赖
+
+### 4. 本地验证
+- `rg -n "one_core::license|crate::license|pub mod license;|mod license;|SubscriptionInfo|get_subscription\\(|license_tool|user_subscriptions|OfflineLicense|PlanTier|Feature::CloudSync" main/src crates/core/src crates/license_tool Cargo.toml main/Cargo.toml crates/core/Cargo.toml -S`
+- 结果：无匹配
+- `cargo check -p one-core`
+- 结果：通过
+- `cargo check -p main`
+- 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+- `cargo test -p one-core cloud_sync:: --lib`
+- 结果：通过（13 passed）
+
+## 编码后声明 - 删除 License 模块
+时间：2026-03-24 16:04:47 +0800
+
+### 1. 复用了以下既有组件
+- `auth` 模块：保留账号登录
+- `cloud_sync` 模块：保留账号相关同步能力
+- 工作区 Cargo 配置：作为删除独立授权工具的唯一入口
+
+### 2. 遵循了以下项目约定
+- 模块删除同步更新了启动链路、公共导出和 Cargo 依赖
+- 没有保留名义上的 License 兼容层
+- 本地验证覆盖了主程序、核心库和保留的云同步测试
+
+### 3. 未重复造轮子的证明
+- 没有新增任何新的授权、订阅或配置模块
+- 删除后仅保留账号登录和云同步所需的最小代码路径
+
+## 编码前检查 - 云同步服务端完整方案
+时间：2026-03-24 16:04:47 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-server-complete-plan.md`
+□ 将使用以下可复用组件：
+- `/.claude/cloud-sync-server-development-plan.md`：原始服务端方案草稿
+- `crates/core/src/cloud_sync/client.rs`：当前真实生效的服务端接口契约
+- `crates/core/src/cloud_sync/supabase.rs`：当前 Supabase 协议约束
+- `crates/core/src/cloud_sync/engine.rs`：同步执行顺序
+- `crates/core/src/cloud_sync/models.rs`：统一 `sync_data` 模型
+□ 将遵循命名约定：基础版以当前代码接口为准，订阅/商业化统一放到可选增强段落
+□ 将遵循代码风格：方案文档明确区分“当前必选能力”和“未来可选能力”
+□ 确认不重复造轮子，证明：继续以 Supabase 协议兼容为核心，不发明新的同步协议
+
+### 工具与替代记录
+- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
+  - 文件阅读：`sed`
+  - 代码检索：`rg`
+  - 文档校验：`test` / `rg`
+
+## 执行记录 - 云同步服务端完整方案
+时间：2026-03-24 16:04:47 +0800
+
+### 1. 已检索并阅读的关键实现
+- `/.claude/cloud-sync-server-development-plan.md`
+- `/.claude/context-summary-cloud-sync-server-plan.md`
+- `/.claude/context-summary-delete-license-module.md`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/models.rs`
+
+### 2. 对比的相似实现
+- `/.claude/cloud-sync-server-development-plan.md`：原始架构草案
+- `crates/core/src/cloud_sync/client.rs:1`：当前基础版接口契约
+- `crates/core/src/cloud_sync/engine.rs:147`：同步执行顺序
+- `crates/core/src/cloud_sync/models.rs:203`：统一同步模型
+
+### 3. 本次输出
+- 新增 `.claude/context-summary-cloud-sync-server-complete-plan.md`
+- 新增 `.claude/cloud-sync-server-complete-development-plan.md`
+- 追加 `.claude/operations-log.md`
+- 追加 `.claude/verification-report.md`
+
+### 4. 关键结论
+- 原始方案文档可继续作为基础，但必须按当前代码状态重构为“基础版 + 可选增强版”
+- 当前基础版必选对象不再包含 `user_subscriptions`
+- 技术选型应至少提供 3 组可选方案，推荐以 Supabase 托管标准版为第一阶段正式方案
+
+### 5. 本地验证
+- `test -f .claude/cloud-sync-server-complete-development-plan.md`
+- `test -f .claude/context-summary-cloud-sync-server-complete-plan.md`
+- `rg -n "技术选型备选组|方案 A|方案 B|方案 C|方案 D|当前代码已经删除 License|基础版必选|可选增强" .claude/cloud-sync-server-complete-development-plan.md`
+
+## 编码后声明 - 云同步服务端完整方案
+时间：2026-03-24 16:04:47 +0800
+
+### 1. 复用了以下既有组件
+- 复用了原始云同步方案文档中的 Supabase 兼容约束
+- 复用了当前 `CloudApiClient` 作为真实接口边界
+- 复用了 `SyncEngine` 和 `CloudSyncData` 作为同步流程和数据模型依据
+
+### 2. 遵循了以下项目约定
+- 所有工作文件落在项目 `.claude/` 目录
+- 全文使用简体中文
+- 文档中的结论都能映射到当前代码或原始方案文档
+
+### 3. 未重复造轮子的证明
+- 没有新造同步协议或新造后端抽象
+- 技术选型始终围绕 Supabase 兼容与演进展开
+
+## 编码前检查 - 云同步轻量重设计（账号+设备授权）
+时间：2026-03-24 16:21:31 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-account-authorization-plan.md`
+□ 将使用以下可复用组件：
+- `main/src/auth.rs`：现有账号登录与会话恢复链路
+- `crates/core/src/cloud_sync/client.rs`：当前云端协议契约
+- `crates/core/src/cloud_sync/supabase.rs`：Supabase 读写模式与 RPC 模式
+- `crates/core/src/cloud_sync/engine.rs`：个人同步主链路
+- `crates/core/src/cloud_sync/models.rs`：统一 `sync_data` 数据模型
+□ 将遵循命名约定：继续沿用 `user_configs`、`sync_data` 这类表语义命名，新增授权对象命名为设备级对象
+□ 将遵循代码风格：优先复用 Supabase Auth + PostgREST + RPC，不引入新的 BFF 服务
+□ 确认不重复造轮子，证明：当前重设计只在现有账号同步体系上补“设备授权”这一层，不发明新的同步协议
+
+### 工具与替代记录
+- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
+  - 文件阅读：`sed`
+  - 代码检索：`rg`
+  - 文档校验：`test` / `rg`
+
+## 执行记录 - 云同步轻量重设计（账号+设备授权）
+时间：2026-03-24 16:21:31 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/auth.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/models.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `.claude/cloud-sync-server-complete-development-plan.md`
+
+### 2. 对比的相似实现
+- `main/src/auth.rs:80`：当前账号登录与会话恢复能力
+- `crates/core/src/cloud_sync/client.rs:59`：当前客户端云端接口边界
+- `crates/core/src/cloud_sync/supabase.rs:1399`：`user_configs` / `sync_data` / RPC 的 Supabase 访问方式
+- `crates/core/src/cloud_sync/engine.rs:147`：个人同步主链与团队失败降级逻辑
+- `crates/core/src/cloud_sync/models.rs:191`：统一同步 blob 模型
+
+### 3. 本次输出
+- 新增 `.claude/context-summary-cloud-sync-account-authorization-plan.md`
+- 新增 `.claude/cloud-sync-server-account-authorization-plan.md`
+- 追加 `.claude/operations-log.md`
+- 追加 `.claude/verification-report.md`
+
+### 4. 关键结论
+- 当前最合适的“授权”不是 Pro/License，而是设备级同步授权
+- 服务端最小可行闭环只需要 `user_configs`、`sync_data`、`device_authorizations` 和 3 个 RPC
+- 第一阶段推荐做“同步前预检阻断”，不建议直接引入 BFF 或强制每请求设备鉴权
+
+### 5. 本地验证
+- `test -f .claude/cloud-sync-server-account-authorization-plan.md`
+- `test -f .claude/context-summary-cloud-sync-account-authorization-plan.md`
+- `rg -n "设备授权|register_device|check_sync_access|revoke_device|device_authorizations|app_settings|轻量阻断" .claude/cloud-sync-server-account-authorization-plan.md`
+
+## 编码后声明 - 云同步轻量重设计（账号+设备授权）
+时间：2026-03-24 16:21:31 +0800
+
+### 1. 复用了以下既有组件
+- 复用了 `main/src/auth.rs` 的账号登录和会话恢复链路
+- 复用了 `CloudApiClient` / `SupabaseClient` 的 Supabase 协议边界
+- 复用了 `sync_data` 统一 blob 模型，没有拆新同步表
+
+### 2. 遵循了以下项目约定
+- 所有工作文件写入项目本地 `.claude/`
+- 全文使用简体中文
+- 所有结论都以当前代码中的真实边界为依据，而不是基于旧授权模块假设
+
+### 3. 未重复造轮子的证明
+- 没有重新设计新的认证系统
+- 没有新增新的同步网关协议
+- 只是把“授权”的语义收敛为设备级同步授权，并继续使用 Supabase 表 + RPC
+
+## 编码前检查 - 云同步最简方案（账号+同步密钥）
+时间：2026-03-24 16:24:59 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-account-key-plan.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/mod.rs`：现有“账号登录 + 主密钥 + 同步”流程定义
+- `main/src/auth.rs`：账号登录与会话恢复
+- `crates/core/src/cloud_sync/service.rs`：主密钥验证、修改与版本升级
+- `crates/core/src/cloud_sync/supabase.rs`：`user_configs` / `sync_data` 的实际服务端协议边界
+- `crates/core/src/cloud_sync/models.rs`：账号级配置与账号级数据模型
+□ 将遵循命名约定：保持账号级命名空间设计，主对象收敛为 `user_configs` 与 `sync_data`
+□ 将遵循代码风格：优先复用现有主密钥模型，不新增设备授权层
+□ 确认不重复造轮子，证明：当前重设计直接复用已有“主密钥 + key_verification”方案，只做产品层收敛
+
+## 执行记录 - 云同步最简方案（账号+同步密钥）
+时间：2026-03-24 16:24:59 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/cloud_sync/mod.rs`
+- `main/src/auth.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/cloud_sync/models.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+
+### 2. 对比的相似实现
+- `crates/core/src/cloud_sync/mod.rs:1`：现有同步使用流程
+- `main/src/auth.rs:80`：账号登录能力
+- `crates/core/src/cloud_sync/service.rs:162`：主密钥验证与升级
+- `crates/core/src/cloud_sync/supabase.rs:1399`：账号级配置与数据读写
+- `crates/core/src/cloud_sync/models.rs:7`：账号级同步模型
+
+### 3. 本次输出
+- 新增 `.claude/context-summary-cloud-sync-account-key-plan.md`
+- 新增 `.claude/cloud-sync-server-account-key-plan.md`
+- 追加 `.claude/operations-log.md`
+- 追加 `.claude/verification-report.md`
+
+### 4. 关键结论
+- 当前最简方案不需要设备授权
+- 只要同一账号共享同一同步密钥，就可以保证跨平台内容一致
+- 服务端最小闭环可收敛为 `user_configs` + `sync_data`
+- 若用户坚持少一步输入，也可以走“登录密码派生同步密钥”，但不作为首推
+
+### 5. 本地验证
+- `test -f .claude/cloud-sync-server-account-key-plan.md`
+- `test -f .claude/context-summary-cloud-sync-account-key-plan.md`
+- `rg -n "账号 \\+ 同步密钥|user_configs|sync_data|app_settings|登录密码派生同步密钥|不需要设备授权" .claude/cloud-sync-server-account-key-plan.md`
+
+## 编码后声明 - 云同步最简方案（账号+同步密钥）
+时间：2026-03-24 16:24:59 +0800
+
+### 1. 复用了以下既有组件
+- 复用了当前云同步模块中“主密钥 + key_verification”的设计
+- 复用了 `user_configs` 和 `sync_data` 的现有协议边界
+- 复用了现有账号登录和会话恢复链路
+
+### 2. 遵循了以下项目约定
+- 所有工作文件写入项目本地 `.claude/`
+- 全文使用简体中文
+- 设计结论直接映射当前代码能力，不再基于额外设备授权假设
+
+### 3. 未重复造轮子的证明
+- 没有新增设备授权表和注册接口作为主路径
+- 没有新增额外认证或同步网关
+- 只是把已有主密钥能力明确提升为最终产品方案
+
+## 编码前检查 - sync_server Rust 接入
+时间：2026-03-24 17:31:54 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-rust-integration.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/client.rs`：既有云端抽象，避免重做同步引擎接口
+- `crates/core/src/cloud_sync/supabase.rs`：HTTP 客户端、认证状态与自动刷新模式参考
+- `main/src/auth.rs`：会话持久化和恢复
+- `main/src/home_tab.rs`：登录成功后的全局用户状态与自动同步触发
+- `sync_server/server/src/http/routes/auth.ts`：密码登录/刷新真实接口
+- `sync_server/server/src/http/routes/sync.ts`：用户配置与同步项真实接口
+□ 将遵循命名约定：新增 `SyncServerConfig`、`SyncServerClient`，保留 `SupabaseConfig` 兼容旧模式
+□ 将遵循代码风格：继续通过 `CloudApiClient` 抽象给同步引擎供给客户端实例
+□ 确认不重复造轮子，证明：不重写同步引擎，只新增第二个后端实现并在 UI 层分登录模式
+
+## 执行记录 - sync_server Rust 接入
+时间：2026-03-24 17:31:54 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/server/src/services/auth.ts`
+- `sync_server/server/src/http/routes/auth.ts`
+- `sync_server/server/src/http/routes/sync.ts`
+- `crates/core/src/config.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/supabase.rs`
+- `crates/core/src/cloud_sync/models.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `main/src/auth.rs`
+- `main/src/home_tab.rs`
+
+### 2. 对比的相似实现
+- `crates/core/src/cloud_sync/supabase.rs`：现有云端客户端模式
+- `main/src/auth.rs`：现有认证恢复模式
+- `main/src/home_tab.rs`：现有登录弹窗与同步触发模式
+
+### 3. 当前发现
+- `sync_server` 的 refresh 会话改动尚未闭环，`npm run check --workspace server` / `build` 均因 `src/services/auth.ts` 中误解构 `publicUser` 失败
+- Rust 侧当前只能读取 `SUPABASE_URL` / `SUPABASE_ANON_KEY`
+- Rust 侧登录 UI 仍是 OTP 专用
+
+### 4. 工具限制留痕
+- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
+- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
+
+## 编码后声明 - sync_server Rust 接入
+时间：2026-03-24 17:53:05 +0800
+
+### 1. 复用了以下既有组件
+- 复用了 `CloudApiClient` 作为统一云端抽象，没有重写同步引擎
+- 复用了 `main/src/auth.rs` 的本地 `auth.json` 会话持久化模型
+- 复用了 `crates/core/src/cloud_sync/supabase.rs` 的认证状态、401 重试与刷新回调模式
+- 复用了 `main/src/home_tab.rs` 的登录成功后更新全局用户并触发自动同步的流程
+
+### 2. 实际落地的代码
+- 新增 `crates/core/src/cloud_sync/sync_server.rs`，实现 `sync_server` 版认证、配置同步、同步项读写
+- `crates/core/src/config.rs` 新增 `SYNC_SERVER_URL` 读取与规范化
+- `main/src/auth.rs` 改为支持 `Supabase` / `sync_server` 两种后端，并新增密码登录/注册能力
+- `main/src/home_tab.rs` 按后端模式切换 OTP 或邮箱密码登录弹窗
+- `sync_server/server/src/services/auth.ts` 修复 refresh 改造过程中的编译错误
+
+### 3. 本地验证结果
+- `npm run check --workspace server`：通过
+- `npm run build --workspace server`：通过
+- `npm run build`（`sync_server` 根目录）：通过
+- `cargo check -p one-core`：通过
+- `cargo check -p main`：通过
+- `curl http://127.0.0.1:8787/health`：通过
+- 本地冒烟：
+  - 注册返回 `token`、`refreshToken`、`expiresAt`、`user`
+  - 登录返回 `token`、`refreshToken`、`expiresAt`、`user`
+  - 刷新返回 `token`、`refreshToken`、`expiresAt`、`user`
+  - 使用刷新后的 `token` 请求 `/api/v1/auth/me` 成功返回用户信息
+
+### 4. 风险与限制
+- `sync_server` 目前只覆盖账号级同步，不支持团队功能；Rust 客户端对此已降级为空团队列表或明确返回不支持
+- 当前工作树中本就存在大量与 License 删除相关的未提交改动，本次未回退这些无关变更

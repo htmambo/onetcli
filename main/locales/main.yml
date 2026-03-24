@@ -270,6 +270,10 @@ Auth:
     en: Password
     zh-CN: 密码
     zh-HK: 密碼
+  password_required:
+    en: Please enter your password
+    zh-CN: 请输入密码
+    zh-HK: 請輸入密碼
   password_placeholder:
     en: Enter your password
     zh-CN: 输入您的密码

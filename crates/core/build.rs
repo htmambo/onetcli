@@ -2,6 +2,7 @@ fn main() {
     // 当环境变量发生变化时，cargo 会自动重新运行 build script 并重编译
     // 彻底解决 cargo cache 导致 option_env! 拿不到值的问题
     for key in [
+        "SYNC_SERVER_URL",
         "SUPABASE_URL",
         "SUPABASE_ANON_KEY",
         "ONETCLI_UPDATE_URL",

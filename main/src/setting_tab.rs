@@ -2,18 +2,19 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use gpui::{
-    div, App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
-    PathPromptOptions, Render, SharedString, Styled, Window,
+    App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Render, SharedString,
+    Styled, Window, div,
 };
 use gpui_component::{
+    ActiveTheme, Icon, IconName, Sizable, Size, Theme, ThemeMode,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
     h_flex,
     kbd::Kbd,
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
-    v_flex, ActiveTheme, Icon, IconName, Sizable, Size, Theme, ThemeMode, WindowExt,
+    v_flex,
 };
 use one_core::cloud_sync::GlobalCloudUser;
 use one_core::cloud_sync::UserInfo;
@@ -25,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 use crate::auth::get_auth_service;
-use crate::license::{get_license_service, offline_license_public_key};
 use crate::onetcli_app::GlobalHomePage;
 use crate::settings::llm_providers_view::LlmProvidersView;
 
@@ -338,29 +338,37 @@ impl SettingsPanel {
                 .groups(vec![
                     SettingGroup::new()
                         .title(t!("Settings.General.Language.group_title"))
-                        .items(vec![SettingItem::new(
-                            t!("Settings.General.Language.ui_language"),
-                            SettingField::dropdown(
-                                vec![
-                                    ("zh-CN".into(), t!("Settings.General.Language.zh_cn").into()),
-                                    ("zh-HK".into(), t!("Settings.General.Language.zh_hk").into()),
-                                    ("en".into(), t!("Settings.General.Language.en").into()),
-                                ],
-                                |cx: &App| {
-                                    SharedString::from(AppSettings::global(cx).locale.clone())
-                                },
-                                |val: SharedString, cx: &mut App| {
-                                    let settings = AppSettings::global_mut(cx);
-                                    settings.locale = val.to_string();
-                                    gpui_component::set_locale(&settings.locale);
-                                    settings.save();
-                                },
+                        .items(vec![
+                            SettingItem::new(
+                                t!("Settings.General.Language.ui_language"),
+                                SettingField::dropdown(
+                                    vec![
+                                        (
+                                            "zh-CN".into(),
+                                            t!("Settings.General.Language.zh_cn").into(),
+                                        ),
+                                        (
+                                            "zh-HK".into(),
+                                            t!("Settings.General.Language.zh_hk").into(),
+                                        ),
+                                        ("en".into(), t!("Settings.General.Language.en").into()),
+                                    ],
+                                    |cx: &App| {
+                                        SharedString::from(AppSettings::global(cx).locale.clone())
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.locale = val.to_string();
+                                        gpui_component::set_locale(&settings.locale);
+                                        settings.save();
+                                    },
+                                )
+                                .default_value(SharedString::from(default_settings.locale)),
                             )
-                            .default_value(SharedString::from(default_settings.locale)),
-                        )
-                        .description(
-                            t!("Settings.General.Language.ui_language_desc").to_string(),
-                        )]),
+                            .description(
+                                t!("Settings.General.Language.ui_language_desc").to_string(),
+                            ),
+                        ]),
                     SettingGroup::new()
                         .title(t!("Settings.General.Appearance.group_title"))
                         .items(vec![
@@ -719,81 +727,23 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
             )
             // 登出按钮
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("import-license-button")
-                            .icon(IconName::File)
-                            .label("导入离线 License")
-                            .on_click(move |_, window, cx| {
-                                let public_key = match offline_license_public_key() {
-                                    Ok(key) => key,
-                                    Err(msg) => {
-                                        window.push_notification(msg, cx);
-                                        return;
-                                    }
-                                };
-                                let license_service = get_license_service(cx);
-                                let future = cx.prompt_for_paths(PathPromptOptions {
-                                    files: true,
-                                    directories: false,
-                                    multiple: false,
-                                    prompt: Some("选择 License 文件".into()),
+                h_flex().gap_2().child(
+                    Button::new("logout-button")
+                        .icon(IconName::Close)
+                        .label(t!("Auth.logout"))
+                        .danger()
+                        .on_click(move |_, _window, cx| {
+                            // 执行登出
+                            let auth = get_auth_service(cx);
+                            cx.spawn(async move |cx: &mut AsyncApp| {
+                                auth.sign_out().await;
+                                cx.update(|cx| {
+                                    GlobalCurrentUser::set_user(None, cx);
                                 });
-
-                                window
-                                    .spawn(cx, async move |cx| {
-                                        if let Ok(Ok(Some(paths))) = future.await {
-                                            if let Some(path) = paths.into_iter().next() {
-                                                let result = license_service
-                                                    .import_offline_license_from_path(
-                                                        &path,
-                                                        &public_key,
-                                                        None,
-                                                    );
-                                                let message = match result {
-                                                    Ok(_) => "离线 License 导入成功".to_string(),
-                                                    Err(err) => {
-                                                        format!("离线 License 导入失败: {}", err)
-                                                    }
-                                                };
-                                                let _ = cx.update(|_view, cx: &mut App| {
-                                                    if let Some(window_id) = cx.active_window() {
-                                                        let _ = cx.update_window(
-                                                            window_id,
-                                                            |_, window, cx| {
-                                                                window
-                                                                    .push_notification(message, cx);
-                                                            },
-                                                        );
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    })
-                                    .detach();
-                            }),
-                    )
-                    .child(
-                        Button::new("logout-button")
-                            .icon(IconName::Close)
-                            .label(t!("Auth.logout"))
-                            .danger()
-                            .on_click(move |_, _window, cx| {
-                                // 清除 License
-                                get_license_service(cx).clear();
-
-                                // 执行登出
-                                let auth = get_auth_service(cx);
-                                cx.spawn(async move |cx: &mut AsyncApp| {
-                                    auth.sign_out().await;
-                                    cx.update(|cx| {
-                                        GlobalCurrentUser::set_user(None, cx);
-                                    });
-                                })
-                                .detach();
-                            }),
-                    ),
+                            })
+                            .detach();
+                        }),
+                ),
             )
             .into_any_element()
     } else {

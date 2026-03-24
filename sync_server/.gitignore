@@ -1,0 +1,11 @@
+node_modules
+server/node_modules
+web/node_modules
+server/dist
+web/dist
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.db-shm
+data/*.db-wal
+.env

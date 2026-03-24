@@ -14,6 +14,13 @@
 //! cargo build --release
 //! ```
 
+/// sync_server 配置
+#[derive(Debug, Clone)]
+pub struct SyncServerConfig {
+    /// 服务根地址，例如 http://127.0.0.1:8787
+    pub base_url: String,
+}
+
 /// Supabase 配置
 #[derive(Debug, Clone)]
 pub struct SupabaseConfig {
@@ -85,6 +92,38 @@ impl Default for UpdateConfig {
     }
 }
 
+impl SyncServerConfig {
+    /// 获取 sync_server 配置
+    ///
+    /// 优先级：运行时环境变量 > 编译时环境变量
+    pub fn get() -> Self {
+        Self {
+            base_url: Self::get_base_url(),
+        }
+    }
+
+    fn get_base_url() -> String {
+        if let Ok(url) = std::env::var("SYNC_SERVER_URL") {
+            if !url.trim().is_empty() {
+                return normalize_url(&url);
+            }
+        }
+
+        normalize_url(option_env!("SYNC_SERVER_URL").unwrap_or_default())
+    }
+
+    /// 检查配置是否有效
+    pub fn is_valid(&self) -> bool {
+        !self.base_url.is_empty()
+    }
+}
+
+impl Default for SyncServerConfig {
+    fn default() -> Self {
+        Self::get()
+    }
+}
+
 impl SupabaseConfig {
     /// 获取 Supabase 配置
     ///
@@ -136,6 +175,10 @@ impl Default for SupabaseConfig {
     }
 }
 
+fn normalize_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +193,12 @@ mod tests {
     #[test]
     fn test_update_config_get() {
         let config = UpdateConfig::get();
+        let _ = config.is_valid();
+    }
+
+    #[test]
+    fn test_sync_server_config_get() {
+        let config = SyncServerConfig::get();
         let _ = config.is_valid();
     }
 }

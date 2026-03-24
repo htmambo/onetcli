@@ -19,7 +19,7 @@ members = [
     "crates/db_view",
     "crates/terminal",
     "crates/terminal_view"
-    , "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/license_tool", "crates/mongodb_view"]
+    , "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/mongodb_view"]
 resolver = "2"
 
 [workspace.package]

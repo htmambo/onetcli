@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --bg: #f4efe6;
+  --panel: rgba(255, 252, 247, 0.86);
+  --panel-strong: #fffaf2;
+  --line: rgba(61, 44, 29, 0.12);
+  --text: #2f2418;
+  --muted: #705b45;
+  --accent: #b65c2f;
+  --accent-deep: #8f3e18;
+  --accent-soft: rgba(182, 92, 47, 0.12);
+  --success: #237a57;
+  --danger: #b64040;
+  --shadow: 0 24px 80px rgba(78, 52, 29, 0.12);
+  font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(247, 205, 159, 0.4), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(182, 92, 47, 0.12), transparent 32%),
+    linear-gradient(180deg, #f8f2e9 0%, #f1eadf 100%);
+}
+
+body {
+  min-height: 100vh;
+  background: transparent;
+  color: var(--text);
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.panel {
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.soft-line {
+  border-color: var(--line);
+}
+
+.accent-button {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+}
+
+.accent-button:hover {
+  filter: brightness(1.04);
+}
+
+.accent-ring {
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}

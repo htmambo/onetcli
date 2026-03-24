@@ -25,13 +25,12 @@ use gpui_component::{
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
-    CloudApiClient, CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo,
-    can_edit_connection, get_cached_team_options,
+    CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo, can_edit_connection,
+    get_cached_team_options,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
 use one_core::key_storage;
-use one_core::license::Feature;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
@@ -45,13 +44,14 @@ use terminal_view::TerminalView;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
-use crate::auth::{AuthService, show_auth_dialog};
+use crate::auth::{
+    AuthMode, AuthService, PasswordAuthAction, show_auth_dialog, show_password_auth_dialog,
+};
 use crate::encourage::EncourageDialog;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::WorkspaceFilterDelegate;
-use crate::license::{get_license_service, is_feature_enabled, show_upgrade_dialog};
 use crate::setting_tab::GlobalCurrentUser;
 use crate::user_avatar::render_user_avatar;
 
@@ -317,12 +317,6 @@ impl HomePage {
     /// 3. 执行同步操作
     /// 4. 更新本地状态
     fn trigger_sync(&mut self, cx: &mut Context<Self>) {
-        // 检查 License
-        if !is_feature_enabled(Feature::CloudSync, cx) {
-            tracing::debug!("云同步功能需要 Pro 订阅");
-            return;
-        }
-
         if self.current_user.is_none() {
             self.cloud_error = Some(t!("Home.cloud_need_login").to_string());
             cx.notify();
@@ -718,21 +712,10 @@ impl HomePage {
         let auth = self.auth_service.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             if let Some(user) = auth.try_restore_session().await {
-                // 同步 License 信息
-                let cloud_client = auth.cloud_client();
-                let subscription = cloud_client.get_subscription().await.ok().flatten();
-
                 _ = this.update(cx, |this, cx| {
                     this.current_user = Some(user.clone());
                     // 更新全局用户状态
                     GlobalCurrentUser::set_user(Some(user.clone()), cx);
-
-                    // 更新 License
-                    let license_service = get_license_service(cx);
-                    if let Err(e) = license_service.update_from_subscription(user.id, subscription)
-                    {
-                        tracing::warn!("更新 License 失败: {}", e);
-                    }
 
                     cx.notify();
 
@@ -758,13 +741,6 @@ impl HomePage {
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let result = auth.verify_otp(&email, &otp).await;
 
-            // 如果登录成功，获取订阅信息
-            let subscription = if result.is_ok() {
-                auth.cloud_client().get_subscription().await.ok().flatten()
-            } else {
-                None
-            };
-
             _ = this.update(cx, |this, cx| {
                 this.logging_in = false;
                 match result {
@@ -772,14 +748,6 @@ impl HomePage {
                         this.current_user = Some(user.clone());
                         // 更新全局用户状态
                         GlobalCurrentUser::set_user(Some(user.clone()), cx);
-
-                        // 更新 License
-                        let license_service = get_license_service(cx);
-                        if let Err(e) =
-                            license_service.update_from_subscription(user.id, subscription)
-                        {
-                            tracing::warn!("更新 License 失败: {}", e);
-                        }
 
                         this.auth_error = None;
                         // 登录成功后，如果密钥已解锁，自动触发同步
@@ -799,12 +767,65 @@ impl HomePage {
         .detach();
     }
 
-    /// 显示登录对话框（OTP 模式）
+    /// 使用邮箱密码登录或注册
+    fn authenticate_with_password(
+        &mut self,
+        action: PasswordAuthAction,
+        email: String,
+        password: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.logging_in = true;
+        self.auth_error = None;
+        cx.notify();
+
+        let auth = self.auth_service.clone();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let result = match action {
+                PasswordAuthAction::Login => auth.login_with_password(&email, &password).await,
+                PasswordAuthAction::SignUp => auth.sign_up_with_password(&email, &password).await,
+            };
+
+            _ = this.update(cx, |this, cx| {
+                this.logging_in = false;
+                match result {
+                    Ok(user) => {
+                        this.current_user = Some(user.clone());
+                        GlobalCurrentUser::set_user(Some(user.clone()), cx);
+
+                        this.auth_error = None;
+                        if crypto::has_master_key() {
+                            tracing::info!("密码登录成功且密钥已解锁，自动触发云同步");
+                            this.trigger_sync(cx);
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!("密码登录失败: {}", error);
+                        this.auth_error = Some(error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 显示登录对话框
     fn show_login_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.entity();
-        show_auth_dialog(window, cx, view, |this, email, otp, cx| {
-            this.verify_otp(email, otp, cx);
-        });
+        match self.auth_service.auth_mode() {
+            AuthMode::Otp => {
+                show_auth_dialog(window, cx, view, |this, email, otp, cx| {
+                    this.verify_otp(email, otp, cx);
+                });
+            }
+            AuthMode::Password => {
+                show_password_auth_dialog(window, cx, view, |this, action, email, password, cx| {
+                    this.authenticate_with_password(action, email, password, cx);
+                });
+            }
+        }
     }
 
     fn show_encourage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1657,17 +1678,12 @@ impl HomePage {
                                         t!("Encryption.remember_password_title").to_string(),
                                     ),
                                 )
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .child(t!("Encryption.remember_password_detail_local").to_string()),
-                                )
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(cx.theme().warning)
-                                        .child(t!("Encryption.remember_password_detail_cloud").to_string()),
-                                ),
+                                .child(div().text_sm().child(
+                                    t!("Encryption.remember_password_detail_local").to_string(),
+                                ))
+                                .child(div().text_sm().text_color(cx.theme().warning).child(
+                                    t!("Encryption.remember_password_detail_cloud").to_string(),
+                                )),
                         )
                         .when_some(error_msg_for_render.read(cx).clone(), |this, msg| {
                             this.child(div().text_sm().text_color(cx.theme().danger).child(msg))
@@ -1685,7 +1701,6 @@ impl HomePage {
 
         let is_syncing = self.syncing;
         let is_logged_in = self.current_user.is_some();
-        let has_sync_license = is_feature_enabled(Feature::CloudSync, cx);
         let has_master_key = crypto::has_master_key();
         let has_conflicts = !self.pending_conflicts.is_empty();
         let conflict_count = self.pending_conflicts.len();
@@ -1822,33 +1837,21 @@ impl HomePage {
                     // 同步按钮
                     .child(
                         Button::new("sync-button")
-                            .icon(if has_sync_license {
-                                IconName::Refresh
-                            } else {
-                                IconName::Key
-                            })
+                            .icon(IconName::Refresh)
                             .label(if is_syncing {
                                 t!("Home.syncing").to_string()
-                            } else if !has_sync_license {
-                                t!("License.upgrade_to_pro").to_string()
                             } else {
                                 t!("Home.sync").to_string()
                             })
                             .ghost()
-                            .disabled((!is_logged_in && has_sync_license) || is_syncing)
-                            .tooltip(if !is_logged_in && has_sync_license {
+                            .disabled(!is_logged_in || is_syncing)
+                            .tooltip(if !is_logged_in {
                                 t!("Home.cloud_need_login")
-                            } else if !has_sync_license {
-                                t!("License.pro_required")
                             } else {
                                 t!("Home.sync_tooltip")
                             })
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if !has_sync_license {
-                                    show_upgrade_dialog(window, cx);
-                                } else {
-                                    this.trigger_sync(cx);
-                                }
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.trigger_sync(cx);
                             })),
                     )
                     // 冲突指示器

@@ -3,6 +3,38 @@
 
 ---
 
+## 审查报告（sync-server-rust-integration）
+生成时间：2026-03-24 17:53:05 +0800
+
+### 需求完整性检查
+- 目标明确：让当前 Rust 项目真正接入独立部署的 `sync_server`，而不是只改环境变量名
+- 范围明确：`sync_server` 认证返回、Rust 配置入口、云端客户端实现、登录 UI 模式切换
+- 交付物明确：代码实现、本地构建验证、冒烟验证、`.claude/` 留痕文件
+- 风险与依赖明确：`sync_server` 当前不支持团队功能，Rust 侧已显式做能力降级
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 需求闭环成立：[`crates/core/src/config.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/config.rs#L17) 新增 `SYNC_SERVER_URL` 配置，[`main/src/auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L160) 会优先在运行时选择 `sync_server` 后端，已经不是“只能填 Supabase 地址”的状态。
+- 架构延续合理：[`crates/core/src/cloud_sync/sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L132) 新增 `SyncServerClient` 直接实现 `CloudApiClient`，同步引擎无需重写，保持现有抽象层稳定。
+- 认证与 UI 匹配真实协议：[`main/src/auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L358) 新增邮箱密码登录/注册流程，[`main/src/auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L765) 新增密码登录/注册对话框，[`main/src/home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L814) 已按后端类型分支登录方式。
+- 服务端会话协议已验证：[`sync_server/server/src/services/auth.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/services/auth.ts#L18) 修复后，注册、登录、刷新都返回 `token + refreshToken + expiresAt + user`，本地对 `http://127.0.0.1:8787` 的冒烟已证实 `/register`、`/login`、`/refresh`、`/me` 全部成功。
+- 本地验证充分：`npm run check --workspace server`、`npm run build --workspace server`、`npm run build`、`cargo check -p one-core`、`cargo check -p main` 均通过；残余风险主要是团队功能尚未接入，这与当前“简单多账号自动同步”需求一致。
+
+---
+
 ## 审查报告（windows-owner-id-build）
 生成时间：2026-03-20 15:30:18 +0800
 
@@ -666,3 +698,277 @@
 - 本地验证：
   - `cargo test -p gpui-component window_ext::tests --lib` 通过（5 passed）
   - `cargo check -p main` 通过
+
+
+---
+
+## 审查报告（upgrade-pro-sync-review）
+生成时间：2026-03-24 15:18:53 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“升级 Pro”与“同步”两条功能链路，范围包含 UI 入口、认证恢复、License 刷新、同步执行、冲突解决、本地验证
+- 原始意图覆盖：已检查升级入口是否能解锁 Pro，同步是否能在登录/恢复/冲突场景下维持正确行为
+- 交付物映射：已产出上下文摘要、操作日志、本地验证结果、本审查报告
+- 依赖与风险评估：已覆盖 `AuthService`、`LicenseService`、`SyncEngine`、`CloudSyncService`、`CloudApiClient`
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和验证结果
+
+### 技术维度评分
+- 代码质量：72/100
+- 测试覆盖：61/100
+- 规范遵循：84/100
+
+### 战略维度评分
+- 需求匹配：76/100
+- 架构一致：83/100
+- 风险评估：68/100
+
+### 综合评分
+- 74/100
+- 建议：退回
+
+### 主要结论
+- `升级 Pro` 当前存在状态错误降级问题：会话恢复和 OTP 登录都把 `get_subscription()` 的错误结果压成 `None`，再交给 `LicenseService::update_from_subscription` 写入免费版 License；这会让有效 Pro 用户在瞬时网络失败后直接失去同步能力。
+- `升级 Pro` 当前不存在购买后的会话内回流：升级对话框只打开定价页，没有任何购买成功后的订阅刷新动作；代码里只有“恢复会话”和“OTP 登录”两个时机会重新拉取订阅。
+- `同步` 的单独冲突解决路径与常规同步不一致：`SyncEngine::sync()` 会先拉团队列表并填充 `cached_teams`，但 `apply_conflict_resolutions()` 不会；团队共享连接在 `UseLocal` / `KeepBoth` 场景下可能把 `key_version` 写回默认值 `1`。
+- 当前测试主要覆盖 License/加解密/队列等基础能力，没有覆盖 `HomePage` 上的“登录 -> 拉订阅 -> 更新 License -> 自动同步”联动，也没有覆盖 `apply_conflict_resolutions()` 的团队场景，因此上述问题不会被现有测试拦住。
+
+### 本地验证
+- `cargo test -p one-core license::`：通过（8 passed）
+- `cargo test -p one-core cloud_sync::`：通过（13 passed）
+- `cargo check -p main`：通过（存在既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+
+### 建议动作
+- 将“订阅请求失败”与“无订阅记录”拆开处理，失败时保留当前有效 License，不得直接降级并落盘
+- 给升级对话框增加订阅刷新回流，例如购买完成后的手动刷新、轮询或重新拉取订阅
+- 让 `apply_conflict_resolutions()` 复用 `sync()` 的团队缓存预热流程，至少在处理冲突前先拉团队列表并缓存 `key_version`
+- 补充 `HomePage` 和 `SyncEngine` 交互测试，覆盖订阅接口失败、团队冲突解决两类场景
+
+
+---
+
+## 审查报告（cloud-sync-server-plan）
+生成时间：2026-03-24 15:35:05 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“服务器在哪里”和“云同步服务端开发方案”两个目标
+- 原始意图覆盖：已明确客户端兼容约束、服务端对象、实施阶段、正确实现清单、验收标准
+- 交付物映射：已产出上下文摘要、开发方案、操作日志、本审查报告
+- 依赖与风险评估：已覆盖 Supabase Auth、PostgREST、Postgres、RLS、RPC、订阅回写
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和本地校验命令
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：98/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 主要结论
+- 方案与现有客户端完全对齐：继续使用 Supabase，而不是自研一套后端协议。
+- “服务器在哪里”的答案已明确收敛：真实服务端地址只能从 `SUPABASE_URL` 确认，当前仓库与本地环境都未提供具体值，因此现在无法确认真实域名或地域。
+- 服务端最关键的实现点已完整列出：统一 `sync_data` 表、RLS、`version` 自增触发器、团队 owner 自动成员化、`add_team_member_by_email` RPC、订阅回写。
+- 风险说明充分：重点指出了环境地址不透明、订阅回写缺失、团队 owner 记录缺失、误做硬删除四类高影响问题。
+
+### 本地验证
+- `test -f .claude/context-summary-cloud-sync-server-plan.md`：通过
+- `test -f .claude/cloud-sync-server-development-plan.md`：通过
+- `rg -n "SUPABASE_URL|sync_data|add_team_member_by_email|云同步服务器在哪里|正确实现清单" .claude/cloud-sync-server-development-plan.md`：通过
+- `printenv | rg '^SUPABASE_(URL|ANON_KEY)=' -n -S || true`：通过（确认当前环境未暴露具体 Supabase 地址）
+
+
+---
+
+## 审查报告（remove-pro-validation）
+生成时间：2026-03-24 15:56:22 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“移除所有与 Pro 验证相关内容”和“默认包含 Pro 的所有功能”
+- 原始意图覆盖：已同时处理 UI 门禁、升级入口、离线 License 入口、核心 License 默认行为
+- 交付物映射：已产出上下文摘要、代码改动、操作日志、本审查报告
+- 依赖与风险评估：已覆盖 `home_tab`、`setting_tab`、`main/src/license.rs`、`one_core::license`
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和验证结果
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：93/100
+- 风险评估：92/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 主要结论
+- 云同步入口不再做 Pro 门禁，用户登录后即可使用同步功能。
+- 升级 Pro 对话框、离线 License 导入入口、登录后订阅回写均已移除，产品表面不再暴露 Pro 验证链路。
+- `LicenseService` 已退化为兼容层：保留原接口，但默认返回 Pro 并始终开启 `Feature::CloudSync`。
+- 关键残留文本已清理，检索不到旧的升级入口、离线公钥入口或“需要 Pro 才能同步”的 UI 分支。
+
+### 本地验证
+- `cargo test -p one-core license:: --lib`：通过（8 passed）
+- `cargo check -p main`：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+- `rg -n "show_upgrade_dialog|offline_license_public_key|get_license_service\\(|License.upgrade_to_pro|License.pro_required|导入离线 License|从服务端获取订阅信息|用户无订阅记录" main/src crates/core/src -S`：无匹配
+
+
+---
+
+## 审查报告（delete-license-module）
+生成时间：2026-03-24 16:04:47 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“彻底删除 License 授权模块，只保留账号登录”
+- 原始意图覆盖：已删除运行时 License 模块、核心 License 目录、订阅接口与离线 License 工具
+- 交付物映射：已产出上下文摘要、代码删除、操作日志、本审查报告
+- 依赖与风险评估：已覆盖 `main` 启动链路、`one-core` 导出、`cloud_sync` trait、workspace members
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和验证结果
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：91/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：95/100
+- 风险评估：93/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 主要结论
+- `license` 运行时模块、`one_core::license` 核心模块和 `crates/license_tool` 已一并移除，不再保留授权兼容层。
+- 账号登录链路保持不变：`auth` 仍初始化，`CloudApiClient` 的认证与同步接口仍完整保留。
+- 仅供 License 使用的订阅接口已删除：`CloudApiClient::get_subscription()`、`SupabaseClient` 中的 `SubscriptionRow` 与 `user_subscriptions` 读取逻辑已清理。
+- 工作区和依赖已同步收口：根 `Cargo.toml`、`main/Cargo.toml`、`crates/core/Cargo.toml` 与 `Cargo.lock` 都已反映删除结果。
+
+### 本地验证
+- `rg -n "one_core::license|crate::license|pub mod license;|mod license;|SubscriptionInfo|get_subscription\\(|license_tool|user_subscriptions|OfflineLicense|PlanTier|Feature::CloudSync" main/src crates/core/src crates/license_tool Cargo.toml main/Cargo.toml crates/core/Cargo.toml -S`：无匹配
+- `cargo check -p one-core`：通过
+- `cargo check -p main`：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
+- `cargo test -p one-core cloud_sync:: --lib`：通过（13 passed）
+
+
+---
+
+## 审查报告（cloud-sync-server-complete-plan）
+生成时间：2026-03-24 16:04:47 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“根据现有方案文档制作完整开发方案”和“提供多组技术选型”
+- 原始意图覆盖：已补充完整架构、选型矩阵、阶段计划、交付物、排期、验收、风险与建议
+- 交付物映射：已产出上下文摘要、完整方案文档、操作日志、本审查报告
+- 依赖与风险评估：已同时考虑原始方案文档和当前代码删除 License 后的真实接口边界
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和校验命令
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：89/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 主要结论
+- 完整版方案已把原始草案扩展为可执行的实施文件，内容覆盖从技术选型到上线验收的全链路。
+- 技术选型已明确分成 4 组，并给出适用场景、优缺点和最终推荐，而不是单一答案。
+- 文档已处理“旧方案仍含订阅、当前代码已移除 License”这一差异，避免方案与现实代码边界脱节。
+- 推荐结论清晰：第一阶段优先采用方案 A，若确认商业化再进入方案 B。
+
+### 本地验证
+- `test -f .claude/cloud-sync-server-complete-development-plan.md`：通过
+- `test -f .claude/context-summary-cloud-sync-server-complete-plan.md`：通过
+- `rg -n "技术选型备选组|方案 A|方案 B|方案 C|方案 D|当前代码已经删除 License|基础版必选|可选增强" .claude/cloud-sync-server-complete-development-plan.md`：通过
+
+
+---
+
+## 审查报告（cloud-sync-server-account-authorization-plan）
+生成时间：2026-03-24 16:21:31 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“同一账号多平台使用”与“账号 + 授权智能同步”的核心诉求
+- 原始意图覆盖：已把复杂商业化/团队化方案收敛为设备级授权的个人同步方案
+- 交付物映射：已产出上下文摘要、轻量重设计方案、操作日志、本审查报告
+- 依赖与风险评估：已覆盖当前 Supabase Auth、`user_configs`、`sync_data`、缺失设备授权层和客户端最小改造点
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和校验命令
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：87/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 主要结论
+- 新方案已经从“完整版平台建设”收缩为“账号 + 设备授权 + 自动同步”的轻量闭环，更贴合当前实际需求。
+- 设备授权被重新定义为“设备是否允许参与同步”，而不是 License / Pro 授权，方向与当前仓库已删除 License 的状态一致。
+- 技术实现继续围绕 Supabase 现有能力展开，只新增 `device_authorizations` 和少量 RPC，没有引入不必要的 BFF 或后台系统。
+- 文档明确区分了“第一阶段的轻量阻断”和“后续若需要再升级为严格设备鉴权”，避免一次性把系统做重。
+
+### 本地验证
+- `test -f .claude/cloud-sync-server-account-authorization-plan.md`：通过
+- `test -f .claude/context-summary-cloud-sync-account-authorization-plan.md`：通过
+- `rg -n "设备授权|register_device|check_sync_access|revoke_device|device_authorizations|app_settings|轻量阻断" .claude/cloud-sync-server-account-authorization-plan.md`：通过
+
+
+---
+
+## 审查报告（cloud-sync-server-account-key-plan）
+生成时间：2026-03-24 16:24:59 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“每个账户内容一致”和“可以使用账号密码或授权密钥”的新要求
+- 原始意图覆盖：已把设备授权降为可选，把主方案收敛为账号级同步
+- 交付物映射：已产出上下文摘要、最简方案文档、操作日志、本审查报告
+- 依赖与风险评估：已覆盖 Supabase Auth、`user_configs`、`sync_data`、主密钥验证和密码耦合取舍
+- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和校验命令
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：88/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：100/100
+- 架构一致：97/100
+- 风险评估：95/100
+
+### 综合评分
+- 97/100
+- 建议：通过
+
+### 主要结论
+- 最终方案已经从“设备授权同步”进一步简化为“账号 + 同步密钥”，与用户当前诉求完全对齐。
+- 当前仓库已具备该方案的核心骨架：账号登录、`key_verification`、`user_configs`、`sync_data`、主密钥解锁都已存在。
+- 服务端可以最小化收敛到两张核心表和少量触发器，不需要新增设备表或设备 RPC。
+- 文档明确给出了“独立同步密钥”和“登录密码派生同步密钥”两条路径，并给出推荐优先级，便于实际拍板。
+
+### 本地验证
+- `test -f .claude/cloud-sync-server-account-key-plan.md`：通过
+- `test -f .claude/context-summary-cloud-sync-account-key-plan.md`：通过
+- `rg -n "账号 \\+ 同步密钥|user_configs|sync_data|app_settings|登录密码派生同步密钥|不需要设备授权" .claude/cloud-sync-server-account-key-plan.md`：通过
