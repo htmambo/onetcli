@@ -16,8 +16,7 @@ use gpui_component::{
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
     v_flex,
 };
-use one_core::cloud_sync::GlobalCloudUser;
-use one_core::cloud_sync::UserInfo;
+use one_core::cloud_sync::{GlobalCloudUser, UserInfo, sync_server::SyncServerClient};
 use one_core::storage::manager::get_config_dir;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
@@ -128,6 +127,8 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub auto_update: bool,
     #[serde(default)]
+    pub sync_server_url: String,
+    #[serde(default)]
     pub database_open_mode: DatabaseOpenMode,
     /// 是否启用SQL查询的自动保存功能
     #[serde(default = "default_true")]
@@ -178,6 +179,7 @@ impl Default for AppSettings {
             terminal_confirm_multiline_paste: default_true(),
             terminal_confirm_high_risk_command: default_true(),
             auto_update: true,
+            sync_server_url: String::new(),
             database_open_mode: DatabaseOpenMode::default(),
             enable_sql_auto_save: true,
             sql_auto_save_interval: default_auto_save_interval(),
@@ -285,6 +287,7 @@ impl AppSettings {
 
 pub fn init_settings(cx: &mut App) {
     let settings = AppSettings::load();
+    let initial_sync_server_url = settings.sync_server_url.clone();
     // 初始化自动保存配置全局状态
     cx.set_global(AutoSaveConfig::new(
         settings.enable_sql_auto_save,
@@ -292,6 +295,7 @@ pub fn init_settings(cx: &mut App) {
     ));
     settings.apply(cx);
     cx.set_global(settings);
+    let _ = get_auth_service(cx).update_sync_server_url(&initial_sync_server_url);
 }
 
 fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
@@ -307,6 +311,42 @@ fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
             hp.apply_terminal_settings_to_all(&settings, window, cx);
         });
     });
+}
+
+fn normalize_sync_server_url(value: &str) -> String {
+    SyncServerClient::normalize_base_url(value)
+}
+
+fn apply_sync_server_url_setting(value: SharedString, cx: &mut App) {
+    let normalized = normalize_sync_server_url(value.as_ref());
+    let settings_changed = {
+        let settings = AppSettings::global_mut(cx);
+        if settings.sync_server_url == normalized {
+            false
+        } else {
+            settings.sync_server_url = normalized.clone();
+            settings.save();
+            true
+        }
+    };
+
+    if !settings_changed {
+        return;
+    }
+
+    let auth_changed = get_auth_service(cx).update_sync_server_url(&normalized);
+    if !auth_changed {
+        return;
+    }
+
+    GlobalCurrentUser::set_user(None, cx);
+
+    if let Some(home) = cx.try_global::<GlobalHomePage>() {
+        let home_page = home.home_page.clone();
+        home_page.update(cx, |home_page, cx| {
+            home_page.handle_sync_server_url_changed(cx);
+        });
+    }
 }
 
 pub struct SettingsPanel {
@@ -416,6 +456,27 @@ impl SettingsPanel {
                                     .to_string(),
                             ),
                         ]),
+                    SettingGroup::new()
+                        .title(t!("Settings.General.Sync.group_title"))
+                        .item(
+                            SettingItem::new(
+                                t!("Settings.General.Sync.server_url"),
+                                SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).sync_server_url.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        apply_sync_server_url_setting(val, cx);
+                                    },
+                                )
+                                .default_value(SharedString::from(
+                                    default_settings.sync_server_url,
+                                )),
+                            )
+                            .description(t!("Settings.General.Sync.server_url_desc").to_string()),
+                        ),
                     SettingGroup::new()
                         .title(t!("Settings.General.Font.group_title"))
                         .item(
@@ -739,6 +800,12 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
                                 auth.sign_out().await;
                                 cx.update(|cx| {
                                     GlobalCurrentUser::set_user(None, cx);
+                                    if let Some(home) = cx.try_global::<GlobalHomePage>() {
+                                        let home_page = home.home_page.clone();
+                                        home_page.update(cx, |home_page, cx| {
+                                            home_page.handle_auth_state_cleared(cx);
+                                        });
+                                    }
                                 });
                             })
                             .detach();

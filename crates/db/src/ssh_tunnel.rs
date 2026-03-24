@@ -76,7 +76,9 @@ pub async fn resolve_connection_target(
     let tunnel = match tunnel_result {
         Ok(Ok(tunnel)) => tunnel,
         Ok(Err(e)) => {
-            return Err(DbError::connection(format!("failed to establish ssh tunnel: {e}")));
+            return Err(DbError::connection(format!(
+                "failed to establish ssh tunnel: {e}"
+            )));
         }
         Err(_) => {
             return Err(DbError::connection(format!(

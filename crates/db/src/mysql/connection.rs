@@ -262,15 +262,14 @@ impl DbConnection for MysqlDbConnection {
         // 获取连接超时，默认 30 秒
         let connect_timeout_secs = config.get_param_as::<u64>("connect_timeout").unwrap_or(30);
 
-        debug!("[MySQL] Establishing connection with timeout {}s...", connect_timeout_secs);
+        debug!(
+            "[MySQL] Establishing connection with timeout {}s...",
+            connect_timeout_secs
+        );
         let opts = Opts::from(opts_builder);
 
         // 使用 tokio::timeout 包装连接操作
-        let conn_result = timeout(
-            Duration::from_secs(connect_timeout_secs),
-            Conn::new(opts),
-        )
-        .await;
+        let conn_result = timeout(Duration::from_secs(connect_timeout_secs), Conn::new(opts)).await;
 
         let conn = match conn_result {
             Ok(Ok(conn)) => conn,
@@ -279,7 +278,10 @@ impl DbConnection for MysqlDbConnection {
                 return Err(DbError::connection_with_source("failed to connect", e));
             }
             Err(_) => {
-                error!("[MySQL] Connection timed out after {}s", connect_timeout_secs);
+                error!(
+                    "[MySQL] Connection timed out after {}s",
+                    connect_timeout_secs
+                );
                 return Err(DbError::connection(format!(
                     "connection timed out after {}s",
                     connect_timeout_secs

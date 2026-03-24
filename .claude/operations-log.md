@@ -1,5 +1,99 @@
 ## 操作日志
 
+## 编码前检查 - sync-server-url-settings
+时间：2026-03-24 22:35:21 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-url-settings.md`
+- 已分析相似实现：
+  - `main/src/auth.rs`
+  - `main/src/setting_tab.rs`
+  - `main/src/home_tab.rs`
+  - `crates/core/src/cloud_sync/sync_server.rs`
+- 将使用以下可复用组件：
+  - `AppSettings::load/save`：复用现有设置持久化
+  - `SettingField::input`：复用现有字符串输入设置项
+  - `SyncServerClient`：在同一客户端对象上热更新地址
+  - `HomePage::push_sync_notification`：复用现有同步结果通知
+- 将遵循命名约定：设置字段继续使用 `snake_case`，文案键继续使用 `Settings.General.*`、`Auth.*`、`Home.*`
+- 将遵循代码风格：只在现有认证、设置、首页同步链路内补齐逻辑，不新增并行配置来源
+- 确认不重复造轮子，证明：已检查设置页字段组件、认证服务初始化、首页同步提示和 sync_server 客户端，当前需求属于既有链路补齐，不需要新增独立模块
+
+## 编码后声明 - sync-server-url-settings
+时间：2026-03-24 22:45:33 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/setting_tab.rs::AppSettings`：继续使用 `settings.json` 持久化同步地址
+- `crates/ui/src/setting/fields/string.rs`：继续使用即时保存的字符串输入组件
+- `main/src/home_tab.rs::push_sync_notification`：继续用现有通知系统显式提示同步结果
+- `crates/core/src/cloud_sync/sync_server.rs::SyncServerClient`：在同一客户端对象上热更新地址，避免替换 `Arc`
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增字段使用 `sync_server_url`，新增方法沿用 `snake_case`
+- 代码风格：修改集中在认证、设置、首页同步入口和配置清理，没有新增平行配置层
+- 文件组织：设置相关逻辑仍然集中在 `main/src/setting_tab.rs`，认证检查仍然集中在 `main/src/auth.rs`
+
+### 3. 对比了以下相似实现
+- `main/src/auth.rs`：延续现有认证服务持有全局客户端、负责会话恢复和令牌持久化的模式
+- `main/src/home_tab.rs`：延续现有 `sync_feedback + notification` 的失败提示模式
+- `crates/ui/src/setting/fields/string.rs`：沿用“输入变化立即写回全局状态”的设置组件行为
+
+### 4. 未重复造轮子的证明
+- 已检查 `AppSettings`、`SettingField::input`、`SyncServerClient` 和 `HomePage` 现有状态管理
+- 结论：当前需求可通过补齐既有链路完成，不需要新增独立同步配置服务或新的弹窗体系
+
+## 实施与验证记录 - sync-server-url-settings
+时间：2026-03-24 22:45:33 +0800
+
+### 已完成修改
+- `crates/core/src/cloud_sync/sync_server.rs`
+  - 新增同步地址规范化与有效性校验
+  - 改为运行时可更新的 `base_url`
+- `main/src/auth.rs`
+  - 启动时从 `AppSettings` 读取同步地址
+  - 登录、注册、会话恢复前增加同步地址有效性检查
+  - 新增同步地址热更新方法
+- `main/src/setting_tab.rs`
+  - 新增 `sync_server_url` 设置项和持久化字段
+  - 设置修改后立即更新认证服务并重置首页登录状态
+- `main/src/home_tab.rs`
+  - 登录前未配置地址时弹出准确提示，并引导打开设置页
+  - 同步前未配置地址时显式展示失败原因并推送通知
+- `crates/core/src/config.rs` / `crates/core/build.rs` / `CLAUDE.md`
+  - 删除 `SYNC_SERVER_URL` 相关环境变量入口和文档说明
+- `main/locales/main.yml`
+  - 新增设置项文案和未配置提示文案
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p main`
+  - 结果：通过，6 个测试全部成功
+- `cargo test -p one-core --no-run`
+  - 结果：通过
+- `rg -n "SYNC_SERVER_URL|SyncServerConfig::get" /usr/htdocs/onetcli --glob '!target' --glob '!**/node_modules/**'`
+  - 结果：无匹配，确认已移除该配置入口
+
+### 当前限制
+- 尚未执行 GUI 手动回归；需要在界面中实际验证“未配置时登录弹提示并跳设置页”和“未配置时同步显示明确失败原因”两条交互链路
+
+## 增量完善记录 - auth-state-consistency
+时间：2026-03-24 22:53:03 +0800
+
+### 已完成修改
+- `main/src/home_tab.rs`
+  - 抽取统一的认证状态清理逻辑
+  - 会话过期时不再只清空 `current_user`，同时清理全局用户状态、同步服务状态和反馈状态
+- `main/src/setting_tab.rs`
+  - 设置页执行登出后，额外同步刷新首页登录态与同步状态
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p main`
+  - 结果：通过，6 个测试全部成功
+- `cargo test -p one-core --no-run`
+  - 结果：通过
+
 ## 编码前检查 - windows-owner-id-build
 时间：2026-03-20 15:29:09 +0800
 
@@ -1413,8 +1507,6 @@
 时间：2026-03-24 15:35:05 +0800
 
 ### 1. 复用了以下既有组件
-- `SupabaseConfig::get()`：用于确认服务端地址来源
-- `SupabaseClient`：用于确认服务端协议边界、表名和 RPC 名称
 - `CloudSyncData`：用于约束统一同步表设计
 - `generic_sync` / `SyncEngine`：用于约束软删除、增量拉取和团队缓存语义
 
@@ -1799,7 +1891,7 @@
 - `main/src/home_tab.rs`：登录成功后的全局用户状态与自动同步触发
 - `sync_server/server/src/http/routes/auth.ts`：密码登录/刷新真实接口
 - `sync_server/server/src/http/routes/sync.ts`：用户配置与同步项真实接口
-□ 将遵循命名约定：新增 `SyncServerConfig`、`SyncServerClient`，保留 `SupabaseConfig` 兼容旧模式
+□ 将遵循命名约定：新增 `SyncServerConfig`、`SyncServerClient` 等命名
 □ 将遵循代码风格：继续通过 `CloudApiClient` 抽象给同步引擎供给客户端实例
 □ 确认不重复造轮子，证明：不重写同步引擎，只新增第二个后端实现并在 UI 层分登录模式
 
@@ -1864,3 +1956,434 @@
 ### 4. 风险与限制
 - `sync_server` 目前只覆盖账号级同步，不支持团队功能；Rust 客户端对此已降级为空团队列表或明确返回不支持
 - 当前工作树中本就存在大量与 License 删除相关的未提交改动，本次未回退这些无关变更
+
+## 编码前检查 - sync_server 启动期 OPTIONS 路由冲突
+时间：2026-03-24 19:20:45 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-proxy-options-conflict.md`
+□ 将使用以下可复用组件：
+- `sync_server/server/src/http/app.ts`：现有 Fastify 插件注册入口
+- `sync_server/server/src/config/env.ts`：开发/生产分支判定来源
+- `sync_server/node_modules/@fastify/cors/index.js`：预检路由真实注册行为
+- `sync_server/node_modules/@fastify/http-proxy/index.js`：默认代理方法集与路由生成逻辑
+□ 将遵循命名约定：保持现有 Fastify 配置对象写法，不新增额外封装
+□ 将遵循代码风格：只在现有代理配置上做最小修改，保留既有前端代理与 API 分流模式
+□ 确认不重复造轮子，证明：直接使用 `@fastify/http-proxy` 已支持的 `httpMethods` 配置解决冲突，不新增自研代理层
+
+## 执行记录 - sync_server 启动期 OPTIONS 路由冲突
+时间：2026-03-24 19:20:45 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/server/src/http/app.ts`
+- `sync_server/server/src/main.ts`
+- `sync_server/server/src/config/env.ts`
+- `sync_server/README.md`
+- `sync_server/node_modules/@fastify/cors/index.js`
+- `sync_server/node_modules/@fastify/http-proxy/index.js`
+- `sync_server/node_modules/@fastify/http-proxy/README.md`
+
+### 2. 对比的相似实现
+- `sync_server/server/src/http/app.ts:44`：生产模式静态前端回退只处理 `GET`
+- `sync_server/node_modules/@fastify/cors/index.js:72`：CORS 全局预检路由
+- `sync_server/node_modules/@fastify/http-proxy/index.js:564`：代理默认方法集含 `OPTIONS`
+
+### 3. 当前发现
+- 开发模式下 `web/dist` 不存在，因此 `createApp()` 会走前端开发代理分支
+- `@fastify/cors` 默认注册 `OPTIONS *`
+- `@fastify/http-proxy` 默认对 `['/', '/*']` 注册 `DELETE/GET/HEAD/PATCH/POST/PUT/OPTIONS`
+- 两者在 `OPTIONS /*` 上冲突，导致服务在 `app.ready()/listen()` 阶段启动失败
+
+### 4. 工具限制留痕
+- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
+- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
+
+## 编码后声明 - sync_server 启动期 OPTIONS 路由冲突
+时间：2026-03-24 19:22:45 +0800
+
+### 1. 复用了以下既有组件
+- 复用了 `@fastify/http-proxy` 原生 `httpMethods` 配置能力，没有新增代理包装层
+- 复用了 `sync_server/server/src/http/app.ts` 既有的开发/生产分支结构
+- 继续复用了 `@fastify/cors` 的全局预检处理逻辑，没有改动 API 的 CORS 行为
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增新模块或工具函数，只在现有插件配置对象里补充字段
+- 代码风格：继续使用对象字面量注册 Fastify 插件，没有引入额外抽象
+- 文件组织：修复点保持在 `sync_server/server/src/http/app.ts`，没有扩散到业务路由文件
+
+### 3. 对比了以下相似实现
+- `sync_server/server/src/http/app.ts:44`：生产模式只让前端回退接收 `GET`；本次把开发代理也收敛到页面资源所需的 `GET/HEAD`
+- `sync_server/node_modules/@fastify/cors/index.js:72`：保留 CORS 统一接管 `OPTIONS` 预检，不在代理层重复声明
+- `sync_server/node_modules/@fastify/http-proxy/index.js:564`：未修改插件源码，只覆写当前实例的默认方法集
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/server/src/http/app.ts`、`sync_server/node_modules/@fastify/http-proxy/README.md`、`sync_server/node_modules/@fastify/http-proxy/index.js`
+- 确认 `httpMethods` 已是官方提供的解决位点，因此无需新增自研过滤逻辑或前置插件
+
+### 5. 本地验证结果
+- `npm run check --workspace server`：通过
+- `npm run build --workspace server`：通过
+- `node --input-type=module -e "... await app.ready() ..."`：通过，输出 `READY_OK`
+- `node --input-type=module -e "... OPTIONS /foo ..."`：通过，返回 `204` 且 `access-control-allow-origin` 为 `http://localhost:5173`
+- `node --input-type=module -e "... GET /health ..."`：通过，返回 `200`
+- `node --input-type=module -e "... await app.listen({ host: '127.0.0.1', port: 0 }) ..."`：失败，原因为当前沙箱禁止监听本地端口，错误 `listen EPERM`
+
+## 编码前检查 - sync_server 单端口开发模式
+时间：2026-03-24 19:31:20 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-single-port-dev.md`
+□ 将使用以下可复用组件：
+- `sync_server/server/src/http/app.ts`：现有统一 Web/API 入口
+- `sync_server/server/src/config/env.ts`：运行模式和路径配置来源
+- `sync_server/web/vite.config.ts`：现有前端构建与插件配置
+- `sync_server/package.json`：默认开发命令入口
+□ 将遵循命名约定：保留 `createApp` 作为统一入口，不新增与现有模块风格不一致的“管理器”类
+□ 将遵循代码风格：通过少量 helper 和官方 API 完成单端口集成，不引入自研代理协议
+□ 确认不重复造轮子，证明：直接使用 Vite 官方 `middlewareMode` 能力，而不是再写一层自定义开发服务器
+
+## 执行记录 - sync_server 单端口开发模式
+时间：2026-03-24 19:31:20 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/package.json`
+- `sync_server/server/src/http/app.ts`
+- `sync_server/server/src/config/env.ts`
+- `sync_server/server/src/main.ts`
+- `sync_server/web/package.json`
+- `sync_server/web/vite.config.ts`
+- `sync_server/web/index.html`
+- `sync_server/README.md`
+- `sync_server/.env.example`
+- `sync_server/node_modules/vite/dist/node/index.d.ts`
+- `sync_server/node_modules/vite/dist/node/chunks/config.js`
+
+### 2. 对比的相似实现
+- `sync_server/package.json:10`：当前默认双进程开发入口
+- `sync_server/server/src/http/app.ts:44`：现有单入口 Web/API 编排方式
+- `sync_server/node_modules/vite/dist/node/index.d.ts:2388`：Vite 官方 middleware 模式
+
+### 3. 当前发现
+- 现有双端口并非业务必须，而是默认脚本同时启动了 `tsx watch` 和 `vite`
+- `sync_server/server/src/http/app.ts` 已经承担统一入口职责，适合直接接入 Vite middleware
+- 只靠 `web/dist` 是否存在来判断开发/生产不可靠，因为开发环境可能保留旧构建产物
+- Vite 官方允许把 HMR WebSocket 挂到父级 HTTP server，可满足“真正只用一个端口”
+
+### 4. 工具限制留痕
+- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
+- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
+
+## 编码后声明 - sync_server 单端口开发模式
+时间：2026-03-24 19:34:24 +0800
+
+### 1. 复用了以下既有组件
+- 复用了 `sync_server/server/src/http/app.ts` 作为统一 Web/API 编排入口，没有新增第二套开发服务器
+- 复用了 `sync_server/web/vite.config.ts` 作为前端唯一配置来源，未复制插件配置
+- 复用了 Vite 官方 `middlewareMode` 与父级 `server` 挂载能力，实现同端口 HMR
+
+### 2. 遵循了以下项目约定
+- 命名约定：继续保留 `createApp`、`env` 等既有入口名称
+- 代码风格：通过少量 helper 函数处理运行模式和请求分流，没有引入额外抽象层
+- 文件组织：变更集中在 `server` 入口、根脚本和说明文档，没有改动业务路由
+
+### 3. 对比了以下相似实现
+- `sync_server/package.json:10`：此前默认双进程启动；现在保留 workspace 结构但把默认入口收敛为单进程
+- `sync_server/server/src/http/app.ts:44`：此前生产静态、开发代理都由 Fastify 管；现在开发分支改为内嵌 Vite middleware，仍保持统一入口
+- `sync_server/node_modules/vite/dist/node/index.d.ts:2388`：直接采用官方 middleware 模式，而不是自研端口转发
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/web/vite.config.ts`、`sync_server/node_modules/vite/dist/node/index.d.ts`、`sync_server/node_modules/vite/dist/node/chunks/config.js`
+- 确认 Vite 已原生支持把 HMR 绑定到父级 HTTP server，因此无需新增自定义代理或自研资源服务器
+
+### 5. 本地验证结果
+- `npm run check --workspace server`：通过
+- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); console.log('SRC_READY_OK'); } catch (error) { console.error('SRC_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过，输出 `SRC_READY_OK`
+- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('SRC_INDEX_STATUS', response.statusCode); console.log('SRC_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('SRC_INDEX_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过，返回 `200` 且 HTML 包含 `@vite/client`
+- `npm run build`：通过
+- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('DIST_INDEX_STATUS', response.statusCode); console.log('DIST_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('DIST_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过，返回 `200` 且 HTML 不包含 `@vite/client`
+
+### 6. 风险与限制
+- 当前沙箱禁止真实监听端口，因此未直接执行 `npm run dev` 做长时间监听验证
+- `dev:web` 仍可单独启动独立 Vite 服务，但此时属于可选调试路径，不再是默认开发入口
+
+## 编码前检查 - sync_server dev 启动失败
+时间：2026-03-24 19:39:10 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-dev-startup.md`
+□ 将使用以下可复用组件：
+- `sync_server/package.json`：根级默认开发入口
+- `sync_server/server/package.json`：实际 `dev` 脚本定义
+- `sync_server/server/src/config/env.ts`：环境变量加载逻辑
+- `sync_server/server/src/main.ts`：开发启动目标入口
+□ 将遵循命名约定：继续沿用现有 `dev` / `start` 脚本名称，不新增旁路脚本
+□ 将遵循代码风格：仅调整现有脚本与配置路径，不引入额外守护工具
+□ 确认不重复造轮子，证明：优先使用 Node 原生 `--watch` 与 `tsx/esm` 组合，而不是再引入 `nodemon` 一类新工具
+
+## 执行记录 - sync_server dev 启动失败
+时间：2026-03-24 19:39:10 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/package.json`
+- `sync_server/server/package.json`
+- `sync_server/server/src/config/env.ts`
+- `sync_server/server/src/main.ts`
+
+### 2. 对比的相似实现
+- `sync_server/package.json:10`：默认开发入口如何转发到 workspace
+- `sync_server/server/package.json:7`：当前 `tsx watch` 脚本
+- `sync_server/server/src/config/env.ts:5`：当前 `.env` 路径绑定 `process.cwd()`
+
+### 3. 当前发现
+- `npm run dev` 失败发生在 `tsx watch` 自己的 IPC 管道初始化阶段，报错 `listen EPERM ... /tmp/tsx-*.pipe`
+- `npm --workspace server exec -- node -p 'process.cwd()'` 显示 workspace 脚本运行目录是 `sync_server/server`
+- 因此默认开发命令不会读取 `sync_server/.env`，这是独立于 `tsx watch` 的第二个真实缺陷
+- `node --watch --import tsx/esm server/src/main.ts` 可以进入业务启动逻辑，说明替换 watch 方案可行
+
+### 4. 工具限制留痕
+- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
+- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
+
+## 编码后声明 - sync_server dev 启动失败
+时间：2026-03-24 19:41:55 +0800
+
+### 1. 复用了以下既有组件
+- 继续复用了 `tsx/esm` 作为 TypeScript ESM 运行时
+- 继续复用了根级 `npm run dev` → workspace `server` 的启动链路
+- 继续复用了 `dotenv`，但改为稳定读取项目根目录 `.env`
+
+### 2. 遵循了以下项目约定
+- 命名约定：保留既有 `dev` 语义，同时新增显式的 `dev:watch` 作为可选脚本
+- 代码风格：只调整脚本和配置路径，不增加额外守护脚本文件
+- 文件组织：变更只落在 `server/package.json`、`server/src/config/env.ts` 和说明文档
+
+### 3. 对比了以下相似实现
+- `sync_server/server/package.json:7`：原先默认 `tsx watch` 会在失败时造成自动重启循环
+- `sync_server/package.json:10`：根级 `dev` 继续转发到 `server` 包，不改调用入口
+- `sync_server/server/src/config/env.ts:5`：原先绑定 `process.cwd()`，默认 workspace 启动下会漏读根 `.env`
+
+### 4. 未重复造轮子的证明
+- 已检查 Node 原生 `--watch` 与 `tsx/esm` 组合能力
+- 最终采用“默认稳定单次启动 + 可选 watch 脚本”的最小修复，没有引入 `nodemon` 等新依赖
+
+### 5. 本地验证结果
+- `npm run check --workspace server`：通过
+- `npm --workspace server exec -- node --import tsx/esm --input-type=module -e "import { env } from './src/config/env.ts'; console.log('ENV_PROJECT_ROOT', env.projectRoot); console.log('ENV_ADMIN_EMAIL', env.adminEmail ?? '');"`：通过，确认默认 workspace 启动会读取 `sync_server/.env`
+- `npm run dev`：已越过原来的 `tsx watch` IPC 失败点，不再自动重启；当前仅因沙箱禁止监听 `0.0.0.0:8787` 而单次退出
+- `node -e "const pkg=require('./sync_server/server/package.json'); console.log('DEV_SCRIPT', pkg.scripts.dev); console.log('DEV_WATCH_SCRIPT', pkg.scripts['dev:watch']);"`：通过，确认默认 `dev` 与可选 `dev:watch` 脚本都已写入
+
+### 6. 风险与限制
+- 当前沙箱禁止真实监听端口，因此无法在这里验证常驻成功监听
+- 如果你本机仍然启动失败，下一步需要看启动时的首个报错，而不是 watch 循环日志
+
+## 编码前检查 - auth-error-dialog-auto-close
+时间：2026-03-24 21:07:51 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-auth-error-dialog-auto-close.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs::show_login_dialog`：失败提示关闭后的统一登录入口
+- `main/src/auth.rs::show_auth_dialog`：现有 OTP 登录弹窗实现
+- `crates/ui/src/dialog.rs::Dialog::on_ok`：确认按钮关闭时序
+□ 将遵循命名约定：继续沿用现有 `show_*` / `verify_*` 命名和 Rust `snake_case`
+□ 将遵循代码风格：只调整闭包时序，不引入新状态字段或新组件
+□ 确认不重复造轮子，证明：复用现有 `window.defer` 延迟窗口修改模式，不新增旁路弹窗管理逻辑
+
+## 执行记录 - auth-error-dialog-auto-close
+时间：2026-03-24 21:07:51 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `main/src/auth.rs`
+- `crates/ui/src/dialog.rs`
+
+### 2. 对比的相似实现
+- `main/src/home_tab.rs:3038`：认证错误通过 `window.defer + open_dialog` 提示
+- `main/src/auth.rs:531`：登录弹窗统一由 `show_auth_dialog` 创建
+- `crates/ui/src/dialog.rs:323`：确认按钮先执行 `on_ok`，再关闭当前栈顶对话框
+
+### 3. 当前发现
+- 认证失败后错误信息写入 `self.auth_error`，在 `render` 中消费并弹出 `alert` 错误框
+- 错误框 `on_ok` 里会立即调用 `show_login_dialog`
+- `Dialog` 的确认按钮随后执行 `window.close_dialog(cx)`，因此会关闭刚打开的新登录弹窗，而不是错误弹窗本身
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
+
+## 编码后声明 - sync-server-only
+时间：2026-03-24 22:08:05 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/auth.rs::show_password_auth_dialog`：继续作为唯一登录/注册弹窗
+- `main/src/auth.rs::finish_auth`：继续统一处理令牌持久化和用户信息回填
+- `main/src/home_tab.rs::authenticate_with_password`：继续承接首页登录后的状态更新和自动同步
+- `crates/core/src/config.rs::SyncServerConfig`：继续作为同步地址唯一配置入口
+
+### 2. 遵循了以下项目约定
+- 命名约定：保留既有 `sync_server`、`CloudApiClient`、`PasswordAuthAction` 命名体系
+- 代码风格：通过删除分支和接口收缩完成清理，没有引入新的包装层
+- 文件组织：UI 清理集中在 `main/src/auth.rs` 与 `main/src/home_tab.rs`，底层清理集中在 `crates/core/src`
+
+### 3. 对比了以下相似实现
+- `main/src/auth.rs`：原本通过 `AuthBackend` 包装双后端；现在收敛成单一 `SyncServerClient`
+- `main/src/home_tab.rs`：原本按 `AuthMode` 分支决定 OTP/密码登录；现在直接固定密码登录
+- `crates/core/src/cloud_sync/client.rs`：原本保留 OTP 接口；现在只保留 sync_server 实际支持的认证能力
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/auth.rs`、`main/src/home_tab.rs`、`crates/core/src/config.rs`、`crates/core/src/cloud_sync/client.rs`、`crates/core/src/cloud_sync/sync_server.rs`
+- 最终直接删除 `Supabase` 模块、配置和 OTP 登录分支，完全复用现有 `sync_server` 密码认证和同步实现
+
+### 5. 本地验证结果
+- `rg -n "SUPABASE|Supabase|supabase|AuthMode|show_auth_dialog|send_otp|verify_otp\\(|sign_in_with_otp|验证码登录" main crates/core CLAUDE.md --glob '!target'`：无结果，确认主代码路径已无旧后端残留
+- `cargo fmt --all`：通过
+- `git restore crates/db/src/clickhouse/connection.rs ... crates/ui/src/window_ext.rs`：已执行，回退 `cargo fmt --all` 误改的无关文件
+- `cargo test -p main`：通过，6 个测试全部通过
+- `cargo test -p one-core --no-run`：通过，确认 `one-core` 编译成功
+
+### 6. 风险与限制
+- 仓库中仍有 OTP 输入组件文档 `docs/docs/components/otp-input.md`，它描述的是通用 UI 组件，不属于本次业务链路清理范围
+- 验证过程中仍存在既有 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，均与本次清理无关
+
+## 编码前检查 - sync-server-url-settings
+时间：2026-03-24 22:24:31 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-url-settings.md`
+□ 将使用以下可复用组件：
+- `main/src/setting_tab.rs::AppSettings`：作为同步地址唯一持久化位置
+- `crates/ui/src/setting/fields/string.rs`：作为设置页字符串输入控件
+- `main/src/home_tab.rs::add_settings_tab`：用于未配置时引导用户进入设置页
+- `main/src/auth.rs::AuthService`：作为同步地址变更后的统一认证入口
+□ 将遵循命名约定：沿用 `Settings.General.*`、`Auth.*`、`Home.*` 的翻译命名空间和 `sync_server_url` 字段命名
+□ 将遵循代码风格：在现有设置回调里即时保存和应用，不新增额外的设置管理器
+□ 确认不重复造轮子，证明：直接复用 `AppSettings` 与现有全局认证服务，不再引入环境变量或独立配置文件
+
+## 执行记录 - sync-server-url-settings
+时间：2026-03-24 22:24:31 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/setting_tab.rs`
+- `crates/ui/src/setting/fields/mod.rs`
+- `crates/ui/src/setting/fields/string.rs`
+- `main/src/auth.rs`
+- `main/src/home_tab.rs`
+- `main/src/onetcli_app.rs`
+- `crates/core/src/llm/manager.rs`
+
+### 2. 对比的相似实现
+- `main/src/setting_tab.rs`：全局设置字段持久化和设置项即时生效模式
+- `crates/ui/src/setting/fields/string.rs`：字符串输入设置项的实现方式
+- `main/src/home_tab.rs`：登录入口和同步前置检查提示链路
+- `crates/core/src/llm/manager.rs`：云端客户端被 AI provider 复用的全局状态
+
+### 3. 当前发现
+- 目前 `sync_server` 地址仍在 `AuthService` 初始化阶段固定，设置页无法接管
+- LLM provider 复用的是同一个 `CloudApiClient` 引用，因此最好让客户端对象原地更新地址
+- 未配置地址时，现有首页登录入口会继续打开密码登录框，缺少明确引导
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
+
+## 编码前检查 - sync-server-only
+时间：2026-03-24 21:53:39 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-only.md`
+□ 将使用以下可复用组件：
+- `main/src/auth.rs::show_password_auth_dialog`：作为唯一保留的登录入口
+- `main/src/auth.rs::finish_auth`：继续统一处理认证成功后的落盘和用户信息收敛
+- `crates/core/src/config.rs::normalize_url`：继续用于 `SYNC_SERVER_URL` 标准化
+- `main/src/home_tab.rs::authenticate_with_password`：继续承接首页登录后的状态更新
+□ 将遵循命名约定：保留现有 `sync_*`、`Auth.*`、`CloudApiClient` 命名体系，不新增旁路概念
+□ 将遵循代码风格：使用现有 `match` / 链式 UI / 配置 `get()` 模式，不新增抽象层
+□ 确认不重复造轮子，证明：直接删除 `Supabase`/OTP 分支并复用既有 `sync_server` 密码认证链路
+
+## 执行记录 - sync-server-only
+时间：2026-03-24 21:53:39 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/auth.rs`
+- `main/src/home_tab.rs`
+- `crates/core/src/config.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/mod.rs`
+- `crates/core/src/cloud_sync/sync_server.rs`
+- `crates/core/build.rs`
+- `crates/core/src/llm/onet_cli_provider.rs`
+- `main/locales/main.yml`
+
+### 2. 对比的相似实现
+- `main/src/auth.rs`：统一认证服务封装和本地认证持久化
+- `main/src/home_tab.rs`：首页登录入口和同步反馈展示
+- `crates/core/src/config.rs`：运行时/编译时配置收敛模式
+- `crates/core/src/cloud_sync/client.rs`：云端接口抽象层
+
+### 3. 当前发现
+- `Supabase` 相关内容仍分散在认证后端、配置读取、模块导出、文案和仓库说明中
+- OTP 登录仅服务于旧后端，项目内没有其它真实调用价值
+- `sync_server` 已具备完整的密码登录、注册、会话恢复和同步能力，可以独立承接全部流程
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
+
+## 编码后声明 - auth-error-dialog-auto-close
+时间：2026-03-24 21:15:36 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home_tab.rs::show_login_dialog`：继续作为认证失败后的唯一重试入口
+- `window.defer`：继续复用项目内“延迟修改窗口状态”的既有模式
+- `crates/ui/src/dialog.rs::Dialog::on_ok`：继续沿用现有确认按钮返回 `bool` 的关闭协议
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增状态字段和类型，只在既有 `on_ok` 闭包中调整时序
+- 代码风格：保持现有链式弹窗构造风格和 `window.defer` 用法
+- 文件组织：修复保持在 `main/src/home_tab.rs`，没有扩散到通用认证或对话框框架
+
+### 3. 对比了以下相似实现
+- `main/src/home_tab.rs:3030`：会话过期已使用 `window.defer` 延迟重新打开登录弹窗，本次失败路径对齐同一时序模式
+- `main/src/auth.rs:531`：登录弹窗仍由既有 `show_auth_dialog` 创建，没有新增旁路 UI
+- `crates/ui/src/dialog.rs:323`：确认按钮仍保持“回调返回 `true` 后关闭弹窗”的约定，本次只避免在关闭前抢先打开新弹窗
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/home_tab.rs`、`main/src/auth.rs`、`crates/ui/src/dialog.rs`
+- 最终采用延迟调用现有 `show_login_dialog` 的最小修复，没有新增弹窗管理器或额外状态机
+
+### 5. 本地验证结果
+- `cargo test -p main --no-run`：通过，确认 `main` 包编译和测试目标都可正常构建
+- `cargo test -p main -- --list`：通过，确认当前 `main` 包共有 3 个现有测试
+- `cargo test -p main`：通过，3 个现有测试全部通过
+
+### 6. 风险与限制
+- 当前仓库没有直接覆盖“认证失败弹窗确认后重开登录弹窗”的 UI 自动化测试，本次主要依靠源码时序推理和编译/单测兜底
+- `cargo test` 输出了既有的 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，均与本次修复无关
+
+## 编码前检查 - home-sync-feedback
+时间：2026-03-24 21:36:51 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-home-sync-feedback.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs::trigger_sync`：同步主流程与错误来源
+- `main/src/home_tab.rs::render_toolbar`：主界面显式状态展示位置
+- `main/src/settings/provider_form_dialog.rs`：异步完成后发送通知的既有模式
+□ 将遵循命名约定：继续沿用 `sync_*` 字段和 `Home.*` 文案命名空间
+□ 将遵循代码风格：只在首页同步相关逻辑内增加状态汇总和通知，不引入新的全局管理器
+□ 确认不重复造轮子，证明：直接复用 `window.push_notification` 和工具栏渲染，不新增自研弹层系统
+
+## 执行记录 - home-sync-feedback
+时间：2026-03-24 21:36:51 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `main/src/settings/provider_form_dialog.rs`
+- `crates/ui/src/notification.rs`
+
+### 2. 对比的相似实现
+- `main/src/home_tab.rs:321`：同步失败只写入 `cloud_error`
+- `main/src/home_tab.rs:1836`：同步按钮和冲突按钮所在工具栏
+- `main/src/settings/provider_form_dialog.rs:462`：异步任务完成后通过活动窗口推送通知
+
+### 3. 当前发现
+- `cloud_error` 会在同步前置校验失败、同步失败、部分成功有错误时被写入
+- `render_toolbar` 中没有任何地方读取 `cloud_error`，所以主界面上看不到失败原因
+- 正常同步完成只写 tracing 日志，没有成功/部分成功通知
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证

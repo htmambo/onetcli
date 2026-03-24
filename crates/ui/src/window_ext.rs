@@ -15,12 +15,12 @@ fn resolve_macos_titlebar_double_click_action(
     action_on_double_click: Option<&str>,
     miniaturize_on_double_click: Option<&str>,
 ) -> MacTitlebarDoubleClickAction {
-    let action = action_on_double_click.map(str::trim).filter(|value| !value.is_empty());
+    let action = action_on_double_click
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
     match action {
-        Some(value) if value.eq_ignore_ascii_case("none") => {
-            MacTitlebarDoubleClickAction::None
-        }
+        Some(value) if value.eq_ignore_ascii_case("none") => MacTitlebarDoubleClickAction::None,
         Some(value) if value.eq_ignore_ascii_case("minimize") => {
             MacTitlebarDoubleClickAction::Minimize
         }

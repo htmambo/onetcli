@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::{debug, error, info, warn};
+use url::Url;
 
 /// sync_server 客户端配置
 #[derive(Debug, Clone)]
@@ -131,7 +132,7 @@ struct UpdateSyncItemRequest<'a> {
 
 /// sync_server 客户端
 pub struct SyncServerClient {
-    config: SyncServerConfig,
+    base_url: RwLock<String>,
     http: Arc<dyn HttpClient>,
     auth_state: RwLock<AuthState>,
     refresh_lock: AsyncMutex<()>,
@@ -143,7 +144,7 @@ impl SyncServerClient {
     /// 创建新的 sync_server 客户端
     pub fn new(config: SyncServerConfig, http: Arc<dyn HttpClient>) -> Self {
         Self {
-            config,
+            base_url: RwLock::new(Self::normalize_base_url(&config.base_url)),
             http,
             auth_state: RwLock::new(AuthState {
                 access_token: None,
@@ -155,6 +156,51 @@ impl SyncServerClient {
             on_session_expired: RwLock::new(None),
             on_token_refreshed: RwLock::new(None),
         }
+    }
+
+    /// 规范化 sync_server 根地址。
+    pub fn normalize_base_url(value: &str) -> String {
+        value.trim().trim_end_matches('/').to_string()
+    }
+
+    /// 检查 sync_server 根地址是否为有效的 HTTP/HTTPS URL。
+    pub fn is_valid_base_url(value: &str) -> bool {
+        let normalized = Self::normalize_base_url(value);
+        if normalized.is_empty() {
+            return false;
+        }
+
+        match Url::parse(&normalized) {
+            Ok(url) => matches!(url.scheme(), "http" | "https") && url.has_host(),
+            Err(_) => false,
+        }
+    }
+
+    /// 返回当前根地址。
+    pub fn base_url(&self) -> String {
+        self.base_url
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_default()
+    }
+
+    /// 检查当前根地址是否有效。
+    pub fn has_valid_base_url(&self) -> bool {
+        Self::is_valid_base_url(&self.base_url())
+    }
+
+    /// 更新当前根地址，返回值表示是否发生变化。
+    pub fn set_base_url(&self, value: impl AsRef<str>) -> bool {
+        let normalized = Self::normalize_base_url(value.as_ref());
+        if let Ok(mut base_url) = self.base_url.write() {
+            if *base_url == normalized {
+                return false;
+            }
+            *base_url = normalized;
+            return true;
+        }
+
+        false
     }
 
     /// 设置会话过期回调
@@ -237,7 +283,7 @@ impl SyncServerClient {
     fn api_url(&self, path: &str) -> String {
         format!(
             "{}/{}",
-            self.config.base_url.trim_end_matches('/'),
+            self.base_url().trim_end_matches('/'),
             path.trim_start_matches('/')
         )
     }
@@ -738,14 +784,6 @@ impl CloudApiClient for SyncServerClient {
         Ok(auth)
     }
 
-    async fn sign_in_with_otp(&self, _email: &str) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持验证码登录"))
-    }
-
-    async fn verify_otp(&self, _email: &str, _token: &str) -> Result<AuthResponse, CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持验证码登录"))
-    }
-
     async fn get_user_config(&self) -> Result<Option<CloudUserConfig>, CloudApiError> {
         let url = self.api_url("/api/v1/sync/config");
         let (status, result) = self
@@ -977,4 +1015,28 @@ fn format_millis_to_rfc3339(value: i64) -> String {
     chrono::DateTime::from_timestamp_millis(value)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SyncServerClient;
+
+    #[test]
+    fn normalize_base_url_trims_spaces_and_trailing_slashes() {
+        assert_eq!(
+            SyncServerClient::normalize_base_url(" https://example.com/api/ "),
+            "https://example.com/api"
+        );
+    }
+
+    #[test]
+    fn is_valid_base_url_requires_http_or_https() {
+        assert!(SyncServerClient::is_valid_base_url("http://127.0.0.1:8787"));
+        assert!(SyncServerClient::is_valid_base_url(
+            "https://example.com/api"
+        ));
+        assert!(!SyncServerClient::is_valid_base_url(""));
+        assert!(!SyncServerClient::is_valid_base_url("127.0.0.1:8787"));
+        assert!(!SyncServerClient::is_valid_base_url("ftp://example.com"));
+    }
 }

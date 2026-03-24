@@ -1,6 +1,6 @@
 //! Onet CLI LLM Provider
 //!
-//! 使用 Supabase 边缘函数作为 AI 代理的 LLM Provider。
+//! 使用云端同步服务提供的 AI 代理能力。
 //! 委托给 CloudApiClient 实现，支持 OpenAI 兼容的 /chat/completions 接口。
 
 use anyhow::Result;
@@ -13,7 +13,7 @@ use crate::cloud_sync::client::CloudApiClient;
 
 /// Onet CLI LLM Provider
 ///
-/// 使用 Supabase 边缘函数作为 AI 代理，委托给 CloudApiClient 实现。
+/// 使用云端 API 作为 AI 代理，委托给 CloudApiClient 实现。
 pub struct OnetCliLLMProvider {
     cloud_client: Arc<dyn CloudApiClient>,
 }

@@ -1,8 +1,8 @@
 use crate::{ActiveTheme, Sizable, Size};
 use gpui::{
-    div, img, prelude::FluentBuilder as _, svg, AnyElement, App, AppContext, Context, Entity, Hsla,
-    IntoElement, ParentElement, Radians, Render, RenderOnce, SharedString, StyleRefinement, Styled,
-    Svg, Transformation, Window,
+    AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, ParentElement, Radians,
+    Render, RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window, div,
+    img, prelude::FluentBuilder as _, svg,
 };
 
 /// Types implementing this trait can automatically be converted to [`Icon`].

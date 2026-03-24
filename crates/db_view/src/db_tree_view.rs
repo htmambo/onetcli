@@ -2528,7 +2528,6 @@ impl DbTreeView {
         let is_active =
             conn_active && (node.node_type != DbNodeType::Database || node.children_loaded);
 
-
         // 尝试从 plugin 获取菜单
         let registry = cx.global::<DatabaseViewPluginRegistry>();
         if let Some(plugin) = registry.get(&node.database_type) {

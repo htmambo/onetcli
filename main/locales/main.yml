@@ -109,6 +109,42 @@ Home:
     en: Sync data with cloud
     zh-CN: 与云端同步数据
     zh-HK: 與雲端同步數據
+  sync_failed:
+    en: Sync failed
+    zh-CN: 同步失败
+    zh-HK: 同步失敗
+  sync_completed_no_changes:
+    en: Sync completed, no changes detected
+    zh-CN: 同步完成，没有发现需要同步的数据
+    zh-HK: 同步完成，沒有發現需要同步的數據
+  sync_completed_summary:
+    en: "Sync completed: %{summary}"
+    zh-CN: "同步完成：%{summary}"
+    zh-HK: "同步完成：%{summary}"
+  sync_completed_with_issues:
+    en: "Sync completed: %{summary}; %{issues}"
+    zh-CN: "同步完成：%{summary}；%{issues}"
+    zh-HK: "同步完成：%{summary}；%{issues}"
+  sync_issues_conflicts:
+    en: "%{count} conflicts pending"
+    zh-CN: "%{count} 个冲突待处理"
+    zh-HK: "%{count} 個衝突待處理"
+  sync_issues_errors:
+    en: "%{count} issues: %{error}"
+    zh-CN: "%{count} 条问题：%{error}"
+    zh-HK: "%{count} 條問題：%{error}"
+  sync_conflicts_resolved:
+    en: Conflict resolution completed
+    zh-CN: 冲突处理完成
+    zh-HK: 衝突處理完成
+  sync_conflicts_resolved_with_issues:
+    en: "Conflict resolution completed, but %{count} issues remain: %{error}"
+    zh-CN: "冲突处理完成，但仍有 %{count} 条问题：%{error}"
+    zh-HK: "衝突處理完成，但仍有 %{count} 條問題：%{error}"
+  sync_server_url_required:
+    en: Please set a valid sync server URL in Settings first
+    zh-CN: 请先在设置中填写有效的同步地址
+    zh-HK: 請先在設定中填寫有效的同步地址
   conflict_tooltip:
     en: "%{count} sync conflicts need to be resolved"
     zh-CN: "%{count} 个同步冲突需要解决"
@@ -330,47 +366,14 @@ Auth:
     en: "Please check your email (%{email}) to confirm your account"
     zh-CN: "请检查您的邮箱（%{email}）以确认您的账号"
     zh-HK: "請檢查您的電郵（%{email}）以確認您的帳號"
+  sync_server_url_required:
+    en: Please set a valid sync server URL in Settings before logging in
+    zh-CN: 登录前请先在设置中填写有效的同步地址
+    zh-HK: 登入前請先在設定中填寫有效的同步地址
   auth_error_title:
     en: Authentication Failed
     zh-CN: 认证失败
     zh-HK: 認證失敗
-  # OTP 相关
-  otp_placeholder:
-    en: Enter verification code
-    zh-CN: 输入验证码
-    zh-HK: 輸入驗證碼
-  otp_code:
-    en: Verification Code
-    zh-CN: 验证码
-    zh-HK: 驗證碼
-  otp_required:
-    en: Please enter the verification code
-    zh-CN: 请输入验证码
-    zh-HK: 請輸入驗證碼
-  send_otp:
-    en: Send Code
-    zh-CN: 发送验证码
-    zh-HK: 發送驗證碼
-  sending_otp:
-    en: Sending...
-    zh-CN: 发送中...
-    zh-HK: 發送中...
-  resend_otp:
-    en: Resend Code
-    zh-CN: 重新发送
-    zh-HK: 重新發送
-  verify_otp:
-    en: Verify Code
-    zh-CN: 验证
-    zh-HK: 驗證
-  otp_sent_hint:
-    en: A verification code has been sent to your email
-    zh-CN: 验证码已发送到您的邮箱
-    zh-HK: 驗證碼已發送到您的電郵
-  change_email:
-    en: Change email
-    zh-CN: 更换邮箱
-    zh-HK: 更換電郵
 
 # 主密钥
 Encryption:
@@ -615,6 +618,20 @@ Settings:
         en: Automatically switch theme based on system settings
         zh-CN: 根据系统设置自动切换主题
         zh-HK: 根據系統設定自動切換主題
+
+    Sync:
+      group_title:
+        en: Sync
+        zh-CN: 同步
+        zh-HK: 同步
+      server_url:
+        en: Sync Server URL
+        zh-CN: 同步地址
+        zh-HK: 同步地址
+      server_url_desc:
+        en: Set the sync_server URL, for example http://127.0.0.1:8787. Changes take effect immediately and require logging in again.
+        zh-CN: 配置 sync_server 地址，例如 http://127.0.0.1:8787。修改后会立即生效，并需要重新登录。
+        zh-HK: 配置 sync_server 地址，例如 http://127.0.0.1:8787。修改後會立即生效，並需要重新登入。
 
     # 字体设置
     Font:

@@ -3,6 +3,40 @@
 
 ---
 
+## 审查报告（sync-server-url-settings）
+生成时间：2026-03-24 22:45:33 +0800
+
+### 需求完整性检查
+- 目标明确：同步地址必须从设置页配置，不能再从环境变量或编译时配置读取
+- 范围明确：认证初始化、设置持久化、登录入口提示、同步入口提示、环境变量清理
+- 交付物明确：代码修改、本地验证、`.claude/` 留痕文件
+- 风险与依赖明确：设置项为即时保存，必须以“有效 URL”而不是“非空字符串”判断是否已配置
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：87/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：92/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 设置来源已统一：[`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L95) 新增 `sync_server_url` 持久化字段，并在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L449) 新增设置页输入项，修改后立即同步到认证服务。
+- 地址更新策略合理：[`crates/core/src/cloud_sync/sync_server.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L123) 的 `SyncServerClient` 改为持有可运行时更新的 `base_url`，避免替换全局共享客户端对象后引发引用失效。
+- 登录前提示准确：[`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L966) 在未配置有效同步地址时不再打开登录表单，而是弹出明确提示并引导进入设置页。
+- 同步失败可见性补齐：[`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L464) 在未配置同步地址时会同时设置主界面反馈和通知提示，不再落成底层 `builder error`。
+- 认证状态一致性更完整：[`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L3252) 会话过期时会统一清理首页和全局登录态；[`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L799) 设置页登出后也会同步刷新首页状态。
+- 环境变量入口已移除：[`crates/core/src/config.rs`](/usr/htdocs/onetcli/crates/core/src/config.rs#L1) 不再包含 `SyncServerConfig`；[`crates/core/build.rs`](/usr/htdocs/onetcli/crates/core/build.rs#L1) 也已移除 `SYNC_SERVER_URL` 注入逻辑；检索 `SYNC_SERVER_URL|SyncServerConfig::get` 无匹配。
+- 本地验证通过：`cargo fmt --all`、`cargo test -p main`、`cargo test -p one-core --no-run` 全部成功。残余风险仅剩 GUI 手动交互未回归。
+
+---
+
 ## 审查报告（sync-server-rust-integration）
 生成时间：2026-03-24 17:53:05 +0800
 
@@ -972,3 +1006,205 @@
 - `test -f .claude/cloud-sync-server-account-key-plan.md`：通过
 - `test -f .claude/context-summary-cloud-sync-account-key-plan.md`：通过
 - `rg -n "账号 \\+ 同步密钥|user_configs|sync_data|app_settings|登录密码派生同步密钥|不需要设备授权" .claude/cloud-sync-server-account-key-plan.md`：通过
+
+
+---
+
+## 审查报告（sync-server-proxy-options-conflict）
+生成时间：2026-03-24 19:22:45 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“修复 sync_server 启动时报 `OPTIONS` 重复路由”的目标、范围、交付物和验证要点
+- 原始意图覆盖：已直接处理开发模式启动失败根因，没有扩散为无关重构
+- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已确认冲突来自 `@fastify/cors` 与 `@fastify/http-proxy` 的路由注册组合
+- 结论留痕：验证命令与限制说明已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 主要结论
+- 根因是开发模式下根路径代理默认注册了 `OPTIONS /*`，与 `@fastify/cors` 的全局预检路由冲突。
+- 修复通过收窄前端开发代理的方法集到 `GET/HEAD` 完成，行为也与生产模式仅托管页面资源的设计保持一致。
+- API 侧 CORS 预检仍由官方插件处理，没有引入新的代理层或自研兼容逻辑。
+- 当前缺少现成自动化测试文件，因此本次依赖 `app.ready()` 和 `app.inject()` 作为本地回归证据。
+
+### 本地验证
+- `npm run check --workspace server`：通过
+- `npm run build --workspace server`：通过
+- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); console.log('READY_OK'); } catch (error) { console.error('READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
+- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'OPTIONS', url: '/foo', headers: { origin: 'http://localhost:5173', 'access-control-request-method': 'GET' } }); console.log('OPTIONS_STATUS', response.statusCode); console.log('ALLOW_ORIGIN', response.headers['access-control-allow-origin'] ?? ''); } catch (error) { console.error(error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
+- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/health' }); console.log('HEALTH_STATUS', response.statusCode); console.log('HEALTH_BODY', response.body); } catch (error) { console.error(error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
+- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.listen({ host: '127.0.0.1', port: 0 }); console.log('LISTEN_OK'); } catch (error) { console.error('LISTEN_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：失败，因当前沙箱禁止监听端口，报错 `listen EPERM`，不构成代码回归
+
+
+---
+
+## 审查报告（sync-server-single-port-dev）
+生成时间：2026-03-24 19:34:24 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“默认开发模式只使用一个端口”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已把默认开发入口从“双进程 + 双端口”改成“单进程 + 单端口”
+- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 Vite middleware、HMR 挂载方式、运行态识别和独立前端调试兼容性
+- 结论留痕：源码态与产物态验证命令已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 主要结论
+- 默认 `npm run dev` 现在只启动 Fastify，一个端口同时承载 API、页面资源和 HMR。
+- 开发模式不再依赖额外的 5173 代理链，而是直接复用 Vite 官方 middleware 模式挂到 Fastify。
+- 运行态判断已从“是否存在 `web/dist`”收敛为“源码态优先走 Vite middleware，产物态优先走静态资源”，避免开发环境因为旧构建产物误走生产分支。
+- 可选的 `npm run dev:web` 仍保留，用于单独调试前端，但不再是默认开发路径。
+
+### 本地验证
+- `npm run check --workspace server`：通过
+- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); console.log('SRC_READY_OK'); } catch (error) { console.error('SRC_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过
+- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('SRC_INDEX_STATUS', response.statusCode); console.log('SRC_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('SRC_INDEX_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过
+- `npm run build`：通过
+- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('DIST_INDEX_STATUS', response.statusCode); console.log('DIST_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('DIST_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
+
+
+---
+
+## 审查报告（sync-server-dev-startup）
+生成时间：2026-03-24 19:41:55 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“`npm run dev` 无法正常启动且不停自动重启”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已针对默认开发入口稳定性修复，而不是继续堆叠 watch 机制
+- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `tsx watch`、Node 原生 `--watch`、workspace `cwd` 与 `.env` 读取路径
+- 结论留痕：本地验证命令与沙箱限制已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：87/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：95/100
+- 风险评估：94/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 主要结论
+- 默认 `npm run dev` 现在使用稳定单次启动，不会因为启动异常而陷入自动重启循环。
+- 根目录 `sync_server/.env` 现在会被默认 workspace 启动正确读取，修复了此前的配置漂移问题。
+- 如果需要后端代码变更自动重启，保留了显式的 `dev:watch`，但它不再作为默认路径。
+- 当前本地沙箱只剩端口监听受限问题，说明原来的脚本级失败和重启循环都已经被剥离掉。
+
+### 本地验证
+- `npm run check --workspace server`：通过
+- `npm --workspace server exec -- node --import tsx/esm --input-type=module -e "import { env } from './src/config/env.ts'; console.log('ENV_PROJECT_ROOT', env.projectRoot); console.log('ENV_ADMIN_EMAIL', env.adminEmail ?? '');"`：通过
+- `npm run dev`：通过脚本级验证，不再自动重启；当前仅因沙箱禁止监听 `8787` 而单次退出
+- `node -e "const pkg=require('./sync_server/server/package.json'); console.log('DEV_SCRIPT', pkg.scripts.dev); console.log('DEV_WATCH_SCRIPT', pkg.scripts['dev:watch']);"`：通过
+
+
+---
+
+## 审查报告（auth-error-dialog-auto-close）
+生成时间：2026-03-24 21:15:36 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“认证失败弹窗点击确定后不能自动消失”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已修复错误弹窗确认后的关闭时序，并保留重新弹出登录框的原有意图
+- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `HomePage::render`、`show_login_dialog`、`Dialog::on_ok` 的调用顺序和对话框栈影响
+- 结论留痕：本地验证命令与残余测试缺口已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 主要结论
+- 根因是错误弹窗 `on_ok` 在当前弹窗关闭前就重新打开了登录弹窗，导致框架随后关闭的是新弹窗而不是错误弹窗。
+- 修复后改为通过 `window.defer` 延迟重开登录弹窗，让当前错误弹窗先按既有流程关闭。
+- 修复点只落在 [`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs)，没有修改通用对话框框架和认证接口。
+
+### 本地验证
+- `cargo test -p main --no-run`：通过
+- `cargo test -p main -- --list`：通过，当前 `main` 包共有 3 个现有测试
+- `cargo test -p main`：通过，3 个现有测试全部通过
+
+### 残余风险
+- 当前没有直接模拟“点击错误弹窗确定按钮”的 UI 自动化回归测试，因此本次仍存在一处行为级测试缺口
+
+
+---
+
+## 审查报告（sync-server-only）
+生成时间：2026-03-24 22:08:05 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“只保留 sync_server，移除 Supabase 相关内容”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已同时清理认证后端、OTP 登录、配置读取、模块导出、文案和仓库说明
+- 交付物映射：已产出代码清理、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `AuthService`、`HomePage::show_login_dialog`、`CloudApiClient`、`SyncServerClient` 的接口收缩影响
+- 结论留痕：本地验证命令、残余告警和未纳入范围的文档已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 主要结论
+- `main` 侧认证已经从“双后端 + OTP/密码双模式”收敛为只使用 `sync_server` 的密码登录/注册流程。
+- `one-core` 已删除 `Supabase` 模块暴露、编译期 `SUPABASE_*` 配置以及 `CloudApiClient` 中仅旧后端使用的 OTP 接口。
+- 主代码路径检索已确认没有 `Supabase`、`SUPABASE_*`、`AuthMode`、`show_auth_dialog`、`send_otp`、`verify_otp` 等残留引用。
+
+### 本地验证
+- `rg -n "SUPABASE|Supabase|supabase|AuthMode|show_auth_dialog|send_otp|verify_otp\\(|sign_in_with_otp|验证码登录" main crates/core CLAUDE.md --glob '!target'`：无结果
+- `cargo fmt --all`：通过
+- `cargo test -p main`：通过，6 个测试全部通过
+- `cargo test -p one-core --no-run`：通过
+
+### 残余风险
+- `docs/docs/components/otp-input.md` 仍保留通用 OTP 输入组件文档，但它不再参与当前认证业务流程
+- 验证输出中仍有既有 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，与本次变更无关

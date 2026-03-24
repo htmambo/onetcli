@@ -44,9 +44,7 @@ use terminal_view::TerminalView;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
-use crate::auth::{
-    AuthMode, AuthService, PasswordAuthAction, show_auth_dialog, show_password_auth_dialog,
-};
+use crate::auth::{AuthService, PasswordAuthAction, show_password_auth_dialog};
 use crate::encourage::EncourageDialog;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
@@ -56,6 +54,22 @@ use crate::setting_tab::GlobalCurrentUser;
 use crate::user_avatar::render_user_avatar;
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncFeedbackLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncFeedback {
+    level: SyncFeedbackLevel,
+    message: String,
+}
+
+struct SyncResultNotification;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -92,6 +106,8 @@ pub struct HomePage {
     cloud_sync_service: Arc<std::sync::RwLock<CloudSyncService>>,
     /// 云端加载错误信息
     cloud_error: Option<String>,
+    /// 最近一次同步反馈，用于主界面显式展示
+    sync_feedback: Option<SyncFeedback>,
     /// 是否正在同步
     syncing: bool,
     /// 同步期间收到的新同步请求
@@ -156,6 +172,7 @@ impl HomePage {
             terminal_views: Vec::new(),
             cloud_sync_service: Arc::new(std::sync::RwLock::new(CloudSyncService::new())),
             cloud_error: None,
+            sync_feedback: None,
             syncing: false,
             sync_requested: false,
             pending_conflicts: Vec::new(),
@@ -309,6 +326,148 @@ impl HomePage {
         self.load_connections(cx);
     }
 
+    fn clear_auth_related_state(&mut self, cx: &mut Context<Self>) {
+        self.current_user = None;
+        self.logging_in = false;
+        self.auth_error = None;
+        self.cloud_error = None;
+        self.sync_feedback = None;
+        self.pending_conflicts.clear();
+        self.syncing = false;
+        self.sync_requested = false;
+        GlobalCurrentUser::set_user(None, cx);
+
+        if let Ok(mut service) = self.cloud_sync_service.write() {
+            service.logout();
+        } else {
+            tracing::warn!("同步地址变更后重置云同步状态失败：无法获取写锁");
+        }
+
+        cx.notify();
+    }
+
+    pub(crate) fn handle_auth_state_cleared(&mut self, cx: &mut Context<Self>) {
+        self.clear_auth_related_state(cx);
+    }
+
+    pub(crate) fn handle_sync_server_url_changed(&mut self, cx: &mut Context<Self>) {
+        self.clear_auth_related_state(cx);
+    }
+
+    fn set_sync_feedback(&mut self, level: SyncFeedbackLevel, message: impl Into<String>) {
+        self.sync_feedback = Some(SyncFeedback {
+            level,
+            message: message.into(),
+        });
+    }
+
+    fn summarize_sync_result(result: &one_core::cloud_sync::SyncResult) -> SyncFeedback {
+        let mut summary_parts = Vec::new();
+        if result.uploaded > 0 {
+            summary_parts.push(format!("上传 {} 项", result.uploaded));
+        }
+        if result.downloaded > 0 {
+            summary_parts.push(format!("下载 {} 项", result.downloaded));
+        }
+        if result.deleted > 0 {
+            summary_parts.push(format!("删除 {} 项", result.deleted));
+        }
+
+        let summary = if summary_parts.is_empty() {
+            t!("Home.sync_completed_no_changes").to_string()
+        } else {
+            t!(
+                "Home.sync_completed_summary",
+                summary = summary_parts.join("，")
+            )
+            .to_string()
+        };
+
+        let mut issues = Vec::new();
+        if !result.conflicts.is_empty() {
+            issues
+                .push(t!("Home.sync_issues_conflicts", count = result.conflicts.len()).to_string());
+        }
+        if !result.errors.is_empty() {
+            issues.push(
+                t!(
+                    "Home.sync_issues_errors",
+                    count = result.errors.len(),
+                    error = result.errors[0].as_str()
+                )
+                .to_string(),
+            );
+        }
+
+        if issues.is_empty() {
+            let level = if summary_parts.is_empty() {
+                SyncFeedbackLevel::Info
+            } else {
+                SyncFeedbackLevel::Success
+            };
+            SyncFeedback {
+                level,
+                message: summary,
+            }
+        } else {
+            SyncFeedback {
+                level: SyncFeedbackLevel::Warning,
+                message: t!(
+                    "Home.sync_completed_with_issues",
+                    summary = summary,
+                    issues = issues.join("；")
+                )
+                .to_string(),
+            }
+        }
+    }
+
+    fn build_conflict_resolution_feedback(
+        result: &one_core::cloud_sync::SyncResult,
+    ) -> SyncFeedback {
+        if result.errors.is_empty() {
+            SyncFeedback {
+                level: SyncFeedbackLevel::Success,
+                message: t!("Home.sync_conflicts_resolved").to_string(),
+            }
+        } else {
+            SyncFeedback {
+                level: SyncFeedbackLevel::Warning,
+                message: t!(
+                    "Home.sync_conflicts_resolved_with_issues",
+                    count = result.errors.len(),
+                    error = result.errors[0].as_str()
+                )
+                .to_string(),
+            }
+        }
+    }
+
+    fn push_sync_notification(feedback: &SyncFeedback, cx: &mut Context<Self>) {
+        let notification = match feedback.level {
+            SyncFeedbackLevel::Info => {
+                gpui_component::notification::Notification::info(feedback.message.clone())
+            }
+            SyncFeedbackLevel::Success => {
+                gpui_component::notification::Notification::success(feedback.message.clone())
+            }
+            SyncFeedbackLevel::Warning => {
+                gpui_component::notification::Notification::warning(feedback.message.clone())
+            }
+            SyncFeedbackLevel::Error => {
+                gpui_component::notification::Notification::error(feedback.message.clone())
+            }
+        }
+        .title(t!("Home.sync"))
+        .id::<SyncResultNotification>();
+
+        if let Some(window_id) = cx.active_window() {
+            let _ = cx.update_window(window_id, move |_, window, cx| {
+                window.push_notification(notification, cx);
+            });
+        }
+    }
+
     /// 触发云端同步
     ///
     /// 使用 SyncEngine 执行同步，包括：
@@ -317,20 +476,39 @@ impl HomePage {
     /// 3. 执行同步操作
     /// 4. 更新本地状态
     fn trigger_sync(&mut self, cx: &mut Context<Self>) {
+        if !self.auth_service.has_valid_sync_server_url() {
+            let message = t!("Home.sync_server_url_required").to_string();
+            self.cloud_error = Some(message.clone());
+            self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
+            if let Some(feedback) = &self.sync_feedback {
+                Self::push_sync_notification(feedback, cx);
+            }
+            cx.notify();
+            return;
+        }
+
         if self.current_user.is_none() {
-            self.cloud_error = Some(t!("Home.cloud_need_login").to_string());
+            let message = t!("Home.cloud_need_login").to_string();
+            self.cloud_error = Some(message.clone());
+            self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
+            if let Some(feedback) = &self.sync_feedback {
+                Self::push_sync_notification(feedback, cx);
+            }
             cx.notify();
             return;
         }
 
         if !self.pending_conflicts.is_empty() {
-            self.cloud_error = Some(
-                t!(
-                    "Home.conflict_tooltip",
-                    count = self.pending_conflicts.len()
-                )
-                .to_string(),
-            );
+            let message = t!(
+                "Home.conflict_tooltip",
+                count = self.pending_conflicts.len()
+            )
+            .to_string();
+            self.cloud_error = Some(message.clone());
+            self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
+            if let Some(feedback) = &self.sync_feedback {
+                Self::push_sync_notification(feedback, cx);
+            }
             cx.notify();
             return;
         }
@@ -346,6 +524,7 @@ impl HomePage {
         self.syncing = true;
         self.sync_requested = false;
         self.cloud_error = None;
+        self.set_sync_feedback(SyncFeedbackLevel::Info, t!("Home.syncing").to_string());
         cx.notify();
 
         let cloud_client = self.auth_service.cloud_client();
@@ -370,6 +549,7 @@ impl HomePage {
                 let sync_requested = this.sync_requested;
                 match result {
                     Ok(stats) => {
+                        let feedback = Self::summarize_sync_result(&stats);
                         tracing::info!(
                             "同步完成：上传 {} 个，下载 {} 个，冲突 {} 个",
                             stats.uploaded,
@@ -389,12 +569,20 @@ impl HomePage {
                             this.cloud_error = Some(stats.errors.join("; "));
                         }
 
+                        this.sync_feedback = Some(feedback.clone());
+                        Self::push_sync_notification(&feedback, cx);
+
                         // 刷新首页本地数据，确保部分失败时界面仍与已落库数据一致
                         this.refresh_local_home_data(cx);
                     }
                     Err(e) => {
                         tracing::error!("同步失败: {}", e);
+                        let message = format!("{}：{}", t!("Home.sync_failed"), e);
                         this.cloud_error = Some(e.to_string());
+                        this.set_sync_feedback(SyncFeedbackLevel::Error, message);
+                        if let Some(feedback) = &this.sync_feedback {
+                            Self::push_sync_notification(feedback, cx);
+                        }
                     }
                 }
                 if sync_requested && this.pending_conflicts.is_empty() && this.cloud_error.is_none()
@@ -680,14 +868,27 @@ impl HomePage {
                 this.syncing = false;
                 let sync_requested = this.sync_requested;
                 match result {
-                    Ok(_stats) => {
+                    Ok(stats) => {
+                        let feedback = Self::build_conflict_resolution_feedback(&stats);
                         tracing::info!("冲突解决完成");
                         this.pending_conflicts.clear();
+                        this.cloud_error = if stats.errors.is_empty() {
+                            None
+                        } else {
+                            Some(stats.errors.join("; "))
+                        };
+                        this.sync_feedback = Some(feedback.clone());
+                        Self::push_sync_notification(&feedback, cx);
                         this.refresh_local_home_data(cx);
                     }
                     Err(e) => {
                         tracing::error!("冲突解决失败: {}", e);
+                        let message = format!("{}：{}", t!("Home.sync_failed"), e);
                         this.cloud_error = Some(e.to_string());
+                        this.set_sync_feedback(SyncFeedbackLevel::Error, message);
+                        if let Some(feedback) = &this.sync_feedback {
+                            Self::push_sync_notification(feedback, cx);
+                        }
                     }
                 }
                 if sync_requested && this.pending_conflicts.is_empty() && this.cloud_error.is_none()
@@ -726,43 +927,6 @@ impl HomePage {
                     }
                 });
             }
-        })
-        .detach();
-    }
-
-    /// 使用 OTP 验证码登录
-    fn verify_otp(&mut self, email: String, otp: String, cx: &mut Context<Self>) {
-        self.logging_in = true;
-        self.auth_error = None;
-        cx.notify();
-
-        let auth = self.auth_service.clone();
-
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let result = auth.verify_otp(&email, &otp).await;
-
-            _ = this.update(cx, |this, cx| {
-                this.logging_in = false;
-                match result {
-                    Ok(user) => {
-                        this.current_user = Some(user.clone());
-                        // 更新全局用户状态
-                        GlobalCurrentUser::set_user(Some(user.clone()), cx);
-
-                        this.auth_error = None;
-                        // 登录成功后，如果密钥已解锁，自动触发同步
-                        if crypto::has_master_key() {
-                            tracing::info!("登录成功且密钥已解锁，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("OTP 验证失败: {}", e);
-                        this.auth_error = Some(e);
-                    }
-                }
-                cx.notify();
-            });
         })
         .detach();
     }
@@ -813,19 +977,29 @@ impl HomePage {
 
     /// 显示登录对话框
     fn show_login_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let view = cx.entity();
-        match self.auth_service.auth_mode() {
-            AuthMode::Otp => {
-                show_auth_dialog(window, cx, view, |this, email, otp, cx| {
-                    this.verify_otp(email, otp, cx);
-                });
-            }
-            AuthMode::Password => {
-                show_password_auth_dialog(window, cx, view, |this, action, email, password, cx| {
-                    this.authenticate_with_password(action, email, password, cx);
-                });
-            }
+        if !self.auth_service.has_valid_sync_server_url() {
+            let message = self.auth_service.sync_server_url_required_message();
+            let view = cx.entity();
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                let view_for_ok = view.clone();
+                dialog
+                    .title(t!("Common.settings").to_string())
+                    .child(message.clone().into_any_element())
+                    .alert()
+                    .on_ok(move |_, window, cx| {
+                        _ = view_for_ok.update(cx, |this, cx| {
+                            this.add_settings_tab(window, cx);
+                        });
+                        true
+                    })
+            });
+            return;
         }
+
+        let view = cx.entity();
+        show_password_auth_dialog(window, cx, view, |this, action, email, password, cx| {
+            this.authenticate_with_password(action, email, password, cx);
+        });
     }
 
     fn show_encourage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1704,6 +1878,7 @@ impl HomePage {
         let has_master_key = crypto::has_master_key();
         let has_conflicts = !self.pending_conflicts.is_empty();
         let conflict_count = self.pending_conflicts.len();
+        let sync_feedback = self.sync_feedback.clone();
 
         h_flex()
             .gap_3()
@@ -1854,6 +2029,63 @@ impl HomePage {
                                 this.trigger_sync(cx);
                             })),
                     )
+                    .when_some(sync_feedback, |this, feedback| {
+                        let (icon, text_color, bg_color) = match feedback.level {
+                            SyncFeedbackLevel::Info => (
+                                IconName::Info,
+                                cx.theme().info,
+                                cx.theme().info.opacity(0.12),
+                            ),
+                            SyncFeedbackLevel::Success => (
+                                IconName::CircleCheck,
+                                cx.theme().success,
+                                cx.theme().success.opacity(0.12),
+                            ),
+                            SyncFeedbackLevel::Warning => (
+                                IconName::TriangleAlert,
+                                cx.theme().warning,
+                                cx.theme().warning.opacity(0.12),
+                            ),
+                            SyncFeedbackLevel::Error => (
+                                IconName::CircleX,
+                                cx.theme().danger,
+                                cx.theme().danger.opacity(0.12),
+                            ),
+                        };
+
+                        this.child(
+                            div()
+                                .id("sync-feedback")
+                                .max_w(px(360.0))
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .bg(bg_color)
+                                .tooltip({
+                                    let tooltip_text = feedback.message.clone();
+                                    move |window, cx| {
+                                        Tooltip::new(tooltip_text.clone()).build(window, cx)
+                                    }
+                                })
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .child(
+                                            Icon::new(icon)
+                                                .with_size(Size::Small)
+                                                .text_color(text_color),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(text_color)
+                                                .truncate()
+                                                .child(feedback.message),
+                                        ),
+                                ),
+                        )
+                    })
                     // 冲突指示器
                     .when(has_conflicts, |this| {
                         this.child(
@@ -3024,7 +3256,7 @@ impl Render for HomePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 检测会话过期：token 刷新失败时由回调设置静态标志，在此处响应
         if crate::auth::check_and_reset_session_expired() {
-            self.current_user = None;
+            self.handle_auth_state_cleared(cx);
             // 延迟弹出登录对话框，避免在 render 中直接修改窗口
             let view = cx.entity();
             window.defer(cx, move |window, cx| {
@@ -3047,9 +3279,12 @@ impl Render for HomePage {
                         .child(error_msg.clone().into_any_element())
                         .alert()
                         .on_ok(move |_, window, cx| {
-                            // 关闭错误对话框后重新弹出登录对话框
-                            view_clone.update(cx, |this, cx| {
-                                this.show_login_dialog(window, cx);
+                            // 延迟到当前错误弹窗关闭后再重新打开登录弹窗，避免关闭掉新弹窗。
+                            let view_for_login = view_clone.clone();
+                            window.defer(cx, move |window, cx| {
+                                _ = view_for_login.update(cx, |this, cx| {
+                                    this.show_login_dialog(window, cx);
+                                });
                             });
                             true
                         })
@@ -3097,4 +3332,54 @@ fn re_encrypt_all_connections(
     }
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HomePage, SyncFeedbackLevel};
+    use one_core::cloud_sync::SyncResult;
+
+    #[test]
+    fn summarize_sync_result_returns_info_when_nothing_changed() {
+        let result = SyncResult::default();
+
+        let feedback = HomePage::summarize_sync_result(&result);
+
+        assert_eq!(feedback.level, SyncFeedbackLevel::Info);
+        assert!(!feedback.message.is_empty());
+    }
+
+    #[test]
+    fn summarize_sync_result_returns_success_when_changes_applied() {
+        let result = SyncResult {
+            uploaded: 2,
+            downloaded: 1,
+            deleted: 0,
+            conflicts: Vec::new(),
+            errors: Vec::new(),
+        };
+
+        let feedback = HomePage::summarize_sync_result(&result);
+
+        assert_eq!(feedback.level, SyncFeedbackLevel::Success);
+        assert!(feedback.message.contains("上传 2 项"));
+        assert!(feedback.message.contains("下载 1 项"));
+    }
+
+    #[test]
+    fn summarize_sync_result_returns_warning_when_errors_exist() {
+        let result = SyncResult {
+            uploaded: 1,
+            downloaded: 0,
+            deleted: 0,
+            conflicts: Vec::new(),
+            errors: vec!["请先输入主密钥解锁".to_string()],
+        };
+
+        let feedback = HomePage::summarize_sync_result(&result);
+
+        assert_eq!(feedback.level, SyncFeedbackLevel::Warning);
+        assert!(!feedback.message.is_empty());
+        assert!(feedback.message.contains("请先输入主密钥解锁"));
+    }
 }

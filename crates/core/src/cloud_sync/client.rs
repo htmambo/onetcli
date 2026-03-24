@@ -1,6 +1,6 @@
 //! 云端 API 客户端抽象层
 //!
-//! 定义云端 API 的通用接口，支持多种后端实现（如 Supabase）。
+//! 定义云端 API 的通用接口，当前主要对接 `sync_server`。
 
 use crate::cloud_sync::models::*;
 use crate::llm::ChatStream;
@@ -99,12 +99,6 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 刷新访问令牌
     async fn refresh_token(&self, refresh_token: &str) -> Result<AuthResponse, CloudApiError>;
-
-    /// 发送 OTP 验证码到邮箱
-    async fn sign_in_with_otp(&self, email: &str) -> Result<(), CloudApiError>;
-
-    /// 验证 OTP 验证码并登录
-    async fn verify_otp(&self, email: &str, token: &str) -> Result<AuthResponse, CloudApiError>;
 
     // ========================================================================
     // 用户配置相关（密钥验证数据）

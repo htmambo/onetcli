@@ -61,13 +61,29 @@ npm run dev
 默认地址：
 
 - 统一入口：`http://localhost:8787`
-- Vite 内部开发服务：`http://localhost:5173`
 
 说明：
 
-- 开发模式下，浏览器只需要打开 `8787`
-- Fastify 会把网页和 HMR 请求代理到内部的 Vite 端口
-- API 和 Web 因此共用一个对外端口
+- 开发模式下默认只启动一个端口：`8787`
+- Fastify 会以内嵌 Vite middleware 的方式提供前端页面、静态资源和 HMR
+- API 和 Web 因此共用同一个监听端口
+- 默认 `npm run dev` 使用稳定单次启动，不会因为启动异常进入自动重启循环
+
+如果你需要后端代码变更时自动重启，可以额外执行：
+
+```bash
+npm run dev:watch --workspace server
+```
+
+如果你只想单独调试前端，也可以额外执行：
+
+```bash
+npm run dev:web
+```
+
+这时独立的 Vite 地址是：
+
+- `http://localhost:5173`
 
 ### 4. 生产构建
 
