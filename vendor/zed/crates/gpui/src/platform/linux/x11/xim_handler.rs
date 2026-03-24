@@ -1,4 +1,4 @@
-use std::default::Default;
+use std::{default::Default, env};
 
 use x11rb::protocol::{Event, xproto};
 use xim::{AHashMap, AttributeName, Client, ClientError, ClientHandler, InputStyle};
@@ -29,9 +29,31 @@ impl XimHandler {
     }
 }
 
+fn preferred_xim_locale_from_candidates<'a>(
+    candidates: impl IntoIterator<Item = Option<&'a str>>,
+) -> &'a str {
+    candidates
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|locale| !locale.is_empty() && !matches!(*locale, "C" | "POSIX"))
+        .unwrap_or("C")
+}
+
+fn preferred_xim_locale() -> String {
+    preferred_xim_locale_from_candidates([
+        env::var("LC_CTYPE").ok().as_deref(),
+        env::var("LC_ALL").ok().as_deref(),
+        env::var("LANG").ok().as_deref(),
+    ])
+    .to_string()
+}
+
 impl<C: Client<XEvent = xproto::KeyPressEvent>> ClientHandler<C> for XimHandler {
     fn handle_connect(&mut self, client: &mut C) -> Result<(), ClientError> {
-        client.open("C")
+        let locale = preferred_xim_locale();
+        log::info!("XIM: opening input method with locale {}", locale);
+        client.open(&locale)
     }
 
     fn handle_open(&mut self, client: &mut C, input_method_id: u16) -> Result<(), ClientError> {
@@ -129,5 +151,36 @@ impl<C: Client<XEvent = xproto::KeyPressEvent>> ClientHandler<C> for XimHandler 
             String::from(preedit_string),
         ));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preferred_xim_locale_from_candidates;
+
+    #[test]
+    fn prefers_valid_lc_ctype_locale() {
+        let locale = preferred_xim_locale_from_candidates([
+            Some("zh_CN.UTF-8"),
+            Some("en_US.UTF-8"),
+            Some("C"),
+        ]);
+
+        assert_eq!(locale, "zh_CN.UTF-8");
+    }
+
+    #[test]
+    fn skips_c_locale_and_keeps_fallback_chain() {
+        let locale =
+            preferred_xim_locale_from_candidates([Some("C"), Some("POSIX"), Some("C.UTF-8")]);
+
+        assert_eq!(locale, "C.UTF-8");
+    }
+
+    #[test]
+    fn falls_back_to_c_when_no_locale_is_available() {
+        let locale = preferred_xim_locale_from_candidates([None, Some(""), Some("C")]);
+
+        assert_eq!(locale, "C");
     }
 }
