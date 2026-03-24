@@ -11,7 +11,7 @@ use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable, Sizable, Size,
-    WindowExt as _, h_flex, v_flex,
+    WindowExt as _, h_flex, should_render_custom_window_controls, v_flex,
 };
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -1524,6 +1524,8 @@ impl TabContainer {
         let is_macos = cfg!(target_os = "macos");
         let is_client_decorated = matches!(window.window_decorations(), Decorations::Client { .. });
         let show_window_controls = self.show_window_controls;
+        let show_custom_window_controls =
+            show_window_controls && should_render_custom_window_controls(window);
         let allow_tab_drag = !is_macos;
 
         // 使用状态管理窗口拖动
@@ -1931,10 +1933,9 @@ impl TabContainer {
                         )
                     }),
             )
-            .when(
-                cfg!(not(target_os = "macos")) && self.show_window_controls,
-                |el| el.child(self.render_window_controls(window)),
-            )
+            .when(show_custom_window_controls, |el| {
+                el.child(self.render_window_controls(window))
+            })
     }
 
     fn render_window_controls(&self, window: &mut Window) -> impl IntoElement {

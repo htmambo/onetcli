@@ -18,6 +18,48 @@ const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 #[cfg(not(target_os = "macos"))]
 const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
 
+fn desktop_prefers_system_window_controls(
+    current_desktop: Option<&str>,
+    desktop_session: Option<&str>,
+) -> bool {
+    [current_desktop, desktop_session]
+        .into_iter()
+        .flatten()
+        .map(|value| value.to_ascii_lowercase())
+        .any(|value| value.contains("deepin") || value.contains("dde"))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_prefers_system_window_controls() -> bool {
+    let current_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    let desktop_session = std::env::var("DESKTOP_SESSION").ok();
+
+    desktop_prefers_system_window_controls(current_desktop.as_deref(), desktop_session.as_deref())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_prefers_system_window_controls() -> bool {
+    false
+}
+
+pub fn should_render_custom_window_controls(window: &Window) -> bool {
+    if cfg!(target_os = "macos") {
+        return false;
+    }
+
+    if cfg!(target_os = "linux") {
+        // Deepin 25 的 X11 会话下可能同时保留系统标题栏和应用自绘按钮。
+        if linux_prefers_system_window_controls() {
+            return false;
+        }
+
+        return matches!(window.window_decorations(), Decorations::Client { .. });
+    }
+
+    let _ = window;
+    true
+}
+
 /// TitleBar used to customize the appearance of the title bar.
 ///
 /// We can put some elements inside the title bar.
@@ -252,9 +294,15 @@ impl Render for TitleBarState {
 
 impl RenderOnce for TitleBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let TitleBar {
+            style,
+            children,
+            on_close_window,
+        } = self;
         let is_client_decorated = matches!(window.window_decorations(), Decorations::Client { .. });
         let is_linux = cfg!(target_os = "linux");
         let is_macos = cfg!(target_os = "macos");
+        let show_custom_window_controls = should_render_custom_window_controls(window);
 
         let state = window.use_state(cx, |_, _| TitleBarState { should_move: false });
 
@@ -270,7 +318,7 @@ impl RenderOnce for TitleBar {
                 .border_b_1()
                 .border_color(cx.theme().title_bar_border)
                 .bg(cx.theme().title_bar)
-                .refine_style(&self.style)
+                .refine_style(&style)
                 .when(is_linux, |this| {
                     this.on_double_click(|_, window, _| window.zoom_window())
                 })
@@ -320,11 +368,37 @@ impl RenderOnce for TitleBar {
                                     }),
                             )
                         })
-                        .children(self.children),
+                        .children(children),
                 )
-                .child(WindowControls {
-                    on_close_window: self.on_close_window,
+                .when(show_custom_window_controls, |this| {
+                    this.child(WindowControls { on_close_window })
                 }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::desktop_prefers_system_window_controls;
+
+    #[test]
+    fn 识别_deepin_桌面环境() {
+        assert!(desktop_prefers_system_window_controls(
+            Some("Deepin"),
+            Some("deepin")
+        ));
+        assert!(desktop_prefers_system_window_controls(
+            Some("DDE"),
+            Some("dde")
+        ));
+    }
+
+    #[test]
+    fn 非_deepin_桌面环境不走兼容分支() {
+        assert!(!desktop_prefers_system_window_controls(
+            Some("GNOME"),
+            Some("ubuntu")
+        ));
+        assert!(!desktop_prefers_system_window_controls(None, None));
     }
 }

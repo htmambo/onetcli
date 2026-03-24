@@ -2207,6 +2207,74 @@
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
 
+## 编码前检查 - deepin-window-controls
+时间：2026-03-24 23:15:51 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-controls.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/title_bar.rs`：通用标题栏和窗口三键实现
+- `crates/core/src/tab_container.rs`：主标签栏窗口三键实现
+- `main/src/main.rs`：Linux 主窗口装饰配置入口
+□ 将遵循命名约定：沿用 `show_*`、`is_*`、`should_*` 的布尔命名风格
+□ 将遵循代码风格：继续使用局部布尔变量配合 `.when(...)` 控制渲染，不改现有窗口按钮点击逻辑
+□ 确认不重复造轮子，证明：直接复用已有 `TitleBar`、`TabContainer`、`Window::window_decorations()`，不新增第二套窗口控件组件
+
+## 执行记录 - deepin-window-controls
+时间：2026-03-24 23:15:51 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/main.rs`
+- `main/src/onetcli_app.rs`
+- `crates/core/src/tab_container.rs`
+- `crates/ui/src/title_bar.rs`
+- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
+
+### 2. 对比的相似实现
+- `crates/core/src/tab_container.rs:1935`：主窗口标签栏右侧自绘窗口按钮
+- `crates/ui/src/title_bar.rs:255`：通用标题栏尾部自绘窗口按钮
+- `.../gpui/src/platform/linux/x11/window.rs:1697`：X11 下通过 `_MOTIF_WM_HINTS` 请求客户端装饰
+
+### 3. 当前发现
+- Linux 主窗口已经请求 `WindowDecorations::Client`，但 Deepin 25 X11 仍会出现系统标题栏与应用按钮并存
+- 问题不只存在于主窗口，所有复用 `TitleBar::new()` 的弹窗/表单窗口理论上也会重复显示按钮
+- 单纯依赖 `window.window_decorations()` 仍可能遗漏 Deepin 这类桌面环境，因此需要补一个最小兼容分支
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg`、本地环境变量和 Cargo 本地验证完成检索与确认
+
+## 编码后声明 - deepin-window-controls
+时间：2026-03-24 23:20:04 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/title_bar.rs::WindowControls`：保留原有通用窗口按钮实现，只增加显示条件
+- `crates/core/src/tab_container.rs::render_window_controls`：保留主标签栏按钮绘制和点击行为
+- `Window::window_decorations()`：继续作为 Linux 运行时装饰状态的基础判断
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `should_render_custom_window_controls` 与 `show_custom_window_controls`，符合现有布尔命名风格
+- 代码风格：仍使用局部布尔变量配合 `.when(...)` 控制 UI 分支，没有重构窗口层结构
+- 文件组织：通用兼容判断放在 `crates/ui`，业务主窗口只引入该判断函数
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/title_bar.rs`：保持原有 `WindowControls` 结构不变，只把追加时机改成条件渲染
+- `crates/core/src/tab_container.rs`：保持 `render_window_controls` 原逻辑不变，只把渲染入口改成条件判断
+- `.../gpui/src/platform/linux/x11/window.rs:1710`：上游仍尝试请求客户端装饰，本次不逆向篡改上游行为，只在应用层规避 Deepin 重复按钮
+
+### 4. 未重复造轮子的证明
+- 已检查 `crates/ui/src/title_bar.rs`、`crates/core/src/tab_container.rs`、`main/src/main.rs`
+- 最终只新增一个通用显示判断函数，没有再造新的标题栏组件或第三套窗口控件逻辑
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p gpui-component --lib title_bar`：通过，新增 2 个标题栏兼容分支测试全部通过
+
+### 6. 风险与限制
+- 当前修复对 Deepin/DDE 做了显式兼容分支，若其它 Linux 桌面环境也存在同样问题，后续需要扩展判断条件
+- 本次没有在图形界面里直接截图验证，只能依赖编译、单测和当前桌面环境信息进行确认
+- `cargo check` 与 `cargo test` 仍输出既有 `crates/ui/src/window_ext.rs` 未使用代码警告，以及 `num-bigint-dig` future incompatibility 提示，均与本次改动无关
+
 ## 编码后声明 - sync-server-only
 时间：2026-03-24 22:08:05 +0800
 
