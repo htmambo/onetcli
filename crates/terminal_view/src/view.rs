@@ -569,6 +569,7 @@ impl TerminalView {
             }
             TerminalSidebarEvent::PasteCodeToTerminal(code) => {
                 // 粘贴代码块到终端（使用 bracketed paste 模式，不自动执行）
+                window.focus(&self.focus_handle, cx);
                 self.paste_code_block(&code, window, cx);
             }
             TerminalSidebarEvent::AskAi => {

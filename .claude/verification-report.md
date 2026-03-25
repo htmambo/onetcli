@@ -3,6 +3,38 @@
 
 ---
 
+## 审查报告（terminal-sidebar-paste-focus）
+生成时间：2026-03-25 21:03:13 +0800
+
+### 需求完整性检查
+- 目标明确：AI 对话中的“粘贴到终端”动作执行后，终端应获得输入焦点，便于用户继续输入
+- 范围明确：仅涉及 `crates/terminal_view/src/view.rs` 的 sidebar 事件消费路径
+- 交付物明确：聚焦逻辑修复、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：多行/高危粘贴确认框的最终焦点体验仍需手工确认
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：83/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 修复点准确：[`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L570) 的 `PasteCodeToTerminal` 分支现在会先调用 `window.focus(&self.focus_handle, cx)`，再执行代码块粘贴。
+- 架构边界正确：AI 面板继续只发 sidebar 事件，终端聚焦逻辑仍由 `TerminalView` 自己负责，没有把终端细节泄漏到 sidebar。
+- 复用既有模式：聚焦写法与 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L1772) 的终端鼠标点击聚焦保持一致，行为可预测。
+- 影响范围受控：未改普通终端粘贴、命令执行或其他 sidebar 事件，只修复用户明确指出的“AI 对话里的粘贴到终端”路径。
+- 本地验证有效：`cargo fmt --all` 与 `cargo check -p main` 均通过；残余风险仅在于尚未做 GUI 自动化或人工交互验收。
+
+---
+
 ## 审查报告（table-data-printable-key-edit）
 生成时间：2026-03-25 20:36:26 +0800
 

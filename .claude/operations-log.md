@@ -1,5 +1,64 @@
 ## 操作日志
 
+## 编码前检查 - terminal-sidebar-paste-focus
+时间：2026-03-25 21:00:29 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-sidebar-paste-focus.md`
+- 已分析相似实现：
+  - `crates/terminal_view/src/sidebar/mod.rs`
+  - `crates/terminal_view/src/view.rs::handle_sidebar_event`
+  - `crates/terminal_view/src/view.rs::handle_mouse_down`
+  - `crates/terminal_view/src/view.rs::paste_code_block`
+- 将使用以下可复用组件：
+  - `TerminalSidebarEvent::PasteCodeToTerminal`：复用 AI 代码块按钮现有事件
+  - `window.focus(&self.focus_handle, cx)`：复用终端既有聚焦方式
+  - `paste_code_block(...)`：继续使用终端既有 bracketed paste 和确认逻辑
+- 将遵循命名约定：不新增新事件名或状态字段，只在现有事件处理路径补行为
+- 将遵循代码风格：改动收敛在 `crates/terminal_view/src/view.rs`，sidebar 保持只发事件
+- 确认不重复造轮子，证明：终端已有成熟聚焦 API，本次只补调用时机
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和编译验证作为替代并留痕
+
+## 编码后声明 - terminal-sidebar-paste-focus
+时间：2026-03-25 21:03:13 +0800
+
+### 1. 复用了以下既有组件
+- `crates/terminal_view/src/sidebar/mod.rs::TerminalSidebarEvent::PasteCodeToTerminal`：继续作为 AI 代码块“粘贴到终端”的唯一事件入口
+- `crates/terminal_view/src/view.rs::handle_sidebar_event`：继续在终端视图侧统一消费 sidebar 动作
+- `crates/terminal_view/src/view.rs::focus_handle`：直接复用终端现有焦点句柄
+- `crates/terminal_view/src/view.rs::paste_code_block`：继续使用现有 bracketed paste 和确认逻辑
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增任何事件、状态或辅助类型
+- 代码风格：只在 `PasteCodeToTerminal` 分支补一条显式聚焦，保持 sidebar 只发事件、view 负责交互
+- 文件组织：改动收敛在 `crates/terminal_view/src/view.rs`
+
+### 3. 对比了以下相似实现
+- `crates/terminal_view/src/view.rs::handle_mouse_down`：沿用终端鼠标点击时的聚焦写法 `window.focus(&self.focus_handle, cx)`
+- `crates/terminal_view/src/view.rs::paste`：保留普通终端粘贴路径，不做无关改动
+- `crates/terminal_view/src/sidebar/mod.rs`：保持 AI 面板只发 `PasteCodeToTerminal` 事件，不耦合终端聚焦细节
+
+### 4. 未重复造轮子的证明
+- 已检查 sidebar 事件注册、TerminalView 事件消费、终端鼠标聚焦和现有粘贴实现
+- 最终没有新增新的“聚焦终端”事件或中间桥接层，只复用终端既有焦点 API
+
+## 实施与验证记录 - terminal-sidebar-paste-focus
+时间：2026-03-25 21:03:13 +0800
+
+### 已完成修改
+- `crates/terminal_view/src/view.rs`
+  - 在 `TerminalSidebarEvent::PasteCodeToTerminal` 分支中，先执行 `window.focus(&self.focus_handle, cx)`，再执行 `paste_code_block(...)`
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 当前限制
+- 本次没有补 GUI 自动化；建议手工确认两种场景：
+  - 普通单行代码块点击“粘贴到终端”后可直接继续键入
+  - 会触发多行/高危确认框的代码块在确认后仍保持合理焦点
+
 ## 编码前检查 - table-data-printable-key-edit
 时间：2026-03-25 20:26:57 +0800
 
