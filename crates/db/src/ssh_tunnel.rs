@@ -123,6 +123,7 @@ fn build_auth(config: &DbConnectionConfig) -> Result<SshAuth, DbError> {
         .unwrap_or_else(|| "password".to_string());
 
     match auth_type.as_str() {
+        "agent" => Ok(SshAuth::Agent),
         "private_key" => {
             let key_path = required_param(config, SSH_PRIVATE_KEY_PATH)?;
             let passphrase = config
@@ -139,5 +140,40 @@ fn build_auth(config: &DbConnectionConfig) -> Result<SshAuth, DbError> {
             let password = required_param(config, SSH_PASSWORD)?;
             Ok(SshAuth::Password(password))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use one_core::storage::DatabaseType;
+    use std::collections::HashMap;
+
+    fn build_config(extra_params: HashMap<String, String>) -> DbConnectionConfig {
+        DbConnectionConfig {
+            id: "test".to_string(),
+            database_type: DatabaseType::MySQL,
+            name: "test".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            username: "root".to_string(),
+            password: "password".to_string(),
+            database: None,
+            service_name: None,
+            sid: None,
+            workspace_id: None,
+            extra_params,
+        }
+    }
+
+    #[test]
+    fn build_auth_supports_agent_type() {
+        let mut extra_params = HashMap::new();
+        extra_params.insert(SSH_AUTH_TYPE.to_string(), "agent".to_string());
+        let config = build_config(extra_params);
+
+        let auth = build_auth(&config).expect("agent 认证类型应解析成功");
+
+        assert!(matches!(auth, SshAuth::Agent));
     }
 }

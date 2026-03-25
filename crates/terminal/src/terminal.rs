@@ -318,6 +318,7 @@ impl Terminal {
                 passphrase,
                 certificate_path: None,
             },
+            SshAuthMethod::Agent => SshAuth::Agent,
         };
 
         // 构建初始化命令
@@ -352,6 +353,7 @@ impl Terminal {
                         passphrase,
                         certificate_path: None,
                     },
+                    SshAuthMethod::Agent => SshAuth::Agent,
                 };
                 JumpServerConnectConfig {
                     host: jump.host,

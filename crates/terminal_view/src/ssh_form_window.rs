@@ -171,6 +171,7 @@ pub enum AuthMethodSelection {
     #[default]
     Password,
     PrivateKey,
+    Agent,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -350,6 +351,9 @@ impl SshFormWindow {
                         if let Some(ref pass) = passphrase {
                             passphrase_input.update(cx, |s, cx| s.set_value(pass, window, cx));
                         }
+                    }
+                    SshAuthMethod::Agent => {
+                        auth_method = AuthMethodSelection::Agent;
                     }
                 }
 
@@ -643,6 +647,7 @@ impl SshFormWindow {
                         passphrase,
                     }
                 }
+                AuthMethodSelection::Agent => SshAuthMethod::Agent,
             }
         };
 
@@ -789,6 +794,7 @@ impl SshFormWindow {
                 passphrase: passphrase.clone(),
                 certificate_path: None,
             },
+            SshAuthMethod::Agent => SshAuth::Agent,
         };
 
         // 构建跳板机配置
@@ -803,6 +809,7 @@ impl SshFormWindow {
                     passphrase: passphrase.clone(),
                     certificate_path: None,
                 },
+                SshAuthMethod::Agent => SshAuth::Agent,
             };
             JumpServerConnectConfig {
                 host: jump.host.clone(),
@@ -1015,6 +1022,16 @@ impl SshFormWindow {
                                 .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::PrivateKey;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Radio::new("agent")
+                                .label(t!("SSH.agent").to_string())
+                                .checked(auth_method == AuthMethodSelection::Agent)
+                                .disabled(use_certificate)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.auth_method = AuthMethodSelection::Agent;
                                     cx.notify();
                                 })),
                         ),

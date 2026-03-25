@@ -473,6 +473,7 @@ impl SftpView {
                 passphrase,
                 certificate_path: None,
             },
+            SshAuthMethod::Agent => SshAuth::Agent,
         };
 
         let config = SshConnectConfig {
@@ -494,6 +495,7 @@ impl SftpView {
                         passphrase,
                         certificate_path: None,
                     },
+                    SshAuthMethod::Agent => SshAuth::Agent,
                 };
                 JumpServerConnectConfig {
                     host: jump.host,

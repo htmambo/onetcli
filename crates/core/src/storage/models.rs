@@ -253,6 +253,7 @@ pub enum SshAuthMethod {
         key_path: String,
         passphrase: Option<String>,
     },
+    Agent,
 }
 
 /// Redis 连接模式
@@ -1665,5 +1666,14 @@ mod serial_tests {
 
         assert!(reference.matches_ids(Some(7), None));
         assert!(!reference.matches_ids(Some(8), None));
+    }
+
+    #[test]
+    fn ssh_auth_method_agent_serialize_deserialize() {
+        let auth = SshAuthMethod::Agent;
+        let json = serde_json::to_string(&auth).expect("Agent 认证方式应可序列化");
+        let parsed: SshAuthMethod =
+            serde_json::from_str(&json).expect("Agent 认证方式应可反序列化");
+        assert!(matches!(parsed, SshAuthMethod::Agent));
     }
 }
