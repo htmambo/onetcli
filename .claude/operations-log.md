@@ -1,5 +1,47 @@
 ## 操作日志
 
+## 分析记录 - upstream-merge-analysis
+时间：2026-03-25 21:29:12 +0800
+
+- 已查阅分支状态：
+  - 当前分支：`fix/deepin-window-controls`
+  - 跟踪分支：`origin/fix/deepin-window-controls`
+  - `upstream` 默认分支：`dev`
+- 已执行远端同步分析：
+  - `git ls-remote --symref upstream HEAD 'refs/heads/*'`
+  - `git fetch --no-tags upstream dev main`
+- 已执行差异分析：
+  - `git rev-list --left-right --count HEAD...upstream/dev`
+  - `git log --oneline --graph --left-right HEAD...upstream/dev`
+  - `git diff --name-status`
+  - `git diff --dirstat`
+- 已执行模拟合并：
+  - `git merge-tree --write-tree --messages HEAD upstream/dev`
+- 结论摘要：
+  - 当前分支相对 `upstream/dev` 为 14 ahead / 9 behind
+  - 存在 5 个文本冲突，其中真正的代码冲突集中在 `storage/models.rs`、`db_connection_form.rs`、`ssh_form_window.rs`
+  - 结论为“可以整合，但不建议直接在当前分支上盲目 merge；更适合先建临时整合分支做冲突解决和回归验证”
+
+## 执行记录 - upstream-merge-attempt
+时间：2026-03-25 21:37:03 +0800
+
+- 当前主工作区状态：
+  - 分支：`fix/deepin-window-controls`
+  - 存在未提交留痕：`.claude/operations-log.md`、`.claude/context-summary-upstream-merge-analysis.md`
+- 为避免污染当前工作区，已创建独立临时 worktree：
+  - 分支：`tmp-merge-upstream-dev-20260325`
+  - 路径：`/tmp/onetcli-merge-upstream-dev-20260325`
+- 已在临时 worktree 中执行真实合并：
+  - 命令：`git merge --no-commit --no-ff upstream/dev`
+  - 结果：进入冲突待解决状态
+- 当前未合并文件：
+  - `.claude/operations-log.md`
+  - `.claude/verification-report.md`
+  - `crates/core/src/storage/models.rs`
+  - `crates/db_view/src/common/db_connection_form.rs`
+  - `crates/terminal_view/src/ssh_form_window.rs`
+- 其余大量文件已自动合并进暂存区，可在临时 worktree 中继续逐个解冲突
+
 ## 编码前检查 - terminal-sidebar-paste-focus
 时间：2026-03-25 21:00:29 +0800
 
