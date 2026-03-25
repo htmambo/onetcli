@@ -172,6 +172,7 @@ impl Theme {
         } else {
             theme.apply_config(&theme.light_theme.clone());
         }
+        crate::app_style::sync_theme(theme);
 
         if let Some(window) = window {
             window.refresh();

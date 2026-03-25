@@ -379,14 +379,15 @@ impl RenderOnce for Input {
                         this.border_color(cx.theme().input)
                             .border_1()
                             .when(cx.theme().shadow, |this| this.shadow_xs())
-                            .when(focused && self.focus_bordered, |this| {
-                                this.focused_border(cx)
-                            })
                     })
             })
             .items_center()
             .gap(gap_x)
             .refine_style(&self.style)
+            .when(
+                self.appearance && self.bordered && focused && self.focus_bordered,
+                |this| this.focused_border(cx),
+            )
             .children(prefix)
             .when(state.mode.is_multi_line(), |mut this| {
                 let paddings = this.style().padding.clone();

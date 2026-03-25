@@ -2488,3 +2488,248 @@
 ### 残余风险
 - 仍缺少桌面端自动化截图比对，最终观感需要你本地 hover 一次确认
 - 当前 spotlight 是近似实现，不是 DOM 版真实径向渐变
+
+---
+
+## 审查报告（app-settings-sync）
+生成时间：2026-03-26 02:01:25 +0800
+
+### 需求完整性检查
+- 目标明确：补齐主应用“应用设置 / 系统设置”的云同步能力
+- 范围明确：本地设置模型、同步类型注册、设置保存后的同步触发、同步完成后的运行时重载
+- 交付物明确：应用设置同步处理器、同步元数据字段、本地验证、`.claude/` 留痕
+- 风险与依赖明确：真实双端同步仍需手工回归验证
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：93/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 桌面端现在已经新增 `app_settings` 同步类型，并通过 [`app_settings_sync.rs`](/usr/htdocs/onetcli/main/src/app_settings_sync.rs) 接入现有 `SyncEngine + generic_sync` 流程。
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 已为设置文件补 `local_id`、`remote_id`、`last_synced_at`、`updated_at` 元数据，并区分“本地改动保存”和“同步状态回写”。
+- [`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs) 已把应用设置处理器注册到同步引擎，并在同步完成后重载全局设置。
+- [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs) 已在终端设置改动后补充云同步触发，同时支持把云端回写的终端设置立即应用到现有终端视图。
+- `sync_server_url` 被保留为本地字段，不会被云端设置覆盖。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main app_settings_sync`：通过
+
+### 残余风险
+- 目前没有自动化的双设备同步回归，跨设备首轮下载与回写仍建议你手动测一次
+- 仓库仍保留既有 `crates/ui/src/window_ext.rs` 未使用代码告警，与本次改动无关
+
+---
+
+## 审查报告（app-style-theme-switch）
+生成时间：2026-03-26 02:15:50 +0800
+
+### 需求完整性检查
+- 目标明确：修复前序配色改动破坏的亮色/暗色切换逻辑
+- 范围明确：`app_style`、`sync_server_theme` 的全部既有调用点，包括设置页、账号页、弹窗、连接窗口和表单
+- 交付物明确：主题同步修复代码、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：最终观感仍需桌面端手动切换亮暗模式确认
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：85/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`app_style.rs`](/usr/htdocs/onetcli/crates/ui/src/app_style.rs) 不再写死深色背景、边框和文字，而是读取当前主题快照。
+- [`theme/mod.rs`](/usr/htdocs/onetcli/crates/ui/src/theme/mod.rs#L172) 已在 `Theme::change` 时同步 `app_style`，因此所有既有 `app_style` / `sync_server_theme` 调用点会一起跟随亮暗切换刷新。
+- 修复方式覆盖了设置页、账号登录弹窗、全局对话框、数据库连接窗口、SSH/串口/Redis/Mongo 连接窗口等全部现有接入点，不再需要逐页补丁。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component`：通过
+
+### 残余风险
+- 缺少自动化桌面截图测试，亮暗模式切换后的实际观感仍建议你手动确认一次
+- 当前 `app_style` 依赖 `Theme::change` 同步快照；如果未来新增旁路主题更新逻辑，需要同时补充同步
+- 仓库内仍有既有未使用代码告警，与本次主题修复无关
+
+---
+
+## 审查报告（form-focus-border）
+生成时间：2026-03-26 02:22:37 +0800
+
+### 需求完整性检查
+- 目标明确：让输入框获得焦点时与下拉框一致地处理边框颜色，并检查其它页面同类控件
+- 范围明确：通用 `Input`、通用 `Select` 路径，以及设置页这类按钮式下拉
+- 交付物明确：组件层修复、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：最终视觉仍需桌面端手工确认
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：84/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：97/100
+- 风险评估：91/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`input.rs`](/usr/htdocs/onetcli/crates/ui/src/input/input.rs#L375) 已把焦点边框移动到 `refine_style` 之后叠加，修复所有 `Input::new(...)` 在自定义边框样式下焦点边框被覆盖的问题。
+- [`button.rs`](/usr/htdocs/onetcli/crates/ui/src/button/button.rs#L608) 已为 `outline` 按钮补充键盘焦点边框色切换，覆盖设置页这类“按钮式下拉”。
+- `Select` 组件本身的焦点边框逻辑保持不变；本次主要是让输入框与按钮式下拉跟上相同的焦点反馈。
+- 由于修复位于通用组件层，主应用、数据库、终端、Redis、Mongo、SFTP 等页面的现有输入框和下拉框会自动受益。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component -p sftp_view`：通过
+
+### 残余风险
+- 缺少桌面端自动截图或交互测试，建议你手动检查设置页、账号弹窗、新建连接、Provider 设置、SFTP 对话框这几类典型页面
+- `outline Button` 焦点边框变更会一并影响其他 outline 按钮，但这符合统一焦点反馈方向
+- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次修复无关
+
+### 补充结论（2026-03-26 02:32:37 +0800）
+- 设置页下拉未生效的原因已确认：其实现走的是 `outline Button`，不是 `Select`
+- [`button.rs`](/usr/htdocs/onetcli/crates/ui/src/button/button.rs#L608) 现已把“打开态 selected”也纳入边框切换条件，因此设置页下拉在展开时会显示相同的主题边框反馈
+- 补充验证：`cargo fmt --all`、`cargo check -p main -p gpui-component` 通过
+
+---
+
+## 审查报告（chatdb-completion-menu-height）
+生成时间：2026-03-26 02:42:16 +0800
+
+### 需求完整性检查
+- 目标明确：修复 ChatDb SQL 助手中 `@` 表提示列表超出窗口高度的问题
+- 范围明确：通用补全面板与同类代码动作面板的弹层布局
+- 交付物明确：布局修复代码、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：最终体验仍需小窗口手工验证
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：84/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`completion_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/input/popovers/completion_menu.rs#L392) 现在会根据窗口顶部/底部剩余空间动态计算最大高度，并在底部空间不足时改为向上展开。
+- [`completion_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/input/popovers/completion_menu.rs#L475) 中的文档侧栏也增加了最大高度与滚动处理，避免一起把窗口撑爆。
+- [`code_action_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/input/popovers/code_action_menu.rs#L309) 同步采用相同的窗口边界约束策略，避免保留同类问题。
+- 由于 ChatDb SQL 助手的 `@` 提示最终走的是通用 `CompletionMenu`，因此这次修复会直接覆盖该场景。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p db_view -p main`：通过
+
+### 残余风险
+- 仍缺少桌面端自动截图或交互测试，建议你在较小窗口高度下手动触发一次 `@` 提示确认
+- `MIN_MENU_HEIGHT` 为经验阈值，若你觉得切换向上展开的时机还不理想，可以继续微调
+- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次修复无关
+
+---
+
+## 审查报告（dialog-visual-structure）
+生成时间：2026-03-26 02:57:42 +0800
+
+### 需求完整性检查
+- 目标明确：增强简单弹窗边框识别度，并统一标题栏、正文区、底部操作区的视觉层级
+- 范围明确：通用 `Dialog` 默认渲染结构与相关语义样式入口
+- 交付物明确：通用弹窗样式修复、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：最终观感仍需桌面端手工确认
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：83/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：98/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L515) 已把简单弹窗外框边界提升到更明显的 `border_strong`，并保持原有拖拽、焦点陷阱和动画逻辑不变。
+- [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L569) 现在为带标题的弹窗渲染独立标题栏，复用 `title_bar_style` 并增加底部分隔线，避免标题区与正文区粘连。
+- [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L633) 为正文区重新分配上下内边距，并在 [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L646) 中为底部操作区增加独立背景、顶部分隔线和统一留白。
+- [`app_style.rs`](/usr/htdocs/onetcli/crates/ui/src/app_style.rs#L128) 已把 `footer_style` 调整为次级面板背景，让底部操作区在亮暗主题下都更容易和正文区区分。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p sftp_view`：通过
+
+### 残余风险
+- 仍缺少桌面端自动截图或交互测试，建议你重点看一眼确认/警告弹窗、设置弹窗、同步相关弹窗的实际观感
+- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次弹窗样式修复无关
+
+---
+
+## 审查报告（certificate-settings-navigation）
+生成时间：2026-03-26 03:34:20 +0800
+
+### 需求完整性检查
+- 目标明确：将凭证管理迁移到设置页，并确保连接表单里的“管理凭证”入口不破坏既有链路
+- 范围明确：设置页分页、主窗口导航桥、凭证管理统一入口
+- 交付物明确：设置页新分页、主窗口句柄桥接、导航优先/弹窗回退逻辑、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：最终跨窗口交互仍需桌面端手工确认
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：83/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`certificate_manager.rs`](/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs) 新增了全局导航器注册能力，`open_certificate_manager_popup(...)` 现在会优先走主窗口导航，失败时才回退到原有 `PopupWindow`。
+- [`onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 注册了该导航器，并保存主窗口句柄，避免从连接弹窗内点击时误把当前 popup 当作主窗口。
+- [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs) 新增 `open_certificate_settings_tab(...)`，复用既有设置标签打开逻辑。
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 新增 `SettingsPanelPage::Certificate`，并把 [`CertificateManagerView`](/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs) 直接嵌入设置页，交互形态与现有 `LLM 提供商` 页面一致。
+- 由于各连接表单仍然调用同一个 `open_certificate_manager_popup(cx)`，所以 SSH/MySQL/Redis/Mongo/主页入口都会自动切换到新行为，无需逐处改按钮链路。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p one-core -p main -p db_view -p terminal_view -p redis_view -p mongodb_view`：通过
+
+### 残余风险
+- 仍缺少自动化 GUI 验证，建议手工确认“弹窗内点击管理凭证 -> 主窗口切到设置页 -> 保存凭证后原弹窗列表自动刷新”这一完整链路
+- 当前主窗口句柄假设应用只有一个主窗口；若后续出现多主窗口并存，需要补充选择策略
+- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次改动无关

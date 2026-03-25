@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
 use gpui::{
-    App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled, Task,
-    Window, actions, div,
+    AnyWindowHandle, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement,
+    Render, Styled, Task, Window, actions, div,
 };
 
 actions!(
@@ -36,6 +38,13 @@ pub struct GlobalHomePage {
 }
 
 impl gpui::Global for GlobalHomePage {}
+
+#[derive(Clone, Copy)]
+pub struct GlobalMainWindowHandle {
+    pub window_handle: AnyWindowHandle,
+}
+
+impl gpui::Global for GlobalMainWindowHandle {}
 
 #[cfg(target_os = "macos")]
 use gpui::px;
@@ -137,6 +146,24 @@ fn duplicate_tab(cx: &mut App) {
             });
         });
     });
+}
+
+fn open_certificate_settings_tab(cx: &mut App) -> bool {
+    let Some(main_window) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
+        return false;
+    };
+    let Some(home) = cx.try_global::<GlobalHomePage>() else {
+        return false;
+    };
+    let home_page = home.home_page.clone();
+
+    cx.update_window(main_window.window_handle, move |_, window, cx| {
+        window.activate_window();
+        home_page.update(cx, |hp, cx| {
+            hp.open_certificate_settings_tab(window, cx);
+        });
+    })
+    .is_ok()
 }
 
 fn quit_app(cx: &mut App) {
@@ -279,6 +306,10 @@ pub fn init(cx: &mut App) {
 
     let registry = TabContentRegistry::new();
     cx.set_global(registry);
+    one_core::certificate_manager::set_certificate_manager_navigator(
+        Arc::new(|cx| open_certificate_settings_tab(cx)),
+        cx,
+    );
 
     cx.activate(true);
 }
@@ -292,6 +323,10 @@ pub struct OnetCliApp {
 
 impl OnetCliApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.set_global(GlobalMainWindowHandle {
+            window_handle: window.window_handle(),
+        });
+
         let tab_container = cx.new(|cx| {
             let mut container = TabContainer::new(window, cx)
                 .with_tab_bar_colors(

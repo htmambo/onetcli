@@ -1,41 +1,64 @@
-use gpui::{App, Hsla, StyleRefinement, Styled, rgb, rgba, white};
+use std::sync::{LazyLock, RwLock};
 
-use crate::button::{ButtonCustomVariant, ButtonVariant};
+use gpui::{App, Hsla, StyleRefinement, Styled, rgb, white};
+
+use crate::{
+    Theme, ThemeColor,
+    button::{ButtonCustomVariant, ButtonVariant},
+    theme::ActiveTheme,
+};
+
+static ACTIVE_APP_STYLE_THEME: LazyLock<RwLock<ThemeColor>> =
+    LazyLock::new(|| RwLock::new(*ThemeColor::light().as_ref()));
+
+#[inline]
+fn active_theme() -> ThemeColor {
+    ACTIVE_APP_STYLE_THEME
+        .read()
+        .map(|theme| *theme)
+        .unwrap_or_else(|_| *ThemeColor::light().as_ref())
+}
+
+pub(crate) fn sync_theme(theme: &Theme) {
+    if let Ok(mut current_theme) = ACTIVE_APP_STYLE_THEME.write() {
+        *current_theme = theme.colors;
+    }
+}
 
 pub fn page_bg() -> Hsla {
-    rgb(0x0a0a0a).into()
+    active_theme().background
 }
 
 pub fn panel_bg() -> Hsla {
-    rgb(0x12121a).into()
+    active_theme().group_box
 }
 
 pub fn panel_alt_bg() -> Hsla {
-    rgb(0x101114).into()
+    active_theme().secondary
 }
 
 pub fn panel_hover_bg() -> Hsla {
-    rgb(0x15171d).into()
+    active_theme().secondary_hover
 }
 
 pub fn border() -> Hsla {
-    rgba(0xffffff14).into()
+    active_theme().border
 }
 
 pub fn border_strong() -> Hsla {
-    rgba(0xffffff1f).into()
+    active_theme().input
 }
 
 pub fn text_primary() -> Hsla {
-    rgb(0xeaeaf0).into()
+    active_theme().foreground
 }
 
 pub fn text_muted() -> Hsla {
-    rgb(0xb7b7c6).into()
+    active_theme().muted_foreground
 }
 
 pub fn text_soft() -> Hsla {
-    rgb(0x6b7280).into()
+    active_theme().muted_foreground.opacity(0.72)
 }
 
 pub fn accent() -> Hsla {
@@ -59,7 +82,7 @@ pub fn accent_dim_strong() -> Hsla {
 }
 
 pub fn danger() -> Hsla {
-    rgb(0xef4444).into()
+    active_theme().danger
 }
 
 pub fn danger_dim() -> Hsla {
@@ -83,9 +106,9 @@ pub fn control_style() -> StyleRefinement {
 
 pub fn sidebar_style() -> StyleRefinement {
     StyleRefinement::default()
-        .bg(panel_bg())
-        .border_color(border())
-        .text_color(text_primary())
+        .bg(active_theme().sidebar)
+        .border_color(active_theme().sidebar_border)
+        .text_color(active_theme().sidebar_foreground)
 }
 
 pub fn page_header_style() -> StyleRefinement {
@@ -97,14 +120,14 @@ pub fn page_header_style() -> StyleRefinement {
 
 pub fn title_bar_style() -> StyleRefinement {
     StyleRefinement::default()
-        .bg(panel_bg())
-        .border_color(border())
+        .bg(active_theme().title_bar)
+        .border_color(active_theme().title_bar_border)
         .text_color(text_primary())
 }
 
 pub fn footer_style() -> StyleRefinement {
     StyleRefinement::default()
-        .bg(panel_bg())
+        .bg(panel_alt_bg())
         .border_color(border())
         .text_color(text_primary())
 }
@@ -136,9 +159,9 @@ pub fn danger_button_variant(cx: &App) -> ButtonVariant {
     ButtonVariant::Custom(
         ButtonCustomVariant::new(cx)
             .color(panel_alt_bg())
-            .foreground(danger())
-            .border(danger().opacity(0.35))
-            .hover(danger_dim())
-            .active(danger().opacity(0.18)),
+            .foreground(cx.theme().danger)
+            .border(cx.theme().danger.opacity(0.35))
+            .hover(cx.theme().danger_hover)
+            .active(cx.theme().danger_active),
     )
 }

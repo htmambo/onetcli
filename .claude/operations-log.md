@@ -1,5 +1,24 @@
 ## 操作日志
 
+## 编码前检查 - certificate-settings-navigation
+时间：2026-03-26 00:00:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-certificate-settings-navigation.md`
+- 已分析相似实现：
+  - `main/src/home/home_tabs.rs::add_settings_tab / open_account_settings_tab`
+  - `main/src/setting_tab.rs::SettingsPanelPage / SettingsPanel::setting_pages`
+  - `crates/core/src/certificate_manager.rs::open_certificate_manager_popup`
+  - `main/src/onetcli_app.rs::GlobalHomePage / 主窗口初始化`
+- 将使用以下可复用组件：
+  - `SettingsPanel::request_page(...)`：复用设置页默认选中逻辑
+  - `CertificateManagerView`：直接嵌入设置页，不重写凭证列表 UI
+  - `HomePage::add_settings_tab(...)`：复用主窗口打开设置标签逻辑
+  - `open_certificate_manager_popup(...)`：保留现有 API，对内改为“导航优先，弹窗回退”
+- 将遵循命名约定：新增 `Certificate` 页面枚举、`open_certificate_settings_tab(...)` 导航函数和“navigator”类型名，保持现有语义风格
+- 将遵循代码风格：只在通用层补桥接，不修改各连接表单的按钮调用点
+- 确认不重复造轮子，证明：设置页已有嵌入自定义视图能力，主页已有设置页导航模式，凭证管理已有独立视图
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索和 Rust 构建验证作为替代并留痕
+
 ## 分析记录 - upstream-merge-analysis
 时间：2026-03-25 21:29:12 +0800
 
@@ -4615,3 +4634,488 @@
 ### 4. 工具限制留痕
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
+
+## 编码前检查 - app-settings-sync
+时间：2026-03-26 01:53:48 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-app-settings-sync.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/generic_sync.rs::generic_sync`：复用通用同步流程
+- `crates/core/src/cloud_sync/workspace_sync.rs::WorkspaceSyncType`：复用类型化同步接入模式
+- `crates/core/src/cloud_sync/certificate_sync.rs::CertificateSyncType`：复用上传后回写同步元数据模式
+- `main/src/home_tab.rs::trigger_sync`：复用主界面同步入口
+- `main/src/home/home_tabs.rs::apply_terminal_settings_to_all`：复用终端设置批量应用能力
+□ 将遵循命名约定：设置文件内新增稳定 `local_id` 和 `remote_id`，并在同步层映射为 `cloud_id`
+□ 将遵循代码风格：优先扩展现有 `AppSettings`、`SyncEngine` 和设置保存链路，不新增独立状态容器
+□ 确认不重复造轮子，证明：已检查 `main/src/setting_tab.rs`、`main/src/home/home_tabs.rs`、`main/src/home_tab.rs`、`crates/core/src/cloud_sync/engine.rs`、`crates/core/src/cloud_sync/generic_sync.rs`、`crates/core/src/cloud_sync/service.rs`
+
+## 执行记录 - app-settings-sync
+时间：2026-03-26 01:53:48 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/setting_tab.rs`
+- `main/src/home/home_tabs.rs`
+- `main/src/home_tab.rs`
+- `main/src/onetcli_app.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/generic_sync.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/cloud_sync/workspace_sync.rs`
+- `crates/core/src/cloud_sync/certificate_sync.rs`
+- `crates/core/src/cloud_sync/models.rs`
+
+### 2. 对比的相似实现
+- `crates/core/src/cloud_sync/workspace_sync.rs:13`：简单数据类型接入通用同步
+- `crates/core/src/cloud_sync/certificate_sync.rs:14`：同步元数据回写与本地更新模式
+- `main/src/setting_tab.rs:270`：应用设置本地 JSON 读写入口
+- `main/src/home/home_tabs.rs:73`：终端设置保存后的本地应用链路
+
+### 3. 当前发现
+- `AppSettings` 只有本地 `settings.json` 持久化，还没有远端同步元数据
+- `SyncEngine` 当前默认只注册工作区、证书、连接三类处理器
+- 服务端管理页已经把 `app_settings` 作为合法同步类型统计，但桌面端不会上传该类型
+- 设置下载后的运行时刷新能力缺失，需要显式重载全局设置并更新现有终端视图
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地补充文档完成实现和验证
+
+## 编码后声明 - app-settings-sync
+时间：2026-03-26 02:01:25 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/cloud_sync/generic_sync.rs::generic_sync`：应用设置复用通用同步执行框架
+- `crates/core/src/cloud_sync/engine.rs::SyncEngine::register_type`：通过注册类型化处理器接入同步引擎
+- `main/src/home_tab.rs::trigger_sync`：继续作为统一的桌面端同步入口
+- `main/src/home/home_tabs.rs::apply_terminal_settings_to_all`：继续作为终端设置批量应用基础能力
+- `main/src/setting_tab.rs::AppSettings::load/save`：继续作为本地 JSON 单一数据源，只补同步元数据
+
+### 2. 遵循了以下项目约定
+- 命名约定：远端记录继续沿用 `cloud_id` 语义，本地设置文件内新增 `local_id` 和 `remote_id` 建立稳定映射
+- 代码风格：未新增第二套同步框架，而是在既有 `SyncTypeHandler` 体系上增量扩展
+- 文件组织：`one_core` 只补通用常量与泛型加解密能力，主应用特有的设置同步处理器放在 `main/src/app_settings_sync.rs`
+
+### 3. 对比了以下相似实现
+- `crates/core/src/cloud_sync/workspace_sync.rs`：沿用简单数据类型接入通用同步模式
+- `crates/core/src/cloud_sync/certificate_sync.rs`：沿用上传成功后回写同步元数据模式
+- `main/src/setting_tab.rs`：沿用本地 JSON 配置模型，不改存储介质
+- `main/src/home/home_tabs.rs`：沿用终端设置变更后即时应用的运行时刷新模式
+
+### 4. 未重复造轮子的证明
+- 已检查 `crates/core/src/cloud_sync/engine.rs`、`generic_sync.rs`、`service.rs`、`workspace_sync.rs`、`certificate_sync.rs`
+- 最终没有新建独立同步服务、设置数据库表或额外状态管理层，而是把应用设置接入现有框架
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main app_settings_sync`：通过
+
+### 6. 风险与限制
+- 当前只补了“应用设置”这一类云同步，未扩展额外的设备专属配置类型
+- `sync_server_url` 按设计保留为本地字段，不参与云端同步，避免跨设备错误改写同步服务地址
+- 仍缺少真实双设备往返自动化测试；本次通过编译、单元测试和运行时刷新链路完成本地验证
+
+## 编码前检查 - app-style-theme-switch
+时间：2026-03-26 02:15:50 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-app-style-theme-switch.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/app_style.rs`：统一样式入口，直接修根因
+- `crates/ui/src/theme/mod.rs::Theme::change`：主题切换唯一入口
+- `crates/terminal_view/src/sidebar/settings_panel.rs`：现成的 `cx.theme()` 语义色用法
+- `main/src/encourage.rs`：主题语义色与强调色混用的卡片样式参考
+□ 将遵循命名约定：继续沿用 `page/panel/control/sidebar/title_bar/text_*` 语义样式命名
+□ 将遵循代码风格：优先复用 `ThemeColor` 语义色，不在业务页面散落追加写死颜色
+□ 确认不重复造轮子，证明：已检查 `crates/ui/src/app_style.rs`、`crates/ui/src/theme/mod.rs`、`crates/ui/src/theme/theme_color.rs`、`crates/terminal_view/src/sidebar/settings_panel.rs`、`main/src/encourage.rs`
+
+## 执行记录 - app-style-theme-switch
+时间：2026-03-26 02:15:50 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/ui/src/app_style.rs`
+- `crates/ui/src/theme/mod.rs`
+- `crates/ui/src/theme/theme_color.rs`
+- `crates/ui/src/theme/default-theme.json`
+- `crates/ui/src/theme/schema.rs`
+- `crates/ui/src/dialog.rs`
+- `crates/db_view/src/connection_form_window.rs`
+- `main/src/setting_tab.rs`
+- `main/src/auth.rs`
+- `crates/terminal_view/src/sidebar/settings_panel.rs`
+- `main/src/encourage.rs`
+
+### 2. 对比的相似实现
+- `crates/terminal_view/src/sidebar/settings_panel.rs:297`：直接读取 `cx.theme()` 的主题分层模式
+- `main/src/encourage.rs:52`：主题边框与轻量卡片背景的组合模式
+- `crates/ui/src/dialog.rs:505`：弹窗外壳统一依赖 `app_style`，适合作为集中修复入口
+
+### 3. 当前发现
+- `app_style` 之前把页面、卡片、标题栏、输入区、边框全部写死为深色
+- `sync_server_theme` 只是对 `app_style` 的重导出，因此设置页、账号页、弹窗和连接窗口都会被一起锁死在深色
+- 项目原生主题系统本身工作正常，问题只在于 `app_style` 绕过了 `ThemeColor`
+- 与其逐页补丁，不如在 `Theme::change` 时同步 `app_style` 当前主题快照，直接覆盖全部既有调用点
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - certificate-settings-navigation
+时间：2026-03-26 03:34:20 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home/home_tabs.rs::add_settings_tab`：继续作为设置标签页唯一打开入口
+- `main/src/home/home_tabs.rs::open_account_settings_tab`：直接复用其“先 request_page，再 add_settings_tab”的导航模式
+- `main/src/setting_tab.rs::SettingsPanel::setting_pages`：继续通过 `SettingItem::render(...)` 嵌入自定义 `Entity`
+- `crates/core/src/certificate_manager.rs::CertificateManagerView`：直接复用现有凭证管理视图
+- `crates/core/src/certificate_manager.rs::open_certificate_manager_popup`：保留现有对外 API，不改各表单调用点
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `SettingsPanelPage::Certificate`、`open_certificate_settings_tab(...)`、`GlobalMainWindowHandle`
+- 代码风格：导航桥集中在 `one_core + main` 的通用层，不向 SSH/MySQL/Redis/Mongo 等表单散落特判
+- 文件组织：凭证数据和通用入口继续留在 `crates/core`，主窗口与设置页逻辑继续留在 `main`
+
+### 3. 对比了以下相似实现
+- `main/src/home/home_tabs.rs::open_account_settings_tab`：本次新入口与其保持完全一致的调用结构
+- `main/src/setting_tab.rs::LlmProvidersView`：凭证管理页采用同样的设置页内嵌视图方式
+- `main/src/onetcli_app.rs::GlobalHomePage`：沿用现有全局桥接模式，再补主窗口句柄以避开弹窗 `active_window()` 歧义
+
+### 4. 未重复造轮子的证明
+- 没有重写新的“凭证设置页专用视图”，而是直接复用 `CertificateManagerView`
+- 没有改动任一连接表单里的 `open_certificate_manager_popup(cx)` 调用点
+- 最终只把原本“总是开 popup”的通用入口升级为“优先导航主窗口设置页，失败回退 popup”
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p one-core -p main -p db_view -p terminal_view -p redis_view -p mongodb_view`：通过
+
+### 6. 风险与限制
+- 当前以编译验证为主，仍建议你手工再看一次从“新建连接弹窗”点击“管理凭证”时，主窗口是否能准确切到设置页中的“凭证管理”
+- 若未来支持多个主应用窗口，`GlobalMainWindowHandle` 需要升级为“当前主窗口选择策略”；当前单主窗口场景可用
+- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次实现无关
+
+## 编码后声明 - popup-window-style
+时间：2026-03-26 03:04:38 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/popup_window.rs`：继续复用独立窗口打开、焦点陷阱和 Esc 关闭逻辑
+- `crates/ui/src/app_style.rs`：复用 `page_bg / page_header_style / footer_style / border_strong`
+- `crates/core/src/certificate_manager.rs`：保留现有凭证管理数据与操作逻辑，只补视觉结构
+
+### 2. 遵循了以下项目约定
+- 命名约定：沿用 `PopupWindowView / CertificateManagerView / CertificateEditorView`
+- 代码风格：优先在通用 `PopupWindow` 层增强窗口壳体，再对凭证管理窗口做最小结构补强
+- 文件组织：仅修改 `popup_window.rs` 与 `certificate_manager.rs`，没有改动连接表单业务逻辑
+
+### 3. 对比了以下相似实现
+- `connection_form_window.rs`：保持其已有标题栏与底部操作区实现不变，只让外层窗口框体更清晰
+- `dialog.rs`：沿用“增强边框、区块分层”的思路，但没有把大表单窗口强行迁回 `Dialog`
+- `certificate_manager.rs`：补上页头、正文、页脚三段式结构，使其与其它弹出窗口更一致
+
+### 4. 未重复造轮子的证明
+- 没有为 SSH/MySQL/Redis/Mongo 等每个连接窗口分别加边框特判
+- 最终通过 `PopupWindowView` 统一增强了独立窗口外壳，让所有 `open_popup_window(...)` 调用自动继承
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p one-core -p gpui-component -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p sftp_view`：通过
+
+### 6. 风险与限制
+- 当前仍缺少桌面端自动截图或交互测试，建议重点手看连接表单窗口与凭证管理/编辑窗口
+- `crates/ui/src/window_ext.rs` 的既有未使用代码告警仍存在，与本次 PopupWindow 样式修复无关
+
+## 编码后声明 - dialog-visual-structure
+时间：2026-03-26 02:57:42 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/dialog.rs`：继续复用原有拖拽、动画、焦点陷阱、关闭逻辑
+- `crates/ui/src/app_style.rs`：直接复用 `title_bar_style`、`footer_style`、`border_strong`
+- `crates/db_view/src/connection_form_window.rs`：借鉴标题栏和底部操作区的分隔方式
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增变量沿用 `has_footer / title_bar_padding_y / body_top_padding` 这类布局语义命名
+- 代码风格：所有改动都留在通用 UI 层，没有向业务页面扩散特判
+- 文件组织：仅修改 `crates/ui/src/dialog.rs` 与相关语义样式入口 `crates/ui/src/app_style.rs`
+
+### 3. 对比了以下相似实现
+- `connection_form_window`：沿用“标题栏独立背景 + 底部操作区顶部分隔线”的结构
+- `redis_form_window`：沿用“容器边框与背景分层”思路，但没有把弹窗再次做成重卡片
+- `ssh_form_window`：沿用统一 `app_style` 语义，避免写死颜色
+
+### 4. 未重复造轮子的证明
+- 没有在具体弹窗调用点补样式，也没有新增新的弹窗组件
+- 最终只增强了通用 `Dialog` 的默认渲染结构，让 `open_dialog / confirm / alert` 自动继承修复
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p sftp_view`：通过
+
+### 6. 风险与限制
+- 当前仍缺少桌面端自动截图或交互测试，标题栏高度和底部层级建议你手动看一眼典型弹窗
+- 既有 `window_ext.rs` 未使用代码告警仍存在，与本次弹窗样式修复无关
+
+## 编码前检查 - popup-window-style
+时间：2026-03-26 03:04:38 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-popup-window-style.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/popup_window.rs`：连接表单与凭证管理的统一弹出窗口入口
+- `crates/ui/src/app_style.rs`：统一边框、页头和页脚语义样式
+- `crates/db_view/src/connection_form_window.rs`：已有弹出窗口内容层的结构参考
+- `crates/core/src/certificate_manager.rs`：凭证管理与编辑窗口本体
+□ 将遵循命名约定：延续 `PopupWindow* / Certificate*View` 现有命名，不新增冗余抽象
+□ 将遵循代码风格：优先改通用 `PopupWindow` 壳体，对明显缺结构的凭证管理视图做最小补强
+□ 确认不重复造轮子，证明：已核对 `open_popup_window`、连接表单窗口、凭证管理窗口与 `Dialog` 路径差异
+
+## 执行记录 - popup-window-style
+时间：2026-03-26 03:04:38 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/popup_window.rs`
+- `main/src/home_tab.rs`
+- `crates/core/src/certificate_manager.rs`
+- `crates/db_view/src/connection_form_window.rs`
+- `crates/ui/src/app_style.rs`
+
+### 2. 对比的相似实现
+- `connection_form_window.rs`：独立窗口内部已有标题栏和底部操作区
+- `dialog.rs`：页内模态已增强边框和结构分层，但不适合直接替换大表单窗口
+- `popup_window.rs`：当前只负责窗口打开和焦点陷阱，窗口壳体样式偏弱
+
+### 3. 当前发现
+- “新建连接 -> 选择类型后出现的窗口”与“凭证管理窗口”都走 `open_popup_window(...)`
+- 连接表单类窗口本身已有清晰头尾结构，主要缺的是独立窗口壳体边界
+- 凭证管理与凭证编辑窗口内部还缺少明确的页头/页脚分层，需要一起补
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - app-style-theme-switch
+时间：2026-03-26 02:15:50 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/app_style.rs`：继续作为统一样式入口，只把取色来源改为当前主题快照
+- `crates/ui/src/theme/mod.rs::Theme::change`：继续作为主题切换唯一入口，并新增样式快照同步
+- `ThemeColor` 语义色：复用 `background/group_box/secondary/sidebar/title_bar/danger` 等字段，不再维护第二套深色背景常量
+
+### 2. 遵循了以下项目约定
+- 命名约定：没有新增新的业务样式体系，仍沿用 `page_bg/panel_bg/control_style/...`
+- 代码风格：把变更集中在通用层，避免去 `setting_tab/auth/dialog/连接窗口` 分别散改
+- 文件组织：主题同步逻辑留在 `crates/ui` 内部，业务模块不感知实现细节
+
+### 3. 对比了以下相似实现
+- `crates/terminal_view/src/sidebar/settings_panel.rs`：沿用 `cx.theme()` 语义色分层思路
+- `main/src/encourage.rs`：沿用卡片背景与强调色分离思路
+- `crates/ui/src/dialog.rs`：验证通过统一入口修复可以自然覆盖所有现有弹窗
+
+### 4. 未重复造轮子的证明
+- 已检查所有 `app_style::` / `sync_server_theme::` 调用点
+- 最终没有新增第二套亮色样式文件，也没有在每个窗口局部复制主题判断逻辑
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component`：通过
+
+### 6. 风险与限制
+- 当前验证以编译与调用链检查为主，缺少自动化 GUI 截图回归
+- `app_style` 现在依赖 `Theme::change` 同步主题快照；如果未来出现绕过该入口的主题改写路径，需要同步补上快照刷新
+- `crates/ui/src/window_ext.rs` 的未使用代码告警仍存在，与本次修复无关
+
+## 编码前检查 - form-focus-border
+时间：2026-03-26 02:22:37 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-form-focus-border.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/input/input.rs`：统一输入框渲染与焦点边框逻辑
+- `crates/ui/src/select.rs`：作为正确的焦点边框顺序参考
+- `crates/ui/src/button/button.rs`：覆盖设置页这类按钮式下拉
+- `crates/ui/src/setting/fields/dropdown.rs`：确认设置下拉不是 `Select`
+□ 将遵循命名约定：焦点态统一使用主题 `ring` 语义色，不新增页面级特例颜色
+□ 将遵循代码风格：优先修通用组件，不在业务页面重复追加焦点边框逻辑
+□ 确认不重复造轮子，证明：已检查 `input/input.rs`、`select.rs`、`button/button.rs`、`setting/fields/dropdown.rs`
+
+## 执行记录 - form-focus-border
+时间：2026-03-26 02:22:37 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/ui/src/input/input.rs`
+- `crates/ui/src/select.rs`
+- `crates/ui/src/button/button.rs`
+- `crates/ui/src/styled.rs`
+- `crates/ui/src/setting/fields/string.rs`
+- `crates/ui/src/setting/fields/dropdown.rs`
+- `crates/ui/src/setting/fields/number.rs`
+- `crates/db_view/src/common/db_connection_form.rs`
+- `main/src/setting_tab.rs`
+- `main/src/auth.rs`
+
+### 2. 对比的相似实现
+- `crates/ui/src/select.rs:821`：下拉框在 `refine_style` 之后再叠加焦点边框，效果正确
+- `crates/ui/src/input/input.rs:375`：输入框在 `refine_style` 之前叠加焦点边框，导致被覆盖
+- `crates/ui/src/setting/fields/dropdown.rs:50`：设置页下拉是 `outline Button`，不走 `Select`
+
+### 3. 当前发现
+- 新建连接窗口下拉框焦点边框正常，是因为 `Select` 的叠加顺序正确
+- 其它输入框焦点边框不明显，根因是 `Input` 把 `focused_border` 放在 `refine_style` 之前
+- 设置页等按钮式下拉虽然有 focus ring，但边框色不会跟随焦点切换，需要在 `outline Button` 层补齐
+- 通过修 `Input` 和 `Button` 通用组件，可以自动覆盖主应用、数据库、终端、Redis、Mongo、SFTP 等页面
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - form-focus-border
+时间：2026-03-26 02:22:37 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/input/input.rs`：通过调整既有渲染顺序恢复所有输入框焦点边框
+- `crates/ui/src/button/button.rs`：通过扩展既有 `outline` 焦点态覆盖按钮式下拉
+- `crates/ui/src/styled.rs::focused_border`：继续复用主题 `ring` 作为统一焦点边框色
+
+### 2. 遵循了以下项目约定
+- 命名约定：没有引入新的页面级焦点颜色入口，仍沿用 `ring/focused_border`
+- 代码风格：修复集中在通用组件层，业务模块零散调用无需改签名
+- 文件组织：设置页、连接页、账号页等页面继续只消费通用组件
+
+### 3. 对比了以下相似实现
+- `Select`：沿用“最后再叠加焦点边框”的顺序
+- `Button`：沿用现有 focus ring 机制，并补实际边框色切换
+- `SettingField Dropdown`：确认需要通过 `Button` 层覆盖，而不是误改 `Select`
+
+### 4. 未重复造轮子的证明
+- 没有在 `db_connection_form/ssh_form_window/redis_form_window/mongo_form_window/setting_tab/auth` 等页面分别打补丁
+- 最终只改了 `Input` 与 `Button` 两个通用组件，让现有全部调用点自动继承
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component -p sftp_view`：通过
+
+### 6. 风险与限制
+- 缺少自动化 GUI 回归，最终焦点观感仍需本地手动确认
+- `outline Button` 的焦点边框现在会一并作用于设置类按钮式下拉和其他 outline 按钮，这是有意统一，但仍建议顺手看一遍观感
+- `crates/ui/src/window_ext.rs` 的既有未使用代码告警仍存在，与本次修复无关
+
+## 补充修复 - settings-dropdown-open-border
+时间：2026-03-26 02:32:37 +0800
+
+### 1. 发现
+- 设置页下拉字段不是 `Select`，而是 `setting/fields/dropdown.rs` 里的 `outline Button + dropdown_menu_with_anchor`
+- 鼠标点击打开菜单时，按钮本身不会进入 `is_focused`，但会因为 `Popover::trigger` 机制进入 `selected/open` 状态
+- 之前只在 `is_focused && outline` 时把边框切到 `ring`，所以设置页下拉不会命中
+
+### 2. 修复
+- 在 `crates/ui/src/button/button.rs` 中把后置边框切换条件改为：
+- `(is_focused || self.selected) && self.outline && !self.disabled`
+- 这样设置页下拉在“键盘聚焦”或“鼠标点开菜单”时都会显示主题 `ring` 边框
+
+### 3. 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main -p gpui-component`：通过
+
+## 编码前检查 - chatdb-completion-menu-height
+时间：2026-03-26 02:42:16 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-chatdb-completion-menu-height.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/input/popovers/completion_menu.rs`：ChatDb `@` 提示实际走这里
+- `crates/ui/src/input/popovers/code_action_menu.rs`：同类输入弹层一起修复
+- `crates/ui/src/input/popovers/hover_popover.rs`：窗口剩余空间计算参考
+- `crates/ui/src/menu/popup_menu.rs`：超高弹层滚动与高度限制参考
+□ 将遵循命名约定：继续沿用 `MAX_MENU_* / edge padding / max_h` 这一类布局语义
+□ 将遵循代码风格：优先在通用 popover 层修复，不在 ChatDb 页面加特判
+□ 确认不重复造轮子，证明：已检查 `completion_menu.rs`、`code_action_menu.rs`、`hover_popover.rs`、`popup_menu.rs`
+
+## 执行记录 - chatdb-completion-menu-height
+时间：2026-03-26 02:42:16 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/db_view/src/chatdb/ai_input.rs`
+- `crates/ui/src/input/popovers/completion_menu.rs`
+- `crates/ui/src/input/popovers/code_action_menu.rs`
+- `crates/ui/src/input/popovers/hover_popover.rs`
+- `crates/ui/src/menu/popup_menu.rs`
+- `crates/ui/src/input/state.rs`
+
+### 2. 对比的相似实现
+- `hover_popover.rs:188`：按窗口剩余高度限制弹层
+- `popup_menu.rs:1269`：超高菜单自动滚动
+- `completion_menu.rs:441`：原本只算宽度、不算高度
+
+### 3. 当前发现
+- ChatDb SQL 助手里的 `@` 表名提示最终走的是通用 `CompletionMenu`
+- `CompletionMenu` 和 `CodeActionMenu` 都是固定高度、固定向下展开
+- 当光标靠近窗口底部时，面板不会根据可用空间收缩，也不会改为向上展开，所以会超出窗口范围
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - chatdb-completion-menu-height
+时间：2026-03-26 02:42:16 +0800
+
+### 1. 复用了以下既有组件
+- `completion_menu.rs`：继续作为补全列表统一入口，只补窗口边界计算
+- `code_action_menu.rs`：沿用同一套位置与高度约束策略
+- `editor_popover`：继续作为通用浮层外壳
+- `List::max_h`：继续作为列表最大高度限制入口
+
+### 2. 遵循了以下项目约定
+- 命名约定：保留 `MAX_MENU_WIDTH / MAX_MENU_HEIGHT`，只新增最小切换阈值和边缘留白
+- 代码风格：在通用 UI 层修复，ChatDb、SQL 编辑器、其它补全调用方都无需改动
+- 文件组织：只修改 `crates/ui/src/input/popovers` 下的相关弹层实现
+
+### 3. 对比了以下相似实现
+- `hover_popover`：沿用“计算顶部/底部空间，再决定展开方向”的思路
+- `popup_menu`：沿用“面板超高则滚动”的处理方式
+- `code_action_menu`：同步补上相同边界约束，避免同类问题残留
+
+### 4. 未重复造轮子的证明
+- 没有在 `chatdb/ai_input.rs` 或 SQL 助手页面写死窗口高度判断
+- 最终只改了两个通用输入弹层组件，让所有相关调用自动继承修复
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p db_view -p main`：通过
+
+### 6. 风险与限制
+- 当前阈值 `MIN_MENU_HEIGHT` 是经验值，最终观感仍建议在小窗口里手动验证一次
+- 文档侧栏也会受相同高度限制影响，空间不足时会更早进入滚动，这是预期行为
+- `crates/ui/src/window_ext.rs` 的既有未使用代码告警仍存在，与本次修复无关
+
+## 编码前检查 - dialog-visual-structure
+时间：2026-03-26 02:57:42 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-dialog-visual-structure.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/dialog.rs`：统一简单弹窗默认结构
+- `crates/ui/src/app_style.rs`：复用标题栏、页脚、边框与主题颜色语义
+- `crates/db_view/src/connection_form_window.rs`：参考标题栏与底部操作区的分层方式
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+□ 将遵循命名约定：继续使用 `has_* / *_padding / *_offset` 这类布局语义命名
+□ 将遵循代码风格：只修通用 `Dialog`，不在业务页面做弹窗特判
+□ 确认不重复造轮子，证明：已检查 `dialog.rs` 与多个表单窗口的现有标题栏/底部样式模式
+
+## 执行记录 - dialog-visual-structure
+时间：2026-03-26 02:57:42 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/ui/src/dialog.rs`
+- `crates/ui/src/app_style.rs`
+- `crates/db_view/src/connection_form_window.rs`
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+
+### 2. 对比的相似实现
+- `connection_form_window.rs`：标题栏使用 `title_bar_style`，底部按钮区使用顶部分隔线
+- `redis_form_window.rs`：主体卡片与背景通过边框和圆角分层
+- `ssh_form_window.rs`：沿用与连接窗口一致的标题/主体结构
+
+### 3. 当前发现
+- 简单弹窗并非完全没有边框，而是默认外框强度偏弱，在部分背景下识别度不够
+- 现有 `Dialog` 标题区只是很小的拖拽行，正文和底部操作区缺少独立背景与分隔线
+- 只要增强 `Dialog` 默认外框，并为标题栏和底部操作区增加明确层级，就能覆盖大多数简单弹窗
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复

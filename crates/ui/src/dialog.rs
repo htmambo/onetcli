@@ -313,6 +313,7 @@ impl RenderOnce for Dialog {
         let on_ok = self.on_ok.clone();
         let on_cancel = self.on_cancel.clone();
         let has_title = self.title.is_some();
+        let has_footer = self.footer.is_some();
         let drag_state = window.use_keyed_state(
             SharedString::from(format!("dialog-drag-{}-{:?}", layer_ix, self.focus_handle)),
             cx,
@@ -418,8 +419,21 @@ impl RenderOnce for Dialog {
 
         if !has_title {
             // When no title, reduce the top padding to fix line-height effect.
-            paddings.top -= px(6.);
+            paddings.top = (paddings.top - px(6.)).max(px(0.));
         }
+
+        let title_bar_padding_y = paddings.top.min(px(16.)).max(px(12.));
+        let body_top_padding = if has_title {
+            (paddings.top - px(6.)).max(px(14.))
+        } else {
+            paddings.top
+        };
+        let body_bottom_padding = if has_footer {
+            (paddings.bottom - px(6.)).max(px(12.))
+        } else {
+            paddings.bottom
+        };
+        let footer_padding_y = paddings.bottom.min(px(16.)).max(px(12.));
 
         let animation =
             Animation::new(*ANIMATION_DURATION).with_easing(cubic_bezier(0.32, 0.72, 0., 1.));
@@ -504,14 +518,14 @@ impl RenderOnce for Dialog {
                             .focus_trap(format!("dialog-{}", layer_ix), &self.focus_handle)
                             .bg(app_style::panel_bg())
                             .border_1()
-                            .border_color(app_style::border())
+                            .border_color(app_style::border_strong())
                             .rounded(cx.theme().radius_lg)
+                            .overflow_hidden()
                             .min_h_24()
-                            .pt(paddings.top)
-                            .pb(paddings.bottom)
-                            .gap(paddings.top.min(px(16.)))
                             .refine_style(&self.style)
                             .px_0()
+                            .pt(px(0.))
+                            .pb(px(0.))
                             .key_context(CONTEXT)
                             .when(self.keyboard, |this| {
                                 this.on_action({
@@ -552,41 +566,51 @@ impl RenderOnce for Dialog {
                             .top(y)
                             .w(self.width)
                             .when_some(self.max_width, |this, w| this.max_w(w))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h(if has_title { px(22.) } else { px(10.) })
-                                    .pl(paddings.left)
-                                    .pr(paddings.right
-                                        + if self.close_button { px(28.) } else { px(0.) })
-                                    .flex()
-                                    .items_center()
-                                    .cursor_move()
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        window.listener_for(
-                                            &drag_state,
-                                            |drag_state, event: &MouseDownEvent, _, cx| {
-                                                drag_state.dragging = true;
-                                                drag_state.drag_origin = event.position;
-                                                drag_state.start_offset = drag_state.offset;
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                            },
-                                        ),
-                                    )
-                                    .when_some(self.title, |this, title| {
-                                        this.child(
-                                            div()
-                                                .line_height(relative(1.))
-                                                .font_semibold()
-                                                .text_color(app_style::text_primary())
-                                                .child(title),
+                            .when(has_title, |this| {
+                                this.child(
+                                    div()
+                                        .w_full()
+                                        .pl(paddings.left)
+                                        .pr(paddings.right
+                                            + if self.close_button { px(28.) } else { px(0.) })
+                                        .pt(title_bar_padding_y)
+                                        .pb(title_bar_padding_y)
+                                        .flex()
+                                        .items_center()
+                                        .cursor_move()
+                                        .refine_style(&app_style::title_bar_style())
+                                        .border_b_1()
+                                        .border_color(app_style::border())
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            window.listener_for(
+                                                &drag_state,
+                                                |drag_state, event: &MouseDownEvent, _, cx| {
+                                                    drag_state.dragging = true;
+                                                    drag_state.drag_origin = event.position;
+                                                    drag_state.start_offset = drag_state.offset;
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                },
+                                            ),
                                         )
-                                    }),
-                            )
+                                        .when_some(self.title, |this, title| {
+                                            this.child(
+                                                div()
+                                                    .line_height(relative(1.))
+                                                    .font_semibold()
+                                                    .text_color(app_style::text_primary())
+                                                    .child(title),
+                                            )
+                                        }),
+                                )
+                            })
                             .children(self.close_button.then(|| {
-                                let top = (paddings.top - px(10.)).max(px(8.));
+                                let top = if has_title {
+                                    title_bar_padding_y.max(px(8.))
+                                } else {
+                                    (paddings.top - px(10.)).max(px(8.))
+                                };
                                 let right = (paddings.right - px(10.)).max(px(8.));
 
                                 Button::new("close")
@@ -614,17 +638,25 @@ impl RenderOnce for Dialog {
                                         .overflow_y_scrollbar()
                                         .pl(paddings.left)
                                         .pr(paddings.right)
+                                        .pt(body_top_padding)
+                                        .pb(body_bottom_padding)
                                         .children(self.children),
                                 ),
                             )
                             .when_some(self.footer, |this, footer| {
                                 this.child(
                                     h_flex()
+                                        .w_full()
                                         .gap_2()
                                         .pl(paddings.left)
                                         .pr(paddings.right)
+                                        .pt(footer_padding_y)
+                                        .pb(footer_padding_y)
                                         .line_height(relative(1.))
                                         .justify_end()
+                                        .refine_style(&app_style::footer_style())
+                                        .border_t_1()
+                                        .border_color(app_style::border())
                                         .children(footer(render_ok, render_cancel, window, cx)),
                                 )
                             })

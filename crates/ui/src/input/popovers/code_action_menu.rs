@@ -10,6 +10,9 @@ use lsp_types::CodeAction;
 
 const MAX_MENU_WIDTH: Pixels = px(320.);
 const MAX_MENU_HEIGHT: Pixels = px(480.);
+const MIN_MENU_HEIGHT: Pixels = px(96.);
+const POPOVER_GAP: Pixels = px(4.);
+const SNAP_TO_EDGE: Pixels = px(8.);
 
 use crate::{
     ActiveTheme, IndexPath, Selectable, actions, h_flex,
@@ -285,7 +288,7 @@ impl CodeActionMenu {
         cx.notify();
     }
 
-    fn origin(&self, cx: &App) -> Option<Point<Pixels>> {
+    fn origin(&self, cx: &App) -> Option<(Point<Pixels>, Pixels)> {
         let state = self.state.read(cx);
         let Some(last_layout) = state.last_layout.as_ref() else {
             return None;
@@ -296,10 +299,36 @@ impl CodeActionMenu {
 
         let scroll_origin = self.state.read(cx).scroll_handle.offset();
 
-        Some(
+        Some((
             scroll_origin + cursor_origin - state.input_bounds.origin
                 + Point::new(-px(4.), last_layout.line_height + px(4.)),
-        )
+            last_layout.line_height,
+        ))
+    }
+
+    fn menu_layout(
+        &self,
+        pos: Point<Pixels>,
+        line_height: Pixels,
+        window: &Window,
+        cx: &App,
+    ) -> (Pixels, Pixels, Pixels) {
+        let abs_pos = self.state.read(cx).input_bounds.origin + pos;
+        let window_size = window.bounds().size;
+        let max_width =
+            MAX_MENU_WIDTH.min((window_size.width - abs_pos.x - SNAP_TO_EDGE).max(px(120.)));
+
+        let top_space = (abs_pos.y - line_height - POPOVER_GAP - SNAP_TO_EDGE).max(px(0.));
+        let bottom_space = (window_size.height - abs_pos.y - SNAP_TO_EDGE).max(px(0.));
+        let open_upward = bottom_space < MIN_MENU_HEIGHT && top_space > bottom_space;
+        let max_height = if open_upward { top_space } else { bottom_space }.min(MAX_MENU_HEIGHT);
+        let menu_y = if open_upward {
+            pos.y - line_height - POPOVER_GAP - max_height
+        } else {
+            pos.y
+        };
+
+        (menu_y, max_width, max_height)
     }
 }
 
@@ -314,20 +343,23 @@ impl Render for CodeActionMenu {
             return Empty.into_any_element();
         }
 
-        let Some(pos) = self.origin(cx) else {
+        let Some((pos, line_height)) = self.origin(cx) else {
             return Empty.into_any_element();
         };
 
-        let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - pos.x);
+        let (menu_y, max_width, max_height) = self.menu_layout(pos, line_height, window, cx);
+        if max_height <= px(0.) {
+            return Empty.into_any_element();
+        }
 
         deferred(
             editor_popover("code-action-menu", cx)
                 .absolute()
                 .left(pos.x)
-                .top(pos.y)
+                .top(menu_y)
                 .max_w(max_width)
                 .min_w(px(120.))
-                .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT))
+                .child(List::new(&self.list).max_h(max_height))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.hide(cx);
                 })),

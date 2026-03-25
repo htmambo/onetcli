@@ -25,7 +25,6 @@ use gpui_component::{
     v_flex,
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
-use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::cloud_sync::{
     CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo, can_edit_connection,
 };
@@ -45,6 +44,7 @@ use terminal_view::TerminalView;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
+use crate::app_settings_sync::AppSettingsSyncType;
 use crate::auth::{AuthService, PasswordAuthAction, show_password_auth_dialog};
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
@@ -330,6 +330,23 @@ impl HomePage {
     fn refresh_local_home_data(&mut self, cx: &mut Context<Self>) {
         self.load_workspaces(cx);
         self.load_connections(cx);
+        let settings = crate::setting_tab::AppSettings::reload_global_from_disk(cx);
+
+        cx.defer(move |cx| {
+            let Some(home) = cx.try_global::<crate::onetcli_app::GlobalHomePage>() else {
+                return;
+            };
+            let Some(window_id) = cx.active_window() else {
+                return;
+            };
+
+            let home_page = home.home_page.clone();
+            let _ = cx.update_window(window_id, move |_, window, cx| {
+                home_page.update(cx, |home_page, cx| {
+                    home_page.apply_app_settings(&settings, window, cx);
+                });
+            });
+        });
     }
 
     fn queue_pending_cloud_deletion(
@@ -581,7 +598,8 @@ impl HomePage {
         }
 
         // 创建同步引擎
-        let engine = SyncEngine::new(cloud_client, sync_service, storage);
+        let engine =
+            SyncEngine::new(cloud_client, sync_service, storage).register_type(AppSettingsSyncType);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let result = engine.sync().await;
@@ -638,6 +656,23 @@ impl HomePage {
             });
         })
         .detach();
+    }
+
+    pub(crate) fn request_app_settings_sync(&mut self, cx: &mut Context<Self>) {
+        if self.current_user.is_none() {
+            return;
+        }
+
+        if !self.auth_service.has_valid_sync_server_url() {
+            return;
+        }
+
+        if !crypto::has_master_key() {
+            return;
+        }
+
+        tracing::info!("应用设置变化，自动触发云同步");
+        self.trigger_sync(cx);
     }
 
     /// 同步前记录本地连接解密状态，用于提示哪些连接会被引擎按连接粒度跳过。
@@ -898,7 +933,8 @@ impl HomePage {
         cx.notify();
 
         // 创建同步引擎
-        let engine = SyncEngine::new(cloud_client, sync_service, storage);
+        let engine =
+            SyncEngine::new(cloud_client, sync_service, storage).register_type(AppSettingsSyncType);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             // 使用策略映射应用冲突解决方案
@@ -2488,16 +2524,6 @@ impl HomePage {
                     .gap_3()
                     .border_t_1()
                     .border_color(cx.theme().border)
-                    .child(
-                        Button::new("open_certificate_manager_sidebar")
-                            .icon(IconName::Key)
-                            .label(t!("Home.certificate_manager"))
-                            .w_full()
-                            .justify_start()
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                open_certificate_manager_popup(cx);
-                            })),
-                    )
                     .child(
                         Button::new("open_settings")
                             .icon(IconName::Settings)

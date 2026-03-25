@@ -4,6 +4,7 @@ use crate::cloud_sync::models::*;
 use crate::cloud_sync::queue::{OperationQueue, SyncOperation};
 use crate::crypto::{self, CryptoError};
 use crate::storage::{Certificate, CertificateKind, ConnectionType, StoredConnection};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -464,6 +465,37 @@ impl CloudSyncService {
         })
     }
 
+    /// 准备上传任意可序列化数据到 sync_data（整体 blob 加密）
+    pub fn prepare_generic_sync_data_upload<T: Serialize>(
+        &self,
+        data_type: &str,
+        name: &str,
+        value: &T,
+        team_id: Option<&str>,
+        teams: &[Team],
+    ) -> Result<CloudSyncData, SyncError> {
+        let plaintext =
+            serde_json::to_string(value).map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+
+        let checksum = Self::calculate_blob_checksum(&plaintext);
+        let encrypted_data = self.encrypt_blob(&plaintext, team_id)?;
+        let key_version = self.select_key_version(team_id, teams);
+
+        Ok(CloudSyncData {
+            id: uuid::Uuid::new_v4().to_string(),
+            owner_id: self.user_id.clone().unwrap_or_default(),
+            team_id: team_id.map(|s| s.to_string()),
+            data_type: data_type.to_string(),
+            name: name.to_string(),
+            encrypted_data,
+            key_version,
+            checksum,
+            version: 1,
+            updated_at: current_timestamp(),
+            deleted_at: None,
+        })
+    }
+
     /// 解密 sync_data 中的连接数据
     pub fn decrypt_sync_data_connection(
         &self,
@@ -543,6 +575,16 @@ impl CloudSyncService {
             team_id: cloud_data.team_id.clone(),
             owner_id: plain_data.owner_id,
         })
+    }
+
+    /// 解密 sync_data 中的通用 JSON 数据
+    pub fn decrypt_generic_sync_data<T: DeserializeOwned>(
+        &self,
+        cloud_data: &CloudSyncData,
+    ) -> Result<T, SyncError> {
+        let plaintext =
+            self.decrypt_blob(&cloud_data.encrypted_data, cloud_data.team_id.as_deref())?;
+        serde_json::from_str(&plaintext).map_err(|e| SyncError::DataFormatError(e.to_string()))
     }
 
     /// 重新加密同步数据（密钥轮换时使用）

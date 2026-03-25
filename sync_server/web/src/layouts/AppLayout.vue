@@ -25,8 +25,7 @@
         <div class="mt-auto pt-6">
           <RouterLink
             to="/app/profile"
-            class="hover-card block rounded-2xl border px-4 py-4 transition"
-            :class="isActive('/app/profile') ? 'border-[color:rgba(0,217,163,0.22)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--panel-strong)] hover:bg-[var(--panel-hover)]'"
+            class="hover-card block rounded-2xl border px-4 py-4 transition border-[var(--line)] bg-[var(--panel-strong)] hover:bg-[var(--panel-hover)]"
           >
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">当前账号</p>
             <p class="mt-3 text-base font-semibold text-[var(--text)]">{{ displayName }}</p>

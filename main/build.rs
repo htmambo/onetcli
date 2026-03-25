@@ -1,4 +1,6 @@
 fn main() {
+    println!("cargo:rerun-if-changed=locales");
+
     // 当环境变量发生变化时，cargo 会自动重新运行 build script 并重编译
     for key in [
         "ONETCLI_WECHAT_QR_URL",

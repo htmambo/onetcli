@@ -2,6 +2,7 @@
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod app_settings_sync;
 mod auth;
 mod encourage;
 

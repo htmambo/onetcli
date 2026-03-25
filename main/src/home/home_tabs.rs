@@ -84,6 +84,7 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::AutoCopyChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -92,6 +93,7 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::MiddleClickPasteChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -100,6 +102,7 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::SyncPathChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -108,6 +111,7 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
 
                     // ---- 持久化到 AppSettings 并同步 ----
@@ -120,6 +124,7 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, window, cx| {
                             view.apply_theme(&theme, window, cx);
                         });
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::CursorBlinkChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -130,6 +135,7 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, window, cx| {
                             view.apply_cursor_blink(enabled, window, cx);
                         });
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::ConfirmMultilinePasteChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -140,6 +146,7 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, _window, cx| {
                             view.apply_confirm_multiline_paste(enabled, cx);
                         });
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::ConfirmHighRiskCommandChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -150,6 +157,7 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, _window, cx| {
                             view.apply_confirm_high_risk_command(enabled, cx);
                         });
+                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                 }
                 cx.notify();
@@ -184,6 +192,29 @@ impl HomePage {
             } else {
                 false
             }
+        });
+    }
+
+    pub(crate) fn apply_app_settings(
+        &mut self,
+        settings: &AppSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_terminal_settings_to_all(settings, window, cx);
+
+        let theme = TerminalTheme::find_by_name(&settings.terminal_theme);
+        let cursor_blink = settings.terminal_cursor_blink;
+        let confirm_multiline = settings.terminal_confirm_multiline_paste;
+        let confirm_high_risk = settings.terminal_confirm_high_risk_command;
+
+        self.for_each_terminal_view(window, cx, |view, window, cx| {
+            if let Some(theme) = theme.as_ref() {
+                view.apply_theme(theme, window, cx);
+            }
+            view.apply_cursor_blink(cursor_blink, window, cx);
+            view.apply_confirm_multiline_paste(confirm_multiline, cx);
+            view.apply_confirm_high_risk_command(confirm_high_risk, cx);
         });
     }
 
@@ -553,6 +584,15 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) {
         SettingsPanel::request_page(SettingsPanelPage::Account, cx);
+        self.add_settings_tab(window, cx);
+    }
+
+    pub(crate) fn open_certificate_settings_tab(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        SettingsPanel::request_page(SettingsPanelPage::Certificate, cx);
         self.add_settings_tab(window, cx);
     }
 

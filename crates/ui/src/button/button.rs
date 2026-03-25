@@ -605,6 +605,10 @@ impl RenderOnce for Button {
                     .border_color(normal_style.border.opacity(0.8))
                     .text_color(normal_style.fg.opacity(0.8))
             })
+            .when(
+                (is_focused || self.selected) && self.outline && !self.disabled,
+                |this| this.border_color(cx.theme().ring),
+            )
             .when_some(self.tooltip, |this, (tooltip, action)| {
                 this.tooltip(move |window, cx| {
                     Tooltip::new(tooltip.clone())

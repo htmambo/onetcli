@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
     ParentElement, Render, SharedString, Styled, Subscription, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IndexPath, Sizable, WindowExt,
-    button::{Button, ButtonVariant, ButtonVariants as _},
+    Disableable, IndexPath, Sizable, StyledExt as _, WindowExt, app_style,
+    button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
@@ -48,6 +50,31 @@ impl SelectItem for CertificateKindItem {
     fn value(&self) -> &Self::Value {
         &self.kind
     }
+}
+
+#[derive(Clone)]
+struct GlobalCertificateManagerNavigator {
+    navigate: Arc<dyn Fn(&mut App) -> bool + Send + Sync>,
+}
+
+impl gpui::Global for GlobalCertificateManagerNavigator {}
+
+pub fn set_certificate_manager_navigator(
+    navigate: Arc<dyn Fn(&mut App) -> bool + Send + Sync>,
+    cx: &mut App,
+) {
+    cx.set_global(GlobalCertificateManagerNavigator { navigate });
+}
+
+fn try_open_certificate_manager_via_navigator(cx: &mut App) -> bool {
+    let Some(navigator) = cx
+        .try_global::<GlobalCertificateManagerNavigator>()
+        .cloned()
+    else {
+        return false;
+    };
+
+    (navigator.navigate)(cx)
 }
 
 pub struct CertificateManagerView {
@@ -185,162 +212,165 @@ impl Focusable for CertificateManagerView {
 
 impl Render for CertificateManagerView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let certificate_cards =
+            v_flex()
+                .gap_3()
+                .children(self.certificates.iter().cloned().map(|certificate| {
+                    let edit_certificate = certificate.clone();
+                    let delete_certificate = certificate.clone();
+                    let subtitle = certificate.display_subtitle();
+                    let remark = certificate.remark.clone();
+                    let sync_text = if certificate.sync_enabled {
+                        t!("CertificateManager.sync_enabled").to_string()
+                    } else {
+                        t!("CertificateManager.sync_disabled").to_string()
+                    };
+
+                    v_flex()
+                        .gap_3()
+                        .p_4()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::panel_bg())
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .items_start()
+                                .gap_4()
+                                .child(
+                                    v_flex()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(app_style::text_primary())
+                                                .child(certificate.name.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(app_style::text_muted())
+                                                .child(certificate.kind.label().to_string()),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(app_style::text_muted())
+                                                .child(subtitle),
+                                        )
+                                        .when_some(remark, |this, remark| {
+                                            this.child(
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(app_style::text_muted())
+                                                    .child(remark),
+                                            )
+                                        })
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(app_style::text_soft())
+                                                .child(sync_text),
+                                        ),
+                                )
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Button::new(format!(
+                                                "edit-certificate-{}",
+                                                certificate.id.unwrap_or_default()
+                                            ))
+                                            .small()
+                                            .with_variant(app_style::secondary_button_variant(cx))
+                                            .label(t!("Common.edit").to_string())
+                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                open_certificate_editor_popup(
+                                                    Some(edit_certificate.clone()),
+                                                    cx,
+                                                );
+                                            })),
+                                        )
+                                        .child(
+                                            Button::new(format!(
+                                                "delete-certificate-{}",
+                                                certificate.id.unwrap_or_default()
+                                            ))
+                                            .small()
+                                            .with_variant(app_style::danger_button_variant(cx))
+                                            .label(t!("Common.delete").to_string())
+                                            .on_click(cx.listener(move |view, _, window, cx| {
+                                                view.confirm_delete(
+                                                    delete_certificate.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            })),
+                                        ),
+                                ),
+                        )
+                }));
+
         v_flex()
             .size_full()
-            .gap_4()
-            .p_6()
+            .bg(app_style::page_bg())
             .child(
-                h_flex()
-                    .justify_between()
-                    .items_center()
+                div()
+                    .refine_style(&app_style::page_header_style())
+                    .border_b_1()
+                    .border_color(app_style::border())
+                    .px_6()
+                    .py_5()
                     .child(
-                        v_flex()
-                            .gap_1()
+                        h_flex()
+                            .justify_between()
+                            .items_center()
+                            .gap_4()
                             .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(t!("CertificateManager.title").to_string()),
+                                v_flex()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_xl()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(app_style::text_primary())
+                                            .child(t!("CertificateManager.title").to_string()),
+                                    )
+                                    .child(
+                                        div().text_sm().text_color(app_style::text_muted()).child(
+                                            t!("CertificateManager.description").to_string(),
+                                        ),
+                                    ),
                             )
                             .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("CertificateManager.description").to_string()),
+                                Button::new("add-certificate")
+                                    .with_variant(app_style::primary_button_variant(cx))
+                                    .label(t!("CertificateManager.add").to_string())
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        open_certificate_editor_popup(None, cx);
+                                    })),
                             ),
-                    )
-                    .child(
-                        Button::new("add-certificate")
-                            .with_variant(ButtonVariant::Primary)
-                            .label(t!("CertificateManager.add").to_string())
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                open_certificate_editor_popup(None, cx);
-                            })),
                     ),
             )
             .child(
                 div()
                     .flex_1()
+                    .px_6()
+                    .py_5()
                     .overflow_y_scrollbar()
-                    .child(
-                        v_flex()
-                            .gap_3()
-                            .children(self.certificates.iter().cloned().map(|certificate| {
-                                let edit_certificate = certificate.clone();
-                                let delete_certificate = certificate.clone();
-                                let subtitle = certificate.display_subtitle();
-                                let remark = certificate.remark.clone();
-                                let sync_text = if certificate.sync_enabled {
-                                    t!("CertificateManager.sync_enabled").to_string()
-                                } else {
-                                    t!("CertificateManager.sync_disabled").to_string()
-                                };
-
-                                v_flex()
-                                    .gap_3()
-                                    .p_4()
-                                    .rounded_lg()
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().background)
-                                    .child(
-                                        h_flex()
-                                            .justify_between()
-                                            .items_start()
-                                            .gap_4()
-                                            .child(
-                                                v_flex()
-                                                    .gap_1()
-                                                    .child(
-                                                        div()
-                                                            .font_weight(FontWeight::BOLD)
-                                                            .child(certificate.name.clone()),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .child(
-                                                                certificate
-                                                                    .kind
-                                                                    .label()
-                                                                    .to_string(),
-                                                            ),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .child(subtitle),
-                                                    )
-                                                    .when_some(remark, |this, remark| {
-                                                        this.child(
-                                                            div()
-                                                                .text_sm()
-                                                                .text_color(
-                                                                    cx.theme().muted_foreground,
-                                                                )
-                                                                .child(remark),
-                                                        )
-                                                    })
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .child(sync_text),
-                                                    ),
-                                            )
-                                            .child(
-                                                h_flex()
-                                                    .gap_2()
-                                                    .child(
-                                                        Button::new(format!(
-                                                            "edit-certificate-{}",
-                                                            certificate.id.unwrap_or_default()
-                                                        ))
-                                                        .small()
-                                                        .outline()
-                                                        .label(t!("Common.edit").to_string())
-                                                        .on_click(cx.listener(
-                                                            move |_, _, _, cx| {
-                                                                open_certificate_editor_popup(
-                                                                    Some(edit_certificate.clone()),
-                                                                    cx,
-                                                                );
-                                                            },
-                                                        )),
-                                                    )
-                                                    .child(
-                                                        Button::new(format!(
-                                                            "delete-certificate-{}",
-                                                            certificate.id.unwrap_or_default()
-                                                        ))
-                                                        .small()
-                                                        .ghost()
-                                                        .label(t!("Common.delete").to_string())
-                                                        .on_click(cx.listener(
-                                                            move |view, _, window, cx| {
-                                                                view.confirm_delete(
-                                                                    delete_certificate.clone(),
-                                                                    window,
-                                                                    cx,
-                                                                );
-                                                            },
-                                                        )),
-                                                    ),
-                                            ),
-                                    )
-                            })),
-                    ),
+                    .when(self.certificates.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(app_style::text_muted())
+                                .child(t!("CertificateManager.empty").to_string()),
+                        )
+                    })
+                    .when(!self.certificates.is_empty(), |this| {
+                        this.child(certificate_cards)
+                    }),
             )
-            .when(self.certificates.is_empty(), |this| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("CertificateManager.empty").to_string()),
-                )
-            })
     }
 }
 
@@ -774,37 +804,60 @@ impl Focusable for CertificateEditorView {
 impl Render for CertificateEditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_saving = self.is_saving;
+        let title = if self.is_editing {
+            t!("CertificateManager.edit_title").to_string()
+        } else {
+            t!("CertificateManager.add_title").to_string()
+        };
 
         v_flex()
             .size_full()
-            .gap_4()
-            .p_6()
+            .bg(app_style::page_bg())
             .child(
                 div()
-                    .text_xl()
-                    .font_weight(FontWeight::BOLD)
-                    .child(if self.is_editing {
-                        t!("CertificateManager.edit_title").to_string()
-                    } else {
-                        t!("CertificateManager.add_title").to_string()
-                    }),
+                    .refine_style(&app_style::page_header_style())
+                    .border_b_1()
+                    .border_color(app_style::border())
+                    .px_6()
+                    .py_4()
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(app_style::text_primary())
+                            .child(title),
+                    ),
             )
-            .child(self.form.clone())
-            .when_some(self.error_message.clone(), |this, error_message| {
-                this.child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().danger)
-                        .child(error_message),
-                )
-            })
+            .child(div().flex_1().px_6().py_5().overflow_y_scrollbar().child(
+                v_flex().gap_4().child(self.form.clone()).when_some(
+                    self.error_message.clone(),
+                    |this, error_message| {
+                        this.child(
+                            div()
+                                .px_3()
+                                .py_2()
+                                .rounded_md()
+                                .bg(app_style::danger_dim())
+                                .text_sm()
+                                .text_color(app_style::danger())
+                                .child(error_message),
+                        )
+                    },
+                ),
+            ))
             .child(
                 h_flex()
                     .justify_end()
                     .gap_2()
+                    .px_6()
+                    .py_4()
+                    .refine_style(&app_style::footer_style())
+                    .border_t_1()
+                    .border_color(app_style::border())
                     .child(
                         Button::new("certificate-editor-cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .disabled(is_saving)
                             .on_click(|_, window, cx| {
@@ -814,7 +867,7 @@ impl Render for CertificateEditorView {
                     .child(
                         Button::new("certificate-editor-save")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(if self.is_editing {
                                 t!("Common.save").to_string()
                             } else {
@@ -847,6 +900,10 @@ fn open_certificate_editor_popup(certificate: Option<Certificate>, cx: &mut App)
 }
 
 pub fn open_certificate_manager_popup(cx: &mut App) {
+    if try_open_certificate_manager_via_navigator(cx) {
+        return;
+    }
+
     open_popup_window(
         PopupWindowOptions::new(t!("CertificateManager.window_title").to_string())
             .size(760.0, 620.0),

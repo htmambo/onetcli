@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{
     App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -19,6 +20,7 @@ use gpui_component::{
     },
     v_flex,
 };
+use one_core::certificate_manager::CertificateManagerView;
 use one_core::cloud_sync::{GlobalCloudUser, UserInfo, sync_server::SyncServerClient};
 use one_core::storage::manager::get_config_dir;
 use one_core::tab_container::{TabContent, TabContentEvent};
@@ -32,6 +34,9 @@ use crate::encourage::render_encourage_section;
 use crate::onetcli_app::GlobalHomePage;
 use crate::settings::llm_providers_view::LlmProvidersView;
 use crate::sync_server_theme;
+
+pub(crate) const APP_SETTINGS_SYNC_ITEM_NAME: &str = "应用设置";
+const APP_SETTINGS_LOCAL_ID: i64 = 1;
 
 // ============================================================================
 // 全局用户状态
@@ -75,6 +80,7 @@ impl GlobalCurrentUser {
 pub enum SettingsPanelPage {
     #[default]
     General,
+    Certificate,
     Account,
 }
 
@@ -82,8 +88,12 @@ impl SettingsPanelPage {
     fn select_index(self) -> SelectIndex {
         match self {
             Self::General => SelectIndex::default(),
-            Self::Account => SelectIndex {
+            Self::Certificate => SelectIndex {
                 page_ix: 3,
+                group_ix: None,
+            },
+            Self::Account => SelectIndex {
+                page_ix: 4,
                 group_ix: None,
             },
         }
@@ -189,6 +199,18 @@ pub struct AppSettings {
     /// SQL查询自动保存的间隔（秒），默认5秒
     #[serde(default = "default_auto_save_interval")]
     pub sql_auto_save_interval: f64,
+    /// 单例设置在本地的稳定 ID，用于接入通用同步流程
+    #[serde(default = "default_app_settings_local_id")]
+    pub local_id: i64,
+    /// 云端同步记录 ID
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_id: Option<String>,
+    /// 最后同步时间（秒）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<i64>,
+    /// 本地最后修改时间（秒）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
 }
 
 fn default_font_family() -> String {
@@ -213,6 +235,17 @@ fn default_true() -> bool {
 
 fn default_auto_save_interval() -> f64 {
     5.0
+}
+
+fn default_app_settings_local_id() -> i64 {
+    APP_SETTINGS_LOCAL_ID
+}
+
+fn current_settings_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
@@ -261,6 +294,10 @@ impl Default for AppSettings {
             database_open_mode: DatabaseOpenMode::default(),
             enable_sql_auto_save: true,
             sql_auto_save_interval: default_auto_save_interval(),
+            local_id: default_app_settings_local_id(),
+            remote_id: None,
+            last_synced_at: None,
+            updated_at: None,
         }
     }
 }
@@ -280,34 +317,13 @@ impl AppSettings {
         get_config_dir().ok().map(|dir| dir.join("settings.json"))
     }
 
-    pub fn load() -> Self {
-        let Some(path) = Self::config_path() else {
-            return Self::default();
-        };
-
-        if !path.exists() {
-            return Self::default();
-        }
-
-        match std::fs::read_to_string(&path) {
-            Ok(content) => match serde_json::from_str(&content) {
-                Ok(settings) => {
-                    info!("Settings loaded from {:?}", path);
-                    settings
-                }
-                Err(e) => {
-                    error!("Failed to parse settings: {}", e);
-                    Self::default()
-                }
-            },
-            Err(e) => {
-                error!("Failed to read settings file: {}", e);
-                Self::default()
-            }
+    fn normalize_sync_identity(&mut self) {
+        if self.local_id <= 0 {
+            self.local_id = default_app_settings_local_id();
         }
     }
 
-    pub fn save(&self) {
+    fn write_to_disk(&self) {
         let Some(path) = Self::config_path() else {
             error!("Could not determine config path");
             return;
@@ -332,6 +348,77 @@ impl AppSettings {
                 error!("Failed to serialize settings: {}", e);
             }
         }
+    }
+
+    pub fn load() -> Self {
+        let Some(path) = Self::config_path() else {
+            return Self::default();
+        };
+
+        if !path.exists() {
+            return Self::default();
+        }
+
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str::<Self>(&content) {
+                Ok(mut settings) => {
+                    settings.normalize_sync_identity();
+                    info!("Settings loaded from {:?}", path);
+                    settings
+                }
+                Err(e) => {
+                    error!("Failed to parse settings: {}", e);
+                    Self::default()
+                }
+            },
+            Err(e) => {
+                error!("Failed to read settings file: {}", e);
+                Self::default()
+            }
+        }
+    }
+
+    pub fn save(&mut self) {
+        self.normalize_sync_identity();
+        self.updated_at = Some(current_settings_timestamp());
+        self.write_to_disk();
+    }
+
+    pub fn save_local_only(&mut self) {
+        self.normalize_sync_identity();
+        self.write_to_disk();
+    }
+
+    pub(crate) fn persist_sync_state(&mut self) {
+        self.normalize_sync_identity();
+        self.write_to_disk();
+    }
+
+    pub(crate) fn apply_synced_settings(&mut self, incoming: &AppSettings) {
+        let sync_server_url = self.sync_server_url.clone();
+
+        self.locale = incoming.locale.clone();
+        self.theme_mode = incoming.theme_mode.clone();
+        self.auto_switch_theme = incoming.auto_switch_theme;
+        self.font_family = incoming.font_family.clone();
+        self.font_size = incoming.font_size;
+        self.terminal_font_size = incoming.terminal_font_size;
+        self.terminal_auto_copy = incoming.terminal_auto_copy;
+        self.terminal_middle_click_paste = incoming.terminal_middle_click_paste;
+        self.terminal_sync_path_with_terminal = incoming.terminal_sync_path_with_terminal;
+        self.terminal_theme = incoming.terminal_theme.clone();
+        self.terminal_cursor_blink = incoming.terminal_cursor_blink;
+        self.terminal_confirm_multiline_paste = incoming.terminal_confirm_multiline_paste;
+        self.terminal_confirm_high_risk_command = incoming.terminal_confirm_high_risk_command;
+        self.auto_update = incoming.auto_update;
+        self.database_open_mode = incoming.database_open_mode;
+        self.enable_sql_auto_save = incoming.enable_sql_auto_save;
+        self.sql_auto_save_interval = incoming.sql_auto_save_interval;
+        self.remote_id = incoming.remote_id.clone();
+        self.last_synced_at = incoming.last_synced_at;
+        self.updated_at = incoming.updated_at;
+        self.sync_server_url = sync_server_url;
+        self.local_id = default_app_settings_local_id();
     }
 
     pub fn apply(&self, cx: &mut App) {
@@ -360,6 +447,20 @@ impl AppSettings {
             config.set_enabled(enabled);
             config.set_interval_seconds(interval_seconds);
         }
+    }
+
+    pub(crate) fn reload_global_from_disk(cx: &mut App) -> AppSettings {
+        let settings = Self::load();
+        settings.apply(cx);
+
+        if cx.has_global::<AppSettings>() {
+            let global = Self::global_mut(cx);
+            *global = settings.clone();
+        } else {
+            cx.set_global(settings.clone());
+        }
+
+        settings
     }
 }
 
@@ -391,6 +492,17 @@ fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
     });
 }
 
+pub(crate) fn trigger_app_settings_sync(cx: &mut App) {
+    let Some(home) = cx.try_global::<GlobalHomePage>() else {
+        return;
+    };
+
+    let home_page = home.home_page.clone();
+    home_page.update(cx, |home_page, cx| {
+        home_page.request_app_settings_sync(cx);
+    });
+}
+
 fn normalize_sync_server_url(value: &str) -> String {
     SyncServerClient::normalize_base_url(value)
 }
@@ -403,7 +515,7 @@ fn apply_sync_server_url_setting(value: SharedString, cx: &mut App) {
             false
         } else {
             settings.sync_server_url = normalized.clone();
-            settings.save();
+            settings.save_local_only();
             true
         }
     };
@@ -429,6 +541,7 @@ fn apply_sync_server_url_setting(value: SharedString, cx: &mut App) {
 
 pub struct SettingsPanel {
     focus_handle: FocusHandle,
+    certificate_manager_view: Entity<CertificateManagerView>,
     llm_providers_view: Entity<LlmProvidersView>,
     size: Size,
     group_variant: GroupBoxVariant,
@@ -438,9 +551,11 @@ pub struct SettingsPanel {
 
 impl SettingsPanel {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let certificate_manager_view = cx.new(|cx| CertificateManagerView::new(cx));
         let llm_providers_view = cx.new(|cx| LlmProvidersView::new(cx));
         Self {
             focus_handle: cx.focus_handle(),
+            certificate_manager_view,
             llm_providers_view,
             size: Size::default(),
             group_variant: GroupBoxVariant::Outline,
@@ -462,6 +577,7 @@ impl SettingsPanel {
     }
 
     fn setting_pages(&self, _window: &mut Window, _cx: &App) -> Vec<SettingPage> {
+        let certificate_manager_view = self.certificate_manager_view.clone();
         let llm_view = self.llm_providers_view.clone();
         let default_settings = AppSettings::default();
 
@@ -495,6 +611,7 @@ impl SettingsPanel {
                                         settings.locale = val.to_string();
                                         gpui_component::set_locale(&settings.locale);
                                         settings.save();
+                                        trigger_app_settings_sync(cx);
                                     },
                                 ))
                                 .default_value(SharedString::from(default_settings.locale)),
@@ -526,6 +643,7 @@ impl SettingsPanel {
                                             "light".to_string()
                                         };
                                         settings.save();
+                                        trigger_app_settings_sync(cx);
                                     },
                                 )
                                 .default_value(false),
@@ -541,6 +659,7 @@ impl SettingsPanel {
                                         let settings = AppSettings::global_mut(cx);
                                         settings.auto_switch_theme = val;
                                         settings.save();
+                                        trigger_app_settings_sync(cx);
                                     },
                                 )
                                 .default_value(default_settings.auto_switch_theme),
@@ -592,6 +711,7 @@ impl SettingsPanel {
                                         let settings = AppSettings::global_mut(cx);
                                         settings.font_family = val.to_string();
                                         settings.save();
+                                        trigger_app_settings_sync(cx);
                                     },
                                 ))
                                 .default_value(SharedString::from(default_settings.font_family)),
@@ -612,6 +732,7 @@ impl SettingsPanel {
                                         let settings = AppSettings::global_mut(cx);
                                         settings.font_size = val;
                                         settings.save();
+                                        trigger_app_settings_sync(cx);
                                     },
                                 ))
                                 .default_value(default_settings.font_size),
@@ -636,6 +757,7 @@ impl SettingsPanel {
                                         settings.save();
                                         let settings_snapshot = settings.clone();
                                         sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        trigger_app_settings_sync(cx);
                                     },
                                 ))
                                 .default_value(default_settings.terminal_font_size),
@@ -653,6 +775,7 @@ impl SettingsPanel {
                                         settings.save();
                                         let settings_snapshot = settings.clone();
                                         sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        trigger_app_settings_sync(cx);
                                     },
                                 )
                                 .default_value(default_settings.terminal_auto_copy),
@@ -670,6 +793,7 @@ impl SettingsPanel {
                                         settings.save();
                                         let settings_snapshot = settings.clone();
                                         sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        trigger_app_settings_sync(cx);
                                     },
                                 )
                                 .default_value(default_settings.terminal_middle_click_paste),
@@ -705,6 +829,7 @@ impl SettingsPanel {
                                         settings.database_open_mode =
                                             DatabaseOpenMode::from_str(&val);
                                         settings.save();
+                                        trigger_app_settings_sync(cx);
                                     },
                                 ))
                                 .default_value(
@@ -729,6 +854,7 @@ impl SettingsPanel {
                                             cx.global::<AppSettings>().sql_auto_save_interval,
                                             cx,
                                         );
+                                        trigger_app_settings_sync(cx);
                                     },
                                 )
                                 .default_value(default_settings.enable_sql_auto_save),
@@ -754,6 +880,7 @@ impl SettingsPanel {
                                             val,
                                             cx,
                                         );
+                                        trigger_app_settings_sync(cx);
                                     },
                                 ))
                                 .default_value(default_settings.sql_auto_save_interval),
@@ -772,6 +899,13 @@ impl SettingsPanel {
             themed_setting_page(SettingPage::new(t!("LlmProviders.title"))).group(
                 themed_setting_group(SettingGroup::new()).item(SettingItem::render(
                     move |_options, _window, _cx| llm_view.clone().into_any_element(),
+                )),
+            ),
+            themed_setting_page(SettingPage::new(t!("CertificateManager.title"))).group(
+                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+                    move |_options, _window, _cx| {
+                        certificate_manager_view.clone().into_any_element()
+                    },
                 )),
             ),
             // 账户设置页
