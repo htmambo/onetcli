@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../plugins/auth.js";
+import type { SyncDataRecord } from "../../types/models.js";
 import { sendError } from "../../utils/http.js";
 import { parseSince } from "../../utils/time.js";
 
@@ -24,6 +25,21 @@ const updateSyncItemSchema = z.object({
   version: z.number().int().min(1),
   deletedAt: z.string().datetime().nullable().optional(),
 });
+
+function toSyncItemResponse(item: SyncDataRecord) {
+  return {
+    id: item.id,
+    ownerId: item.owner_id,
+    dataType: item.data_type,
+    encryptedData: item.encrypted_data,
+    keyVersion: item.key_version,
+    checksum: item.checksum,
+    version: item.version,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+    deletedAt: item.deleted_at,
+  };
+}
 
 export async function registerSyncRoutes(app: FastifyInstance) {
   app.get("/api/v1/sync/config", { preHandler: requireAuth }, async (request) => {
@@ -70,18 +86,20 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     });
 
     return {
-      data: items.map((item) => ({
-        id: item.id,
-        ownerId: item.owner_id,
-        dataType: item.data_type,
-        encryptedData: item.encrypted_data,
-        keyVersion: item.key_version,
-        checksum: item.checksum,
-        version: item.version,
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-        deletedAt: item.deleted_at,
-      })),
+      data: items.map(toSyncItemResponse),
+    };
+  });
+
+  app.get("/api/v1/sync/items/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const params = request.params as { id: string };
+    const item = app.database.getSyncItem(request.authUser!.id, params.id);
+
+    if (!item) {
+      return sendError(reply, 404, "同步项不存在");
+    }
+
+    return {
+      data: toSyncItemResponse(item),
     };
   });
 
@@ -102,18 +120,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
       });
 
       return reply.status(201).send({
-        data: {
-          id: item.id,
-          ownerId: item.owner_id,
-          dataType: item.data_type,
-          encryptedData: item.encrypted_data,
-          keyVersion: item.key_version,
-          checksum: item.checksum,
-          version: item.version,
-          createdAt: item.created_at,
-          updatedAt: item.updated_at,
-          deletedAt: item.deleted_at,
-        },
+        data: toSyncItemResponse(item),
       });
     } catch (error) {
       return sendError(reply, 400, error instanceof Error ? error.message : "创建同步项失败");
@@ -142,18 +149,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     }
 
     return {
-      data: {
-        id: item.id,
-        ownerId: item.owner_id,
-        dataType: item.data_type,
-        encryptedData: item.encrypted_data,
-        keyVersion: item.key_version,
-        checksum: item.checksum,
-        version: item.version,
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-        deletedAt: item.deleted_at,
-      },
+      data: toSyncItemResponse(item),
     };
   });
 

@@ -44,7 +44,7 @@
         <table class="min-w-full text-left text-sm">
           <thead class="text-[var(--muted)]">
             <tr class="border-b soft-line">
-              <th class="px-3 py-3 font-medium">邮箱</th>
+              <th class="px-3 py-3 font-medium">昵称 / 邮箱</th>
               <th class="px-3 py-3 font-medium">角色</th>
               <th class="px-3 py-3 font-medium">状态</th>
               <th class="px-3 py-3 font-medium">同步配置</th>
@@ -55,7 +55,10 @@
           </thead>
           <tbody>
             <tr v-for="user in users" :key="user.id" class="border-b soft-line last:border-none">
-              <td class="px-3 py-4 font-medium text-[var(--text)]">{{ user.email }}</td>
+              <td class="px-3 py-4">
+                <p class="font-medium text-[var(--text)]">{{ user.nickname }}</p>
+                <p v-if="user.nickname !== user.email" class="mt-1 text-xs text-[var(--muted)]">{{ user.email }}</p>
+              </td>
               <td class="px-3 py-4">{{ user.role }}</td>
               <td class="px-3 py-4">
                 <span
@@ -86,7 +89,7 @@
                   </button>
                   <button
                     class="rounded-xl bg-rose-600 px-3 py-2 text-xs font-medium text-white"
-                    @click="purgeData(user.id, user.email)"
+                    @click="purgeData(user.id, user.nickname, user.email)"
                   >
                     清空数据
                   </button>
@@ -155,8 +158,9 @@ async function toggleRole(userId: string, current: AdminUserSummary["role"]) {
   }
 }
 
-async function purgeData(userId: string, email: string) {
-  const confirmed = window.confirm(`确认要清空 ${email} 的同步配置和同步数据吗？`);
+async function purgeData(userId: string, nickname: string, email: string) {
+  const label = nickname === email ? email : `${nickname}（${email}）`;
+  const confirmed = window.confirm(`确认要清空 ${label} 的同步配置和同步数据吗？`);
   if (!confirmed) {
     return;
   }

@@ -19,6 +19,10 @@ export const useAuthStore = defineStore("auth", () => {
     localStorage.setItem(TOKEN_KEY, nextToken);
   }
 
+  function replaceUser(nextUser: PublicUser) {
+    user.value = nextUser;
+  }
+
   function clearSession() {
     token.value = null;
     user.value = null;
@@ -83,6 +87,7 @@ export const useAuthStore = defineStore("auth", () => {
     register,
     login,
     refreshMe,
+    replaceUser,
     logout,
     clearSession,
   };

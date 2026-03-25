@@ -4,7 +4,7 @@
 
 use gpui::{
     AnyElement, App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
-    Styled, Window, div,
+    Styled, Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
     ActiveTheme, IconName, Sizable, Size,
@@ -31,19 +31,8 @@ pub fn render_user_avatar<V: 'static>(
     cx: &App,
 ) -> AnyElement {
     if let Some(user) = user {
-        let email: SharedString = user.email.clone().into();
-        let display_name: SharedString = user
-            .username
-            .clone()
-            .unwrap_or_else(|| {
-                // 从邮箱提取用户名
-                user.email
-                    .split('@')
-                    .next()
-                    .unwrap_or(&user.email)
-                    .to_string()
-            })
-            .into();
+        let display_name: SharedString = user.display_name().into();
+        let secondary_identity = user.secondary_identity().map(SharedString::from);
         let avatar_url = user.avatar_url.clone();
 
         let avatar = if let Some(url) = &avatar_url {
@@ -79,16 +68,18 @@ pub fn render_user_avatar<V: 'static>(
                             .overflow_hidden()
                             .child(display_name),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .max_w_full()
-                            .overflow_hidden()
-                            .child(email),
-                    ),
+                    .when_some(secondary_identity, |this, email| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .max_w_full()
+                                .overflow_hidden()
+                                .child(email),
+                        )
+                    }),
             )
             .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
                 view.update(cx, |this, cx| {

@@ -1,6 +1,7 @@
 export interface UserRecord {
   id: string;
   email: string;
+  nickname: string;
   password_hash: string;
   role: "admin" | "user";
   status: "active" | "disabled";
@@ -42,6 +43,7 @@ export interface SyncDataRecord {
 export interface PublicUser {
   id: string;
   email: string;
+  nickname: string;
   role: "admin" | "user";
   status: "active" | "disabled";
   createdAt: string;

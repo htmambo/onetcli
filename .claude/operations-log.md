@@ -1,5 +1,348 @@
 ## 操作日志
 
+## 追加编码前检查 - sync-server-sidebar-account-entry
+时间：2026-03-25 10:48:33 +0800
+
+- 已复查相关实现：
+  - `sync_server/web/src/layouts/AppLayout.vue`
+  - `sync_server/web/src/router/index.ts`
+  - `sync_server/web/src/views/user/ProfileView.vue`
+- 将使用以下复用方式：
+  - 继续复用 `/app/profile` 既有账号设置页作为点击落点
+  - 复用 `isActive(...)` 路由高亮逻辑控制账号入口选中样式
+- 将遵循代码风格：只调整侧栏布局和交互，不新增路由或额外状态
+- 确认不重复造轮子，证明：资料页已存在，当前只缺少更直观的侧栏入口
+
+## 编码后声明 - sync-server-sidebar-account-entry
+时间：2026-03-25 10:49:14 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/layouts/AppLayout.vue::isActive`
+- `/app/profile` 既有账号设置页
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增新的路由和状态字段
+- 代码风格：通过 `RouterLink` 直接承载账号入口点击跳转，保持现有导航交互模式
+- 文件组织：改动仅限于侧栏布局文件
+
+### 3. 未重复造轮子的证明
+- 已有账号设置页和资料路由可直接复用，因此未新增新的账号详情页或弹窗
+
+## 实施与验证记录 - sync-server-sidebar-account-entry
+时间：2026-03-25 10:49:14 +0800
+
+### 已完成修改
+- `sync_server/web/src/layouts/AppLayout.vue`
+  - 侧栏改为纵向布局
+  - 账号信息入口移到底部区域
+  - 账号信息卡改为可点击，点击后进入 `/app/profile`
+  - 账号入口在资料页激活时显示选中状态
+
+### 本地验证
+- `npm run build`（工作目录：`sync_server/web`）
+  - 结果：通过
+
+## 编码前检查 - sync-server-user-nickname
+时间：2026-03-25 10:40:01 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-user-nickname.md`
+- 已分析相似实现：
+  - `sync_server/server/src/db/database.ts`
+  - `sync_server/server/src/http/routes/auth.ts`
+  - `sync_server/server/src/services/auth.ts`
+  - `sync_server/web/src/views/user/ProfileView.vue`
+  - `sync_server/web/src/layouts/AppLayout.vue`
+  - `sync_server/web/src/views/admin/AdminOverviewView.vue`
+- 将使用以下可复用组件：
+  - `toPublicUser(...)`：统一把昵称透出到公开用户对象
+  - `AuthService`：沿用现有账号自助能力承载昵称更新
+  - `auth.refreshMe()`：在资料页提交昵称后刷新当前登录态
+- 将遵循命名约定：数据库字段使用 `nickname`，前端接口字段使用 `nickname`
+- 将遵循代码风格：昵称自助修改继续挂在用户资料页和 `/api/v1/auth/*` 下，不新增独立模块
+- 确认不重复造轮子，证明：当前需求属于用户资料字段扩展，沿用现有账号模型和资料页即可完成
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和构建脚本作为替代并留痕
+
+## 编码后声明 - sync-server-user-nickname
+时间：2026-03-25 10:44:22 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/server/src/db/database.ts::toPublicUser`：昵称字段统一通过公开用户映射向外暴露
+- `sync_server/server/src/services/auth.ts::createSessionForUser`：登录、注册、刷新后的用户载荷沿用同一收敛点补齐昵称
+- `sync_server/web/src/views/user/ProfileView.vue`：沿用现有自助表单和消息提示模式新增昵称设置
+- `sync_server/web/src/stores/auth.ts`：沿用现有登录态 store，补一个轻量 `replaceUser` 以便资料修改后即时刷新界面
+
+### 2. 遵循了以下项目约定
+- 命名约定：数据库列和服务端字段使用 `nickname`，前端接口字段同样使用 `nickname`
+- 代码风格：昵称默认值通过数据库/服务层统一处理，前端仅做表单提交和展示，不引入额外状态层
+- 文件组织：结构变更集中在 `migrations` 和 `database.ts`，用户自助入口继续放在 `ProfileView.vue`
+
+### 3. 对比了以下相似实现
+- `change-password`：昵称修改沿用同样的 `auth` 路由和资料页表单结构
+- `toPublicUser + me`：昵称和角色/邮箱一样，作为登录态基础字段贯穿后端与前端
+- `AdminOverviewView`：管理员页继续通过 `PublicUser`/`AdminUserSummary` 展示账号信息，只补充昵称展示，不新增单独查询
+
+### 4. 未重复造轮子的证明
+- 已检查账号模型、认证会话返回、管理员用户列表和资料页表单
+- 结论：昵称是现有用户资料模型的自然扩展，使用既有账号链路即可完成，不需要新增独立用户资料服务
+
+## 实施与验证记录 - sync-server-user-nickname
+时间：2026-03-25 10:44:22 +0800
+
+### 已完成修改
+- `sync_server/server/migrations/002_add_user_nickname.sql`
+  - 新增 `nickname` 列
+  - 将历史用户昵称回填为邮箱
+- `sync_server/server/src/db/database.ts`
+  - 新用户默认 `nickname = email`
+  - 会话查询、公开用户映射和用户更新逻辑全部补齐昵称字段
+- `sync_server/server/src/services/auth.ts`
+  - 认证返回中补齐昵称
+  - 新增昵称资料更新服务
+- `sync_server/server/src/http/routes/auth.ts`
+  - 新增 `PATCH /api/v1/auth/profile`
+- `sync_server/web/src/views/user/ProfileView.vue`
+  - 新增昵称设置表单，支持用户自行修改
+- `sync_server/web/src/layouts/AppLayout.vue`
+  - 当前账号卡片优先展示昵称
+- `sync_server/web/src/views/admin/AdminOverviewView.vue`
+  - 管理员账号列表补充昵称展示
+
+### 本地验证
+- `npm run build`（工作目录：`sync_server`）
+  - 结果：通过
+  - 说明：`web` 构建与 `server` TypeScript 编译均成功
+- `node --import tsx/esm -e "...new DatabaseClient(...)"`（工作目录：`sync_server/server`）
+  - 结果：通过
+  - 说明：新增迁移可在临时 SQLite 数据库中成功执行，已验证 `nickname` 列添加与回填 SQL 无语法错误
+
+### 当前限制
+- 当前注册页没有单独收集昵称，仍按你的要求默认使用邮箱作为昵称；后续如需要注册时直接填写昵称，可在现有资料模型上继续扩展
+
+## 追加编码前检查 - sync-server-version-label-clarify
+时间：2026-03-25 10:26:24 +0800
+
+- 已复查相关实现：
+  - `sync_server/web/src/views/user/DashboardView.vue`
+  - `sync_server/web/src/views/user/SyncItemsView.vue`
+  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
+- 将使用以下复用方式：
+  - 抽出共享版本格式化函数，统一“密钥版本”和“记录版本”的展示方式
+- 将遵循代码风格：只改展示层文案和说明，不动接口协议
+- 确认不重复造轮子，证明：当前问题属于展示语义不清晰，使用共享格式化工具即可解决
+
+## 编码后声明 - sync-server-version-label-clarify
+时间：2026-03-25 10:31:56 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/views/user/DashboardView.vue`
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+
+### 2. 遵循了以下项目约定
+- 命名约定：共享格式化函数命名为 `formatKeyVersion`、`formatRecordVersion`
+- 代码风格：仅在展示层追加说明文案和格式化输出，不修改接口字段
+- 文件组织：版本展示逻辑集中放在 `sync_server/web/src/utils/syncItemVersion.ts`
+
+### 3. 未重复造轮子的证明
+- 密钥版本和记录版本的格式化逻辑已收敛到单一工具文件，页面模板没有重复拼接文案
+
+## 实施与验证记录 - sync-server-version-label-clarify
+时间：2026-03-25 10:31:56 +0800
+
+### 已完成修改
+- `sync_server/web/src/utils/syncItemVersion.ts`
+  - 新增密钥版本和记录版本的统一展示格式化函数
+- `sync_server/web/src/views/user/DashboardView.vue`
+  - 密钥配置面板补充字段说明和当前生效配置说明
+  - 最近同步项预览将 `key_version` / `版本` 改为更直观的展示
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 列表表头改为“密钥版本”“记录版本”
+  - 顶部补充两者区别说明
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - 详情页补充密钥版本和记录版本的解释文字
+
+### 本地验证
+- `npm run build`（工作目录：`sync_server/web`）
+  - 结果：通过
+
+## 追加编码前检查 - sync-server-sync-item-type-label
+时间：2026-03-25 10:22:38 +0800
+
+- 已复查相关实现：
+  - `sync_server/web/src/views/user/DashboardView.vue`
+  - `sync_server/web/src/views/user/SyncItemsView.vue`
+  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
+- 将使用以下复用方式：
+  - 抽出共享映射函数，避免三处页面各写一套类型文案
+- 将遵循代码风格：继续使用纯函数 + `<script setup lang="ts">` 导入调用，不引入额外状态
+- 确认不重复造轮子，证明：当前问题是展示层文案统一，不涉及接口和状态模型变更
+
+## 编码后声明 - sync-server-sync-item-type-label
+时间：2026-03-25 10:26:24 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/views/user/DashboardView.vue`
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+
+### 2. 遵循了以下项目约定
+- 命名约定：共享工具函数命名为 `getSyncItemTypeLabel`
+- 代码风格：通过单一纯函数完成展示层映射，不修改接口类型和页面状态结构
+- 文件组织：共享展示逻辑集中放入 `sync_server/web/src/utils`
+
+### 3. 未重复造轮子的证明
+- 三个页面都改为导入同一个映射函数，没有在模板里重复写条件判断
+
+## 实施与验证记录 - sync-server-sync-item-type-label
+时间：2026-03-25 10:26:24 +0800
+
+### 已完成修改
+- `sync_server/web/src/utils/syncItemType.ts`
+  - 新增同步类型中文映射
+- `sync_server/web/src/views/user/DashboardView.vue`
+  - 最近同步项卡片改为展示可读类型文案
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 列表页类型列改为展示可读类型文案
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - 详情页“数据类型”值改为展示可读类型文案
+
+### 本地验证
+- `npm run build`（工作目录：`sync_server/web`）
+  - 结果：通过
+
+## 编码前检查 - sync-server-sync-items-list
+时间：2026-03-25 10:00:22 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-items-list.md`
+- 已分析相似实现：
+  - `sync_server/web/src/views/user/DashboardView.vue`
+  - `sync_server/web/src/layouts/AppLayout.vue`
+  - `sync_server/web/src/views/admin/AdminOverviewView.vue`
+  - `sync_server/server/src/http/routes/sync.ts`
+- 将使用以下可复用组件：
+  - `api.listSyncItems(...)`：复用现有完整同步项接口
+  - `AppLayout.vue` 的 `links`：复用侧边栏导航组织方式
+  - `DashboardView.vue` 的概览卡片和时间格式化模式：保持用户页风格一致
+- 将遵循命名约定：新增视图继续放在 `sync_server/web/src/views/user`，路由名使用语义清晰的英文短横线路径
+- 将遵循代码风格：继续使用 Vue 3 `<script setup lang="ts">`、`ref`/`computed` 和现有面板布局
+- 确认不重复造轮子，证明：已检查同步接口、用户布局和后台表格页，当前仅缺少完整列表入口与页面，不需要新增后端协议
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和现有构建脚本作为替代并留痕
+
+## 编码后声明 - sync-server-sync-items-list
+时间：2026-03-25 10:03:27 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/services/api.ts::api.listSyncItems`：完整列表页直接复用现有同步项接口
+- `sync_server/web/src/layouts/AppLayout.vue::links`：沿用统一侧边栏导航组织方式，新增“全部同步项”入口
+- `sync_server/web/src/views/admin/AdminOverviewView.vue` 的表格页面结构：复用完整列表视图的头部、错误提示和表格展示模式
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增用户页命名为 `SyncItemsView.vue`，路由名为 `sync-items`
+- 代码风格：仍使用 `<script setup lang=\"ts\">`、`ref`/`computed` 和现有面板样式类
+- 文件组织：用户页面继续放在 `sync_server/web/src/views/user`，未新增额外状态层或后端接口
+
+### 3. 对比了以下相似实现
+- `DashboardView.vue`：保留仪表盘“最近同步项”定位，只把预览条数从 8 缩减到 5，并增加完整列表跳转按钮
+- `AppLayout.vue`：延续现有固定路由链接模式，把完整列表页作为普通用户导航项接入
+- `AdminOverviewView.vue`：参考其完整表格页结构，但未复用管理员权限或批量操作逻辑
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/server/src/http/routes/sync.ts` 和 `sync_server/server/src/db/database.ts`，确认 `/api/v1/sync/items` 已能返回按 `updated_at DESC` 排序的完整列表
+- 结论：当前只需新增前端入口和展示页，不需要新增后端路由、分页协议或并行数据模型
+
+## 实施与验证记录 - sync-server-sync-items-list
+时间：2026-03-25 10:03:27 +0800
+
+### 已完成修改
+- `sync_server/web/src/views/user/DashboardView.vue`
+  - 最近同步项预览改为通过 `previewItems` 计算属性截取前 5 条
+  - 区块头部新增“查看全部同步项”按钮，跳转到完整列表页
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 新增当前账号完整同步项列表页
+  - 展示类型、同步项 ID、`key_version`、版本、更新时间和软删除状态
+  - 补齐加载中、空状态、错误提示和返回概览按钮
+- `sync_server/web/src/router/index.ts`
+  - 新增 `/app/sync-items` 用户子路由
+- `sync_server/web/src/layouts/AppLayout.vue`
+  - 侧边栏新增“全部同步项”导航入口
+
+### 本地验证
+- `npm run build`（工作目录：`sync_server/web`）
+  - 结果：通过
+  - 说明：`vue-tsc -b && vite build` 成功，产物中已生成 `SyncItemsView` 对应构建文件
+
+### 当前限制
+- `sync_server/web` 当前没有独立的前端单元测试或组件测试；本次只能通过类型检查和生产构建验证回归
+
+## 追加编码前检查 - sync-server-sync-item-detail
+时间：2026-03-25 10:09:35 +0800
+
+- 已补充查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-items-list.md` 中“追加上下文（详情能力）”
+- 已分析新增复用点：
+  - `sync_server/server/src/db/database.ts::getSyncItem`
+  - `sync_server/web/src/views/user/SyncItemsView.vue`
+  - `sync_server/web/src/layouts/AppLayout.vue`
+- 将使用以下可复用组件：
+  - `DatabaseClient::getSyncItem(...)`：直接复用数据库层单条读取能力
+  - `api.request(...)`：沿用现有前端 API 封装补单条详情读取
+  - `AppLayout.vue` 导航模式：补齐详情页时“全部同步项”入口高亮
+- 将遵循命名约定：详情路由使用 `sync-item-detail`，详情页组件使用 `SyncItemDetailView.vue`
+- 将遵循代码风格：详情页继续使用现有面板布局，不新增模态框状态层或本地缓存层
+- 确认不重复造轮子，证明：数据库层已有单条读取能力，补 HTTP 路由和前端详情页即可完成，不需要前端全量拉取后手动筛一条
+
+## 编码后声明 - sync-server-sync-item-detail
+时间：2026-03-25 10:09:35 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/server/src/db/database.ts::getSyncItem`：直接作为单条详情读取的数据来源
+- `sync_server/web/src/services/api.ts::request`：继续复用统一鉴权和错误处理封装
+- `sync_server/web/src/layouts/AppLayout.vue::links`：沿用侧边栏导航入口，只补充详情页高亮规则
+
+### 2. 遵循了以下项目约定
+- 命名约定：动态路由命名为 `sync-item-detail`，页面组件为 `SyncItemDetailView`
+- 代码风格：详情页仍使用 `<script setup lang=\"ts\">`，通过 `watch(route.params.id)` 驱动数据刷新
+- 文件组织：服务端改动仅位于 `sync.ts` 路由层，前端改动集中在 `views/user`、`router` 和 `services/api`
+
+### 3. 对比了以下相似实现
+- `SyncItemsView.vue`：列表页继续负责“发现记录”，详情页负责“展开完整字段”，职责分离更清晰
+- `DashboardView.vue`：最近同步项预览新增“查看详情”按钮，但不承担详情渲染本身
+- `AppLayout.vue`：延续固定入口高亮模式，对详情页增加同组前缀匹配
+
+### 4. 未重复造轮子的证明
+- 已检查 `getSyncItem`、`listSyncItems` 和当前前端路由结构
+- 结论：通过独立详情 API 和详情页即可满足需求，不需要再加模态、额外 store 或重复的列表数据缓存
+
+## 实施与验证记录 - sync-server-sync-item-detail
+时间：2026-03-25 10:09:35 +0800
+
+### 已完成修改
+- `sync_server/server/src/http/routes/sync.ts`
+  - 新增 `GET /api/v1/sync/items/:id`
+  - 抽出 `toSyncItemResponse`，统一单条和列表响应结构
+- `sync_server/web/src/services/api.ts`
+  - 新增 `api.getSyncItem(token, id)`
+- `sync_server/web/src/router/index.ts`
+  - 新增 `/app/sync-items/:id` 详情路由
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 列表新增“查看详情”操作列
+- `sync_server/web/src/views/user/DashboardView.vue`
+  - 最近同步项卡片新增“查看详情”入口
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - 新增详情页，展示类型、状态、ID、owner_id、版本、时间戳、校验值和加密数据
+- `sync_server/web/src/layouts/AppLayout.vue`
+  - 补齐详情页时“全部同步项”导航高亮
+
+### 本地验证
+- `npm run build`（工作目录：`sync_server`）
+  - 结果：通过
+  - 说明：`web` 构建成功，`server` 的 `tsc -p tsconfig.json` 成功
+- `npm run check`（工作目录：`sync_server/server`）
+  - 结果：通过
+  - 说明：服务端无输出类型检查通过
+
+### 当前限制
+- 详情页当前展示的是原始 `encryptedData` 文本，不尝试做解密或结构化解析；这符合现有接口能力边界
+
 ## 编码前检查 - deepin-client-decorations
 时间：2026-03-25 02:06:00 +0800
 
@@ -2825,3 +3168,78 @@
 ### 6. 风险与限制
 - 当前仍缺少自动化 GUI 手段去点击 Deepin 的系统“还原”主按钮，所以最终结论仍需你实机确认
 - 现有 `window_ext.rs` 仍有既有未使用代码告警，与本次改动无关
+
+## 编码前检查 - desktop-account-entry
+时间：2026-03-25 11:07:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-desktop-account-entry.md`
+□ 将使用以下可复用组件：
+- `main/src/home/home_tabs.rs::add_settings_tab`：复用现有设置标签打开逻辑
+- `gpui_component::setting::Settings::default_selected_index`：复用设置页默认选中能力
+- `main/src/user_avatar.rs::render_user_avatar`：复用侧栏账号入口组件
+- `crates/core/src/cloud_sync/sync_server.rs::map_user_info`：复用当前用户映射链路补昵称
+□ 将遵循命名约定：新增 `SettingsPanelPage` 这类页面语义枚举和 `display_name` 这类展示语义方法
+□ 将遵循代码风格：只在现有设置页、用户模型和侧栏组件上做增量修改，不引入新的窗口或标签体系
+□ 确认不重复造轮子，证明：已检查 `home_tab.rs`、`home/home_tabs.rs`、`setting_tab.rs`、`user_avatar.rs`、`cloud_sync/sync_server.rs`，现有设置页和账号组件已满足复用条件
+
+## 执行记录 - desktop-account-entry
+时间：2026-03-25 11:07:00 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `main/src/home/home_tabs.rs`
+- `main/src/setting_tab.rs`
+- `main/src/user_avatar.rs`
+- `main/src/auth.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/sync_server.rs`
+- `crates/ui/src/setting/settings.rs`
+
+### 2. 对比的相似实现
+- `main/src/home_tab.rs:2375`：主页侧栏底部集中承载设置和账号入口
+- `main/src/setting_tab.rs:679`：账户页已存在于主设置面板中
+- `main/src/user_avatar.rs:27`：账号入口渲染已抽成独立组件
+- `crates/ui/src/setting/settings.rs:86`：设置组件支持默认页选中
+
+### 3. 当前发现
+- 左侧栏登录后点击账号区域没有行为，未满足“打开设置中的账号页面”的要求
+- 桌面端 `UserInfo` 尚未解析服务端 `nickname`，所以即使 web 已完成昵称链路，桌面端仍拿不到
+- `Settings::default_selected_index` 可以直接复用，但要补一个“待打开页面”请求，才能兼容已存在的设置标签
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
+
+## 编码后声明 - desktop-account-entry
+时间：2026-03-25 11:06:26 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home/home_tabs.rs::add_settings_tab`：继续复用原有设置标签打开和激活逻辑
+- `gpui_component::setting::Settings::default_selected_index`：用于账户页默认定位
+- `main/src/user_avatar.rs::render_user_avatar`：继续作为主页左下角账号入口的唯一渲染点
+- `crates/core/src/cloud_sync/sync_server.rs::map_user_info`：继续作为 sync server 用户信息进入桌面端的唯一映射点
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `SettingsPanelPage`、`PendingSettingsPanelPage`、`display_name`、`secondary_identity` 等语义化命名
+- 代码风格：采用小范围增量修改，未新增第二套设置页或账号入口组件
+- 文件组织：导航状态收敛在 `main/src/setting_tab.rs`，展示逻辑收敛在 `main/src/user_avatar.rs`，数据映射收敛在 `crates/core/src/cloud_sync`
+
+### 3. 对比了以下相似实现
+- `main/src/home_tab.rs:2413`：沿用侧栏底部账号入口结构，仅修改点击行为
+- `main/src/setting_tab.rs:747`：沿用既有账户设置页，不新增新路由或窗口
+- `crates/ui/src/setting/settings.rs:86`：复用默认选中页能力，通过 `state_version` 触发已打开设置页重新定位
+- `crates/core/src/cloud_sync/sync_server.rs:604`：沿用既有用户映射入口补 `nickname`
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/home_tab.rs`、`main/src/home/home_tabs.rs`、`main/src/setting_tab.rs`、`main/src/user_avatar.rs`、`crates/core/src/cloud_sync/client.rs`、`crates/core/src/cloud_sync/sync_server.rs`
+- 最终没有新增新的设置窗口、账号弹窗或独立导航系统，只是在现有设置标签基础上增加“待打开页面”请求状态
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main --no-run`：通过
+
+### 6. 风险与限制
+- 本次没有自动化 GUI 点击测试，左下角账号入口跳转到账户页的最终交互仍建议你本地点一次确认
+- 构建过程中保留了既有 `crates/ui/src/title_bar.rs` 未使用函数警告，与本次改动无关
+- Rust 依赖里仍有既有 `num-bigint-dig v0.8.4` future incompatibility 提示，与本次任务无关

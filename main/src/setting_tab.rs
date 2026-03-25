@@ -13,7 +13,10 @@ use gpui_component::{
     group_box::GroupBoxVariant,
     h_flex,
     kbd::Kbd,
-    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
+    setting::{
+        NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
+        Settings,
+    },
     v_flex,
 };
 use one_core::cloud_sync::{GlobalCloudUser, UserInfo, sync_server::SyncServerClient};
@@ -63,6 +66,54 @@ impl GlobalCurrentUser {
             }
         }
         GlobalCloudUser::set_user(user, cx);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SettingsPanelPage {
+    #[default]
+    General,
+    Account,
+}
+
+impl SettingsPanelPage {
+    fn select_index(self) -> SelectIndex {
+        match self {
+            Self::General => SelectIndex::default(),
+            Self::Account => SelectIndex {
+                page_ix: 3,
+                group_ix: None,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct PendingSettingsPanelPage {
+    page: Arc<RwLock<Option<SettingsPanelPage>>>,
+}
+
+impl gpui::Global for PendingSettingsPanelPage {}
+
+impl PendingSettingsPanelPage {
+    fn set(page: SettingsPanelPage, cx: &mut App) {
+        if !cx.has_global::<PendingSettingsPanelPage>() {
+            cx.set_global(PendingSettingsPanelPage::default());
+        }
+        if let Some(state) = cx.try_global::<PendingSettingsPanelPage>() {
+            if let Ok(mut guard) = state.page.write() {
+                *guard = Some(page);
+            }
+        }
+    }
+
+    fn take(cx: &mut App) -> Option<SettingsPanelPage> {
+        if let Some(state) = cx.try_global::<PendingSettingsPanelPage>() {
+            if let Ok(mut guard) = state.page.write() {
+                return guard.take();
+            }
+        }
+        None
     }
 }
 
@@ -354,6 +405,8 @@ pub struct SettingsPanel {
     llm_providers_view: Entity<LlmProvidersView>,
     size: Size,
     group_variant: GroupBoxVariant,
+    selected_page: SettingsPanelPage,
+    state_version: u64,
 }
 
 impl SettingsPanel {
@@ -364,6 +417,20 @@ impl SettingsPanel {
             llm_providers_view,
             size: Size::default(),
             group_variant: GroupBoxVariant::Outline,
+            selected_page: PendingSettingsPanelPage::take(cx).unwrap_or_default(),
+            state_version: 0,
+        }
+    }
+
+    pub fn request_page(page: SettingsPanelPage, cx: &mut App) {
+        PendingSettingsPanelPage::set(page, cx);
+    }
+
+    fn apply_requested_page(&mut self, cx: &mut Context<Self>) {
+        if let Some(page) = PendingSettingsPanelPage::take(cx) {
+            self.selected_page = page;
+            self.state_version = self.state_version.wrapping_add(1);
+            cx.notify();
         }
     }
 
@@ -717,6 +784,7 @@ impl TabContent for SettingsPanel {
         if !cx.has_global::<AppSettings>() {
             init_settings(cx);
         }
+        self.apply_requested_page(cx);
     }
 }
 
@@ -727,9 +795,10 @@ impl Render for SettingsPanel {
         }
 
         div().track_focus(&self.focus_handle).size_full().child(
-            Settings::new("main-app-settings")
+            Settings::new(format!("main-app-settings-{}", self.state_version))
                 .with_size(self.size)
                 .with_group_variant(self.group_variant)
+                .default_selected_index(self.selected_page.select_index())
                 .pages(self.setting_pages(window, cx)),
         )
     }
@@ -742,17 +811,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
     if let Some(user) = user {
         // 已登录状态：显示用户信息和登出按钮
         let email: SharedString = user.email.clone().into();
-        let display_name: SharedString = user
-            .username
-            .clone()
-            .unwrap_or_else(|| {
-                user.email
-                    .split('@')
-                    .next()
-                    .unwrap_or(&user.email)
-                    .to_string()
-            })
-            .into();
+        let display_name: SharedString = user.display_name().into();
 
         v_flex()
             .gap_4()

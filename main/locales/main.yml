@@ -879,9 +879,9 @@ Settings:
       zh-CN: 账户
       zh-HK: 帳戶
     username:
-      en: "Username:"
-      zh-CN: "用户名："
-      zh-HK: "用戶名："
+      en: "Nickname:"
+      zh-CN: "昵称："
+      zh-HK: "暱稱："
     email:
       en: "Email:"
       zh-CN: "邮箱："

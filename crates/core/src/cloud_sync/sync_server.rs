@@ -51,6 +51,7 @@ struct ApiErrorBody {
 struct SyncServerPublicUser {
     id: String,
     email: String,
+    nickname: Option<String>,
     role: String,
     status: String,
     created_at: String,
@@ -610,6 +611,7 @@ impl SyncServerClient {
         UserInfo {
             id: user.id,
             email: user.email,
+            nickname: user.nickname.filter(|nickname| !nickname.trim().is_empty()),
             username: None,
             avatar_url: None,
             created_at: parse_rfc3339_to_seconds(&user.created_at),

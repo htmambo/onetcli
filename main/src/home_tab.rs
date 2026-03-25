@@ -2416,6 +2416,8 @@ impl HomePage {
                                 |this: &mut HomePage, window, cx| {
                                     if this.current_user.is_none() {
                                         this.show_login_dialog(window, cx);
+                                    } else {
+                                        this.open_account_settings_tab(window, cx);
                                     }
                                 },
                                 cx,

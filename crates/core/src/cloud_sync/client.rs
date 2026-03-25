@@ -215,10 +215,49 @@ pub struct UserInfo {
     pub id: String,
     /// 用户邮箱
     pub email: String,
+    /// 用户昵称（可选）
+    pub nickname: Option<String>,
     /// 用户名（可选）
     pub username: Option<String>,
     /// 头像 URL（可选）
     pub avatar_url: Option<String>,
     /// 创建时间
     pub created_at: i64,
+}
+
+impl UserInfo {
+    /// 返回适合界面展示的主身份文案，优先使用昵称，其次用户名，最后回退到邮箱前缀。
+    pub fn display_name(&self) -> String {
+        self.nickname
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                self.username
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+            })
+            .unwrap_or_else(|| {
+                self.email
+                    .split('@')
+                    .next()
+                    .unwrap_or(&self.email)
+                    .to_string()
+            })
+    }
+
+    /// 返回适合界面展示的副身份文案。
+    ///
+    /// 当主文案已经等于邮箱时，不再重复显示邮箱。
+    pub fn secondary_identity(&self) -> Option<String> {
+        let display_name = self.display_name();
+        if display_name == self.email {
+            None
+        } else {
+            Some(self.email.clone())
+        }
+    }
 }

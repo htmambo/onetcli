@@ -82,6 +82,16 @@ export const api = {
     });
   },
 
+  updateProfile(token: string, nickname: string) {
+    return request<PublicUser>("/api/v1/auth/profile", {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({
+        nickname,
+      }),
+    });
+  },
+
   getSyncConfig(token: string) {
     return request<SyncConfig | null>("/api/v1/sync/config", {
       token,
@@ -101,6 +111,12 @@ export const api = {
 
   listSyncItems(token: string) {
     return request<SyncItem[]>("/api/v1/sync/items", {
+      token,
+    });
+  },
+
+  getSyncItem(token: string, id: string) {
+    return request<SyncItem>(`/api/v1/sync/items/${id}`, {
       token,
     });
   },

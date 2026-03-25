@@ -1,6 +1,7 @@
 export interface PublicUser {
   id: string;
   email: string;
+  nickname: string;
   role: "admin" | "user";
   status: "active" | "disabled";
   createdAt: string;

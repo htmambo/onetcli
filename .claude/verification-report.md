@@ -3,6 +3,190 @@
 
 ---
 
+## 审查报告（sync-server-sidebar-account-entry）
+生成时间：2026-03-25 10:49:14 +0800
+
+### 需求完整性检查
+- 目标明确：左侧栏底部的账号信息需要更新展示，并支持点击后打开账号设置页
+- 范围明确：仅涉及 `sync_server/web` 左侧栏布局与交互
+- 交付物明确：布局调整、点击跳转、本地构建验证
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：84/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 入口复用合理：直接使用既有 `/app/profile` 作为账号信息卡点击落点，没有新增冗余页面。
+- 展示位置更符合需求：账号信息区已移到侧栏底部，并保留昵称/邮箱联合展示。
+- 交互一致性良好：资料页激活时，底部账号入口会显示选中状态，和侧栏其他入口保持一致。
+
+---
+
+## 审查报告（sync-server-user-nickname）
+生成时间：2026-03-25 10:44:22 +0800
+
+### 需求完整性检查
+- 目标明确：在用户表新增昵称字段，默认与邮箱相同，并支持用户自行修改
+- 范围明确：数据库迁移、认证返回、资料修改接口、个人资料页和用户展示位
+- 交付物明确：代码修改、本地构建验证、迁移冒烟验证、`.claude/` 留痕文件
+- 风险与依赖明确：历史数据库需要通过迁移回填昵称，注册页暂不单独采集昵称
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：87/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 迁移策略正确：[`002_add_user_nickname.sql`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/migrations/002_add_user_nickname.sql#L1) 先新增 `nickname` 列，再把历史用户回填为邮箱，满足“默认昵称与邮箱相同”。
+- 默认值闭环成立：[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L63) 新用户创建时默认把 `nickname` 设为 `email`；[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L38) 通过 `toPublicUser` 统一把昵称向外暴露。
+- 自助修改入口合理：[`auth.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/auth.ts#L111) 新增 `PATCH /api/v1/auth/profile`；[`ProfileView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/ProfileView.vue#L3) 新增昵称设置卡片，用户可自行保存昵称。
+- 登录态与展示位一致：[`AppLayout.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/layouts/AppLayout.vue#L13) 当前账号卡片已优先展示昵称；管理员列表也补充了昵称/邮箱联合展示，避免只能看到邮箱。
+- 本地验证有效：`npm run build`（`sync_server`）通过；临时 SQLite 数据库实例化也通过，说明昵称迁移 SQL 能在真实初始化流程中执行成功。
+- 残余风险可控：当前注册页不提供单独昵称输入，但这与“默认昵称等于邮箱，后续自己设置”一致。
+
+---
+
+## 审查报告（sync-server-version-label-clarify）
+生成时间：2026-03-25 10:26:24 +0800
+
+### 需求完整性检查
+- 目标明确：让页面中的 `key_version` 与 `版本` 更直观，并在密钥配置面板补充解释
+- 范围明确：仅涉及 `sync_server/web` 展示层
+- 交付物明确：共享格式化函数、页面文案调整、本地构建验证
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：84/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 展示语义已明显改善：`key_version` 改为“密钥版本”，`版本` 改为“记录版本”，并统一格式化为“第 N 代 / 第 N 版”。
+- 说明信息位置合理：密钥配置面板直接补充了字段解释和当前生效配置，用户无需跳到详情页再猜字段含义。
+
+---
+
+## 审查报告（sync-server-sync-item-type-label）
+生成时间：2026-03-25 10:22:38 +0800
+
+### 需求完整性检查
+- 目标明确：将页面中原始 `dataType` 值替换为可读性更好的中文描述
+- 范围明确：仅涉及 `sync_server/web` 的展示层
+- 交付物明确：共享映射函数、三处页面改动、本地构建验证
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：84/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 抽象层级合适：通过共享函数统一 `connection`、`workspace`、`app_settings` 的中文描述，避免概览、列表、详情页各自维护一套映射。
+- 影响范围受控：仅改展示值，不改接口和数据结构；未知类型保留原始值作为兜底，避免信息丢失。
+
+---
+
+## 审查报告（sync-server-sync-item-detail）
+生成时间：2026-03-25 10:09:35 +0800
+
+### 需求完整性检查
+- 目标明确：同步记录不仅要有完整列表，还需要可以进入单条详情查看完整字段
+- 范围明确：服务端单条读取路由、前端 API、详情路由、详情页、列表和预览入口
+- 交付物明确：代码修改、本地前后端类型与构建验证、`.claude/` 留痕更新
+- 风险与依赖明确：详情页依赖现有原始加密数据字段；当前不包含解密能力
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 服务端实现最小且正确：[`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L29) 抽出统一响应映射，[`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L90) 新增 `GET /api/v1/sync/items/:id`，直接复用数据库层已有单条读取能力。
+- 前端接口闭环完整：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts#L108) 新增 `api.getSyncItem`，没有绕回全量列表筛选单条，避免了无谓请求和重复状态。
+- 详情页信息量充分：[`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue#L1) 展示同步项状态、ID、`owner_id`、版本、时间戳、`checksum` 和 `encryptedData`，满足“查看详情”的实际排查需求。
+- 入口体验完整：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L66) 列表页新增“查看详情”操作；[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L123) 最近同步项预览也可直接进入详情。
+- 导航一致性已补齐：[`AppLayout.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/layouts/AppLayout.vue#L75) 对 `/app/sync-items/:id` 做了前缀高亮处理，详情页下侧边栏不会丢失定位。
+- 本地验证有效：`npm run build`（`sync_server`）和 `npm run check`（`sync_server/server`）均通过。残余风险主要是当前仓库没有组件级自动化测试。
+
+---
+
+## 审查报告（sync-server-sync-items-list）
+生成时间：2026-03-25 10:03:27 +0800
+
+### 需求完整性检查
+- 目标明确：将 `sync_server` 仪表盘中的最近同步项预览缩减为 5 条，并提供跳转到完整列表页的入口
+- 范围明确：仅涉及 `sync_server/web` 的用户路由、侧边栏导航、仪表盘区块和新增列表页
+- 交付物明确：前端代码改动、本地构建验证、`.claude/` 留痕文件
+- 风险与依赖明确：后端依赖既有 `/api/v1/sync/items` 接口；当前前端没有独立测试文件，只能以构建验证为主
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：84/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：91/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 需求匹配直接完成：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L85) 已新增完整列表入口，[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L111) 改为只渲染前 5 条预览数据。
+- 路由与导航接入完整：[`index.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/router/index.ts#L37) 新增 `/app/sync-items` 用户页路由，[`AppLayout.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/layouts/AppLayout.vue#L60) 侧边栏新增“全部同步项”入口。
+- 完整列表页实现独立且复用现有接口：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L1) 使用既有 `api.listSyncItems` 拉取完整数据，补齐加载、空状态、错误提示和软删除状态展示。
+- 架构一致性良好：未新增后端接口，也没有引入新的状态管理层；改动集中在现有 Vue Router 和用户视图目录内，符合当前 `sync_server/web` 结构。
+- 本地验证闭环成立：在 `sync_server/web` 目录执行 `npm run build` 成功，`vue-tsc -b` 与 `vite build` 均通过。
+- 残余风险可控：当前没有组件测试，后续若要继续扩展筛选、分页或仅展示 `connection` 类型，需要补测试用例保证列表交互稳定。
+
+---
+
 ## 审查报告（deepin-client-decorations）
 生成时间：2026-03-25 02:27:00 +0800
 
@@ -1441,3 +1625,44 @@
 ### 残余风险
 - 还原按钮行为没有自动化 GUI 回归测试，仍依赖 Deepin 25 实机验证
 - 若问题根因最终位于 `gpui` X11 对 `_NET_WM_STATE_TOGGLE` 的处理语义，本次改动只能消除干扰项，不能替代底层补丁
+
+
+---
+
+## 审查报告（desktop-account-entry）
+生成时间：2026-03-25 11:06:26 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“桌面应用左侧栏底部账号信息更新”和“登录后点击打开设置中的账号页”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已同时处理昵称展示、去重邮箱显示、账户页入口跳转和设置页默认定位
+- 交付物映射：已产出桌面端代码改动、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `UserInfo` 映射、主页侧栏账号组件、设置页默认选中能力和现有设置标签复用方式
+- 结论留痕：本地验证命令、构建警告和 GUI 残余验证边界已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：91/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 主要结论
+- 桌面端现在会解析 sync server 返回的 `nickname`，侧栏账号区与账户设置页统一按“昵称优先、邮箱兜底”的规则展示。
+- 左下角账号入口在未登录时仍保持弹登录框，登录后则会激活设置标签并直接定位到账户页。
+- 已打开的设置标签也能响应这次跳转，不需要关闭重开设置页。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main --no-run`：通过
+
+### 残余风险
+- 缺少自动化 GUI 测试，仍建议在实际界面确认侧栏点击后是否按预期切到账户页
+- 当前只验证了桌面端编译和测试目标编译，未新增独立单元测试覆盖设置页切换状态

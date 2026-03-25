@@ -1,6 +1,39 @@
 <template>
   <div class="grid gap-6 xl:grid-cols-[1fr_1fr]">
     <section class="panel rounded-[28px] p-6">
+      <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">资料设置</p>
+      <h2 class="mt-3 text-2xl font-semibold text-[var(--text)]">设置昵称</h2>
+      <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
+        昵称默认与邮箱相同。你可以把它改成更容易识别的名称，修改后会立即同步到当前账号信息展示。
+      </p>
+
+      <form class="mt-8 space-y-4" @submit.prevent="submitNickname">
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-[var(--text)]">昵称</span>
+          <input
+            v-model="nickname"
+            type="text"
+            maxlength="255"
+            required
+            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            placeholder="输入昵称"
+          />
+        </label>
+
+        <p v-if="nicknameMessage" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {{ nicknameMessage }}
+        </p>
+        <p v-if="nicknameError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {{ nicknameError }}
+        </p>
+
+        <button class="accent-button rounded-2xl px-4 py-3 text-sm font-semibold text-white" :disabled="submittingNickname">
+          {{ submittingNickname ? "保存中..." : "保存昵称" }}
+        </button>
+      </form>
+    </section>
+
+    <section class="panel rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">账号设置</p>
       <h2 class="mt-3 text-2xl font-semibold text-[var(--text)]">修改密码</h2>
       <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
@@ -43,7 +76,7 @@
       </form>
     </section>
 
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel rounded-[28px] p-6 xl:col-span-2">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">同步数据管理</p>
       <h2 class="mt-3 text-2xl font-semibold text-[var(--text)]">清空当前账号云端数据</h2>
       <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
@@ -76,11 +109,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
+
+const nickname = ref("");
+const nicknameMessage = ref("");
+const nicknameError = ref("");
+const submittingNickname = ref(false);
 
 const currentPassword = ref("");
 const nextPassword = ref("");
@@ -91,6 +129,31 @@ const submittingPassword = ref(false);
 const clearMessage = ref("");
 const clearError = ref("");
 const clearing = ref(false);
+
+watch(
+  () => auth.user?.nickname,
+  (nextNickname) => {
+    nickname.value = nextNickname ?? "";
+  },
+  { immediate: true },
+);
+
+async function submitNickname() {
+  nicknameMessage.value = "";
+  nicknameError.value = "";
+  submittingNickname.value = true;
+
+  try {
+    const nextUser = await api.updateProfile(auth.token!, nickname.value);
+    auth.replaceUser(nextUser);
+    nickname.value = nextUser.nickname;
+    nicknameMessage.value = "昵称已更新";
+  } catch (error) {
+    nicknameError.value = error instanceof ApiError ? error.message : "更新昵称失败";
+  } finally {
+    submittingNickname.value = false;
+  }
+}
 
 async function submitPassword() {
   passwordMessage.value = "";

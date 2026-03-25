@@ -294,13 +294,17 @@ impl AuthService {
 
         match self.cloud_client().get_current_user().await {
             Ok(Some(user)) => Ok(user),
-            Ok(None) => Ok(UserInfo {
-                id: auth_resp.user_id,
-                email: auth_resp.email,
-                username: None,
-                avatar_url: None,
-                created_at: 0,
-            }),
+            Ok(None) => {
+                let email = auth_resp.email;
+                Ok(UserInfo {
+                    id: auth_resp.user_id,
+                    email: email.clone(),
+                    nickname: Some(email),
+                    username: None,
+                    avatar_url: None,
+                    created_at: 0,
+                })
+            }
             Err(error) => Err(error.to_string()),
         }
     }

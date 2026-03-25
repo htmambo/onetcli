@@ -15,6 +15,10 @@ const changePasswordSchema = z.object({
   nextPassword: z.string().min(8).max(128),
 });
 
+const updateProfileSchema = z.object({
+  nickname: z.string().trim().min(1).max(255),
+});
+
 const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
@@ -101,6 +105,21 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       };
     } catch (error) {
       return sendError(reply, 400, error instanceof Error ? error.message : "修改密码失败");
+    }
+  });
+
+  app.patch("/api/v1/auth/profile", { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = updateProfileSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, 400, parsed.error.issues[0]?.message ?? "请求参数错误");
+    }
+
+    try {
+      return {
+        data: app.authService.updateProfile(request.authUser!.id, parsed.data.nickname),
+      };
+    } catch (error) {
+      return sendError(reply, 400, error instanceof Error ? error.message : "更新资料失败");
     }
   });
 }

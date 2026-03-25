@@ -1,5 +1,5 @@
 use crate::home_tab::HomePage;
-use crate::setting_tab::{AppSettings, DatabaseOpenMode, SettingsPanel};
+use crate::setting_tab::{AppSettings, DatabaseOpenMode, SettingsPanel, SettingsPanelPage};
 use db_view::chatdb::chat_panel::ChatPanel;
 use db_view::database_tab::DatabaseTabView;
 use gpui::AppContext;
@@ -545,6 +545,15 @@ impl HomePage {
                 );
             });
         });
+    }
+
+    pub(crate) fn open_account_settings_tab(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        SettingsPanel::request_page(SettingsPanelPage::Account, cx);
+        self.add_settings_tab(window, cx);
     }
 
     pub(crate) fn add_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {

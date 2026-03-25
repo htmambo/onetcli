@@ -39,6 +39,7 @@ function toPublicUser(user: UserRecord): PublicUser {
   return {
     id: user.id,
     email: user.email,
+    nickname: user.nickname,
     role: user.role,
     status: user.status,
     createdAt: user.created_at,
@@ -59,11 +60,18 @@ export class DatabaseClient {
     runMigrations(this.db, migrationsPath);
   }
 
-  createUser(email: string, passwordHash: string, role: UserRole = "user", status: UserStatus = "active"): UserRecord {
+  createUser(
+    email: string,
+    passwordHash: string,
+    role: UserRole = "user",
+    status: UserStatus = "active",
+    nickname: string = email,
+  ): UserRecord {
     const now = nowIso();
     const user: UserRecord = {
       id: createId(),
       email,
+      nickname,
       password_hash: passwordHash,
       role,
       status,
@@ -75,8 +83,8 @@ export class DatabaseClient {
     this.db
       .prepare(
         `
-        INSERT INTO users (id, email, password_hash, role, status, created_at, updated_at, last_login_at)
-        VALUES (@id, @email, @password_hash, @role, @status, @created_at, @updated_at, @last_login_at)
+        INSERT INTO users (id, email, nickname, password_hash, role, status, created_at, updated_at, last_login_at)
+        VALUES (@id, @email, @nickname, @password_hash, @role, @status, @created_at, @updated_at, @last_login_at)
       `,
       )
       .run(user);
@@ -139,6 +147,7 @@ export class DatabaseClient {
             s.last_used_at as s_last_used_at,
             u.id as u_id,
             u.email as u_email,
+            u.nickname as u_nickname,
             u.password_hash as u_password_hash,
             u.role as u_role,
             u.status as u_status,
@@ -168,6 +177,7 @@ export class DatabaseClient {
       user: {
         id: row.u_id,
         email: row.u_email,
+        nickname: row.u_nickname,
         password_hash: row.u_password_hash,
         role: row.u_role as UserRole,
         status: row.u_status as UserStatus,
@@ -371,7 +381,7 @@ export class DatabaseClient {
     };
   }
 
-  updateUser(userId: string, patch: { role?: UserRole; status?: UserStatus }): PublicUser | null {
+  updateUser(userId: string, patch: { role?: UserRole; status?: UserStatus; nickname?: string }): PublicUser | null {
     const updates: string[] = [];
     const values: Array<string> = [];
 
@@ -383,6 +393,11 @@ export class DatabaseClient {
     if (patch.status) {
       updates.push("status = ?");
       values.push(patch.status);
+    }
+
+    if (patch.nickname !== undefined) {
+      updates.push("nickname = ?");
+      values.push(patch.nickname);
     }
 
     if (updates.length === 0) {

@@ -35,6 +35,16 @@ const routes = [
         component: () => import("@/views/user/DashboardView.vue"),
       },
       {
+        path: "sync-items",
+        name: "sync-items",
+        component: () => import("@/views/user/SyncItemsView.vue"),
+      },
+      {
+        path: "sync-items/:id",
+        name: "sync-item-detail",
+        component: () => import("@/views/user/SyncItemDetailView.vue"),
+      },
+      {
         path: "profile",
         name: "profile",
         component: () => import("@/views/user/ProfileView.vue"),

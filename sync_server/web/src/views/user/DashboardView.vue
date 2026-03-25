@@ -30,7 +30,7 @@
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">同步密钥配置</p>
-            <h3 class="mt-2 text-xl font-semibold text-[var(--text)]">更新 key_verification</h3>
+            <h3 class="mt-2 text-xl font-semibold text-[var(--text)]">管理同步密钥配置</h3>
           </div>
           <span
             class="rounded-full px-3 py-1 text-xs font-medium"
@@ -40,9 +40,33 @@
           </span>
         </div>
 
+        <div class="mt-6 rounded-3xl border border-[var(--line)] bg-white/60 p-5">
+          <p class="text-sm font-semibold text-[var(--text)]">字段说明</p>
+          <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
+            密钥校验串用于校验当前主密钥是否匹配，不会直接保存你的明文密钥。
+          </p>
+          <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
+            密钥版本表示当前账号正在使用第几代同步密钥；只有更换主密钥或重建密钥配置时才应该递增。
+          </p>
+          <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
+            同步记录里的记录版本则表示某一条记录已经更新到第几版，它和密钥版本是两回事。
+          </p>
+        </div>
+
+        <div v-if="config" class="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50/80 p-5">
+          <p class="text-sm font-semibold text-emerald-800">当前生效配置</p>
+          <div class="mt-3 flex flex-wrap gap-3 text-sm text-emerald-700">
+            <span>密钥版本：{{ formatKeyVersion(config.keyVersion) }}</span>
+            <span>最近更新：{{ formatDate(config.updatedAt) }}</span>
+          </div>
+        </div>
+
         <form class="mt-6 space-y-4" @submit.prevent="saveConfig">
           <label class="block">
-            <span class="mb-2 block text-sm font-medium text-[var(--text)]">key_verification</span>
+            <span class="mb-2 block text-sm font-medium text-[var(--text)]">密钥校验串（key_verification）</span>
+            <span class="mb-2 block text-xs leading-6 text-[var(--muted)]">
+              用来验证当前主密钥是否正确，不是主密钥本身。
+            </span>
             <textarea
               v-model="keyVerification"
               rows="5"
@@ -51,7 +75,10 @@
             />
           </label>
           <label class="block">
-            <span class="mb-2 block text-sm font-medium text-[var(--text)]">key_version</span>
+            <span class="mb-2 block text-sm font-medium text-[var(--text)]">密钥版本（key_version）</span>
+            <span class="mb-2 block text-xs leading-6 text-[var(--muted)]">
+              表示当前账号使用的是第几代同步密钥。正常修改同步内容时不需要改它。
+            </span>
             <input
               v-model.number="keyVersion"
               type="number"
@@ -82,9 +109,17 @@
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">最近同步项</p>
             <h3 class="mt-2 text-xl font-semibold text-[var(--text)]">账号级同步数据</h3>
           </div>
-          <span class="rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-[var(--muted)]">
-            {{ items.length }} 条
-          </span>
+          <div class="flex items-center gap-3">
+            <RouterLink
+              to="/app/sync-items"
+              class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+            >
+              查看全部同步项
+            </RouterLink>
+            <span class="rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-[var(--muted)]">
+              {{ items.length }} 条
+            </span>
+          </div>
         </div>
 
         <div v-if="loading" class="mt-6 text-sm text-[var(--muted)]">读取中...</div>
@@ -93,23 +128,31 @@
         </div>
         <div v-else class="mt-6 space-y-3">
           <article
-            v-for="item in items.slice(0, 8)"
+            v-for="item in previewItems"
             :key="item.id"
             class="rounded-2xl border border-[var(--line)] bg-white/60 p-4"
           >
             <div class="flex items-start justify-between gap-4">
               <div class="min-w-0">
-                <p class="text-sm font-semibold text-[var(--text)]">{{ item.dataType }}</p>
+                <p class="text-sm font-semibold text-[var(--text)]">{{ getSyncItemTypeLabel(item.dataType) }}</p>
                 <p class="mt-1 truncate text-xs text-[var(--muted)]">{{ item.id }}</p>
               </div>
               <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-[var(--muted)]">
-                v{{ item.version }}
+                记录{{ formatRecordVersion(item.version) }}
               </span>
             </div>
             <div class="mt-3 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
-              <span>key_version: {{ item.keyVersion }}</span>
+              <span>密钥版本：{{ formatKeyVersion(item.keyVersion) }}</span>
               <span>updated_at: {{ formatDate(item.updatedAt) }}</span>
               <span v-if="item.deletedAt" class="text-rose-700">已软删除</span>
+            </div>
+            <div class="mt-4">
+              <RouterLink
+                :to="{ name: 'sync-item-detail', params: { id: item.id } }"
+                class="inline-flex rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--accent-soft)]"
+              >
+                查看详情
+              </RouterLink>
             </div>
           </article>
         </div>
@@ -124,6 +167,8 @@ import StatCard from "@/components/StatCard.vue";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type { SyncConfig, SyncItem } from "@/types/api";
+import { getSyncItemTypeLabel } from "@/utils/syncItemType";
+import { formatKeyVersion, formatRecordVersion } from "@/utils/syncItemVersion";
 
 const auth = useAuthStore();
 
@@ -142,6 +187,8 @@ const stats = computed(() => ({
   workspace: items.value.filter((item) => item.dataType === "workspace").length,
   appSettings: items.value.filter((item) => item.dataType === "app_settings").length,
 }));
+
+const previewItems = computed(() => items.value.slice(0, 5));
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString("zh-CN");

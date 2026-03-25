@@ -6,6 +6,7 @@ import { plusHoursIso } from "../utils/time.js";
 
 export const emailSchema = z.string().trim().min(3).max(255).email().transform((value) => value.toLowerCase());
 export const passwordSchema = z.string().min(8).max(128);
+export const nicknameSchema = z.string().trim().min(1).max(255);
 
 export interface AuthSessionPayload {
   token: string;
@@ -60,6 +61,19 @@ export class AuthService {
     this.database.updateUserPassword(userId, hashPassword(nextPassword));
   }
 
+  updateProfile(userId: string, nickname: string): PublicUser {
+    const normalizedNickname = nicknameSchema.parse(nickname);
+    const user = this.database.updateUser(userId, {
+      nickname: normalizedNickname,
+    });
+
+    if (!user) {
+      throw new Error("用户不存在");
+    }
+
+    return user;
+  }
+
   authenticateBearerToken(token: string): { tokenHash: string; user: PublicUser } | null {
     this.database.deleteExpiredSessions();
     const tokenHash = sha256(token);
@@ -85,6 +99,7 @@ export class AuthService {
       user: {
         id: sessionWithUser.user.id,
         email: sessionWithUser.user.email,
+        nickname: sessionWithUser.user.nickname,
         role: sessionWithUser.user.role,
         status: sessionWithUser.user.status,
         createdAt: sessionWithUser.user.created_at,
@@ -126,6 +141,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        nickname: user.nickname,
         role: user.role,
         status: user.status,
         createdAt: user.created_at,
