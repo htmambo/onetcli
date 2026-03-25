@@ -2,9 +2,10 @@ use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges,
-    FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement,
-    Pixels, Point, RenderOnce, SharedString, StyleRefinement, Styled, Window, WindowControlArea,
-    anchored, div, hsla, point, prelude::FluentBuilder, px, relative,
+    FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
+    prelude::FluentBuilder, px, relative,
 };
 use rust_i18n::t;
 
@@ -13,6 +14,7 @@ use crate::{
     TITLE_BAR_HEIGHT, WindowExt as _,
     actions::{Cancel, Confirm},
     animation::cubic_bezier,
+    app_style,
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement as _,
@@ -31,6 +33,14 @@ pub(crate) fn init(cx: &mut App) {
 type RenderButtonFn = Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement>;
 type FooterFn =
     Box<dyn Fn(RenderButtonFn, RenderButtonFn, &mut Window, &mut App) -> Vec<AnyElement>>;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DialogDragState {
+    dragging: bool,
+    drag_origin: Point<Pixels>,
+    start_offset: Point<Pixels>,
+    offset: Point<Pixels>,
+}
 
 /// Dialog button props.
 pub struct DialogButtonProps {
@@ -303,6 +313,11 @@ impl RenderOnce for Dialog {
         let on_ok = self.on_ok.clone();
         let on_cancel = self.on_cancel.clone();
         let has_title = self.title.is_some();
+        let drag_state = window.use_keyed_state(
+            SharedString::from(format!("dialog-drag-{}-{:?}", layer_ix, self.focus_handle)),
+            cx,
+            |_, _| DialogDragState::default(),
+        );
 
         let render_ok: RenderButtonFn = Box::new({
             let on_ok = on_ok.clone();
@@ -373,8 +388,16 @@ impl RenderOnce for Dialog {
             size: view_size,
         };
         let offset_top = px(layer_ix as f32 * 16.);
-        let y = self.margin_top.unwrap_or(view_size.height / 10.) + offset_top;
-        let x = bounds.center().x - self.width / 2.;
+        let base_x = bounds.center().x - self.width / 2.;
+        let default_y = ((view_size.height - px(360.)) / 2.).max(px(48.));
+        let base_y = self.margin_top.unwrap_or(default_y) + offset_top;
+        let drag_offset = drag_state.read(cx).offset;
+        let x = base_x + drag_offset.x;
+        let y = base_y + drag_offset.y;
+        let min_x = px(16.);
+        let max_x = (view_size.width - self.width - px(16.)).max(min_x);
+        let min_y = px(24.);
+        let max_y = (view_size.height - px(80.)).max(min_y);
 
         let base_size = window.text_style().font_size;
         let rem_size = window.rem_size();
@@ -410,6 +433,43 @@ impl RenderOnce for Dialog {
                     .occlude()
                     .w(view_size.width)
                     .h(view_size.height)
+                    .on_mouse_move(window.listener_for(
+                        &drag_state,
+                        move |drag_state, event: &MouseMoveEvent, _, cx| {
+                            if !drag_state.dragging {
+                                return;
+                            }
+
+                            let next_x = (base_x
+                                + drag_state.start_offset.x
+                                + (event.position.x - drag_state.drag_origin.x))
+                                .clamp(min_x, max_x);
+                            let next_y = (base_y
+                                + drag_state.start_offset.y
+                                + (event.position.y - drag_state.drag_origin.y))
+                                .clamp(min_y, max_y);
+                            let next_offset = point(next_x - base_x, next_y - base_y);
+
+                            if next_offset != drag_state.offset {
+                                drag_state.offset = next_offset;
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        window.listener_for(&drag_state, |drag_state, _: &MouseUpEvent, _, cx| {
+                            drag_state.dragging = false;
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        window.listener_for(&drag_state, |drag_state, _: &MouseUpEvent, _, cx| {
+                            drag_state.dragging = false;
+                            cx.notify();
+                        }),
+                    )
                     .when(self.overlay_visible, |this| {
                         this.bg(overlay_color(self.overlay, cx))
                     })
@@ -442,9 +502,9 @@ impl RenderOnce for Dialog {
                             .id(layer_ix)
                             .track_focus(&self.focus_handle)
                             .focus_trap(format!("dialog-{}", layer_ix), &self.focus_handle)
-                            .bg(cx.theme().background)
+                            .bg(app_style::panel_bg())
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(app_style::border())
                             .rounded(cx.theme().radius_lg)
                             .min_h_24()
                             .pt(paddings.top)
@@ -492,16 +552,39 @@ impl RenderOnce for Dialog {
                             .top(y)
                             .w(self.width)
                             .when_some(self.max_width, |this, w| this.max_w(w))
-                            .when_some(self.title, |this, title| {
-                                this.child(
-                                    div()
-                                        .pl(paddings.left)
-                                        .pr(paddings.right)
-                                        .line_height(relative(1.))
-                                        .font_semibold()
-                                        .child(title),
-                                )
-                            })
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(if has_title { px(22.) } else { px(10.) })
+                                    .pl(paddings.left)
+                                    .pr(paddings.right
+                                        + if self.close_button { px(28.) } else { px(0.) })
+                                    .flex()
+                                    .items_center()
+                                    .cursor_move()
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        window.listener_for(
+                                            &drag_state,
+                                            |drag_state, event: &MouseDownEvent, _, cx| {
+                                                drag_state.dragging = true;
+                                                drag_state.drag_origin = event.position;
+                                                drag_state.start_offset = drag_state.offset;
+                                                cx.stop_propagation();
+                                                cx.notify();
+                                            },
+                                        ),
+                                    )
+                                    .when_some(self.title, |this, title| {
+                                        this.child(
+                                            div()
+                                                .line_height(relative(1.))
+                                                .font_semibold()
+                                                .text_color(app_style::text_primary())
+                                                .child(title),
+                                        )
+                                    }),
+                            )
                             .children(self.close_button.then(|| {
                                 let top = (paddings.top - px(10.)).max(px(8.));
                                 let right = (paddings.right - px(10.)).max(px(8.));

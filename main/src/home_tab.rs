@@ -13,6 +13,7 @@ use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt, Sizable, Size, WindowExt,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -1236,8 +1237,9 @@ impl HomePage {
                             .w_full()
                             .max_h(px(360.0))
                             .p(px(8.0))
+                            .bg(app_style::panel_bg())
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(app_style::border())
                             .rounded(cx.theme().radius),
                     ),
                 )
@@ -1275,8 +1277,9 @@ impl HomePage {
                             .w_full()
                             .max_h(px(360.0))
                             .p(px(8.0))
+                            .bg(app_style::panel_bg())
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(app_style::border())
                             .rounded(cx.theme().radius),
                     ),
                 )

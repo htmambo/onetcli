@@ -2,6 +2,7 @@ use gpui::{App, SharedString};
 use std::ops::Deref;
 
 mod anchored;
+pub mod app_style;
 mod element_ext;
 mod event;
 mod focus_trap;
@@ -64,7 +65,6 @@ pub mod sidebar;
 pub mod skeleton;
 pub mod slider;
 pub mod spinner;
-pub mod spotlight_card;
 pub mod stepper;
 pub mod switch;
 pub mod tab;
@@ -87,7 +87,6 @@ pub use input::{BlinkCursor, Rope, RopeExt, RopeLines};
 #[cfg(any(feature = "inspector", debug_assertions))]
 pub use inspector::*;
 pub use root::Root;
-pub use spotlight_card::SpotlightCard;
 pub use styled::*;
 pub use theme::*;
 pub use time::{calendar, date_picker, datetime_picker, time_picker};

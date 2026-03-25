@@ -5,14 +5,15 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     radio::Radio,
-    select::{Select, SelectEvent, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Disableable, Sizable, Size, TitleBar,
+    v_flex, Disableable, Sizable, Size, StyledExt, TitleBar,
 };
 use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::certificate_notifier::{
@@ -968,6 +969,17 @@ impl SshFormWindow {
         window.remove_window();
     }
 
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
+    }
+
     fn render_form_row(&self, label: &str, child: impl IntoElement) -> impl IntoElement {
         h_flex()
             .gap_3()
@@ -977,6 +989,7 @@ impl SshFormWindow {
                     .w(px(100.0))
                     .text_sm()
                     .text_right()
+                    .text_color(app_style::text_muted())
                     .child(label.to_string()),
             )
             .child(div().flex_1().child(child))
@@ -989,17 +1002,29 @@ impl SshFormWindow {
 
         v_flex()
             .gap_2()
-            .child(self.render_form_row(&t!("SSH.name"), Input::new(&self.name_input)))
-            .child(self.render_form_row(&t!("SSH.host"), Input::new(&self.host_input)))
-            .child(self.render_form_row(&t!("SSH.port"), Input::new(&self.port_input)))
+            .child(self.render_form_row(
+                &t!("SSH.name"),
+                self.styled_input(Input::new(&self.name_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.host"),
+                self.styled_input(Input::new(&self.host_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.port"),
+                self.styled_input(Input::new(&self.port_input)),
+            ))
             .child(self.render_form_row(
                 &t!("SSH.certificate"),
-                Select::new(&self.credential_select).w_full(),
+                self.styled_select(Select::new(&self.credential_select).w_full()),
             ))
-            .child(self.render_form_row(
-                &t!("SSH.username"),
-                Input::new(&self.username_input).disabled(use_certificate),
-            ))
+            .child(
+                self.render_form_row(
+                    &t!("SSH.username"),
+                    self.styled_input(Input::new(&self.username_input))
+                        .disabled(use_certificate),
+                ),
+            )
             .child(
                 self.render_form_row(
                     &t!("SSH.auth_method"),
@@ -1041,21 +1066,24 @@ impl SshFormWindow {
                 this.child(
                     self.render_form_row(
                         &t!("SSH.password"),
-                        Input::new(&self.password_input)
+                        self.styled_input(Input::new(&self.password_input))
                             .mask_toggle()
                             .disabled(use_certificate),
                     ),
                 )
             })
             .when(auth_method == AuthMethodSelection::PrivateKey, |this| {
-                this.child(self.render_form_row(
-                    &t!("SSH.key_path"),
-                    Input::new(&self.key_path_input).disabled(use_certificate),
-                ))
+                this.child(
+                    self.render_form_row(
+                        &t!("SSH.key_path"),
+                        self.styled_input(Input::new(&self.key_path_input))
+                            .disabled(use_certificate),
+                    ),
+                )
                 .child(
                     self.render_form_row(
                         &t!("SSH.passphrase"),
-                        Input::new(&self.passphrase_input)
+                        self.styled_input(Input::new(&self.passphrase_input))
                             .mask_toggle()
                             .disabled(use_certificate),
                     ),
@@ -1063,7 +1091,7 @@ impl SshFormWindow {
             })
             .child(self.render_form_row(
                 &t!("SSH.workspace"),
-                Select::new(&self.workspace_select).w_full(),
+                self.styled_select(Select::new(&self.workspace_select).w_full()),
             ))
             .child(
                 self.render_form_row(
@@ -1081,7 +1109,7 @@ impl SshFormWindow {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(app_style::text_muted())
                                 .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
                         ),
                 ),
@@ -1094,11 +1122,12 @@ impl SshFormWindow {
             .gap_2()
             .child(self.render_form_row(
                 &t!("SSH.default_directory"),
-                Input::new(&self.default_directory_input),
+                self.styled_input(Input::new(&self.default_directory_input)),
             ))
-            .child(
-                self.render_form_row(&t!("SSH.init_script"), Input::new(&self.init_script_input)),
-            )
+            .child(self.render_form_row(
+                &t!("SSH.init_script"),
+                self.styled_input(Input::new(&self.init_script_input)),
+            ))
     }
 
     /// 渲染跳板机标签页
@@ -1119,20 +1148,25 @@ impl SshFormWindow {
                 ),
             )
             .when(enable_jump, |this| {
-                this.child(
-                    self.render_form_row(&t!("SSH.jump_host"), Input::new(&self.jump_host_input)),
-                )
-                .child(
-                    self.render_form_row(&t!("SSH.jump_port"), Input::new(&self.jump_port_input)),
-                )
+                this.child(self.render_form_row(
+                    &t!("SSH.jump_host"),
+                    self.styled_input(Input::new(&self.jump_host_input)),
+                ))
+                .child(self.render_form_row(
+                    &t!("SSH.jump_port"),
+                    self.styled_input(Input::new(&self.jump_port_input)),
+                ))
                 .child(self.render_form_row(
                     &t!("SSH.jump_username"),
-                    Input::new(&self.jump_username_input),
+                    self.styled_input(Input::new(&self.jump_username_input)),
                 ))
-                .child(self.render_form_row(
-                    &t!("SSH.jump_password"),
-                    Input::new(&self.jump_password_input).mask_toggle(),
-                ))
+                .child(
+                    self.render_form_row(
+                        &t!("SSH.jump_password"),
+                        self.styled_input(Input::new(&self.jump_password_input))
+                            .mask_toggle(),
+                    ),
+                )
             })
     }
 
@@ -1180,20 +1214,25 @@ impl SshFormWindow {
                             ),
                     ),
                 )
-                .child(
-                    self.render_form_row(&t!("SSH.proxy_host"), Input::new(&self.proxy_host_input)),
-                )
-                .child(
-                    self.render_form_row(&t!("SSH.proxy_port"), Input::new(&self.proxy_port_input)),
-                )
+                .child(self.render_form_row(
+                    &t!("SSH.proxy_host"),
+                    self.styled_input(Input::new(&self.proxy_host_input)),
+                ))
+                .child(self.render_form_row(
+                    &t!("SSH.proxy_port"),
+                    self.styled_input(Input::new(&self.proxy_port_input)),
+                ))
                 .child(self.render_form_row(
                     &t!("SSH.proxy_username"),
-                    Input::new(&self.proxy_username_input),
+                    self.styled_input(Input::new(&self.proxy_username_input)),
                 ))
-                .child(self.render_form_row(
-                    &t!("SSH.proxy_password"),
-                    Input::new(&self.proxy_password_input).mask_toggle(),
-                ))
+                .child(
+                    self.render_form_row(
+                        &t!("SSH.proxy_password"),
+                        self.styled_input(Input::new(&self.proxy_password_input))
+                            .mask_toggle(),
+                    ),
+                )
             })
     }
 
@@ -1203,23 +1242,24 @@ impl SshFormWindow {
             .gap_2()
             .child(self.render_form_row(
                 &t!("SSH.connect_timeout"),
-                Input::new(&self.connect_timeout_input),
+                self.styled_input(Input::new(&self.connect_timeout_input)),
             ))
             .child(self.render_form_row(
                 &t!("SSH.keepalive_interval"),
-                Input::new(&self.keepalive_interval_input),
+                self.styled_input(Input::new(&self.keepalive_interval_input)),
             ))
             .child(self.render_form_row(
                 &t!("SSH.keepalive_max"),
-                Input::new(&self.keepalive_max_input),
+                self.styled_input(Input::new(&self.keepalive_max_input)),
             ))
     }
 
     /// 渲染其他设置标签页
     fn render_other_tab(&self) -> impl IntoElement {
-        v_flex()
-            .gap_2()
-            .child(self.render_form_row(&t!("SSH.remark"), Input::new(&self.remark_input)))
+        v_flex().gap_2().child(self.render_form_row(
+            &t!("SSH.remark"),
+            self.styled_input(Input::new(&self.remark_input)),
+        ))
     }
 }
 
@@ -1237,14 +1277,22 @@ impl Render for SshFormWindow {
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::accent_dim_strong())
                     .text_sm()
-                    .text_color(cx.theme().success)
+                    .text_color(app_style::accent())
                     .child(t!("SSH.test_success").to_string()),
             ),
             Some(Err(e)) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::danger_dim())
                     .text_sm()
-                    .text_color(cx.theme().danger)
+                    .text_color(app_style::danger())
                     .child(e.clone()),
             ),
             None => None,
@@ -1253,36 +1301,48 @@ impl Render for SshFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(app_style::page_bg())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text_primary())
+                            .child(self.title.clone()),
+                    ),
             )
             // TabBar
             .child(
-                div().flex().justify_center().px_3().pt_2().child(
-                    TabBar::new("ssh-form-tabs")
-                        .with_size(Size::Small)
-                        .underline()
-                        .selected_index(active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .child(Tab::new().label(t!("SSH.tab_basic").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_init").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_jump_server").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_proxy").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_advanced").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_other").to_string())),
+                div().flex().justify_center().px_4().pt_3().pb_1().child(
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::panel_bg())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("ssh-form-tabs")
+                                .with_size(Size::Small)
+                                .underline()
+                                .selected_index(active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .child(Tab::new().label(t!("SSH.tab_basic").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_init").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_jump_server").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_proxy").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_advanced").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_other").to_string())),
+                        ),
                 ),
             )
             // 标签页内容
@@ -1290,7 +1350,13 @@ impl Render for SshFormWindow {
                 div()
                     .id("ssh-form-content")
                     .flex_1()
-                    .p_3()
+                    .mx_4()
+                    .mb_4()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
+                    .p_4()
                     .overflow_y_scroll()
                     .child(match active_tab {
                         0 => self.render_basic_tab(cx).into_any_element(),
@@ -1314,10 +1380,12 @@ impl Render for SshFormWindow {
                     .px_6()
                     .py_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_cancel(window, cx);
@@ -1326,7 +1394,7 @@ impl Render for SshFormWindow {
                     .child(
                         Button::new("manage-certificates")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("SSH.manage_certificates").to_string())
                             .on_click(cx.listener(|_, _, _window, cx| {
                                 open_certificate_manager_popup(cx);
@@ -1335,7 +1403,7 @@ impl Render for SshFormWindow {
                     .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(if is_testing {
                                 t!("Connection.testing").to_string()
                             } else {
@@ -1349,7 +1417,7 @@ impl Render for SshFormWindow {
                     .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.ok").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_save(window, cx);

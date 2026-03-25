@@ -574,7 +574,7 @@ pub fn show_password_auth_dialog<V: 'static>(
                     .p_5()
                     .bg(sync_server_theme::page_bg())
                     .child(
-                        sync_server_theme::spotlight_card("auth-dialog-hero-card")
+                        gpui::div()
                             .rounded_xl()
                             .border_1()
                             .border_color(sync_server_theme::border())
@@ -669,7 +669,7 @@ pub fn show_password_auth_dialog<V: 'static>(
                     })
                     .when_some(error_for_render.read(cx).clone(), |this, msg| {
                         this.child(
-                            sync_server_theme::danger_spotlight_card("auth-dialog-error-card")
+                            gpui::div()
                                 .w_full()
                                 .rounded_xl()
                                 .border_1()

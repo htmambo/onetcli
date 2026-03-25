@@ -4,12 +4,13 @@ use gpui::{
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 use gpui_component::{
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
-    select::{Select, SelectItem, SelectState},
-    v_flex, ActiveTheme, Disableable, IndexPath, Sizable, TitleBar,
+    select::{Select, SelectDelegate, SelectItem, SelectState},
+    v_flex, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
 };
 use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
@@ -626,9 +627,21 @@ impl SerialFormWindow {
                     .w(px(100.0))
                     .text_sm()
                     .text_right()
+                    .text_color(app_style::text_muted())
                     .child(label.to_string()),
             )
             .child(div().flex_1().child(child))
+    }
+
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
     }
 }
 
@@ -645,14 +658,22 @@ impl Render for SerialFormWindow {
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::accent_dim_strong())
                     .text_sm()
-                    .text_color(cx.theme().success)
+                    .text_color(app_style::accent())
                     .child(t!("Serial.test_success").to_string()),
             ),
             Some(Err(e)) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::danger_dim())
                     .text_sm()
-                    .text_color(cx.theme().danger)
+                    .text_color(app_style::danger())
                     .child(e.clone()),
             ),
             None => None,
@@ -661,49 +682,56 @@ impl Render for SerialFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(app_style::page_bg())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text_primary())
+                            .child(self.title.clone()),
+                    ),
             )
             // 表单内容
             .child(
                 div()
                     .id("serial-form-content")
                     .flex_1()
-                    .p_3()
+                    .mx_4()
+                    .my_4()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
+                    .p_4()
                     .overflow_y_scroll()
                     .child(
                         v_flex()
                             .gap_2()
-                            .child(
-                                self.render_form_row(
-                                    &t!("Serial.name"),
-                                    Input::new(&self.name_input),
-                                ),
-                            )
+                            .child(self.render_form_row(
+                                &t!("Serial.name"),
+                                self.styled_input(Input::new(&self.name_input)),
+                            ))
                             .child(
                                 self.render_form_row(
                                     &t!("Serial.port_name"),
                                     h_flex()
                                         .gap_2()
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .child(Select::new(&self.port_select).w_full()),
-                                        )
+                                        .child(div().flex_1().child(self.styled_select(
+                                            Select::new(&self.port_select).w_full(),
+                                        )))
                                         .child(
                                             Button::new("refresh-ports")
                                                 .small()
-                                                .outline()
+                                                .with_variant(app_style::secondary_button_variant(
+                                                    cx,
+                                                ))
                                                 .label(t!("Serial.refresh_ports").to_string())
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.on_refresh_ports(window, cx);
@@ -711,30 +739,33 @@ impl Render for SerialFormWindow {
                                         ),
                                 ),
                             )
-                            .child(self.render_form_row("", Input::new(&self.port_name_input)))
+                            .child(self.render_form_row(
+                                "",
+                                self.styled_input(Input::new(&self.port_name_input)),
+                            ))
                             .child(self.render_form_row(
                                 &t!("Serial.baud_rate"),
-                                Select::new(&self.baud_rate_select).w_full(),
+                                self.styled_select(Select::new(&self.baud_rate_select).w_full()),
                             ))
                             .child(self.render_form_row(
                                 &t!("Serial.data_bits"),
-                                Select::new(&self.data_bits_select).w_full(),
+                                self.styled_select(Select::new(&self.data_bits_select).w_full()),
                             ))
                             .child(self.render_form_row(
                                 &t!("Serial.stop_bits"),
-                                Select::new(&self.stop_bits_select).w_full(),
+                                self.styled_select(Select::new(&self.stop_bits_select).w_full()),
                             ))
                             .child(self.render_form_row(
                                 &t!("Serial.parity"),
-                                Select::new(&self.parity_select).w_full(),
+                                self.styled_select(Select::new(&self.parity_select).w_full()),
                             ))
                             .child(self.render_form_row(
                                 &t!("Serial.flow_control"),
-                                Select::new(&self.flow_control_select).w_full(),
+                                self.styled_select(Select::new(&self.flow_control_select).w_full()),
                             ))
                             .child(self.render_form_row(
                                 &t!("Serial.workspace"),
-                                Select::new(&self.workspace_select).w_full(),
+                                self.styled_select(Select::new(&self.workspace_select).w_full()),
                             ))
                             .child(
                                 self.render_form_row(
@@ -752,7 +783,7 @@ impl Render for SerialFormWindow {
                                         .child(
                                             div()
                                                 .text_sm()
-                                                .text_color(cx.theme().muted_foreground)
+                                                .text_color(app_style::text_muted())
                                                 .child(
                                                     t!("ConnectionForm.cloud_sync_desc")
                                                         .to_string(),
@@ -762,7 +793,7 @@ impl Render for SerialFormWindow {
                             )
                             .child(self.render_form_row(
                                 &t!("Serial.remark"),
-                                Input::new(&self.remark_input),
+                                self.styled_input(Input::new(&self.remark_input)),
                             )),
                     ),
             )
@@ -778,10 +809,12 @@ impl Render for SerialFormWindow {
                     .px_6()
                     .py_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_cancel(window, cx);
@@ -790,7 +823,7 @@ impl Render for SerialFormWindow {
                     .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(if is_testing {
                                 t!("Connection.testing").to_string()
                             } else {
@@ -804,7 +837,7 @@ impl Render for SerialFormWindow {
                     .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.ok").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_save(window, cx);

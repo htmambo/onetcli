@@ -7,7 +7,7 @@ use gpui::{
     prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size,
+    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, StyledExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -17,7 +17,7 @@ use gpui_component::{
     popover::Popover,
     radio::Radio,
     scroll::ScrollableElement,
-    select::{Select, SelectEvent, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -983,6 +983,17 @@ pub struct DbConnectionForm {
 }
 
 impl DbConnectionForm {
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
+    }
+
     pub fn new(config: DbFormConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let current_db_type = cx.new(|_| config.db_type);
@@ -2103,6 +2114,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
+            .text_color(app_style::text_primary())
             .children(current_tab_fields.iter().enumerate().map(|(i, field_info)| {
                 let input_idx = field_input_offset + i;
                 let is_sqlite_path = db_type == DatabaseType::SQLite && field_info.name == "host";
@@ -2125,15 +2137,19 @@ impl DbConnectionForm {
                             .when(is_textarea, |el| el.items_start())
                             .when(is_select, |el| {
                                 if let Some(select_state) = self.field_selects.get(&field_name) {
-                                    el.child(Select::new(select_state).w_full().disabled(disable_field))
+                                    el.child(
+                                        self.styled_select(Select::new(select_state).w_full())
+                                            .disabled(disable_field),
+                                    )
                                 } else {
                                     el
                                 }
                             })
                             .when(!is_select, |el| {
                                 if let Some(Some(input_state)) = self.field_inputs.get(input_idx) {
-                                    let input =
-                                        Input::new(input_state).w_full().disabled(disable_field);
+                                    let input = self
+                                        .styled_input(Input::new(input_state).w_full())
+                                        .disabled(disable_field);
                                     let input = if is_password {
                                         input.mask_toggle()
                                     } else {
@@ -2169,7 +2185,7 @@ impl DbConnectionForm {
                         .label(t!("ConnectionForm.workspace").to_string())
                         .items_center()
                         .label_justify_end()
-                        .child(Select::new(&self.workspace_select).w_full()),
+                        .child(self.styled_select(Select::new(&self.workspace_select).w_full())),
                 )
                 .child(
                     field()
@@ -2192,7 +2208,7 @@ impl DbConnectionForm {
                                 .child(
                                     div()
                                         .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .text_color(app_style::text_muted())
                                         .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
                                 ),
                         ),
@@ -2387,6 +2403,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
+            .text_color(app_style::text_primary())
             .child(
                 field()
                     .label(self.field_label("ssh_tunnel_enabled"))
@@ -2494,6 +2511,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
+            .text_color(app_style::text_primary())
             .child(
                 field()
                     .label(t!("ConnectionForm.require_ssl").to_string())
@@ -2565,19 +2583,28 @@ impl Render for DbConnectionForm {
             .child(
                 // Tab bar
                 div().flex().justify_center().child(
-                    TabBar::new("connection-tabs")
-                        .with_size(Size::Large)
-                        .underline()
-                        .selected_index(self.active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _window, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .children(
-                            self.config
-                                .tab_groups
-                                .iter()
-                                .map(|tab| Tab::new().label(tab.label.clone())),
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::panel_bg())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("connection-tabs")
+                                .with_size(Size::Large)
+                                .underline()
+                                .selected_index(self.active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _window, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .children(
+                                    self.config
+                                        .tab_groups
+                                        .iter()
+                                        .map(|tab| Tab::new().label(tab.label.clone())),
+                                ),
                         ),
                 ),
             )

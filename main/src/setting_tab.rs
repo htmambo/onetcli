@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use gpui::{
     App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Render, SharedString,
-    Styled, Window, div, prelude::FluentBuilder, px,
+    StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, Theme, ThemeMode,
@@ -213,6 +213,31 @@ fn default_true() -> bool {
 
 fn default_auto_save_interval() -> f64 {
     5.0
+}
+
+fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
+    field
+        .bg(sync_server_theme::panel_alt_bg())
+        .border_color(sync_server_theme::border_strong())
+        .text_color(sync_server_theme::text_primary())
+}
+
+fn settings_group_content_style() -> StyleRefinement {
+    sync_server_theme::surface_style().rounded(px(16.0))
+}
+
+fn settings_group_title_style() -> StyleRefinement {
+    StyleRefinement::default().text_color(sync_server_theme::text_primary())
+}
+
+fn themed_setting_group(group: SettingGroup) -> SettingGroup {
+    group
+        .title_style(&settings_group_title_style())
+        .content_style(&settings_group_content_style())
+}
+
+fn themed_setting_page(page: SettingPage) -> SettingPage {
+    page.header_style(&sync_server_theme::page_header_style())
 }
 
 impl Default for AppSettings {
@@ -441,16 +466,16 @@ impl SettingsPanel {
         let default_settings = AppSettings::default();
 
         vec![
-            SettingPage::new(t!("Settings.General.title"))
+            themed_setting_page(SettingPage::new(t!("Settings.General.title")))
                 .resettable(true)
                 .default_open(true)
                 .groups(vec![
-                    SettingGroup::new()
+                    themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Language.group_title"))
                         .items(vec![
                             SettingItem::new(
                                 t!("Settings.General.Language.ui_language"),
-                                SettingField::dropdown(
+                                themed_setting_field(SettingField::dropdown(
                                     vec![
                                         (
                                             "zh-CN".into(),
@@ -471,14 +496,14 @@ impl SettingsPanel {
                                         gpui_component::set_locale(&settings.locale);
                                         settings.save();
                                     },
-                                )
+                                ))
                                 .default_value(SharedString::from(default_settings.locale)),
                             )
                             .description(
                                 t!("Settings.General.Language.ui_language_desc").to_string(),
                             ),
                         ]),
-                    SettingGroup::new()
+                    themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Appearance.group_title"))
                         .items(vec![
                             SettingItem::new(
@@ -525,12 +550,12 @@ impl SettingsPanel {
                                     .to_string(),
                             ),
                         ]),
-                    SettingGroup::new()
+                    themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Sync.group_title"))
                         .item(
                             SettingItem::new(
                                 t!("Settings.General.Sync.server_url"),
-                                SettingField::input(
+                                themed_setting_field(SettingField::input(
                                     |cx: &App| {
                                         SharedString::from(
                                             AppSettings::global(cx).sync_server_url.clone(),
@@ -539,19 +564,19 @@ impl SettingsPanel {
                                     |val: SharedString, cx: &mut App| {
                                         apply_sync_server_url_setting(val, cx);
                                     },
-                                )
-                                .default_value(SharedString::from(
-                                    default_settings.sync_server_url,
-                                )),
+                                ))
+                                .default_value(
+                                    SharedString::from(default_settings.sync_server_url),
+                                ),
                             )
                             .description(t!("Settings.General.Sync.server_url_desc").to_string()),
                         ),
-                    SettingGroup::new()
+                    themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Font.group_title"))
                         .item(
                             SettingItem::new(
                                 t!("Settings.General.Font.font_family"),
-                                SettingField::dropdown(
+                                themed_setting_field(SettingField::dropdown(
                                     vec![
                                         ("Arial".into(), "Arial".into()),
                                         ("Helvetica".into(), "Helvetica".into()),
@@ -568,7 +593,7 @@ impl SettingsPanel {
                                         settings.font_family = val.to_string();
                                         settings.save();
                                     },
-                                )
+                                ))
                                 .default_value(SharedString::from(default_settings.font_family)),
                             )
                             .description(t!("Settings.General.Font.font_family_desc").to_string()),
@@ -576,7 +601,7 @@ impl SettingsPanel {
                         .item(
                             SettingItem::new(
                                 t!("Settings.General.Font.font_size"),
-                                SettingField::number_input(
+                                themed_setting_field(SettingField::number_input(
                                     NumberFieldOptions {
                                         min: 8.0,
                                         max: 72.0,
@@ -588,17 +613,17 @@ impl SettingsPanel {
                                         settings.font_size = val;
                                         settings.save();
                                     },
-                                )
+                                ))
                                 .default_value(default_settings.font_size),
                             )
                             .description(t!("Settings.General.Font.font_size_desc").to_string()),
                         ),
-                    SettingGroup::new()
+                    themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Terminal.group_title"))
                         .items(vec![
                             SettingItem::new(
                                 t!("Settings.General.Terminal.font_size"),
-                                SettingField::number_input(
+                                themed_setting_field(SettingField::number_input(
                                     NumberFieldOptions {
                                         min: 8.0,
                                         max: 72.0,
@@ -612,7 +637,7 @@ impl SettingsPanel {
                                         let settings_snapshot = settings.clone();
                                         sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
-                                )
+                                ))
                                 .default_value(default_settings.terminal_font_size),
                             )
                             .description(
@@ -653,12 +678,12 @@ impl SettingsPanel {
                                 t!("Settings.General.Terminal.middle_click_paste_desc").to_string(),
                             ),
                         ]),
-                    SettingGroup::new()
+                    themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Database.group_title"))
                         .items(vec![
                             SettingItem::new(
                                 t!("Settings.General.Database.open_mode"),
-                                SettingField::dropdown(
+                                themed_setting_field(SettingField::dropdown(
                                     vec![
                                         (
                                             "single".into(),
@@ -681,10 +706,12 @@ impl SettingsPanel {
                                             DatabaseOpenMode::from_str(&val);
                                         settings.save();
                                     },
-                                )
-                                .default_value(SharedString::from(
-                                    default_settings.database_open_mode.as_str(),
-                                )),
+                                ))
+                                .default_value(
+                                    SharedString::from(
+                                        default_settings.database_open_mode.as_str(),
+                                    ),
+                                ),
                             )
                             .description(
                                 t!("Settings.General.Database.open_mode_desc").to_string(),
@@ -711,7 +738,7 @@ impl SettingsPanel {
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Database.auto_save_interval"),
-                                SettingField::number_input(
+                                themed_setting_field(SettingField::number_input(
                                     NumberFieldOptions {
                                         min: 1.0,
                                         max: 60.0,
@@ -728,7 +755,7 @@ impl SettingsPanel {
                                             cx,
                                         );
                                     },
-                                )
+                                ))
                                 .default_value(default_settings.sql_auto_save_interval),
                             )
                             .description(
@@ -737,26 +764,34 @@ impl SettingsPanel {
                         ]),
                 ]),
             // 快捷键页面
-            SettingPage::new(t!("Settings.Shortcuts.title")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, _window, cx| render_shortcuts_section(cx)),
-            )),
-            SettingPage::new(t!("LlmProviders.title")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, _window, _cx| {
-                    llm_view.clone().into_any_element()
-                }),
-            )),
+            themed_setting_page(SettingPage::new(t!("Settings.Shortcuts.title"))).group(
+                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+                    move |_options, _window, cx| render_shortcuts_section(cx),
+                )),
+            ),
+            themed_setting_page(SettingPage::new(t!("LlmProviders.title"))).group(
+                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+                    move |_options, _window, _cx| llm_view.clone().into_any_element(),
+                )),
+            ),
             // 账户设置页
-            SettingPage::new(t!("Settings.Account.title")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, window, cx| render_account_section(window, cx)),
-            )),
+            themed_setting_page(SettingPage::new(t!("Settings.Account.title"))).group(
+                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+                    move |_options, window, cx| render_account_section(window, cx),
+                )),
+            ),
             // 支持作者页面
-            SettingPage::new(t!("Encourage.button_label")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, _window, cx| render_encourage_section(cx)),
-            )),
+            themed_setting_page(SettingPage::new(t!("Encourage.button_label"))).group(
+                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+                    move |_options, _window, cx| render_encourage_section(cx),
+                )),
+            ),
             // 关于页面
-            SettingPage::new(t!("Settings.About.title")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, _window, cx| render_about_section(cx)),
-            )),
+            themed_setting_page(SettingPage::new(t!("Settings.About.title"))).group(
+                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+                    move |_options, _window, cx| render_about_section(cx),
+                )),
+            ),
         ]
     }
 }
@@ -800,13 +835,19 @@ impl Render for SettingsPanel {
             init_settings(cx);
         }
 
-        div().track_focus(&self.focus_handle).size_full().child(
-            Settings::new(format!("main-app-settings-{}", self.state_version))
-                .with_size(self.size)
-                .with_group_variant(self.group_variant)
-                .default_selected_index(self.selected_page.select_index())
-                .pages(self.setting_pages(window, cx)),
-        )
+        div()
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .bg(sync_server_theme::page_bg())
+            .child(
+                Settings::new(format!("main-app-settings-{}", self.state_version))
+                    .with_size(self.size)
+                    .with_group_variant(self.group_variant)
+                    .sidebar_style(&sync_server_theme::sidebar_style())
+                    .header_style(&sync_server_theme::control_style())
+                    .default_selected_index(self.selected_page.select_index())
+                    .pages(self.setting_pages(window, cx)),
+            )
     }
 }
 
@@ -840,7 +881,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
                 .gap_4()
                 .p_4()
                 .child(
-                    sync_server_theme::spotlight_card("settings-account-shell-card")
+                    div()
                         .w_full()
                         .rounded_xl()
                         .border_1()
@@ -943,7 +984,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
             v_flex()
                 .gap_4()
                 .child(
-                    sync_server_theme::spotlight_card("settings-account-details-card")
+                    div()
                         .w_full()
                         .rounded_xl()
                         .border_1()
@@ -993,7 +1034,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
         render_account_shell(
             t!("Settings.Account.title").to_string(),
             None,
-            sync_server_theme::spotlight_card("settings-account-empty-card")
+            div()
                 .w_full()
                 .rounded_xl()
                 .border_1()

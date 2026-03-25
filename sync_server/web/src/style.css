@@ -71,6 +71,7 @@ a {
 }
 
 .hover-card {
+  cursor: pointer;
   position: relative;
   overflow: hidden;
   isolation: isolate;

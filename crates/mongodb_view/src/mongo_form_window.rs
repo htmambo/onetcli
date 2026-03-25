@@ -7,13 +7,13 @@ use gpui::{
     div, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IconName, Sizable, Size, TitleBar,
+    Disableable, IconName, Sizable, Size, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     scroll::ScrollableElement,
-    select::{Select, SelectEvent, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -796,9 +796,21 @@ impl MongoFormWindow {
                     .w(px(120.0))
                     .text_sm()
                     .text_right()
+                    .text_color(app_style::text_muted())
                     .child(label.to_string()),
             )
             .child(div().flex_1().child(child))
+    }
+
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
     }
 
     fn render_basic_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -808,43 +820,46 @@ impl MongoFormWindow {
             .gap_2()
             .child(self.render_form_row(
                 t!("MongoForm.name_label").as_ref(),
-                Input::new(&self.name_input),
+                self.styled_input(Input::new(&self.name_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.host_label").as_ref(),
-                Input::new(&self.host_input),
+                self.styled_input(Input::new(&self.host_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.port_label").as_ref(),
-                Input::new(&self.port_input),
+                self.styled_input(Input::new(&self.port_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.database_label").as_ref(),
-                Input::new(&self.database_input),
+                self.styled_input(Input::new(&self.database_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.certificate_label").as_ref(),
-                Select::new(&self.credential_select).w_full(),
-            ))
-            .child(self.render_form_row(
-                t!("MongoForm.username_label").as_ref(),
-                Input::new(&self.username_input).disabled(use_certificate),
+                self.styled_select(Select::new(&self.credential_select).w_full()),
             ))
             .child(
                 self.render_form_row(
+                    t!("MongoForm.username_label").as_ref(),
+                    self.styled_input(Input::new(&self.username_input))
+                        .disabled(use_certificate),
+                ),
+            )
+            .child(
+                self.render_form_row(
                     t!("MongoForm.password_label").as_ref(),
-                    Input::new(&self.password_input)
+                    self.styled_input(Input::new(&self.password_input))
                         .mask_toggle()
                         .disabled(use_certificate),
                 ),
             )
             .child(self.render_form_row(
                 t!("MongoForm.auth_source_label").as_ref(),
-                Input::new(&self.authentication_source_input),
+                self.styled_input(Input::new(&self.authentication_source_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.workspace_label").as_ref(),
-                Select::new(&self.workspace_select).w_full(),
+                self.styled_select(Select::new(&self.workspace_select).w_full()),
             ))
             .child(
                 self.render_form_row(
@@ -862,7 +877,7 @@ impl MongoFormWindow {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(app_style::text_muted())
                                 .child(t!("MongoForm.cloud_sync_enabled").to_string()),
                         ),
                 ),
@@ -896,11 +911,11 @@ impl MongoFormWindow {
             )
             .child(self.render_form_row(
                 t!("MongoForm.replica_set_label").as_ref(),
-                Input::new(&self.replica_set_input),
+                self.styled_input(Input::new(&self.replica_set_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.read_preference_label").as_ref(),
-                Input::new(&self.read_preference_input),
+                self.styled_input(Input::new(&self.read_preference_input)),
             ))
     }
 
@@ -920,18 +935,18 @@ impl MongoFormWindow {
             )
             .child(self.render_form_row(
                 t!("MongoForm.connect_timeout_label").as_ref(),
-                Input::new(&self.connect_timeout_seconds_input),
+                self.styled_input(Input::new(&self.connect_timeout_seconds_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.app_name_label").as_ref(),
-                Input::new(&self.application_name_input),
+                self.styled_input(Input::new(&self.application_name_input)),
             ))
     }
 
     fn render_remark_tab(&self) -> impl IntoElement {
         v_flex().gap_2().child(self.render_form_row(
             t!("MongoForm.remark_label").as_ref(),
-            Input::new(&self.remark_input),
+            self.styled_input(Input::new(&self.remark_input)),
         ))
     }
 }
@@ -949,23 +964,31 @@ impl Render for MongoFormWindow {
 
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
-                div()
-                    .w_full()
-                    .px_6()
-                    .pb_2()
-                    .text_sm()
-                    .text_color(cx.theme().success)
-                    .child(t!("MongoForm.test_success").to_string()),
+                div().w_full().px_6().pb_2().child(
+                    div()
+                        .w_full()
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .bg(app_style::accent_dim_strong())
+                        .text_sm()
+                        .text_color(app_style::accent())
+                        .child(t!("MongoForm.test_success").to_string()),
+                ),
             ),
             Some(Err(error)) => Some(
                 div().w_full().px_6().pb_2().child(
                     div()
                         .w_full()
                         .max_h(px(120.0))
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .bg(app_style::danger_dim())
                         .overflow_y_scrollbar()
                         .whitespace_normal()
                         .text_sm()
-                        .text_color(cx.theme().danger)
+                        .text_color(app_style::danger())
                         .child(error.clone()),
                 ),
             ),
@@ -975,39 +998,57 @@ impl Render for MongoFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(app_style::page_bg())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text_primary())
+                            .child(self.title.clone()),
+                    ),
             )
             .child(
-                div().flex().justify_center().px_3().pt_2().child(
-                    TabBar::new("mongodb-form-tabs")
-                        .with_size(Size::Small)
-                        .underline()
-                        .selected_index(active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .child(Tab::new().label(t!("MongoForm.tab_basic").to_string()))
-                        .child(Tab::new().label(t!("MongoForm.tab_cluster").to_string()))
-                        .child(Tab::new().label(t!("MongoForm.tab_advanced").to_string()))
-                        .child(Tab::new().label(t!("MongoForm.tab_remark").to_string())),
+                div().flex().justify_center().px_4().pt_3().pb_1().child(
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::panel_bg())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("mongodb-form-tabs")
+                                .with_size(Size::Small)
+                                .underline()
+                                .selected_index(active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .child(Tab::new().label(t!("MongoForm.tab_basic").to_string()))
+                                .child(Tab::new().label(t!("MongoForm.tab_cluster").to_string()))
+                                .child(Tab::new().label(t!("MongoForm.tab_advanced").to_string()))
+                                .child(Tab::new().label(t!("MongoForm.tab_remark").to_string())),
+                        ),
                 ),
             )
             .child(
                 div()
                     .id("mongo-form-content")
                     .flex_1()
+                    .mx_4()
+                    .mb_4()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
                     .p_4()
                     .overflow_y_scroll()
                     .child(match active_tab {
@@ -1026,10 +1067,12 @@ impl Render for MongoFormWindow {
                     .px_6()
                     .py_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(|_, window, _cx| {
                                 window.remove_window();
@@ -1038,7 +1081,7 @@ impl Render for MongoFormWindow {
                     .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .icon(IconName::Refresh)
                             .label(if is_testing {
                                 t!("MongoForm.testing").to_string()
@@ -1053,7 +1096,7 @@ impl Render for MongoFormWindow {
                     .child(
                         Button::new("manage-certificates")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("MongoForm.manage_certificates").to_string())
                             .on_click(cx.listener(|_, _, _window, cx| {
                                 open_certificate_manager_popup(cx);
@@ -1062,7 +1105,7 @@ impl Render for MongoFormWindow {
                     .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.save").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_save(window, cx);
