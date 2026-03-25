@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 use crate::auth::get_auth_service;
+use crate::encourage::render_encourage_section;
 use crate::onetcli_app::GlobalHomePage;
 use crate::settings::llm_providers_view::LlmProvidersView;
 
@@ -746,6 +747,10 @@ impl SettingsPanel {
             // 账户设置页
             SettingPage::new(t!("Settings.Account.title")).group(SettingGroup::new().item(
                 SettingItem::render(move |_options, window, cx| render_account_section(window, cx)),
+            )),
+            // 支持作者页面
+            SettingPage::new(t!("Encourage.button_label")).group(SettingGroup::new().item(
+                SettingItem::render(move |_options, _window, cx| render_encourage_section(cx)),
             )),
             // 关于页面
             SettingPage::new(t!("Settings.About.title")).group(SettingGroup::new().item(
