@@ -1,5 +1,5 @@
 <template>
-  <section class="panel rounded-3xl p-5">
+  <section class="panel hover-card rounded-3xl p-5">
     <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">{{ label }}</p>
     <div class="mt-4 flex items-end justify-between gap-4">
       <strong class="text-3xl font-semibold text-[var(--text)]">{{ value }}</strong>
@@ -26,11 +26,11 @@ const props = defineProps<{
 const toneClass = computed(() => {
   switch (props.tone) {
     case "success":
-      return "bg-emerald-100 text-emerald-700";
+      return "status-success";
     case "danger":
-      return "bg-rose-100 text-rose-700";
+      return "status-danger";
     default:
-      return "bg-white/70 text-[var(--muted)]";
+      return "status-neutral";
   }
 });
 </script>

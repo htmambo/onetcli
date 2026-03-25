@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">同步记录详情</p>
       <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
@@ -12,12 +12,12 @@
         <div class="flex flex-wrap gap-3">
           <RouterLink
             to="/app/sync-items"
-            class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+            class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
           >
             返回列表
           </RouterLink>
           <button
-            class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+            class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
             @click="loadItem"
           >
             刷新详情
@@ -26,60 +26,60 @@
       </div>
     </section>
 
-    <p v-if="errorMessage" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <p v-if="errorMessage" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
       {{ errorMessage }}
     </p>
     <div v-else-if="loading" class="text-sm text-[var(--muted)]">读取中...</div>
     <template v-else-if="item">
       <section class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <div class="panel rounded-[28px] p-6">
+        <div class="panel hover-card rounded-[28px] p-6">
           <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">基础信息</p>
           <div class="mt-6 grid gap-4 md:grid-cols-2">
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4 md:col-span-2">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 md:col-span-2">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">项目名称</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ item.name || "未提供名称" }}</p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">数据类型</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ getSyncItemTypeLabel(item.dataType) }}</p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">当前状态</p>
-              <p class="mt-2 text-base font-semibold" :class="item.deletedAt ? 'text-rose-700' : 'text-emerald-700'">
+              <p class="mt-2 text-base font-semibold" :class="item.deletedAt ? 'text-[var(--danger)]' : 'text-[var(--success)]'">
                 {{ item.deletedAt ? "已软删除" : "有效" }}
               </p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4 md:col-span-2">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 md:col-span-2">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">同步项 ID</p>
               <p class="mt-2 break-all font-mono text-xs text-[var(--text)]">{{ item.id }}</p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4 md:col-span-2">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 md:col-span-2">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">owner_id</p>
               <p class="mt-2 break-all font-mono text-xs text-[var(--text)]">{{ item.ownerId }}</p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">密钥版本</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ formatKeyVersion(item.keyVersion) }}</p>
               <p class="mt-2 text-xs leading-6 text-[var(--muted)]">
                 表示这条记录是用第几代同步密钥加密的。
               </p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">记录版本</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ formatRecordVersion(item.version) }}</p>
               <p class="mt-2 text-xs leading-6 text-[var(--muted)]">
                 表示这条记录内容已经更新到第几版，每次修改都会递增。
               </p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">创建时间</p>
               <p class="mt-2 text-sm text-[var(--text)]">{{ formatDate(item.createdAt) }}</p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">更新时间</p>
               <p class="mt-2 text-sm text-[var(--text)]">{{ formatDate(item.updatedAt) }}</p>
             </article>
-            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4 md:col-span-2">
+            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 md:col-span-2">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">删除时间</p>
               <p class="mt-2 text-sm text-[var(--text)]">
                 {{ item.deletedAt ? formatDate(item.deletedAt) : "未删除" }}
@@ -89,12 +89,12 @@
         </div>
 
         <div class="space-y-6">
-          <section class="panel rounded-[28px] p-6">
+          <section class="panel hover-card rounded-[28px] p-6">
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">校验值</p>
             <p class="mt-4 break-all font-mono text-xs leading-6 text-[var(--text)]">{{ item.checksum || "空" }}</p>
           </section>
 
-          <section class="panel rounded-[28px] p-6">
+          <section class="panel hover-card rounded-[28px] p-6">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">本地解密</p>
@@ -102,7 +102,7 @@
               </div>
               <span
                 class="rounded-full px-3 py-1 text-xs font-medium"
-                :class="config ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+                :class="config ? 'status-success' : 'status-warning'"
               >
                 {{ config ? `已读取 key_verification · ${formatKeyVersion(config.keyVersion)}` : "未读取到 key_verification" }}
               </span>
@@ -111,7 +111,7 @@
             <p class="mt-4 text-sm leading-7 text-[var(--muted)]">
               主密钥只在当前浏览器内存中使用，不会发送到 sync_server。每次需要查看明文时，请手动输入主密钥。
             </p>
-            <p v-if="configLoadFailed" class="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            <p v-if="configLoadFailed" class="feedback-warning mt-4 rounded-2xl px-4 py-3 text-sm">
               同步密钥配置读取失败，本次将直接尝试解密密文，无法提前校验主密钥是否正确。
             </p>
 
@@ -122,15 +122,15 @@
                   v-model="masterKey"
                   type="password"
                   autocomplete="off"
-                  class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+                  class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
                   placeholder="输入主密钥后在本地解密"
                 />
               </label>
 
-              <p v-if="decryptMessage" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              <p v-if="decryptMessage" class="feedback-success rounded-2xl px-4 py-3 text-sm">
                 {{ decryptMessage }}
               </p>
-              <p v-if="decryptError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <p v-if="decryptError" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
                 {{ decryptError }}
               </p>
 
@@ -143,7 +143,7 @@
                 </button>
                 <button
                   type="button"
-                  class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+                  class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
                   @click="clearDecryptedData"
                 >
                   清空结果
@@ -153,13 +153,13 @@
 
             <div v-if="formattedDecryptedPayload" class="mt-6">
               <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">解密结果</p>
-              <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ formattedDecryptedPayload }}</pre>
+              <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[color:rgba(0,217,163,0.22)] bg-[color:rgba(0,217,163,0.08)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ formattedDecryptedPayload }}</pre>
             </div>
           </section>
 
-          <section class="panel rounded-[28px] p-6">
+          <section class="panel hover-card rounded-[28px] p-6">
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">加密数据</p>
-            <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[var(--line)] bg-white/60 p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ item.encryptedData }}</pre>
+            <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ item.encryptedData }}</pre>
           </section>
         </div>
       </section>

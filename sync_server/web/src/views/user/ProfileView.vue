@@ -1,6 +1,6 @@
 <template>
   <div class="grid gap-6 xl:grid-cols-[1fr_1fr]">
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">资料设置</p>
       <h2 class="mt-3 text-2xl font-semibold text-[var(--text)]">设置昵称</h2>
       <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
@@ -15,15 +15,15 @@
             type="text"
             maxlength="255"
             required
-            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
             placeholder="输入昵称"
           />
         </label>
 
-        <p v-if="nicknameMessage" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <p v-if="nicknameMessage" class="feedback-success rounded-2xl px-4 py-3 text-sm">
           {{ nicknameMessage }}
         </p>
-        <p v-if="nicknameError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <p v-if="nicknameError" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
           {{ nicknameError }}
         </p>
 
@@ -33,7 +33,7 @@
       </form>
     </section>
 
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">账号设置</p>
       <h2 class="mt-3 text-2xl font-semibold text-[var(--text)]">修改密码</h2>
       <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
@@ -48,7 +48,7 @@
             type="password"
             minlength="8"
             required
-            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
           />
         </label>
 
@@ -59,14 +59,14 @@
             type="password"
             minlength="8"
             required
-            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
           />
         </label>
 
-        <p v-if="passwordMessage" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <p v-if="passwordMessage" class="feedback-success rounded-2xl px-4 py-3 text-sm">
           {{ passwordMessage }}
         </p>
-        <p v-if="passwordError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <p v-if="passwordError" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
           {{ passwordError }}
         </p>
 
@@ -76,29 +76,29 @@
       </form>
     </section>
 
-    <section class="panel rounded-[28px] p-6 xl:col-span-2">
+    <section class="panel hover-card rounded-[28px] p-6 xl:col-span-2">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">同步数据管理</p>
       <h2 class="mt-3 text-2xl font-semibold text-[var(--text)]">清空当前账号云端数据</h2>
       <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
         该操作会删除当前账号的同步配置和全部同步项。适合重置同步状态，但不会删除账号本身。
       </p>
 
-      <div class="mt-8 rounded-3xl border border-rose-200 bg-rose-50 p-5">
-        <p class="text-sm font-semibold text-rose-800">危险操作</p>
-        <p class="mt-2 text-sm leading-7 text-rose-700">
+      <div class="feedback-danger hover-card hover-card-danger mt-8 rounded-3xl p-5">
+        <p class="text-sm font-semibold">危险操作</p>
+        <p class="mt-2 text-sm leading-7">
           删除后，其他设备将无法继续使用原有云端同步状态，需要重新写入同步配置。
         </p>
       </div>
 
-      <p v-if="clearMessage" class="mt-5 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+      <p v-if="clearMessage" class="feedback-success mt-5 rounded-2xl px-4 py-3 text-sm">
         {{ clearMessage }}
       </p>
-      <p v-if="clearError" class="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+      <p v-if="clearError" class="feedback-danger mt-5 rounded-2xl px-4 py-3 text-sm">
         {{ clearError }}
       </p>
 
       <button
-        class="mt-6 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-700"
+        class="danger-button mt-6 rounded-2xl px-4 py-3 text-sm font-semibold text-white"
         :disabled="clearing"
         @click="clearData"
       >

@@ -3399,6 +3399,56 @@
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
 
+## 编码前检查 - sync-server-theme-kiro2api
+时间：2026-03-26 00:00:36 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-theme-kiro2api.md`
+□ 将使用以下可复用组件：
+- `main/src/auth.rs::show_password_auth_dialog`：复用现有认证弹窗结构和提交逻辑
+- `main/src/setting_tab.rs::render_account_section`：复用设置页账户区渲染入口
+- `gpui_component::dialog::DialogButtonProps`：复用对话框确认/取消按钮配置
+- `gpui_component::button::ButtonCustomVariant`：复用自定义按钮视觉方案
+□ 将遵循命名约定：新增主题辅助函数统一使用语义化命名，不在业务代码里散落魔法颜色值
+□ 将遵循代码风格：只改 `sync_server` 相关局部 UI，不改全局主题，不改业务流程
+□ 确认不重复造轮子，证明：已检查 `main/src/auth.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`main/src/encourage.rs` 和 `../kiro2api/frontend-vue/src/styles/globals.css`
+
+## 执行记录 - sync-server-theme-kiro2api
+时间：2026-03-26 00:00:36 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/auth.rs`
+- `main/src/setting_tab.rs`
+- `main/src/home_tab.rs`
+- `main/src/encourage.rs`
+- `main/src/main.rs`
+- `../kiro2api/frontend-vue/src/styles/globals.css`
+- `../kiro2api/frontend-vue/src/views/login/LoginPage.vue`
+- `../kiro2api/frontend-vue/src/layouts/DashboardLayout.vue`
+
+### 2. 对比的相似实现
+- `main/src/auth.rs:445`：`sync_server` 密码登录/注册弹窗入口
+- `main/src/setting_tab.rs:814`：设置页账户区自定义渲染入口
+- `main/src/home_tab.rs:2009`：仓库内已有 `ButtonVariant::Custom(...)` 用法
+- `../kiro2api/frontend-vue/src/styles/globals.css:1`：目标配色变量来源
+
+### 3. 本次实现
+- 新增 `main/src/sync_server_theme.rs`，统一 `sync_server` 深色面板、文字层级、强调色和按钮 variant。
+- 在 `main/src/main.rs` 注册 `mod sync_server_theme;`。
+- 在 `main/src/auth.rs` 将密码登录/注册弹窗替换为深色卡片 + 绿色主按钮 + 深色输入框 + 红色弱提示面板。
+- 在 `main/src/setting_tab.rs` 将账户区替换为深色卡片风格，统一已登录态、未登录态和登出按钮配色。
+
+### 4. 未重复造轮子的证明
+- 没有新增新的弹窗系统、按钮组件或设置页容器，只是复用现有结构并抽出一个局部主题模块
+- 仓库已有自定义按钮 variant 模式，因此本次直接沿用，而不是额外造一套 `sync_server` 专属按钮组件
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 6. 风险与限制
+- 当前没有 GUI 截图或自动化交互验证，最终视觉效果和间距细节仍建议你本地打开账户页与登录弹窗确认
+- 构建输出中的 `gpui-component` 历史 warning 与本次配色改动无关
+
 ## 编码前检查 - sync-reference-recovery
 时间：2026-03-25 20:08:00 +0800
 

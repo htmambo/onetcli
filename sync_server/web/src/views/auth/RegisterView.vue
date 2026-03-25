@@ -1,6 +1,6 @@
 <template>
   <div class="flex min-h-screen items-center justify-center px-4 py-10">
-    <section class="panel w-full max-w-2xl rounded-[32px] p-8 lg:p-10">
+    <section class="panel hover-card w-full max-w-2xl rounded-[32px] p-8 lg:p-10">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">创建账号</p>
       <h1 class="mt-3 text-3xl font-semibold text-[var(--text)]">注册新的同步账号</h1>
       <p class="mt-3 text-sm leading-7 text-[var(--muted)]">
@@ -14,7 +14,7 @@
             v-model="email"
             type="email"
             required
-            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
           />
         </label>
 
@@ -25,7 +25,7 @@
             type="password"
             required
             minlength="8"
-            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
           />
         </label>
 
@@ -36,11 +36,11 @@
             type="password"
             required
             minlength="8"
-            class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+            class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
           />
         </label>
 
-        <p v-if="errorMessage" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <p v-if="errorMessage" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
           {{ errorMessage }}
         </p>
 
@@ -55,7 +55,7 @@
 
       <p class="mt-5 text-sm text-[var(--muted)]">
         已有账号？
-        <RouterLink class="font-semibold text-[var(--accent-deep)]" to="/login">返回登录</RouterLink>
+        <RouterLink class="link-accent font-semibold" to="/login">返回登录</RouterLink>
       </p>
     </section>
   </div>

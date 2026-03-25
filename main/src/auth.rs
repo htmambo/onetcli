@@ -14,10 +14,10 @@ use gpui::{App, AppContext as _, Context, Entity, FontWeight, ParentElement, Sty
 /// 用于在客户端回调中（无法访问 GPUI 全局状态时）通知 UI 层会话已过期。
 /// UI 层定期检查此标志，若为 true 则弹出登录对话框。
 static SESSION_EXPIRED: AtomicBool = AtomicBool::new(false);
-use gpui_component::button::Button;
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::{
-    ActiveTheme, Sizable, WindowExt,
+    Icon, IconName, Sizable, WindowExt, h_flex,
     input::{Input, InputState},
     v_flex,
 };
@@ -29,6 +29,7 @@ use rust_i18n::t;
 use tracing::{info, warn};
 
 use crate::setting_tab::AppSettings;
+use crate::sync_server_theme;
 
 // ============================================================================
 // 全局认证服务
@@ -490,11 +491,42 @@ pub fn show_password_auth_dialog<V: 'static>(
         let error_ok = error_for_ok.clone();
         let sign_up_mode_ok = sign_up_mode_for_ok.clone();
 
+        let build_field = |label: String, input: Input| {
+            v_flex()
+                .gap_2()
+                .child(
+                    gpui::div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(sync_server_theme::text_muted())
+                        .child(label),
+                )
+                .child(
+                    input
+                        .w_full()
+                        .bg(sync_server_theme::panel_alt_bg())
+                        .border_color(sync_server_theme::border())
+                        .text_color(sync_server_theme::text_primary()),
+                )
+        };
+
         dialog
-            .title(submit_label.clone())
-            .width(px(400.))
+            .title(
+                gpui::div()
+                    .text_color(sync_server_theme::text_primary())
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(submit_label.clone()),
+            )
+            .width(px(460.))
+            .bg(sync_server_theme::panel_bg())
+            .border_color(sync_server_theme::border_strong())
             .confirm()
-            .button_props(DialogButtonProps::default().ok_text(submit_label))
+            .button_props(
+                DialogButtonProps::default()
+                    .ok_text(submit_label.clone())
+                    .ok_variant(sync_server_theme::primary_button_variant(cx))
+                    .cancel_variant(sync_server_theme::secondary_button_variant(cx)),
+            )
             .on_ok(move |_, _window, cx| {
                 let email = email_ok.read(cx).text().to_string();
                 let password = password_ok.read(cx).text().to_string();
@@ -538,48 +570,79 @@ pub fn show_password_auth_dialog<V: 'static>(
             })
             .child(
                 v_flex()
-                    .gap_4()
-                    .p_4()
+                    .gap_5()
+                    .p_5()
+                    .bg(sync_server_theme::page_bg())
                     .child(
                         v_flex()
-                            .gap_1()
+                            .gap_3()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(
+                                        gpui::div()
+                                            .w(px(42.))
+                                            .h(px(42.))
+                                            .rounded_xl()
+                                            .bg(sync_server_theme::accent_dim())
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                Icon::new(IconName::Server)
+                                                    .with_size(px(18.))
+                                                    .text_color(sync_server_theme::accent()),
+                                            ),
+                                    )
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(
+                                                gpui::div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(sync_server_theme::text_primary())
+                                                    .child(submit_label.clone()),
+                                            )
+                                            .child(
+                                                gpui::div()
+                                                    .text_xs()
+                                                    .text_color(sync_server_theme::text_soft())
+                                                    .child("sync_server"),
+                                            ),
+                                    ),
+                            )
                             .child(
                                 gpui::div()
                                     .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Auth.email").to_string()),
-                            )
-                            .child(Input::new(&email_for_render)),
+                                    .text_color(sync_server_theme::text_muted())
+                                    .child(
+                                        t!("Settings.General.Account.sync_server_url_desc")
+                                            .to_string(),
+                                    ),
+                            ),
                     )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                gpui::div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Auth.password").to_string()),
-                            )
-                            .child(Input::new(&password_for_render)),
-                    )
+                    .child(build_field(
+                        t!("Auth.email").to_string(),
+                        Input::new(&email_for_render),
+                    ))
+                    .child(build_field(
+                        t!("Auth.password").to_string(),
+                        Input::new(&password_for_render),
+                    ))
                     .when(is_sign_up, |this| {
-                        this.child(
-                            v_flex()
-                                .gap_1()
-                                .child(
-                                    gpui::div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(t!("Auth.confirm_password").to_string()),
-                                )
-                                .child(Input::new(&confirm_password_for_render)),
-                        )
+                        this.child(build_field(
+                            t!("Auth.confirm_password").to_string(),
+                            Input::new(&confirm_password_for_render),
+                        ))
                     })
                     .child({
                         let sign_up_mode_toggle = sign_up_mode_for_render.clone();
                         let error_toggle = error_for_render.clone();
                         Button::new("switch-auth-mode")
-                            .xsmall()
+                            .w_full()
+                            .with_variant(sync_server_theme::secondary_button_variant(cx))
                             .label(switch_label)
                             .on_click(move |_, _window, cx| {
                                 sign_up_mode_toggle.update(cx, |mode, cx| {
@@ -595,9 +658,18 @@ pub fn show_password_auth_dialog<V: 'static>(
                     .when_some(error_for_render.read(cx).clone(), |this, msg| {
                         this.child(
                             gpui::div()
-                                .text_sm()
-                                .text_color(cx.theme().danger)
-                                .child(msg),
+                                .w_full()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(sync_server_theme::danger().opacity(0.35))
+                                .bg(sync_server_theme::danger_dim())
+                                .p_3()
+                                .child(
+                                    gpui::div()
+                                        .text_sm()
+                                        .text_color(sync_server_theme::danger())
+                                        .child(msg),
+                                ),
                         )
                     }),
             )

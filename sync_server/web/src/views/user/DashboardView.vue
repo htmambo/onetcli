@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">同步概览</p>
       <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
@@ -10,7 +10,7 @@
           </p>
         </div>
         <button
-          class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+          class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
           @click="loadData"
         >
           刷新数据
@@ -27,7 +27,7 @@
     </section>
 
     <section class="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
-      <div class="panel rounded-[28px] p-6">
+      <div class="panel hover-card rounded-[28px] p-6">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">同步密钥配置</p>
@@ -35,13 +35,13 @@
           </div>
           <span
             class="rounded-full px-3 py-1 text-xs font-medium"
-            :class="config ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+            :class="config ? 'status-success' : 'status-warning'"
           >
             {{ config ? "已配置" : "未配置" }}
           </span>
         </div>
 
-        <div class="mt-6 rounded-3xl border border-[var(--line)] bg-white/60 p-5">
+        <div class="hover-card mt-6 rounded-3xl border border-[var(--line)] bg-[var(--panel-strong)] p-5">
           <p class="text-sm font-semibold text-[var(--text)]">字段说明</p>
           <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
             <b>密钥校验串（key_verification）</b>用于校验当前主密钥是否匹配，不会直接保存你的明文密钥。
@@ -54,9 +54,9 @@
           </p>
         </div>
 
-        <div v-if="config" class="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50/80 p-5">
-          <p class="text-sm font-semibold text-emerald-800">当前生效配置</p>
-          <div class="mt-3 flex flex-wrap gap-3 text-sm text-emerald-700">
+        <div v-if="config" class="feedback-success hover-card mt-4 rounded-3xl p-5">
+          <p class="text-sm font-semibold">当前生效配置</p>
+          <div class="mt-3 flex flex-wrap gap-3 text-sm">
             <span>密钥版本：{{ formatKeyVersion(config.keyVersion) }}</span>
             <span>最近更新：{{ formatDate(config.updatedAt) }}</span>
           </div>
@@ -71,7 +71,7 @@
             <textarea
               v-model="keyVerification"
               rows="5"
-              class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+              class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
               placeholder="输入或粘贴同步密钥校验串"
             />
           </label>
@@ -84,14 +84,14 @@
               v-model.number="keyVersion"
               type="number"
               min="1"
-              class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+              class="input-shell w-full rounded-2xl border px-4 py-3 outline-none"
             />
           </label>
 
-          <p v-if="configMessage" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <p v-if="configMessage" class="feedback-success rounded-2xl px-4 py-3 text-sm">
             {{ configMessage }}
           </p>
-          <p v-if="configError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <p v-if="configError" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
             {{ configError }}
           </p>
 
@@ -104,7 +104,7 @@
         </form>
       </div>
 
-      <div class="panel rounded-[28px] p-6">
+      <div class="panel hover-card rounded-[28px] p-6">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">最近同步项</p>
@@ -113,16 +113,16 @@
           <div class="flex items-center gap-3">
             <RouterLink
               to="/app/sync-items"
-              class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+              class="ghost-button rounded-2xl px-4 py-2 text-sm font-medium"
             >
               查看全部同步项
             </RouterLink>
-            <span class="rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-[var(--muted)]">
+            <span class="status-neutral rounded-full px-3 py-1 text-xs font-medium">
               有效 {{ activeItems.length }} 条
             </span>
             <span
               v-if="deletedItems.length > 0"
-              class="rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700"
+              class="status-danger rounded-full px-3 py-1 text-xs font-medium"
             >
               已软删除 {{ deletedItems.length }} 条
             </span>
@@ -134,14 +134,14 @@
         </p>
 
         <div v-if="loading" class="mt-6 text-sm text-[var(--muted)]">读取中...</div>
-        <div v-else-if="activeItems.length === 0" class="mt-6 rounded-2xl bg-white/60 p-4 text-sm text-[var(--muted)]">
+        <div v-else-if="activeItems.length === 0" class="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 text-sm text-[var(--muted)]">
           当前没有同步数据。
         </div>
         <div v-else class="mt-6 space-y-3">
           <article
             v-for="item in previewItems"
             :key="item.id"
-            class="rounded-2xl border border-[var(--line)] bg-white/60 p-4"
+            class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4"
           >
             <div class="flex items-start justify-between gap-4">
               <div class="min-w-0">
@@ -149,19 +149,19 @@
                 <p class="mt-1 truncate text-sm text-[var(--text)]">{{ item.name || "未提供名称" }}</p>
                 <p class="mt-1 truncate text-xs text-[var(--muted)]">{{ item.id }}</p>
               </div>
-              <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-[var(--muted)]">
+              <span class="status-neutral rounded-full px-3 py-1 text-xs font-medium">
                 记录{{ formatRecordVersion(item.version) }}
               </span>
             </div>
             <div class="mt-3 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
               <span>密钥版本：{{ formatKeyVersion(item.keyVersion) }}</span>
               <span>最后更新：{{ formatDate(item.updatedAt) }}</span>
-              <span v-if="item.deletedAt" class="text-rose-700">已软删除</span>
+              <span v-if="item.deletedAt" class="text-[var(--danger)]">已软删除</span>
             </div>
             <div class="mt-4">
               <RouterLink
                 :to="{ name: 'sync-item-detail', params: { id: item.id } }"
-                class="inline-flex rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--accent-soft)]"
+                class="inline-button inline-flex rounded-xl px-3 py-2 text-xs font-medium"
               >
                 查看详情
               </RouterLink>

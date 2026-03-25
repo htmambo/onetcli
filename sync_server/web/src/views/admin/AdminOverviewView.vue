@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">管理界面</p>
       <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
@@ -10,7 +10,7 @@
           </p>
         </div>
         <button
-          class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+          class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
           @click="loadData"
         >
           刷新管理数据
@@ -25,18 +25,18 @@
       <StatCard label="同步配置数" :value="overview?.syncConfigs ?? 0" />
     </section>
 
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <div class="flex items-center justify-between">
         <div>
           <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">账号列表</p>
           <h3 class="mt-2 text-xl font-semibold text-[var(--text)]">用户与同步状态</h3>
         </div>
-        <span class="rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-[var(--muted)]">
+        <span class="status-neutral rounded-full px-3 py-1 text-xs font-medium">
           {{ users.length }} 个账号
         </span>
       </div>
 
-      <p v-if="errorMessage" class="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+      <p v-if="errorMessage" class="feedback-danger mt-5 rounded-2xl px-4 py-3 text-sm">
         {{ errorMessage }}
       </p>
 
@@ -63,7 +63,7 @@
               <td class="px-3 py-4">
                 <span
                   class="rounded-full px-3 py-1 text-xs font-medium"
-                  :class="user.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'"
+                  :class="user.status === 'active' ? 'status-success' : 'status-danger'"
                 >
                   {{ user.status }}
                 </span>
@@ -76,19 +76,19 @@
               <td class="px-3 py-4">
                 <div class="flex flex-wrap gap-2">
                   <button
-                    class="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs font-medium text-[var(--text)]"
+                    class="inline-button rounded-xl px-3 py-2 text-xs font-medium"
                     @click="toggleStatus(user.id, user.status)"
                   >
                     {{ user.status === "active" ? "禁用" : "启用" }}
                   </button>
                   <button
-                    class="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs font-medium text-[var(--text)]"
+                    class="inline-button rounded-xl px-3 py-2 text-xs font-medium"
                     @click="toggleRole(user.id, user.role)"
                   >
                     {{ user.role === "admin" ? "降为用户" : "升为管理员" }}
                   </button>
                   <button
-                    class="rounded-xl bg-rose-600 px-3 py-2 text-xs font-medium text-white"
+                    class="danger-button rounded-xl px-3 py-2 text-xs font-medium text-white"
                     @click="purgeData(user.id, user.nickname, user.email)"
                   >
                     清空数据

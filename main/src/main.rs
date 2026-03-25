@@ -10,6 +10,7 @@ mod home_tab;
 mod onetcli_app;
 mod setting_tab;
 mod settings;
+mod sync_server_theme;
 mod update;
 mod user_avatar;
 

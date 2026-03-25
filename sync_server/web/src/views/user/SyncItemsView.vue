@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">全部同步项</p>
       <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
@@ -10,7 +10,7 @@
           </p>
         </div>
         <button
-          class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+          class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
           @click="loadItems"
         >
           刷新列表
@@ -18,7 +18,7 @@
       </div>
     </section>
 
-    <section class="panel rounded-[28px] p-6">
+    <section class="panel hover-card rounded-[28px] p-6">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">同步项列表</p>
@@ -31,28 +31,28 @@
         </div>
         <RouterLink
           to="/app"
-          class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+          class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
         >
           返回同步概览
         </RouterLink>
       </div>
 
-      <p v-if="errorMessage" class="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+      <p v-if="errorMessage" class="feedback-danger mt-5 rounded-2xl px-4 py-3 text-sm">
         {{ errorMessage }}
       </p>
       <div v-else-if="loading" class="mt-6 text-sm text-[var(--muted)]">读取中...</div>
-      <div v-else-if="items.length === 0" class="mt-6 rounded-2xl bg-white/60 p-4 text-sm text-[var(--muted)]">
+      <div v-else-if="items.length === 0" class="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 text-sm text-[var(--muted)]">
         当前没有同步数据。
       </div>
       <div v-else class="mt-6 space-y-6">
-        <div class="rounded-3xl border border-[var(--line)] bg-white/50 p-5">
+        <div class="hover-card rounded-3xl border border-[var(--line)] bg-[var(--panel-strong)] p-5">
           <div class="space-y-4">
             <div class="grid gap-4 md:grid-cols-3">
               <label class="block">
                 <span class="mb-2 block text-sm font-medium text-[var(--text)]">类型筛选</span>
                 <select
                   v-model="selectedType"
-                  class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 text-sm text-[var(--text)] outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+                  class="input-shell w-full rounded-2xl border px-4 py-3 text-sm outline-none"
                 >
                   <option :value="ALL_TYPES">全部类型</option>
                   <option
@@ -69,7 +69,7 @@
                 <span class="mb-2 block text-sm font-medium text-[var(--text)]">状态筛选</span>
                 <select
                   v-model="selectedStatus"
-                  class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 text-sm text-[var(--text)] outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+                  class="input-shell w-full rounded-2xl border px-4 py-3 text-sm outline-none"
                 >
                   <option :value="ACTIVE_STATUS">仅有效</option>
                   <option :value="ALL_STATUS">全部状态</option>
@@ -81,7 +81,7 @@
                 <span class="mb-2 block text-sm font-medium text-[var(--text)]">每页条数</span>
                 <select
                   v-model.number="pageSize"
-                  class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 text-sm text-[var(--text)] outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+                  class="input-shell w-full rounded-2xl border px-4 py-3 text-sm outline-none"
                 >
                   <option v-for="option in pageSizeOptions" :key="option" :value="option">
                     {{ option }} 条/页
@@ -91,22 +91,22 @@
             </div>
 
             <div class="flex flex-wrap gap-3 text-sm text-[var(--muted)]">
-              <span class="rounded-full bg-white/80 px-3 py-2">共 {{ items.length }} 条</span>
-              <span class="rounded-full bg-white/80 px-3 py-2">有效 {{ activeItemCount }} 条</span>
-              <span class="rounded-full bg-white/80 px-3 py-2">已软删除 {{ deletedItemCount }} 条</span>
-              <span class="rounded-full bg-white/80 px-3 py-2">筛选后 {{ filteredItems.length }} 条</span>
-              <span class="rounded-full bg-white/80 px-3 py-2">第 {{ currentPage }} / {{ totalPages }} 页</span>
+              <span class="status-neutral rounded-full px-3 py-2">共 {{ items.length }} 条</span>
+              <span class="status-neutral rounded-full px-3 py-2">有效 {{ activeItemCount }} 条</span>
+              <span class="status-neutral rounded-full px-3 py-2">已软删除 {{ deletedItemCount }} 条</span>
+              <span class="status-neutral rounded-full px-3 py-2">筛选后 {{ filteredItems.length }} 条</span>
+              <span class="status-neutral rounded-full px-3 py-2">第 {{ currentPage }} / {{ totalPages }} 页</span>
             </div>
           </div>
         </div>
 
-        <p class="rounded-2xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+        <p class="feedback-warning rounded-2xl px-4 py-3 text-sm leading-6">
           远端删除采用软删除保留审计痕迹。默认仅显示有效项；如果需要核对删除记录，可切换到“仅已软删除”或“全部状态”。
         </p>
 
         <div
           v-if="filteredItems.length === 0"
-          class="rounded-2xl bg-white/60 p-4 text-sm text-[var(--muted)]"
+          class="rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 text-sm text-[var(--muted)]"
         >
           当前筛选条件下没有同步数据。
         </div>
@@ -137,7 +137,7 @@
                   <td class="px-3 py-4">
                     <span
                       class="rounded-full px-3 py-1 text-xs font-medium"
-                      :class="item.deletedAt ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'"
+                      :class="item.deletedAt ? 'status-danger' : 'status-success'"
                     >
                       {{ item.deletedAt ? "已软删除" : "有效" }}
                     </span>
@@ -145,7 +145,7 @@
                   <td class="px-3 py-4">
                     <RouterLink
                       :to="{ name: 'sync-item-detail', params: { id: item.id } }"
-                      class="inline-flex rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--accent-soft)]"
+                      class="inline-button inline-flex rounded-xl px-3 py-2 text-xs font-medium"
                     >
                       查看详情
                     </RouterLink>
@@ -162,7 +162,7 @@
 
             <div class="flex flex-wrap items-center gap-2">
               <button
-                class="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                class="inline-button rounded-xl px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
                 :disabled="currentPage === 1"
                 @click="goToPreviousPage"
               >
@@ -173,14 +173,14 @@
                 v-for="page in visiblePages"
                 :key="page"
                 class="rounded-xl border px-3 py-2 text-sm font-medium transition"
-                :class="page === currentPage ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-deep)]' : 'border-[var(--line)] bg-white text-[var(--text)] hover:bg-[var(--accent-soft)]'"
+                :class="page === currentPage ? 'border-[color:rgba(0,217,163,0.22)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'inline-button'"
                 @click="goToPage(page)"
               >
                 {{ page }}
               </button>
 
               <button
-                class="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                class="inline-button rounded-xl px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
                 :disabled="currentPage === totalPages"
                 @click="goToNextPage"
               >

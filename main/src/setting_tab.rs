@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use gpui::{
     App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Render, SharedString,
-    Styled, Window, div,
+    Styled, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, Theme, ThemeMode,
@@ -31,6 +31,7 @@ use crate::auth::get_auth_service;
 use crate::encourage::render_encourage_section;
 use crate::onetcli_app::GlobalHomePage;
 use crate::settings::llm_providers_view::LlmProvidersView;
+use crate::sync_server_theme;
 
 // ============================================================================
 // 全局用户状态
@@ -811,84 +812,213 @@ impl Render for SettingsPanel {
 
 /// 渲染账户设置区域
 fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
-    let user = GlobalCurrentUser::get_user(cx);
-
-    if let Some(user) = user {
-        // 已登录状态：显示用户信息和登出按钮
-        let email: SharedString = user.email.clone().into();
-        let display_name: SharedString = user.display_name().into();
-
-        v_flex()
+    let render_account_row = |label: String, value: String| {
+        h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
             .gap_4()
-            .p_4()
-            // 用户信息区域
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("Settings.Account.username").to_string()),
-                            )
-                            .child(div().text_sm().child(display_name)),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("Settings.Account.email").to_string()),
-                            )
-                            .child(div().text_sm().child(email)),
-                    ),
-            )
-            // 登出按钮
-            .child(
-                h_flex().gap_2().child(
-                    Button::new("logout-button")
-                        .icon(IconName::Close)
-                        .label(t!("Auth.logout"))
-                        .danger()
-                        .on_click(move |_, _window, cx| {
-                            // 执行登出
-                            let auth = get_auth_service(cx);
-                            cx.spawn(async move |cx: &mut AsyncApp| {
-                                auth.sign_out().await;
-                                cx.update(|cx| {
-                                    GlobalCurrentUser::set_user(None, cx);
-                                    if let Some(home) = cx.try_global::<GlobalHomePage>() {
-                                        let home_page = home.home_page.clone();
-                                        home_page.update(cx, |home_page, cx| {
-                                            home_page.handle_auth_state_cleared(cx);
-                                        });
-                                    }
-                                });
-                            })
-                            .detach();
-                        }),
-                ),
-            )
-            .into_any_element()
-    } else {
-        // 未登录状态：显示提示信息
-        v_flex()
-            .gap_2()
-            .p_4()
             .child(
                 div()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("Settings.Account.not_logged_in").to_string()),
+                    .text_color(sync_server_theme::text_muted())
+                    .child(label),
             )
-            .into_any_element()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(sync_server_theme::text_primary())
+                    .child(value),
+            )
+    };
+
+    let render_account_shell = |title: String,
+                                subtitle: Option<String>,
+                                body: gpui::AnyElement|
+     -> gpui::AnyElement {
+        v_flex()
+                .gap_4()
+                .p_4()
+                .child(
+                    div()
+                        .w_full()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(sync_server_theme::border())
+                        .bg(sync_server_theme::panel_bg())
+                        .shadow_lg()
+                        .child(
+                            v_flex()
+                                .gap_4()
+                                .p_5()
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_3()
+                                        .child(
+                                            h_flex()
+                                                .items_center()
+                                                .gap_3()
+                                                .child(
+                                                    div()
+                                                        .w(px(42.))
+                                                        .h(px(42.))
+                                                        .rounded_xl()
+                                                        .bg(sync_server_theme::accent_dim())
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .child(
+                                                            Icon::new(IconName::Server)
+                                                                .with_size(px(18.))
+                                                                .text_color(
+                                                                    sync_server_theme::accent(),
+                                                                ),
+                                                        ),
+                                                )
+                                                .child(
+                                                    v_flex()
+                                                        .gap_1()
+                                                        .child(
+                                                            div()
+                                                                .text_sm()
+                                                                .font_weight(
+                                                                    FontWeight::SEMIBOLD,
+                                                                )
+                                                                .text_color(
+                                                                    sync_server_theme::text_primary(),
+                                                                )
+                                                                .child(title),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(
+                                                                    sync_server_theme::text_soft(),
+                                                                )
+                                                                .child("sync_server"),
+                                                        )
+                                                        .when_some(subtitle, |this, subtitle| {
+                                                            this.child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .text_color(
+                                                                        sync_server_theme::text_muted(),
+                                                                    )
+                                                                    .child(subtitle),
+                                                            )
+                                                        }),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .rounded_full()
+                                                .px_2()
+                                                .py_1()
+                                                .bg(sync_server_theme::accent_dim_strong())
+                                                .text_xs()
+                                                .text_color(sync_server_theme::accent())
+                                                .child(t!("Settings.Account.title").to_string()),
+                                        ),
+                                )
+                                .child(body),
+                        ),
+                )
+                .into_any_element()
+    };
+
+    let user = GlobalCurrentUser::get_user(cx);
+
+    if let Some(user) = user {
+        let display_name = user.display_name();
+        let secondary_identity = user
+            .secondary_identity()
+            .unwrap_or_else(|| user.email.clone());
+
+        render_account_shell(
+            display_name.clone(),
+            Some(secondary_identity),
+            v_flex()
+                .gap_4()
+                .child(
+                    div()
+                        .w_full()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(sync_server_theme::border())
+                        .bg(sync_server_theme::panel_alt_bg())
+                        .child(
+                            v_flex()
+                                .gap_3()
+                                .p_4()
+                                .child(render_account_row(
+                                    t!("Settings.Account.username").to_string(),
+                                    display_name,
+                                ))
+                                .child(render_account_row(
+                                    t!("Settings.Account.email").to_string(),
+                                    user.email.clone(),
+                                )),
+                        ),
+                )
+                .child(
+                    h_flex().gap_2().justify_end().child(
+                        Button::new("logout-button")
+                            .icon(IconName::Close)
+                            .label(t!("Auth.logout"))
+                            .with_variant(sync_server_theme::danger_button_variant(cx))
+                            .on_click(move |_, _window, cx| {
+                                let auth = get_auth_service(cx);
+                                cx.spawn(async move |cx: &mut AsyncApp| {
+                                    auth.sign_out().await;
+                                    cx.update(|cx| {
+                                        GlobalCurrentUser::set_user(None, cx);
+                                        if let Some(home) = cx.try_global::<GlobalHomePage>() {
+                                            let home_page = home.home_page.clone();
+                                            home_page.update(cx, |home_page, cx| {
+                                                home_page.handle_auth_state_cleared(cx);
+                                            });
+                                        }
+                                    });
+                                })
+                                .detach();
+                            }),
+                    ),
+                )
+                .into_any_element(),
+        )
+    } else {
+        render_account_shell(
+            t!("Settings.Account.title").to_string(),
+            None,
+            div()
+                .w_full()
+                .rounded_xl()
+                .border_1()
+                .border_color(sync_server_theme::border())
+                .bg(sync_server_theme::panel_alt_bg())
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .p_4()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(sync_server_theme::text_primary())
+                                .child(t!("Settings.Account.title").to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(sync_server_theme::text_muted())
+                                .child(t!("Settings.Account.not_logged_in").to_string()),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 }
 

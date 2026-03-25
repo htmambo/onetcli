@@ -16,7 +16,7 @@
             :key="item.to"
             :to="item.to"
             class="rounded-2xl px-4 py-3 text-sm font-medium transition"
-            :class="isActive(item.to) ? 'bg-[var(--accent-soft)] text-[var(--accent-deep)]' : 'text-[var(--muted)] hover:bg-white/60'"
+            :class="isActive(item.to) ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)] hover:bg-[var(--panel-hover)] hover:text-[var(--text)]'"
           >
             {{ item.label }}
           </RouterLink>
@@ -25,8 +25,8 @@
         <div class="mt-auto pt-6">
           <RouterLink
             to="/app/profile"
-            class="block rounded-2xl border px-4 py-4 transition"
-            :class="isActive('/app/profile') ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-white/70 hover:bg-white'"
+            class="hover-card block rounded-2xl border px-4 py-4 transition"
+            :class="isActive('/app/profile') ? 'border-[color:rgba(0,217,163,0.22)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--panel-strong)] hover:bg-[var(--panel-hover)]'"
           >
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">当前账号</p>
             <p class="mt-3 text-base font-semibold text-[var(--text)]">{{ displayName }}</p>
@@ -38,7 +38,7 @@
           </RouterLink>
 
           <button
-            class="mt-4 w-full rounded-2xl border border-[var(--line)] bg-white/60 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+            class="ghost-button mt-4 w-full rounded-2xl px-4 py-3 text-sm font-medium"
             @click="handleLogout"
           >
             退出登录
