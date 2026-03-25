@@ -231,33 +231,41 @@ function parseSerialParams(params: Record<string, unknown>): PayloadField[] {
   return fields;
 }
 
-// 通用数据库 params 解析（MySQL/PostgreSQL/SQLite/SQL Server/Oracle/ClickHouse）
+// 数据库 params 专项解析（MySQL/PostgreSQL/SQLite/MSSQL/Oracle/ClickHouse）
 function parseDbParams(params: Record<string, unknown>): PayloadField[] {
   const fields: PayloadField[] = [];
-  const simple: Array<[string, string, Partial<{ sensitive: boolean; mono: boolean }>]> = [
-    ["主机", "host", {}],
-    ["端口", "port", {}],
-    ["用户名", "username", {}],
-    ["密码", "password", { sensitive: true }],
-    ["数据库", "database", {}],
-    ["服务名", "service_name", {}],
-    ["SID", "sid", {}],
-  ];
-  for (const [label, key, opts] of simple) {
-    const f = field(label, params[key], opts);
+  const dbType = String(params.database_type ?? "");
+  const isSqlite = dbType === "SQLite";
+
+  // database_type 字段
+  if (dbType) fields.push({ label: "数据库类型", value: dbType });
+
+  if (isSqlite) {
+    // SQLite 用 host 存文件路径，port 无意义
+    const f = field("文件路径", params.host, { mono: true });
     if (f) fields.push(f);
+  } else {
+    const connFields: Array<[string, string, Partial<{ sensitive: boolean; mono: boolean }>]> = [
+      ["主机", "host", {}],
+      ["端口", "port", {}],
+      ["用户名", "username", {}],
+      ["密码", "password", { sensitive: true }],
+      ["数据库", "database", {}],
+      ["服务名", "service_name", {}],
+      ["SID", "sid", {}],
+    ];
+    for (const [label, key, opts] of connFields) {
+      const f = field(label, params[key], opts);
+      if (f) fields.push(f);
+    }
   }
 
-  // extra_params 作为嵌套
+  // extra_params 嵌套展示
   if (params.extra_params && typeof params.extra_params === "object") {
     const extra = params.extra_params as Record<string, unknown>;
     const extraFields = Object.entries(extra)
       .filter(([, v]) => v !== undefined && v !== null && v !== "")
-      .map(([k, v]) => ({
-        label: k,
-        value: String(v),
-        mono: true,
-      }));
+      .map(([k, v]) => ({ label: k, value: String(v), mono: true }));
     if (extraFields.length > 0) {
       fields.push({ label: "扩展参数", value: "", nested: extraFields });
     }
@@ -267,12 +275,14 @@ function parseDbParams(params: Record<string, unknown>): PayloadField[] {
 }
 
 // 根据连接类型选择解析器
+// connection_type 实际序列化值：Database / SshSftp / Redis / MongoDB / Serial / ChatDB
 function parseConnectionParams(
   params: Record<string, unknown>,
   connectionType: string,
 ): PayloadField[] {
   const type = connectionType.toLowerCase();
   switch (type) {
+    case "sshsftp":
     case "ssh":
     case "sftp":
       return parseSshParams(params);
@@ -283,19 +293,20 @@ function parseConnectionParams(
       return parseMongoParams(params);
     case "serial":
       return parseSerialParams(params);
+    case "database":
     case "mysql":
     case "postgres":
     case "postgresql":
     case "sqlite":
+    case "mssql":
     case "sqlserver":
     case "oracle":
     case "clickhouse":
       return parseDbParams(params);
     default:
-      // 未知类型降级为通用解析，但尝试识别 auth_method
-      if ("auth_method" in params) {
-        return parseSshParams(params);
-      }
+      // 未知类型：尝试 auth_method 识别为 SSH，否则通用
+      if ("auth_method" in params) return parseSshParams(params);
+      if ("database_type" in params) return parseDbParams(params);
       return objectToFields(params, CONNECTION_SENSITIVE_PARAMS);
   }
 }
