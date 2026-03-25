@@ -561,19 +561,11 @@ impl CertificateReference {
     }
 
     pub fn matches_ids(&self, local_id: Option<i64>, cloud_id: Option<&str>) -> bool {
-        if let (Some(reference_id), Some(local_id)) = (self.local_id, local_id) {
-            if reference_id == local_id {
-                return true;
-            }
+        if let Some(reference_cloud_id) = self.cloud_id.as_deref() {
+            return cloud_id == Some(reference_cloud_id);
         }
 
-        if let (Some(reference_cloud_id), Some(cloud_id)) = (self.cloud_id.as_deref(), cloud_id) {
-            if reference_cloud_id == cloud_id {
-                return true;
-            }
-        }
-
-        false
+        matches!((self.local_id, local_id), (Some(reference_id), Some(local_id)) if reference_id == local_id)
     }
 
     pub fn sync_with_certificate(&mut self, certificate: &Certificate) -> bool {
@@ -1650,5 +1642,28 @@ mod serial_tests {
         assert_eq!(SerialParity::Even.label(), "Even");
         assert_eq!(SerialFlowControl::Software.label(), "XON/XOFF");
         assert_eq!(SerialFlowControl::Hardware.label(), "RTS/CTS");
+    }
+
+    #[test]
+    fn certificate_reference_prefers_cloud_id_when_present() {
+        let reference = CertificateReference {
+            local_id: Some(1),
+            cloud_id: Some("certificate-cloud-1".to_string()),
+        };
+
+        assert!(reference.matches_ids(Some(99), Some("certificate-cloud-1")));
+        assert!(!reference.matches_ids(Some(1), Some("certificate-cloud-2")));
+        assert!(!reference.matches_ids(Some(1), None));
+    }
+
+    #[test]
+    fn certificate_reference_falls_back_to_local_id_before_sync() {
+        let reference = CertificateReference {
+            local_id: Some(7),
+            cloud_id: None,
+        };
+
+        assert!(reference.matches_ids(Some(7), None));
+        assert!(!reference.matches_ids(Some(8), None));
     }
 }

@@ -3,6 +3,40 @@
 
 ---
 
+## 审查报告（table-data-printable-key-edit）
+生成时间：2026-03-25 20:36:26 +0800
+
+### 需求完整性检查
+- 目标明确：单击单元格只负责选中，不进入编辑；按可打印键时，已选中单元格应立即进入编辑并保留首字符
+- 范围明确：仅涉及通用表格编辑层 `crates/one_ui/src/edit_table/state.rs` 及对应本地留痕
+- 交付物明确：键盘编辑入口修复、回归单测、本地格式化与编译验证
+- 风险与依赖明确：真实交互仍依赖 GPUI 焦点和按键重放机制，需留意 GUI 手工体验验证
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 修复点准确：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1096) 新增可打印键判定和 `on_key_down`，补上此前缺失的表格级键盘编辑入口。
+- 行为边界符合需求：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1111) 仅在未编辑、可编辑、存在活动单元格、且不是行号列时触发；单击行为本身没有被改成进入编辑。
+- 首字符保留方案合理：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1134) 先进入编辑，再通过 `window.defer + dispatch_keystroke` 把首个按键交给真实输入控件，避免在不同 `CellEditor` 上重复造轮子。
+- 集成点最小：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L2924) 只在表格根容器新增 `.on_key_down(...)` 绑定，数据库结果页等所有复用 `EditTableState` 的视图自动继承行为。
+- 回归保障存在：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L3085) 新增 3 个纯逻辑测试，覆盖正常字符、快捷键和控制字符过滤。
+- 本地验证充分：`cargo fmt --all`、`cargo test -p one-ui`、`cargo check -p main` 全部通过；残余风险主要是尚未做 GUI 自动化或人工录屏级验收。
+- 补丁已闭环：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1171) 与 [`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1199) 现在都会在退出编辑时把焦点还给表格，因此 Enter / Esc 退出后方向键与 Tab 能继续命中表格导航绑定。
+
+---
+
 ## 审查报告（sync-server-sidebar-account-entry）
 生成时间：2026-03-25 10:49:14 +0800
 
@@ -2302,3 +2336,44 @@
 ### 残余风险
 - 列表/表格这次主要依赖更强的背景对比度，尚未像输入框那样显式切换前景色
 - 缺少 GUI 自动化截图验证，最终视觉效果仍建议你本地实际拖选确认
+
+---
+
+## 审查报告（sync-reference-recovery）
+生成时间：2026-03-25 20:28:00 +0800
+
+### 需求完整性检查
+- 目标明确：修复同步后连接无法恢复到原工作区，以及凭证引用跨设备恢复不稳定的问题
+- 范围明确：`one-core` 内的连接同步、工作区映射、凭证引用匹配与对应本地测试
+- 交付物明确：根因修复、回归测试、本地验证、`.claude/` 留痕
+- 风险与依赖明确：历史云端脏数据若缺失远端引用，需要后续重新同步才能完成补齐
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 工作区远端引用已贯通：[`connection_sync.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L674) 上传前先解析本地工作区的 `cloud_id`，[`connection_sync.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L688) 下载/更新本地时再按 `workspace_cloud_id` 反查并恢复 `workspace_id`。
+- 连接冲突链路已同步修正：[`engine.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L454) 的冲突解决现在也复用同一套“按工作区 `cloud_id` 恢复”的逻辑，不再在冲突分支里漏掉工作区归属。
+- 同步载荷不再丢字段：[`service.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs#L352) 已把 `workspace_cloud_id` 正式写入连接同步 blob，并由新增测试 [`service.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs#L629) 锁定。
+- 凭证引用跨设备匹配已稳定：[`models.rs`](/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L563) 在存在 `cloud_id` 时只按 `cloud_id` 匹配，避免不同设备本地自增 ID 重号导致误绑；新增测试位于 [`models.rs`](/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L1648)。
+- 仓储恢复能力已补齐：[`repository.rs`](/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L721) 新增工作区 `get_by_cloud_id` 查询，并由测试 [`repository.rs`](/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L1116) 验证。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p one-core`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 历史已上传但未包含 `workspace_cloud_id` 的旧连接，不会被自动逆推出工作区，只能在本地再同步一次带上新字段
+- 当前验证仍以单元测试和编译检查为主，没有真实双设备同步往返自动化场景

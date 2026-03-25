@@ -352,13 +352,14 @@ impl CloudSyncService {
     pub fn prepare_sync_data_upload(
         &self,
         conn: &StoredConnection,
+        workspace_cloud_id: Option<String>,
         team_id: Option<&str>,
         teams: &[Team],
     ) -> Result<CloudSyncData, SyncError> {
         let plain_data = ConnectionPlainData {
             name: conn.name.clone(),
             connection_type: conn.connection_type.to_string(),
-            workspace_cloud_id: None, // 由调用者设置
+            workspace_cloud_id,
             selected_databases: conn.selected_databases.clone(),
             remark: conn.remark.clone(),
             params: serde_json::from_str(&conn.params)
@@ -623,5 +624,49 @@ mod tests {
         let encrypted = service.encrypt_blob(plaintext, Some("team-1")).unwrap();
         let decrypted = service.decrypt_blob(&encrypted, Some("team-1")).unwrap();
         assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_prepare_connection_sync_data_preserves_workspace_cloud_id() {
+        let mut service = CloudSyncService::new();
+        service.set_master_key_directly("test_workspace_key".to_string());
+
+        let connection = StoredConnection::new_redis(
+            "测试连接".to_string(),
+            crate::storage::RedisParams {
+                host: "127.0.0.1".to_string(),
+                port: 6379,
+                password: Some("secret".to_string()),
+                username: Some("tester".to_string()),
+                credential_ref: None,
+                db_index: 0,
+                mode: crate::storage::RedisMode::Standalone,
+                use_tls: false,
+                connect_timeout: None,
+                sentinel: None,
+                cluster: None,
+            },
+            Some(7),
+        );
+
+        let cloud_data = service
+            .prepare_sync_data_upload(
+                &connection,
+                Some("workspace-cloud-1".to_string()),
+                None,
+                &[],
+            )
+            .unwrap();
+
+        let plaintext = service
+            .decrypt_blob(&cloud_data.encrypted_data, None)
+            .unwrap();
+        let plain_data: ConnectionPlainData = serde_json::from_str(&plaintext).unwrap();
+
+        assert_eq!(
+            plain_data.workspace_cloud_id.as_deref(),
+            Some("workspace-cloud-1")
+        );
+        assert_eq!(plain_data.name, "测试连接");
     }
 }

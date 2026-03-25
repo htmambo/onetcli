@@ -1,5 +1,93 @@
 ## 操作日志
 
+## 编码前检查 - table-data-printable-key-edit
+时间：2026-03-25 20:26:57 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-table-data-printable-key-edit.md`
+- 已分析相似实现：
+  - `crates/one_ui/src/edit_table/state.rs`
+  - `crates/one_ui/src/edit_table/delegate.rs`
+  - `crates/db_view/src/table_data/results_delegate.rs`
+  - `crates/redis_view/src/redis_cli_view.rs`
+  - `crates/ui/src/input/otp_input.rs`
+- 将使用以下可复用组件：
+  - `EditTableState::current_cell_for_navigation`：定位当前活动单元格
+  - `EditTableState::start_editing`：统一进入编辑态
+  - `EditTableDelegate::cell_edit_enabled`：判定当前表格是否可编辑
+  - `Window::dispatch_keystroke`：重放首个字符到新焦点输入框
+- 将遵循命名约定：新增 `on_key_down` / `should_start_edit_on_printable_key` 一类表格内部函数，保持事件处理命名风格
+- 将遵循代码风格：只改 `one_ui` 通用表格层，不在 `db_view` 追加业务特判
+- 确认不重复造轮子，证明：数据库结果页已有完整输入构建与聚焦逻辑，当前缺失点仅是表格级键盘编辑入口
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和编译验证作为替代并留痕
+
+## 编码后声明 - table-data-printable-key-edit
+时间：2026-03-25 20:36:26 +0800
+
+### 1. 复用了以下既有组件
+- `crates/one_ui/src/edit_table/state.rs::current_cell_for_navigation`：沿用既有活动单元格定位逻辑，避免单独维护“当前单元格”状态
+- `crates/one_ui/src/edit_table/state.rs::start_editing`：沿用统一编辑态切换入口，不在按键处理里重复创建输入控件
+- `crates/db_view/src/table_data/results_delegate.rs::build_input`：继续使用数据库结果页现有输入构建和聚焦能力
+- `vendor/zed/crates/gpui/src/window.rs::dispatch_keystroke`：复用 GPUI 的按键重放能力，把首个字符交给真实输入控件处理
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `should_start_edit_on_printable_key`、`on_key_down`，保持事件处理函数的现有命名风格
+- 代码风格：改动收敛在 `crates/one_ui/src/edit_table/state.rs`，数据库视图无需额外分支
+- 文件组织：通用交互逻辑继续留在 `one_ui` 表格层，测试也跟随状态文件放置
+
+### 3. 对比了以下相似实现
+- `crates/one_ui/src/edit_table/delegate.rs`：继续保留 `single_click_to_edit = false` 的默认行为，不把需求实现成单击编辑
+- `crates/redis_view/src/redis_cli_view.rs`：参考现有 `.on_key_down(cx.listener(...))` 接入方式，将键盘事件绑定在表格根容器
+- `crates/ui/src/input/otp_input.rs`：参考现有键盘事件处理方式，在命中时调用 `window.prevent_default()` 和 `cx.stop_propagation()`
+
+### 4. 未重复造轮子的证明
+- 已检查 `one_ui` 表格编辑入口、delegate 策略、数据库结果页输入构建和 GPUI 按键派发机制
+- 最终没有在 `db_view`、输入组件或数据库业务层额外造一套“首字符注入”逻辑
+
+## 实施与验证记录 - table-data-printable-key-edit
+时间：2026-03-25 20:36:26 +0800
+
+### 已完成修改
+- `crates/one_ui/src/edit_table/state.rs`
+  - 新增可打印键判定逻辑，过滤 `Ctrl/Cmd/Fn` 和控制字符
+  - 新增表格级 `on_key_down` 监听
+  - 在未处于编辑态时，按可打印键会先进入编辑，再通过 `window.defer + dispatch_keystroke` 重放首个字符
+  - 新增 3 个纯逻辑单测，覆盖正常字符、快捷键、控制字符三类场景
+- `.claude/context-summary-table-data-printable-key-edit.md`
+  - 记录相似实现、复用点、测试策略和风险
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-ui`
+  - 结果：通过（7 个测试全部通过，含新增 3 个回归测试）
+- `cargo check -p main`
+  - 结果：通过
+
+### 当前限制
+- 本次没有补真实 GUI 自动化回放；交互层行为主要依赖编译验证和按键判定单测兜底，建议你在数据库结果表里再手工确认一次“选中单元格后直接敲字”的实际体验
+
+## 补充修复记录 - table-data-printable-key-edit
+时间：2026-03-25 20:41:53 +0800
+
+### 根因定位
+- `commit_and_move_to_prev_cell` / `commit_and_move_to_next_cell` 在结束编辑后会显式 `focus_handle.focus(window, cx)`，因此 Tab 导航路径正常
+- 普通 `commit_cell_edit` 与 `cancel_cell_edit` 在结束编辑后没有把焦点还给表格
+- 结果是按 Enter / Esc 退出编辑后，方向键和 Tab 仍然落在已退出的输入控件焦点链上，只有鼠标再次选中单元格后表格才重新拿回焦点
+
+### 已完成修复
+- `crates/one_ui/src/edit_table/state.rs`
+  - `commit_cell_edit(...)` 在关闭编辑器后统一把焦点还给表格
+  - `cancel_cell_edit(...)` 改为接收 `window`，并在取消编辑后统一把焦点还给表格
+  - `action_cancel(...)` 改为走新的带 `window` 取消路径
+
+### 补充本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-ui`
+  - 结果：通过（7 个测试全部通过）
+- `cargo check -p main`
+  - 结果：通过
+
 ## 追加编码前检查 - sync-server-sidebar-account-entry
 时间：2026-03-25 10:48:33 +0800
 
@@ -3209,6 +3297,84 @@
 ### 4. 工具限制留痕
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
+
+## 编码前检查 - sync-reference-recovery
+时间：2026-03-25 20:08:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-reference-recovery.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/workspace_sync.rs::on_uploaded`：复用工作区同步后回写 `cloud_id` 的既有模式
+- `crates/core/src/storage/models.rs::CertificateReference`：复用凭证引用模型，不新建第二套引用结构
+- `crates/core/src/storage/repository.rs::ConnectionRepository::get_by_cloud_id`：沿用按 `cloud_id` 反查的仓储接口风格
+- `crates/core/src/cloud_sync/service.rs::ConnectionPlainData`：复用现有连接同步明文字段，不新增独立同步载荷
+□ 将遵循命名约定：远端稳定引用统一沿用 `cloud_id`，工作区字段沿用现有 `workspace_cloud_id`
+□ 将遵循代码风格：在同步层和仓储层做小范围增量修复，不把恢复逻辑下沉到 UI
+□ 确认不重复造轮子，证明：已检查 `connection_sync.rs`、`workspace_sync.rs`、`certificate_sync.rs`、`service.rs`、`storage/models.rs`、`storage/repository.rs`
+
+## 执行记录 - sync-reference-recovery
+时间：2026-03-25 20:08:00 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/cloud_sync/connection_sync.rs`
+- `crates/core/src/cloud_sync/workspace_sync.rs`
+- `crates/core/src/cloud_sync/certificate_sync.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/cloud_sync/models.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/storage/models.rs`
+- `crates/core/src/storage/repository.rs`
+- `crates/db_view/src/common/db_connection_form.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/mongodb_view/src/mongo_form_window.rs`
+
+### 2. 对比的相似实现
+- `crates/core/src/cloud_sync/workspace_sync.rs:13`：工作区同步的标准接入与 `cloud_id` 回写模式
+- `crates/core/src/cloud_sync/service.rs:348`：连接同步明文结构中已预留 `workspace_cloud_id`
+- `crates/core/src/storage/models.rs:544`：凭证引用的双 ID 结构与同步辅助方法
+- `crates/core/src/storage/repository.rs:609`：连接仓储已具备按 `cloud_id` 反查本地实体的模式
+
+### 3. 当前发现
+- 连接同步上传时始终把 `workspace_cloud_id` 写成 `None`
+- 连接同步下载/更新本地时没有按 `workspace_cloud_id` 恢复本地 `workspace_id`
+- `CertificateReference` 已有 `cloud_id`，但匹配逻辑会在跨设备场景下错误优先使用 `local_id`
+- 表单与连接参数恢复都统一依赖 `CertificateReference::matches_certificate`，修复匹配语义可以覆盖多个入口
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续使用本地源码检索、Rust 单元测试和构建命令完成修复与验证
+
+## 编码后声明 - sync-reference-recovery
+时间：2026-03-25 20:28:00 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/cloud_sync/service.rs::ConnectionPlainData`：继续作为连接同步 blob 的唯一明文模型，补齐 `workspace_cloud_id` 的实际写入
+- `crates/core/src/storage/models.rs::CertificateReference`：继续作为凭证跨连接引用的唯一模型，只修正匹配语义
+- `crates/core/src/cloud_sync/workspace_sync.rs::on_uploaded`：延续工作区先同步、再供连接恢复映射的既有流程
+- `crates/core/src/storage/repository.rs::ConnectionRepository::get_by_cloud_id`：沿用按 `cloud_id` 反查本地实体的仓储设计，并为工作区补齐同类接口
+
+### 2. 遵循了以下项目约定
+- 命名约定：远端稳定标识继续统一使用 `cloud_id`，没有引入新的 `remote_id` 命名分支
+- 代码风格：改动集中在 `cloud_sync` 与 `storage` 两层，没有把恢复逻辑下沉到表单或 UI
+- 文件组织：工作区恢复能力放在 `connection_sync.rs`，仓储查询能力放在 `repository.rs`，引用匹配规则放在 `models.rs`
+
+### 3. 对比了以下相似实现
+- `crates/core/src/cloud_sync/workspace_sync.rs:75`：沿用工作区上传后回写 `cloud_id` 的模式，为连接上传前解析工作区远端 ID 提供前置保障
+- `crates/core/src/storage/models.rs:551`：沿用 `CertificateReference` 既有双 ID 结构，只调整“先远端、后本地”的匹配顺序
+- `crates/core/src/storage/repository.rs:609`：工作区新增 `get_by_cloud_id` 时对齐连接仓储现有查询模式，避免新建另类接口
+
+### 4. 未重复造轮子的证明
+- 已检查 `connection_sync.rs`、`workspace_sync.rs`、`certificate_sync.rs`、`service.rs`、`storage/models.rs`、`storage/repository.rs`
+- 最终没有新增新的引用模型、同步表或中间映射表，而是复用现有 `cloud_id` 与 `CertificateReference`
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo test -p one-core`：通过（38 个测试全部通过，含新增 3 个回归测试）
+- `cargo check -p main`：通过
+
+### 6. 风险与限制
+- 若云端历史连接记录本身没有 `workspace_cloud_id`，旧数据仍需要下一次本地改动后重新上传才能补齐归属
+- 当前没有完整“多设备真实同步往返”自动化测试，本次以模型回归测试和上层编译验证兜底
 
 ## 编码前检查 - selection-contrast-in-app
 时间：2026-03-25 17:31:06 +0800

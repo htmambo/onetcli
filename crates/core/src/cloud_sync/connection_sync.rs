@@ -1,11 +1,14 @@
 use crate::cloud_sync::engine::{SyncEngine, SyncFuture, SyncHandler};
 use crate::cloud_sync::models::{
-    CloudSyncData, ConflictResolution, SyncConflict, SyncPlan, SyncResult, data_type,
+    CloudSyncData, ConflictResolution, ConnectionPlainData, SyncConflict, SyncPlan, SyncResult,
+    data_type,
 };
 use crate::cloud_sync::queue::SyncOperation;
 use crate::cloud_sync::service::SyncError;
 use crate::storage::traits::Repository;
-use crate::storage::{ConnectionRepository, PendingCloudDeletionRepository, StoredConnection};
+use crate::storage::{
+    ConnectionRepository, PendingCloudDeletionRepository, StoredConnection, WorkspaceRepository,
+};
 use std::collections::{HashMap, HashSet};
 
 const CONNECTION_QUEUE_KEY: &str = "connection";
@@ -668,15 +671,102 @@ impl SyncEngine {
         Ok(resolved)
     }
 
-    async fn upload_connection(&self, conn: &StoredConnection) -> Result<String, SyncError> {
+    pub(crate) fn prepare_connection_sync_data_upload(
+        &self,
+        conn: &StoredConnection,
+    ) -> Result<CloudSyncData, SyncError> {
+        let workspace_cloud_id = self.resolve_workspace_cloud_id(conn.workspace_id)?;
         let teams = self.get_cached_teams();
-        let cloud_data = {
+        let service = self
+            .crypto_service
+            .read()
+            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+
+        service.prepare_sync_data_upload(conn, workspace_cloud_id, conn.team_id.as_deref(), &teams)
+    }
+
+    pub(crate) fn build_local_connection_from_cloud(
+        &self,
+        cloud_data: &CloudSyncData,
+    ) -> Result<StoredConnection, SyncError> {
+        let (mut local_conn, workspace_cloud_id) = {
             let service = self
                 .crypto_service
                 .read()
                 .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-            service.prepare_sync_data_upload(conn, conn.team_id.as_deref(), &teams)?
+            let local_conn = service.decrypt_sync_data_connection(cloud_data)?;
+            let plaintext =
+                service.decrypt_blob(&cloud_data.encrypted_data, cloud_data.team_id.as_deref())?;
+            let plain_data: ConnectionPlainData = serde_json::from_str(&plaintext)
+                .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+            (local_conn, plain_data.workspace_cloud_id)
         };
+
+        local_conn.workspace_id = self.resolve_workspace_local_id(workspace_cloud_id.as_deref())?;
+        Ok(local_conn)
+    }
+
+    fn resolve_workspace_cloud_id(
+        &self,
+        workspace_id: Option<i64>,
+    ) -> Result<Option<String>, SyncError> {
+        let Some(workspace_id) = workspace_id else {
+            return Ok(None);
+        };
+
+        let repo = self
+            .storage
+            .get::<WorkspaceRepository>()
+            .ok_or_else(|| SyncError::StorageError("WorkspaceRepository not found".to_string()))?;
+
+        let workspace = repo
+            .get(workspace_id)
+            .map_err(|e| SyncError::StorageError(e.to_string()))?
+            .ok_or_else(|| {
+                SyncError::StorageError(format!("工作区 {} 不存在，无法同步其下连接", workspace_id))
+            })?;
+
+        workspace.cloud_id.map(Some).ok_or_else(|| {
+            SyncError::StorageError(format!(
+                "工作区 {} 缺少 cloud_id，无法同步其下连接",
+                workspace_id
+            ))
+        })
+    }
+
+    fn resolve_workspace_local_id(
+        &self,
+        workspace_cloud_id: Option<&str>,
+    ) -> Result<Option<i64>, SyncError> {
+        let Some(workspace_cloud_id) = workspace_cloud_id else {
+            return Ok(None);
+        };
+
+        let repo = self
+            .storage
+            .get::<WorkspaceRepository>()
+            .ok_or_else(|| SyncError::StorageError("WorkspaceRepository not found".to_string()))?;
+
+        let workspace = repo
+            .get_by_cloud_id(workspace_cloud_id)
+            .map_err(|e| SyncError::StorageError(e.to_string()))?
+            .ok_or_else(|| {
+                SyncError::StorageError(format!(
+                    "未找到 cloud_id={} 对应的本地工作区，无法恢复连接归属",
+                    workspace_cloud_id
+                ))
+            })?;
+
+        workspace.id.map(Some).ok_or_else(|| {
+            SyncError::StorageError(format!(
+                "工作区 cloud_id={} 缺少本地 id，无法恢复连接归属",
+                workspace_cloud_id
+            ))
+        })
+    }
+
+    async fn upload_connection(&self, conn: &StoredConnection) -> Result<String, SyncError> {
+        let cloud_data = self.prepare_connection_sync_data_upload(conn)?;
         let created = self
             .cloud_client
             .create_sync_data(&cloud_data)
@@ -691,21 +781,9 @@ impl SyncEngine {
         local_conn: &StoredConnection,
         cloud_data: &CloudSyncData,
     ) -> Result<(), SyncError> {
-        let teams = self.get_cached_teams();
-        let updated_data = {
-            let service = self
-                .crypto_service
-                .read()
-                .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-            let mut data = service.prepare_sync_data_upload(
-                local_conn,
-                local_conn.team_id.as_deref(),
-                &teams,
-            )?;
-            data.id = cloud_data.id.clone();
-            data.version = cloud_data.version;
-            data
-        };
+        let mut updated_data = self.prepare_connection_sync_data_upload(local_conn)?;
+        updated_data.id = cloud_data.id.clone();
+        updated_data.version = cloud_data.version;
 
         self.cloud_client
             .update_sync_data(&updated_data)
@@ -716,12 +794,7 @@ impl SyncEngine {
     }
 
     async fn download_connection(&self, cloud_data: &CloudSyncData) -> Result<(), SyncError> {
-        let service = self
-            .crypto_service
-            .read()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-
-        let mut local_conn = service.decrypt_sync_data_connection(cloud_data)?;
+        let mut local_conn = self.build_local_connection_from_cloud(cloud_data)?;
         local_conn.id = None;
         local_conn.cloud_id = Some(cloud_data.id.clone());
         local_conn.last_synced_at = Some(Self::current_timestamp());
@@ -742,12 +815,7 @@ impl SyncEngine {
         cloud_data: &CloudSyncData,
         local_conn: &StoredConnection,
     ) -> Result<(), SyncError> {
-        let service = self
-            .crypto_service
-            .read()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-
-        let mut updated = service.decrypt_sync_data_connection(cloud_data)?;
+        let mut updated = self.build_local_connection_from_cloud(cloud_data)?;
         updated.id = local_conn.id;
         updated.cloud_id = Some(cloud_data.id.clone());
         updated.last_synced_at = Some(Self::current_timestamp());

@@ -454,12 +454,8 @@ impl SyncEngine {
         match resolved.resolution {
             ConflictResolution::UseCloud => {
                 // 更新本地连接
-                let service = self
-                    .crypto_service
-                    .read()
-                    .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-
-                let mut updated = service.decrypt_sync_data_connection(&resolved.conflict.cloud)?;
+                let mut updated =
+                    self.build_local_connection_from_cloud(&resolved.conflict.cloud)?;
                 updated.id = resolved.conflict.local.id;
                 updated.cloud_id = Some(resolved.conflict.cloud.id.clone());
                 updated.last_synced_at = Some(Self::current_timestamp());
@@ -475,21 +471,10 @@ impl SyncEngine {
             }
             ConflictResolution::UseLocal => {
                 // 更新云端连接
-                let teams = self.get_cached_teams();
-                let updated_data = {
-                    let service = self
-                        .crypto_service
-                        .read()
-                        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-                    let mut data = service.prepare_sync_data_upload(
-                        &resolved.conflict.local,
-                        resolved.conflict.local.team_id.as_deref(),
-                        &teams,
-                    )?;
-                    data.id = resolved.conflict.cloud.id.clone();
-                    data.version = resolved.conflict.cloud.version;
-                    data
-                };
+                let mut updated_data =
+                    self.prepare_connection_sync_data_upload(&resolved.conflict.local)?;
+                updated_data.id = resolved.conflict.cloud.id.clone();
+                updated_data.version = resolved.conflict.cloud.version;
 
                 self.cloud_client
                     .update_sync_data(&updated_data)
@@ -511,12 +496,8 @@ impl SyncEngine {
                 }
 
                 // 同时更新本地连接为云端版本
-                let service = self
-                    .crypto_service
-                    .read()
-                    .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-
-                let mut updated = service.decrypt_sync_data_connection(&resolved.conflict.cloud)?;
+                let mut updated =
+                    self.build_local_connection_from_cloud(&resolved.conflict.cloud)?;
                 updated.id = resolved.conflict.local.id;
                 updated.cloud_id = Some(resolved.conflict.cloud.id.clone());
                 updated.last_synced_at = Some(Self::current_timestamp());

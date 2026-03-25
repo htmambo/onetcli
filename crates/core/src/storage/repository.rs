@@ -717,6 +717,20 @@ impl WorkspaceRepository {
             Ok(())
         })
     }
+
+    pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<Workspace>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, color, icon, created_at, updated_at, cloud_id FROM workspaces WHERE cloud_id = ?1",
+            )?;
+            let mut rows = stmt.query(params![cloud_id])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(WorkspaceRow::from_row(row)?.into()))
+            } else {
+                Ok(None)
+            }
+        })
+    }
 }
 
 impl Repository for WorkspaceRepository {
@@ -1076,4 +1090,41 @@ pub fn init(cx: &mut App) {
     storage.register(quick_cmd_repo);
     storage.register(pending_deletion_repo);
     storage.register(team_key_cache_repo);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::migration::run_migrations;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_test_sqlite_connection() -> SqliteConnection {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("系统时间不应回退")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("one-core-repository-test-{unique_id}.db"));
+        let conn = SqliteConnection::open(&path).unwrap();
+        conn.with_connection(|db| {
+            run_migrations(db)?;
+            Ok(())
+        })
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn workspace_repository_can_lookup_by_cloud_id() {
+        let conn = create_test_sqlite_connection();
+        let repo = WorkspaceRepository::new(conn);
+
+        let mut workspace = Workspace::new("测试工作区".to_string());
+        workspace.cloud_id = Some("workspace-cloud-1".to_string());
+        repo.insert(&mut workspace).unwrap();
+
+        let found = repo.get_by_cloud_id("workspace-cloud-1").unwrap().unwrap();
+        assert_eq!(found.id, workspace.id);
+        assert_eq!(found.name, "测试工作区");
+        assert_eq!(found.cloud_id.as_deref(), Some("workspace-cloud-1"));
+    }
 }

@@ -7,10 +7,10 @@ use crate::edit_table::filter_panel::FilterPanel;
 use gpui::{
     AppContext, Axis, Bounds, ClickEvent, ClipboardItem, Context, Div, DragMoveEvent, ElementId,
     Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, IsZero,
-    ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render,
-    ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement as _,
-    Styled, Subscription, Task, UniformListScrollHandle, Window, canvas, div,
-    prelude::FluentBuilder, px, uniform_list,
+    KeyDownEvent, Keystroke, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement,
+    Pixels, Point, Render, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, UniformListScrollHandle, Window,
+    canvas, div, prelude::FluentBuilder, px, uniform_list,
 };
 use gpui_component::list::{List, ListState};
 use gpui_component::scroll::ScrollbarHandle;
@@ -1093,6 +1093,52 @@ where
         }
     }
 
+    fn should_start_edit_on_printable_key(keystroke: &Keystroke) -> bool {
+        if keystroke.modifiers.control
+            || keystroke.modifiers.platform
+            || keystroke.modifiers.function
+        {
+            return false;
+        }
+
+        let Some(key_char) = keystroke.key_char.as_ref() else {
+            return false;
+        };
+
+        !key_char.is_empty() && key_char.chars().all(|char| !char.is_control())
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_cell.is_some() || !self.delegate.cell_edit_enabled(cx) {
+            return;
+        }
+
+        let Some((row_ix, col_ix)) = self.current_cell_for_navigation() else {
+            return;
+        };
+
+        if self.delegate.row_number_enabled(cx) && col_ix == 0 {
+            return;
+        }
+
+        if !Self::should_start_edit_on_printable_key(&event.keystroke) {
+            return;
+        }
+
+        self.start_editing(row_ix, col_ix, window, cx);
+
+        if self.editing_cell != Some((row_ix, col_ix)) {
+            return;
+        }
+
+        let keystroke = event.keystroke.clone();
+        window.prevent_default();
+        cx.stop_propagation();
+        window.defer(cx, move |window, cx| {
+            let _ = window.dispatch_keystroke(keystroke.clone(), cx);
+        });
+    }
+
     pub fn start_editing(
         &mut self,
         row_ix: usize,
@@ -1145,15 +1191,17 @@ where
             self.editing_cell = None;
             self.editing_input = None;
             self._subscriptions.clear();
+            self.focus_handle.focus(window, cx);
             cx.notify();
         }
     }
 
-    pub fn cancel_cell_edit(&mut self, cx: &mut Context<Self>) {
+    pub fn cancel_cell_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_cell.is_some() {
             self.editing_cell = None;
             self.editing_input = None;
             self._subscriptions.clear();
+            self.focus_handle.focus(window, cx);
             cx.notify();
         }
     }
@@ -1214,9 +1262,14 @@ where
         }
     }
 
-    pub(super) fn action_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn action_cancel(
+        &mut self,
+        _: &Cancel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.editing_cell.is_some() {
-            self.cancel_cell_edit(cx);
+            self.cancel_cell_edit(window, cx);
             return;
         }
 
@@ -2879,6 +2932,7 @@ where
             .id("table-inner")
             .key_context("EditTable")
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::on_key_down))
             .on_action(cx.listener(Self::action_copy))
             .on_action(cx.listener(Self::action_paste))
             .on_action(cx.listener(Self::action_select_all))
@@ -3031,5 +3085,71 @@ where
                         ),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditTableState;
+    use crate::edit_table::{Column, EditTableDelegate};
+    use gpui::{App, Context, IntoElement, Keystroke, Modifiers, Window, div};
+
+    struct TestDelegate;
+
+    impl EditTableDelegate for TestDelegate {
+        fn columns_count(&self, _: &App) -> usize {
+            0
+        }
+
+        fn rows_count(&self, _: &App) -> usize {
+            0
+        }
+
+        fn column(&self, _: usize, _: &App) -> Column {
+            unreachable!("测试不会访问列定义")
+        }
+
+        fn render_td(
+            &mut self,
+            _: usize,
+            _: usize,
+            _: &mut Window,
+            _: &mut Context<EditTableState<Self>>,
+        ) -> impl IntoElement {
+            div()
+        }
+    }
+
+    #[test]
+    fn printable_key_can_start_editing() {
+        let keystroke = Keystroke {
+            modifiers: Modifiers::none(),
+            key: "a".into(),
+            key_char: Some("a".into()),
+        };
+
+        assert!(EditTableState::<TestDelegate>::should_start_edit_on_printable_key(&keystroke));
+    }
+
+    #[test]
+    fn control_shortcut_cannot_start_editing() {
+        let keystroke = Keystroke {
+            modifiers: Modifiers::secondary_key(),
+            key: "c".into(),
+            key_char: None,
+        };
+
+        assert!(!EditTableState::<TestDelegate>::should_start_edit_on_printable_key(&keystroke));
+    }
+
+    #[test]
+    fn control_character_cannot_start_editing() {
+        let keystroke = Keystroke {
+            modifiers: Modifiers::none(),
+            key: "enter".into(),
+            key_char: Some("\n".into()),
+        };
+
+        assert!(!EditTableState::<TestDelegate>::should_start_edit_on_printable_key(&keystroke));
     }
 }
