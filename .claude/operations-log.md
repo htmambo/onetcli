@@ -3434,6 +3434,39 @@
 - 在 `main/src/sync_server_theme.rs` 提供绿色和危险态预设
 - 首先接入 `main/src/setting_tab.rs` 账户区域与 `main/src/auth.rs` 认证面板
 
+## 编码后声明 - main-window-spotlight
+时间：2026-03-26 02:17:00 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/window_border.rs`：复用了 `canvas` + 鼠标位置驱动的主应用自绘模式
+- `crates/ui/src/color_picker.rs`：复用了 `on_mouse_move(...)` 更新 hover 状态的交互方式
+- `main/src/home_tab.rs`：复用了左侧强调线和 hover 卡片的表达方式
+- `main/src/sync_server_theme.rs`：继续沿用 sync_server 主题 token，不散落新增颜色常量
+
+### 2. 遵循了以下项目约定
+- 命名约定：通用组件命名为 `SpotlightCard`，主题包装保持 `spotlight_card` / `danger_spotlight_card`
+- 代码风格：保持链式 GPUI builder 风格，没有引入新的状态管理模型
+- 文件组织：通用能力放 `crates/ui/src`，业务侧只保留主题包装和调用
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/window_border.rs`：我的实现不做窗口级命中处理，只复用局部自绘叠层思路
+- `crates/ui/src/color_picker.rs`：我的实现不修改业务值，只记录 hover 和鼠标位置
+- `main/src/home_tab.rs`：我的实现把左侧强调线抽到通用组件，避免业务页重复写
+
+### 4. 未重复造轮子的证明
+- 已检查 `crates/ui/src/hover_card.rs`、`crates/ui/src/color_picker.rs`、`crates/ui/src/window_border.rs`、`main/src/home_tab.rs`
+- 现有仓库没有可直接复用的“卡片 spotlight”组件，因此新增最小通用组件 `SpotlightCard`
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main`：通过
+- `cargo test -p main --no-run`：通过
+
+### 6. 风险与限制
+- 当前只验证了编译和测试目标构建，没有自动化 GUI 截图或交互回归
+- GPUI 暂未直接使用 Web 那种径向渐变，本次采用多层半透明圆形叠层近似 spotlight
+- 工作区存在与本任务无关的已有改动：`sync_server/web/src/utils/syncPayloadTable.ts`
+
 ## 编码前检查 - sync-server-theme-kiro2api
 时间：2026-03-26 00:00:36 +0800
 

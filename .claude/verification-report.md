@@ -2448,3 +2448,43 @@
 ### 残余风险
 - 目前没有自动化 GUI 回归，只验证了类型、构建和样式接入链路
 - 若你希望和 `kiro2api` 更接近，后续还可以继续细调圆角、留白和输入框边框强度
+
+---
+
+## 审查报告（main-window-spotlight）
+生成时间：2026-03-26 02:17:00 +0800
+
+### 需求完整性检查
+- 目标明确：把 `sync_server/web` 的左侧强调线 + 鼠标驱动高光思路落到主应用窗口
+- 范围明确：新增通用 `SpotlightCard`，并用于主应用现有 `sync_server` 相关面板
+- 交付物明确：组件代码、主题包装、本地验证、`.claude/` 留痕
+- 风险与依赖明确：最终视觉仍需桌面端手工确认
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：94/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 新增 [`spotlight_card.rs`](/usr/htdocs/onetcli/crates/ui/src/spotlight_card.rs) 提供主应用内可复用的 hover 卡片效果。
+- [`lib.rs`](/usr/htdocs/onetcli/crates/ui/src/lib.rs) 已导出 `SpotlightCard`，便于业务模块直接使用。
+- 主应用 `sync_server` 主题包装已具备 `spotlight_card` / `danger_spotlight_card` 入口，当前调用位于 [`auth.rs`](/usr/htdocs/onetcli/main/src/auth.rs#L577) 与 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L843)。
+- 实现策略与 GPUI 当前能力匹配：使用自绘叠层近似 Web spotlight，没有引入额外框架。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main`：通过
+- `cargo test -p main --no-run`：通过
+
+### 残余风险
+- 仍缺少桌面端自动化截图比对，最终观感需要你本地 hover 一次确认
+- 当前 spotlight 是近似实现，不是 DOM 版真实径向渐变

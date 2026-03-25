@@ -1,10 +1,11 @@
 use gpui::{
-    AnyElement, App, Bounds, ElementId, Entity, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Point, RenderOnce, StyleRefinement, Styled, Window, canvas, div, fill,
-    outline, point, prelude::FluentBuilder as _, px, size,
+    AnyElement, App, BorderStyle, Bounds, Context, ElementId, Entity, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement, Pixels, Point, RenderOnce,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, canvas, div, fill,
+    outline, point, px, size,
 };
 
-use crate::ElementExt;
+use crate::{ElementExt, StyledExt};
 
 #[derive(IntoElement)]
 pub struct SpotlightCard {
@@ -81,7 +82,7 @@ impl SpotlightCardState {
         }
     }
 
-    fn set_hovered(&mut self, hovered: bool, cx: &mut App) {
+    fn set_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
         if self.hovered == hovered {
             return;
         }
@@ -93,7 +94,7 @@ impl SpotlightCardState {
         cx.notify();
     }
 
-    fn update_pointer(&mut self, window: &Window, cx: &mut App) {
+    fn update_pointer(&mut self, window: &Window, cx: &mut Context<Self>) {
         if self.bounds.size.width <= Pixels::ZERO || self.bounds.size.height <= Pixels::ZERO {
             return;
         }
@@ -148,11 +149,8 @@ impl SpotlightCard {
                     return;
                 }
 
-                for (diameter, opacity) in [
-                    (px(280.0), 0.26),
-                    (px(190.0), 0.18),
-                    (px(120.0), 0.12),
-                ] {
+                for (diameter, opacity) in [(px(280.0), 0.26), (px(190.0), 0.18), (px(120.0), 0.12)]
+                {
                     let halo_bounds = Bounds::new(
                         point(
                             bounds.origin.x + state.pointer.x - diameter / 2.,
@@ -165,7 +163,10 @@ impl SpotlightCard {
                     );
                 }
 
-                window.paint_quad(outline(bounds, accent.opacity(0.22)).corner_radii(radius));
+                window.paint_quad(
+                    outline(bounds, accent.opacity(0.22), BorderStyle::default())
+                        .corner_radii(radius),
+                );
             },
         )
         .absolute()
@@ -175,21 +176,31 @@ impl SpotlightCard {
 
 impl RenderOnce for SpotlightCard {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| SpotlightCardState::default());
+        let state =
+            window.use_keyed_state(self.id.clone(), cx, |_, _| SpotlightCardState::default());
         let hovered = state.read(cx).hovered;
         let hover_background = self.hover_background;
         let accent = self.accent;
         let glow = self.glow;
         let radius = self.radius;
 
-        div()
+        let card = div()
             .id(self.id.clone())
             .relative()
             .overflow_hidden()
-            .refine_style(&self.style)
-            .when(hovered, |this| {
-                this.when_some(hover_background, |this, background| this.bg(background))
-            })
+            .refine_style(&self.style);
+
+        let card = if hovered {
+            if let Some(background) = hover_background {
+                card.bg(background)
+            } else {
+                card
+            }
+        } else {
+            card
+        };
+
+        card
             .on_hover(window.listener_for(&state, |state, hovered, _, cx| {
                 state.set_hovered(*hovered, cx);
             }))
