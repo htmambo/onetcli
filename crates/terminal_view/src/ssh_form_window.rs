@@ -2,7 +2,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, WeakEntity, Window,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants as _},
@@ -10,17 +10,21 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     radio::Radio,
-    select::{Select, SelectItem, SelectState},
+    select::{Select, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex, ActiveTheme, Disableable, Sizable, Size, TitleBar,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::certificate_manager::open_certificate_manager_popup;
+use one_core::certificate_notifier::{
+    get_notifier as get_certificate_notifier, CertificateDataEvent,
+};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
-    JumpServerConfig, ProxyConfig, ProxyType as StorageProxyType, SshAuthMethod, SshParams,
-    StoredConnection, Workspace,
+    Certificate, CertificateReference, CertificateRepository, JumpServerConfig, ProxyConfig,
+    ProxyType as StorageProxyType, SshAuthMethod, SshParams, StoredConnection, Workspace,
 };
 use rust_i18n::t;
 use ssh::{
@@ -32,7 +36,6 @@ use std::time::Duration;
 pub struct SshFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -70,32 +73,32 @@ impl SelectItem for WorkspaceSelectItem {
 }
 
 #[derive(Clone, Default, PartialEq)]
-struct TeamSelectItem {
-    id: Option<String>,
-    name: String,
+struct CertificateSelectItem {
+    id: Option<i64>,
+    label: String,
 }
 
-impl TeamSelectItem {
-    fn personal() -> Self {
+impl CertificateSelectItem {
+    fn none() -> Self {
         Self {
             id: None,
-            name: t!("TeamSync.personal").to_string(),
+            label: t!("SSH.certificate_none").to_string(),
         }
     }
 
-    fn from_team(team: &TeamOption) -> Self {
+    fn from_certificate(certificate: &Certificate) -> Self {
         Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
+            id: certificate.id,
+            label: format!("{} · {}", certificate.name, certificate.kind.label()),
         }
     }
 }
 
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
+impl SelectItem for CertificateSelectItem {
+    type Value = Option<i64>;
 
     fn title(&self) -> SharedString {
-        self.name.clone().into()
+        self.label.clone().into()
     }
 
     fn value(&self) -> &Self::Value {
@@ -122,10 +125,11 @@ pub struct SshFormWindow {
     password_input: Entity<InputState>,
     key_path_input: Entity<InputState>,
     passphrase_input: Entity<InputState>,
+    certificates: Vec<Certificate>,
+    credential_select: Entity<SelectState<Vec<CertificateSelectItem>>>,
 
     auth_method: AuthMethodSelection,
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
 
     // 跳板机设置
     enable_jump_server: bool,
@@ -159,6 +163,7 @@ pub struct SshFormWindow {
 
     is_testing: bool,
     test_result: Option<Result<(), String>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -219,6 +224,20 @@ impl SshFormWindow {
                 .placeholder(t!("SSH.passphrase_placeholder"))
                 .masked(true)
         });
+        let certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+        let mut certificate_items = vec![CertificateSelectItem::none()];
+        certificate_items.extend(
+            certificates
+                .iter()
+                .map(CertificateSelectItem::from_certificate),
+        );
+        let credential_select =
+            cx.new(|cx| SelectState::new(certificate_items, Some(Default::default()), window, cx));
 
         // 跳板机设置
         let jump_host_input =
@@ -296,23 +315,20 @@ impl SshFormWindow {
         let workspace_select =
             cx.new(|cx| SelectState::new(workspace_items, Some(Default::default()), window, cx));
 
-        let mut team_items = vec![TeamSelectItem::personal()];
-        team_items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-        let team_select =
-            cx.new(|cx| SelectState::new(team_items, Some(Default::default()), window, cx));
-
         let mut auth_method = AuthMethodSelection::Password;
         let mut workspace_id: Option<i64> = None;
         let mut enable_jump_server = false;
         let mut enable_proxy = false;
         let mut proxy_type = ProxyTypeSelection::default();
         let mut sync_enabled = true; // 默认启用云同步
+        let mut editing_credential_ref: Option<CertificateReference> = None;
 
         if let Some(ref conn) = config.editing_connection {
             // 加载同步状态
             sync_enabled = conn.sync_enabled;
 
             if let Ok(params) = conn.to_ssh_params() {
+                editing_credential_ref = params.credential_ref.clone();
                 name_input.update(cx, |s, cx| s.set_value(&conn.name, window, cx));
                 host_input.update(cx, |s, cx| s.set_value(&params.host, window, cx));
                 port_input.update(cx, |s, cx| {
@@ -391,13 +407,6 @@ impl SshFormWindow {
             }
             workspace_id = conn.workspace_id;
 
-            // 加载团队归属
-            if let Some(ref team_id) = conn.team_id {
-                team_select.update(cx, |select, cx| {
-                    select.set_selected_value(&Some(team_id.clone()), window, cx);
-                });
-            }
-
             // 加载备注
             if let Some(ref remark) = conn.remark {
                 remark_input.update(cx, |s, cx| s.set_value(remark, window, cx));
@@ -410,7 +419,7 @@ impl SshFormWindow {
             });
         }
 
-        Self {
+        let mut view = Self {
             focus_handle: cx.focus_handle(),
             title,
             is_editing,
@@ -425,9 +434,10 @@ impl SshFormWindow {
             password_input,
             key_path_input,
             passphrase_input,
+            certificates,
+            credential_select,
             auth_method,
             workspace_select,
-            team_select,
             enable_jump_server,
             jump_host_input,
             jump_port_input,
@@ -448,7 +458,33 @@ impl SshFormWindow {
             sync_enabled,
             is_testing: false,
             test_result: None,
+            _subscriptions: Vec::new(),
+        };
+
+        cx.subscribe_in(
+            &view.credential_select,
+            window,
+            |this, _select, event: &SelectEvent<Vec<CertificateSelectItem>>, window, cx| {
+                let SelectEvent::Confirm(_) = event;
+                this.sync_selected_certificate_inputs(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+
+        if let Some(notifier) = get_certificate_notifier(cx) {
+            view._subscriptions.push(cx.subscribe_in(
+                &notifier,
+                window,
+                |this, _, _event: &CertificateDataEvent, window, cx| {
+                    this.reload_certificates(window, cx);
+                },
+            ));
         }
+
+        view.restore_selected_certificate(editing_credential_ref.as_ref(), window, cx);
+        view.sync_selected_certificate_inputs(window, cx);
+        view
     }
 
     fn get_workspace_id(&self, cx: &App) -> Option<i64> {
@@ -459,15 +495,106 @@ impl SshFormWindow {
             .flatten()
     }
 
-    fn get_team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
+    fn restore_selected_certificate(
+        &mut self,
+        reference: Option<&CertificateReference>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(reference) = reference else {
+            return;
+        };
+
+        let selected_id = self
+            .certificates
+            .iter()
+            .find(|certificate| reference.matches_certificate(certificate))
+            .and_then(|certificate| certificate.id);
+
+        self.credential_select.update(cx, |select, cx| {
+            select.set_selected_value(&selected_id, window, cx);
+        });
+    }
+
+    fn selected_certificate(&self, cx: &App) -> Option<Certificate> {
+        let selected_id = self
+            .credential_select
             .read(cx)
             .selected_value()
             .cloned()
-            .flatten()
+            .flatten();
+
+        self.certificates
+            .iter()
+            .find(|certificate| certificate.id == selected_id)
+            .cloned()
+    }
+
+    fn reload_certificates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_id = self
+            .credential_select
+            .read(cx)
+            .selected_value()
+            .cloned()
+            .flatten();
+
+        self.certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+
+        let mut items = vec![CertificateSelectItem::none()];
+        items.extend(
+            self.certificates
+                .iter()
+                .map(CertificateSelectItem::from_certificate),
+        );
+
+        self.credential_select.update(cx, |select, cx| {
+            select.set_items(items, window, cx);
+            select.set_selected_value(&selected_id, window, cx);
+        });
+
+        self.sync_selected_certificate_inputs(window, cx);
+        cx.notify();
+    }
+
+    fn sync_selected_certificate_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(certificate) = self.selected_certificate(cx) else {
+            return;
+        };
+
+        self.username_input.update(cx, |state, cx| {
+            state.set_value(&certificate.username, window, cx)
+        });
+
+        match certificate.kind {
+            one_core::storage::CertificateKind::UsernamePassword => {
+                self.auth_method = AuthMethodSelection::Password;
+                self.password_input.update(cx, |state, cx| {
+                    state.set_value(certificate.password.clone().unwrap_or_default(), window, cx);
+                });
+            }
+            one_core::storage::CertificateKind::SshPrivateKey => {
+                self.auth_method = AuthMethodSelection::PrivateKey;
+                self.key_path_input.update(cx, |state, cx| {
+                    state.set_value(certificate.key_path.clone().unwrap_or_default(), window, cx);
+                });
+                self.passphrase_input.update(cx, |state, cx| {
+                    state.set_value(
+                        certificate.passphrase.clone().unwrap_or_default(),
+                        window,
+                        cx,
+                    );
+                });
+            }
+        }
     }
 
     fn build_ssh_params(&self, cx: &App) -> Option<SshParams> {
+        let selected_certificate = self.selected_certificate(cx);
         let host = self.host_input.read(cx).text().to_string();
         let port: u16 = self
             .port_input
@@ -476,30 +603,45 @@ impl SshFormWindow {
             .to_string()
             .parse()
             .unwrap_or(22);
-        let username = self.username_input.read(cx).text().to_string();
+        let username = selected_certificate
+            .as_ref()
+            .map(|certificate| certificate.username.clone())
+            .unwrap_or_else(|| self.username_input.read(cx).text().to_string());
 
         if host.is_empty() || username.is_empty() {
             return None;
         }
 
-        let auth_method = match self.auth_method {
-            AuthMethodSelection::Password => {
-                let password = self.password_input.read(cx).text().to_string();
-                SshAuthMethod::Password { password }
+        let auth_method = if let Some(certificate) = &selected_certificate {
+            match certificate.kind {
+                one_core::storage::CertificateKind::UsernamePassword => SshAuthMethod::Password {
+                    password: certificate.password.clone().unwrap_or_default(),
+                },
+                one_core::storage::CertificateKind::SshPrivateKey => SshAuthMethod::PrivateKey {
+                    key_path: certificate.key_path.clone().unwrap_or_default(),
+                    passphrase: certificate.passphrase.clone(),
+                },
             }
-            AuthMethodSelection::PrivateKey => {
-                let key_path = self.key_path_input.read(cx).text().to_string();
-                let passphrase = {
-                    let p = self.passphrase_input.read(cx).text().to_string();
-                    if p.is_empty() {
-                        None
-                    } else {
-                        Some(p)
+        } else {
+            match self.auth_method {
+                AuthMethodSelection::Password => {
+                    let password = self.password_input.read(cx).text().to_string();
+                    SshAuthMethod::Password { password }
+                }
+                AuthMethodSelection::PrivateKey => {
+                    let key_path = self.key_path_input.read(cx).text().to_string();
+                    let passphrase = {
+                        let p = self.passphrase_input.read(cx).text().to_string();
+                        if p.is_empty() {
+                            None
+                        } else {
+                            Some(p)
+                        }
+                    };
+                    SshAuthMethod::PrivateKey {
+                        key_path,
+                        passphrase,
                     }
-                };
-                SshAuthMethod::PrivateKey {
-                    key_path,
-                    passphrase,
                 }
             }
         };
@@ -623,6 +765,9 @@ impl SshFormWindow {
             port,
             username,
             auth_method,
+            credential_ref: selected_certificate
+                .as_ref()
+                .map(CertificateReference::from_certificate),
             connect_timeout,
             keepalive_interval,
             keepalive_max,
@@ -747,7 +892,7 @@ impl SshFormWindow {
         let workspace_id = self.get_workspace_id(cx);
         let mut conn = StoredConnection::new_ssh(name, params, workspace_id);
         conn.sync_enabled = self.sync_enabled; // 设置同步状态
-        conn.team_id = self.get_team_id(cx);
+        conn.team_id = None;
         if !self.is_editing {
             conn.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
         }
@@ -833,13 +978,21 @@ impl SshFormWindow {
     /// 渲染基本信息标签页
     fn render_basic_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let auth_method = self.auth_method;
+        let use_certificate = self.selected_certificate(cx).is_some();
 
         v_flex()
             .gap_2()
             .child(self.render_form_row(&t!("SSH.name"), Input::new(&self.name_input)))
             .child(self.render_form_row(&t!("SSH.host"), Input::new(&self.host_input)))
             .child(self.render_form_row(&t!("SSH.port"), Input::new(&self.port_input)))
-            .child(self.render_form_row(&t!("SSH.username"), Input::new(&self.username_input)))
+            .child(self.render_form_row(
+                &t!("SSH.certificate"),
+                Select::new(&self.credential_select).w_full(),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.username"),
+                Input::new(&self.username_input).disabled(use_certificate),
+            ))
             .child(
                 self.render_form_row(
                     &t!("SSH.auth_method"),
@@ -849,6 +1002,7 @@ impl SshFormWindow {
                             Radio::new("password")
                                 .label(t!("SSH.password").to_string())
                                 .checked(auth_method == AuthMethodSelection::Password)
+                                .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::Password;
                                     cx.notify();
@@ -858,6 +1012,7 @@ impl SshFormWindow {
                             Radio::new("private-key")
                                 .label(t!("SSH.private_key").to_string())
                                 .checked(auth_method == AuthMethodSelection::PrivateKey)
+                                .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::PrivateKey;
                                     cx.notify();
@@ -866,27 +1021,32 @@ impl SshFormWindow {
                 ),
             )
             .when(auth_method == AuthMethodSelection::Password, |this| {
-                this.child(self.render_form_row(
-                    &t!("SSH.password"),
-                    Input::new(&self.password_input).mask_toggle(),
-                ))
+                this.child(
+                    self.render_form_row(
+                        &t!("SSH.password"),
+                        Input::new(&self.password_input)
+                            .mask_toggle()
+                            .disabled(use_certificate),
+                    ),
+                )
             })
             .when(auth_method == AuthMethodSelection::PrivateKey, |this| {
-                this.child(
-                    self.render_form_row(&t!("SSH.key_path"), Input::new(&self.key_path_input)),
-                )
-                .child(self.render_form_row(
-                    &t!("SSH.passphrase"),
-                    Input::new(&self.passphrase_input).mask_toggle(),
+                this.child(self.render_form_row(
+                    &t!("SSH.key_path"),
+                    Input::new(&self.key_path_input).disabled(use_certificate),
                 ))
+                .child(
+                    self.render_form_row(
+                        &t!("SSH.passphrase"),
+                        Input::new(&self.passphrase_input)
+                            .mask_toggle()
+                            .disabled(use_certificate),
+                    ),
+                )
             })
             .child(self.render_form_row(
                 &t!("SSH.workspace"),
                 Select::new(&self.workspace_select).w_full(),
-            ))
-            .child(self.render_form_row(
-                &t!("TeamSync.team_label"),
-                Select::new(&self.team_select).w_full(),
             ))
             .child(
                 self.render_form_row(
@@ -1144,6 +1304,15 @@ impl Render for SshFormWindow {
                             .label(t!("Common.cancel").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_cancel(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("manage-certificates")
+                            .small()
+                            .outline()
+                            .label(t!("SSH.manage_certificates").to_string())
+                            .on_click(cx.listener(|_, _, _window, cx| {
+                                open_certificate_manager_popup(cx);
                             })),
                     )
                     .child(

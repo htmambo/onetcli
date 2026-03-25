@@ -4,7 +4,6 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 mod auth;
 
-mod encourage;
 mod home;
 mod home_tab;
 mod onetcli_app;

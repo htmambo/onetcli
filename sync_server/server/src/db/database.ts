@@ -13,6 +13,7 @@ export interface CreateSyncItemInput {
   id?: string;
   ownerId: string;
   dataType: string;
+  name: string;
   encryptedData: string;
   keyVersion: number;
   checksum: string;
@@ -21,6 +22,7 @@ export interface CreateSyncItemInput {
 export interface UpdateSyncItemInput {
   id: string;
   ownerId: string;
+  name: string;
   encryptedData: string;
   keyVersion: number;
   checksum: string;
@@ -262,11 +264,11 @@ export class DatabaseClient {
       .prepare(
         `
         INSERT INTO sync_data (
-          id, owner_id, data_type, encrypted_data, key_version, checksum, version, created_at, updated_at, deleted_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+          id, owner_id, data_type, name, encrypted_data, key_version, checksum, version, created_at, updated_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
       `,
       )
-      .run(id, input.ownerId, input.dataType, input.encryptedData, input.keyVersion, input.checksum, now, now);
+      .run(id, input.ownerId, input.dataType, input.name, input.encryptedData, input.keyVersion, input.checksum, now, now);
 
     return this.getSyncItem(input.ownerId, id)!;
   }
@@ -285,6 +287,7 @@ export class DatabaseClient {
         UPDATE sync_data
         SET
           encrypted_data = ?,
+          name = ?,
           key_version = ?,
           checksum = ?,
           deleted_at = ?,
@@ -295,6 +298,7 @@ export class DatabaseClient {
       )
       .run(
         input.encryptedData,
+        input.name,
         input.keyVersion,
         input.checksum,
         input.deletedAt ?? null,

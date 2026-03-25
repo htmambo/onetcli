@@ -1666,3 +1666,639 @@
 ### 残余风险
 - 缺少自动化 GUI 测试，仍建议在实际界面确认侧栏点击后是否按预期切到账户页
 - 当前只验证了桌面端编译和测试目标编译，未新增独立单元测试覆盖设置页切换状态
+
+
+---
+
+## 审查报告（sync-server-sidebar-scroll）
+生成时间：2026-03-25 11:46:59 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“sync_server 页面左侧内容较少，需要固定高度且不受整体滚动影响”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已处理左侧栏固定高度、右侧独立滚动，以及由此带来的路由切换滚动复位
+- 交付物映射：已产出布局代码改动、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `AppLayout` 共享壳层、Vue Router 子路由切换、Tailwind 视口高度约束和移动端回退行为
+- 结论留痕：本地构建验证结果已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：82/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 92/100
+- 建议：通过
+
+### 主要结论
+- 桌面端 `/app` 布局现在会把左侧栏限制在视口高度内，并让右侧主内容独立滚动，左侧不再被长页面拖着一起滚。
+- 这次改动保持在 `AppLayout` 内部完成，没有把滚动逻辑分散到各个业务页，符合现有路由和布局组织方式。
+- 为避免内部滚动容器在切换子路由时停留在旧位置，已补充主内容区滚动复位。
+
+### 本地验证
+- `npm --prefix sync_server/web run build`：通过
+- `npm --prefix sync_server/web run build`（补 `min-h-0` 后复验）：通过
+
+### 残余风险
+- 当前没有浏览器级自动化回归测试，桌面端最终视觉效果仍建议在真实页面滚动一次确认
+- 移动端保留自然流布局，如果你后续希望手机端也固定侧栏，需要单独设计交互而不是直接套用桌面结构
+
+
+---
+
+## 审查报告（sync-server-sync-items-filter-pagination）
+生成时间：2026-03-25 11:54:06 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“全部同步项增加类型筛选、每页条数选择和分页显示”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已处理类型下拉筛选、默认每页 20 条、可切换每页条数、分页翻页和筛选为空态
+- 交付物映射：已产出页面代码改动、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `SyncItemsView` 现有结构、类型标签工具、前端本地分页边界和仓库缺少前端测试的现状
+- 结论留痕：本地构建验证结果已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：81/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：91/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 主要结论
+- 页面现在支持按同步项类型做下拉筛选，并会根据真实数据集动态生成可选类型，不会与后端类型列表脱节。
+- 列表展示已改为前端分页，默认每页 20 条，可切换每页条数，并提供当前页、总页数和上一页/下一页控制。
+- 筛选条件变化、每页条数变化和列表刷新后都处理了页码复位或越界夹紧，避免翻到空页。
+
+### 本地验证
+- `npm --prefix sync_server/web run build`：通过
+
+### 残余风险
+- 当前没有浏览器级交互测试，仍建议实际点一次类型筛选和分页按钮确认体验
+- 若未来同步项规模很大，前端本地分页可能需要升级为服务端分页
+
+
+---
+
+## 审查报告（sync-server-sync-item-local-decrypt）
+生成时间：2026-03-25 16:11:59 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“详情页手动输入主密钥并解密显示同步项明文”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已处理手动输入主密钥、浏览器本地校验、浏览器本地解密、格式化展示和失败提示
+- 交付物映射：已产出前端工具代码、详情页代码、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估 `keyVerification` 校验流程、Rust 加密算法对齐、Web Crypto 兼容性和仓库缺少前端自动化测试的现状
+- 结论留痕：本地构建验证结果已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：80/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 主要结论
+- 当前实现保持了端到端加密边界不变，`sync_server` 仍只保存密文，主密钥仅在浏览器内存中短暂使用。
+- 详情页现在会优先用 `keyVerification` 校验主密钥是否正确，再在浏览器本地解密 `encryptedData`，并以格式化 JSON 展示明文。
+- 当同步配置读取失败、主密钥为空、主密钥错误或密文损坏时，页面都会给出明确反馈。
+
+### 本地验证
+- `npm --prefix sync_server/web run build`：通过
+- `npm --prefix sync_server/web run build`（补空输入提示后复验）：通过
+
+### 残余风险
+- 当前没有浏览器级交互自动化测试，仍建议实际输入正确/错误主密钥各验证一次
+- 若未来需要支持批量解密或更多数据类型的结构化展示，再考虑把结果视图从原始 JSON 升级为类型化展示
+
+
+---
+
+## 审查报告（certificate-management）
+生成时间：2026-03-25 12:08:00 +0800
+
+### 审查清单
+- 需求字段完整性：已覆盖“统一证书管理”“连接配置直接复用登录信息”“证书参与同步”和“应用窗口内各类连接表单接入”的目标、范围、交付物与验证要点
+- 原始意图覆盖：已处理证书实体、存储迁移、云同步、证书管理弹窗、主页入口，以及 SSH/Redis/Mongo/数据库通用表单中的选择与管理入口
+- 交付物映射：已产出核心存储与同步代码、桌面端表单改动、本地化文案、上下文摘要、操作日志和本审查报告
+- 依赖与风险评估：已评估连接参数序列化、引用快照回写、证书删除后的连接解引用、窗口内热刷新和数据库 SSH 隧道认证映射
+- 结论留痕：格式化、编译与测试目标编译结果已写入 `.claude/operations-log.md`
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：86/100
+- 规范遵循：93/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 主要结论
+- 当前仓库已具备统一“证书”实体、数据库迁移和云同步类型，证书可以独立增删改并参与同步。
+- SSH、Redis、MongoDB 和数据库通用连接表单都支持直接选择证书复用登录信息，并在窗口内提供统一的“管理证书”入口。
+- 数据库通用表单同时支持数据库主认证证书和 SSH 隧道证书，且保持“引用 + 快照”策略，避免破坏现有连接执行路径。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main --no-run`：通过
+
+### 残余风险
+- 目前仍缺少桌面 GUI 自动化回归，特别是证书切换、清空选择和删除证书后的表单交互，需要你手动过一遍
+- 本次只验证了 `main` 目标及其依赖的编译链路，未新增针对证书同步和表单联动的独立单元测试
+
+---
+
+## 审查报告（certificate-management-window-followup）
+生成时间：2026-03-25 12:31:29 +0800
+
+### 需求完整性检查
+- 目标明确：修复桌面端“新增证书”无响应，把证书管理入口移到侧边栏，并补齐工作区修改/删除及删除时的连接处理提示
+- 范围明确：`crates/core` 证书管理窗口、`main` 主页侧栏和工作区删除交互、对应本地化文案
+- 交付物明确：交互修复、入口迁移、删除流程增强、本地编译验证、`.claude/` 留痕
+- 风险与依赖明确：仍依赖人工点击确认 GUI 交互；空工作区的管理入口继续通过工作区筛选弹层承载
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：85/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：93/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 根因修复合理：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs) 已把“新增证书/编辑证书”从管理弹窗内的嵌套 dialog 改为独立 popup，避免点击按钮后无响应。
+- 入口位置符合要求：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs) 已在左侧栏连接类型列表下方新增“证书管理”按钮，位置落在 `串口` 下方，不再混在“新建连接”菜单中。
+- 工作区删除流程更完整：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs) 删除工作区时会根据是否存在连接给出“移到未分区”或“删除全部连接”的明确分支，并在存在活动连接时阻止全删。
+- 交互覆盖面可接受：主内容区为非空工作区补了编辑/删除快捷按钮；全部工作区仍可在 [`home_workspace_filter.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home/home_workspace_filter.rs) 的筛选弹层中编辑和删除，因此空工作区并未失去管理入口。
+
+### 本地验证
+- `cargo check -p main`：通过
+
+### 残余风险
+- 当前没有桌面 GUI 自动化测试，仍建议实际点一次“新增证书”“侧栏证书管理”“删除带连接的工作区”三条主路径
+
+---
+
+## 审查报告（certificate-save-window-error）
+生成时间：2026-03-25 12:46:46 +0800
+
+### 需求完整性检查
+- 目标明确：修复添加证书后保存卡顿，并消除终端中的 `gpui::window: window not found`
+- 范围明确：证书编辑窗口保存链路、四个引用证书的连接表单订阅生命周期
+- 交付物明确：异步保存改造、订阅释放修正、本地格式化与编译验证、`.claude/` 留痕
+- 风险与依赖明确：当前仍缺少 GUI 自动化验证，需要实际点一次证书新增和表单联动路径
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：85/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 根因定位准确：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L772) 之前在 UI 线程同步执行证书保存和连接快照回写，导致保存时直接阻塞窗口。
+- 性能问题已对症处理：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L788) 现在通过 `window.spawn + Tokio::spawn_result` 把保存和批量回写放到后台执行，窗口仅在结果返回后更新状态并关闭。
+- 窗口报错根因已消除：[`ssh_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/terminal_view/src/ssh_form_window.rs#L202)、[`redis_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/redis_view/src/redis_form_window.rs#L223)、[`db_connection_form.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/db_view/src/common/db_connection_form.rs#L832) 等表单现在显式持有证书订阅，不再把窗口相关订阅 `detach()` 成悬空监听器。
+- 影响范围受控：只调整执行线程和订阅生命周期，没有改动证书事件协议、连接参数结构或同步语义。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 仍建议手动验证两条路径：
+  - 证书管理中新增/编辑证书后，窗口是否即时关闭且无明显卡顿
+  - 打开一个 SSH/Redis/Mongo/数据库连接表单后，再从证书管理新增证书，表单下拉是否能正常刷新且终端不再打印 `window not found`
+
+---
+
+## 审查报告（sync-server-credential-sync-type）
+生成时间：2026-03-25 12:46:46 +0800
+
+### 需求完整性检查
+- 目标明确：让 `sync_server` 正确识别并展示新增的“凭证”同步类型
+- 范围明确：`sync_server/web` 的类型映射、概览统计和列表筛选；后端协议只做复核不改动
+- 交付物明确：类型归一化工具、前端页面适配、本地构建验证、`.claude/` 留痕
+- 风险与依赖明确：当前后端继续透传原始 `dataType` 字符串，前端需要兼容历史 `certificate` 和未来 `credential`
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：84/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 兼容层位置正确：[`syncItemType.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/utils/syncItemType.ts#L1) 现在统一把 `certificate` / `credential` 归一化为“凭证”，最近同步项、列表页和详情页都会自然复用这层映射。
+- 仪表盘统计已补齐：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L21) 新增“凭证”统计卡片，[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L185) 分类统计改为走统一类型判断，不会再漏算新增类型。
+- 列表筛选更稳健：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L199) 类型选项按归一化结果去重，[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L220) 筛选命中也改为兼容别名类型，避免 `certificate` / `credential` 出现重复语义选项或筛选失效。
+- 后端无需改动：已复核 [`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L13) 和 [`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L229)，当前 `dataType` 本来就是通用字符串透传和筛选，前端适配已经足够覆盖这轮需求。
+
+### 本地验证
+- `npm --prefix sync_server/web run build`：通过
+
+### 残余风险
+- 当前没有浏览器级自动化测试，仍建议实际点一次：
+  - 概览页“凭证”统计卡片是否显示正确
+  - 列表页类型筛选是否能正确筛出凭证项
+
+---
+
+## 审查报告（popup-escape-and-core-common-translation）
+生成时间：2026-03-25 13:01:27 +0800
+
+### 需求完整性检查
+- 目标明确：修复凭证管理弹窗中 `Common.edit` / `Common.delete` 未翻译，并让所有独立 popup 支持按 `Esc` 关闭
+- 范围明确：`crates/core` 的共享本地化词条与 popup 基础设施
+- 交付物明确：词条补齐、popup 键盘上下文接入、本地 Rust 构建验证、`.claude/` 留痕
+- 风险与依赖明确：`Esc` 行为仅覆盖通过 `open_popup_window(...)` 打开的独立窗口，最终交互仍需 GUI 手动确认
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：86/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：98/100
+- 风险评估：93/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 翻译缺失根因明确且修复位置正确：[`core.yml`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/locales/core.yml#L3) 原先只提供了 `save/cancel/search`，现在补齐 `Common.edit` 和 `Common.delete` 后，凭证管理列表不再回显原始 key。
+- `Esc` 关闭方案复用现有交互模式：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L8) 新增 popup 专用动作与键绑定，[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L16) 通过包装层统一处理焦点、`focus_trap`、键盘上下文和关闭动作，方向与现有 `dialog/sheet` 保持一致。
+- 影响面控制合理：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L133) 把统一能力收口在 `open_popup_window(...)`，数据库连接表单、凭证新增/编辑窗口等所有调用点都会自动获得 `Esc` 关闭，无需在业务窗口重复补逻辑。
+- 初始化闭环已补齐：[`lib.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/lib.rs#L37) 已注册 `popup_window::init(cx)`，避免运行时只写了动作却未绑定按键。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 目前仅完成本地构建验证，仍建议手动确认：
+  - 凭证管理窗口中的“编辑 / 删除”按钮已显示正确翻译
+  - SSH / Redis / Mongo / 数据库连接等独立表单窗口在输入框聚焦时按 `Esc` 能直接关闭
+
+---
+
+## 审查报告（popup-window-close-window-not-found）
+生成时间：2026-03-25 13:09:37 +0800
+
+### 需求完整性检查
+- 目标明确：修复关闭凭证管理相关 popup 时出现的 `gpui::window: window not found`
+- 范围明确：`crates/core` 的 popup 关闭基础设施，以及凭证编辑窗口的关闭调用点
+- 交付物明确：统一延迟关闭助手、系统关闭拦截、本地 Rust 构建验证、`.claude/` 留痕
+- 风险与依赖明确：本次只修独立 popup 的关闭时机，不改业务数据流；最终仍需 GUI 手动确认实际关闭路径不再报错
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：85/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：98/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 修复点选择正确：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L16) 新增统一的 popup 延迟关闭助手，没有在凭证页做一次性特判。
+- 系统关闭路径已纳管：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L169) 现在会在窗口创建时注册 `on_window_should_close(...)`，把窗口管理器触发的关闭请求也改成延迟执行，避免当前事件循环尚未结束时窗口已被立即移除。
+- `Esc` 与业务关闭路径保持一致：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L38) 的 `CancelPopup` 已复用同一关闭助手；[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L825) 和 [`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L885) 也改为同一关闭方式，避免不同关闭入口行为不一致。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 目前没有桌面 GUI 自动化回归，仍建议你手动确认三条路径：
+  - 关闭凭证管理主窗口时终端不再出现 `gpui::window: window not found`
+  - 凭证编辑窗口点击“取消”时不再报错
+  - 凭证编辑窗口保存成功自动关闭时不再报错
+
+---
+
+## 审查报告（remove-team-ui-from-desktop-forms）
+生成时间：2026-03-25 13:45:14 +0800
+
+### 需求完整性检查
+- 目标明确：移除应用窗口中所有“团队”相关内容
+- 范围明确：桌面端主页、数据库连接表单、SSH/Redis/Mongo/串口表单、凭证管理窗口
+- 交付物明确：团队 UI 清理、保存逻辑归一、本地构建验证、`.claude/` 留痕
+- 风险与依赖明确：本轮不做底层 `team_id` 数据迁移，也不改 `cloud_sync` 的团队模型
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：85/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：95/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 主页入口已清理：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1733) 到 [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1866) 的各连接窗口配置不再透传 `teams`，连接卡片上的团队徽标也已移除。
+- MongoDB 与串口表单已对齐：[`mongo_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/mongodb_view/src/mongo_form_window.rs#L38) 和 [`serial_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/terminal_view/src/serial_form_window.rs#L22) 的窗口配置已删掉团队字段；保存时分别在 [`mongo_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/mongodb_view/src/mongo_form_window.rs#L741) 与 [`serial_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/terminal_view/src/serial_form_window.rs#L532) 统一写 `team_id = None`。
+- 凭证管理已去掉团队范围：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L347) 的编辑表单不再持有团队选择状态，保存时在 [`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L561) 强制落为个人范围。
+- 保持了风险边界：底层 `cloud_sync` 与存储模型未被顺手重构，避免把这轮 UI 清理扩展成数据结构改造；但通过保存时显式清空 `team_id`，已阻断“用户编辑后仍写回团队数据”的问题。
+
+### 本地验证
+- `rg -n "TeamSelectItem|team_select|get_team_id|pub teams: Vec<TeamOption>|get_cached_team_options|TeamSync\\.team_label|selected_team_id" crates main -g '*.rs'`：通过
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 目前没有自动迁移历史团队数据；旧数据只有在重新保存后才会被归一为个人范围
+- 当前没有桌面 GUI 自动化测试，仍建议手动确认各连接窗口和凭证编辑窗口中已无团队项
+
+---
+
+## 审查报告（sync-server-soft-delete-visibility）
+生成时间：2026-03-25 16:06:27 +0800
+
+### 需求完整性检查
+- 目标明确：解释并修正“本地删除工作区后远端看起来没删”的可见性问题
+- 范围明确：`sync_server/web` 展示层；服务端删除语义仅做核对不改动
+- 交付物明确：统计口径修正、状态筛选、本地前端构建验证、`.claude/` 留痕
+- 风险与依赖明确：远端删除仍然是软删除，记录不会被物理移除
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：84/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：95/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 根因已确认：[`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L162) 删除接口调用的是软删除；[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L314) 只会写入 `deleted_at`，不会物理删记录。
+- 展示口径已修正：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L185) 开始只统计有效项，并单独显示已软删除数量，避免把 tombstone 当作当前有效数据。
+- 列表默认行为更符合直觉：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L56) 新增状态筛选，并默认显示“仅有效”，但仍能切换查看软删除记录。
+- API 兼容性保留：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts#L115) 只扩展了可选 `includeDeleted` 参数，没有破坏现有调用。
+
+### 本地验证
+- `npm --prefix sync_server/web run build`：通过
+
+### 残余风险
+- 软删除记录仍然存在于服务端，这是当前同步服务的既定设计
+- 还没有浏览器级自动化验证，建议手动确认：
+  - 删除工作区后概览卡片数量会下降
+  - 完整列表默认不再把已软删除工作区当作有效项显示
+
+---
+
+## 审查报告（workspace-delete-sync-semantics）
+生成时间：2026-03-25 16:17:25 +0800
+
+### 需求完整性检查
+- 目标明确：确保本地删除工作区/连接后，远端删除语义也能被一致处理与识别
+- 范围明确：桌面端删除入口与同步待删除队列
+- 交付物明确：删除链路统一、本地构建验证、`.claude/` 留痕
+- 风险与依赖明确：本次不引入本地软删除字段，仍采用“本地物理删除 + 远端 soft delete tombstone”
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：84/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 删除语义已统一：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L334) 新增统一的待删除登记辅助函数，工作区和连接删除都不再在 UI 层直接删除云端。
+- 连接删除已收敛：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1115) 现在先完成本地物理删除，再登记 `connection` 待删除，由同步引擎处理远端 soft delete。
+- 工作区删除已收敛：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1500) 现在会对工作区及其被删除的连接统一登记待删除，随后触发自动同步；远端 tombstone 将由现有 [`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L342) 处理。
+- 与现有同步模型一致：证书删除本来就走待删除队列，本次让工作区/连接与其保持同一路径，避免 `deleted_at` 识别和重试逻辑分叉。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 当前没有自动化集成测试覆盖“删除后立即同步”的完整桌面到服务端链路
+- 本地删除仍为物理删除，不支持本地恢复；远端仍保留 soft delete 记录作为同步 tombstone
+
+---
+
+## 审查报告（sync-server-delete-empty-body）
+生成时间：2026-03-25 16:26:06 +0800
+
+### 需求完整性检查
+- 目标明确：修复待删除同步时 `DELETE` 请求因空 JSON body 被服务端拒绝的问题
+- 范围明确：`crates/core/src/cloud_sync/sync_server.rs` 的请求头和请求构造
+- 交付物明确：请求头修复、本地 Rust 构建验证、`.claude/` 留痕
+- 风险与依赖明确：本次不改服务端，只修客户端契约
+
+### 技术维度评分
+- 代码质量：97/100
+- 测试覆盖：83/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：98/100
+- 风险评估：95/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 根因定位准确：[`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L292) 原先给所有请求统一加了 `Content-Type: application/json`，而 [`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L487) 的删除请求没有 body，触发 Fastify 的空 JSON body 校验错误。
+- 修复位置正确：[`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L292) 现在公共头只保留 `Accept`；[`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L314) 仅在有 body 时补 `Content-Type`。
+- 影响面可控：有 body 的登录、注册、刷新 token、保存同步配置、创建/更新同步项仍会自动带 JSON 头，无 body 的 GET/DELETE 不再误带。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 仍缺少对接真实 `sync_server` 的自动化联调测试
+- 之前已经进入待删除列表的记录需要再执行一次同步，修复后才会真正被远端软删除
+
+---
+
+## 审查报告（sync-item-plaintext-name）
+生成时间：2026-03-25 16:46:58 +0800
+
+### 需求完整性检查
+- 目标明确：把每个同步项的名称以明文方式存到云端，便于直接查看
+- 范围明确：Rust 同步模型、sync_server 服务端存储/API、Web 展示层
+- 交付物明确：模型扩展、数据库迁移、展示接入、本地多端验证、`.claude/` 留痕
+- 风险与依赖明确：历史旧数据存在无 `name` 的兼容问题，需要自动回填与迁移默认值双保险
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：85/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：95/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 同步元数据已扩展：[`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L206) 的 `CloudSyncData` 新增 `name` 字段，连接/工作区/凭证在 [`service.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs#L376) 起的上传构造都会写入明文名称。
+- 服务端已持久化：[`003_add_sync_item_name.sql`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/migrations/003_add_sync_item_name.sql) 为 `sync_data` 表增加 `name`，[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L257) 和 [`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L11) 已贯通读写与响应。
+- 同步兼容已补齐：[`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L403) 与 [`connection_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L378) 会优先使用云端明文名称；如果旧记录 `name` 为空，则继续解密兜底，并在下一次同步时自动补写回云端。
+- 云端可见性已落地：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L148)、[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L130)、[`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue#L43) 都会直接显示明文名称，不再只能看 `id`。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `npm --prefix sync_server/server run check`：通过
+- `npm --prefix sync_server/web run build`：通过
+
+### 残余风险
+- 历史已删除且本地源对象不存在的旧记录，无法从客户端回填真实名称，只能保留迁移默认值
+- 目前没有端到端自动化测试覆盖“旧记录自动补写 name”的完整同步链路，建议手动触发一次同步确认
+
+---
+
+## 审查报告（sync-item-name-placeholder-backfill）
+生成时间：2026-03-25 17:06:47 +0800
+
+### 需求完整性检查
+- 目标明确：修复旧同步记录把 `id` 当作项目名称长期保留的问题
+- 范围明确：Rust 客户端名称回填判定与 `sync_server` 服务端历史迁移数据
+- 交付物明确：统一判定方法、旧数据规范化迁移、本地验证、`.claude/` 留痕
+- 风险与依赖明确：需要用户再触发一次同步，真实名称才会回写到云端
+
+### 技术维度评分
+- 代码质量：97/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：98/100
+- 风险评估：95/100
+
+### 综合评分
+- 97/100
+- 建议：通过
+
+### 结论
+- 根因修正到位：[`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L231) 新增统一判定方法后，旧迁移产生的 `name == id` 不再被当成真实名称。
+- 客户端回填已贯通：[`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L406) 与 [`connection_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L381) 都改为使用统一判定，因此工作区、凭证、连接三条链路都能在下次同步时回填真实名称。
+- 服务端旧值已规范化：[`004_normalize_sync_item_placeholder_name.sql`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/migrations/004_normalize_sync_item_placeholder_name.sql) 会把历史占位值恢复为空串，避免 Web 继续直接显示 `id`。
+- 回归验证充分：新增的 [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L253) 单元测试覆盖了“占位值”和“真实名称”两种判定，Rust 与 `sync_server` 的构建检查均已通过。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p one-core cloud_sync::models::tests --lib`：通过
+- `npm --prefix sync_server/server run check`：通过
+- `npm --prefix sync_server/web run build`：通过
+
+### 残余风险
+- 历史已删除且本地对象已不存在的记录，仍无法自动补回真实名称
+- 极少数真实名称恰好等于云端 `id` 的记录，会被识别为占位值并在下一次同步时覆盖
+
+---
+
+## 审查报告（selection-contrast-in-app）
+生成时间：2026-03-25 17:31:06 +0800
+
+### 需求完整性检查
+- 目标明确：定位并修复应用内 AI 消息、输入框、数据表/列表的选中态对比度过低问题
+- 范围明确：`crates/ui` 的文本选区绘制、输入框文字渲染与默认主题 token
+- 交付物明确：根因修复、默认主题增强、本地构建验证、`.claude/` 留痕
+- 风险与依赖明确：最终视觉效果仍需手动 GUI 确认
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：86/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：98/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- AI 消息根因已修正：[`inline.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/text/inline.rs#L301) 现在先画选区背景，再画文字，避免半透明选区把文本盖灰。
+- 输入框根因已修正：[`input/element.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/input/element.rs#L451) 新增 selection 区间提取，并在 [`input/element.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/input/element.rs#L1199) 接入现有的 `split_runs_by_bg_segments(...)`，因此选中文字会自动切换为黑/白高对比前景色。
+- 主题总开关已修正：[`schema.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/theme/schema.rs#L631) 不再强制把 `selection` / `list_active` / `table_active` 压成低透明度；[`default-theme.json`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/theme/default-theme.json#L20) 和 [`default-theme.json`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/theme/default-theme.json#L169) 也提高了默认选中背景强度。
+- 影响面控制合理：改动全部集中在公共 UI 基础层，没有给 AI、表格、表单单独打补丁。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p gpui-component input::element::tests --lib`：通过
+
+### 残余风险
+- 列表/表格这次主要依赖更强的背景对比度，尚未像输入框那样显式切换前景色
+- 缺少 GUI 自动化截图验证，最终视觉效果仍建议你本地实际拖选确认

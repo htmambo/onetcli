@@ -12,6 +12,10 @@ type RequestOptions = RequestInit & {
   token?: string;
 };
 
+type SyncItemListOptions = {
+  includeDeleted?: boolean;
+};
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers ?? {});
 
@@ -109,8 +113,15 @@ export const api = {
     });
   },
 
-  listSyncItems(token: string) {
-    return request<SyncItem[]>("/api/v1/sync/items", {
+  listSyncItems(token: string, options: SyncItemListOptions = {}) {
+    const searchParams = new URLSearchParams();
+    if (options.includeDeleted === false) {
+      searchParams.set("includeDeleted", "false");
+    }
+
+    const query = searchParams.toString();
+
+    return request<SyncItem[]>(`/api/v1/sync/items${query ? `?${query}` : ""}`, {
       token,
     });
   },

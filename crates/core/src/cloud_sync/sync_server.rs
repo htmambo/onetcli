@@ -82,6 +82,8 @@ struct SyncServerSyncItemPayload {
     id: String,
     owner_id: String,
     data_type: String,
+    #[serde(default)]
+    name: String,
     encrypted_data: String,
     key_version: u32,
     checksum: String,
@@ -116,6 +118,7 @@ struct SaveConfigRequest<'a> {
 struct CreateSyncItemRequest<'a> {
     id: Option<&'a str>,
     data_type: &'a str,
+    name: &'a str,
     encrypted_data: &'a str,
     key_version: u32,
     checksum: &'a str,
@@ -124,6 +127,7 @@ struct CreateSyncItemRequest<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateSyncItemRequest<'a> {
+    name: &'a str,
     encrypted_data: &'a str,
     key_version: u32,
     checksum: &'a str,
@@ -290,7 +294,7 @@ impl SyncServerClient {
     }
 
     fn common_headers(&self) -> Vec<(&'static str, String)> {
-        vec![("Content-Type", "application/json".to_string())]
+        vec![("Accept", "application/json".to_string())]
     }
 
     fn auth_headers(&self) -> Result<Vec<(&'static str, String)>, CloudApiError> {
@@ -311,6 +315,10 @@ impl SyncServerClient {
         body: Option<Vec<u8>>,
     ) -> Result<Request<AsyncBody>, CloudApiError> {
         let mut builder = Request::builder().method(method).uri(url);
+
+        if body.is_some() {
+            builder = builder.header("Content-Type", "application/json");
+        }
 
         for (key, value) in headers {
             builder = builder.header(key, value);
@@ -632,6 +640,7 @@ impl SyncServerClient {
             id,
             owner_id,
             data_type,
+            name,
             encrypted_data,
             key_version,
             checksum,
@@ -646,6 +655,7 @@ impl SyncServerClient {
             owner_id,
             team_id: None,
             data_type,
+            name,
             encrypted_data,
             key_version,
             checksum,
@@ -879,6 +889,7 @@ impl CloudApiClient for SyncServerClient {
         let body = CreateSyncItemRequest {
             id: (!data.id.is_empty()).then_some(data.id.as_str()),
             data_type: &data.data_type,
+            name: &data.name,
             encrypted_data: &data.encrypted_data,
             key_version: data.key_version,
             checksum: &data.checksum,
@@ -905,6 +916,7 @@ impl CloudApiClient for SyncServerClient {
 
         let url = self.api_url(&format!("/api/v1/sync/items/{}", data.id));
         let body = UpdateSyncItemRequest {
+            name: &data.name,
             encrypted_data: &data.encrypted_data,
             key_version: data.key_version,
             checksum: &data.checksum,

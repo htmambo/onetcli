@@ -105,6 +105,7 @@ impl ConflictResolver {
             owner_id: String::new(),
             team_id: None,
             data_type: crate::cloud_sync::models::data_type::CONNECTION.to_string(),
+            name: local.name.clone(),
             encrypted_data: String::new(),
             key_version: 0,
             checksum: String::new(),

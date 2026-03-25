@@ -1,7 +1,7 @@
 <template>
-  <div class="min-h-screen px-4 py-6 md:px-6">
-    <div class="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-      <aside class="panel flex flex-col rounded-[28px] p-6">
+  <div class="min-h-screen px-4 py-6 md:px-6 lg:h-screen lg:overflow-hidden">
+    <div class="mx-auto grid max-w-7xl gap-6 lg:h-full lg:grid-cols-[280px_minmax(0,1fr)]">
+      <aside class="panel flex flex-col rounded-[28px] p-6 lg:min-h-0 lg:h-full lg:overflow-y-auto">
         <div class="border-b soft-line pb-5">
           <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">Sync Server</p>
           <h1 class="mt-3 text-2xl font-semibold text-[var(--text)]">账号与同步中心</h1>
@@ -37,16 +37,19 @@
             </div>
           </RouterLink>
 
-        <button
-          class="mt-4 w-full rounded-2xl border border-[var(--line)] bg-white/60 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
-          @click="handleLogout"
-        >
-          退出登录
-        </button>
+          <button
+            class="mt-4 w-full rounded-2xl border border-[var(--line)] bg-white/60 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+            @click="handleLogout"
+          >
+            退出登录
+          </button>
         </div>
       </aside>
 
-      <main class="min-w-0">
+      <main
+        ref="mainScrollContainer"
+        class="min-w-0 lg:min-h-0 lg:h-full lg:overflow-y-auto lg:pr-1"
+      >
         <RouterView />
       </main>
     </div>
@@ -54,13 +57,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+const mainScrollContainer = ref<HTMLElement | null>(null);
 
 const displayName = computed(() => auth.user?.nickname ?? auth.user?.email ?? "");
 const showEmail = computed(() => Boolean(auth.user?.nickname && auth.user.nickname !== auth.user.email));
@@ -83,6 +87,14 @@ async function handleLogout() {
   await auth.logout();
   await router.push("/login");
 }
+
+watch(
+  () => route.fullPath,
+  async () => {
+    await nextTick();
+    mainScrollContainer.value?.scrollTo({ top: 0 });
+  },
+);
 
 function isActive(path: string) {
   if (path === "/app/sync-items") {

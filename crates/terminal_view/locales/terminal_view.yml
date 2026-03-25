@@ -103,6 +103,14 @@ SSH:
     en: Port
     zh-CN: 端口
     zh-HK: 端口
+  certificate:
+    en: Certificate
+    zh-CN: 证书
+    zh-HK: 憑證
+  certificate_none:
+    en: Do not use certificate
+    zh-CN: 不使用证书
+    zh-HK: 不使用憑證
   username:
     en: Username
     zh-CN: 用户名
@@ -147,6 +155,10 @@ SSH:
     en: Workspace
     zh-CN: 工作区
     zh-HK: 工作區
+  manage_certificates:
+    en: Manage Certificates
+    zh-CN: 管理证书
+    zh-HK: 管理憑證
   validation_error:
     en: Please fill in all required fields
     zh-CN: 请填写所有必填字段

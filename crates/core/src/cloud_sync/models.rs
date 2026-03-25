@@ -213,6 +213,9 @@ pub struct CloudSyncData {
     pub team_id: Option<String>,
     /// 数据类型标识（"connection" | "workspace" | ...）
     pub data_type: String,
+    /// 明文名称，便于云端直接展示与轻量匹配
+    #[serde(default)]
+    pub name: String,
     /// 加密后的完整数据 blob（base64(nonce + AES-256-GCM ciphertext)）
     pub encrypted_data: String,
     /// 加密密钥版本
@@ -230,6 +233,21 @@ pub struct CloudSyncData {
     pub deleted_at: Option<i64>,
 }
 
+impl CloudSyncData {
+    /// 判断云端同步项是否携带了可直接展示和匹配的真实名称。
+    ///
+    /// 兼容旧迁移把 `name` 回填成 `id` 的占位场景，这种值不能当作真实名称使用。
+    pub fn has_resolved_name(&self) -> bool {
+        let name = self.name.trim();
+        !name.is_empty() && name != self.id
+    }
+
+    /// 判断云端同步项是否仍需要回填真实名称。
+    pub fn needs_name_backfill(&self) -> bool {
+        !self.has_resolved_name()
+    }
+}
+
 fn default_version() -> u32 {
     1
 }
@@ -238,6 +256,44 @@ fn default_version() -> u32 {
 pub mod data_type {
     pub const CONNECTION: &str = "connection";
     pub const WORKSPACE: &str = "workspace";
+    pub const CERTIFICATE: &str = "certificate";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CloudSyncData;
+
+    fn sample_cloud_sync_data(name: &str) -> CloudSyncData {
+        CloudSyncData {
+            id: "ab934c43-8e85-4c9c-8119-8c3fc43e9f15".to_string(),
+            owner_id: "owner-1".to_string(),
+            team_id: None,
+            data_type: "workspace".to_string(),
+            name: name.to_string(),
+            encrypted_data: "ENC:test".to_string(),
+            key_version: 1,
+            checksum: "checksum".to_string(),
+            version: 1,
+            updated_at: 0,
+            deleted_at: None,
+        }
+    }
+
+    #[test]
+    fn placeholder_name_should_require_backfill() {
+        let cloud_data = sample_cloud_sync_data("ab934c43-8e85-4c9c-8119-8c3fc43e9f15");
+
+        assert!(!cloud_data.has_resolved_name());
+        assert!(cloud_data.needs_name_backfill());
+    }
+
+    #[test]
+    fn plaintext_name_should_be_usable() {
+        let cloud_data = sample_cloud_sync_data("生产工作区");
+
+        assert!(cloud_data.has_resolved_name());
+        assert!(!cloud_data.needs_name_backfill());
+    }
 }
 
 /// 团队
@@ -331,4 +387,30 @@ pub struct WorkspacePlainData {
     /// 图标
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+}
+
+/// 证书明文数据结构（加密前 / 解密后的 JSON blob）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertificatePlainData {
+    /// 证书名称
+    pub name: String,
+    /// 证书类型
+    pub kind: String,
+    /// 用户名
+    pub username: String,
+    /// 密码
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// 私钥路径
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_path: Option<String>,
+    /// 私钥口令
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passphrase: Option<String>,
+    /// 备注
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remark: Option<String>,
+    /// 创建者
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<String>,
 }

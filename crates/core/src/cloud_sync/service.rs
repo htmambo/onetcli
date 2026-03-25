@@ -3,7 +3,7 @@
 use crate::cloud_sync::models::*;
 use crate::cloud_sync::queue::{OperationQueue, SyncOperation};
 use crate::crypto::{self, CryptoError};
-use crate::storage::{ConnectionType, StoredConnection};
+use crate::storage::{Certificate, CertificateKind, ConnectionType, StoredConnection};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -378,6 +378,7 @@ impl CloudSyncService {
             owner_id: self.user_id.clone().unwrap_or_default(),
             team_id: team_id.map(|s| s.to_string()),
             data_type: data_type::CONNECTION.to_string(),
+            name: conn.name.clone(),
             encrypted_data,
             key_version,
             checksum,
@@ -412,6 +413,47 @@ impl CloudSyncService {
             owner_id: self.user_id.clone().unwrap_or_default(),
             team_id: team_id.map(|s| s.to_string()),
             data_type: data_type::WORKSPACE.to_string(),
+            name: ws.name.clone(),
+            encrypted_data,
+            key_version,
+            checksum,
+            version: 1,
+            updated_at: current_timestamp(),
+            deleted_at: None,
+        })
+    }
+
+    /// 准备上传证书到 sync_data（整体 blob 加密）
+    pub fn prepare_certificate_sync_data_upload(
+        &self,
+        certificate: &Certificate,
+        team_id: Option<&str>,
+        teams: &[Team],
+    ) -> Result<CloudSyncData, SyncError> {
+        let plain_data = CertificatePlainData {
+            name: certificate.name.clone(),
+            kind: certificate.kind.to_string(),
+            username: certificate.username.clone(),
+            password: certificate.password.clone(),
+            key_path: certificate.key_path.clone(),
+            passphrase: certificate.passphrase.clone(),
+            remark: certificate.remark.clone(),
+            owner_id: certificate.owner_id.clone(),
+        };
+
+        let plaintext = serde_json::to_string(&plain_data)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+
+        let checksum = Self::calculate_blob_checksum(&plaintext);
+        let encrypted_data = self.encrypt_blob(&plaintext, team_id)?;
+        let key_version = self.select_key_version(team_id, teams);
+
+        Ok(CloudSyncData {
+            id: uuid::Uuid::new_v4().to_string(),
+            owner_id: self.user_id.clone().unwrap_or_default(),
+            team_id: team_id.map(|s| s.to_string()),
+            data_type: data_type::CERTIFICATE.to_string(),
+            name: certificate.name.clone(),
             encrypted_data,
             key_version,
             checksum,
@@ -473,6 +515,35 @@ impl CloudSyncService {
         })
     }
 
+    /// 解密 sync_data 中的证书数据
+    pub fn decrypt_sync_data_certificate(
+        &self,
+        cloud_data: &CloudSyncData,
+    ) -> Result<Certificate, SyncError> {
+        let plaintext =
+            self.decrypt_blob(&cloud_data.encrypted_data, cloud_data.team_id.as_deref())?;
+        let plain_data: CertificatePlainData = serde_json::from_str(&plaintext)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+
+        Ok(Certificate {
+            id: None,
+            name: plain_data.name,
+            kind: CertificateKind::from_str(&plain_data.kind),
+            username: plain_data.username,
+            password: plain_data.password,
+            key_path: plain_data.key_path,
+            passphrase: plain_data.passphrase,
+            remark: plain_data.remark,
+            sync_enabled: true,
+            cloud_id: Some(cloud_data.id.clone()),
+            last_synced_at: Some(cloud_data.updated_at / 1000),
+            created_at: None,
+            updated_at: Some(cloud_data.updated_at / 1000),
+            team_id: cloud_data.team_id.clone(),
+            owner_id: plain_data.owner_id,
+        })
+    }
+
     /// 重新加密同步数据（密钥轮换时使用）
     pub fn re_encrypt_sync_data(
         &self,
@@ -490,6 +561,7 @@ impl CloudSyncService {
             owner_id: cloud_data.owner_id.clone(),
             team_id: cloud_data.team_id.clone(),
             data_type: cloud_data.data_type.clone(),
+            name: cloud_data.name.clone(),
             encrypted_data,
             key_version: new_key_version,
             checksum: cloud_data.checksum.clone(),

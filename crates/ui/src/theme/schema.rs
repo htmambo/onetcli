@@ -629,11 +629,6 @@ impl ThemeColor {
         apply_color!(window_border, fallback = self.border);
 
         // TODO: Apply default fallback colors to highlight.
-
-        // Ensure opacity for list_active, table_active
-        self.list_active = self.list_active.alpha(self.list_active.a.min(0.2));
-        self.table_active = self.table_active.alpha(self.table_active.a.min(0.2));
-        self.selection = self.selection.alpha(self.selection.a.min(0.3));
     }
 }
 

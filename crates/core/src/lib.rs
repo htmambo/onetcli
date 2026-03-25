@@ -4,6 +4,8 @@ rust_i18n::i18n!("locales", fallback = "zh-CN");
 
 pub mod agent;
 pub mod ai_chat;
+pub mod certificate_manager;
+pub mod certificate_notifier;
 pub mod cloud_sync;
 pub mod config;
 pub mod connection_notifier;
@@ -39,4 +41,6 @@ pub fn init(cx: &mut App) {
     llm::init(cx);
     agent::init(cx);
     connection_notifier::init(cx);
+    certificate_notifier::init(cx);
+    popup_window::init(cx);
 }

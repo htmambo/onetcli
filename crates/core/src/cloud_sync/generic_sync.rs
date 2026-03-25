@@ -402,12 +402,17 @@ fn build_name_map<H: SyncTypeHandler>(
     cloud_data_list: &[CloudSyncData],
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let service = match engine.crypto_service.read() {
-        Ok(s) => s,
-        Err(_) => return map,
-    };
-
     for data in cloud_data_list {
+        if data.has_resolved_name() {
+            map.insert(data.id.clone(), data.name.clone());
+            continue;
+        }
+
+        let service = match engine.crypto_service.read() {
+            Ok(s) => s,
+            Err(_) => return map,
+        };
+
         if let Some(name) = handler.decrypt_name(&service, data) {
             map.insert(data.id.clone(), name);
         }
@@ -485,6 +490,13 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
         match local_item.cloud_id() {
             Some(cloud_id) => {
                 if let Some(cloud_data) = cloud_map.get(cloud_id) {
+                    if cloud_data.needs_name_backfill() && !local_item.item_name().trim().is_empty()
+                    {
+                        plan.to_update_cloud
+                            .push((local_item.clone(), (*cloud_data).clone()));
+                        continue;
+                    }
+
                     let local_updated = local_item.updated_at().unwrap_or(0);
                     let cloud_updated = cloud_data.updated_at / 1000;
 

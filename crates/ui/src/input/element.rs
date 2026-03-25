@@ -448,6 +448,48 @@ impl TextElement {
         paths
     }
 
+    fn selection_bg_segments(
+        state: &InputState,
+        last_layout: &LastLayout,
+        selection_color: Hsla,
+        window: &mut Window,
+    ) -> Vec<(Range<usize>, Hsla)> {
+        if !state.focus_handle.is_focused(window) {
+            return Vec::new();
+        }
+
+        let mut selected_range = state.selected_range;
+        if let Some(ime_marked_range) = &state.ime_marked_range {
+            if !ime_marked_range.is_empty() {
+                selected_range = (ime_marked_range.end..ime_marked_range.end).into();
+            }
+        }
+        if selected_range.is_empty() {
+            return Vec::new();
+        }
+
+        if state.masked {
+            // Because masked use `*`, 1 char with 1 byte.
+            selected_range.start = state.text.offset_to_char_index(selected_range.start);
+            selected_range.end = state.text.offset_to_char_index(selected_range.end);
+        }
+
+        let (start_ix, end_ix) = if selected_range.start < selected_range.end {
+            (selected_range.start, selected_range.end)
+        } else {
+            (selected_range.end, selected_range.start)
+        };
+
+        let range = start_ix.max(last_layout.visible_range_offset.start)
+            ..end_ix.min(last_layout.visible_range_offset.end);
+
+        if range.is_empty() {
+            return Vec::new();
+        }
+
+        vec![(range, selection_color)]
+    }
+
     fn layout_selections(
         &self,
         last_layout: &LastLayout,
@@ -722,7 +764,8 @@ impl TextElement {
         last_layout: &LastLayout,
         font_size: Pixels,
         runs: &[TextRun],
-        bg_segments: &[(Range<usize>, Hsla)],
+        document_bg_segments: &[(Range<usize>, Hsla)],
+        selection_bg_segments: &[(Range<usize>, Hsla)],
         whitespace_indicators: Option<WhitespaceIndicators>,
         window: &mut Window,
     ) -> Vec<LineLayout> {
@@ -782,13 +825,22 @@ impl TextElement {
 
             for range in &line_item.wrapped_lines {
                 let line_runs = runs_for_range(runs, offset, &range);
-                let line_runs = if bg_segments.is_empty() {
+                let line_runs = if document_bg_segments.is_empty() {
                     line_runs
                 } else {
                     split_runs_by_bg_segments(
                         visible_range_offset.start + offset,
                         &line_runs,
-                        bg_segments,
+                        document_bg_segments,
+                    )
+                };
+                let line_runs = if selection_bg_segments.is_empty() {
+                    line_runs
+                } else {
+                    split_runs_by_bg_segments(
+                        visible_range_offset.start + offset,
+                        &line_runs,
+                        selection_bg_segments,
                     )
                 };
 
@@ -1024,6 +1076,7 @@ impl Element for TextElement {
             visible_start_offset..visible_end_offset,
             cx,
         );
+        let selection_color = cx.theme().selection;
 
         let state = self.state.read(cx);
         let multi_line = state.mode.is_multi_line();
@@ -1143,6 +1196,8 @@ impl Element for TextElement {
         let document_colors = state
             .lsp
             .document_colors_for_range(&text, &last_layout.visible_range);
+        let selection_bg_segments =
+            Self::selection_bg_segments(&state, &last_layout, selection_color, window);
 
         // Create shaped lines for whitespace indicators before layout
         let whitespace_indicators =
@@ -1155,6 +1210,7 @@ impl Element for TextElement {
             text_size,
             &runs,
             &document_colors,
+            &selection_bg_segments,
             whitespace_indicators,
             window,
         );

@@ -2,9 +2,13 @@ use anyhow::Result;
 use gpui::{App, SharedString};
 use rusqlite::params;
 
+use crate::crypto;
 use crate::storage::connection::SqliteConnection;
-use crate::storage::manager::{GlobalStorageState, now};
-use crate::storage::models::has_decrypt_failure_in_sensitive_fields;
+use crate::storage::manager::{GlobalStorageState, StorageManager, now};
+use crate::storage::models::{
+    Certificate, CertificateKind, apply_certificate_to_connection_snapshot,
+    detach_certificate_from_connection_snapshot, has_decrypt_failure_in_sensitive_fields,
+};
 use crate::storage::quick_command::QuickCommandRepository;
 use crate::storage::row_mapping::FromSqliteRow;
 use crate::storage::traits::Repository;
@@ -113,6 +117,79 @@ impl From<WorkspaceRow> for Workspace {
     }
 }
 
+fn encrypt_secret(value: &Option<String>) -> Option<String> {
+    value.as_deref().map(crypto::encrypt_password)
+}
+
+fn decrypt_secret(value: Option<String>) -> Option<String> {
+    value.map(|secret| crypto::decrypt_password(&secret))
+}
+
+struct CertificateRow {
+    id: i64,
+    name: String,
+    kind: String,
+    username: String,
+    password: Option<String>,
+    key_path: Option<String>,
+    passphrase: Option<String>,
+    remark: Option<String>,
+    sync_enabled: bool,
+    cloud_id: Option<String>,
+    last_synced_at: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+    team_id: Option<String>,
+    owner_id: Option<String>,
+}
+
+impl FromSqliteRow for CertificateRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            kind: row.get("kind")?,
+            username: row.get("username")?,
+            password: row.get("password")?,
+            key_path: row.get("key_path")?,
+            passphrase: row.get("passphrase")?,
+            remark: row.get("remark")?,
+            sync_enabled: row
+                .get::<_, i64>("sync_enabled")
+                .map(|v| v != 0)
+                .unwrap_or(true),
+            cloud_id: row.get("cloud_id")?,
+            last_synced_at: row.get("last_synced_at")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+            team_id: row.get("team_id").unwrap_or(None),
+            owner_id: row.get("owner_id").unwrap_or(None),
+        })
+    }
+}
+
+impl From<CertificateRow> for Certificate {
+    fn from(row: CertificateRow) -> Self {
+        Self {
+            id: Some(row.id),
+            name: row.name,
+            kind: CertificateKind::from_str(&row.kind),
+            username: row.username,
+            password: decrypt_secret(row.password),
+            key_path: row.key_path,
+            passphrase: decrypt_secret(row.passphrase),
+            remark: row.remark,
+            sync_enabled: row.sync_enabled,
+            cloud_id: row.cloud_id,
+            last_synced_at: row.last_synced_at,
+            created_at: Some(row.created_at),
+            updated_at: Some(row.updated_at),
+            team_id: row.team_id,
+            owner_id: row.owner_id,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ConnectionRepository {
     conn: SqliteConnection,
@@ -121,6 +198,230 @@ pub struct ConnectionRepository {
 impl ConnectionRepository {
     pub fn new(conn: SqliteConnection) -> Self {
         Self { conn }
+    }
+}
+
+#[derive(Clone)]
+pub struct CertificateRepository {
+    conn: SqliteConnection,
+}
+
+impl CertificateRepository {
+    pub fn new(conn: SqliteConnection) -> Self {
+        Self { conn }
+    }
+
+    pub fn update_from_cloud(&self, item: &Certificate) -> Result<()> {
+        let id = item
+            .id
+            .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
+        let updated_at = item.updated_at.unwrap_or_else(now);
+
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE certificates SET name = ?1, kind = ?2, username = ?3, password = ?4, key_path = ?5, passphrase = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
+                params![
+                    item.name,
+                    item.kind.to_string(),
+                    item.username,
+                    encrypt_secret(&item.password),
+                    item.key_path,
+                    encrypt_secret(&item.passphrase),
+                    item.remark,
+                    if item.sync_enabled { 1i64 } else { 0i64 },
+                    item.cloud_id,
+                    item.last_synced_at,
+                    item.team_id,
+                    item.owner_id,
+                    updated_at,
+                    id
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn update_sync_status(
+        &self,
+        id: i64,
+        cloud_id: Option<String>,
+        last_synced_at: Option<i64>,
+    ) -> Result<()> {
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE certificates SET cloud_id = ?1, last_synced_at = ?2 WHERE id = ?3",
+                params![cloud_id, last_synced_at, id],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<Certificate>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE cloud_id = ?1",
+            )?;
+            let mut rows = stmt.query(params![cloud_id])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(CertificateRow::from_row(row)?.into()))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    pub fn list_by_team(&self, team_id: &str) -> Result<Vec<Certificate>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id = ?1 ORDER BY updated_at DESC",
+            )?;
+            let rows = stmt.query_map(params![team_id], |row| CertificateRow::from_row(row))?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?.into());
+            }
+            Ok(results)
+        })
+    }
+
+    pub fn list_personal(&self) -> Result<Vec<Certificate>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id IS NULL ORDER BY updated_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?.into());
+            }
+            Ok(results)
+        })
+    }
+}
+
+impl Repository for CertificateRepository {
+    type Entity = Certificate;
+
+    fn entity_type(&self) -> SharedString {
+        SharedString::from("Certificate")
+    }
+
+    fn insert(&self, item: &mut Self::Entity) -> Result<i64> {
+        let ts = now();
+
+        let id = self.conn.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO certificates (name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![
+                    item.name,
+                    item.kind.to_string(),
+                    item.username,
+                    encrypt_secret(&item.password),
+                    item.key_path,
+                    encrypt_secret(&item.passphrase),
+                    item.remark,
+                    if item.sync_enabled { 1i64 } else { 0i64 },
+                    item.cloud_id,
+                    item.last_synced_at,
+                    item.team_id,
+                    item.owner_id,
+                    ts,
+                    ts
+                ],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })?;
+
+        item.id = Some(id);
+        item.created_at = Some(ts);
+        item.updated_at = Some(ts);
+
+        Ok(id)
+    }
+
+    fn update(&self, item: &Self::Entity) -> Result<()> {
+        let id = item
+            .id
+            .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
+        let ts = now();
+
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE certificates SET name = ?1, kind = ?2, username = ?3, password = ?4, key_path = ?5, passphrase = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
+                params![
+                    item.name,
+                    item.kind.to_string(),
+                    item.username,
+                    encrypt_secret(&item.password),
+                    item.key_path,
+                    encrypt_secret(&item.passphrase),
+                    item.remark,
+                    if item.sync_enabled { 1i64 } else { 0i64 },
+                    item.cloud_id,
+                    item.last_synced_at,
+                    item.team_id,
+                    item.owner_id,
+                    ts,
+                    id
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn delete(&self, id: i64) -> Result<()> {
+        self.conn.with_connection(|conn| {
+            conn.execute("DELETE FROM certificates WHERE id = ?1", params![id])?;
+            Ok(())
+        })
+    }
+
+    fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query(params![id])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(CertificateRow::from_row(row)?.into()))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    fn list(&self) -> Result<Vec<Self::Entity>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates ORDER BY updated_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?.into());
+            }
+            Ok(results)
+        })
+    }
+
+    fn count(&self) -> Result<i64> {
+        self.conn.with_connection(|conn| {
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM certificates", [], |row| row.get(0))?;
+            Ok(count)
+        })
+    }
+
+    fn exists(&self, id: i64) -> Result<bool> {
+        self.conn.with_connection(|conn| {
+            let exists: i64 = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM certificates WHERE id = ?1)",
+                params![id],
+                |row| row.get(0),
+            )?;
+            Ok(exists == 1)
+        })
     }
 }
 
@@ -553,13 +854,12 @@ impl PendingCloudDeletionRepository {
         })
     }
 
-    /// 获取所有待删除的连接
-    pub fn list_connections(&self) -> Result<Vec<PendingCloudDeletion>> {
+    pub fn list_by_entity_type(&self, entity_type: &str) -> Result<Vec<PendingCloudDeletion>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, cloud_id, entity_type, created_at FROM pending_cloud_deletions WHERE entity_type = 'connection'"
+                "SELECT id, cloud_id, entity_type, created_at FROM pending_cloud_deletions WHERE entity_type = ?1",
             )?;
-            let rows = stmt.query_map([], |row| {
+            let rows = stmt.query_map(params![entity_type], |row| {
                 Ok(PendingCloudDeletion {
                     id: row.get(0)?,
                     cloud_id: row.get(1)?,
@@ -575,26 +875,19 @@ impl PendingCloudDeletionRepository {
         })
     }
 
+    /// 获取所有待删除的连接
+    pub fn list_connections(&self) -> Result<Vec<PendingCloudDeletion>> {
+        self.list_by_entity_type("connection")
+    }
+
     /// 获取所有待删除的工作空间
     pub fn list_workspaces(&self) -> Result<Vec<PendingCloudDeletion>> {
-        self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, cloud_id, entity_type, created_at FROM pending_cloud_deletions WHERE entity_type = 'workspace'"
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(PendingCloudDeletion {
-                    id: row.get(0)?,
-                    cloud_id: row.get(1)?,
-                    entity_type: row.get(2)?,
-                    created_at: row.get(3)?,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
+        self.list_by_entity_type("workspace")
+    }
+
+    /// 获取所有待删除的证书
+    pub fn list_certificates(&self) -> Result<Vec<PendingCloudDeletion>> {
+        self.list_by_entity_type("certificate")
     }
 
     /// 删除记录（同步成功后调用）
@@ -619,6 +912,45 @@ impl PendingCloudDeletionRepository {
             Ok(count > 0)
         })
     }
+}
+
+pub fn sync_connections_for_certificate(
+    storage: &StorageManager,
+    certificate: &Certificate,
+) -> Result<Vec<StoredConnection>> {
+    let connection_repo = storage
+        .get::<ConnectionRepository>()
+        .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+
+    let mut changed_connections = Vec::new();
+    for mut connection in connection_repo.list()? {
+        if apply_certificate_to_connection_snapshot(&mut connection, certificate) {
+            connection_repo.update(&connection)?;
+            changed_connections.push(connection);
+        }
+    }
+
+    Ok(changed_connections)
+}
+
+pub fn detach_connections_for_certificate(
+    storage: &StorageManager,
+    local_id: Option<i64>,
+    cloud_id: Option<&str>,
+) -> Result<Vec<StoredConnection>> {
+    let connection_repo = storage
+        .get::<ConnectionRepository>()
+        .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+
+    let mut changed_connections = Vec::new();
+    for mut connection in connection_repo.list()? {
+        if detach_certificate_from_connection_snapshot(&mut connection, local_id, cloud_id) {
+            connection_repo.update(&connection)?;
+            changed_connections.push(connection);
+        }
+    }
+
+    Ok(changed_connections)
 }
 
 /// 团队密钥缓存（本地存储，用 personal_key 加密 team_key）
@@ -731,12 +1063,14 @@ pub fn init(cx: &mut App) {
     let storage = storage_state.storage.clone();
 
     let conn = storage.connection();
+    let certificate_repo = CertificateRepository::new(conn.clone());
     let conn_repo = ConnectionRepository::new(conn.clone());
     let workspace_repo = WorkspaceRepository::new(conn.clone());
     let quick_cmd_repo = QuickCommandRepository::new(conn.clone());
     let pending_deletion_repo = PendingCloudDeletionRepository::new(conn.clone());
     let team_key_cache_repo = TeamKeyCacheRepository::new(conn.clone());
 
+    storage.register(certificate_repo);
     storage.register(workspace_repo);
     storage.register(conn_repo);
     storage.register(quick_cmd_repo);

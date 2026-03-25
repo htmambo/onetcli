@@ -147,14 +147,8 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
             return Vec::new();
         };
 
-        let entity_type = self.pending_deletion_entity_type();
-        let result = if entity_type == "connection" {
-            repo.list_connections()
-        } else {
-            repo.list_workspaces()
-        };
-
-        result.unwrap_or_default()
+        repo.list_by_entity_type(self.pending_deletion_entity_type())
+            .unwrap_or_default()
     }
 
     /// 删除一条待删除记录

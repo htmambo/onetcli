@@ -18,10 +18,11 @@
       </div>
     </section>
 
-    <section class="grid gap-4 md:grid-cols-4">
-      <StatCard label="同步项总数" :value="stats.total" tone="success" tone-text="已建立" />
+    <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <StatCard label="有效同步项" :value="stats.total" tone="success" tone-text="当前生效" />
       <StatCard label="连接项" :value="stats.connection" />
       <StatCard label="工作区" :value="stats.workspace" />
+      <StatCard label="凭证" :value="stats.credential" />
       <StatCard label="应用设置" :value="stats.appSettings" />
     </section>
 
@@ -43,13 +44,13 @@
         <div class="mt-6 rounded-3xl border border-[var(--line)] bg-white/60 p-5">
           <p class="text-sm font-semibold text-[var(--text)]">字段说明</p>
           <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
-            密钥校验串用于校验当前主密钥是否匹配，不会直接保存你的明文密钥。
+            <b>密钥校验串（key_verification）</b>用于校验当前主密钥是否匹配，不会直接保存你的明文密钥。
           </p>
           <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
-            密钥版本表示当前账号正在使用第几代同步密钥；只有更换主密钥或重建密钥配置时才应该递增。
+            <b>密钥版本（key_version）</b>表示当前账号正在使用第几代同步密钥；只有更换主密钥或重建密钥配置时才应该递增。
           </p>
           <p class="mt-2 text-sm leading-7 text-[var(--muted)]">
-            同步记录里的记录版本则表示某一条记录已经更新到第几版，它和密钥版本是两回事。
+            同步记录里的<b>记录版本（record_version）</b>则表示某一条记录已经更新到第几版，它和密钥版本是两回事。
           </p>
         </div>
 
@@ -117,13 +118,23 @@
               查看全部同步项
             </RouterLink>
             <span class="rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-[var(--muted)]">
-              {{ items.length }} 条
+              有效 {{ activeItems.length }} 条
+            </span>
+            <span
+              v-if="deletedItems.length > 0"
+              class="rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700"
+            >
+              已软删除 {{ deletedItems.length }} 条
             </span>
           </div>
         </div>
 
+        <p class="mt-3 text-sm leading-6 text-[var(--muted)]">
+          远端删除采用软删除保留审计痕迹。上方统计和下方预览只计算当前有效项；已软删除项可在完整列表中查看。
+        </p>
+
         <div v-if="loading" class="mt-6 text-sm text-[var(--muted)]">读取中...</div>
-        <div v-else-if="items.length === 0" class="mt-6 rounded-2xl bg-white/60 p-4 text-sm text-[var(--muted)]">
+        <div v-else-if="activeItems.length === 0" class="mt-6 rounded-2xl bg-white/60 p-4 text-sm text-[var(--muted)]">
           当前没有同步数据。
         </div>
         <div v-else class="mt-6 space-y-3">
@@ -135,6 +146,7 @@
             <div class="flex items-start justify-between gap-4">
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-[var(--text)]">{{ getSyncItemTypeLabel(item.dataType) }}</p>
+                <p class="mt-1 truncate text-sm text-[var(--text)]">{{ item.name || "未提供名称" }}</p>
                 <p class="mt-1 truncate text-xs text-[var(--muted)]">{{ item.id }}</p>
               </div>
               <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-[var(--muted)]">
@@ -143,7 +155,7 @@
             </div>
             <div class="mt-3 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
               <span>密钥版本：{{ formatKeyVersion(item.keyVersion) }}</span>
-              <span>updated_at: {{ formatDate(item.updatedAt) }}</span>
+              <span>最后更新：{{ formatDate(item.updatedAt) }}</span>
               <span v-if="item.deletedAt" class="text-rose-700">已软删除</span>
             </div>
             <div class="mt-4">
@@ -167,7 +179,7 @@ import StatCard from "@/components/StatCard.vue";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type { SyncConfig, SyncItem } from "@/types/api";
-import { getSyncItemTypeLabel } from "@/utils/syncItemType";
+import { getSyncItemTypeLabel, isSyncItemType } from "@/utils/syncItemType";
 import { formatKeyVersion, formatRecordVersion } from "@/utils/syncItemVersion";
 
 const auth = useAuthStore();
@@ -181,14 +193,18 @@ const keyVersion = ref(1);
 const configMessage = ref("");
 const configError = ref("");
 
+const activeItems = computed(() => items.value.filter((item) => !item.deletedAt));
+const deletedItems = computed(() => items.value.filter((item) => Boolean(item.deletedAt)));
+
 const stats = computed(() => ({
-  total: items.value.length,
-  connection: items.value.filter((item) => item.dataType === "connection").length,
-  workspace: items.value.filter((item) => item.dataType === "workspace").length,
-  appSettings: items.value.filter((item) => item.dataType === "app_settings").length,
+  total: activeItems.value.length,
+  connection: activeItems.value.filter((item) => isSyncItemType(item.dataType, "connection")).length,
+  workspace: activeItems.value.filter((item) => isSyncItemType(item.dataType, "workspace")).length,
+  credential: activeItems.value.filter((item) => isSyncItemType(item.dataType, "credential")).length,
+  appSettings: activeItems.value.filter((item) => isSyncItemType(item.dataType, "app_settings")).length,
 }));
 
-const previewItems = computed(() => items.value.slice(0, 5));
+const previewItems = computed(() => activeItems.value.slice(0, 5));
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString("zh-CN");

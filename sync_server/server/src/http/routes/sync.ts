@@ -13,12 +13,14 @@ const configSchema = z.object({
 const createSyncItemSchema = z.object({
   id: z.string().uuid().optional(),
   dataType: z.string().min(1).max(50),
+  name: z.string().trim().max(255).default(""),
   encryptedData: z.string().min(1),
   keyVersion: z.number().int().min(1),
   checksum: z.string().default(""),
 });
 
 const updateSyncItemSchema = z.object({
+  name: z.string().trim().max(255).default(""),
   encryptedData: z.string().min(1),
   keyVersion: z.number().int().min(1),
   checksum: z.string().default(""),
@@ -31,6 +33,7 @@ function toSyncItemResponse(item: SyncDataRecord) {
     id: item.id,
     ownerId: item.owner_id,
     dataType: item.data_type,
+    name: item.name,
     encryptedData: item.encrypted_data,
     keyVersion: item.key_version,
     checksum: item.checksum,
@@ -114,6 +117,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
         id: parsed.data.id,
         ownerId: request.authUser!.id,
         dataType: parsed.data.dataType,
+        name: parsed.data.name,
         encryptedData: parsed.data.encryptedData,
         keyVersion: parsed.data.keyVersion,
         checksum: parsed.data.checksum,
@@ -137,6 +141,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     const item = app.database.updateSyncItem({
       id: params.id,
       ownerId: request.authUser!.id,
+      name: parsed.data.name,
       encryptedData: parsed.data.encryptedData,
       keyVersion: parsed.data.keyVersion,
       checksum: parsed.data.checksum,

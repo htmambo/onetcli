@@ -377,12 +377,16 @@ impl SyncEngine {
     /// 解密云端数据建立 cloud_id → name 映射
     fn build_cloud_name_map(&self, cloud_data_list: &[CloudSyncData]) -> HashMap<String, String> {
         let mut map = HashMap::new();
-        let service = match self.crypto_service.read() {
-            Ok(s) => s,
-            Err(_) => return map,
-        };
-
         for data in cloud_data_list {
+            if data.has_resolved_name() {
+                map.insert(data.id.clone(), data.name.clone());
+                continue;
+            }
+
+            let service = match self.crypto_service.read() {
+                Ok(s) => s,
+                Err(_) => return map,
+            };
             if let Ok(conn) = service.decrypt_sync_data_connection(data) {
                 map.insert(data.id.clone(), conn.name);
             }
@@ -531,6 +535,12 @@ impl SyncEngine {
             match &local_conn.cloud_id {
                 Some(cloud_id) => {
                     if let Some(cloud_data) = cloud_map.get(cloud_id.as_str()) {
+                        if cloud_data.needs_name_backfill() && !local_conn.name.trim().is_empty() {
+                            plan.to_update_cloud
+                                .push((local_conn.clone(), (*cloud_data).clone()));
+                            continue;
+                        }
+
                         let local_updated = local_conn.updated_at.unwrap_or(0);
                         let last_synced = local_conn.last_synced_at.unwrap_or(0);
                         let cloud_updated = cloud_data.updated_at / 1000;

@@ -349,6 +349,14 @@ MongoForm:
     en: "Username"
     zh-CN: "用户名"
     zh-HK: "使用者名稱"
+  certificate_label:
+    en: "Certificate"
+    zh-CN: "证书"
+    zh-HK: "憑證"
+  certificate_none:
+    en: "Do not use certificate"
+    zh-CN: "不使用证书"
+    zh-HK: "不使用憑證"
   password_placeholder:
     en: "Password"
     zh-CN: "密码"
@@ -497,6 +505,10 @@ MongoForm:
     en: "Test"
     zh-CN: "测试"
     zh-HK: "測試"
+  manage_certificates:
+    en: "Manage Certificates"
+    zh-CN: "管理证书"
+    zh-HK: "管理憑證"
 
 MongoCollection:
   parse_failed:

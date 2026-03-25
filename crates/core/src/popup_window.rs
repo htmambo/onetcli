@@ -1,8 +1,64 @@
 use gpui::{
-    AnyView, App, AppContext, Bounds, SharedString, Size, Window, WindowBounds, WindowKind,
-    WindowOptions, px, size,
+    AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Window,
+    WindowBounds, WindowKind, WindowOptions, actions, div, px, size,
 };
-use gpui_component::{Root, TitleBar};
+use gpui_component::{ActiveTheme, FocusTrapElement, Root, TitleBar, v_flex};
+
+actions!(popup_window, [CancelPopup]);
+
+const CONTEXT: &str = "PopupWindow";
+
+pub fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("escape", CancelPopup, Some(CONTEXT))]);
+}
+
+pub fn request_popup_window_close(window: &mut Window, cx: &mut App) {
+    window.defer(cx, |window, _| {
+        window.remove_window();
+    });
+}
+
+struct PopupWindowView {
+    focus_handle: FocusHandle,
+    content: AnyView,
+}
+
+impl PopupWindowView {
+    fn new(content: AnyView, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window, cx);
+
+        Self {
+            focus_handle,
+            content,
+        }
+    }
+
+    fn on_cancel_popup(&mut self, _: &CancelPopup, window: &mut Window, cx: &mut Context<Self>) {
+        request_popup_window_close(window, cx);
+    }
+}
+
+impl Focusable for PopupWindowView {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for PopupWindowView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .id("popup-window-root")
+            .size_full()
+            .bg(cx.theme().background)
+            .key_context(CONTEXT)
+            .track_focus(&self.focus_handle)
+            .focus_trap("popup-window-root", &self.focus_handle)
+            .on_action(cx.listener(Self::on_cancel_popup))
+            .child(div().size_full().child(self.content.clone()))
+    }
+}
 
 /// 弹出窗口的配置选项
 pub struct PopupWindowOptions {
@@ -111,8 +167,13 @@ where
         };
 
         let window = cx.open_window(window_opts, |window, cx| {
-            let view = create_view_fn(window, cx);
-            cx.new(|cx| Root::new(view, window, cx))
+            window.on_window_should_close(cx, |window, cx| {
+                request_popup_window_close(window, cx);
+                false
+            });
+            let view = create_view_fn(window, cx).into();
+            let popup_view = cx.new(|cx| PopupWindowView::new(view, window, cx));
+            cx.new(|cx| Root::new(popup_view, window, cx))
         })?;
 
         window.update(cx, |_, window, _| {

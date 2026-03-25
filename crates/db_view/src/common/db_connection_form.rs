@@ -3,7 +3,8 @@ use db::{GlobalDbState, oracle};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AsyncApp, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement, PathPromptOptions, Render, SharedString, Styled, Window, div, prelude::*, px,
+    ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size,
@@ -19,10 +20,14 @@ use gpui_component::{
     tab::{Tab, TabBar},
     v_flex,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::certificate_notifier::{
+    CertificateDataEvent, get_notifier as get_certificate_notifier,
+};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
+    Certificate, CertificateKind, CertificateReference, CertificateRepository,
     ConnectionRepository, DatabaseType, DbConnectionConfig, GlobalStorageState, StoredConnection,
     Workspace, get_config_dir,
 };
@@ -81,41 +86,6 @@ impl WorkspaceSelectItem {
 
 impl SelectItem for WorkspaceSelectItem {
     type Value = Option<i64>;
-
-    fn title(&self) -> SharedString {
-        self.name.clone().into()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.id
-    }
-}
-
-/// Team select item for dropdown
-#[derive(Clone, Debug)]
-pub struct TeamSelectItem {
-    pub id: Option<String>,
-    pub name: String,
-}
-
-impl TeamSelectItem {
-    pub fn personal() -> Self {
-        Self {
-            id: None,
-            name: t!("TeamSync.personal").to_string(),
-        }
-    }
-
-    pub fn from_team(team: &TeamOption) -> Self {
-        Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
-        }
-    }
-}
-
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
 
     fn title(&self) -> SharedString {
         self.name.clone().into()
@@ -228,6 +198,16 @@ pub struct DbFormConfig {
 }
 
 impl DbFormConfig {
+    fn certificate_field(name: impl Into<String>, label: impl Into<String>) -> FormField {
+        FormField::new(name, label, FormFieldType::Select)
+            .optional()
+            .default("")
+            .options(vec![(
+                "".to_string(),
+                t!("ConnectionForm.certificate_none").to_string(),
+            )])
+    }
+
     fn ssh_tab_group() -> TabGroup {
         TabGroup::new("ssh", t!("ConnectionForm.ssh")).fields(vec![
             FormField::new(
@@ -256,6 +236,10 @@ impl DbFormConfig {
             .optional()
             .default("22")
             .placeholder("22"),
+            Self::certificate_field(
+                "ssh_tunnel_credential_ref",
+                t!("ConnectionForm.ssh_certificate"),
+            ),
             FormField::new(
                 "ssh_username",
                 t!("ConnectionForm.ssh_username"),
@@ -338,6 +322,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("3306")
                         .default("3306"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -414,6 +399,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("5432")
                         .default("5432"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -489,6 +475,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("1433")
                         .default("1433"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -596,6 +583,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("1521")
                         .default("1521"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -663,6 +651,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("8123 (HTTP port)")
                         .default("8123"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -793,10 +782,10 @@ pub struct DbConnectionForm {
     field_values: Vec<(String, Entity<String>)>,
     field_inputs: Vec<Option<Entity<InputState>>>,
     field_selects: std::collections::HashMap<String, Entity<SelectState<Vec<FormSelectItem>>>>,
+    certificates: Vec<Certificate>,
     is_testing: Entity<bool>,
     test_result: Entity<Option<Result<bool, String>>>,
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
     pending_file_path: Entity<Option<String>>,
     editing_connection: Option<StoredConnection>,
     /// 是否启用云同步
@@ -804,12 +793,14 @@ pub struct DbConnectionForm {
     /// Oracle 客户端检测状态：Ok(版本) / Err(错误)
     oracle_client_status: Entity<Option<Result<String, String>>>,
     oracle_client_checking: Entity<bool>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl DbConnectionForm {
     pub fn new(config: DbFormConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let current_db_type = cx.new(|_| config.db_type);
+        let certificates = Self::load_certificates_from_storage(cx);
 
         // Initialize field values, inputs, and selects
         let mut field_values = Vec::new();
@@ -823,11 +814,19 @@ impl DbConnectionForm {
 
                 if field.field_type == FormFieldType::Select {
                     // Create SelectState for Select fields
-                    let items: Vec<FormSelectItem> = field
-                        .options
-                        .iter()
-                        .map(|(v, l)| FormSelectItem::new(v.clone(), l.clone()))
-                        .collect();
+                    let items: Vec<FormSelectItem> = match field.name.as_str() {
+                        "credential_ref" => {
+                            Self::build_certificate_select_items(&certificates, false)
+                        }
+                        "ssh_tunnel_credential_ref" => {
+                            Self::build_certificate_select_items(&certificates, true)
+                        }
+                        _ => field
+                            .options
+                            .iter()
+                            .map(|(v, l)| FormSelectItem::new(v.clone(), l.clone()))
+                            .collect(),
+                    };
                     // Find the index of the default value
                     let selected_index = if field.default_value.is_empty() {
                         Some(IndexPath::new(0))
@@ -838,22 +837,34 @@ impl DbConnectionForm {
                             .map(IndexPath::new)
                     };
                     let field_name = field.name.clone();
+                    let field_name_for_event = field_name.clone();
                     let value_clone = value.clone();
                     let select = cx.new(|cx| SelectState::new(items, selected_index, window, cx));
                     // Subscribe to select changes
                     cx.subscribe_in(
                         &select,
                         window,
-                        move |_form,
+                        move |form,
                               _select,
                               event: &SelectEvent<Vec<FormSelectItem>>,
-                              _window,
+                              window,
                               cx| {
                             if let SelectEvent::Confirm(Some(val)) = event {
+                                let selected_value = val.clone();
                                 value_clone.update(cx, |v, cx| {
-                                    *v = val.clone();
+                                    *v = selected_value.clone();
                                     cx.notify();
                                 });
+                                if matches!(
+                                    field_name_for_event.as_str(),
+                                    "credential_ref" | "ssh_tunnel_credential_ref"
+                                ) {
+                                    form.sync_selected_certificate_fields(
+                                        &field_name_for_event,
+                                        window,
+                                        cx,
+                                    );
+                                }
                             }
                         },
                     )
@@ -908,10 +919,6 @@ impl DbConnectionForm {
         let workspace_select =
             cx.new(|cx| SelectState::new(workspace_items, Some(Default::default()), window, cx));
 
-        let team_items = vec![TeamSelectItem::personal()];
-        let team_select =
-            cx.new(|cx| SelectState::new(team_items, Some(Default::default()), window, cx));
-
         let pending_file_path = cx.new(|_| None);
 
         // 默认启用云同步
@@ -919,7 +926,7 @@ impl DbConnectionForm {
         let oracle_client_status = cx.new(|_| None);
         let oracle_client_checking = cx.new(|_| false);
 
-        let form = Self {
+        let mut form = Self {
             config,
             current_db_type,
             focus_handle,
@@ -927,19 +934,64 @@ impl DbConnectionForm {
             field_values,
             field_inputs,
             field_selects,
+            certificates,
             is_testing,
             test_result,
             workspace_select,
-            team_select,
             pending_file_path,
             editing_connection: None,
             sync_enabled,
             oracle_client_status,
             oracle_client_checking,
+            _subscriptions: Vec::new(),
         };
+
+        if let Some(notifier) = get_certificate_notifier(cx) {
+            form._subscriptions.push(cx.subscribe_in(
+                &notifier,
+                window,
+                |this, _, _event: &CertificateDataEvent, window, cx| {
+                    this.reload_certificates(window, cx);
+                },
+            ));
+        }
 
         form.refresh_oracle_client_status(cx);
         form
+    }
+
+    fn load_certificates_from_storage(cx: &App) -> Vec<Certificate> {
+        cx.global::<GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default()
+    }
+
+    fn build_certificate_select_items(
+        certificates: &[Certificate],
+        allow_private_key: bool,
+    ) -> Vec<FormSelectItem> {
+        let mut items = vec![FormSelectItem::new(
+            "",
+            t!("ConnectionForm.certificate_none").to_string(),
+        )];
+        items.extend(
+            certificates
+                .iter()
+                .filter(|certificate| {
+                    allow_private_key || certificate.kind == CertificateKind::UsernamePassword
+                })
+                .filter_map(|certificate| {
+                    certificate.id.map(|id| {
+                        FormSelectItem::new(
+                            id.to_string(),
+                            format!("{} · {}", certificate.name, certificate.kind.label()),
+                        )
+                    })
+                }),
+        );
+        items
     }
 
     fn refresh_oracle_client_status(&self, cx: &mut Context<Self>) {
@@ -1027,21 +1079,6 @@ impl DbConnectionForm {
         cx.notify();
     }
 
-    pub fn set_teams(
-        &mut self,
-        teams: Vec<TeamOption>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mut items = vec![TeamSelectItem::personal()];
-        items.extend(teams.iter().map(TeamSelectItem::from_team));
-
-        self.team_select.update(cx, |select, cx| {
-            select.set_items(items, window, cx);
-        });
-        cx.notify();
-    }
-
     pub fn load_connection(
         &mut self,
         connection: &StoredConnection,
@@ -1074,6 +1111,20 @@ impl DbConnectionForm {
             for (key, value) in &params.extra_params {
                 self.set_field_value(key, value, window, cx);
             }
+            self.restore_selected_certificate(
+                "credential_ref",
+                params.credential_ref.as_ref(),
+                window,
+                cx,
+            );
+            self.restore_selected_certificate(
+                "ssh_tunnel_credential_ref",
+                params.ssh_tunnel_credential_ref.as_ref(),
+                window,
+                cx,
+            );
+            self.sync_selected_certificate_fields("credential_ref", window, cx);
+            self.sync_selected_certificate_fields("ssh_tunnel_credential_ref", window, cx);
         }
 
         if let Some(remark) = &connection.remark {
@@ -1086,17 +1137,6 @@ impl DbConnectionForm {
             });
         } else {
             self.workspace_select.update(cx, |select, cx| {
-                select.set_selected_value(&None, window, cx);
-            });
-        }
-
-        // 加载团队归属
-        if let Some(ref team_id) = connection.team_id {
-            self.team_select.update(cx, |select, cx| {
-                select.set_selected_value(&Some(team_id.clone()), window, cx);
-            });
-        } else {
-            self.team_select.update(cx, |select, cx| {
                 select.set_selected_value(&None, window, cx);
             });
         }
@@ -1139,6 +1179,131 @@ impl DbConnectionForm {
             .map(|(_, value)| value.read(cx).clone())
     }
 
+    fn selected_certificate_by_field(&self, field_name: &str, cx: &App) -> Option<Certificate> {
+        let selected_id = self
+            .get_field_value(field_name, cx)
+            .and_then(|value| value.parse::<i64>().ok());
+
+        self.certificates
+            .iter()
+            .find(|certificate| certificate.id == selected_id)
+            .cloned()
+    }
+
+    fn restore_selected_certificate(
+        &mut self,
+        field_name: &str,
+        reference: Option<&CertificateReference>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected_value = reference
+            .and_then(|reference| {
+                self.certificates
+                    .iter()
+                    .find(|certificate| reference.matches_certificate(certificate))
+                    .and_then(|certificate| certificate.id)
+                    .map(|id| id.to_string())
+            })
+            .unwrap_or_default();
+
+        self.set_field_value(field_name, &selected_value, window, cx);
+    }
+
+    fn sync_selected_certificate_fields(
+        &mut self,
+        field_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(certificate) = self.selected_certificate_by_field(field_name, cx) else {
+            return;
+        };
+
+        match field_name {
+            "credential_ref" => {
+                self.set_field_value("username", &certificate.username, window, cx);
+                self.set_field_value(
+                    "password",
+                    certificate.password.as_deref().unwrap_or(""),
+                    window,
+                    cx,
+                );
+            }
+            "ssh_tunnel_credential_ref" => {
+                self.set_field_value("ssh_username", &certificate.username, window, cx);
+                match certificate.kind {
+                    CertificateKind::UsernamePassword => {
+                        self.set_field_value("ssh_auth_type", "password", window, cx);
+                        self.set_field_value(
+                            "ssh_password",
+                            certificate.password.as_deref().unwrap_or(""),
+                            window,
+                            cx,
+                        );
+                        self.set_field_value("ssh_private_key_path", "", window, cx);
+                        self.set_field_value("ssh_private_key_passphrase", "", window, cx);
+                    }
+                    CertificateKind::SshPrivateKey => {
+                        self.set_field_value("ssh_auth_type", "private_key", window, cx);
+                        self.set_field_value(
+                            "ssh_private_key_path",
+                            certificate.key_path.as_deref().unwrap_or(""),
+                            window,
+                            cx,
+                        );
+                        self.set_field_value(
+                            "ssh_private_key_passphrase",
+                            certificate.passphrase.as_deref().unwrap_or(""),
+                            window,
+                            cx,
+                        );
+                        self.set_field_value("ssh_password", "", window, cx);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn reload_certificates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_main_ref = self
+            .selected_certificate_by_field("credential_ref", cx)
+            .as_ref()
+            .map(CertificateReference::from_certificate);
+        let selected_ssh_ref = self
+            .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+            .as_ref()
+            .map(CertificateReference::from_certificate);
+
+        self.certificates = Self::load_certificates_from_storage(cx);
+
+        if let Some(select) = self.field_selects.get("credential_ref") {
+            let items = Self::build_certificate_select_items(&self.certificates, false);
+            select.update(cx, |select, cx| {
+                select.set_items(items, window, cx);
+            });
+        }
+
+        if let Some(select) = self.field_selects.get("ssh_tunnel_credential_ref") {
+            let items = Self::build_certificate_select_items(&self.certificates, true);
+            select.update(cx, |select, cx| {
+                select.set_items(items, window, cx);
+            });
+        }
+
+        self.restore_selected_certificate("credential_ref", selected_main_ref.as_ref(), window, cx);
+        self.restore_selected_certificate(
+            "ssh_tunnel_credential_ref",
+            selected_ssh_ref.as_ref(),
+            window,
+            cx,
+        );
+        self.sync_selected_certificate_fields("credential_ref", window, cx);
+        self.sync_selected_certificate_fields("ssh_tunnel_credential_ref", window, cx);
+        cx.notify();
+    }
+
     fn build_connection(&self, cx: &App) -> DbConnectionConfig {
         let workspace_id = self
             .workspace_select
@@ -1158,8 +1323,14 @@ impl DbConnectionForm {
             "remark",
             "service_name",
             "sid",
+            "credential_ref",
+            "ssh_tunnel_credential_ref",
         ];
         let mut extra_params = std::collections::HashMap::new();
+
+        let selected_credential = self.selected_certificate_by_field("credential_ref", cx);
+        let selected_ssh_credential =
+            self.selected_certificate_by_field("ssh_tunnel_credential_ref", cx);
 
         for (field_name, value_entity) in &self.field_values {
             if !basic_fields.contains(&field_name.as_str()) {
@@ -1179,17 +1350,61 @@ impl DbConnectionForm {
         if let Some(port_str) = port_str {
             port = port_str.parse().unwrap_or(3306);
         }
+
+        let username = selected_credential
+            .as_ref()
+            .map(|certificate| certificate.username.clone())
+            .unwrap_or_else(|| self.get_field_value("username", cx).unwrap_or_default());
+        let password = selected_credential
+            .as_ref()
+            .and_then(|certificate| certificate.password.clone())
+            .unwrap_or_else(|| self.get_field_value("password", cx).unwrap_or_default());
+
+        if let Some(certificate) = selected_ssh_credential.as_ref() {
+            extra_params.insert("ssh_username".to_string(), certificate.username.clone());
+
+            match certificate.kind {
+                CertificateKind::UsernamePassword => {
+                    extra_params.insert("ssh_auth_type".to_string(), "password".to_string());
+                    extra_params.insert(
+                        "ssh_password".to_string(),
+                        certificate.password.clone().unwrap_or_default(),
+                    );
+                    extra_params.remove("ssh_private_key_path");
+                    extra_params.remove("ssh_private_key_passphrase");
+                }
+                CertificateKind::SshPrivateKey => {
+                    extra_params.insert("ssh_auth_type".to_string(), "private_key".to_string());
+                    extra_params.insert(
+                        "ssh_private_key_path".to_string(),
+                        certificate.key_path.clone().unwrap_or_default(),
+                    );
+                    extra_params.insert(
+                        "ssh_private_key_passphrase".to_string(),
+                        certificate.passphrase.clone().unwrap_or_default(),
+                    );
+                    extra_params.remove("ssh_password");
+                }
+            }
+        }
+
         DbConnectionConfig {
             id: String::new(),
             database_type: db_type,
             name: self.get_field_value("name", cx).unwrap_or_default(),
             host: self.get_field_value("host", cx).unwrap_or_default(),
             port,
-            username: self.get_field_value("username", cx).unwrap_or_default(),
-            password: self.get_field_value("password", cx).unwrap_or_default(),
+            username,
+            password,
             database: self.get_field_value("database", cx),
             service_name: self.get_field_value("service_name", cx),
             sid: self.get_field_value("sid", cx),
+            credential_ref: selected_credential
+                .as_ref()
+                .map(CertificateReference::from_certificate),
+            ssh_tunnel_credential_ref: selected_ssh_credential
+                .as_ref()
+                .map(CertificateReference::from_certificate),
             workspace_id,
             extra_params,
         }
@@ -1233,6 +1448,13 @@ impl DbConnectionForm {
                     t!("ConnectionForm.ssh_missing_required", field = field)
                 ));
             }
+        }
+
+        if self
+            .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+            .is_some()
+        {
+            return Ok(());
         }
 
         let auth_type = self
@@ -1383,12 +1605,6 @@ impl DbConnectionForm {
         let remark = self.get_field_value("remark", cx);
         let is_update = self.editing_connection.is_some();
         let sync_enabled = *self.sync_enabled.read(cx);
-        let team_id = self
-            .team_select
-            .read(cx)
-            .selected_value()
-            .cloned()
-            .flatten();
 
         let mut stored = match &self.editing_connection {
             Some(conn) => {
@@ -1396,7 +1612,7 @@ impl DbConnectionForm {
                 c.name = connection.name.clone();
                 c.workspace_id = connection.workspace_id;
                 c.sync_enabled = sync_enabled;
-                c.team_id = team_id;
+                c.team_id = None;
                 c.params = serde_json::to_string(&connection)
                     .map_err(|e| format!("{}: {}", t!("ConnectionForm.serialize_failed"), e))?;
                 c
@@ -1404,7 +1620,7 @@ impl DbConnectionForm {
             None => {
                 let mut c = StoredConnection::from_db_connection(connection);
                 c.sync_enabled = sync_enabled;
-                c.team_id = team_id;
+                c.team_id = None;
                 // 新建时自动填充 owner_id
                 c.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
                 c
@@ -1576,6 +1792,12 @@ impl Render for DbConnectionForm {
         }
 
         let current_tab_fields = &self.config.tab_groups[self.active_tab].fields;
+        let use_main_certificate = self
+            .selected_certificate_by_field("credential_ref", cx)
+            .is_some();
+        let use_ssh_certificate = self
+            .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+            .is_some();
 
         v_flex()
             .gap_4()
@@ -1627,6 +1849,20 @@ impl Render for DbConnectionForm {
                                         let is_password =
                                             field_info.field_type == FormFieldType::Password;
                                         let field_name = field_info.name.clone();
+                                        let disable_field = (use_main_certificate
+                                            && matches!(
+                                                field_name.as_str(),
+                                                "username" | "password"
+                                            ))
+                                            || (use_ssh_certificate
+                                                && matches!(
+                                                    field_name.as_str(),
+                                                    "ssh_username"
+                                                        | "ssh_auth_type"
+                                                        | "ssh_password"
+                                                        | "ssh_private_key_path"
+                                                        | "ssh_private_key_passphrase"
+                                                ));
 
                                         field()
                                             .label(field_info.label.clone())
@@ -1644,7 +1880,9 @@ impl Render for DbConnectionForm {
                                                             self.field_selects.get(&field_name)
                                                         {
                                                             el.child(
-                                                                Select::new(select_state).w_full(),
+                                                                Select::new(select_state)
+                                                                    .w_full()
+                                                                    .disabled(disable_field),
                                                             )
                                                         } else {
                                                             el
@@ -1655,7 +1893,9 @@ impl Render for DbConnectionForm {
                                                             self.field_inputs.get(input_idx)
                                                         {
                                                             let input =
-                                                                Input::new(input_state).w_full();
+                                                                Input::new(input_state)
+                                                                    .w_full()
+                                                                    .disabled(disable_field);
                                                             let input = if is_password {
                                                                 input.mask_toggle()
                                                             } else {
@@ -1698,13 +1938,6 @@ impl Render for DbConnectionForm {
                                             .items_center()
                                             .label_justify_end()
                                             .child(Select::new(&self.workspace_select).w_full()),
-                                    )
-                                    .child(
-                                        field()
-                                            .label(t!("TeamSync.team_label").to_string())
-                                            .items_center()
-                                            .label_justify_end()
-                                            .child(Select::new(&self.team_select).w_full()),
                                     )
                                     .child(
                                         field()

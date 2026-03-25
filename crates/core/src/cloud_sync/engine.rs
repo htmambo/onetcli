@@ -8,6 +8,7 @@
 //! - 支持冲突检测和多种解决策略
 //! - 提供完整同步和增量同步两种模式
 
+use super::certificate_sync::CertificateSyncType;
 use super::connection_sync::ConnectionSyncHandler;
 use super::generic_sync::generic_sync;
 use super::sync_type::SyncTypeHandler;
@@ -83,6 +84,9 @@ impl SyncEngine {
             handlers: vec![
                 Box::new(TypedSyncBridge {
                     handler: WorkspaceSyncType,
+                }),
+                Box::new(TypedSyncBridge {
+                    handler: CertificateSyncType,
                 }),
                 Box::new(ConnectionSyncHandler),
             ],

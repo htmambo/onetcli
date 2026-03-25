@@ -35,6 +35,10 @@
         <div class="panel rounded-[28px] p-6">
           <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">基础信息</p>
           <div class="mt-6 grid gap-4 md:grid-cols-2">
+            <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4 md:col-span-2">
+              <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">项目名称</p>
+              <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ item.name || "未提供名称" }}</p>
+            </article>
             <article class="rounded-2xl border border-[var(--line)] bg-white/60 p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">数据类型</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ getSyncItemTypeLabel(item.dataType) }}</p>
@@ -91,6 +95,69 @@
           </section>
 
           <section class="panel rounded-[28px] p-6">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">本地解密</p>
+                <h3 class="mt-2 text-xl font-semibold text-[var(--text)]">手动输入主密钥查看明文</h3>
+              </div>
+              <span
+                class="rounded-full px-3 py-1 text-xs font-medium"
+                :class="config ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+              >
+                {{ config ? `已读取 key_verification · ${formatKeyVersion(config.keyVersion)}` : "未读取到 key_verification" }}
+              </span>
+            </div>
+
+            <p class="mt-4 text-sm leading-7 text-[var(--muted)]">
+              主密钥只在当前浏览器内存中使用，不会发送到 sync_server。每次需要查看明文时，请手动输入主密钥。
+            </p>
+            <p v-if="configLoadFailed" class="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              同步密钥配置读取失败，本次将直接尝试解密密文，无法提前校验主密钥是否正确。
+            </p>
+
+            <form class="mt-6 space-y-4" @submit.prevent="decryptItemData">
+              <label class="block">
+                <span class="mb-2 block text-sm font-medium text-[var(--text)]">主密钥</span>
+                <input
+                  v-model="masterKey"
+                  type="password"
+                  autocomplete="off"
+                  class="w-full rounded-2xl border border-[var(--line)] bg-white/80 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:accent-ring"
+                  placeholder="输入主密钥后在本地解密"
+                />
+              </label>
+
+              <p v-if="decryptMessage" class="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {{ decryptMessage }}
+              </p>
+              <p v-if="decryptError" class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {{ decryptError }}
+              </p>
+
+              <div class="flex flex-wrap gap-3">
+                <button
+                  class="accent-button rounded-2xl px-4 py-3 text-sm font-semibold text-white"
+                  :disabled="decrypting"
+                >
+                  {{ decrypting ? "解密中..." : "验证并解密" }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded-2xl border border-[var(--line)] bg-white/70 px-4 py-3 text-sm font-medium text-[var(--text)] transition hover:bg-white"
+                  @click="clearDecryptedData"
+                >
+                  清空结果
+                </button>
+              </div>
+            </form>
+
+            <div v-if="formattedDecryptedPayload" class="mt-6">
+              <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">解密结果</p>
+              <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ formattedDecryptedPayload }}</pre>
+            </div>
+          </section>
+
+          <section class="panel rounded-[28px] p-6">
             <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">加密数据</p>
             <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[var(--line)] bg-white/60 p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ item.encryptedData }}</pre>
           </section>
@@ -105,7 +172,13 @@ import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { SyncItem } from "@/types/api";
+import type { SyncConfig, SyncItem } from "@/types/api";
+import {
+  SyncCryptoError,
+  decryptSyncEncryptedData,
+  formatDecryptedPayload,
+  verifySyncMasterKey,
+} from "@/utils/syncCrypto";
 import { getSyncItemTypeLabel } from "@/utils/syncItemType";
 import { formatKeyVersion, formatRecordVersion } from "@/utils/syncItemVersion";
 
@@ -114,28 +187,96 @@ const route = useRoute();
 
 const loading = ref(false);
 const item = ref<SyncItem | null>(null);
+const config = ref<SyncConfig | null>(null);
 const errorMessage = ref("");
+const configLoadFailed = ref(false);
+const masterKey = ref("");
+const decrypting = ref(false);
+const decryptMessage = ref("");
+const decryptError = ref("");
+const decryptedPlaintext = ref("");
 
 const syncItemId = computed(() => String(route.params.id ?? ""));
+const formattedDecryptedPayload = computed(() => formatDecryptedPayload(decryptedPlaintext.value));
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString("zh-CN");
 }
 
+function clearDecryptedData() {
+  masterKey.value = "";
+  decryptMessage.value = "";
+  decryptError.value = "";
+  decryptedPlaintext.value = "";
+}
+
+async function decryptItemData() {
+  if (!item.value) {
+    decryptError.value = "当前没有可解密的同步项";
+    return;
+  }
+
+  if (!masterKey.value.trim()) {
+    decryptMessage.value = "";
+    decryptError.value = "请输入主密钥";
+    decryptedPlaintext.value = "";
+    return;
+  }
+
+  decrypting.value = true;
+  decryptMessage.value = "";
+  decryptError.value = "";
+
+  try {
+    if (config.value?.keyVerification) {
+      const isValid = await verifySyncMasterKey(masterKey.value, config.value.keyVerification);
+      if (!isValid) {
+        decryptError.value = "主密钥错误，无法通过当前账号的 key_verification 校验";
+        decryptedPlaintext.value = "";
+        return;
+      }
+    }
+
+    decryptedPlaintext.value = await decryptSyncEncryptedData(item.value.encryptedData, masterKey.value);
+    decryptMessage.value = config.value?.keyVerification
+      ? "主密钥校验通过，已在浏览器本地完成解密"
+      : "已在浏览器本地完成解密";
+    masterKey.value = "";
+  } catch (error) {
+    decryptedPlaintext.value = "";
+    decryptError.value = error instanceof SyncCryptoError ? error.message : "解密失败";
+  } finally {
+    decrypting.value = false;
+  }
+}
+
 async function loadItem() {
   if (!syncItemId.value) {
     item.value = null;
+    config.value = null;
     errorMessage.value = "同步项 ID 无效";
+    clearDecryptedData();
     return;
   }
 
   loading.value = true;
   errorMessage.value = "";
+  configLoadFailed.value = false;
+  clearDecryptedData();
 
   try {
-    item.value = await api.getSyncItem(auth.token!, syncItemId.value);
+    const [nextItem, nextConfig] = await Promise.all([
+      api.getSyncItem(auth.token!, syncItemId.value),
+      api.getSyncConfig(auth.token!).catch(() => {
+        configLoadFailed.value = true;
+        return null;
+      }),
+    ]);
+    item.value = nextItem;
+    config.value = nextConfig;
   } catch (error) {
     item.value = null;
+    config.value = null;
     errorMessage.value = error instanceof ApiError ? error.message : "读取同步项详情失败";
   } finally {
     loading.value = false;

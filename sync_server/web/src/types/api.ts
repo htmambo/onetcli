@@ -24,6 +24,7 @@ export interface SyncItem {
   id: string;
   ownerId: string;
   dataType: string;
+  name: string;
   encryptedData: string;
   keyVersion: number;
   checksum: string;

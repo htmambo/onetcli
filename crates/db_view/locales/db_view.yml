@@ -203,6 +203,18 @@ ConnectionForm:
     en: Port
     zh-CN: 端口
     zh-HK: 端口
+  certificate:
+    en: Certificate
+    zh-CN: 证书
+    zh-HK: 憑證
+  ssh_certificate:
+    en: SSH Certificate
+    zh-CN: SSH 证书
+    zh-HK: SSH 憑證
+  certificate_none:
+    en: Do not use certificate
+    zh-CN: 不使用证书
+    zh-HK: 不使用憑證
   username:
     en: Username
     zh-CN: 用户名
@@ -307,6 +319,10 @@ ConnectionForm:
     en: "Missing required field: %{field}"
     zh-CN: "缺少必填字段：%{field}"
     zh-HK: "缺少必填欄位：%{field}"
+  manage_certificates:
+    en: Manage Certificates
+    zh-CN: 管理证书
+    zh-HK: 管理憑證
 
   # Placeholder
   enter_connection_name:

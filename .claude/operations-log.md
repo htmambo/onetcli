@@ -3210,6 +3210,946 @@
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
 
+## 编码前检查 - selection-contrast-in-app
+时间：2026-03-25 17:31:06 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-selection-contrast-in-app.md`
+- 已分析相似实现：
+  - `crates/ui/src/text/inline.rs`
+  - `crates/ui/src/input/element.rs`
+  - `crates/ui/src/theme/schema.rs`
+  - `crates/ui/src/theme/default-theme.json`
+- 将使用以下可复用组件：
+  - `paint_selection(...)`：统一修正 `TextView` 选区绘制顺序
+  - `split_runs_by_bg_segments(...)`：复用输入框已有的黑/白字自动切换逻辑
+  - `ThemeColor` token：通过主题层统一提升对比度，不在业务页面散落修色
+- 将遵循命名约定：继续沿用 `selection` / `list_active` / `table_active` 现有 token，不新增业务专用颜色名
+- 将遵循代码风格：优先修公共 UI 基础设施，不在 AI 页面、表格页和各表单里分别特判
+- 确认不重复造轮子，证明：选区绘制、背景区间切字色、主题 token 三套基础能力都已存在，本次只做正确接线与默认值调整
+- 工具说明：仓库要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`，但当前会话未提供这些工具；已改用本地源码检索与 Rust 构建验证作为替代并留痕
+
+## 编码后声明 - selection-contrast-in-app
+时间：2026-03-25 17:31:06 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/text/inline.rs::paint_selection`：继续作为 `TextView` 唯一选区背景绘制入口
+- `crates/ui/src/input/element.rs::split_runs_by_bg_segments`：继续作为按背景区间切换前景色的唯一实现
+- `crates/ui/src/theme/default-theme.json`：继续作为默认主题源，不新增第二套硬编码配色
+
+### 2. 遵循了以下项目约定
+- 命名约定：保持 `selection`、`table_active`、`list_active` 原有主题字段
+- 代码风格：改动集中在 `crates/ui`，没有把修复扩散到业务 crate
+- 文件组织：文本选区修复放 `text/` 和 `input/`，配色修复放 `theme/`
+
+### 3. 对比了以下相似实现
+- `TextView`：原先先画字后画选区背景，本次改为先画背景再画字
+- `Input`：原先只把文档颜色区间接入 `split_runs_by_bg_segments`，本次把 selection 区间也接入
+- `Theme`：原先在 `apply_config` 阶段强行压低 alpha，本次交还给主题 token 本身决定强度
+
+### 4. 未重复造轮子的证明
+- 已检查 `Inline`、`Input`、`ThemeConfig`
+- 最终没有新增新的选区渲染组件、没有给 AI 消息或表格页面做局部补丁，只修公共基础层
+
+## 实施与验证记录 - selection-contrast-in-app
+时间：2026-03-25 17:31:06 +0800
+
+### 已完成修改
+- `crates/ui/src/text/inline.rs`
+  - 选区背景改为先画后文字再画，避免半透明遮罩盖在字上
+- `crates/ui/src/input/element.rs`
+  - 新增 `selection_bg_segments(...)`
+  - 将 selection 区间接入 `split_runs_by_bg_segments(...)`，让输入框选中文字自动切换高对比前景色
+- `crates/ui/src/theme/schema.rs`
+  - 删除对 `selection` / `list_active` / `table_active` 的强制 alpha 压低逻辑
+- `crates/ui/src/theme/default-theme.json`
+  - 提升 light/dark 默认 `list.active.background`
+  - 新增 light/dark 默认 `table.active.background`
+  - 为 light 主题补齐 `selection.background`
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p gpui-component input::element::tests --lib`
+  - 结果：通过
+
+### 当前限制
+- 当前没有桌面 GUI 自动化测试，仍建议你手动确认 AI 消息、输入框和数据表中实际选中效果
+- 这次没有为列表/表格单独切换前景色，而是通过更强的背景对比度解决；如果你还觉得不够明显，可以再继续把行/单元格前景色也纳入主题 token
+
+## 编码前检查 - sync-item-name-placeholder-backfill
+时间：2026-03-25 17:06:47 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sync-item-name-placeholder-backfill.md`
+- 已分析相似实现：
+  - `crates/core/src/cloud_sync/service.rs`
+  - `crates/core/src/cloud_sync/generic_sync.rs`
+  - `crates/core/src/cloud_sync/connection_sync.rs`
+  - `sync_server/server/migrations/003_add_sync_item_name.sql`
+- 将使用以下可复用组件：
+  - `CloudSyncData`：承载统一名称判定，避免客户端两套同步逻辑继续分叉
+  - `build_name_map` / `build_cloud_name_map`：继续作为名称解析入口，只替换判定条件
+  - `sync_server/server/migrations`：通过独立 migration 规范化旧占位值
+- 将遵循命名约定：统一使用“resolved name / backfill name”语义，不再散落写空串判断
+- 将遵循代码风格：最小化补丁，不改现有同步协议和 Web 展示层
+- 确认不重复造轮子，证明：名称明文上传链路已经存在，本次只修旧数据占位值识别
+- 工具说明：仓库要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`，但当前会话未提供这些工具；已改用本地源码检索与构建验证作为替代并留痕
+
+## 编码后声明 - sync-item-name-placeholder-backfill
+时间：2026-03-25 17:06:47 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/cloud_sync/models.rs::CloudSyncData`：新增统一名称判定方法，避免同步逻辑分叉
+- `crates/core/src/cloud_sync/generic_sync.rs::build_name_map`：继续承担通用同步名称映射
+- `crates/core/src/cloud_sync/connection_sync.rs::build_cloud_name_map`：继续承担连接同步名称映射
+- `sync_server/server/migrations`：沿用既有数据库迁移机制修正服务端旧数据
+
+### 2. 遵循了以下项目约定
+- 命名约定：模型层方法命名为 `has_resolved_name` / `needs_name_backfill`
+- 代码风格：客户端兼容判断收敛到模型方法，服务端旧数据修复通过独立 `004` migration 处理
+- 文件组织：Rust 逻辑只改 `cloud_sync` 模块，服务端只新增一个 migration 文件
+
+### 3. 对比了以下相似实现
+- `service.rs`：明文名称上传链路已经正确，因此未改上传构造
+- `generic_sync.rs`：通用同步原先只把空名称视为缺失名称，本次扩展为“空名称或占位名称”
+- `connection_sync.rs`：连接同步原先复制了同样的空名称判断，本次同步收敛到同一模型方法
+
+### 4. 未重复造轮子的证明
+- 已检查 `CloudSyncData`、通用同步、连接同步和服务端迁移
+- 结论：当前问题是旧占位值识别错误，不需要新增新的同步字段、接口或展示逻辑
+
+## 实施与验证记录 - sync-item-name-placeholder-backfill
+时间：2026-03-25 17:06:47 +0800
+
+### 已完成修改
+- `crates/core/src/cloud_sync/models.rs`
+  - 新增 `has_resolved_name` / `needs_name_backfill`
+  - 补充占位名称判定单元测试
+- `crates/core/src/cloud_sync/generic_sync.rs`
+  - 名称映射不再把 `name == id` 当成真实名称
+  - 同步计划会把占位名称记录加入云端回填
+- `crates/core/src/cloud_sync/connection_sync.rs`
+  - 连接同步使用同一套占位名称判定
+- `sync_server/server/migrations/004_normalize_sync_item_placeholder_name.sql`
+  - 将历史 `name = id` 的占位值规范化为空串，等待下一次同步自动补写真实名称
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p one-core cloud_sync::models::tests --lib`
+  - 结果：通过
+- `npm --prefix sync_server/server run check`
+  - 结果：通过
+- `npm --prefix sync_server/web run build`
+  - 结果：通过
+
+### 当前限制
+- 历史已删除且本地已不存在源对象的记录，客户端无法回填真实名称
+- 极少数真实名称刚好等于云端 `id` 的记录，会被当作占位值重新回填
+
+## 编码前检查 - sync-server-sync-item-local-decrypt
+时间：2026-03-25 16:06:01 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-item-local-decrypt.md`
+□ 将使用以下可复用组件：
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`：复用详情页加载与展示结构
+- `sync_server/web/src/views/user/ProfileView.vue`：复用密码表单和消息提示交互模式
+- `sync_server/web/src/views/user/DashboardView.vue`：复用同步配置读取能力与 keyVerification 语义
+- `sync_server/web/src/services/api.ts`：复用 `getSyncItem()` 和 `getSyncConfig()` 接口
+- `crates/core/src/crypto.rs`：复用实际加解密算法约束
+□ 将遵循命名约定：新增 `masterKey`、`decrypting`、`decryptedPlaintext`、`configLoadFailed` 等语义化命名
+□ 将遵循代码风格：继续使用 `script setup + Composition API`，把通用解密逻辑下沉到 `src/utils/`
+□ 确认不重复造轮子，证明：已检查 `SyncItemDetailView.vue`、`ProfileView.vue`、`DashboardView.vue`、`api.ts`，当前没有现成的前端解密工具可直接复用
+
+## 执行记录 - sync-server-sync-item-local-decrypt
+时间：2026-03-25 16:06:01 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+- `sync_server/web/src/views/user/ProfileView.vue`
+- `sync_server/web/src/views/user/DashboardView.vue`
+- `sync_server/web/src/services/api.ts`
+- `sync_server/web/src/types/api.ts`
+- `crates/core/src/crypto.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `main/locales/main.yml`
+
+### 2. 对比的相似实现
+- `sync_server/web/src/views/user/SyncItemDetailView.vue:1`：详情页基础结构和加载模式
+- `sync_server/web/src/views/user/ProfileView.vue:12`：密码输入表单和提示块模式
+- `sync_server/web/src/views/user/DashboardView.vue:65`：同步配置读取与说明文案模式
+- `crates/core/src/crypto.rs:356`：需要前端严格对齐的加解密算法入口
+
+### 3. 当前发现
+- `sync_server` 服务端按设计只存储和返回密文，本身没有解密能力
+- `keyVerification` 可以用于校验主密钥是否正确，但无法从中反推出主密钥
+- 云同步 `encryptedData` 实际是整段 JSON 明文整体加密，解密后适合直接格式化为 JSON 展示
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Node 构建命令完成检索与验证
+
+## 编码后声明 - sync-server-sync-item-local-decrypt
+时间：2026-03-25 16:11:59 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`：继续作为同步项详情唯一页面
+- `sync_server/web/src/services/api.ts`：继续复用 `getSyncItem()` 与 `getSyncConfig()` 接口
+- `sync_server/web/src/views/user/ProfileView.vue`：沿用密码输入表单和消息提示交互样式
+- `crates/core/src/crypto.rs`：前端按同一算法复刻主密钥校验和解密
+- `crates/core/src/cloud_sync/service.rs`：沿用“整段 JSON 明文整体加密”的数据约束
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `masterKey`、`decrypting`、`decryptedPlaintext`、`configLoadFailed`、`formattedDecryptedPayload`
+- 代码风格：继续使用 `script setup + Composition API`，把通用逻辑放到 `src/utils/syncCrypto.ts`
+- 文件组织：详情页只负责交互与展示，算法和字节处理沉到工具文件
+
+### 3. 对比了以下相似实现
+- `sync_server/web/src/views/user/SyncItemDetailView.vue:1`：保留原有详情页布局，只在右侧信息区新增本地解密卡片
+- `sync_server/web/src/views/user/ProfileView.vue:10`：沿用密码表单和提示块模式
+- `sync_server/web/src/views/user/DashboardView.vue:65`：沿用同步配置读取与 keyVerification 的前端使用方式
+- `crates/core/src/crypto.rs:356`：严格对齐 `ENC:` 前缀、固定 salt 和 `AES-256-GCM` 解密流程
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/web/src/views/user/SyncItemDetailView.vue`、`sync_server/web/src/views/user/ProfileView.vue`、`sync_server/web/src/views/user/DashboardView.vue`、`sync_server/web/src/services/api.ts`
+- 最终没有改后端接口，也没有把主密钥发送到服务端，而是在现有详情页上新增浏览器本地解密能力
+
+### 5. 本地验证结果
+- `npm --prefix sync_server/web run build`：通过
+- `npm --prefix sync_server/web run build`（补空输入提示后复验）：通过
+
+### 6. 风险与限制
+- 当前仓库没有浏览器级自动化测试，本次只能验证构建通过，仍建议你实际输入一次主密钥确认明文展示效果
+- 如果浏览器环境不支持 `Web Crypto API`，页面会提示无法本地解密
+
+## 编码前检查 - remove-team-ui-from-desktop-forms
+时间：2026-03-25 13:45:14 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-remove-team-ui-from-desktop-forms.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs`：桌面端连接窗口配置汇总与连接卡片展示
+- `crates/db_view/src/common/db_connection_form.rs`：数据库连接表单的保存归一模式
+- `crates/terminal_view/src/ssh_form_window.rs`：已移除团队 UI 的参考实现
+- `crates/redis_view/src/redis_form_window.rs`：已移除团队 UI 的参考实现
+- `crates/core/src/certificate_manager.rs`：凭证管理编辑窗口
+□ 将遵循命名约定：继续使用 `*FormWindowConfig`、`team_id`、`owner_id` 等既有命名，不引入新概念
+□ 将遵循代码风格：仅删除桌面端团队 UI、配置透传和保存透传，不顺手改造底层同步/存储结构
+□ 确认不重复造轮子，证明：已检查 `db_connection_form.rs`、`ssh_form_window.rs`、`redis_form_window.rs`、`mongo_form_window.rs`、`serial_form_window.rs`、`certificate_manager.rs`、`home_tab.rs`
+
+## 执行记录 - remove-team-ui-from-desktop-forms
+时间：2026-03-25 13:45:14 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `crates/db_view/src/connection_form_window.rs`
+- `crates/db_view/src/common/db_connection_form.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/mongodb_view/src/mongo_form_window.rs`
+- `crates/terminal_view/src/serial_form_window.rs`
+- `crates/core/src/certificate_manager.rs`
+- `crates/core/src/cloud_sync/sync_server.rs`
+
+### 2. 对比的相似实现
+- `crates/db_view/src/common/db_connection_form.rs`：数据库连接表单保存时统一 `team_id = None`
+- `crates/terminal_view/src/ssh_form_window.rs`：SSH 表单已完成的无团队 UI 模式
+- `crates/redis_view/src/redis_form_window.rs`：Redis 表单已完成的无团队 UI 模式
+- `main/src/home_tab.rs`：桌面端所有连接窗口配置与卡片展示总入口
+
+### 3. 关键决策
+- 本轮只移除桌面端窗口中的团队概念，不删除底层 `team_id/owner_id` 字段
+- 不仅隐藏 UI，还在保存时统一将连接和凭证写为 `team_id = None`
+- 这样可以避免历史编辑后的数据继续命中 sync server 对团队数据的不支持路径
+
+### 4. 完成的修改
+- `main/src/home_tab.rs`：移除各连接窗口配置中的 `teams` 透传，删除连接卡片“团队”徽标
+- `crates/db_view/src/connection_form_window.rs`：删除 `teams` 配置字段与下发表单的调用
+- `crates/db_view/src/common/db_connection_form.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
+- `crates/terminal_view/src/ssh_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
+- `crates/redis_view/src/redis_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
+- `crates/mongodb_view/src/mongo_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
+- `crates/terminal_view/src/serial_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
+- `crates/core/src/certificate_manager.rs`：删除凭证范围选择，保存时统一 `team_id = None`
+
+## 编码后声明 - remove-team-ui-from-desktop-forms
+时间：2026-03-25 13:45:14 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home_tab.rs`：复用既有窗口打开入口，仅调整配置字段与卡片展示
+- `crates/db_view/src/common/db_connection_form.rs`：沿用统一构建 `StoredConnection` 的保存模式
+- `crates/terminal_view/src/ssh_form_window.rs`：沿用已处理完成的“个人范围”保存语义
+- `crates/core/src/certificate_manager.rs`：沿用既有凭证编辑与保存链路，仅删除团队范围输入
+
+### 2. 遵循了以下项目约定
+- 命名约定：保持 `team_id` / `owner_id` / `sync_enabled` 等既有字段命名
+- 代码风格：采用小范围删除和字段归一，不新增中间适配层
+- 文件组织：主页只负责配置与展示，表单逻辑仍保留在各自 crate 内
+
+### 3. 对比了以下相似实现
+- `crates/terminal_view/src/ssh_form_window.rs`：我的 Mongo/串口处理方式与其一致，都是移除团队 UI 后保存时清空 `team_id`
+- `crates/redis_view/src/redis_form_window.rs`：我的凭证管理和主页清理方式与其一致，都是同时删除状态字段与渲染
+- `crates/db_view/src/common/db_connection_form.rs`：继续把最终归一逻辑收口在保存阶段，而不是只做展示层隐藏
+
+### 4. 未重复造轮子的证明
+- 已检查 `home_tab.rs`、`connection_form_window.rs`、`db_connection_form.rs`、`ssh_form_window.rs`、`redis_form_window.rs`、`mongo_form_window.rs`、`serial_form_window.rs`、`certificate_manager.rs`
+- 最终没有新增新的“个人范围”组件或兼容层，只是删除桌面端团队入口并复用既有保存链路
+
+### 5. 本地验证结果
+- `rg -n "TeamSelectItem|team_select|get_team_id|pub teams: Vec<TeamOption>|get_cached_team_options|TeamSync\\.team_label|selected_team_id" crates main -g '*.rs'`：桌面端表单残余引用已清空，仅剩底层缓存函数
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 6. 风险与限制
+- 本次没有数据迁移，历史未编辑过的团队数据仍会留在本地存储中
+- 本次没有 GUI 自动化验证，仍建议手动打开数据库/SSH/Redis/Mongo/串口/凭证窗口确认团队项已消失
+- 编译过程中保留既有 `crates/ui/src/title_bar.rs` 未使用函数警告，与本次改动无关
+
+## 编码前检查 - sync-server-soft-delete-visibility
+时间：2026-03-25 16:06:27 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-soft-delete-visibility.md`
+□ 将使用以下可复用组件：
+- `sync_server/web/src/services/api.ts`：同步项列表 API 封装
+- `sync_server/web/src/views/user/DashboardView.vue`：概览统计与最近同步项
+- `sync_server/web/src/views/user/SyncItemsView.vue`：完整列表筛选与状态展示
+- `sync_server/server/src/http/routes/sync.ts`：确认删除和列表查询的真实语义
+□ 将遵循命名约定：沿用 `deletedAt`、`includeDeleted`、`SyncItem` 等既有命名
+□ 将遵循代码风格：使用 Composition API 和 `computed/ref` 做无副作用派生，不新增额外状态管理
+□ 确认不重复造轮子，证明：已检查 `api.ts`、`DashboardView.vue`、`SyncItemsView.vue`、`sync.ts`、`database.ts`
+
+## 执行记录 - sync-server-soft-delete-visibility
+时间：2026-03-25 16:06:27 +0800
+
+### 1. 根因确认
+- `sync_server/server/src/http/routes/sync.ts` 的删除接口调用的是 `softDeleteSyncItem(...)`
+- `sync_server/server/src/db/database.ts` 的实现只写入 `deleted_at`
+- `sync_server/web` 当前统计与默认列表展示没有把软删除和有效数据分开，导致“看起来没删”
+
+### 2. 已完成修改
+- `sync_server/web/src/services/api.ts`：`listSyncItems(...)` 支持显式传 `includeDeleted`
+- `sync_server/web/src/views/user/DashboardView.vue`：概览统计改为只统计有效项，并单独展示已软删除数量
+- `sync_server/web/src/views/user/SyncItemsView.vue`：新增状态筛选，默认仅显示有效项，同时保留查看软删除记录能力
+
+## 编码后声明 - sync-server-soft-delete-visibility
+时间：2026-03-25 16:06:27 +0800
+
+### 1. 复用了以下既有组件
+- `api.listSyncItems(...)`：继续作为同步项读取入口，仅扩展查询参数
+- `DashboardView.vue`：沿用既有概览结构，仅调整统计口径
+- `SyncItemsView.vue`：沿用现有筛选区和分页结构，新增状态筛选而不重做页面
+
+### 2. 遵循了以下项目约定
+- 命名约定：保持 `deletedAt` / `includeDeleted` / `SyncItem` 原有术语
+- 代码风格：派生数据使用 `computed`，筛选状态使用 `ref`
+- 文件组织：只改动 Web 展示层，不动服务端删除语义
+
+### 3. 本地验证结果
+- `npm --prefix sync_server/web run build`：通过
+
+### 4. 风险与限制
+- 当前仍保留软删除记录，这是同步服务设计的一部分，不是物理删除
+- 本次没有浏览器自动化验证，建议手动确认概览统计和列表默认筛选是否符合预期
+
+## 编码前检查 - workspace-delete-sync-semantics
+时间：2026-03-25 16:17:25 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-workspace-delete-sync-semantics.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs::delete_connection`：连接删除入口
+- `main/src/home_tab.rs::handle_delete_workspace`：工作区删除入口
+- `crates/core/src/certificate_manager.rs::delete_certificate`：待删除队列模式参考
+- `crates/core/src/cloud_sync/generic_sync.rs::process_pending_deletions`：统一远端删除入口
+□ 将遵循命名约定：沿用 `PendingCloudDeletionRepository`、`deleted_at`、`WorkspaceDeleted`、`ConnectionDeleted`
+□ 将遵循代码风格：不新增本地软删除字段，只统一删除调度路径
+□ 确认不重复造轮子，证明：已检查 `home_tab.rs`、`certificate_manager.rs`、`generic_sync.rs`、`workspace_sync.rs`、`sync.ts`
+
+## 执行记录 - workspace-delete-sync-semantics
+时间：2026-03-25 16:17:25 +0800
+
+### 1. 根因判断
+- 本地工作区/连接删除与证书删除使用了两套不同语义
+- 工作区/连接此前由 UI 直接调云端删除，证书则通过待删除队列交给同步引擎处理
+- 这会导致删除语义分散，难以保证 `deleted_at`、同步重试和状态识别全部走同一条链路
+
+### 2. 已完成修改
+- `main/src/home_tab.rs`：新增 `queue_pending_cloud_deletion(...)` 统一登记待删除云端记录
+- `main/src/home_tab.rs::delete_connection`：改为本地删除成功后登记 `connection` 待删除
+- `main/src/home_tab.rs::handle_delete_workspace`：改为本地删除工作区和其下连接成功后分别登记 `workspace` / `connection` 待删除
+- 保留删除后自动触发同步，确保在线情况下会尽快把待删除记录同步到远端 tombstone
+
+## 编码后声明 - workspace-delete-sync-semantics
+时间：2026-03-25 16:17:25 +0800
+
+### 1. 复用了以下既有组件
+- `PendingCloudDeletionRepository`：作为本地删除意图的唯一持久化入口
+- `generic_sync::process_pending_deletions(...)`：作为远端软删除执行入口
+- `ConnectionDataEvent::{ConnectionDeleted, WorkspaceDeleted}`：继续作为 UI 刷新与自动同步触发器
+
+### 2. 遵循了以下项目约定
+- 命名约定：沿用现有 `workspace` / `connection` 实体类型标识
+- 代码风格：删除语义集中在辅助函数与现有删除入口，不扩散到更多模块
+- 文件组织：只修改 `main/src/home_tab.rs`，不改底层数据模型
+
+### 3. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 4. 风险与限制
+- 当前本地仍然不是软删除模型，而是物理删除 + 远端 soft delete tombstone
+- 没有桌面 GUI 自动化验证，建议手动确认删除工作区后下一次自动同步能让远端列表只在“已软删除”视图中看到该项
+
+## 编码前检查 - sync-server-delete-empty-body
+时间：2026-03-25 16:26:06 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-delete-empty-body.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/sync_server.rs::common_headers`
+- `crates/core/src/cloud_sync/sync_server.rs::build_request`
+- `crates/core/src/cloud_sync/sync_server.rs::delete_json_with_retry`
+□ 将遵循命名约定：沿用 `common_headers` / `build_request` / `delete_json_with_retry`
+□ 将遵循代码风格：仅修复请求头与 body 的契约，不改业务接口签名
+□ 确认不重复造轮子，证明：已检查 `sync_server.rs` 中 GET/POST/PUT/DELETE 的统一请求构造
+
+## 执行记录 - sync-server-delete-empty-body
+时间：2026-03-25 16:26:06 +0800
+
+### 1. 根因确认
+- `DELETE /api/v1/sync/items/:id` 请求没有 body，但客户端公共头却总是带 `Content-Type: application/json`
+- Fastify 因此返回 `FST_ERR_CTP_EMPTY_JSON_BODY`
+
+### 2. 已完成修改
+- `crates/core/src/cloud_sync/sync_server.rs`：公共头改为 `Accept: application/json`
+- `crates/core/src/cloud_sync/sync_server.rs`：仅在 `body.is_some()` 时自动补 `Content-Type: application/json`
+
+## 编码后声明 - sync-server-delete-empty-body
+时间：2026-03-25 16:26:06 +0800
+
+### 1. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 2. 风险与限制
+- 本次没有实际起一个 sync_server 做端到端联调，但客户端构造已经与 Fastify 的约束一致
+- 之前积压在 `pending_cloud_deletions` 里的删除记录需要再触发一次同步才会被消费
+
+## 编码前检查 - sync-item-plaintext-name
+时间：2026-03-25 16:46:58 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-item-plaintext-name.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/service.rs`：统一构造同步上传 payload
+- `crates/core/src/cloud_sync/generic_sync.rs`：工作区/凭证的名称映射与同步计划
+- `crates/core/src/cloud_sync/connection_sync.rs`：连接的名称映射与同步计划
+- `sync_server/server/src/db/database.ts`：服务端 `sync_data` 持久化
+- `sync_server/web/src/views/user/*`：同步项概览、列表、详情展示
+□ 将遵循命名约定：统一使用 `name` 表示同步项明文名称，不额外引入 `display_name` / `plain_name`
+□ 将遵循代码风格：兼容旧数据时使用默认值和兜底逻辑，不破坏既有接口
+□ 确认不重复造轮子，证明：已检查 `CloudSyncData`、服务端 `sync_data`、Web `SyncItem` 三层现有字段结构
+
+## 执行记录 - sync-item-plaintext-name
+时间：2026-03-25 16:46:58 +0800
+
+### 1. 已完成修改
+- `crates/core/src/cloud_sync/models.rs`：为 `CloudSyncData` 增加 `name`
+- `crates/core/src/cloud_sync/service.rs`：连接、工作区、凭证上传与重加密时都保留 `name`
+- `crates/core/src/cloud_sync/generic_sync.rs` 与 `connection_sync.rs`：名称映射优先用明文字段，旧数据为空时再解密兜底；云端 `name` 为空的旧记录会在下一次同步自动回填
+- `crates/core/src/cloud_sync/sync_server.rs`：请求/响应 payload 增加 `name`
+- `sync_server/server/migrations/003_add_sync_item_name.sql`：为 `sync_data` 表增加 `name`
+- `sync_server/server/src/db/database.ts` 与 `http/routes/sync.ts`：服务端存储与 API 打通 `name`
+- `sync_server/web/src/types/api.ts` 与 `views/user/*`：Web 概览、列表、详情直接展示云端明文名称
+
+### 2. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `npm --prefix sync_server/server run check`：通过
+- `npm --prefix sync_server/web run build`：通过
+
+### 3. 风险与限制
+- 历史未删除记录会在下一次同步自动补写 `name`
+- 历史上已经只剩远端 tombstone、而本地原对象已不存在的记录，服务端迁移只能把 `name` 初始化为 `id`
+
+## 追加编码前检查 - popup-window-close-window-not-found
+时间：2026-03-25 13:09:37 +0800
+
+- 已复查相关实现：
+  - `crates/core/src/popup_window.rs`
+  - `crates/core/src/certificate_manager.rs`
+  - `crates/ui/src/dialog.rs`
+  - `crates/ui/src/sheet.rs`
+  - `/Users/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/window.rs`
+- 已分析 3 个可复用模式：
+  - `dialog/sheet` 在当前事件内只做状态切换，不直接销毁独立窗口
+  - `gpui::Window::defer(...)` 会把窗口操作推迟到当前 effect cycle 末尾，并在窗口不存在时静默忽略
+  - `gpui::Window::on_window_should_close(...)` 可以拦截系统关闭请求
+- 将使用以下可复用组件：
+  - `popup_window::open_popup_window(...)` 作为所有独立弹窗的统一入口
+  - `window.on_window_should_close(...)` 统一拦截系统关闭
+  - `window.defer(...)` 统一延迟执行 `remove_window()`
+- 将遵循代码风格：继续在 popup 基础设施层统一修复，不把关闭保护散落到每个业务窗口
+- 确认不重复造轮子，证明：当前问题属于独立窗口销毁时机不稳定，不需要新增第二套窗口组件
+
+## 编码后声明 - popup-window-close-window-not-found
+时间：2026-03-25 13:09:37 +0800
+
+### 1. 根因结论
+- `gpui::window: window not found` 的触发条件是：某个延迟到当前 effect cycle 末尾或系统关闭回调后的窗口更新，在执行时窗口已经被立即移除
+- 当前 popup 的 `Esc` 关闭和凭证编辑窗口保存/取消关闭都直接调用 `window.remove_window()`，系统关闭按钮也没有经过 popup 自己的统一保护
+
+### 2. 已完成修复
+- `crates/core/src/popup_window.rs`
+  - 新增 `request_popup_window_close(...)`，把 `remove_window()` 统一改为延迟执行
+  - `CancelPopup` 动作改走统一延迟关闭
+  - `open_popup_window(...)` 创建窗口时注册 `on_window_should_close(...)`，系统关闭请求也改走统一延迟关闭
+- `crates/core/src/certificate_manager.rs`
+  - 凭证编辑窗口保存成功后的关闭改走统一延迟关闭
+  - 凭证编辑窗口取消按钮关闭改走统一延迟关闭
+
+### 3. 未重复造轮子的证明
+- 没有在凭证管理窗口里做特判，而是把关闭时机收口到 popup 基础设施
+- 没有改动证书/凭证数据模型、通知协议或窗口布局，只修复窗口销毁时机
+
+## 实施与验证记录 - popup-window-close-window-not-found
+时间：2026-03-25 13:09:37 +0800
+
+### 已完成修改
+- `crates/core/src/popup_window.rs`
+  - popup 独立窗口统一改为延迟关闭，并拦截系统关闭请求
+- `crates/core/src/certificate_manager.rs`
+  - 凭证编辑窗口保存/取消统一改走 popup 关闭助手
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+## 追加编码前检查 - popup-escape-and-core-common-translation
+时间：2026-03-25 12:59:24 +0800
+
+- 已复查相关实现：
+  - `crates/core/src/certificate_manager.rs`
+  - `crates/core/src/popup_window.rs`
+  - `crates/core/src/lib.rs`
+  - `crates/core/locales/core.yml`
+  - `crates/ui/src/dialog.rs`
+  - `crates/ui/src/sheet.rs`
+- 已分析 3 个可复用模式：
+  - `dialog` 通过本地 `KeyBinding + key_context + on_action` 处理 `Escape`
+  - `sheet` 通过 `track_focus + focus_trap` 保证容器级键盘动作生效
+  - `one_core::init(...)` 负责注册 core 级全局初始化能力
+- 将使用以下可复用组件：
+  - `gpui::actions!` 与 `KeyBinding::new("escape", ...)`
+  - `gpui_component::FocusTrapElement`
+  - `popup_window::open_popup_window(...)` 作为所有独立弹窗的统一入口
+- 将遵循代码风格：不在各业务弹窗里重复加 `Esc` 逻辑，而是在 popup 基础设施层统一处理
+- 确认不重复造轮子，证明：当前问题属于基础设施能力缺失和 core 本地化缺词，不需要新增第二套弹窗组件
+
+## 编码后声明 - popup-escape-and-core-common-translation
+时间：2026-03-25 12:59:24 +0800
+
+### 1. 根因结论
+- 凭证管理弹窗中的 `Common.edit` / `Common.delete` 未翻译，是因为 `crates/core/locales/core.yml` 只定义了 `save/cancel/search`，没有定义 `edit/delete`
+- 独立 popup 窗口不支持 `Esc` 关闭，是因为 `open_popup_window(...)` 之前只负责开新窗口，没有像 `dialog/sheet` 那样建立自己的键盘上下文和取消动作
+
+### 2. 已完成修复
+- `crates/core/locales/core.yml`
+  - 补充 `Common.edit`
+  - 补充 `Common.delete`
+- `crates/core/src/popup_window.rs`
+  - 新增 popup 专用 `CancelPopup` 动作和 `Escape` 键绑定
+  - 增加 `PopupWindowView` 包装层，统一处理焦点、`focus_trap` 和 `Esc` 关闭
+- `crates/core/src/lib.rs`
+  - 在 `one_core::init(...)` 中注册 `popup_window::init(cx)`
+
+### 3. 未重复造轮子的证明
+- `Esc` 关闭逻辑没有散落到各个弹窗窗口，而是统一收敛到 `open_popup_window(...)`
+- 共用翻译也没有回退到业务层硬编码文案，而是补回 `core.yml` 的 `Common` 命名空间
+
+## 实施与验证记录 - popup-escape-and-core-common-translation
+时间：2026-03-25 12:59:24 +0800
+
+### 已完成修改
+- `crates/core/locales/core.yml`
+  - 补齐 `Common.edit` / `Common.delete`
+- `crates/core/src/popup_window.rs`
+  - popup 窗口统一支持按 `Esc` 关闭
+- `crates/core/src/lib.rs`
+  - 注册 popup 键盘上下文初始化
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+## 编码前检查 - sync-server-credential-sync-type
+时间：2026-03-25 12:46:46 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-credential-sync-type.md`
+- 已分析相似实现：
+  - `sync_server/web/src/utils/syncItemType.ts`
+  - `sync_server/web/src/views/user/DashboardView.vue`
+  - `sync_server/web/src/views/user/SyncItemsView.vue`
+  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - `sync_server/server/src/http/routes/sync.ts`
+  - `sync_server/server/src/db/database.ts`
+- 将使用以下可复用组件：
+  - `getSyncItemTypeLabel(...)`：继续作为同步项类型展示的唯一出口
+  - `DashboardView.vue` 的 `stats` 计算属性：继续承载概览统计
+  - `SyncItemsView.vue` 的动态类型筛选：继续承载类型选项和前端分页
+- 将遵循命名约定：前端继续使用 `dataType`，工具函数命名为 `normalizeSyncItemType` / `isSyncItemType`
+- 将遵循代码风格：只加前端兼容层，不改 `sync_server` 后端协议和数据库结构
+- 确认不重复造轮子，证明：服务端 `dataType` 已经是字符串透传，当前只需要把前端展示和统计接入新增类型
+- 工具说明：仓库规范要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但当前会话未提供这些工具；本次改用本地源码检索和前端构建命令替代并留痕
+
+## 编码后声明 - sync-server-credential-sync-type
+时间：2026-03-25 12:46:46 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/utils/syncItemType.ts`：继续作为同步项类型展示的统一映射层
+- `sync_server/web/src/views/user/DashboardView.vue::stats`：继续作为概览页统计的唯一收敛点
+- `sync_server/web/src/views/user/SyncItemsView.vue::itemTypeOptions / filteredItems`：继续作为列表页类型筛选和分页的核心派生逻辑
+
+### 2. 遵循了以下项目约定
+- 命名约定：使用 `normalizeSyncItemType` 统一别名归一化，`isSyncItemType` 用于页面分类判断
+- 代码风格：维持 Vue 3 `<script setup lang="ts">` + `computed` 派生模式，不引入额外 store
+- 文件组织：展示层兼容逻辑继续集中在 `sync_server/web/src/utils`
+
+### 3. 本轮兼容内容
+- `certificate` 和 `credential` 都会被前端统一视为“凭证”
+- 最近同步项、完整列表、详情页都会显示正确类型文案，不再落入“未识别类型”
+- 仪表盘新增“凭证”统计卡片
+- 列表页类型筛选改为按归一化后的类型去重和过滤，避免别名类型出现重复语义选项
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/server/src/http/routes/sync.ts` 和 `sync_server/server/src/db/database.ts`
+- 结论：后端已经支持任意 `dataType` 透传和筛选，不需要再新增服务端枚举或映射层
+
+## 实施与验证记录 - sync-server-credential-sync-type
+时间：2026-03-25 12:46:46 +0800
+
+### 已完成修改
+- `sync_server/web/src/utils/syncItemType.ts`
+  - 新增类型别名归一化，兼容 `certificate` / `credential`
+  - 新增 `isSyncItemType(...)` 统一分类判断
+- `sync_server/web/src/views/user/DashboardView.vue`
+  - 新增“凭证”统计卡片
+  - 统计逻辑改为走统一类型判断
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 类型筛选改为按归一化后的类型生成选项
+  - 筛选命中判断改为兼容别名类型
+
+### 本地验证
+- `npm --prefix sync_server/web run build`
+  - 结果：通过
+  - 说明：`vue-tsc -b` 与 `vite build` 均通过
+
+## 追加编码前检查 - certificate-management-window-followup
+时间：2026-03-25 12:31:29 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-certificate-management.md`
+- 已复查相关实现：
+  - `crates/core/src/certificate_manager.rs`
+  - `main/src/home_tab.rs`
+  - `main/src/home/home_workspace_filter.rs`
+  - `main/locales/main.yml`
+  - `crates/core/locales/core.yml`
+- 将使用以下可复用组件：
+  - `crates/core/src/popup_window.rs::open_popup_window`：证书编辑继续复用现有独立窗口模式
+  - `crates/core/src/connection_notifier.rs::emit_connection_event`：复用连接刷新广播
+  - `main/src/home/home_workspace_filter.rs::WorkspaceFilterDelegate`：复用工作区筛选弹层已有编辑/删除入口
+- 将遵循命名约定：继续使用 `CertificateManager`、`WorkspaceDeleteMode` 等现有语义化命名
+- 将遵循代码风格：只修正桌面端交互路径和入口位置，不新增第二套管理页面
+- 确认不重复造轮子，证明：证书管理、工作区弹层和主页侧栏都已有承载位置，本轮只补齐交互闭环
+- 工具说明：仓库规范要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但当前会话未提供这些工具；本次继续使用本地源码检索和 Rust 构建命令替代并留痕
+
+## 编码后声明 - certificate-management-window-followup
+时间：2026-03-25 12:31:29 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/popup_window.rs::open_popup_window`：证书新增/编辑统一改为独立 popup，而不是在管理窗口里再套一层 dialog
+- `crates/core/src/connection_notifier.rs::emit_connection_event`：证书保存后继续广播连接变更，保证引用快照同步刷新
+- `main/src/home/home_workspace_filter.rs`：工作区筛选弹层保留所有工作区的编辑/删除入口，补上主内容区非空工作区的快捷按钮
+
+### 2. 遵循了以下项目约定
+- 命名约定：延续 `open_*_popup`、`handle_delete_*`、`WorkspaceDeleteMode` 的现有命名模式
+- 代码风格：桌面端管理能力继续走 popup/dialog，不新增额外状态层
+- 文件组织：证书管理逻辑仍集中在 `crates/core/src/certificate_manager.rs`，主页交互仍集中在 `main/src/home_tab.rs`
+
+### 3. 本轮补齐的交互
+- `新增证书`/编辑证书：从管理窗口里直接打开独立证书编辑 popup，修复原先点击无响应的问题
+- 证书管理入口：从“新建连接”菜单移除，改到左侧栏连接类型列表下方，位于 `串口` 下方
+- 工作区删除：当工作区下仍有连接时，删除前支持二选一
+  - 删除全部连接
+  - 移动到未分区
+- 工作区保护：若工作区内存在正在使用中的连接，则禁用“删除全部连接”并显示提示
+- 工作区编辑/删除入口：主内容区非空工作区标题栏支持快捷操作；空工作区和全部工作区仍可通过工作区筛选弹层管理
+
+### 4. 未重复造轮子的证明
+- 已检查 `certificate_manager.rs`、`home_tab.rs`、`home_workspace_filter.rs`
+- 结论：现有 popup、侧栏和工作区筛选弹层已经覆盖所需承载点，本轮只做入口迁移和删除流程增强，没有新增重复页面或重复状态
+
+## 实施与验证记录 - certificate-management-window-followup
+时间：2026-03-25 12:31:29 +0800
+
+### 已完成修改
+- `crates/core/src/certificate_manager.rs`
+  - 证书新增/编辑改为独立 popup 编辑窗口
+  - 保存后发出证书/连接更新事件并关闭窗口
+- `main/src/home_tab.rs`
+  - 左侧栏新增“证书管理”入口，位置在连接类型列表下方
+  - 工作区标题栏新增编辑/删除按钮
+  - 删除工作区时增加“移到未分区 / 删除全部连接”的分支处理
+- `main/locales/main.yml`
+  - 新增工作区删除确认相关文案
+- `crates/core/locales/core.yml`
+  - 新增证书编辑校验和保存失败相关文案
+
+### 本地验证
+- `cargo check -p main`
+  - 结果：通过
+
+## 追加编码前检查 - certificate-save-window-error
+时间：2026-03-25 12:46:46 +0800
+
+- 已复查相关实现：
+  - `crates/core/src/certificate_manager.rs`
+  - `crates/terminal_view/src/ssh_form_window.rs`
+  - `crates/redis_view/src/redis_form_window.rs`
+  - `crates/mongodb_view/src/mongo_form_window.rs`
+  - `crates/db_view/src/common/db_connection_form.rs`
+  - `crates/gpui/src/subscription.rs`
+- 已确认 3 类可复用/对照模式：
+  - 连接表单保存普遍采用异步保存后关闭窗口
+  - `CertificateManagerView` 已使用 `_subscriptions: Vec<Subscription>` 持有订阅
+  - `gpui::Subscription::detach()` 的语义是“保持订阅直到被订阅实体销毁”，不适合窗口生命周期敏感的证书事件订阅
+- 将使用以下可复用组件：
+  - `window.spawn(...)`：把证书保存和连接快照回写移出 UI 线程
+  - `Tokio::spawn_result(...)`：复用现有后台任务执行模式
+  - `_subscriptions: Vec<Subscription>`：让证书事件订阅跟随窗口实体一起释放
+- 将遵循代码风格：不改证书/连接事件协议，只修正执行线程和订阅生命周期
+- 确认不重复造轮子，证明：现有 popup、后台任务和订阅持有模式足以覆盖本次问题
+
+## 编码后声明 - certificate-save-window-error
+时间：2026-03-25 12:46:46 +0800
+
+### 1. 根因结论
+- 保存卡顿：`CertificateEditorView::on_save` 之前在 UI 线程里同步执行证书写入和 `sync_connections_for_certificate(...)`，连接多时会直接阻塞窗口
+- `window not found`：SSH / Redis / MongoDB / 数据库通用表单对 `CertificateDataEvent` 使用了 `subscribe_in(...).detach()`，窗口关闭后订阅仍可能继续收到事件并访问失效窗口
+
+### 2. 已完成修复
+- `crates/core/src/certificate_manager.rs`
+  - 证书保存改为 `window.spawn + Tokio::spawn_result` 异步执行
+  - 保存期间通过 `is_saving` 禁用按钮，避免重复提交
+  - 成功后再回到窗口上下文中广播事件并关闭窗口
+- `crates/terminal_view/src/ssh_form_window.rs`
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/mongodb_view/src/mongo_form_window.rs`
+- `crates/db_view/src/common/db_connection_form.rs`
+  - 证书事件订阅不再 `detach()`，改为由 `_subscriptions: Vec<Subscription>` 持有，随窗口实体释放
+
+### 3. 未重复造轮子的证明
+- 后台执行沿用现有 `Tokio::spawn_result` 方案
+- 订阅管理沿用 `CertificateManagerView` 已有 `_subscriptions` 模式
+- 结论：没有新增新通知器或新窗口模型，只是把原有能力放到正确生命周期里
+
+## 实施与验证记录 - certificate-save-window-error
+时间：2026-03-25 12:46:46 +0800
+
+### 已完成修改
+- 异步化证书保存与连接快照回写，减少保存时主线程阻塞
+- 修正四个连接表单的证书订阅生命周期，避免向已关闭窗口派发事件
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 当前限制
+- 本次未做桌面 GUI 手点验证，仍需实际确认“保存证书后无明显卡顿、终端不再出现 `window not found`”
+
+## 编码后声明 - certificate-management
+时间：2026-03-25 12:08:00 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/storage/models.rs::apply_certificate_to_connection_snapshot`：沿用“引用 + 快照”回写策略，避免重写连接运行链路
+- `crates/core/src/storage/repository.rs::sync_connections_for_certificate`：继续作为证书变更后批量回写连接快照的唯一入口
+- `crates/core/src/certificate_manager.rs::open_certificate_manager_popup`：复用统一证书管理弹窗，所有表单只提供入口，不重复实现管理界面
+- `crates/core/src/certificate_notifier.rs`：复用证书变更通知，驱动 SSH/Redis/Mongo/数据库表单的证书列表热刷新
+
+### 2. 遵循了以下项目约定
+- 命名约定：代码层统一使用 `Certificate`、`CertificateReference`、`credential_ref`、`ssh_tunnel_credential_ref`
+- 代码风格：继续沿用现有窗口表单结构，只在既有字段、Select 和底部按钮区域增量扩展
+- 文件组织：同步逻辑留在 `crates/core/src/cloud_sync`，表单接入分别留在各自 view crate，没有引入新的跨模块 UI 层
+
+### 3. 对比了以下相似实现
+- `crates/terminal_view/src/ssh_form_window.rs`：沿用现有窗口态输入框与 Select 订阅模式，补证书选择与禁用手工输入
+- `crates/redis_view/src/redis_form_window.rs`：沿用现有连接参数构建方式，将证书选择折叠为参数生成前的覆盖逻辑
+- `crates/mongodb_view/src/mongo_form_window.rs`：沿用 Mongo 现有表单结构，按 Redis 同模式接入账号密码证书
+- `crates/db_view/src/common/db_connection_form.rs`：沿用数据库通用表单字段系统，在通用字段模型内注入证书 Select，而不是分叉新表单
+
+### 4. 未重复造轮子的证明
+- 已检查 `crates/core/src/storage/models.rs`、`crates/core/src/storage/repository.rs`、`crates/core/src/certificate_manager.rs`、`crates/core/src/certificate_notifier.rs`
+- 已检查 `crates/terminal_view/src/ssh_form_window.rs`、`crates/redis_view/src/redis_form_window.rs`、`crates/mongodb_view/src/mongo_form_window.rs`、`crates/db_view/src/common/db_connection_form.rs`
+- 最终没有新增第二套凭据模型或单独的窗口状态管理，所有连接类型都复用统一证书实体和通知机制
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+- `cargo test -p main --no-run`：通过
+
+### 6. 风险与限制
+- 本次验证覆盖了 Rust 编译和测试目标编译，但没有自动化 GUI 交互测试，仍建议你手动点一次各表单中的证书选择与“管理证书”按钮
+- 验证过程中曾出现 Cargo 包缓存锁等待，原因是先后启动了两个 Cargo 命令；最终已顺序完成验证，不影响结果
+- 构建过程中的 `crates/ui/src/title_bar.rs` 未使用函数警告，以及 `num-bigint-dig v0.8.4` future incompatibility 提示，均为仓库既有问题，与本次改动无关
+
+## 编码前检查 - sync-server-sync-items-filter-pagination
+时间：2026-03-25 11:51:05 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-items-filter-pagination.md`
+□ 将使用以下可复用组件：
+- `sync_server/web/src/views/user/SyncItemsView.vue`：复用现有列表页结构、表格列和刷新逻辑
+- `sync_server/web/src/views/admin/AdminOverviewView.vue`：复用列表页头部统计和按钮布局风格
+- `sync_server/web/src/views/user/DashboardView.vue`：复用 `computed` 派生列表展示数据的组织方式
+- `sync_server/web/src/utils/syncItemType.ts`：复用类型中文标签映射
+□ 将遵循命名约定：新增 `selectedType`、`pageSize`、`currentPage`、`filteredItems`、`paginatedItems` 等语义化命名
+□ 将遵循代码风格：继续使用 `script setup + Composition API` 和内联 Tailwind 样式，不新增抽象组件
+□ 确认不重复造轮子，证明：已检查 `SyncItemsView.vue`、`AdminOverviewView.vue`、`DashboardView.vue`、`SyncItemDetailView.vue`，确认当前没有现成的筛选/分页组件可直接复用
+
+## 执行记录 - sync-server-sync-items-filter-pagination
+时间：2026-03-25 11:51:05 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+- `sync_server/web/src/views/admin/AdminOverviewView.vue`
+- `sync_server/web/src/views/user/DashboardView.vue`
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+- `sync_server/web/src/types/api.ts`
+- `sync_server/web/src/utils/syncItemType.ts`
+
+### 2. 对比的相似实现
+- `sync_server/web/src/views/user/SyncItemsView.vue:21`：当前同步项表格页主体结构
+- `sync_server/web/src/views/admin/AdminOverviewView.vue:21`：另一张管理表格的头部统计布局
+- `sync_server/web/src/views/user/DashboardView.vue:109`：`computed` 派生展示列表的模式
+- `sync_server/web/src/views/user/SyncItemDetailView.vue:116`：`ref + computed + watch` 维护页面交互状态的模式
+
+### 3. 当前发现
+- `sync_server/web` 没有现成的 `<select>` 或分页组件，本次更适合在 `SyncItemsView` 内做轻量自包含实现
+- 当前 `SyncItem.dataType` 是字符串，筛选项应从实际数据集中动态提取，避免写死后与后端类型脱节
+- 页面已经一次性拿到完整列表，因此本地筛选 + 本地分页是当前风险最低的方案
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Node 构建命令完成检索与验证
+
+## 编码后声明 - sync-server-sync-items-filter-pagination
+时间：2026-03-25 11:54:06 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/views/user/SyncItemsView.vue`：继续作为同步项列表唯一页面，不新增第二套列表页
+- `sync_server/web/src/utils/syncItemType.ts`：继续作为类型展示的唯一中文标签映射
+- `sync_server/web/src/utils/syncItemVersion.ts`：继续负责密钥版本和记录版本格式化
+- `sync_server/web/src/views/admin/AdminOverviewView.vue`：沿用同类表格页的头部统计和按钮布局风格
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `selectedType`、`pageSize`、`currentPage`、`filteredItems`、`paginatedItems` 等语义化状态名
+- 代码风格：继续使用 `script setup + Composition API`，通过 `computed` 组织派生视图状态
+- 文件组织：筛选和分页逻辑集中在 `SyncItemsView.vue`，没有扩散到接口层和工具层
+
+### 3. 对比了以下相似实现
+- `sync_server/web/src/views/user/SyncItemsView.vue:21`：保留原有表格页结构，只在中间插入筛选和分页控制区
+- `sync_server/web/src/views/admin/AdminOverviewView.vue:21`：沿用列表卡片头部信息布局
+- `sync_server/web/src/views/user/DashboardView.vue:109`：沿用 `computed` 派生展示子集的写法
+- `sync_server/web/src/views/user/SyncItemDetailView.vue:116`：沿用 `watch` 维护页面交互状态的模式
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/web/src/views/user/SyncItemsView.vue`、`sync_server/web/src/views/admin/AdminOverviewView.vue`、`sync_server/web/src/views/user/DashboardView.vue`、`sync_server/web/src/views/user/SyncItemDetailView.vue`
+- 最终没有新增抽象分页组件或改后端接口，而是在已有页面内基于完整数据列表做本地筛选和本地分页
+
+### 5. 本地验证结果
+- `npm --prefix sync_server/web run build`：通过
+
+### 6. 风险与限制
+- 当前仓库没有前端自动化测试，本次只能验证构建通过，仍建议你在浏览器里点一下筛选切换和翻页交互
+- 本次分页是前端本地分页，若未来数据量明显增长，再考虑后端分页接口更合适
+
+## 编码前检查 - sync-server-sidebar-scroll
+时间：2026-03-25 11:45:07 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sidebar-scroll.md`
+□ 将使用以下可复用组件：
+- `sync_server/web/src/layouts/AppLayout.vue`：复用现有双栏布局和侧栏导航结构
+- `sync_server/web/src/router/index.ts`：确认 `/app` 子路由共享同一布局壳层
+- `sync_server/web/src/style.css`：沿用现有 `min-h-screen` / 面板视觉体系
+□ 将遵循命名约定：新增滚动容器引用使用语义化英文命名，保持 `script setup` 风格
+□ 将遵循代码风格：继续使用内联 Tailwind 类，不新增额外样式文件或 Options API
+□ 确认不重复造轮子，证明：已检查 `src/layouts/AppLayout.vue`、`src/router/index.ts`、`src/views/auth/LoginView.vue`、`src/views/user/ProfileView.vue`，确认当前没有现成的独立主内容滚动壳层
+
+## 执行记录 - sync-server-sidebar-scroll
+时间：2026-03-25 11:45:07 +0800
+
+### 1. 已检索并阅读的关键实现
+- `sync_server/web/src/layouts/AppLayout.vue`
+- `sync_server/web/src/router/index.ts`
+- `sync_server/web/src/style.css`
+- `sync_server/web/src/views/auth/LoginView.vue`
+- `sync_server/web/src/views/auth/RegisterView.vue`
+- `sync_server/web/src/views/user/DashboardView.vue`
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+- `sync_server/web/src/views/user/ProfileView.vue`
+- `sync_server/web/src/views/admin/AdminOverviewView.vue`
+- `sync_server/web/package.json`
+
+### 2. 对比的相似实现
+- `sync_server/web/src/layouts/AppLayout.vue:2`：当前双栏壳层的入口位置
+- `sync_server/web/src/views/auth/LoginView.vue:2`：页面级高度由顶层容器控制的模式
+- `sync_server/web/src/views/user/ProfileView.vue:2`：业务页只输出内容块、不管理外层滚动
+- `sync_server/web/src/router/index.ts:25`：`/app` 子路由统一复用布局，适合集中改造
+
+### 3. 当前发现
+- 左侧栏内容量明显少于右侧业务页，当前自然流布局会让右侧内容高度主导整页滚动
+- 仅给侧栏加 `sticky` 不能彻底切断整页滚动；更符合需求的方案是桌面端把主内容改为独立滚动容器
+- `sync_server/web` 当前没有测试文件，验证只能依赖 `vue-tsc + vite build`
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Node 构建命令完成检索与验证
+
+## 编码后声明 - sync-server-sidebar-scroll
+时间：2026-03-25 11:46:59 +0800
+
+### 1. 复用了以下既有组件
+- `sync_server/web/src/layouts/AppLayout.vue`：继续作为 `/app` 认证区唯一布局壳层
+- `sync_server/web/src/router/index.ts`：继续复用子路由共享布局的组织方式，不新增新页面壳层
+- `sync_server/web/src/style.css`：继续沿用全局 `min-h-screen` 与 `panel` 视觉体系
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `mainScrollContainer`，与现有 `displayName`、`showEmail` 一样保持语义化英文命名
+- 代码风格：继续使用 `script setup + Composition API` 和内联 Tailwind 原子类
+- 文件组织：滚动行为集中在 `src/layouts/AppLayout.vue`，没有把外层布局逻辑分散到各个业务页
+
+### 3. 对比了以下相似实现
+- `sync_server/web/src/layouts/AppLayout.vue:2`：沿用原有双栏布局，只在桌面端增加视口高度与内部滚动约束
+- `sync_server/web/src/views/auth/LoginView.vue:2`：保留登录/注册页的 `min-h-screen` 自然布局，不扩大影响面
+- `sync_server/web/src/views/user/ProfileView.vue:2`：保持业务页继续只负责内容卡片，外层滚动由布局统一承担
+- `sync_server/web/src/router/index.ts:25`：依赖共享布局壳层，一次改动即可覆盖全部 `/app` 子页面
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/web/src/layouts/AppLayout.vue`、`sync_server/web/src/router/index.ts`、`sync_server/web/src/style.css`、`sync_server/web/src/views/auth/LoginView.vue`、`sync_server/web/src/views/user/ProfileView.vue`
+- 最终没有新增第二套布局组件，也没有在每个页面重复写滚动容器，而是在现有 `AppLayout` 上集中实现
+
+### 5. 本地验证结果
+- `npm --prefix sync_server/web run build`：通过
+- `npm --prefix sync_server/web run build`（补 `min-h-0` 后复验）：通过
+
+### 6. 风险与限制
+- 当前仓库没有前端自动化测试，本次只能验证类型检查和生产构建，仍建议你在浏览器里实际滚动确认桌面端表现
+- 主内容改为内部滚动后，浏览器原生“页面总滚动条”在桌面端会弱化，这是按需求做的结构调整
+
 ## 编码后声明 - desktop-account-entry
 时间：2026-03-25 11:06:26 +0800
 
@@ -3243,3 +4183,50 @@
 - 本次没有自动化 GUI 点击测试，左下角账号入口跳转到账户页的最终交互仍建议你本地点一次确认
 - 构建过程中保留了既有 `crates/ui/src/title_bar.rs` 未使用函数警告，与本次改动无关
 - Rust 依赖里仍有既有 `num-bigint-dig v0.8.4` future incompatibility 提示，与本次任务无关
+
+## 编码前检查 - certificate-management
+时间：2026-03-25 13:05:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-certificate-management.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/storage/repository.rs::ConnectionRepository`：复用连接仓储和更新时间语义
+- `crates/core/src/cloud_sync/workspace_sync.rs::WorkspaceSyncType`：复用简单同步类型桥接方式
+- `crates/core/src/cloud_sync/generic_sync.rs::generic_sync`：复用通用同步流程
+- `crates/core/src/popup_window.rs::open_popup_window`：复用桌面弹窗能力
+- `crates/core/src/connection_notifier.rs::emit_connection_event`：复用连接更新广播
+□ 将遵循命名约定：代码层使用 `Certificate` / `CertificateRepository` / `CertificateSyncType`，UI 统一展示为“证书”
+□ 将遵循代码风格：优先增量扩展现有仓储、同步和 popup 模式，不引入新的状态管理框架
+□ 确认不重复造轮子，证明：已检查 `storage/models.rs`、`storage/repository.rs`、`cloud_sync/workspace_sync.rs`、`cloud_sync/generic_sync.rs`、`db_connection_form.rs`、`ssh_form_window.rs`、`home_tab.rs`
+
+## 执行记录 - certificate-management
+时间：2026-03-25 13:05:00 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/storage/models.rs`
+- `crates/core/src/storage/repository.rs`
+- `crates/core/src/storage/migration.rs`
+- `crates/core/src/cloud_sync/models.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/cloud_sync/workspace_sync.rs`
+- `crates/core/src/cloud_sync/generic_sync.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/db_view/src/common/db_connection_form.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/mongodb_view/src/mongo_form_window.rs`
+- `main/src/home_tab.rs`
+
+### 2. 对比的相似实现
+- `crates/core/src/storage/repository.rs:117`：连接实体的仓储实现模式
+- `crates/core/src/cloud_sync/workspace_sync.rs:13`：独立数据类型接入通用同步模式
+- `crates/db_view/src/common/db_connection_form.rs:1142`：数据库连接保存统一汇聚点
+- `crates/terminal_view/src/ssh_form_window.rs:479`：SSH 凭据构建与测试链路
+
+### 3. 当前发现
+- 当前没有统一凭据实体，所有密码/私钥都直接保存在连接参数 JSON 中
+- 若采用纯运行时解引用，需要改造大量 `StoredConnection::to_*` 调用点，代价较高
+- “引用 + 快照”更适合当前仓库：既能统一管理，又不破坏已有连接执行链路
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证

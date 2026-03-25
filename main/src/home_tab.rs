@@ -24,9 +24,9 @@ use gpui_component::{
     v_flex,
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
+use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::cloud_sync::{
     CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo, can_edit_connection,
-    get_cached_team_options,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
@@ -45,7 +45,6 @@ use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::auth::{AuthService, PasswordAuthAction, show_password_auth_dialog};
-use crate::encourage::EncourageDialog;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
@@ -70,6 +69,12 @@ struct SyncFeedback {
 }
 
 struct SyncResultNotification;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceDeleteMode {
+    MoveToUnassigned,
+    DeleteAllConnections,
+}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -324,6 +329,42 @@ impl HomePage {
     fn refresh_local_home_data(&mut self, cx: &mut Context<Self>) {
         self.load_workspaces(cx);
         self.load_connections(cx);
+    }
+
+    fn queue_pending_cloud_deletion(
+        storage: &one_core::storage::StorageManager,
+        cloud_id: Option<&str>,
+        entity_type: &str,
+    ) {
+        let Some(cloud_id) = cloud_id else {
+            return;
+        };
+
+        let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() else {
+            tracing::error!(
+                "[删除] 无法记录待删除{}：PendingCloudDeletionRepository 不存在",
+                entity_type
+            );
+            return;
+        };
+
+        match pending_repo.add(cloud_id, entity_type) {
+            Ok(()) => {
+                tracing::info!(
+                    "[删除] 已登记待删除{}，等待同步引擎处理: {}",
+                    entity_type,
+                    cloud_id
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    "[删除] 记录待删除{}失败: {} - {}",
+                    entity_type,
+                    cloud_id,
+                    error
+                );
+            }
+        }
     }
 
     fn clear_auth_related_state(&mut self, cx: &mut Context<Self>) {
@@ -1002,21 +1043,6 @@ impl HomePage {
         });
     }
 
-    fn show_encourage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let dialog_view = cx.new(|cx| EncourageDialog::new(cx));
-        window.open_dialog(cx, move |dialog, _window, _cx| {
-            dialog
-                .title(t!("Encourage.title").to_string())
-                .w(px(760.0))
-                .child(dialog_view.clone())
-                .alert()
-                .button_props(
-                    gpui_component::dialog::DialogButtonProps::default()
-                        .ok_text(t!("Common.close")),
-                )
-        });
-    }
-
     fn confirm_edit_connection(
         &mut self,
         conn_id: i64,
@@ -1089,53 +1115,13 @@ impl HomePage {
     fn delete_connection(&mut self, conn_id: i64, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
 
-        // 获取连接的 cloud_id，用于删除云端数据
         let cloud_id = self
             .connections
             .iter()
             .find(|c| c.id == Some(conn_id))
             .and_then(|c| c.cloud_id.clone());
 
-        // 如果用户已登录且连接有 cloud_id，需要同时删除云端
-        let cloud_client = if cloud_id.is_some() && self.current_user.is_some() {
-            Some(self.auth_service.cloud_client())
-        } else {
-            None
-        };
-
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            // 1. 先删除云端连接（如果有）
-            if let (Some(cloud_id), Some(client)) = (&cloud_id, cloud_client) {
-                match client.delete_sync_data(cloud_id).await {
-                    Ok(_) => {
-                        tracing::info!("[删除] 云端连接删除成功: {}", cloud_id);
-                    }
-                    Err(e) => {
-                        // 云端删除失败，记录到待删除表，下次同步时重试
-                        tracing::warn!(
-                            "[删除] 云端连接删除失败: {} - {}（记录到待删除列表）",
-                            cloud_id,
-                            e
-                        );
-                        if let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>()
-                        {
-                            if let Err(e) = pending_repo.add(cloud_id, "connection") {
-                                tracing::error!("[删除] 记录待删除失败: {}", e);
-                            }
-                        }
-                    }
-                }
-            } else if let Some(cloud_id) = &cloud_id {
-                // 用户未登录但连接有 cloud_id，也记录到待删除表
-                tracing::info!("[删除] 用户离线，记录到待删除列表: {}", cloud_id);
-                if let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() {
-                    if let Err(e) = pending_repo.add(cloud_id, "connection") {
-                        tracing::error!("[删除] 记录待删除失败: {}", e);
-                    }
-                }
-            }
-
-            // 2. 删除本地连接
             let result = (|| {
                 let repo = storage
                     .get::<ConnectionRepository>()
@@ -1145,6 +1131,7 @@ impl HomePage {
 
             match result {
                 Ok(_) => {
+                    Self::queue_pending_cloud_deletion(&storage, cloud_id.as_deref(), "connection");
                     _ = this.update(cx, |this, cx| {
                         this.connections.retain(|c| c.id != Some(conn_id));
                         if this.selected_connection_id == Some(conn_id) {
@@ -1403,29 +1390,126 @@ impl HomePage {
             .find(|w| w.id == Some(workspace_id))
             .map(|w| w.name.clone())
             .unwrap_or_default();
+        let workspace_connections: Vec<StoredConnection> = self
+            .connections
+            .iter()
+            .filter(|connection| connection.workspace_id == Some(workspace_id))
+            .cloned()
+            .collect();
+        let has_active_connections = workspace_connections.iter().any(|connection| {
+            connection
+                .id
+                .is_some_and(|id| cx.global::<ActiveConnections>().is_active(id))
+        });
 
         let view = cx.entity().clone();
+        if workspace_connections.is_empty() {
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                let view_clone = view.clone();
+                dialog
+                    .title(t!("Workspace.delete").to_string().into_any_element())
+                    .child(
+                        t!("Workspace.delete_confirm", workspace_name = workspace_name)
+                            .to_string()
+                            .into_any_element(),
+                    )
+                    .confirm()
+                    .on_ok(move |_, _window, cx| {
+                        let _ = view_clone.update(cx, |this, cx| {
+                            this.handle_delete_workspace(
+                                workspace_id,
+                                WorkspaceDeleteMode::MoveToUnassigned,
+                                cx,
+                            );
+                        });
+                        true
+                    })
+            });
+            return;
+        }
+
+        let warning_color = cx.theme().warning;
         window.open_dialog(cx, move |dialog, _window, _cx| {
-            let view_clone = view.clone();
+            let view_for_move = view.clone();
+            let view_for_delete = view.clone();
             dialog
                 .title(t!("Workspace.delete").to_string().into_any_element())
                 .child(
-                    t!("Workspace.delete_confirm", workspace_name = workspace_name)
-                        .to_string()
-                        .into_any_element(),
+                    v_flex()
+                        .gap_2()
+                        .child(
+                            t!(
+                                "Workspace.delete_has_connections",
+                                workspace_name = workspace_name,
+                                count = workspace_connections.len()
+                            )
+                            .to_string()
+                            .into_any_element(),
+                        )
+                        .when(has_active_connections, |this| {
+                            this.child(div().text_sm().text_color(warning_color).child(
+                                t!("Workspace.delete_active_connections_blocked").to_string(),
+                            ))
+                        }),
                 )
-                .confirm()
-                .on_ok(move |_, _window, cx| {
-                    let _ = view_clone.update(cx, |this, cx| {
-                        this.handle_delete_workspace(workspace_id, cx);
-                    });
-                    true
+                .footer(move |_ok, cancel, window, cx| {
+                    vec![
+                        cancel(window, cx),
+                        Button::new(format!("workspace-move-{}", workspace_id))
+                            .label(t!("Workspace.delete_move_to_unassigned").to_string())
+                            .with_variant(ButtonVariant::Primary)
+                            .on_click({
+                                let view_for_move = view_for_move.clone();
+                                move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view_for_move.update(cx, |this, cx| {
+                                        this.handle_delete_workspace(
+                                            workspace_id,
+                                            WorkspaceDeleteMode::MoveToUnassigned,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            })
+                            .into_any_element(),
+                        Button::new(format!("workspace-delete-all-{}", workspace_id))
+                            .label(t!("Workspace.delete_all_connections").to_string())
+                            .danger()
+                            .disabled(has_active_connections)
+                            .on_click({
+                                let view_for_delete = view_for_delete.clone();
+                                move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view_for_delete.update(cx, |this, cx| {
+                                        this.handle_delete_workspace(
+                                            workspace_id,
+                                            WorkspaceDeleteMode::DeleteAllConnections,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            })
+                            .into_any_element(),
+                    ]
                 })
+                .overlay_closable(false)
+                .close_button(false)
         });
     }
 
-    fn handle_delete_workspace(&mut self, workspace_id: i64, cx: &mut Context<Self>) {
+    fn handle_delete_workspace(
+        &mut self,
+        workspace_id: i64,
+        mode: WorkspaceDeleteMode,
+        cx: &mut Context<Self>,
+    ) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
+        let workspace_connections: Vec<StoredConnection> = self
+            .connections
+            .iter()
+            .filter(|connection| connection.workspace_id == Some(workspace_id))
+            .cloned()
+            .collect();
 
         // 获取工作空间的 cloud_id，用于删除云端数据
         let cloud_id = self
@@ -1434,74 +1518,101 @@ impl HomePage {
             .find(|w| w.id == Some(workspace_id))
             .and_then(|w| w.cloud_id.clone());
 
-        // 如果用户已登录且工作空间有 cloud_id，需要同时删除云端
-        let cloud_client = if cloud_id.is_some() && self.current_user.is_some() {
-            Some(self.auth_service.cloud_client())
-        } else {
-            None
-        };
-
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            // 1. 先删除云端工作空间（如果有）
-            if let (Some(cloud_id), Some(client)) = (&cloud_id, cloud_client) {
-                match client.delete_sync_data(cloud_id).await {
-                    Ok(_) => {
-                        tracing::info!("[删除] 云端工作空间删除成功: {}", cloud_id);
-                    }
-                    Err(e) => {
-                        // 云端删除失败，记录到待删除表，下次同步时重试
-                        tracing::warn!(
-                            "[删除] 云端工作空间删除失败: {} - {}（记录到待删除列表）",
-                            cloud_id,
-                            e
+            let Some(connection_repo) = storage.get::<ConnectionRepository>() else {
+                tracing::error!("Failed to delete workspace: ConnectionRepository not found");
+                return;
+            };
+            let Some(workspace_repo) = storage.get::<WorkspaceRepository>() else {
+                tracing::error!("Failed to delete workspace: WorkspaceRepository not found");
+                return;
+            };
+
+            let mut updated_connections = Vec::new();
+            let mut deleted_connection_ids = HashSet::new();
+
+            if mode == WorkspaceDeleteMode::DeleteAllConnections {
+                for connection in &workspace_connections {
+                    if let Some(connection_id) = connection.id {
+                        if let Err(e) = connection_repo.delete(connection_id) {
+                            tracing::error!("Failed to delete connection: {}", e);
+                            return;
+                        }
+                        Self::queue_pending_cloud_deletion(
+                            &storage,
+                            connection.cloud_id.as_deref(),
+                            "connection",
                         );
-                        if let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>()
-                        {
-                            if let Err(e) = pending_repo.add(cloud_id, "workspace") {
-                                tracing::error!("[删除] 记录待删除失败: {}", e);
+                        deleted_connection_ids.insert(connection_id);
+                    }
+                }
+            } else {
+                for connection in &workspace_connections {
+                    let mut updated_connection = connection.clone();
+                    updated_connection.workspace_id = None;
+                    if let Err(e) = connection_repo.update(&mut updated_connection) {
+                        tracing::error!("Failed to move connection to unassigned: {}", e);
+                        return;
+                    }
+                    updated_connections.push(updated_connection);
+                }
+            }
+
+            if let Err(e) = workspace_repo.delete(workspace_id) {
+                tracing::error!("Failed to delete workspace: {}", e);
+                return;
+            }
+            Self::queue_pending_cloud_deletion(&storage, cloud_id.as_deref(), "workspace");
+
+            _ = this.update(cx, |this, cx| {
+                this.workspaces.retain(|w| w.id != Some(workspace_id));
+                this.filtered_workspace_ids.remove(&workspace_id);
+
+                match mode {
+                    WorkspaceDeleteMode::MoveToUnassigned => {
+                        for updated_connection in updated_connections {
+                            if let Some(position) = this
+                                .connections
+                                .iter()
+                                .position(|connection| connection.id == updated_connection.id)
+                            {
+                                this.connections[position] = updated_connection.clone();
                             }
+                            emit_connection_event(
+                                ConnectionDataEvent::ConnectionUpdated {
+                                    connection: updated_connection,
+                                },
+                                cx,
+                            );
+                        }
+                    }
+                    WorkspaceDeleteMode::DeleteAllConnections => {
+                        this.connections.retain(|connection| {
+                            !connection.id.is_some_and(|connection_id| {
+                                deleted_connection_ids.contains(&connection_id)
+                            })
+                        });
+                        if this.selected_connection_id.is_some_and(|connection_id| {
+                            deleted_connection_ids.contains(&connection_id)
+                        }) {
+                            this.selected_connection_id = None;
+                        }
+                        for connection_id in deleted_connection_ids {
+                            emit_connection_event(
+                                ConnectionDataEvent::ConnectionDeleted { connection_id },
+                                cx,
+                            );
                         }
                     }
                 }
-            } else if let Some(cloud_id) = &cloud_id {
-                // 用户未登录但工作空间有 cloud_id，也记录到待删除表
-                tracing::info!("[删除] 用户离线，记录到待删除列表: {}", cloud_id);
-                if let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() {
-                    if let Err(e) = pending_repo.add(cloud_id, "workspace") {
-                        tracing::error!("[删除] 记录待删除失败: {}", e);
-                    }
-                }
-            }
 
-            // 2. 删除本地工作空间
-            let result = (|| {
-                let repo = storage
-                    .get::<WorkspaceRepository>()
-                    .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
-                repo.delete(workspace_id)
-            })();
-
-            match result {
-                Ok(_) => {
-                    _ = this.update(cx, |this, cx| {
-                        this.workspaces.retain(|w| w.id != Some(workspace_id));
-                        this.filtered_workspace_ids.remove(&workspace_id);
-                        emit_connection_event(
-                            ConnectionDataEvent::WorkspaceDeleted { workspace_id },
-                            cx,
-                        );
-                        // 兜底触发一次自动同步，避免当前页对自身工作区事件未回流时漏同步。
-                        if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("本地工作区删除成功，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
-                        cx.notify();
-                    });
+                emit_connection_event(ConnectionDataEvent::WorkspaceDeleted { workspace_id }, cx);
+                if this.current_user.is_some() && crypto::has_master_key() {
+                    tracing::info!("本地工作区删除成功，自动触发云同步");
+                    this.trigger_sync(cx);
                 }
-                Err(e) => {
-                    tracing::error!("Failed to delete workspace: {}", e);
-                }
-            }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -1526,7 +1637,6 @@ impl HomePage {
             db_type,
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         };
 
         self.editing_connection_id = None;
@@ -1560,7 +1670,6 @@ impl HomePage {
         let config = SshFormWindowConfig {
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         };
 
         self.editing_connection_id = None;
@@ -1594,7 +1703,6 @@ impl HomePage {
         let config = RedisFormWindowConfig {
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         };
 
         self.editing_connection_id = None;
@@ -1628,7 +1736,6 @@ impl HomePage {
         let config = MongoFormWindowConfig {
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         };
 
         self.editing_connection_id = None;
@@ -1662,7 +1769,6 @@ impl HomePage {
         let config = SerialFormWindowConfig {
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         };
 
         self.editing_connection_id = None;
@@ -2380,13 +2486,13 @@ impl HomePage {
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .child(
-                        Button::new("open_encourage_dialog")
-                            .icon(IconName::Heart)
-                            .label(t!("Encourage.button_label"))
+                        Button::new("open_certificate_manager_sidebar")
+                            .icon(IconName::Key)
+                            .label(t!("Home.certificate_manager"))
                             .w_full()
                             .justify_start()
-                            .on_click(cx.listener(|this: &mut HomePage, _, window, cx| {
-                                this.show_encourage_dialog(window, cx);
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                open_certificate_manager_popup(cx);
                             })),
                     )
                     .child(
@@ -2667,7 +2773,37 @@ impl HomePage {
                                 t!("Home.connection_count", count = connections.len()).to_string(),
                             ),
                     )
-                    .child(div().flex_1()),
+                    .child(div().flex_1())
+                    .when_some(workspace_id, |this, workspace_id| {
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    Button::new(format!("workspace-edit-{}", workspace_id))
+                                        .icon(IconName::Edit)
+                                        .xsmall()
+                                        .ghost()
+                                        .tooltip(t!("Workspace.edit"))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.show_workspace_form(
+                                                Some(workspace_id),
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("workspace-delete-{}", workspace_id))
+                                        .icon(IconName::Remove)
+                                        .xsmall()
+                                        .ghost()
+                                        .tooltip(t!("Workspace.delete"))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.delete_workspace(workspace_id, window, cx);
+                                        })),
+                                ),
+                        )
+                    }),
             )
             .when(!connections.is_empty(), |this| {
                 // 使用 flex 布局实现响应式卡片网格
@@ -2784,8 +2920,6 @@ impl HomePage {
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
 
         let can_edit = can_edit_connection(&conn, cx);
-        let has_team = conn.team_id.is_some();
-
         let card = v_flex()
             .justify_center()
             .id(SharedString::from(format!(
@@ -2991,40 +3125,25 @@ impl HomePage {
                             .overflow_hidden()
                             .child({
                                 let name_tooltip: SharedString = conn.name.clone().into();
-                                h_flex()
-                                    .gap_1()
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-name-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(cx.theme().foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .flex_shrink()
-                                            .min_w_0()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(name_tooltip.clone()).build(window, cx)
-                                            })
-                                            .child(conn.name.clone()),
-                                    )
-                                    .when(has_team, |this| {
-                                        this.child(
-                                            div()
-                                                .flex_shrink_0()
-                                                .px_1()
-                                                .rounded(px(3.0))
-                                                .bg(cx.theme().accent.opacity(0.15))
-                                                .text_color(cx.theme().accent)
-                                                .text_xs()
-                                                .child(t!("Home.team_badge").to_string()),
-                                        )
-                                    })
+                                h_flex().gap_1().overflow_hidden().child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "conn-name-{}",
+                                            conn.id.unwrap_or(0)
+                                        )))
+                                        .text_sm()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(cx.theme().foreground)
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .whitespace_nowrap()
+                                        .flex_shrink()
+                                        .min_w_0()
+                                        .tooltip(move |window, cx| {
+                                            Tooltip::new(name_tooltip.clone()).build(window, cx)
+                                        })
+                                        .child(conn.name.clone()),
+                                )
                             })
                             .when(conn.connection_type == ConnectionType::Database, |this| {
                                 if let Ok(params) = conn.to_db_connection() {

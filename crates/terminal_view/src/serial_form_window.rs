@@ -11,7 +11,7 @@ use gpui_component::{
     select::{Select, SelectItem, SelectState},
     v_flex, ActiveTheme, Disableable, IndexPath, Sizable, TitleBar,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
@@ -22,7 +22,6 @@ use rust_i18n::t;
 pub struct SerialFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -49,40 +48,6 @@ impl WorkspaceSelectItem {
 
 impl SelectItem for WorkspaceSelectItem {
     type Value = Option<i64>;
-
-    fn title(&self) -> SharedString {
-        self.name.clone().into()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.id
-    }
-}
-
-#[derive(Clone, Default, PartialEq)]
-struct TeamSelectItem {
-    id: Option<String>,
-    name: String,
-}
-
-impl TeamSelectItem {
-    fn personal() -> Self {
-        Self {
-            id: None,
-            name: t!("TeamSync.personal").to_string(),
-        }
-    }
-
-    fn from_team(team: &TeamOption) -> Self {
-        Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
-        }
-    }
-}
-
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
 
     fn title(&self) -> SharedString {
         self.name.clone().into()
@@ -215,7 +180,6 @@ pub struct SerialFormWindow {
     parity_select: Entity<SelectState<Vec<ParityItem>>>,
     flow_control_select: Entity<SelectState<Vec<FlowControlItem>>>,
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
     remark_input: Entity<InputState>,
     sync_enabled: bool,
 
@@ -352,15 +316,8 @@ impl SerialFormWindow {
         let workspace_select =
             cx.new(|cx| SelectState::new(workspace_items, Some(Default::default()), window, cx));
 
-        // 团队选择
-        let mut team_items = vec![TeamSelectItem::personal()];
-        team_items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-        let team_select =
-            cx.new(|cx| SelectState::new(team_items, Some(Default::default()), window, cx));
-
         let mut sync_enabled = true;
         let mut workspace_id: Option<i64> = None;
-        let mut team_id: Option<String> = None;
 
         // 编辑模式：加载已有数据
         if let Some(ref conn) = config.editing_connection {
@@ -390,7 +347,6 @@ impl SerialFormWindow {
                 });
             }
             workspace_id = conn.workspace_id;
-            team_id = conn.team_id.clone();
 
             if let Some(ref remark) = conn.remark {
                 remark_input.update(cx, |s, cx| s.set_value(remark, window, cx));
@@ -400,12 +356,6 @@ impl SerialFormWindow {
         if let Some(ws_id) = workspace_id {
             workspace_select.update(cx, |select, cx| {
                 select.set_selected_value(&Some(ws_id), window, cx);
-            });
-        }
-
-        if let Some(ref tid) = team_id {
-            team_select.update(cx, |select, cx| {
-                select.set_selected_value(&Some(tid.clone()), window, cx);
             });
         }
 
@@ -425,7 +375,6 @@ impl SerialFormWindow {
             parity_select,
             flow_control_select,
             workspace_select,
-            team_select,
             remark_input,
             sync_enabled,
             is_testing: false,
@@ -435,14 +384,6 @@ impl SerialFormWindow {
 
     fn get_workspace_id(&self, cx: &App) -> Option<i64> {
         self.workspace_select
-            .read(cx)
-            .selected_value()
-            .cloned()
-            .flatten()
-    }
-
-    fn get_team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
             .read(cx)
             .selected_value()
             .cloned()
@@ -588,7 +529,7 @@ impl SerialFormWindow {
         let workspace_id = self.get_workspace_id(cx);
         let mut conn = StoredConnection::new_serial(name, params, workspace_id);
         conn.sync_enabled = self.sync_enabled;
-        conn.team_id = self.get_team_id(cx);
+        conn.team_id = None;
         if !self.is_editing {
             conn.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
         }
@@ -794,10 +735,6 @@ impl Render for SerialFormWindow {
                             .child(self.render_form_row(
                                 &t!("Serial.workspace"),
                                 Select::new(&self.workspace_select).w_full(),
-                            ))
-                            .child(self.render_form_row(
-                                &t!("TeamSync.team_label"),
-                                Select::new(&self.team_select).w_full(),
                             ))
                             .child(
                                 self.render_form_row(

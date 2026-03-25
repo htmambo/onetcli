@@ -79,6 +79,8 @@ fn register_demo_connection(repo: &ConnectionRepository, db_path: &std::path::Pa
         service_name: None,
         sid: None,
         workspace_id: None,
+        credential_ref: None,
+        ssh_tunnel_credential_ref: None,
         extra_params: HashMap::new(),
     };
 

@@ -31,6 +31,7 @@ export interface SyncDataRecord {
   id: string;
   owner_id: string;
   data_type: string;
+  name: string;
   encrypted_data: string;
   key_version: number;
   checksum: string;

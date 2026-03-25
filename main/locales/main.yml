@@ -57,6 +57,10 @@ Home:
     en: New Connection
     zh-CN: 新建连接
     zh-HK: 新建連線
+  certificate_manager:
+    en: Certificate Manager
+    zh-CN: 凭证管理
+    zh-HK: 憑證管理
   connection_count:
     en: "%{count} connections"
     zh-CN: "%{count} 个连接"
@@ -208,77 +212,6 @@ TeamSync:
     en: No edit permission
     zh-CN: 无编辑权限
     zh-HK: 無編輯權限
-
-# 鼓励作者
-Encourage:
-  title:
-    en: "❤️ Support Author"
-    zh-CN: "❤️ 支持作者"
-    zh-HK: "❤️ 支持作者"
-  button_label:
-    en: Support Author
-    zh-CN: 支持作者
-    zh-HK: 支持作者
-  intro_line1:
-    en: OnetCli is maintained by one person.
-    zh-CN: OnetCli 由个人长期维护。
-    zh-HK: OnetCli 由個人長期維護。
-  intro_line2:
-    en: If it saved you time, feel free to support in a way you are comfortable with ❤️
-    zh-CN: 如果它帮你节省了时间，欢迎用你觉得舒服的方式支持我 ❤️
-    zh-HK: 如果它幫你節省了時間，歡迎用你覺得舒服的方式支持我 ❤️
-  intro_line3:
-    en: No support is totally fine.
-    zh-CN: 不支持也完全没关系。
-    zh-HK: 不支持也完全沒關係。
-  wechat_label:
-    en: WeChat Pay
-    zh-CN: 微信支付
-    zh-HK: 微信支付
-  alipay_label:
-    en: Alipay
-    zh-CN: 支付宝
-    zh-HK: 支付寶
-  paypal_label:
-    en: PayPal
-    zh-CN: PayPal
-    zh-HK: PayPal
-  usage_title:
-    en: "Your support will be used for:"
-    zh-CN: "你的支持将用于："
-    zh-HK: "你的支持將用於："
-  usage_item1:
-    en: Cloud services and infrastructure
-    zh-CN: 云端服务与基础设施
-    zh-HK: 雲端服務與基礎設施
-  usage_item2:
-    en: New features and experience improvements
-    zh-CN: 新功能与体验优化
-    zh-HK: 新功能與體驗優化
-  usage_item3:
-    en: Long-term maintenance
-    zh-CN: 长期维护
-    zh-HK: 長期維護
-  alt_support_title:
-    en: "If you cannot sponsor, that's okay:"
-    zh-CN: "不方便赞助也没关系："
-    zh-HK: "不方便贊助也沒關係："
-  alt_support_item1:
-    en: "⭐ Star the project"
-    zh-CN: "⭐ Star 项目"
-    zh-HK: "⭐ Star 專案"
-  alt_support_item2:
-    en: "💬 Suggestions / Bug reports"
-    zh-CN: "💬 提建议 / 报 Bug"
-    zh-HK: "💬 提建議 / 報 Bug"
-  alt_support_item3:
-    en: "📣 Recommend to friends"
-    zh-CN: "📣 推荐给朋友"
-    zh-HK: "📣 推薦給朋友"
-  footer_notice:
-    en: All features remain fully available without support; sponsorship does not unlock or restrict anything.
-    zh-CN: 所有功能对未支持用户完全开放，赞助不会解锁或限制任何功能。
-    zh-HK: 所有功能對未支持用戶完全開放，贊助不會解鎖或限制任何功能。
 
 # 用户认证
 Auth:
@@ -499,6 +432,22 @@ Workspace:
     en: "Are you sure you want to delete workspace \"%{workspace_name}\"?"
     zh-CN: "确定要删除工作区 \"%{workspace_name}\" 吗？"
     zh-HK: "確定要刪除工作區 \"%{workspace_name}\" 嗎？"
+  delete_has_connections:
+    en: "Workspace \"%{workspace_name}\" still contains %{count} connections. Choose how to handle them before deleting the workspace."
+    zh-CN: "工作区 \"%{workspace_name}\" 下还有 %{count} 个连接。请先选择这些连接的处理方式，再删除工作区。"
+    zh-HK: "工作區 \"%{workspace_name}\" 下還有 %{count} 個連線。請先選擇這些連線的處理方式，再刪除工作區。"
+  delete_move_to_unassigned:
+    en: "Move to Unassigned"
+    zh-CN: "移到未分区"
+    zh-HK: "移到未分區"
+  delete_all_connections:
+    en: "Delete All Connections"
+    zh-CN: "删除全部连接"
+    zh-HK: "刪除全部連線"
+  delete_active_connections_blocked:
+    en: "Some connections in this workspace are currently in use. Close them first before deleting all connections."
+    zh-CN: "当前工作区中有连接正在使用，若要删除全部连接，请先关闭这些连接。"
+    zh-HK: "當前工作區中有連線正在使用，若要刪除全部連線，請先關閉這些連線。"
   filter:
     en: Workspace Filter
     zh-CN: 工作区过滤
