@@ -1,5 +1,8 @@
-use gpui::{App, Hsla, rgb, rgba, white};
-use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
+use gpui::{App, ElementId, Hsla, px, rgb, rgba, white};
+use gpui_component::{
+    SpotlightCard,
+    button::{ButtonCustomVariant, ButtonVariant},
+};
 
 pub(crate) fn page_bg() -> Hsla {
     rgb(0x0a0a0a).into()
@@ -97,4 +100,20 @@ pub(crate) fn danger_button_variant(cx: &App) -> ButtonVariant {
             .hover(danger_dim())
             .active(danger().opacity(0.18)),
     )
+}
+
+pub(crate) fn spotlight_card(id: impl Into<ElementId>) -> SpotlightCard {
+    SpotlightCard::new(id)
+        .accent(accent())
+        .glow(accent())
+        .hover_background(panel_hover_bg())
+        .radius(px(16.0))
+}
+
+pub(crate) fn danger_spotlight_card(id: impl Into<ElementId>) -> SpotlightCard {
+    SpotlightCard::new(id)
+        .accent(danger())
+        .glow(danger())
+        .hover_background(panel_alt_bg())
+        .radius(px(16.0))
 }

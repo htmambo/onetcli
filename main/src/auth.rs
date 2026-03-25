@@ -574,52 +574,64 @@ pub fn show_password_auth_dialog<V: 'static>(
                     .p_5()
                     .bg(sync_server_theme::page_bg())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        sync_server_theme::spotlight_card("auth-dialog-hero-card")
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(sync_server_theme::border())
+                            .bg(sync_server_theme::panel_bg())
+                            .p_4()
                             .child(
-                                h_flex()
-                                    .items_center()
+                                v_flex()
                                     .gap_3()
                                     .child(
-                                        gpui::div()
-                                            .w(px(42.))
-                                            .h(px(42.))
-                                            .rounded_xl()
-                                            .bg(sync_server_theme::accent_dim())
-                                            .flex()
+                                        h_flex()
                                             .items_center()
-                                            .justify_center()
+                                            .gap_3()
                                             .child(
-                                                Icon::new(IconName::Server)
-                                                    .with_size(px(18.))
-                                                    .text_color(sync_server_theme::accent()),
+                                                gpui::div()
+                                                    .w(px(42.))
+                                                    .h(px(42.))
+                                                    .rounded_xl()
+                                                    .bg(sync_server_theme::accent_dim())
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .child(
+                                                        Icon::new(IconName::Server)
+                                                            .with_size(px(18.))
+                                                            .text_color(sync_server_theme::accent()),
+                                                    ),
+                                            )
+                                            .child(
+                                                v_flex()
+                                                    .gap_1()
+                                                    .child(
+                                                        gpui::div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .text_color(
+                                                                sync_server_theme::text_primary(),
+                                                            )
+                                                            .child(submit_label.clone()),
+                                                    )
+                                                    .child(
+                                                        gpui::div()
+                                                            .text_xs()
+                                                            .text_color(
+                                                                sync_server_theme::text_soft(),
+                                                            )
+                                                            .child("sync_server"),
+                                                    ),
                                             ),
                                     )
                                     .child(
-                                        v_flex()
-                                            .gap_1()
+                                        gpui::div()
+                                            .text_sm()
+                                            .text_color(sync_server_theme::text_muted())
                                             .child(
-                                                gpui::div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(sync_server_theme::text_primary())
-                                                    .child(submit_label.clone()),
-                                            )
-                                            .child(
-                                                gpui::div()
-                                                    .text_xs()
-                                                    .text_color(sync_server_theme::text_soft())
-                                                    .child("sync_server"),
+                                                t!("Settings.General.Account.sync_server_url_desc")
+                                                    .to_string(),
                                             ),
-                                    ),
-                            )
-                            .child(
-                                gpui::div()
-                                    .text_sm()
-                                    .text_color(sync_server_theme::text_muted())
-                                    .child(
-                                        t!("Settings.General.Account.sync_server_url_desc")
-                                            .to_string(),
                                     ),
                             ),
                     )
@@ -657,7 +669,7 @@ pub fn show_password_auth_dialog<V: 'static>(
                     })
                     .when_some(error_for_render.read(cx).clone(), |this, msg| {
                         this.child(
-                            gpui::div()
+                            sync_server_theme::danger_spotlight_card("auth-dialog-error-card")
                                 .w_full()
                                 .rounded_xl()
                                 .border_1()

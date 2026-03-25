@@ -840,7 +840,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
                 .gap_4()
                 .p_4()
                 .child(
-                    div()
+                    sync_server_theme::spotlight_card("settings-account-shell-card")
                         .w_full()
                         .rounded_xl()
                         .border_1()
@@ -943,7 +943,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
             v_flex()
                 .gap_4()
                 .child(
-                    div()
+                    sync_server_theme::spotlight_card("settings-account-details-card")
                         .w_full()
                         .rounded_xl()
                         .border_1()
@@ -993,7 +993,7 @@ fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
         render_account_shell(
             t!("Settings.Account.title").to_string(),
             None,
-            div()
+            sync_server_theme::spotlight_card("settings-account-empty-card")
                 .w_full()
                 .rounded_xl()
                 .border_1()

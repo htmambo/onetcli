@@ -151,9 +151,51 @@
               </div>
             </form>
 
-            <div v-if="formattedDecryptedPayload" class="mt-6">
+            <div v-if="decryptedPlaintext" class="mt-6">
               <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">解密结果</p>
-              <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[color:rgba(0,217,163,0.22)] bg-[color:rgba(0,217,163,0.08)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ formattedDecryptedPayload }}</pre>
+
+              <!-- 结构化 table 展示 -->
+              <template v-if="decryptedPayloadFields">
+                <div class="mt-4 overflow-hidden rounded-2xl border border-[color:rgba(0,217,163,0.22)] bg-[color:rgba(0,217,163,0.04)]">
+                  <table class="w-full text-xs">
+                    <tbody>
+                      <template v-for="f in decryptedPayloadFields" :key="f.label">
+                        <!-- 嵌套分组行 -->
+                        <template v-if="f.nested">
+                          <tr class="border-t border-[color:rgba(0,217,163,0.15)] bg-[color:rgba(0,217,163,0.06)]">
+                            <td colspan="2" class="px-4 py-2 font-semibold tracking-[0.2em] uppercase text-[var(--accent)]">{{ f.label }}</td>
+                          </tr>
+                          <tr
+                            v-for="nf in f.nested"
+                            :key="nf.label"
+                            class="border-t border-[var(--line)] hover:bg-[color:rgba(255,255,255,0.02)]"
+                          >
+                            <td class="w-36 shrink-0 px-4 py-2 text-[var(--muted)] align-top">{{ nf.label }}</td>
+                            <td class="px-4 py-2 break-all align-top" :class="[nf.mono ? 'font-mono' : '', nf.sensitive ? 'text-[var(--warning)]' : 'text-[var(--text)]']">
+                              <span v-if="nf.sensitive" class="italic opacity-70">{{ nf.value }}</span>
+                              <span v-else>{{ nf.value }}</span>
+                            </td>
+                          </tr>
+                        </template>
+                        <!-- 普通字段行 -->
+                        <tr
+                          v-else
+                          class="border-t border-[var(--line)] hover:bg-[color:rgba(255,255,255,0.02)]"
+                        >
+                          <td class="w-36 shrink-0 px-4 py-2 text-[var(--muted)] align-top">{{ f.label }}</td>
+                          <td class="px-4 py-2 break-all align-top" :class="[f.mono ? 'font-mono' : '', f.sensitive ? 'text-[var(--warning)]' : 'text-[var(--text)]']">
+                            <span v-if="f.sensitive" class="italic opacity-70">{{ f.value }}</span>
+                            <span v-else>{{ f.value }}</span>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+
+              <!-- 非 JSON 或解析失败时降级为原文 -->
+              <pre v-else class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[color:rgba(0,217,163,0.22)] bg-[color:rgba(0,217,163,0.08)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ formattedDecryptedPayload }}</pre>
             </div>
           </section>
 
@@ -181,6 +223,8 @@ import {
 } from "@/utils/syncCrypto";
 import { getSyncItemTypeLabel } from "@/utils/syncItemType";
 import { formatKeyVersion, formatRecordVersion } from "@/utils/syncItemVersion";
+import { buildPayloadTable } from "@/utils/syncPayloadTable";
+import type { PayloadField } from "@/utils/syncPayloadTable";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -198,6 +242,10 @@ const decryptedPlaintext = ref("");
 
 const syncItemId = computed(() => String(route.params.id ?? ""));
 const formattedDecryptedPayload = computed(() => formatDecryptedPayload(decryptedPlaintext.value));
+const decryptedPayloadFields = computed<PayloadField[] | null>(() => {
+  if (!decryptedPlaintext.value || !item.value) return null;
+  return buildPayloadTable(decryptedPlaintext.value, item.value.dataType);
+});
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString("zh-CN");

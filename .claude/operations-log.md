@@ -3399,6 +3399,41 @@
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
 
+## 编码前检查 - main-window-spotlight
+时间：2026-03-26 00:32:13 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-main-window-spotlight.md`
+□ 将使用以下可复用组件：
+- `crates/ui/src/window_border.rs`：复用 `canvas` 和 `window.mouse_position()` 的自绘模式
+- `crates/ui/src/color_picker.rs`：复用 `on_mouse_move(...)` 驱动 hover 状态更新
+- `main/src/home_tab.rs`：复用卡片边框、左侧强调线和 hover 表达
+- `main/src/sync_server_theme.rs`：复用 sync_server 深色主题色板
+□ 将遵循命名约定：通用组件使用 `SpotlightCard`，业务包装函数使用 `spotlight_card` / `danger_spotlight_card`
+□ 将遵循代码风格：保持链式 GPUI builder 和小范围主题包装，不重写现有页面结构
+□ 确认不重复造轮子，证明：已检查 `crates/ui/src/hover_card.rs`、`crates/ui/src/color_picker.rs`、`crates/ui/src/window_border.rs`、`main/src/home_tab.rs`、`main/src/auth.rs`、`main/src/setting_tab.rs`
+
+## 执行记录 - main-window-spotlight
+时间：2026-03-26 00:32:13 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/ui/src/window_border.rs`
+- `crates/ui/src/color_picker.rs`
+- `crates/ui/src/hover_card.rs`
+- `main/src/home_tab.rs`
+- `main/src/auth.rs`
+- `main/src/setting_tab.rs`
+- `main/src/sync_server_theme.rs`
+
+### 2. 对比的相似实现
+- `crates/ui/src/window_border.rs:94`：主应用内自绘和鼠标位置跟踪
+- `crates/ui/src/color_picker.rs:395`：hover 和鼠标移动驱动状态
+- `main/src/home_tab.rs:2920`：卡片边框、阴影和左侧强调线
+
+### 3. 当前实施策略
+- 在 `crates/ui/src` 新增可复用 `SpotlightCard`
+- 在 `main/src/sync_server_theme.rs` 提供绿色和危险态预设
+- 首先接入 `main/src/setting_tab.rs` 账户区域与 `main/src/auth.rs` 认证面板
+
 ## 编码前检查 - sync-server-theme-kiro2api
 时间：2026-03-26 00:00:36 +0800
 
