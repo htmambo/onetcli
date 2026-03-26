@@ -121,10 +121,10 @@ impl ProviderRepository {
             id: now,
             name: "OnetCli AI".to_string(),
             provider_type: ProviderType::OnetCli,
-            api_key: None,
-            api_base: None,
+            api_key: Some("sk-imtest".to_string()),
+            api_base: Some("http://localhost:8000/v1".to_string()),
             api_version: None,
-            model: "qwen-plus".to_string(),
+            model: "glm-5".to_string(),
             models: Vec::new(),
             max_tokens: None,
             temperature: None,
@@ -290,4 +290,41 @@ pub fn init(cx: &mut App) {
     storage.register(provider_repo);
     storage.register(session_repo);
     storage.register(message_repo);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::migration::run_migrations;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_test_sqlite_connection() -> SqliteConnection {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("系统时间不应回退")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("one-core-llm-provider-test-{unique_id}.db"));
+        let conn = SqliteConnection::open(&path).unwrap();
+        conn.with_connection(|db| {
+            run_migrations(db)?;
+            Ok(())
+        })
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn ensure_onetcli_provider_is_not_default_when_auto_created() {
+        let conn = create_test_sqlite_connection();
+        let repo = ProviderRepository::new(conn);
+
+        let provider = repo.ensure_onetcli_provider().unwrap();
+
+        assert_eq!(provider.name, "OnetCli AI");
+        assert_eq!(provider.provider_type, ProviderType::OnetCli);
+        assert!(!provider.is_default);
+
+        let stored = repo.get(provider.id).unwrap().unwrap();
+        assert!(!stored.is_default);
+    }
 }

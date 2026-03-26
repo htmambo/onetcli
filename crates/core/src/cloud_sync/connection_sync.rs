@@ -1145,7 +1145,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
             .as_nanos();
-        let temp_home = std::env::temp_dir().join(format!("one-core-connection-sync-test-{unique}"));
+        let temp_home =
+            std::env::temp_dir().join(format!("one-core-connection-sync-test-{unique}"));
 
         let previous_home = std::env::var_os("HOME");
         unsafe {
@@ -1240,7 +1241,9 @@ mod tests {
 
             let engine = SyncEngine::new(
                 cloud_client.clone(),
-                Arc::new(std::sync::RwLock::new(crate::cloud_sync::CloudSyncService::new())),
+                Arc::new(std::sync::RwLock::new(
+                    crate::cloud_sync::CloudSyncService::new(),
+                )),
                 storage.clone(),
             );
 

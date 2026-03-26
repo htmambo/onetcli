@@ -15,7 +15,6 @@ pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 #[cfg(target_os = "linux")]
 pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
 const BORDER_SIZE: Pixels = px(1.0);
-pub(crate) const BORDER_RADIUS: Pixels = px(0.0);
 
 /// Create a new window border.
 pub fn window_border() -> WindowBorder {
@@ -86,6 +85,7 @@ impl RenderOnce for WindowBorder {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let decorations = window.window_decorations();
         let shadow_size = self.shadow_size;
+        let border_radius = cx.theme().radius_lg;
         #[cfg(target_os = "linux")]
         let prefers_system_frame =
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
@@ -104,6 +104,8 @@ impl RenderOnce for WindowBorder {
         } else {
             shadow_size
         };
+        let show_content_border =
+            prefers_system_frame || matches!(decorations, Decorations::Server);
 
         // Deepin/X11 的系统标题栏路径下不要继续声明自绘边框范围，
         // 否则窗口管理器可能把窗口当成仍在使用客户端边框。
@@ -130,7 +132,8 @@ impl RenderOnce for WindowBorder {
                             move |_bounds, hitbox, window, _| {
                                 let mouse = window.mouse_position();
                                 let size = window.window_bounds().get_bounds().size;
-                                let Decorations::Client { tiling } = window.window_decorations() else {
+                                let Decorations::Client { tiling } = window.window_decorations()
+                                else {
                                     return;
                                 };
                                 if tiling.top && tiling.bottom && tiling.left && tiling.right {
@@ -162,10 +165,16 @@ impl RenderOnce for WindowBorder {
                         .absolute(),
                     )
                     .when(!(tiling.top || tiling.right), |div| {
-                        div.rounded_tr(BORDER_RADIUS)
+                        div.rounded_tr(border_radius)
                     })
                     .when(!(tiling.top || tiling.left), |div| {
-                        div.rounded_tl(BORDER_RADIUS)
+                        div.rounded_tl(border_radius)
+                    })
+                    .when(!(tiling.bottom || tiling.right), |div| {
+                        div.rounded_br(border_radius)
+                    })
+                    .when(!(tiling.bottom || tiling.left), |div| {
+                        div.rounded_bl(border_radius)
                     })
                     .when(!tiling.top, |div| div.pt(shadow_size))
                     .when(!tiling.bottom, |div| div.pb(shadow_size))
@@ -196,10 +205,16 @@ impl RenderOnce for WindowBorder {
                         Decorations::Server => div,
                         Decorations::Client { tiling } if !prefers_system_frame => div
                             .when(!(tiling.top || tiling.right), |div| {
-                                div.rounded_tr(BORDER_RADIUS)
+                                div.rounded_tr(border_radius)
                             })
                             .when(!(tiling.top || tiling.left), |div| {
-                                div.rounded_tl(BORDER_RADIUS)
+                                div.rounded_tl(border_radius)
+                            })
+                            .when(!(tiling.bottom || tiling.right), |div| {
+                                div.rounded_br(border_radius)
+                            })
+                            .when(!(tiling.bottom || tiling.left), |div| {
+                                div.rounded_bl(border_radius)
                             })
                             .border_color(cx.theme().window_border)
                             .when(!tiling.top, |div| div.border_t(BORDER_SIZE))
@@ -220,6 +235,13 @@ impl RenderOnce for WindowBorder {
                                 }])
                             }),
                         Decorations::Client { .. } => div,
+                    })
+                    // 系统装饰路径下补一层可见内边框，避免窗口边界过弱。
+                    .when(show_content_border, |div| {
+                        div.border_1()
+                            .border_color(cx.theme().window_border)
+                            .rounded(border_radius)
+                            .overflow_hidden()
                     })
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();

@@ -3,6 +3,38 @@
 
 ---
 
+## 审查报告（llm-onetcli-default）
+生成时间：2026-03-26 21:25:33 CST
+
+### 需求完整性检查
+- 目标明确：取消设置页里 `OnetCli AI` 的自动默认行为
+- 范围明确：仅涉及 `one-core` 的 provider 仓库默认策略，不改设置页交互结构
+- 交付物明确：自动默认逻辑移除、仓库层单测、本地验证、`.claude/` 留痕
+- 风险与依赖明确：旧数据中已保存的默认标记不会被自动迁移清除
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：91/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：98/100
+- 风险评估：93/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 根因定位准确：`crates/core/src/llm/storage.rs::ensure_onetcli_provider()` 之前会在“当前没有默认 provider”时把自动创建的 `OnetCli AI` 标成默认，这正是设置页里出现默认值的来源。
+- 修复位置正确：现在自动创建的 `OnetCli AI` 固定 `is_default = false`，默认策略从源头移除，而不是在 UI 层做遮挡。
+- 用户控制仍保留：设置页里既有的“设为默认 / 取消默认”逻辑没有被删，用户仍可手动把 `OnetCli AI` 设成默认。
+- 选择链路安全：provider 选择器在无默认 provider 时会回退到首项，因此取消自动默认不会导致聊天或选择面板失效。
+- 本地验证有效：`cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture` 与 `cargo check -p one-core -p main` 均通过。
+
+---
+
 ## 审查报告（connection-remote-delete-conflict-and-sync-server-restore）
 生成时间：2026-03-26 16:32:30 CST
 
@@ -3074,3 +3106,304 @@
 - `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item`：通过
 - `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection`：通过
 - `cargo check -p main`：通过
+
+## 审查报告（terminal-theme-font-size-preserve）
+生成时间：2026-03-26 19:37:49 +0800
+
+### 需求完整性检查
+- 目标明确：修复终端右侧设置切换主题后实际字号回退到 `13` 的问题
+- 范围明确：`terminal_view` 主题切换入口、跨 tab 同步入口、相关回归测试与 `.claude` 留痕
+- 交付物明确：代码修复、本地回归测试、本地编译验证、任务审查报告
+- 风险与依赖明确：当前仍缺少 GUI 自动化或手工验证证据，结论主要依赖代码路径和单测
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：90/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：90/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L92) 新增 `preserve_theme_typography(...)`，在主题切换时保留当前字号、字体族、备用字体和行高比例，仅替换主题名与颜色字段。
+- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L772) 的 `set_theme(...)` 已改为先合并排版参数再写入 `current_theme`，避免右侧设置切换主题时把字号重置为主题默认值。
+- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L859) 的 `apply_theme(...)` 同步复用同一逻辑，并将早退条件改为比较合并后的完整主题，避免跨 tab 同步遗漏排版差异。
+- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L2715) 新增回归测试，验证主题切换后仍保留字号、字体族、备用字体和行高比例。
+
+### 本地验证
+- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration`：通过
+- `cargo check -p terminal_view`：通过
+
+### 残余风险
+- 尚未在真实 GUI 中手工执行“首页设字号 18 -> 打开终端 -> 切 theme”完整回归路径
+- 仓库既有 `gpui-component` 与 `ssh` 未使用导入 warning 仍存在，与本次修复无关
+
+## 审查报告（terminal-sidebar-settings-i18n）
+生成时间：2026-03-26 19:43:38 +0800
+
+### 需求完整性检查
+- 目标明确：补齐终端右侧设置面板中残留的英文文案与说明提示
+- 范围明确：`settings_panel.rs` 可见文案、`terminal_view.yml` 对应词条、`.claude` 留痕
+- 交付物明确：代码修复、本地扫描验证、本地编译验证、审查报告
+- 风险与依赖明确：未做 GUI 多语言手工验证，结论主要依赖静态扫描与编译结果
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：87/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：89/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L100) 的搜索输入框占位符已改为读取 `t!("Settings.search_placeholder")`。
+- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L327) 到 [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L739) 的设置标题、搜索区、字体区、主题区文案均已从硬编码英文切换为 `t!()`。
+- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L382) 的搜索提示已改为本地化文案，并与当前交互保持一致：回车搜索下一个，`Shift+Enter` 搜索上一个。
+- [`terminal_view.yml`](/usr/htdocs/onetcli/crates/terminal_view/locales/terminal_view.yml#L314) 新增 `Settings.search`、`Settings.font_size`、`Settings.font_family`、`Settings.theme` 等词条，补齐该面板缺失翻译。
+
+### 本地验证
+- `rg -n '"(Settings|SEARCH|FONT SIZE|FONT FAMILY|THEME|Search\\.\\.\\.|Select font\\.\\.\\.|Press [^"]+)"' crates/terminal_view/src/sidebar/settings_panel.rs`：未命中
+- `cargo fmt --all -- /usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs`：通过
+- `cargo check -p terminal_view`：通过
+
+### 残余风险
+- 尚未在 GUI 中实际切换语言检查中文/繁中排版是否出现截断
+- 仓库既有 `gpui-component` 与 `ssh` warning 仍存在，与本次修复无关
+
+## 审查报告（terminal-line-height-setting）
+生成时间：2026-03-26 20:16:19 +0800
+
+### 需求完整性检查
+- 目标明确：把终端现有但未暴露的行间距能力补成真实设置项，并保持首页设置、终端右侧设置和实例渲染一致
+- 范围明确：`setting_tab.rs`、`home_tabs.rs`、`terminal_view` 侧边栏与视图层、相关本地化词条
+- 交付物明确：行间距设置项、同步链路、主题切换排版保持、本地验证、`.claude` 留痕
+- 风险与依赖明确：当前仍缺少 GUI 自动化和手工点验，结论主要基于代码路径、单测和编译结果
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：90/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L198) 与 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L717) 已把 `terminal_line_height_scale` 接入 `AppSettings` 和首页“终端行间距”设置项。
+- [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs#L44) 到 [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs#L97) 已把行间距纳入终端创建时应用、事件回写和全量同步逻辑。
+- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L184) 到 [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L221) 新增行间距输入订阅；[`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L294) 到 [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L299) 会在主题同步时回写当前值。
+- [`sidebar/mod.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/mod.rs#L77) 与 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L657) 到 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L658) 已把侧边栏的 `LineHeightScaleChanged` 贯通到终端 setter。
+- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L837) 与 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L1003) 会在终端实例内部统一应用并限制行间距范围；[`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L96) 的 `preserve_theme_typography(...)` 继续保证切换主题不覆盖字号和行间距。
+- [`theme.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/theme.rs#L25) 到 [`theme.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/theme.rs#L30)、[`main.yml`](/usr/htdocs/onetcli/main/locales/main.yml#L771) 和 [`terminal_view.yml`](/usr/htdocs/onetcli/crates/terminal_view/locales/terminal_view.yml#L334) 已把统一范围常量和文案补齐。
+
+### 本地验证
+- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration -- --nocapture`：通过
+- `cargo check -p terminal_view -p main`：通过
+
+### 残余风险
+- 尚未在真实 GUI 中手工确认“首页设置行间距 -> 打开终端 -> 右侧切换主题 -> 行间距保持不变”的完整路径
+- 仓库既有 `gpui-component` 与 `ssh` warning 仍存在，与本次修复无关
+
+## 审查报告（window-border-preview）
+生成时间：2026-03-26 20:26:43 +0800
+
+### 需求完整性检查
+- 目标明确：先给应用窗口补一个可见边框，便于用户直接看效果
+- 范围明确：仅涉及 `crates/ui/src/window_border.rs` 公共窗口装饰层
+- 交付物明确：边框预览、本地格式化与编译验证、`.claude` 留痕
+- 风险与依赖明确：当前没有 GUI 级视觉验证，最终效果仍要靠实际打开应用确认
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：84/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：96/100
+- 风险评估：88/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L107) 新增 `show_content_border`，用于识别系统装饰或 Deepin 系统控件优先路径。
+- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L227) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L230) 现在会在这条路径下为窗口根内容补一圈 1px 内边框。
+- [`root.rs`](/usr/htdocs/onetcli/crates/ui/src/root.rs#L451) 已统一使用 `window_border()`，所以主窗口和弹窗都会一起看到这次预览效果。
+- Linux 既有客户端外框、阴影和拖拽缩放逻辑没有被改掉，仍保留在 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L198) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L224)。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main`：通过
+
+### 残余风险
+- 尚未在真实 GUI 中肉眼确认边框是否足够明显
+- 这是视觉内边框，不是操作系统级外框，如果你要更强效果还要继续调
+
+## 审查报告（window-border-radius-preview）
+生成时间：2026-03-26 20:31:04 +0800
+
+### 需求完整性检查
+- 目标明确：在边框预览基础上再加一点圆角效果
+- 范围明确：仅涉及 `crates/ui/src/window_border.rs`
+- 交付物明确：圆角预览、本地格式化与编译验证、`.claude` 留痕
+- 风险与依赖明确：最终圆角观感仍要实际打开应用确认
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：84/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：96/100
+- 风险评估：88/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L88) 现在使用 `cx.theme().radius_lg` 作为窗口圆角半径。
+- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L167) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L178) 已为客户端边框路径补齐四个角的圆角。
+- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L227) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L231) 已让系统装饰路径下的内边框和内容一起裁成圆角。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main`：通过
+
+### 残余风险
+- 还没做 GUI 手工确认，最终效果以你实际看到的为准
+
+## 审查报告（global-ui-font-settings）
+生成时间：2026-03-26 20:39:21 +0800
+
+### 需求完整性检查
+- 目标明确：把首页设置里的普通“字体 / 字号”真正接通到全局 UI
+- 范围明确：`main/src/setting_tab.rs` 与其对应的全局 Theme 应用路径
+- 交付物明确：代码修复、本地格式化与编译验证、`.claude` 留痕
+- 风险与依赖明确：终端和其他显式等宽字体区域不在本次作用范围内
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：90/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L393) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L404) 新增 `apply_ui_font_preferences(...)`，统一把设置写回全局 Theme 并刷新所有窗口。
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L406) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L416) 现在会在启动加载设置时应用普通 UI 的字体和字号。
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L601) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L617) 保证切换深浅主题后仍保留用户自定义的普通 UI 字体和字号。
+- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L688) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L699) 与 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L708) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L721) 已把设置页里的“字体 / 字号”即时接通到全局 UI。
+- [`root.rs`](/usr/htdocs/onetcli/crates/ui/src/root.rs#L449) 和 [`root.rs`](/usr/htdocs/onetcli/crates/ui/src/root.rs#L459) 本来就消费全局 Theme 的 `font_size` / `font_family`，所以这次接通后会影响首页、设置页、弹窗等普通界面。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 残余风险
+- 尚未在 GUI 中逐页手工确认不同字体下的局部排版表现
+
+## 审查报告（llm-remove-onetcli-provider）
+生成时间：2026-03-26 21:40:39 +0800
+
+### 需求完整性检查
+- 目标明确：删除 `OnetCli AI` 的自动注入，并允许删除本地已有项
+- 范围明确：设置页 provider 管理、AI Chat / ChatDB provider 加载、运行时 provider 过滤
+- 交付物明确：代码修改、本地验证、风险说明与 `.claude` 留痕
+- 风险与依赖明确：保留 `ProviderType::OnetCli` 以兼容旧数据库记录
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：93/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- [`types.rs`](/usr/htdocs/onetcli/crates/core/src/llm/types.rs#L146) 到 [`types.rs`](/usr/htdocs/onetcli/crates/core/src/llm/types.rs#L181) 新增 `is_runtime_available()` 及对应单测，把“运行时可用 provider”收敛成统一语义：启用且非内置。
+- [`engine.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/engine.rs#L243) 到 [`engine.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/engine.rs#L255)、[`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L406) 到 [`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L447)、[`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L247) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L280) 已不再自动创建 `OnetCli AI`，并把它从 AI 运行时 provider 列表中剔除。
+- [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L47) 到 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L61) 现在直接展示仓库中的所有 provider，不再因登录态隐藏旧 `OnetCli` 记录。
+- [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L150) 到 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L205) 与 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L417) 到 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L476) 已移除内置 provider 的删除/禁用保护，旧 `OnetCli AI` 现在可删除。
+- “没有任何 AI 提供商”场景仍是可控退化：[`provider_select.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/components/provider_select.rs#L323) 到 [`provider_select.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/components/provider_select.rs#L343) 会在空列表时清空选择；[`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L804) 到 [`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L817) 与 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L620) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L637) 会提示先选择 provider，而不是崩溃。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p one-core runtime_available -- --nocapture`：通过
+- `cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture`：通过
+- `cargo check -p one-core -p db_view -p main`：通过
+
+### 残余风险
+- 旧数据库里如果还保留 `OnetCli` provider 关联的历史会话，重新进入会话后会回到“未选择 provider”状态，AI 功能不可用但不会崩。
+- `ProviderRepository::ensure_onetcli_provider()` 和 `ProviderType::OnetCli` 仍保留在底层，用于兼容旧数据；这是有意保留，不是遗漏。
+
+## 审查报告（chatdb-duplicate-user-message）
+生成时间：2026-03-26 21:59:33 +0800
+
+### 需求完整性检查
+- 目标明确：检查 ChatDB 发给 AI 的请求是否把同一条用户消息封装了两次
+- 范围明确：ChatDB 面板入口、AgentContext 历史构造、相关 Agent 的消息拼装方式
+- 交付物明确：根因分析、代码修复、单元测试、编译验证、`.claude` 留痕
+- 风险与依赖明确：只修 ChatDB 入口，不改 Agent 协议
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：91/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 根因成立：[`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L552) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L568) 会先把当前输入压入 `self.chat_history`；随后 [`general_chat.rs`](/usr/htdocs/onetcli/crates/core/src/agent/builtin/general_chat.rs#L45) 到 [`general_chat.rs`](/usr/htdocs/onetcli/crates/core/src/agent/builtin/general_chat.rs#L49)、[`sql_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/sql_workflow.rs#L277) 到 [`sql_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/sql_workflow.rs#L283) 以及 [`query_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/query_workflow.rs#L244) 到 [`query_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/query_workflow.rs#L269) 又都会把当前问题追加一次，因此同一轮用户输入会重复进入模型上下文。
+- 修复位于单一入口：[`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L77) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L98) 新增 `build_agent_history(...)`，在保留历史裁剪逻辑的同时，剔除“历史尾部刚好等于当前输入”的那条用户消息。
+- [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L680) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L682) 已改为统一通过该函数构造 `AgentContext` 的历史，因此 GeneralChat、SqlWorkflow、ChatBi 以及路由器都会一起受益。
+- [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L2062) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L2097) 新增了两条单测，分别验证“当前尾部用户消息会被剔除”和“更早的同文案历史不会误删”。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p db_view build_agent_history -- --nocapture`：通过
+- `cargo check -p db_view -p main`：通过
+
+### 残余风险
+- 这是 ChatDB 入口修复，不影响普通 AI 面板。
+- 当前没有真实网络请求抓包验证，但从代码路径看，导致重复的源头已经被切断。

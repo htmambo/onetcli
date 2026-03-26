@@ -1,5 +1,157 @@
 ## 操作日志
 
+## 编码前检查 - llm-onetcli-default
+时间：2026-03-26 21:25:33 CST
+
+- 已查阅上下文摘要文件：`.claude/context-summary-llm-onetcli-default.md`
+- 已分析相似实现：
+  - `main/src/settings/llm_providers_view.rs`
+  - `crates/core/src/llm/storage.rs`
+  - `crates/core/src/ai_chat/components/provider_select.rs`
+- 将使用以下可复用组件：
+  - `ProviderRepository::ensure_onetcli_provider()` 作为默认行为源头
+  - `LlmProvidersView::toggle_default()` 作为手动默认切换入口
+  - `ProviderSelectState` 的“无默认则回退第一个”逻辑，确保取消自动默认后仍可正常选择
+- 将遵循命名约定：继续使用现有 `ProviderConfig.is_default`
+- 将遵循代码风格：修复落在仓库层，不在设置页 UI 层做临时屏蔽
+- 确认不重复造轮子，证明：直接修改内置 provider 自动创建策略，而不是新增额外的“忽略默认”标记
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、单测和编译验证作为替代并留痕
+
+## 编码后声明 - llm-onetcli-default
+时间：2026-03-26 21:25:33 CST
+
+### 1. 复用了以下既有组件
+- `crates/core/src/llm/storage.rs::ProviderRepository::ensure_onetcli_provider`
+- `main/src/settings/llm_providers_view.rs::toggle_default`
+- `crates/core/src/ai_chat/components/provider_select.rs::set_providers`
+
+### 2. 遵循了以下项目约定
+- 命名约定：默认状态仍然只使用 `ProviderConfig.is_default`
+- 文件组织：修复只落在 `one-core` 的 provider 仓库层与对应单测
+- 行为边界：保留 `OnetCli AI` 内置 provider 与手动默认切换能力，只取消自动默认
+
+### 3. 对比了以下相似实现
+- `LlmProvidersView`：设置页只是读取/操作仓库数据，不适合在 UI 层硬改默认来源
+- `ProviderSelectState`：无默认 provider 时会回退选第一个，因此取消自动默认不会打断选择流程
+- `toggle_default()`：仍保留用户显式设为默认或取消默认的能力
+
+### 4. 未重复造轮子的证明
+- 已检查设置页加载逻辑、provider 仓库创建逻辑和 provider 下拉选择逻辑
+- 最终没有新增新的配置字段或 UI 特判，只删除了自动默认赋值
+
+## 实施与验证记录 - llm-onetcli-default
+时间：2026-03-26 21:25:33 CST
+
+### 已完成修改
+- `crates/core/src/llm/storage.rs`
+  - 去掉 `OnetCli AI` 自动创建时的自动默认逻辑
+  - 新增单测，验证自动创建出来的 `OnetCli AI` 不再带默认标记
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture`
+  - 结果：通过
+- `cargo check -p one-core -p main`
+  - 结果：通过
+
+### 当前限制
+- 已经存在于用户本地数据库中的 `OnetCli AI` 默认标记不会被这次自动迁移清掉
+- 用户仍然可以在设置页手动把 `OnetCli AI` 设为默认或取消默认
+
+## 编码前检查 - terminal-ligatures-setting
+时间：2026-03-26 21:16:53 CST
+
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-ligatures-setting.md`
+- 已分析相似实现：
+  - `main/src/setting_tab.rs`
+  - `main/src/home/home_tabs.rs`
+  - `crates/terminal_view/src/view.rs`
+  - `crates/terminal_view/src/terminal_element.rs`
+- 将使用以下可复用组件：
+  - `sync_terminal_settings_to_all(...)` 的首页设置广播入口
+  - `HomePage::setup_terminal_view(...) / apply_terminal_settings_to_all(...)` 的终端同步链路
+  - `TerminalView::apply_terminal_settings(...)` 的终端统一应用入口
+  - `FontVariants` 的终端字体构造逻辑
+- 将遵循命名约定：新增全局字段命名为 `terminal_font_ligatures`
+- 将遵循代码风格：只在首页设置增加开关，不在终端右侧设置面板新增入口；渲染与字宽测量使用同一布尔值
+- 确认不重复造轮子，证明：继续复用现有终端设置广播与渲染链路，不新建额外终端配置对象
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、格式化和编译验证作为替代并留痕
+
+## 编码后声明 - terminal-ligatures-setting
+时间：2026-03-26 21:16:53 CST
+
+### 1. 复用了以下既有组件
+- `main/src/setting_tab.rs::sync_terminal_settings_to_all`：继续作为首页终端设置广播入口
+- `main/src/home/home_tabs.rs::setup_terminal_view`
+- `main/src/home/home_tabs.rs::apply_terminal_settings_to_all`
+- `crates/terminal_view/src/view.rs::apply_terminal_settings`
+- `crates/terminal_view/src/terminal_element.rs::FontVariants`
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增字段使用 `terminal_font_ligatures`
+- 代码风格：设置存储仍放在 `AppSettings`，终端渲染与测量仍收敛在 `terminal_view` crate
+- 范围控制：按用户要求仅在首页设置新增开关，没有在终端右侧设置面板增加入口
+
+### 3. 对比了以下相似实现
+- `terminal_font_family`：沿用首页设置写入 `AppSettings` 后广播到所有终端的模式
+- `terminal_font_size / terminal_line_height_scale`：沿用 `apply_terminal_settings(...)` 统一下发的模式
+- 终端渲染中的 `calt` 关闭逻辑：改成由布尔开关统一控制，不再硬编码
+
+### 4. 未重复造轮子的证明
+- 已检查首页终端设置、终端批量同步和终端绘制链路
+- 最终没有新增新的终端配置模型，只是把既有“关闭连字”的硬编码提升为全局设置
+
+## 实施与验证记录 - terminal-ligatures-setting
+时间：2026-03-26 21:16:53 CST
+
+### 已完成修改
+- `main/src/setting_tab.rs`
+  - 为 `AppSettings` 新增 `terminal_font_ligatures`
+  - 首页设置“终端”分组新增“终端连字”开关
+  - 修改后继续通过 `sync_terminal_settings_to_all(...)` 同步到所有终端实例
+- `main/src/home/home_tabs.rs`
+  - 终端初始化与批量同步时新增下发 `terminal_font_ligatures`
+- `crates/terminal_view/src/view.rs`
+  - `TerminalView` 新增 `font_ligatures_enabled`
+  - `apply_terminal_settings(...)` 新增连字参数
+  - 字宽测量时使用统一的字体特性开关
+- `crates/terminal_view/src/terminal_element.rs`
+  - 抽出 `terminal_font_features(...)`
+  - 终端真实文本绘制与字宽测量共用同一套连字开关
+- `main/locales/main.yml`
+  - 补充首页终端连字设置文案
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p terminal_view -p main`
+  - 结果：通过
+
+### 当前限制
+- 本次按用户要求，没有在终端右侧设置面板加入连字开关
+- 当前没有 GUI 自动化测试，本次主要依赖本地编译验证；实际连字显示效果仍建议手工切换字体后点验
+
+## 编码前检查 - terminal-font-home-setting
+时间：2026-03-26 20:55:57 CST
+
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-font-home-setting.md`
+- 已分析相似实现：
+  - `main/src/setting_tab.rs`
+  - `main/src/home/home_tabs.rs`
+  - `crates/terminal_view/src/view.rs`
+  - `crates/terminal_view/src/sidebar/settings_panel.rs`
+  - `crates/terminal_view/src/theme.rs`
+- 将使用以下可复用组件：
+  - `sync_terminal_settings_to_all(...)` 的首页设置广播入口
+  - `HomePage::setup_terminal_view(...) / apply_terminal_settings_to_all(...)` 的终端同步模式
+  - `TerminalTheme::available_monospace_fonts()` 的固定等宽字体列表
+  - `preserve_theme_typography(...)` 的主题切换保留排版策略
+- 将遵循命名约定：终端新增全局设置字段命名为 `terminal_font_family`，终端事件沿用 `*Changed` 命名
+- 将遵循代码风格：改动收敛在设置模型、首页设置 UI、终端事件和同步入口，不新增第二套终端状态
+- 确认不重复造轮子，证明：首页设置直接复用右侧终端设置已有字体候选和现有全局同步链路
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、格式化和编译验证作为替代并留痕
+
 ## 编码前检查 - connection-remote-delete-conflict
 时间：2026-03-26 16:18:00 CST
 
@@ -5861,3 +6013,564 @@
 - `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection`：通过
 - `cargo check -p main`：通过
 - `cargo test -p one-core`：存在既有顺序相关失败；3 条冲突测试在全量顺序下出现 `NotUnlocked` / 锁污染，但单独重跑均通过，说明本次改动未引入对应功能性失败
+
+## 编码前检查 - 图标透明背景
+时间：2026-03-26 19:12:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-图标透明背景.md`
+- 将使用以下可复用组件：
+  - `script/generate-macos-icon.sh`：复用 SVG -> 平台图标导出流程
+  - `script/package-linux-deb.sh`：复用 Linux 图标尺寸与目标路径
+  - `main/build.rs`：复用 Windows `.ico` 固定入口
+- 将遵循命名约定：脚本使用 `generate-*` / `prepare-*` 短横线命名
+- 将遵循代码风格：Shell 脚本统一 `set -euo pipefail`，错误输出使用简洁中文
+- 确认不重复造轮子：已检查 `script/`、`resources/`、`main/build.rs`，仓库内不存在现成的 Linux+Windows 透明图标重建脚本
+- 工具缺失留痕：仓库规范要求的 `desktop-commander`、`sequential-thinking`、`context7`、`github.search_code` 在当前运行环境不可用，本次改用本地 shell、代码检索与像素校验替代
+
+## 编码后声明 - 图标透明背景
+时间：2026-03-26 19:18:00 +0800
+
+### 1. 复用了以下既有组件
+- `script/generate-macos-icon.sh`：沿用现有 SVG -> 平台图标导出方式，并接入透明背景预处理
+- `script/package-linux-deb.sh`：保持 Linux 资源文件名与尺寸约定不变
+- `main/build.rs`：保持 Windows `.ico` 固定入口不变，仅重建目标文件内容
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增脚本使用 `generate-linux-windows-icons.sh`、`prepare-transparent-logo.sh`
+- 代码风格：Shell 脚本继续使用 `set -euo pipefail`，临时目录统一清理
+- 文件组织：平台资源仍放在 `resources/linux`、`resources/windows`，生成逻辑放在 `script/`
+
+### 3. 对比了以下相似实现
+- `script/generate-macos-icon.sh`：保持“先渲染主图，再输出平台资源”的模式，只新增透明预处理步骤
+- `script/package-linux-deb.sh`：保持 Linux 三个固定尺寸入口，不引入新的打包路径
+- `main/build.rs`：保持 Windows 仍然只依赖一个 `.ico` 文件，避免改动构建逻辑
+
+### 4. 未重复造轮子的证明
+- 未新增新的平台资源目录或新的构建入口
+- 未修改 Linux 打包脚本与 Windows 构建脚本的消费路径
+- Windows PNG 仅作为 `.ico` 的可追溯源文件补齐，不替代现有 `.ico` 入口
+
+### 5. 本地验证结果
+- `bash script/generate-linux-windows-icons.sh`：通过
+- `file resources/linux/*.png resources/windows/onetcli-*.png resources/windows/onetcli.ico`：通过
+- 自定义 Python 像素校验：Linux 三张 PNG、Windows 七张 PNG 与 ICO 内嵌七帧四角像素均为透明 `(0, 0, 0, 0)`
+- 约束说明：当前环境缺少 macOS 专用的 `sips` / `iconutil`，因此未在本机重建 `resources/macos/OnetCli.icns`
+
+## 编码前检查 - 终端主题切换字号保持
+时间：2026-03-26 19:31:07 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-theme-font-size-preserve.md`
+- 将使用以下可复用组件：
+  - `TerminalView::set_theme(...)`：主题切换主入口
+  - `TerminalView::apply_theme(...)`：跨 tab 主题同步入口
+  - `TerminalView::apply_terminal_settings(...)`：现有字号同步链路
+- 将遵循命名约定：沿用 `set_*` / `apply_*` 职责区分，不引入新的状态来源
+- 将遵循代码风格：优先抽纯函数复用给 `set_theme` 与 `apply_theme`
+- 确认不重复造轮子：已检查 `terminal_view` 现有主题与设置同步逻辑，不存在现成的“保留排版参数切换主题”帮助函数
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码证据和单元测试替代
+
+## 编码后声明 - 终端主题切换字号保持
+时间：2026-03-26 19:37:49 +0800
+
+### 1. 复用了以下既有组件
+- `TerminalView::set_theme(...)`：继续作为终端侧边栏主题切换的唯一入口
+- `TerminalView::apply_theme(...)`：继续作为跨 tab 主题同步入口
+- `TerminalTheme::with_font_size(...)` / `with_font_family(...)` / `with_font_fallbacks(...)` / `with_line_height_scale(...)`：复用现有主题构造接口，避免新增状态同步分支
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增帮助函数命名为 `preserve_theme_typography(...)`，语义与职责单一
+- 代码风格：用纯函数集中“保留排版参数”逻辑，避免在两个调用点复制赋值代码
+- 文件组织：修复与回归测试均留在 `crates/terminal_view/src/view.rs`，保持终端视图逻辑就近维护
+
+### 3. 对比了以下相似实现
+- `TerminalView::set_theme(...)`：原先整体覆盖 `current_theme`，现在保留当前排版参数后再切换颜色主题
+- `TerminalView::apply_theme(...)`：原先仅按 `theme.name` 早退，现改为比较合并后的完整主题，避免排版差异被忽略
+- `TerminalView::apply_terminal_settings(...)`：保持原有字号同步职责不变，本次不新增第二套字号来源
+
+### 4. 未重复造轮子的证明
+- 未新增新的终端设置状态字段
+- 未改动主题列表、首页设置或侧边栏表单结构
+- 仅在主题进入 `current_theme` 前做合并，复用现有刷新与同步链路
+
+### 5. 本地验证结果
+- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration`：通过
+- `cargo check -p terminal_view`：通过
+
+### 6. 残余风险
+- 当前仅完成代码级回归测试与编译验证，未在真实 GUI 里手工走“切换 theme”场景
+- 编译过程中仍有 `crates/ui/src/window_ext.rs` 和 `crates/ssh/src/ssh.rs` 的既有 warning，与本次修复无关
+
+## 编码前检查 - 终端侧边栏设置翻译补齐
+时间：2026-03-26 19:43:38 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-sidebar-settings-i18n.md`
+- 将使用以下可复用组件：
+  - `rust_i18n::t`：复用现有终端侧边栏与设置页文案接入方式
+  - `crates/terminal_view/locales/terminal_view.yml`：复用 `terminal_view` crate 既有词条组织结构
+  - `Common.settings`：复用全局“设置”标题文案
+- 将遵循命名约定：新增文案键统一放在 `Settings.*`
+- 将遵循代码风格：只替换可见文案来源，不改动现有事件流与状态逻辑
+- 确认不重复造轮子：已检查 `settings_panel.rs`、`file_manager_panel.rs`、`quick_command_panel.rs` 与 `main/src/setting_tab.rs`，确认当前问题是该面板残留硬编码英文
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地搜索、代码证据与编译验证替代
+
+## 编码后声明 - 终端侧边栏设置翻译补齐
+时间：2026-03-26 19:43:38 +0800
+
+### 1. 复用了以下既有组件
+- `rust_i18n::t`：将设置面板标题、区块标题、占位符和说明提示统一切到现有 i18n 机制
+- `crates/terminal_view/locales/terminal_view.yml`：在现有 `Settings` 分组下补齐缺失词条
+- `Common.settings`：复用全局“设置”标题，避免重复定义相同语义
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增键使用 `Settings.search`、`Settings.font_size`、`Settings.theme` 这类面板域前缀
+- 代码风格：组件树中不再直接写可见英文字符串，统一使用 `t!()`
+- 文件组织：代码改动只在 `settings_panel.rs` 与 `terminal_view.yml`，未扩散到其他面板
+
+### 3. 对比了以下相似实现
+- `file_manager_panel.rs`：沿用同 crate 内输入框占位符直接读取本地词条的模式
+- `setting_tab.rs`：沿用设置类界面使用明确字段键名的模式
+- `quick_command_panel.rs`：沿用终端侧边栏内部 tooltip/标题均本地化的模式
+
+### 4. 未重复造轮子的证明
+- 未新增新的翻译加载逻辑
+- 未新增新的设置状态或事件
+- 仅补齐词条并将现有硬编码英文替换为 `t!()` 调用
+
+### 5. 本地验证结果
+- `rg -n '"(Settings|SEARCH|FONT SIZE|FONT FAMILY|THEME|Search\\.\\.\\.|Select font\\.\\.\\.|Press [^"]+)"' crates/terminal_view/src/sidebar/settings_panel.rs`：未命中，说明目标面板已无这类可见英文硬编码
+- `cargo fmt --all -- /usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs`：通过
+- `cargo check -p terminal_view`：通过
+
+### 6. 残余风险
+- 当前只完成静态代码扫描与编译验证，未在 GUI 中手工切换语言检查实际显示
+- 编译过程中仍有 `crates/ui/src/window_ext.rs` 与 `crates/ssh/src/ssh.rs` 的既有 warning，与本次翻译修复无关
+
+## 编码前检查 - 终端行间距设置
+时间：2026-03-26 19:49:30 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-line-height-setting.md`
+- 将使用以下可复用组件：
+  - `TerminalView::set_line_height_scale(...)`：终端内部已有的行间距 setter
+  - `HomePage::setup_terminal_view(...)` / `apply_terminal_settings_to_all(...)`：现有全局终端设置同步链
+  - `SettingsPanel` 字体大小输入框模式：复用右侧面板数字输入与回流抑制逻辑
+- 将遵循命名约定：全局设置字段命名为 `terminal_line_height_scale`
+- 将遵循代码风格：复用既有字号同步链路，不新增独立配置通道
+- 确认不重复造轮子：已检查 `theme.rs`、`view.rs`、`sidebar/mod.rs`、`setting_tab.rs`，确认行间距逻辑已存在，只是未接入设置
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地搜索、代码证据和编译验证替代
+
+## 编码后声明 - 终端行间距设置
+时间：2026-03-26 20:16:19 +0800
+
+### 1. 复用了以下既有组件
+- `crates/terminal_view/src/view.rs::set_line_height_scale(...)`：继续作为终端实例内部唯一的行间距变更入口
+- `main/src/home/home_tabs.rs::setup_terminal_view(...)` / `apply_terminal_settings_to_all(...)`：复用现有“首页设置 <-> 终端实例”同步链路
+- `crates/terminal_view/src/sidebar/settings_panel.rs` 的字号输入框模式：复用数字输入、步进按钮与回流抑制机制
+- `crates/terminal_view/src/theme.rs::with_line_height_scale(...)`：复用主题层的统一 clamp 规则
+
+### 2. 遵循了以下项目约定
+- 命名约定：全局设置字段命名为 `terminal_line_height_scale`，事件命名为 `LineHeightScaleChanged`
+- 代码风格：继续沿用 `AppSettings -> HomePage -> TerminalView -> Sidebar` 的单向同步路径
+- 文件组织：产品级设置放在 `main/src/setting_tab.rs`，终端局部设置放在 `crates/terminal_view/src/sidebar/settings_panel.rs`，文案分别落在 `main.yml` 与 `terminal_view.yml`
+
+### 3. 对比了以下相似实现
+- `main/src/setting_tab.rs` 里既有的终端字号设置：本次按同样方式新增行间距设置项并调用 `sync_terminal_settings_to_all(...)`
+- `crates/terminal_view/src/sidebar/settings_panel.rs` 里既有的字号输入框：本次沿用同样的输入订阅与步进事件模式扩展到行间距
+- `crates/terminal_view/src/view.rs` 里的主题切换逻辑：本次保留已有 `preserve_theme_typography(...)`，确保切 theme 不覆盖字号和行间距
+
+### 4. 未重复造轮子的证明
+- 未新增新的终端配置对象或第二套状态源
+- 未新增新的主题排版模型，只把已有 `line_height_scale` 接入现有设置链路
+- 未新增新的同步广播机制，直接复用 `TerminalViewEvent` 与 `apply_terminal_settings_to_all(...)`
+
+### 5. 本地验证结果
+- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration -- --nocapture`：通过
+- `cargo check -p terminal_view -p main`：通过
+
+### 6. 残余风险
+- 尚未做 GUI 手工验证，仍建议实际确认“首页设置行间距 -> 打开终端 -> 右侧切换 theme -> 行间距保持不变”的完整路径
+- 编译过程中存在 `crates/ui/src/window_ext.rs` 与 `crates/ssh/src/ssh.rs` 的既有 warning，与本次行间距设置改动无关
+
+## 实施与验证记录 - 终端行间距设置
+时间：2026-03-26 20:16:19 +0800
+
+### 已完成修改
+- `main/src/setting_tab.rs`
+  - `AppSettings` 新增 `terminal_line_height_scale`
+  - 首页“设置 -> 终端”新增“终端行间距”数值项，并在修改后同步到所有已打开终端
+- `main/src/home/home_tabs.rs`
+  - 创建终端时会读取并应用全局行间距
+  - 终端实例发出 `LineHeightScaleChanged` 后，会回写 `AppSettings` 并广播到所有终端
+- `crates/terminal_view/src/sidebar/settings_panel.rs`
+  - 右侧设置面板新增“行间距”输入框、手动输入订阅和步进按钮处理
+  - `set_current_theme(...)` 会把当前行间距回写到侧边栏 UI，避免显示值与实际值脱节
+- `crates/terminal_view/src/sidebar/mod.rs`
+  - 新增 `TerminalSidebarEvent::LineHeightScaleChanged(f32)` 并完成面板事件转发
+- `crates/terminal_view/src/view.rs`
+  - `apply_terminal_settings(...)` 扩展为同时接收字号与行间距
+  - `set_line_height_scale(...)` 统一进行范围限制并发出 `TerminalViewEvent`
+  - `set_theme(...)` / `apply_theme(...)` 继续通过 `preserve_theme_typography(...)` 保留字号、字体和行间距
+- `crates/terminal_view/src/theme.rs` / `crates/terminal_view/src/lib.rs`
+  - 对外暴露行间距默认值与上下限常量，并统一 clamp 逻辑
+- `main/locales/main.yml` / `crates/terminal_view/locales/terminal_view.yml`
+  - 补充首页设置与终端右侧设置的“行间距”翻译词条
+
+### 本地验证
+- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration -- --nocapture`
+  - 结果：通过
+- `cargo check -p terminal_view -p main`
+  - 结果：通过
+
+### 当前限制
+- 尚未补 UI 自动化测试
+- 尚未进行 GUI 手工点验，最终体验仍建议在实际终端里确认一次
+
+## 编码前检查 - 应用窗口边框预览
+时间：2026-03-26 20:26:43 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-window-border-preview.md`
+- 已分析相似实现：
+  - `crates/ui/src/window_border.rs`
+  - `crates/ui/src/root.rs`
+  - `main/src/main.rs`
+  - `crates/core/src/popup_window.rs`
+  - `crates/ui/src/title_bar.rs`
+- 将使用以下可复用组件：
+  - `window_border()`：统一窗口装饰入口
+  - `linux_prefers_system_window_controls()`：区分 Deepin 系统控件路径
+  - `cx.theme().window_border`：复用现有窗口边框主题色
+- 将遵循命名约定：不新增新的窗口配置项，只在现有 `WindowBorder` 内扩展条件渲染
+- 将遵循代码风格：修改公共窗口层一次，主窗口和弹窗自动继承
+- 确认不重复造轮子：已确认窗口边框能力已存在，本次只补“系统装饰路径下的可见内边框”
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码检索、格式化和编译验证替代
+
+## 编码后声明 - 应用窗口边框预览
+时间：2026-03-26 20:26:43 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/window_border.rs::WindowBorder`：继续作为窗口边框统一入口
+- `crates/ui/src/root.rs::render(...)`：所有窗口继续通过 `window_border()` 承载边框
+- `crates/ui/src/title_bar.rs::linux_prefers_system_window_controls()`：复用桌面环境判断，不重造平台分支
+- `cx.theme().window_border`：继续使用现有主题色作为边框颜色来源
+
+### 2. 遵循了以下项目约定
+- 命名约定：没有新增公开 API 或设置字段，只增加局部布尔变量 `show_content_border`
+- 代码风格：改动收敛在 `crates/ui/src/window_border.rs`，不向页面层扩散
+- 文件组织：窗口基础设施仍集中在 UI 公共层
+
+### 3. 对比了以下相似实现
+- `window_border.rs` 既有 Linux 客户端外框逻辑：本次不改其拖拽缩放和阴影行为
+- `root.rs` 既有统一根容器包装模式：沿用该模式让主窗口和弹窗一起生效
+- `title_bar.rs` 的 Deepin 判断：本次按其结果补“系统装饰路径”的内边框，而不是硬改系统外框
+
+### 4. 未重复造轮子的证明
+- 未新增第二套窗口包裹组件
+- 未在主窗口和弹窗分别写边框逻辑
+- 未新增平台特化窗口配置，仅补现有边框组件的条件渲染
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main`：通过
+
+### 6. 残余风险
+- 当前仅完成编译验证，尚未实际启动 GUI 观察边框强度
+- 这是视觉内边框，不是操作系统级真实外框；如果你觉得太弱或太重，还需要继续调颜色或宽度
+
+## 实施与验证记录 - 应用窗口边框预览
+时间：2026-03-26 20:26:43 +0800
+
+### 已完成修改
+- `crates/ui/src/window_border.rs`
+  - 新增 `show_content_border` 条件
+  - 在系统装饰路径和 Deepin 系统控件优先路径下，为窗口根内容补一圈 1px 内边框
+  - Linux 既有客户端外框、阴影和缩放热区逻辑保持不变
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p gpui-component -p main`
+  - 结果：通过
+
+### 当前限制
+- 未做 GUI 手工预览，边框视觉强度还需要你实际看一眼
+
+## 编码前检查 - 应用窗口圆角预览
+时间：2026-03-26 20:31:04 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-window-border-radius-preview.md`
+- 已分析相似实现：
+  - `crates/ui/src/window_border.rs`
+  - `crates/ui/src/theme/mod.rs`
+  - `crates/ui/src/styled.rs`
+- 将使用以下可复用组件：
+  - `cx.theme().radius_lg`：复用项目既有大圆角半径
+  - `rounded_*` 系列方法：分别处理四个角
+  - `overflow_hidden()`：确保系统装饰路径下内容跟随圆角裁切
+- 将遵循命名约定：不新增设置项，只在现有 `WindowBorder` 内补圆角效果
+- 将遵循代码风格：圆角逻辑继续集中在公共窗口层
+- 确认不重复造轮子：项目已有主题半径和圆角 API，本次只把窗口边框接上去
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码检索、格式化和编译验证替代
+
+## 编码后声明 - 应用窗口圆角预览
+时间：2026-03-26 20:31:04 +0800
+
+### 1. 复用了以下既有组件
+- `cx.theme().radius_lg`：作为窗口圆角统一半径
+- `window_border.rs` 既有 `tiling` 判断：继续按边贴齐状态决定哪些角需要保留圆角
+- `overflow_hidden()`：让系统装饰路径下的内容和边框一起裁成圆角
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增局部变量 `border_radius`，不新增公开配置
+- 代码风格：仍只修改 `crates/ui/src/window_border.rs`
+- 文件组织：窗口视觉效果继续留在 UI 公共层
+
+### 3. 对比了以下相似实现
+- 主题里的 `radius_lg`：本次直接复用，而不是硬写 `8px/10px`
+- `styled.rs` 的通用圆角 API：本次沿用同一套风格能力
+- `window_border.rs` 原有顶角逻辑：本次补齐底角，并让系统装饰路径也有圆角裁切
+
+### 4. 未重复造轮子的证明
+- 未新增新的圆角配置系统
+- 未在页面层逐个加圆角
+- 未新增第二套窗口容器组件
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p gpui-component -p main`：通过
+
+### 6. 残余风险
+- 目前还没有 GUI 肉眼确认，不排除你会觉得圆角偏大或偏小
+
+## 实施与验证记录 - 应用窗口圆角预览
+时间：2026-03-26 20:31:04 +0800
+
+### 已完成修改
+- `crates/ui/src/window_border.rs`
+  - 窗口边框改为使用 `cx.theme().radius_lg`
+  - Linux 客户端边框路径补齐底部两个角的圆角
+  - 系统装饰路径下的内边框也改成圆角，并对内容启用裁切
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p gpui-component -p main`
+  - 结果：通过
+
+### 当前限制
+- 还没实际打开窗口查看最终圆角观感
+
+## 编码前检查 - 全局 UI 字体设置接通
+时间：2026-03-26 20:39:21 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-global-ui-font-settings.md`
+- 已分析相似实现：
+  - `crates/ui/src/root.rs`
+  - `crates/story/src/title_bar.rs`
+  - `crates/core/src/themes.rs`
+  - `main/src/setting_tab.rs`
+- 将使用以下可复用组件：
+  - `Theme::global_mut(cx)`：全局字体与字号实际生效入口
+  - `cx.refresh_windows()`：全窗口立即刷新
+  - `AppSettings::apply(...)`：启动加载和重载设置统一入口
+- 将遵循命名约定：继续使用现有 `font_family` / `font_size` 字段，不新增第二套 UI 字体设置
+- 将遵循代码风格：用一个统一辅助函数覆盖 Theme，避免每个设置项各写一遍
+- 确认不重复造轮子：普通 UI 字体本来就应该走全局 Theme，本次只把已有设置字段接回去
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码检索、格式化和编译验证替代
+
+## 编码后声明 - 全局 UI 字体设置接通
+时间：2026-03-26 20:39:21 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/root.rs`：继续作为普通 UI 消费全局 Theme 字体和字号的根入口
+- `Theme::global_mut(cx)`：继续承载应用级字体配置
+- `cx.refresh_windows()`：复用主题刷新模式，让多窗口同时生效
+- `AppSettings::apply(...)`：继续作为设置加载和重载的统一应用入口
+
+### 2. 遵循了以下项目约定
+- 命名约定：普通 UI 仍用 `font_family` / `font_size`，终端仍用 `terminal_*`
+- 代码风格：新增统一辅助函数 `apply_ui_font_preferences(...)`，不在多个闭包里复制 Theme 写入逻辑
+- 文件组织：只改 `main/src/setting_tab.rs`，不把全局 UI 字体逻辑扩散到各页面
+
+### 3. 对比了以下相似实现
+- `crates/story/src/title_bar.rs`：参考其“改 Theme 后立即刷新窗口”的模式
+- `crates/core/src/themes.rs`：参考其“全局 Theme 改动后刷新所有窗口”的模式
+- `main/src/setting_tab.rs` 现有主题切换逻辑：本次在 `Theme::change(...)` 之后重新覆盖字体设置，避免被主题默认值冲掉
+
+### 4. 未重复造轮子的证明
+- 未新增新的 UI 字体系统
+- 未新增页面级局部字体配置
+- 只是把已有设置字段接回全局 Theme
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过
+
+### 6. 残余风险
+- 尚未做 GUI 手工验证，仍建议你实际改一下首页设置里的字体和字号看看页面变化
+- 终端和显式等宽字体区域不会跟随这组设置变化，这是预期边界
+
+## 实施与验证记录 - 全局 UI 字体设置接通
+时间：2026-03-26 20:39:21 +0800
+
+### 已完成修改
+- `main/src/setting_tab.rs`
+  - 新增 `clamp_ui_font_size(...)`
+  - 新增 `apply_ui_font_preferences(...)`，统一把普通 UI 字体和字号写回 `Theme` 并刷新所有窗口
+  - `AppSettings::apply(...)` 现在会在启动加载时真正应用这组设置
+  - 首页设置里的“字体 / 字号”修改后会立即作用于全局 UI
+  - 切换深浅主题后会重新应用这组设置，避免被主题配置覆盖
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 当前限制
+- 尚未做 GUI 手工点验
+
+## 编码前检查 - 移除 OnetCli AI provider 入口
+时间：2026-03-26 21:35:23 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-llm-remove-onetcli-provider.md`
+- 已分析相似实现：
+  - `main/src/settings/llm_providers_view.rs`
+  - `crates/core/src/ai_chat/panel.rs`
+  - `crates/db_view/src/chatdb/chat_panel.rs`
+  - `crates/core/src/ai_chat/components/provider_select.rs`
+  - `crates/core/src/ai_chat/engine.rs`
+- 将使用以下可复用组件：
+  - `ProviderConfig::is_builtin()`：保留旧数据兼容语义
+  - `ProviderSelectState::set_providers(...)`：在空 provider 列表时自动清空选择
+  - `ProviderRepository::delete(...)`：继续作为删除旧 provider 记录的统一入口
+- 将遵循命名约定：继续使用 `ProviderConfig` / `ProviderType` 现有结构，不引入新 provider 类型
+- 将遵循代码风格：先抽出运行时可用判断，再让 AI Chat / ChatDB / 引擎统一复用
+- 确认不重复造轮子：不新增 provider 存储层，不新增第二套删除逻辑，只去掉 `OnetCli` 的特殊入口和保护
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`、`github.search_code`、`context7`，本次以本地代码检索、现有总结、格式化和编译/单测验证替代
+
+## 编码后声明 - 移除 OnetCli AI provider 入口
+时间：2026-03-26 21:40:39 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/llm/types.rs::ProviderConfig::is_builtin()`：继续保留旧 `onet_cli` 数据兼容判断
+- `crates/core/src/ai_chat/components/provider_select.rs::set_providers(...)`：复用空列表清空选择逻辑，保证无 provider 时安全退化
+- `ProviderRepository::delete(...)`：继续作为设置页删除旧 provider 记录的统一入口
+
+### 2. 遵循了以下项目约定
+- 命名约定：没有新增 provider 类型，继续沿用 `ProviderConfig` / `ProviderType`
+- 代码风格：把“运行时可用”收口到 `ProviderConfig::is_runtime_available()`，避免在多个面板重复硬编码条件
+- 文件组织：设置页改动留在 `main/src/settings`，聊天面板改动留在各自 crate，底层兼容逻辑留在 `one-core`
+
+### 3. 对比了以下相似实现
+- `main/src/settings/llm_providers_view.rs`：原先把内置 provider 做特殊卡片处理，本次改成统一动作按钮，便于用户清理旧记录
+- `crates/core/src/ai_chat/panel.rs` 与 `crates/db_view/src/chatdb/chat_panel.rs`：原先都在登录态下注入 `OnetCli AI`，本次统一改为只消费运行时可用 provider
+- `crates/core/src/ai_chat/engine.rs`：补齐统一过滤，避免其他调用方重新把 `OnetCli` 放回运行时列表
+
+### 4. 未重复造轮子的证明
+- 没有新增 provider 清理脚本
+- 没有新增新的“隐藏 provider”状态字段
+- 只是移除自动注入入口、统一运行时过滤条件，并开放旧记录删除
+
+## 实施与验证记录 - 移除 OnetCli AI provider 入口
+时间：2026-03-26 21:40:39 +0800
+
+### 已完成修改
+- `crates/core/src/llm/types.rs`
+  - 新增 `ProviderConfig::is_runtime_available()`
+  - 新增 2 个单测，验证 `OnetCli` 不可进入运行时、普通 provider 仍可用
+- `crates/core/src/ai_chat/engine.rs`
+  - 统一通过 `is_runtime_available()` 过滤运行时 provider
+- `crates/core/src/ai_chat/panel.rs`
+  - 移除登录态自动创建 `OnetCli AI`
+  - 运行时只加载可用 provider
+- `crates/db_view/src/chatdb/chat_panel.rs`
+  - 移除登录态自动创建 `OnetCli AI`
+  - 运行时只加载可用 provider
+- `main/src/settings/llm_providers_view.rs`
+  - 移除设置页自动创建 `OnetCli AI`
+  - 不再因登录态隐藏旧 `OnetCli` 记录
+  - 移除内置 provider 的删除/禁用保护，统一显示删除按钮
+- `.claude/context-summary-llm-remove-onetcli-provider.md`
+  - 记录本轮上下文、风险与验证依据
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core runtime_available -- --nocapture`
+  - 结果：通过
+- `cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture`
+  - 结果：通过
+- `cargo check -p one-core -p db_view -p main`
+  - 结果：通过
+
+### 风险结论
+- 没有任何 AI provider 时，系统会退化到“空选择 + 发送前提示先选择 provider”，不会直接崩溃
+- 旧会话如果还绑定被删掉的 `OnetCli`，重新进入后 AI 能力不可用，但会回到重新选择 provider 的可恢复状态
+
+### 当前限制
+- 本轮仍保留 `ProviderType::OnetCli` 和 `ProviderRepository::ensure_onetcli_provider()`，这是为了兼容用户本地旧数据库记录
+- 尚未做 GUI 手工点验，建议你实际打开首页设置确认旧 `OnetCli AI` 卡片现在可以删除
+
+## 编码前检查 - chatdb-duplicate-user-message
+时间：2026-03-26 21:59:33 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-chatdb-duplicate-user-message.md`
+- 已分析相似实现：
+  - `crates/db_view/src/chatdb/chat_panel.rs`
+  - `crates/core/src/agent/builtin/general_chat.rs`
+  - `crates/db_view/src/chatdb/agents/sql_workflow.rs`
+  - `crates/db_view/src/chatdb/agents/query_workflow.rs`
+  - `crates/core/src/ai_chat/panel.rs`
+- 将使用以下可复用组件：
+  - `AgentContext::new(...)` 作为 ChatDB 到 Agent 层的唯一历史传递入口
+  - `Message::content_as_text()` 用于精确比较历史尾部文本
+  - `Role::User` 作为“当前输入去重”判定条件
+- 将遵循命名约定：新增辅助函数命名为 `build_agent_history(...)`，保持与现有 `send_to_ai` 语义一致
+- 将遵循代码风格：只在 ChatDB 入口修正历史构造，不散落到各个 Agent 内部做补丁
+- 确认不重复造轮子：不新增第二套消息结构，不改 Agent 协议，只修正传入 `AgentContext` 的历史内容
+- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`、`github.search_code`、`context7`，本次以本地代码检索、单元测试和编译验证替代
+
+## 编码后声明 - chatdb-duplicate-user-message
+时间：2026-03-26 21:59:33 +0800
+
+### 1. 复用了以下既有组件
+- `crates/db_view/src/chatdb/chat_panel.rs::send_to_ai(...)`：继续作为 ChatDB 发往 Agent 的统一入口
+- `one_core::agent::AgentContext`：保持现有“历史 + 当前输入”协议不变
+- `one_core::llm::Message::content_as_text()`：用于比较尾部消息文本而不碰底层消息结构
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增的历史整理函数使用动宾结构 `build_agent_history`
+- 代码风格：根因修复落在入口层，不在 GeneralChat/SqlWorkflow/ChatBi 多处分别打补丁
+- 测试方式：使用纯函数单元测试验证历史去重规则，避免引入重 UI 测试
+
+### 3. 对比了以下相似实现
+- `GeneralChatAgent`：明确要求 `ctx.chat_history` 不含当前输入，因为它会再 append 一次 `ctx.user_input`
+- `SqlWorkflowAgent`：生成 SQL 时同样会在历史后再追加 `context.user_question`
+- `QueryWorkflow`：AI 选表 prompt 也是“历史 + 当前问题”结构，因此入口修复可以一次覆盖所有路径
+- `AiChatPanel`：普通聊天面板没有在入口提前把当前输入塞进 Agent 历史，印证问题仅在 ChatDB
+
+### 4. 未重复造轮子的证明
+- 没有改 Agent trait
+- 没有改路由器协议
+- 没有给消息模型新增“inflight”标记
+- 只是把 ChatDB 传入 Agent 的历史在边界处做一次尾部去重
+
+## 实施与验证记录 - chatdb-duplicate-user-message
+时间：2026-03-26 21:59:33 +0800
+
+### 已完成修改
+- `crates/db_view/src/chatdb/chat_panel.rs`
+  - 新增 `build_agent_history(...)`
+  - `send_to_ai(...)` 统一通过该函数构造传给 `AgentContext` 的历史
+  - 新增 2 条单测，验证当前用户消息不会重复进入 Agent 历史，且不会误删更早的同文案历史
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p db_view build_agent_history -- --nocapture`
+  - 结果：通过
+- `cargo check -p db_view -p main`
+  - 结果：通过
+
+### 风险结论
+- 根因是 ChatDB 在入口把当前输入先塞进 `chat_history`，而 Agent 层又默认追加一次 `ctx.user_input`
+- 修复后，传给模型的上下文中不会再出现同一轮用户输入的重复封装

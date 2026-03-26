@@ -24,6 +24,10 @@ pub const MIN_FONT_SIZE: f32 = 8.0;
 pub const MAX_FONT_SIZE: f32 = 32.0;
 /// 默认行高比例
 pub const DEFAULT_LINE_HEIGHT_SCALE: f32 = 1.4;
+/// 最小行高比例
+pub const MIN_LINE_HEIGHT_SCALE: f32 = 1.0;
+/// 最大行高比例
+pub const MAX_LINE_HEIGHT_SCALE: f32 = 2.5;
 
 /// 终端主题配色（用于侧边栏等 UI 组件）
 ///
@@ -308,7 +312,7 @@ impl TerminalTheme {
 
     /// 设置行高比例
     pub fn with_line_height_scale(mut self, scale: f32) -> Self {
-        self.line_height_scale = scale.clamp(1.0, 2.5);
+        self.line_height_scale = scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
         self
     }
 
@@ -472,5 +476,10 @@ impl TerminalTheme {
         vec![
             8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 20.0, 22.0, 24.0,
         ]
+    }
+
+    /// 获取可用的行高比例预设列表
+    pub fn available_line_height_scales() -> Vec<f32> {
+        vec![1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.0, 2.2, 2.5]
     }
 }

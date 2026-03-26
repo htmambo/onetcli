@@ -42,6 +42,9 @@ impl HomePage {
         if cx.has_global::<AppSettings>() {
             let settings = AppSettings::global(cx);
             let font_size = settings.terminal_font_size as f32;
+            let font_family = settings.terminal_font_family.clone();
+            let font_ligatures = settings.terminal_font_ligatures;
+            let line_height_scale = settings.terminal_line_height_scale as f32;
             let auto_copy = settings.terminal_auto_copy;
             let middle_click_paste = settings.terminal_middle_click_paste;
             let sync_path = settings.terminal_sync_path_with_terminal;
@@ -53,6 +56,9 @@ impl HomePage {
             terminal_view.update(cx, |view, cx| {
                 view.apply_terminal_settings(
                     font_size,
+                    font_family.clone(),
+                    font_ligatures,
+                    line_height_scale,
                     auto_copy,
                     middle_click_paste,
                     sync_path,
@@ -80,6 +86,22 @@ impl HomePage {
                     TerminalViewEvent::FontSizeChanged { size } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
                             s.terminal_font_size = *size as f64;
+                            s.save();
+                        });
+                        let settings = AppSettings::global(cx).clone();
+                        this.apply_terminal_settings_to_all(&settings, window, cx);
+                    }
+                    TerminalViewEvent::FontFamilyChanged { family } => {
+                        cx.update_global::<AppSettings, _>(|s, _| {
+                            s.terminal_font_family = family.clone();
+                            s.save();
+                        });
+                        let settings = AppSettings::global(cx).clone();
+                        this.apply_terminal_settings_to_all(&settings, window, cx);
+                    }
+                    TerminalViewEvent::LineHeightScaleChanged { scale } => {
+                        cx.update_global::<AppSettings, _>(|s, _| {
+                            s.terminal_line_height_scale = *scale as f64;
                             s.save();
                         });
                         let settings = AppSettings::global(cx).clone();
@@ -165,6 +187,9 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) {
         let font_size = settings.terminal_font_size as f32;
+        let font_family = settings.terminal_font_family.clone();
+        let font_ligatures = settings.terminal_font_ligatures;
+        let line_height_scale = settings.terminal_line_height_scale as f32;
         let auto_copy = settings.terminal_auto_copy;
         let middle_click_paste = settings.terminal_middle_click_paste;
         let sync_path = settings.terminal_sync_path_with_terminal;
@@ -173,6 +198,9 @@ impl HomePage {
                 view.update(cx, |view, cx| {
                     view.apply_terminal_settings(
                         font_size,
+                        font_family.clone(),
+                        font_ligatures,
+                        line_height_scale,
                         auto_copy,
                         middle_click_paste,
                         sync_path,

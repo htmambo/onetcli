@@ -247,7 +247,10 @@ impl<E: MessageExtension + Default> ChatEngine<E> {
             None => return Vec::new(),
         };
         match repo.list() {
-            Ok(all) => all.into_iter().filter(|p| p.enabled).collect(),
+            Ok(all) => all
+                .into_iter()
+                .filter(ProviderConfig::is_runtime_available)
+                .collect(),
             Err(_) => Vec::new(),
         }
     }

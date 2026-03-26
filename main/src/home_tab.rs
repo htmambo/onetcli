@@ -3233,7 +3233,9 @@ impl HomePage {
                     .py_2()
                     .cursor_pointer()
                     .rounded_t_lg()
-                    .when(!is_collapsed, |this| this.border_b_1().border_color(cx.theme().border))
+                    .when(!is_collapsed, |this| {
+                        this.border_b_1().border_color(cx.theme().border)
+                    })
                     .when(is_collapsed, |this| this.rounded_b_lg())
                     .hover(|s| s.bg(cx.theme().list_hover))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -3247,9 +3249,13 @@ impl HomePage {
                         }
                     }))
                     .child(
-                        Icon::new(if is_collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
-                            .with_size(Size::Small)
-                            .text_color(cx.theme().muted_foreground),
+                        Icon::new(if is_collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .with_size(Size::Small)
+                        .text_color(cx.theme().muted_foreground),
                     )
                     .child(
                         Icon::new(IconName::AppsColor)
@@ -3304,16 +3310,12 @@ impl HomePage {
                     }),
             )
             .when(!connections.is_empty() && !is_collapsed, |this| {
-                this.child(
-                    div()
-                        .p_3()
-                        .child(self.render_connections_collection(
-                            connections,
-                            workspace_id,
-                            selected_id,
-                            cx,
-                        ))
-                )
+                this.child(div().p_3().child(self.render_connections_collection(
+                    connections,
+                    workspace_id,
+                    selected_id,
+                    cx,
+                )))
             })
     }
 

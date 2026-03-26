@@ -74,6 +74,31 @@ pub enum ChatPanelEvent {
     Close,
 }
 
+fn build_agent_history(
+    chat_history: &[Message],
+    history_count: usize,
+    current_input: &str,
+) -> Vec<Message> {
+    let mut history = if history_count > 0 && !chat_history.is_empty() {
+        let history_start = chat_history.len().saturating_sub(history_count);
+        chat_history
+            .iter()
+            .skip(history_start)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        chat_history.to_vec()
+    };
+
+    if history.last().is_some_and(|message| {
+        message.role == Role::User && message.content_as_text() == current_input
+    }) {
+        history.pop();
+    }
+
+    history
+}
+
 // ============================================================================
 // ChatPanel 组件
 // ============================================================================
@@ -256,26 +281,16 @@ impl ChatPanel {
             }
         };
 
-        let mut providers = match repo.list() {
+        let providers = match repo.list() {
             Ok(all_providers) => all_providers
                 .into_iter()
-                .filter(|p| p.enabled)
+                .filter(|provider| provider.is_runtime_available())
                 .collect::<Vec<_>>(),
             Err(e) => {
                 tracing::error!("Failed to load providers: {}", e);
                 Vec::new()
             }
         };
-
-        if is_logged_in {
-            if let Ok(provider) = repo.ensure_onetcli_provider() {
-                if !providers.iter().any(|p| p.id == provider.id) {
-                    providers.insert(0, provider);
-                }
-            }
-        } else {
-            providers.retain(|p| !p.is_builtin());
-        }
 
         let items: Vec<ProviderItem> = providers.iter().map(ProviderItem::from_config).collect();
         if items.is_empty() {
@@ -664,16 +679,7 @@ impl ChatPanel {
 
         // 根据设置限制历史记录数量
         let history_count = self.model_settings.history_count;
-        let history: Vec<Message> = if history_count > 0 && !self.chat_history.is_empty() {
-            let history_start = self.chat_history.len().saturating_sub(history_count);
-            self.chat_history
-                .iter()
-                .skip(history_start)
-                .cloned()
-                .collect()
-        } else {
-            self.chat_history.clone()
-        };
+        let history = build_agent_history(&self.chat_history, history_count, &content);
 
         let ai_input = self.ai_input.clone();
         let session_id = self.session_id;
@@ -2052,6 +2058,43 @@ impl ChatPanel {
 
 impl EventEmitter<ChatPanelEvent> for ChatPanel {}
 impl EventEmitter<TabContentEvent> for ChatPanel {}
+
+#[cfg(test)]
+mod tests {
+    use super::build_agent_history;
+    use one_core::llm::{Message, Role};
+
+    #[test]
+    fn build_agent_history_drops_inflight_user_message_from_tail() {
+        let history = vec![
+            Message::text(Role::Assistant, "上一条回复"),
+            Message::text(Role::User, "这样呢"),
+        ];
+
+        let result = build_agent_history(&history, 10, "这样呢");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].role, Role::Assistant);
+        assert_eq!(result[0].content_as_text(), "上一条回复");
+    }
+
+    #[test]
+    fn build_agent_history_keeps_older_same_content_messages() {
+        let history = vec![
+            Message::text(Role::User, "这样呢"),
+            Message::text(Role::Assistant, "我看到了"),
+            Message::text(Role::User, "这样呢"),
+        ];
+
+        let result = build_agent_history(&history, 10, "这样呢");
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].role, Role::User);
+        assert_eq!(result[0].content_as_text(), "这样呢");
+        assert_eq!(result[1].role, Role::Assistant);
+        assert_eq!(result[1].content_as_text(), "我看到了");
+    }
+}
 
 impl Focusable for ChatPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {

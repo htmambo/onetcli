@@ -19,8 +19,11 @@ use crate::addon::{
     TerminalAddonMouseContext,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{RenderCache, TerminalElement};
-use crate::theme::{TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
+use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
+use crate::theme::{
+    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE,
+};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentEvent};
@@ -54,6 +57,8 @@ actions!(
 #[derive(Clone, Debug)]
 pub enum TerminalViewEvent {
     FontSizeChanged { size: f32 },
+    FontFamilyChanged { family: String },
+    LineHeightScaleChanged { scale: f32 },
     AutoCopyChanged { enabled: bool },
     MiddleClickPasteChanged { enabled: bool },
     SyncPathChanged { enabled: bool },
@@ -88,6 +93,15 @@ const TERMINAL_SEARCH_BACKWARD_SHORTCUT: &str = "ctrl-shift-g";
 const TERMINAL_TOGGLE_VI_MODE_SHORTCUT: &str = "f7";
 
 const DEFAULT_CELL_WIDTH: Pixels = px(8.0);
+
+fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) -> TerminalTheme {
+    target
+        .clone()
+        .with_font_size(f32::from(current.font_size))
+        .with_font_family(current.font_family.clone())
+        .with_font_fallbacks(current.font_fallbacks.clone())
+        .with_line_height_scale(current.line_height_scale)
+}
 const DEFAULT_COLS: usize = 80;
 const DEFAULT_ROWS: usize = 24;
 
@@ -318,6 +332,8 @@ pub struct TerminalView {
     auto_copy_on_select: bool,
     /// 中键粘贴
     middle_click_paste: bool,
+    /// 是否启用字体连字
+    font_ligatures_enabled: bool,
 
     /// 侧边栏面板大小
     sidebar_panel_size: Pixels,
@@ -608,6 +624,7 @@ impl TerminalView {
             confirm_high_risk_command: true,
             auto_copy_on_select: true,
             middle_click_paste: true,
+            font_ligatures_enabled: false,
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
             view_bounds: Bounds::default(),
@@ -641,8 +658,11 @@ impl TerminalView {
             TerminalSidebarEvent::FontSizeChanged(size) => {
                 self.set_font_size(*size, cx);
             }
+            TerminalSidebarEvent::LineHeightScaleChanged(scale) => {
+                self.set_line_height_scale(*scale, cx);
+            }
             TerminalSidebarEvent::FontFamilyChanged(family) => {
-                self.set_font_family(family.clone(), cx);
+                self.set_font_family(family.clone(), window, cx);
             }
             TerminalSidebarEvent::ThemeChanged(theme) => {
                 self.set_theme(theme.clone(), cx);
@@ -769,7 +789,11 @@ impl TerminalView {
 
     /// Apply a terminal theme
     pub fn set_theme(&mut self, theme: TerminalTheme, cx: &mut Context<Self>) {
-        self.current_theme = theme;
+        let next_theme = preserve_theme_typography(&self.current_theme, &theme);
+        if self.current_theme == next_theme {
+            return;
+        }
+        self.current_theme = next_theme;
         self.font_size = self.current_theme.font_size;
         self.line_height = self.current_theme.line_height();
         cx.notify();
@@ -817,6 +841,9 @@ impl TerminalView {
     pub fn apply_terminal_settings(
         &mut self,
         font_size: f32,
+        font_family: impl Into<SharedString>,
+        font_ligatures_enabled: bool,
+        line_height_scale: f32,
         auto_copy: bool,
         middle_click_paste: bool,
         sync_path: bool,
@@ -829,6 +856,19 @@ impl TerminalView {
         if (current - clamped).abs() >= f32::EPSILON {
             self.current_theme.font_size = px(clamped);
             self.font_size = self.current_theme.font_size;
+            self.line_height = self.current_theme.line_height();
+        }
+
+        let font_family = font_family.into();
+        if self.current_theme.font_family != font_family {
+            self.current_theme.font_family = font_family;
+        }
+        self.font_ligatures_enabled = font_ligatures_enabled;
+
+        let clamped_line_height =
+            line_height_scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
+        if (self.current_theme.line_height_scale - clamped_line_height).abs() >= f32::EPSILON {
+            self.current_theme.line_height_scale = clamped_line_height;
             self.line_height = self.current_theme.line_height();
         }
 
@@ -857,10 +897,11 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.current_theme.name == theme.name {
+        let next_theme = preserve_theme_typography(&self.current_theme, theme);
+        if self.current_theme == next_theme {
             return;
         }
-        self.current_theme = theme.clone();
+        self.current_theme = next_theme;
         self.font_size = self.current_theme.font_size;
         self.line_height = self.current_theme.line_height();
         self.sync_sidebar_theme(window, cx);
@@ -960,8 +1001,21 @@ impl TerminalView {
     }
 
     /// 设置主字体
-    pub fn set_font_family(&mut self, family: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.current_theme.font_family = family.into();
+    pub fn set_font_family(
+        &mut self,
+        family: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let family = family.into();
+        if self.current_theme.font_family == family {
+            return;
+        }
+        self.current_theme.font_family = family.clone();
+        self.sync_sidebar_theme(window, cx);
+        cx.emit(TerminalViewEvent::FontFamilyChanged {
+            family: family.to_string(),
+        });
         cx.notify();
     }
 
@@ -972,8 +1026,13 @@ impl TerminalView {
 
     /// 设置行高比例
     pub fn set_line_height_scale(&mut self, scale: f32, cx: &mut Context<Self>) {
-        self.current_theme.line_height_scale = scale.clamp(1.0, 2.5);
+        let clamped = scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
+        if (self.current_theme.line_height_scale - clamped).abs() < f32::EPSILON {
+            return;
+        }
+        self.current_theme.line_height_scale = clamped;
         self.line_height = self.current_theme.line_height();
+        cx.emit(TerminalViewEvent::LineHeightScaleChanged { scale: clamped });
         cx.notify();
     }
 
@@ -1607,6 +1666,7 @@ impl TerminalView {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            self.font_ligatures_enabled,
             self.current_theme.line_height_scale,
             cursor_visible,
             self.cell_width, // 传入预计算的 cell_width，确保与 resize 一致
@@ -2210,7 +2270,7 @@ impl Render for TerminalView {
                     .collect::<Vec<_>>(),
             ))
         };
-        let features = FontFeatures(std::sync::Arc::new(vec![("calt".to_string(), 0)]));
+        let features = terminal_font_features(self.font_ligatures_enabled);
 
         let font = Font {
             family: self.current_theme.font_family.clone(),
@@ -2624,9 +2684,11 @@ impl Element for ResizeEventHandler {
 mod tests {
     use super::{
         alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
-        has_unterminated_shell_quote, multiline_non_empty_line_count,
+        has_unterminated_shell_quote, multiline_non_empty_line_count, preserve_theme_typography,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, UnbracketedPasteHazard,
     };
+    use crate::theme::TerminalTheme;
+    use gpui::SharedString;
     use std::cell::Cell as StdCell;
 
     #[test]
@@ -2727,5 +2789,28 @@ mod tests {
             &pending_display_offset
         ));
         assert_eq!(pending_display_offset.take(), None);
+    }
+
+    #[test]
+    fn preserve_theme_typography_keeps_current_font_configuration() {
+        let current = TerminalTheme::ocean()
+            .with_font_size(18.0)
+            .with_font_family("Fira Code")
+            .with_font_fallbacks(vec![SharedString::from("Noto Sans Mono CJK SC")])
+            .with_line_height_scale(1.8);
+        let target = TerminalTheme::paper();
+
+        let merged = preserve_theme_typography(&current, &target);
+
+        assert_eq!(merged.name, target.name);
+        assert_eq!(merged.background, target.background);
+        assert_eq!(merged.foreground, target.foreground);
+        assert_eq!(f32::from(merged.font_size), 18.0);
+        assert_eq!(merged.font_family, SharedString::from("Fira Code"));
+        assert_eq!(
+            merged.font_fallbacks,
+            vec![SharedString::from("Noto Sans Mono CJK SC")]
+        );
+        assert!((merged.line_height_scale - 1.8).abs() < f32::EPSILON);
     }
 }

@@ -311,6 +311,38 @@ ConnectionForm:
 
 # 设置面板
 Settings:
+  search:
+    en: Search
+    zh-CN: 搜索
+    zh-HK: 搜尋
+  search_placeholder:
+    en: Search...
+    zh-CN: 搜索...
+    zh-HK: 搜尋...
+  search_hint:
+    en: Press Enter for next, Shift+Enter for previous
+    zh-CN: 回车搜索下一个，Shift+回车搜索上一个
+    zh-HK: 按 Enter 搜尋下一個，Shift+Enter 搜尋上一個
+  font_size:
+    en: Font Size
+    zh-CN: 字号
+    zh-HK: 字體大小
+  font_family:
+    en: Font Family
+    zh-CN: 字体
+    zh-HK: 字體
+  line_height:
+    en: Line Height
+    zh-CN: 行间距
+    zh-HK: 行距
+  select_font_placeholder:
+    en: Select font...
+    zh-CN: 选择字体...
+    zh-HK: 選擇字體...
+  theme:
+    en: Theme
+    zh-CN: 主题
+    zh-HK: 主題
   cursor:
     en: Cursor
     zh-CN: 光标

@@ -1,6 +1,6 @@
 //! 终端设置面板
 //!
-//! 提供搜索、字体设置和主题切换功能
+//! 提供搜索、字体设置、行间距设置和主题切换功能
 
 use gpui::prelude::FluentBuilder;
 use gpui::FontWeight;
@@ -21,7 +21,9 @@ use gpui_component::{
 };
 use rust_i18n::t;
 
-use crate::theme::{TerminalTheme, MAX_FONT_SIZE, MIN_FONT_SIZE};
+use crate::theme::{
+    TerminalTheme, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+};
 
 /// 设置面板事件
 #[derive(Clone, Debug)]
@@ -36,6 +38,8 @@ pub enum SettingsPanelEvent {
     SearchNext,
     /// 字体大小变更
     FontSizeChanged(f32),
+    /// 行高比例变更
+    LineHeightScaleChanged(f32),
     /// 字体变更
     FontFamilyChanged(String),
     /// 主题变更
@@ -60,12 +64,16 @@ pub struct SettingsPanel {
     search_input_state: Entity<InputState>,
     /// 字体大小输入框状态
     font_size_input_state: Entity<InputState>,
+    /// 行高比例输入框状态
+    line_height_input_state: Entity<InputState>,
     /// 字体选择状态
     font_select_state: Entity<SelectState<Vec<SharedString>>>,
     /// 当前主题
     current_theme: TerminalTheme,
     /// 字体大小输入变更抑制
     suppress_font_size_change: bool,
+    /// 行高比例输入变更抑制
+    suppress_line_height_change: bool,
     /// 光标闪烁开关
     cursor_blink: bool,
     /// 非 bracketed 模式下，多行粘贴确认
@@ -96,13 +104,21 @@ impl SettingsPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search..."));
+        let search_input_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Settings.search_placeholder")));
 
         // 字体大小输入框
         let font_size = f32::from(initial_theme.font_size);
         let font_size_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("13"));
         font_size_input_state.update(cx, |state: &mut InputState, cx| {
             state.set_value(&format!("{:.0}", font_size), window, cx);
+        });
+
+        // 行高比例输入框
+        let line_height_scale = initial_theme.line_height_scale;
+        let line_height_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("1.4"));
+        line_height_input_state.update(cx, |state: &mut InputState, cx| {
+            state.set_value(&format!("{:.1}", line_height_scale), window, cx);
         });
 
         // 字体选择列表
@@ -165,6 +181,48 @@ impl SettingsPanel {
             },
         ));
 
+        // 订阅行高比例输入事件
+        let line_height_entity = line_height_input_state.clone();
+        subscriptions.push(cx.subscribe_in(
+            &line_height_input_state,
+            window,
+            move |this, _state, event: &InputEvent, _window, cx| match event {
+                InputEvent::Change => {
+                    if this.suppress_line_height_change {
+                        return;
+                    }
+                    let value = line_height_entity.read(cx).value().to_string();
+                    if let Ok(scale) = value.parse::<f32>() {
+                        let clamped = scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
+                        this.current_theme.line_height_scale = clamped;
+                        cx.emit(SettingsPanelEvent::LineHeightScaleChanged(clamped));
+                    }
+                }
+                _ => {}
+            },
+        ));
+
+        // 订阅行高比例步进事件
+        let line_height_entity2 = line_height_input_state.clone();
+        subscriptions.push(cx.subscribe_in(
+            &line_height_input_state,
+            window,
+            move |this, _state, event: &NumberInputEvent, window, cx| match event {
+                NumberInputEvent::Step(action) => {
+                    let current = this.current_theme.line_height_scale;
+                    let new_scale = match action {
+                        StepAction::Increment => (current + 0.1).min(MAX_LINE_HEIGHT_SCALE),
+                        StepAction::Decrement => (current - 0.1).max(MIN_LINE_HEIGHT_SCALE),
+                    };
+                    this.current_theme.line_height_scale = new_scale;
+                    line_height_entity2.update(cx, |state: &mut InputState, cx| {
+                        state.set_value(&format!("{:.1}", new_scale), window, cx);
+                    });
+                    cx.emit(SettingsPanelEvent::LineHeightScaleChanged(new_scale));
+                }
+            },
+        ));
+
         // 订阅字体大小步进事件
         let font_size_entity2 = font_size_input_state.clone();
         subscriptions.push(cx.subscribe_in(
@@ -201,9 +259,11 @@ impl SettingsPanel {
         Self {
             search_input_state,
             font_size_input_state,
+            line_height_input_state,
             font_select_state,
             current_theme: initial_theme.clone(),
             suppress_font_size_change: false,
+            suppress_line_height_change: false,
             cursor_blink: false,
             confirm_multiline_paste: true,
             confirm_high_risk_command: true,
@@ -230,6 +290,14 @@ impl SettingsPanel {
             state.set_value(&format!("{:.0}", font_size), window, cx);
         });
         self.suppress_font_size_change = false;
+
+        // 更新行高比例输入框
+        let line_height_scale = theme.line_height_scale;
+        self.suppress_line_height_change = true;
+        self.line_height_input_state.update(cx, |state, cx| {
+            state.set_value(&format!("{:.1}", line_height_scale), window, cx);
+        });
+        self.suppress_line_height_change = false;
 
         // 更新字体选择
         let font_family = theme.font_family.clone();
@@ -322,7 +390,7 @@ impl SettingsPanel {
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(fg)
-                            .child("Settings"),
+                            .child(t!("Common.settings")),
                     ),
             )
             .child(
@@ -348,7 +416,7 @@ impl SettingsPanel {
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(muted_fg)
-                        .child("SEARCH"),
+                        .child(t!("Settings.search").to_uppercase()),
                 )
                 .child(
                     h_flex()
@@ -377,7 +445,7 @@ impl SettingsPanel {
                     div()
                         .text_xs()
                         .text_color(muted_fg)
-                        .child("Press ⌘G for next, ⇧⌘G for previous"),
+                        .child(t!("Settings.search_hint")),
                 ),
         )
     }
@@ -463,7 +531,7 @@ impl SettingsPanel {
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(muted_fg)
-                            .child("FONT SIZE"),
+                            .child(t!("Settings.font_size").to_uppercase()),
                     )
                     .child(
                         NumberInput::new(&self.font_size_input_state)
@@ -480,13 +548,30 @@ impl SettingsPanel {
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(muted_fg)
-                            .child("FONT FAMILY"),
+                            .child(t!("Settings.font_family").to_uppercase()),
                     )
                     .child(
                         Select::new(&self.font_select_state)
                             .small()
                             .text_color(fg)
-                            .placeholder("Select font..."),
+                            .placeholder(t!("Settings.select_font_placeholder")),
+                    ),
+            )
+            // 行高比例
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(muted_fg)
+                            .child(t!("Settings.line_height").to_uppercase()),
+                    )
+                    .child(
+                        NumberInput::new(&self.line_height_input_state)
+                            .small()
+                            .suffix(div().text_xs().text_color(muted_fg).child("x")),
                     ),
             )
     }
@@ -734,7 +819,7 @@ impl SettingsPanel {
                     .text_xs()
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(muted_fg)
-                    .child("THEME"),
+                    .child(t!("Settings.theme").to_uppercase()),
             )
             .child(
                 div()

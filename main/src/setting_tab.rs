@@ -26,6 +26,9 @@ use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
+use terminal_view::{
+    DEFAULT_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
+};
 use tracing::{error, info};
 
 use crate::auth::get_auth_service;
@@ -194,6 +197,12 @@ pub struct AppSettings {
     pub font_size: f64,
     #[serde(default = "default_terminal_font_size")]
     pub terminal_font_size: f64,
+    #[serde(default = "default_terminal_font_family")]
+    pub terminal_font_family: String,
+    #[serde(default)]
+    pub terminal_font_ligatures: bool,
+    #[serde(default = "default_terminal_line_height_scale")]
+    pub terminal_line_height_scale: f64,
     #[serde(default = "default_true")]
     pub terminal_auto_copy: bool,
     #[serde(default = "default_true")]
@@ -236,8 +245,20 @@ fn default_font_size() -> f64 {
     14.0
 }
 
+fn clamp_ui_font_size(size: f64) -> f32 {
+    size.clamp(8.0, 72.0) as f32
+}
+
 fn default_terminal_font_size() -> f64 {
     15.0
+}
+
+fn default_terminal_font_family() -> String {
+    terminal_view::theme::default_monospace_font().to_string()
+}
+
+fn default_terminal_line_height_scale() -> f64 {
+    DEFAULT_LINE_HEIGHT_SCALE as f64
 }
 
 fn default_terminal_theme() -> String {
@@ -286,6 +307,9 @@ impl Default for AppSettings {
             font_family: default_font_family(),
             font_size: default_font_size(),
             terminal_font_size: default_terminal_font_size(),
+            terminal_font_family: default_terminal_font_family(),
+            terminal_font_ligatures: false,
+            terminal_line_height_scale: default_terminal_line_height_scale(),
             terminal_auto_copy: default_true(),
             terminal_middle_click_paste: default_true(),
             terminal_sync_path_with_terminal: false,
@@ -378,6 +402,19 @@ impl AppSettings {
         self.write_to_disk();
     }
 
+    fn apply_ui_font_preferences(
+        font_family: impl Into<SharedString>,
+        font_size: f64,
+        cx: &mut App,
+    ) {
+        {
+            let theme = Theme::global_mut(cx);
+            theme.font_family = font_family.into();
+            theme.font_size = px(clamp_ui_font_size(font_size));
+        }
+        cx.refresh_windows();
+    }
+
     pub fn apply(&self, cx: &mut App) {
         gpui_component::set_locale(&self.locale);
 
@@ -388,6 +425,7 @@ impl AppSettings {
         };
         Theme::global_mut(cx).mode = mode;
         Theme::change(mode, None, cx);
+        Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
 
         // 同步自动保存配置
         self.sync_auto_save_config(cx);
@@ -573,6 +611,10 @@ impl SettingsPanel {
                                 SettingField::switch(
                                     |cx: &App| cx.theme().mode.is_dark(),
                                     |val: bool, cx: &mut App| {
+                                        let (font_family, font_size) = {
+                                            let settings = AppSettings::global(cx);
+                                            (settings.font_family.clone(), settings.font_size)
+                                        };
                                         let mode = if val {
                                             ThemeMode::Dark
                                         } else {
@@ -580,6 +622,11 @@ impl SettingsPanel {
                                         };
                                         Theme::global_mut(cx).mode = mode;
                                         Theme::change(mode, None, cx);
+                                        AppSettings::apply_ui_font_preferences(
+                                            font_family,
+                                            font_size,
+                                            cx,
+                                        );
 
                                         let settings = AppSettings::global_mut(cx);
                                         settings.theme_mode = if val {
@@ -651,9 +698,17 @@ impl SettingsPanel {
                                         )
                                     },
                                     |val: SharedString, cx: &mut App| {
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.font_family = val.to_string();
-                                        settings.save();
+                                        let font_size = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.font_family = val.to_string();
+                                            settings.save();
+                                            settings.font_size
+                                        };
+                                        AppSettings::apply_ui_font_preferences(
+                                            val.clone(),
+                                            font_size,
+                                            cx,
+                                        );
                                     },
                                 ))
                                 .default_value(SharedString::from(default_settings.font_family)),
@@ -671,9 +726,17 @@ impl SettingsPanel {
                                     },
                                     |cx: &App| AppSettings::global(cx).font_size,
                                     |val: f64, cx: &mut App| {
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.font_size = val;
-                                        settings.save();
+                                        let font_family = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.font_size = val;
+                                            settings.save();
+                                            settings.font_family.clone()
+                                        };
+                                        AppSettings::apply_ui_font_preferences(
+                                            font_family,
+                                            val,
+                                            cx,
+                                        );
                                     },
                                 ))
                                 .default_value(default_settings.font_size),
@@ -683,6 +746,57 @@ impl SettingsPanel {
                     themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Terminal.group_title"))
                         .items(vec![
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.font_family"),
+                                themed_setting_field(SettingField::dropdown(
+                                    TerminalTheme::available_monospace_fonts()
+                                        .into_iter()
+                                        .map(|font| {
+                                            let font = SharedString::from(font);
+                                            (font.clone(), font)
+                                        })
+                                        .collect(),
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).terminal_font_family.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.terminal_font_family = val.to_string();
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                    },
+                                ))
+                                .default_value(
+                                    SharedString::from(
+                                        default_settings.terminal_font_family.clone(),
+                                    ),
+                                ),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.font_family_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.font_ligatures"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).terminal_font_ligatures,
+                                    |val: bool, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.terminal_font_ligatures = val;
+                                        settings.save();
+                                        let settings_snapshot = settings.clone();
+                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                    },
+                                )
+                                .default_value(default_settings.terminal_font_ligatures),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.font_ligatures_desc").to_string(),
+                            ),
                             SettingItem::new(
                                 t!("Settings.General.Terminal.font_size"),
                                 themed_setting_field(SettingField::number_input(
@@ -704,6 +818,28 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Terminal.font_size_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.line_height"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: MIN_LINE_HEIGHT_SCALE as f64,
+                                        max: MAX_LINE_HEIGHT_SCALE as f64,
+                                        step: 0.1,
+                                    },
+                                    |cx: &App| AppSettings::global(cx).terminal_line_height_scale,
+                                    |val: f64, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.terminal_line_height_scale = val;
+                                        settings.save();
+                                        let settings_snapshot = settings.clone();
+                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.terminal_line_height_scale),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.line_height_desc").to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Terminal.auto_copy"),

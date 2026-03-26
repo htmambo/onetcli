@@ -148,4 +148,36 @@ impl ProviderConfig {
     pub fn is_builtin(&self) -> bool {
         self.provider_type.is_builtin()
     }
+
+    /// 是否可在聊天等运行时入口中使用
+    pub fn is_runtime_available(&self) -> bool {
+        self.enabled && !self.is_builtin()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProviderConfig, ProviderType};
+
+    #[test]
+    fn builtin_provider_is_not_runtime_available() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::OnetCli,
+            enabled: true,
+            ..Default::default()
+        };
+
+        assert!(!config.is_runtime_available());
+    }
+
+    #[test]
+    fn enabled_custom_provider_is_runtime_available() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::OpenAI,
+            enabled: true,
+            ..Default::default()
+        };
+
+        assert!(config.is_runtime_available());
+    }
 }

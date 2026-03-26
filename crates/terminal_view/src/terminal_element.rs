@@ -30,7 +30,7 @@ pub struct FontVariants {
 }
 
 impl FontVariants {
-    pub fn new(family: SharedString, fallbacks: Vec<String>) -> Self {
+    pub fn new(family: SharedString, fallbacks: Vec<String>, ligatures_enabled: bool) -> Self {
         // 与 view.rs 保持一致：当 fallbacks 为空时使用 None
         let fallbacks = if fallbacks.is_empty() {
             None
@@ -38,8 +38,7 @@ impl FontVariants {
             Some(FontFallbacks::from_fonts(fallbacks))
         };
 
-        // 只禁用 calt（上下文替代），避免等宽字符出现连字影响栅格对齐
-        let features = FontFeatures(Arc::new(vec![("calt".to_string(), 0)]));
+        let features = terminal_font_features(ligatures_enabled);
 
         Self {
             normal: Font {
@@ -81,6 +80,15 @@ impl FontVariants {
             (false, true) => &self.italic,
             (true, true) => &self.bold_italic,
         }
+    }
+}
+
+pub(crate) fn terminal_font_features(ligatures_enabled: bool) -> FontFeatures {
+    if ligatures_enabled {
+        FontFeatures(Arc::new(Vec::new()))
+    } else {
+        // 关闭上下文替代，避免编程连字破坏终端的等宽栅格对齐。
+        FontFeatures(Arc::new(vec![("calt".to_string(), 0)]))
     }
 }
 
@@ -764,6 +772,7 @@ pub struct TerminalElement<'a> {
     font_family: SharedString,
     font_size: Pixels,
     font_fallbacks: Vec<String>,
+    font_ligatures_enabled: bool,
     line_height_scale: f32,
     cursor_visible: bool,
     /// 预计算的 cell_width，由 view.rs 传入，确保与 resize 使用相同的值
@@ -776,6 +785,7 @@ impl<'a> TerminalElement<'a> {
         font_family: SharedString,
         font_size: Pixels,
         font_fallbacks: Vec<String>,
+        font_ligatures_enabled: bool,
         line_height_scale: f32,
         cursor_visible: bool,
         cell_width: Pixels,
@@ -785,6 +795,7 @@ impl<'a> TerminalElement<'a> {
             font_family,
             font_size,
             font_fallbacks,
+            font_ligatures_enabled,
             line_height_scale,
             cursor_visible,
             cell_width,
@@ -805,6 +816,7 @@ impl<'a> IntoElement for TerminalElement<'a> {
             font_family: self.font_family,
             font_size: self.font_size,
             font_fallbacks: self.font_fallbacks,
+            font_ligatures_enabled: self.font_ligatures_enabled,
             line_height_scale: self.line_height_scale,
             cursor_visible: self.cursor_visible,
             cell_width: self.cell_width,
@@ -823,6 +835,7 @@ pub struct TerminalElementImpl {
     font_family: SharedString,
     font_size: Pixels,
     font_fallbacks: Vec<String>,
+    font_ligatures_enabled: bool,
     line_height_scale: f32,
     cursor_visible: bool,
     /// 预计算的 cell_width，确保与 resize 使用相同的值
@@ -911,7 +924,11 @@ impl Element for TerminalElementImpl {
         _cx: &mut App,
     ) -> Self::PrepaintState {
         // 预创建所有字体变体，避免在 paint 中逐次创建
-        let fonts = FontVariants::new(self.font_family.clone(), self.font_fallbacks.clone());
+        let fonts = FontVariants::new(
+            self.font_family.clone(),
+            self.font_fallbacks.clone(),
+            self.font_ligatures_enabled,
+        );
 
         let line_height = self.font_size * self.line_height_scale;
         // 使用由 view.rs 传入的 cell_width，确保与 resize 使用完全相同的值

@@ -85,6 +85,8 @@ pub enum TerminalSidebarEvent {
     SearchNext,
     /// 字体大小变更
     FontSizeChanged(f32),
+    /// 行高比例变更
+    LineHeightScaleChanged(f32),
     /// 字体变更
     FontFamilyChanged(String),
     /// 主题变更
@@ -206,6 +208,9 @@ impl TerminalSidebar {
                 }
                 settings_panel::SettingsPanelEvent::FontSizeChanged(size) => {
                     cx.emit(TerminalSidebarEvent::FontSizeChanged(*size));
+                }
+                settings_panel::SettingsPanelEvent::LineHeightScaleChanged(scale) => {
+                    cx.emit(TerminalSidebarEvent::LineHeightScaleChanged(*scale));
                 }
                 settings_panel::SettingsPanelEvent::FontFamilyChanged(family) => {
                     cx.emit(TerminalSidebarEvent::FontFamilyChanged(family.clone()));

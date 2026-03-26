@@ -8,6 +8,7 @@ OUTPUT_ICNS="${2:-${PROJECT_DIR}/resources/macos/OnetCli.icns}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onetcli-icon.XXXXXX")"
 ICONSET_DIR="${WORK_DIR}/OnetCli.iconset"
 MASTER_PNG="${WORK_DIR}/OnetCli-master.png"
+TRANSPARENT_SVG="${WORK_DIR}/logo-transparent.svg"
 
 cleanup() {
     rm -rf "$WORK_DIR"
@@ -22,8 +23,10 @@ fi
 mkdir -p "$ICONSET_DIR"
 mkdir -p "$(dirname "$OUTPUT_ICNS")"
 
+bash "${PROJECT_DIR}/script/prepare-transparent-logo.sh" "$SOURCE_SVG" "$TRANSPARENT_SVG"
+
 echo "Rendering macOS icon from ${SOURCE_SVG}..."
-sips -s format png "$SOURCE_SVG" --out "$MASTER_PNG" >/dev/null
+sips -s format png "$TRANSPARENT_SVG" --out "$MASTER_PNG" >/dev/null
 
 render_icon() {
     local size="$1"

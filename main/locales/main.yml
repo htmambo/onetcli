@@ -760,6 +760,22 @@ Settings:
         en: Terminal
         zh-CN: 终端
         zh-HK: 終端
+      font_family:
+        en: Terminal Font Family
+        zh-CN: 终端字体
+        zh-HK: 終端字型
+      font_family_desc:
+        en: Select the terminal font family
+        zh-CN: 选择终端使用的等宽字体
+        zh-HK: 選擇終端使用的等寬字型
+      font_ligatures:
+        en: Terminal Ligatures
+        zh-CN: 终端连字
+        zh-HK: 終端連字
+      font_ligatures_desc:
+        en: Enable programming ligatures such as ->, => and != in the terminal
+        zh-CN: 启用终端中的编程连字效果，例如 ->、=>、!=
+        zh-HK: 啟用終端中的編程連字效果，例如 ->、=>、!=
       font_size:
         en: Terminal Font Size
         zh-CN: 终端字体大小
@@ -768,6 +784,14 @@ Settings:
         en: Adjust terminal font size (8-72)
         zh-CN: 调整终端字体大小（8-72）
         zh-HK: 調整終端字型大小（8-72）
+      line_height:
+        en: Terminal Line Height
+        zh-CN: 终端行间距
+        zh-HK: 終端行距
+      line_height_desc:
+        en: Adjust terminal line height scale (1.0-2.5)
+        zh-CN: 调整终端行间距比例（1.0-2.5）
+        zh-HK: 調整終端行距比例（1.0-2.5）
       auto_copy:
         en: Auto copy on select
         zh-CN: 选中自动复制
