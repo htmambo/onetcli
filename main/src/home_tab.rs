@@ -3289,8 +3289,7 @@ impl HomePage {
             .connection_drop_preview
             .filter(|preview| preview.workspace_id == workspace_id)?;
         let grid_bounds = self.connection_grid_bounds.get(&workspace_id).copied()?;
-        let anchor_index =
-            connection_card_slot_anchor_index(preview, visible_connection_ids)?;
+        let anchor_index = connection_card_slot_anchor_index(preview, visible_connection_ids)?;
         let anchor_bounds = self
             .connection_card_bounds
             .get(&visible_connection_ids[anchor_index])
@@ -3304,7 +3303,10 @@ impl HomePage {
         );
         let relative_partner_bounds = anchor_index
             .checked_sub(1)
-            .and_then(|index| self.connection_card_bounds.get(&visible_connection_ids[index]))
+            .and_then(|index| {
+                self.connection_card_bounds
+                    .get(&visible_connection_ids[index])
+            })
             .copied()
             .map(|bounds| {
                 Bounds::new(
@@ -5652,6 +5654,70 @@ fn preview_for_connection_card_gap_from_bounds(
     best_preview.map(|(_, preview)| preview)
 }
 
+fn connection_card_slot_anchor_index(
+    preview: ConnectionDropPreview,
+    visible_connection_ids: &[i64],
+) -> Option<usize> {
+    let target_index = visible_connection_ids
+        .iter()
+        .position(|connection_id| *connection_id == preview.target_connection_id)?;
+
+    match preview.position {
+        ManualInsertPosition::Before => Some(target_index),
+        ManualInsertPosition::After => {
+            let next_index = target_index + 1;
+            (next_index < visible_connection_ids.len()).then_some(next_index)
+        }
+    }
+}
+
+fn connection_card_slot_indicator_bounds(
+    anchor_bounds: Bounds<Pixels>,
+    partner_bounds: Option<Bounds<Pixels>>,
+) -> Bounds<Pixels> {
+    let thickness = px(12.0);
+    let inset = px(8.0);
+
+    if let Some(partner_bounds) = partner_bounds {
+        let vertical_overlap_top = anchor_bounds.top().max(partner_bounds.top()) + inset;
+        let vertical_overlap_bottom = anchor_bounds.bottom().min(partner_bounds.bottom()) - inset;
+        let horizontal_gap = anchor_bounds.left() - partner_bounds.right();
+
+        if horizontal_gap > px(0.0) && vertical_overlap_bottom > vertical_overlap_top {
+            let center_x = partner_bounds.right() + horizontal_gap * 0.5;
+            return Bounds::new(
+                Point::new(center_x - thickness * 0.5, vertical_overlap_top),
+                gpui::size(thickness, vertical_overlap_bottom - vertical_overlap_top),
+            );
+        }
+
+        let vertical_gap = anchor_bounds.top() - partner_bounds.bottom();
+        if vertical_gap > px(0.0) {
+            let horizontal_overlap_left = anchor_bounds.left().max(partner_bounds.left()) + inset;
+            let horizontal_overlap_right =
+                anchor_bounds.right().min(partner_bounds.right()) - inset;
+            let (origin_x, width) = if horizontal_overlap_right > horizontal_overlap_left {
+                (
+                    horizontal_overlap_left,
+                    horizontal_overlap_right - horizontal_overlap_left,
+                )
+            } else {
+                (
+                    anchor_bounds.origin.x + inset,
+                    (anchor_bounds.size.width - inset * 2.0).max(px(36.0)),
+                )
+            };
+            let center_y = partner_bounds.bottom() + vertical_gap * 0.5;
+            return Bounds::new(
+                Point::new(origin_x, center_y - thickness * 0.5),
+                gpui::size(width, thickness),
+            );
+        }
+    }
+
+    connection_card_overlay_indicator_bounds(anchor_bounds, ManualDropIndicatorEdge::Left)
+}
+
 fn connection_card_overlay_indicator_bounds(
     bounds: Bounds<Pixels>,
     edge: ManualDropIndicatorEdge,
@@ -5882,27 +5948,42 @@ mod connection_list_sort_tests {
     }
 
     #[test]
-    fn connection_card_overlay_indicator_bounds_for_right_edge_stays_near_target_edge() {
-        let bounds = connection_card_overlay_indicator_bounds(
-            make_card_bounds(140.0, 30.0),
-            ManualDropIndicatorEdge::Right,
+    fn connection_card_slot_anchor_index_maps_after_to_next_slot() {
+        let anchor_index = connection_card_slot_anchor_index(
+            ConnectionDropPreview {
+                workspace_id: Some(7),
+                target_connection_id: 22,
+                position: ManualInsertPosition::After,
+                edge: ManualDropIndicatorEdge::Right,
+            },
+            &[11, 22, 33],
         );
 
-        assert_eq!(bounds.origin.x, px(234.0));
+        assert_eq!(anchor_index, Some(2));
+    }
+
+    #[test]
+    fn connection_card_slot_indicator_bounds_for_same_row_center_between_cards() {
+        let bounds = connection_card_slot_indicator_bounds(
+            make_card_bounds(140.0, 30.0),
+            Some(make_card_bounds(0.0, 30.0)),
+        );
+
+        assert_eq!(bounds.origin.x, px(114.0));
         assert_eq!(bounds.origin.y, px(38.0));
         assert_eq!(bounds.size.width, px(12.0));
         assert_eq!(bounds.size.height, px(64.0));
     }
 
     #[test]
-    fn connection_card_overlay_indicator_bounds_for_bottom_edge_stays_near_target_edge() {
-        let bounds = connection_card_overlay_indicator_bounds(
-            make_card_bounds(20.0, 120.0),
-            ManualDropIndicatorEdge::Bottom,
+    fn connection_card_slot_indicator_bounds_for_next_row_centers_between_rows() {
+        let bounds = connection_card_slot_indicator_bounds(
+            make_card_bounds(0.0, 100.0),
+            Some(make_card_bounds(240.0, 0.0)),
         );
 
-        assert_eq!(bounds.origin.x, px(28.0));
-        assert_eq!(bounds.origin.y, px(194.0));
+        assert_eq!(bounds.origin.x, px(8.0));
+        assert_eq!(bounds.origin.y, px(84.0));
         assert_eq!(bounds.size.width, px(84.0));
         assert_eq!(bounds.size.height, px(12.0));
     }
