@@ -102,6 +102,7 @@ pub struct HomePage {
     selected_connection_id: Option<i64>,
     editing_workspace_id: Option<i64>,
     pub(crate) filtered_workspace_ids: HashSet<i64>,
+    collapsed_workspaces: HashSet<i64>,
     pub(crate) workspace_filter_open: bool,
     workspace_filter_list: Option<Entity<ListState<WorkspaceFilterDelegate>>>,
     pub(crate) _subscriptions: Vec<Subscription>,
@@ -170,6 +171,7 @@ impl HomePage {
             selected_connection_id: None,
             editing_workspace_id: None,
             filtered_workspace_ids: HashSet::new(),
+            collapsed_workspaces: HashSet::new(),
             workspace_filter_open: false,
             workspace_filter_list: None,
             _subscriptions: Vec::new(),
@@ -3210,6 +3212,9 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let workspace_id = workspace.id;
+        let is_collapsed = workspace_id
+            .map(|id| self.collapsed_workspaces.contains(&id))
+            .unwrap_or(false);
         v_flex()
             .gap_3()
             .child(
@@ -3243,6 +3248,31 @@ impl HomePage {
                             ),
                     )
                     .child(div().flex_1())
+                    .child(
+                        Button::new(format!("workspace-collapse-{}", workspace_id.unwrap_or(0)))
+                            .icon(if is_collapsed {
+                                IconName::ChevronRight
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .xsmall()
+                            .ghost()
+                            .tooltip(if is_collapsed {
+                                t!("Workspace.expand").to_string()
+                            } else {
+                                t!("Workspace.collapse").to_string()
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(id) = workspace_id {
+                                    if this.collapsed_workspaces.contains(&id) {
+                                        this.collapsed_workspaces.remove(&id);
+                                    } else {
+                                        this.collapsed_workspaces.insert(id);
+                                    }
+                                    cx.notify();
+                                }
+                            })),
+                    )
                     .when_some(workspace_id, |this, workspace_id| {
                         this.child(
                             h_flex()
@@ -3274,7 +3304,7 @@ impl HomePage {
                         )
                     }),
             )
-            .when(!connections.is_empty(), |this| {
+            .when(!connections.is_empty() && !is_collapsed, |this| {
                 this.child(self.render_connections_collection(
                     connections,
                     workspace_id,

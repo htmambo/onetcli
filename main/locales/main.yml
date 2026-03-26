@@ -551,6 +551,14 @@ Workspace:
     en: Edit Workspace
     zh-CN: 编辑工作区
     zh-HK: 編輯工作區
+  collapse:
+    en: Collapse
+    zh-CN: 收起
+    zh-HK: 收起
+  expand:
+    en: Expand
+    zh-CN: 展开
+    zh-HK: 展開
   delete:
     en: Delete Workspace
     zh-CN: 删除工作区
