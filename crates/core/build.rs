@@ -5,10 +5,10 @@ fn main() {
     // 彻底解决 cargo cache 导致 option_env! 拿不到值的问题
     for key in ["ONETCLI_UPDATE_URL", "ONETCLI_UPDATE_DOWNLOAD_URL"] {
         println!("cargo:rerun-if-env-changed={key}");
-        if let Ok(val) = std::env::var(key) {
-            if !val.is_empty() {
-                println!("cargo:rustc-env={key}={val}");
-            }
+        if let Ok(val) = std::env::var(key)
+            && !val.is_empty()
+        {
+            println!("cargo:rustc-env={key}={val}");
         }
     }
 }
