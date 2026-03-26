@@ -11,9 +11,9 @@ use crate::ActiveTheme;
 use crate::title_bar::linux_prefers_system_window_controls;
 
 #[cfg(not(target_os = "linux"))]
-const SHADOW_SIZE: Pixels = px(0.0);
+pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 #[cfg(target_os = "linux")]
-const SHADOW_SIZE: Pixels = px(12.0);
+pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
 const BORDER_SIZE: Pixels = px(1.0);
 pub(crate) const BORDER_RADIUS: Pixels = px(0.0);
 
@@ -23,25 +23,42 @@ pub fn window_border() -> WindowBorder {
 }
 
 /// Window border use to render a custom window border and shadow for Linux.
-#[derive(IntoElement, Default)]
+#[derive(IntoElement)]
 pub struct WindowBorder {
+    shadow_size: Pixels,
     children: Vec<AnyElement>,
+}
+
+impl Default for WindowBorder {
+    fn default() -> Self {
+        Self {
+            shadow_size: SHADOW_SIZE,
+            children: Vec::new(),
+        }
+    }
 }
 
 impl WindowBorder {
     pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Self::default()
+    }
+
+    /// Set the shadow size for typical Linux client-side decorations.
+    ///
+    /// Default: [`SHADOW_SIZE`]
+    pub fn shadow_size(mut self, size: impl Into<Pixels>) -> Self {
+        self.shadow_size = size.into();
+        self
     }
 }
 
 /// Get the window paddings.
 pub fn window_paddings(window: &Window) -> Edges<Pixels> {
+    let shadow_size = window.client_inset().unwrap_or(SHADOW_SIZE);
     match window.window_decorations() {
         Decorations::Server => Edges::all(px(0.0)),
         Decorations::Client { tiling } => {
-            let mut paddings = Edges::all(SHADOW_SIZE);
+            let mut paddings = Edges::all(shadow_size);
             if tiling.top {
                 paddings.top = px(0.0);
             }
@@ -68,6 +85,7 @@ impl ParentElement for WindowBorder {
 impl RenderOnce for WindowBorder {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let decorations = window.window_decorations();
+        let shadow_size = self.shadow_size;
         #[cfg(target_os = "linux")]
         let prefers_system_frame =
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
@@ -76,7 +94,7 @@ impl RenderOnce for WindowBorder {
         let client_inset = if prefers_system_frame {
             px(0.0)
         } else {
-            SHADOW_SIZE
+            shadow_size
         };
 
         // Deepin/X11 的系统标题栏路径下不要继续声明自绘边框范围，
@@ -104,7 +122,7 @@ impl RenderOnce for WindowBorder {
                             move |_bounds, hitbox, window, _| {
                                 let mouse = window.mouse_position();
                                 let size = window.window_bounds().get_bounds().size;
-                                let Some(edge) = resize_edge(mouse, SHADOW_SIZE, size) else {
+                                let Some(edge) = resize_edge(mouse, shadow_size, size) else {
                                     return;
                                 };
                                 window.set_cursor_style(
@@ -135,15 +153,15 @@ impl RenderOnce for WindowBorder {
                     .when(!(tiling.top || tiling.left), |div| {
                         div.rounded_tl(BORDER_RADIUS)
                     })
-                    .when(!tiling.top, |div| div.pt(SHADOW_SIZE))
-                    .when(!tiling.bottom, |div| div.pb(SHADOW_SIZE))
-                    .when(!tiling.left, |div| div.pl(SHADOW_SIZE))
-                    .when(!tiling.right, |div| div.pr(SHADOW_SIZE))
+                    .when(!tiling.top, |div| div.pt(shadow_size))
+                    .when(!tiling.bottom, |div| div.pb(shadow_size))
+                    .when(!tiling.left, |div| div.pl(shadow_size))
+                    .when(!tiling.right, |div| div.pr(shadow_size))
                     .on_mouse_down(MouseButton::Left, move |_, window, _| {
                         let size = window.window_bounds().get_bounds().size;
                         let pos = window.mouse_position();
 
-                        match resize_edge(pos, SHADOW_SIZE, size) {
+                        match resize_edge(pos, shadow_size, size) {
                             Some(edge) => window.start_window_resize(edge),
                             None => {}
                         };
@@ -176,7 +194,7 @@ impl RenderOnce for WindowBorder {
                                         l: 0.,
                                         a: 0.3,
                                     },
-                                    blur_radius: SHADOW_SIZE / 2.,
+                                    blur_radius: shadow_size / 2.,
                                     spread_radius: px(0.),
                                     offset: point(px(0.0), px(0.0)),
                                 }])
