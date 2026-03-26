@@ -5,7 +5,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
-    app_style, ActiveTheme,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -13,7 +13,7 @@ use gpui_component::{
     radio::Radio,
     select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
-    v_flex, Disableable, Sizable, Size, StyledExt, TitleBar,
+    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
 };
 use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::certificate_notifier::{

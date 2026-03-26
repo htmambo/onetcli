@@ -3,6 +3,71 @@
 
 ---
 
+## 审查报告（connection-remote-delete-conflict-and-sync-server-restore）
+生成时间：2026-03-26 16:32:30 CST
+
+### 需求完整性检查
+- 目标明确：修复“远端删连接会在客户端冒假冲突并可能误回写”的问题，并为远端页面补齐“恢复”入口
+- 范围明确：涉及 `one-core` 的连接同步与 `sync_server/web` 的列表页、详情页、API 封装
+- 交付物明确：核心同步修复、恢复按钮、本地验证、`.claude/` 留痕
+- 风险与依赖明确：工作区恢复不会自动重新关联删除时解绑的子连接
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 连接删除假冲突已修掉：[`connection_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs) 现在会在处理远端软删除后刷新本地快照，并且对真正的“本地更新优先”与“本地无更新直接删除”做了分流，不再把已删连接继续送进冲突列表。
+- 连接云端回写时间基线已对齐：[`service.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs) 和 [`repository.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/repository.rs) 现在会保留连接的云端秒级 `updated_at / last_synced_at`，避免刚同步完就被误判成本地修改。
+- 远端恢复入口已补齐：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts) 新增恢复 API；[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue) 与 [`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue) 已支持恢复软删除记录。
+- 边界说明已明确：工作区恢复时不会自动重新关联此前解绑的子连接，页面确认文案和成功提示里都已写明。
+- 本地验证有效：`cargo test -p one-core remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item -- --nocapture`、`cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline -- --nocapture`、`cargo check -p one-core`、`sync_server/web` 下 `npm run build` 全部通过。
+
+---
+
+## 审查报告（sync-server-web-delete-entry）
+生成时间：2026-03-26 15:55:48 CST
+
+### 需求完整性检查
+- 目标明确：在同步服务器 Web 页面补齐单条同步项删除入口
+- 范围明确：仅涉及 `sync_server/web` 的 API 封装、同步项列表页和详情页
+- 交付物明确：删除按钮、确认提示、冲突处理、本地构建验证、`.claude/` 留痕
+- 风险与依赖明确：删除依赖服务端既有 `DELETE /api/v1/sync/items/:id`，并要求携带 `version` 落实“更新优先”
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：84/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 删除接入点正确：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts) 新增 `deleteSyncItem(...)`，并把当前 `version` 透传到服务端删除接口，确保并发删除不会覆盖较新的更新。
+- 列表入口已经补齐：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue) 的操作列现在同时提供“查看详情”和“删除”，并对已软删除记录切换为不可再删的状态标签。
+- 详情入口已经补齐：[`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue) 顶部操作区新增“删除同步项”，删除成功后当前详情会直接刷新为软删除状态。
+- 业务语义已落到交互文案：列表提示和确认弹窗都明确了“工作区删除只解绑子级，不删除子项”以及“删除与更新并发时更新优先”。
+- 冲突回退可见：删除遇到 409 时，页面会提示用户当前删除未生效，并刷新到最新数据，符合用户对并发规则的要求。
+- 本地验证有效：`sync_server/web` 下 `npm run build` 通过；残余风险仅在于当前仓库没有 Web 端自动化交互测试，建议再手工点击一次列表页和详情页删除流程。
+
+---
+
 ## 审查报告（connection-list-view-preferences）
 生成时间：2026-03-26 12:11:31 +0800
 
@@ -2978,3 +3043,34 @@
 ### 残余风险
 - 当前 UI 仍允许在“云端已删除”冲突上选择 `KeepBoth`，本次仅修正其执行语义为“保留本地并重建云端”，未同步调整按钮层面的交互文案
 - 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
+
+## 审查报告（workspace-delete-update-wins）
+生成时间：2026-03-26 16:05:00 +0800
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：94/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论摘要
+- 工作空间删除已收敛为“删除父对象 + 子连接解绑”，不再支持“删除全部连接”分支。
+- 待删除工作空间现在会记录删除基线与受影响连接列表，删除若遇到更晚的云端更新会自动撤销并恢复本地关联。
+- 云端软删除回放在本地有未同步更新时会让更新优先，不再直接删除本地工作空间。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p one-core workspace_repository_delete_unlinks_connections_and_refreshes_timestamp`：通过
+- `cargo test -p one-core pending_cloud_deletion_repository_persists_context_fields`：通过
+- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status`：通过
+- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item`：通过
+- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection`：通过
+- `cargo check -p main`：通过

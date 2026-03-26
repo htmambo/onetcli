@@ -263,7 +263,11 @@ pub fn discover_default_private_keys() -> Vec<String> {
 pub fn expand_auto_publickey_auth() -> Vec<SshAuth> {
     let mut candidates = vec![SshAuth::Agent];
     candidates.extend(discover_default_private_keys().into_iter().map(|key_path| {
-        SshAuth::PrivateKey { key_path, passphrase: None, certificate_path: None }
+        SshAuth::PrivateKey {
+            key_path,
+            passphrase: None,
+            certificate_path: None,
+        }
     }));
     candidates
 }
@@ -284,7 +288,9 @@ where
     if filtered.is_empty() {
         anyhow::bail!(messages.no_local_identity.clone());
     }
-    let has_keys = filtered.iter().any(|a| matches!(a, SshAuth::PrivateKey { .. }));
+    let has_keys = filtered
+        .iter()
+        .any(|a| matches!(a, SshAuth::PrivateKey { .. }));
     let mut errors = Vec::new();
     for auth in filtered {
         match authenticate_session(session, username, auth, messages.clone()).await {
@@ -293,8 +299,12 @@ where
         }
     }
     let mut parts = vec![messages.auto_publickey_failed.clone()];
-    if !has_keys { parts.push(messages.no_local_identity.clone()); }
-    if !errors.is_empty() { parts.push(errors.join("; ")); }
+    if !has_keys {
+        parts.push(messages.no_local_identity.clone());
+    }
+    if !errors.is_empty() {
+        parts.push(errors.join("; "));
+    }
     parts.push(messages.auto_publickey_next_step.clone());
     anyhow::bail!(parts.join(": "));
 }

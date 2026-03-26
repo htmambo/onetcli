@@ -1,5 +1,158 @@
 ## 操作日志
 
+## 编码前检查 - connection-remote-delete-conflict
+时间：2026-03-26 16:18:00 CST
+
+- 已查阅上下文摘要文件：`.claude/context-summary-connection-remote-delete-conflict.md`
+- 已分析相似实现：
+  - `crates/core/src/cloud_sync/connection_sync.rs`
+  - `crates/core/src/cloud_sync/generic_sync.rs`
+  - `crates/core/src/storage/repository.rs`
+  - `crates/core/src/cloud_sync/service.rs`
+- 将使用以下可复用组件：
+  - `generic_sync::should_keep_local_item_on_cloud_delete` 的判定思路
+  - `WorkspaceRepository::update_from_cloud` / `CertificateRepository::update_from_cloud` 的仓库分层模式
+  - `engine.rs` 里的同步测试夹具模式
+- 将遵循命名约定：连接仓库新增 `insert_from_cloud` / `update_from_cloud`
+- 将遵循代码风格：修复收敛在连接同步、仓库层和云端解密时间戳，不扩散 UI 改动
+- 确认不重复造轮子，证明：优先复用工作区/证书已有“云端回写”模式，不新造另一套同步状态系统
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、Rust 单测和编译作为替代并留痕
+
+## 编码后声明 - connection-remote-delete-conflict
+时间：2026-03-26 16:32:30 CST
+
+### 1. 复用了以下既有组件
+- `crates/core/src/cloud_sync/generic_sync.rs::should_keep_local_item_on_cloud_delete`：沿用“本地有未同步更新则跳过远端删除”的判定思路
+- `crates/core/src/storage/repository.rs::WorkspaceRepository::update_from_cloud`
+- `crates/core/src/storage/repository.rs::CertificateRepository::update_from_cloud`
+- `crates/core/src/cloud_sync/engine.rs` 现有同步测试夹具模式
+
+### 2. 遵循了以下项目约定
+- 命名约定：连接仓库新增 `insert_from_cloud` / `update_from_cloud`
+- 代码风格：修复收敛在 `connection_sync.rs`、`repository.rs`、`service.rs`
+- 文件组织：同步策略留在 `cloud_sync` 层，时间戳落库规则留在仓库层
+
+### 3. 对比了以下相似实现
+- `WorkspaceRepository::update_from_cloud`：参考其“保留云端 updated_at + last_synced_at”的写法
+- `CertificateRepository::update_from_cloud`：沿用“本地普通 update 与云端回写 update 分离”的边界
+- `generic_sync.rs`：参考其在远端软删除后对“本地更新优先”的判定方式
+
+### 4. 未重复造轮子的证明
+- 已检查连接同步现有主流程、工作区/证书云端回写模式和通用软删除判定
+- 最终没有新增新的冲突状态系统，只把连接同步对齐到项目已有模式
+
+## 实施与验证记录 - connection-remote-delete-conflict-and-sync-server-restore
+时间：2026-03-26 16:32:30 CST
+
+### 已完成修改
+- `crates/core/src/cloud_sync/connection_sync.rs`
+  - 远端软删除后刷新本地连接快照，避免后续同步计划继续使用已删除的旧列表
+  - 远端删除连接时，如果本地有未同步修改，则跳过本地删除
+  - 当云端记录缺失时，不再制造伪冲突，而是按既定语义重新加入上传计划
+  - 新增回归测试，覆盖“远端删连接不再冒假冲突，也不会误回写新连接”
+- `crates/core/src/storage/repository.rs`
+  - 为连接仓库新增 `insert_from_cloud` 与 `update_from_cloud`
+  - 新增仓库层测试，覆盖“云端回写保持 updated_at / last_synced_at 基线”
+- `crates/core/src/cloud_sync/service.rs`
+  - 修正连接解密后的秒级时间基线，避免毫秒/秒混用
+- `sync_server/web/src/services/api.ts`
+  - 新增远端恢复 `restoreSyncItem(...)` API
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 列表页已软删除记录新增“恢复”按钮
+  - 恢复确认文案补充“工作区恢复不自动重连子连接”的边界说明
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - 详情页已软删除记录新增“恢复同步项”按钮
+  - 删除 / 恢复都支持版本冲突后的自动刷新
+
+### 本地验证
+- `cargo test -p one-core remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item -- --nocapture`
+  - 结果：通过
+- `cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline -- --nocapture`
+  - 结果：通过
+- `cargo check -p one-core`
+  - 结果：通过
+- `npm run build`
+  - 目录：`sync_server/web`
+  - 结果：通过
+
+### 当前限制
+- 远端“恢复工作区”只恢复工作区记录本身，不会自动重新关联此前解绑的子连接
+- Web 端仍缺少自动化交互测试，删除/恢复确认流程主要依赖本地构建和手工点验
+
+## 编码前检查 - sync-server-web-delete-entry
+时间：2026-03-26 15:49:58 CST
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-web-delete-entry.md`
+- 已分析相似实现：
+  - `sync_server/web/src/views/user/SyncItemsView.vue`
+  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - `sync_server/web/src/views/user/ProfileView.vue`
+  - `sync_server/web/src/views/admin/AdminOverviewView.vue`
+  - `sync_server/server/src/http/routes/sync.ts`
+- 将使用以下可复用组件：
+  - `api.request(...)`：复用统一请求和 `ApiError`
+  - `loadItems()` / `loadItem()`：复用已有刷新逻辑
+  - `danger-button + window.confirm`：复用站内危险操作交互
+  - `getSyncItemTypeLabel / isSyncItemType`：复用类型标签和工作区判断
+- 将遵循命名约定：新增状态命名使用 `actionMessage`、`actionError`、`deleting*`
+- 将遵循代码风格：Composition API + `<script setup>`，不引入新的状态管理层或弹窗组件
+- 确认不重复造轮子，证明：服务端已存在删除接口，本次只补 Web 端 API 封装和页面入口
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、Vue 构建和类型检查作为替代并留痕
+
+## 编码后声明 - sync-server-web-delete-entry
+时间：2026-03-26 15:55:48 CST
+
+### 1. 复用了以下既有组件
+- `sync_server/server/src/http/routes/sync.ts::DELETE /api/v1/sync/items/:id`：继续使用现有单条软删除接口和 409 冲突语义
+- `sync_server/web/src/services/api.ts::request`：继续作为统一请求和错误包装入口
+- `sync_server/web/src/views/user/SyncItemsView.vue::loadItems`：删除冲突后直接复用列表刷新逻辑
+- `sync_server/web/src/views/user/SyncItemDetailView.vue::loadItem`：删除冲突后直接复用详情刷新逻辑
+- `sync_server/web/src/views/user/ProfileView.vue::clearData`：复用危险操作的确认与反馈样式
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `deleteSyncItem`、`actionMessage`、`actionError`、`deletingItemId`、`deleting`
+- 代码风格：继续使用 `<script setup lang=\"ts\">`、`ref`、`computed` 和模板内条件渲染
+- 文件组织：API 变更只落在 `services/api.ts` 与 `types/api.ts`，页面交互只落在 `views/user` 下两个页面
+
+### 3. 对比了以下相似实现
+- `sync_server/web/src/views/user/ProfileView.vue`：沿用 `window.confirm + danger-button` 危险操作模式，但本次改成单条记录粒度
+- `sync_server/web/src/views/admin/AdminOverviewView.vue`：参考表格行级危险操作布局，但补上了版本冲突处理
+- `sync_server/web/src/views/user/SyncItemDetailView.vue` 既有刷新逻辑：保留详情页本地刷新模式，不改成跳页删除
+
+### 4. 未重复造轮子的证明
+- 已检查 `sync_server/server` 路由，确认服务端已有单条删除接口
+- 最终没有新增自定义弹窗、全局状态或新路由，只把现有接口接入到现有页面
+
+## 实施与验证记录 - sync-server-web-delete-entry
+时间：2026-03-26 15:55:48 CST
+
+### 已完成修改
+- `sync_server/web/src/types/api.ts`
+  - 新增 `SyncItemDeleteResult`，定义单条删除响应结构
+- `sync_server/web/src/services/api.ts`
+  - 新增 `api.deleteSyncItem(...)`，支持携带 `version` 查询参数
+- `sync_server/web/src/views/user/SyncItemsView.vue`
+  - 列表页新增行级删除入口、删除确认文案、删除中状态和 409 冲突自动刷新
+  - 删除成功后本地更新当前记录的 `deletedAt`、`updatedAt`、`version`
+  - 页面说明补充“工作区删除只解绑子级”和“更新优先”
+- `sync_server/web/src/views/user/SyncItemDetailView.vue`
+  - 详情页顶部新增“删除同步项”按钮和已删除状态展示
+  - 删除成功后当前详情直接更新为软删除状态
+  - 路由切换时会清理上一条记录的删除提示，避免串页
+- `.claude/context-summary-sync-server-web-delete-entry.md`
+  - 记录服务端接口现状、前端复用点、风险与验证策略
+
+### 本地验证
+- `npm run build`
+  - 目录：`sync_server/web`
+  - 结果：通过
+
+### 当前限制
+- 当前仓库没有 Web 端自动化测试，本次主要依赖 `vue-tsc + vite build`
+- 仍建议手工确认两条交互：
+  - 在同步项列表页删除一条有效记录后，当前筛选和分页表现符合预期
+  - 在详情页删除工作区记录时，确认提示文案和删除后状态展示符合预期
+
 ## 编码前检查 - connection-list-view-preferences
 时间：2026-03-26 12:11:31 +0800
 
@@ -5641,3 +5794,70 @@
 ### 4. 本地验证结果
 - `cargo fmt --all`：通过
 - `cargo check -p main`：通过
+
+## 编码前检查 - workspace-delete-update-wins
+时间：2026-03-26 15:05:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-workspace-delete-update-wins.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs::queue_pending_cloud_deletion(...)`：登记工作空间待删除记录
+- `WorkspaceRepository::delete(...)`：删除工作空间并解绑子连接
+- `generic_sync(...)`：复用工作空间现有通用同步流程
+- `ConnectionRepository::list_by_workspace(...)`：收集待恢复的连接
+□ 将遵循命名约定：沿用 `handle_*`、`process_*`、`restore_*`
+□ 将遵循代码风格：同步语义和日志文案继续使用简体中文
+□ 确认不重复造轮子，证明：不新增独立删除同步框架，只扩展既有待删除记录和工作空间同步逻辑
+
+## 执行记录 - workspace-delete-update-wins
+时间：2026-03-26 15:05:00 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `crates/core/src/storage/repository.rs`
+- `crates/core/src/cloud_sync/generic_sync.rs`
+- `crates/core/src/cloud_sync/workspace_sync.rs`
+- `crates/core/src/cloud_sync/connection_sync.rs`
+
+### 2. 对比的相似实现
+- 连接删除：本地删除后只登记待删除，由同步引擎处理云端删除
+- 证书删除：删除证书前先解绑连接，再进入统一删除链路
+- 工作空间删除：本地仓库层已经具备解绑连接后删除父对象的能力
+
+### 3. 当前发现
+- 现有 UI 删除工作空间仍保留“删除全部连接”分支，需要移除
+- 现有待删除表缺少删除基线和恢复上下文，无法表达“更新优先于删除”
+- 现有云端软删除回放会直接删本地工作空间，不会检查本地是否已有未同步更新
+
+## 编码后声明 - workspace-delete-update-wins
+时间：2026-03-26 16:05:00 +0800
+
+### 1. 复用了以下既有组件
+- `PendingCloudDeletionRepository`：继续沿用既有待删除表，只扩展基线和元数据字段
+- `WorkspaceRepository::delete(...)`：保留“删除工作空间时解绑子连接”的仓库层职责
+- `generic_sync(...)`：继续复用通用同步主流程，只补待删除决策和软删除优先级判断
+- `ConnectionRepository::update(...)`：用于删除撤销时恢复连接归属
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增方法沿用 `queue_pending_*`、`restore_*`、`decide_*`
+- 代码风格：文案仍在 `main/locales/main.yml`，同步日志保持 `[同步]` / `[删除]` 前缀
+- 文件组织：UI 入口改动在 `main/src/home_tab.rs`，同步策略改动在 `crates/core/src/cloud_sync/`，持久化改动在 `crates/core/src/storage/`
+
+### 3. 对比了以下相似实现
+- 连接删除：仍然走“本地删除 + 待删除队列 + 同步引擎处理云端删除”
+- 证书删除：保持“先解绑关联对象，再处理父对象删除”的模式
+- 工作空间删除：由原来的“双分支删除”收敛为“删除工作空间 + 子连接解绑”
+
+### 4. 未重复造轮子的证明
+- 没有新增新的同步引擎或工作空间专属队列系统
+- 没有绕开 `generic_sync(...)` 另起一套工作空间同步主流程
+- 删除撤销恢复直接复用现有仓库与解密逻辑
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo test -p one-core workspace_repository_delete_unlinks_connections_and_refreshes_timestamp`：通过
+- `cargo test -p one-core pending_cloud_deletion_repository_persists_context_fields`：通过
+- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status`：通过
+- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item`：通过
+- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection`：通过
+- `cargo check -p main`：通过
+- `cargo test -p one-core`：存在既有顺序相关失败；3 条冲突测试在全量顺序下出现 `NotUnlocked` / 锁污染，但单独重跑均通过，说明本次改动未引入对应功能性失败
