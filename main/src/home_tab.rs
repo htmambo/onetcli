@@ -3188,6 +3188,12 @@ impl HomePage {
             })
             .collect();
 
+        let sort_field = Self::connection_list_sort_field(cx);
+        let sort_order = Self::connection_list_sort_order(cx);
+        let mut workspaces_with_connections = workspaces_with_connections;
+        workspaces_with_connections
+            .sort_by(|(a, _), (b, _)| compare_workspaces(a, b, sort_field, sort_order));
+
         let unassigned_connections = self.sort_connections_for_display(
             self.connections
                 .iter()
@@ -3945,6 +3951,43 @@ impl HomePage {
             );
 
         card.into_any_element()
+    }
+}
+
+fn compare_workspaces(
+    a: &Workspace,
+    b: &Workspace,
+    sort_field: ConnectionListSortField,
+    sort_order: ConnectionListSortOrder,
+) -> Ordering {
+    // 未分配工作区（id == None）始终排最后
+    match (a.id, b.id) {
+        (None, Some(_)) => return Ordering::Greater,
+        (Some(_), None) => return Ordering::Less,
+        _ => {}
+    }
+    let cmp = match sort_field {
+        ConnectionListSortField::Name => a
+            .name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| timestamp_value(a.updated_at).cmp(&timestamp_value(b.updated_at)))
+            .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
+        ConnectionListSortField::CreatedAt => timestamp_value(a.created_at)
+            .cmp(&timestamp_value(b.created_at))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| timestamp_value(a.updated_at).cmp(&timestamp_value(b.updated_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
+        ConnectionListSortField::UpdatedAt => timestamp_value(a.updated_at)
+            .cmp(&timestamp_value(b.updated_at))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
+    };
+    match sort_order {
+        ConnectionListSortOrder::Ascending => cmp,
+        ConnectionListSortOrder::Descending => cmp.reverse(),
     }
 }
 
