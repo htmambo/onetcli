@@ -1547,13 +1547,14 @@ impl TabContainer {
             .items_center()
             .border_b_1()
             .border_color(border_color)
+            // macOS 双击标签栏触发系统偏好设置的标题栏双击行为（zoom/minimize）
+            .when(is_macos, |this| {
+                this.on_double_click(|_, window, _| window.handle_titlebar_double_click())
+            })
             // 窗口拖动支持：仅在非 macOS 且启用窗口控件时生效
             .when(show_window_controls, |this| {
                 this.when(is_linux, |this| {
                     this.on_double_click(|_, window, _| window.zoom_window())
-                })
-                .when(is_macos, |this| {
-                    this.on_double_click(|_, window, _| window.handle_titlebar_double_click())
                 })
                 .on_mouse_down_out(window.listener_for(&drag_state, |state, _, _, _| {
                     state.should_move = false;
