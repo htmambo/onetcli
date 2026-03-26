@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen px-4 py-6 md:px-6 lg:h-screen lg:overflow-hidden">
     <div class="mx-auto grid max-w-7xl gap-6 lg:h-full lg:grid-cols-[280px_minmax(0,1fr)]">
-      <aside class="panel flex flex-col rounded-[28px] p-6 lg:min-h-0 lg:h-full lg:overflow-y-auto">
+      <aside class="hover-card panel flex flex-col rounded-[28px] p-6 lg:min-h-0 lg:h-full lg:overflow-y-auto">
         <div class="border-b soft-line pb-5">
           <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">Sync Server</p>
           <h1 class="mt-3 text-2xl font-semibold text-[var(--text)]">同步中心</h1>
