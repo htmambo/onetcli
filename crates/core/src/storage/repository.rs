@@ -1,6 +1,7 @@
 use anyhow::Result;
 use gpui::{App, SharedString};
 use rusqlite::params;
+use serde::{Deserialize, Serialize};
 
 use crate::crypto;
 use crate::storage::connection::SqliteConnection;
@@ -201,6 +202,92 @@ pub struct ConnectionRepository {
 impl ConnectionRepository {
     pub fn new(conn: SqliteConnection) -> Self {
         Self { conn }
+    }
+
+    pub fn insert_from_cloud(&self, item: &mut StoredConnection) -> Result<i64> {
+        let name = item.name.clone();
+        let connection_type = item.connection_type.to_string();
+        let params_str = item.encrypt_params();
+        let workspace_id = item.workspace_id;
+        let selected_databases = item.selected_databases.clone();
+        let remark = item.remark.clone();
+        let sync_enabled = if item.sync_enabled { 1i64 } else { 0i64 };
+        let cloud_id = item.cloud_id.clone();
+        let updated_at = item.updated_at.unwrap_or_else(now);
+        let last_synced_at = item.last_synced_at.or(Some(updated_at));
+        let team_id = item.team_id.clone();
+        let owner_id = item.owner_id.clone();
+        let created_at = now();
+
+        let id = self.conn.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO connections (name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    name,
+                    connection_type,
+                    params_str,
+                    workspace_id,
+                    selected_databases,
+                    remark,
+                    sync_enabled,
+                    cloud_id,
+                    last_synced_at,
+                    team_id,
+                    owner_id,
+                    created_at,
+                    updated_at
+                ],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })?;
+
+        item.id = Some(id);
+        item.created_at = Some(created_at);
+        item.updated_at = Some(updated_at);
+        item.last_synced_at = last_synced_at;
+
+        Ok(id)
+    }
+
+    pub fn update_from_cloud(&self, item: &StoredConnection) -> Result<()> {
+        let id = item
+            .id
+            .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
+        let name = item.name.clone();
+        let connection_type = item.connection_type.to_string();
+        let params_str = item.encrypt_params();
+        let workspace_id = item.workspace_id;
+        let selected_databases = item.selected_databases.clone();
+        let remark = item.remark.clone();
+        let sync_enabled = if item.sync_enabled { 1i64 } else { 0i64 };
+        let cloud_id = item.cloud_id.clone();
+        let updated_at = item.updated_at.unwrap_or_else(now);
+        let last_synced_at = item.last_synced_at.or(Some(updated_at));
+        let team_id = item.team_id.clone();
+        let owner_id = item.owner_id.clone();
+
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, workspace_id = ?4, selected_databases = ?5, remark = ?6, sync_enabled = ?7, cloud_id = ?8, last_synced_at = ?9, team_id = ?10, owner_id = ?11, updated_at = ?12 WHERE id = ?13",
+                params![
+                    name,
+                    connection_type,
+                    params_str,
+                    workspace_id,
+                    selected_databases,
+                    remark,
+                    sync_enabled,
+                    cloud_id,
+                    last_synced_at,
+                    team_id,
+                    owner_id,
+                    updated_at,
+                    id
+                ],
+            )?;
+            Ok(())
+        })
     }
 }
 
@@ -793,10 +880,11 @@ impl Repository for WorkspaceRepository {
     }
 
     fn delete(&self, id: i64) -> Result<()> {
+        let ts = now();
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE connections SET workspace_id = NULL WHERE workspace_id = ?1",
-                params![id],
+                "UPDATE connections SET workspace_id = NULL, updated_at = ?2 WHERE workspace_id = ?1",
+                params![id, ts],
             )?;
             conn.execute("DELETE FROM workspaces WHERE id = ?1", params![id])?;
             Ok(())
@@ -853,7 +941,17 @@ pub struct PendingCloudDeletion {
     pub id: Option<i64>,
     pub cloud_id: String,
     pub entity_type: String,
+    pub base_last_synced_at: Option<i64>,
+    pub metadata: Option<PendingCloudDeletionMetadata>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingCloudDeletionMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_local_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_connection_ids: Vec<i64>,
 }
 
 /// 待删除云端记录仓库
@@ -869,11 +967,25 @@ impl PendingCloudDeletionRepository {
 
     /// 添加待删除记录
     pub fn add(&self, cloud_id: &str, entity_type: &str) -> Result<()> {
+        self.add_with_context(cloud_id, entity_type, None, None)
+    }
+
+    pub fn add_with_context(
+        &self,
+        cloud_id: &str,
+        entity_type: &str,
+        base_last_synced_at: Option<i64>,
+        metadata: Option<&PendingCloudDeletionMetadata>,
+    ) -> Result<()> {
         let ts = now();
+        let metadata = metadata
+            .map(serde_json::to_string)
+            .transpose()?
+            .filter(|value| !value.is_empty());
         self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT OR IGNORE INTO pending_cloud_deletions (cloud_id, entity_type, created_at) VALUES (?1, ?2, ?3)",
-                params![cloud_id, entity_type, ts],
+                "INSERT OR IGNORE INTO pending_cloud_deletions (cloud_id, entity_type, base_last_synced_at, metadata, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![cloud_id, entity_type, base_last_synced_at, metadata, ts],
             )?;
             Ok(())
         })
@@ -882,14 +994,27 @@ impl PendingCloudDeletionRepository {
     pub fn list_by_entity_type(&self, entity_type: &str) -> Result<Vec<PendingCloudDeletion>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, cloud_id, entity_type, created_at FROM pending_cloud_deletions WHERE entity_type = ?1",
+                "SELECT id, cloud_id, entity_type, base_last_synced_at, metadata, created_at FROM pending_cloud_deletions WHERE entity_type = ?1",
             )?;
             let rows = stmt.query_map(params![entity_type], |row| {
+                let metadata = row.get::<_, Option<String>>(4)?;
                 Ok(PendingCloudDeletion {
                     id: row.get(0)?,
                     cloud_id: row.get(1)?,
                     entity_type: row.get(2)?,
-                    created_at: row.get(3)?,
+                    base_last_synced_at: row.get(3)?,
+                    metadata: metadata
+                        .as_deref()
+                        .map(serde_json::from_str::<PendingCloudDeletionMetadata>)
+                        .transpose()
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                4,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
+                    created_at: row.get(5)?,
                 })
             })?;
             let mut results = Vec::new();
@@ -1178,5 +1303,115 @@ mod tests {
         assert_eq!(found.name, "本地修改工作区-已更新");
         assert_eq!(found.cloud_id.as_deref(), Some("workspace-cloud-local"));
         assert_eq!(found.last_synced_at, None);
+    }
+
+    #[test]
+    fn workspace_repository_delete_unlinks_connections_and_refreshes_timestamp() {
+        let conn = create_test_sqlite_connection();
+        let workspace_repo = WorkspaceRepository::new(conn.clone());
+        let connection_repo = ConnectionRepository::new(conn);
+
+        let mut workspace = Workspace::new("删除联动工作区".to_string());
+        workspace_repo.insert(&mut workspace).unwrap();
+        let workspace_id = workspace.id.expect("插入后应生成工作区 ID");
+
+        let mut connection = StoredConnection::new_ssh(
+            "删除联动连接".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.1".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(workspace_id),
+        );
+        connection.last_synced_at = Some(123);
+        connection_repo.insert(&mut connection).unwrap();
+        let connection_id = connection.id.expect("插入后应生成连接 ID");
+        let original_updated_at = connection.updated_at.expect("插入后应生成更新时间");
+
+        workspace_repo.delete(workspace_id).unwrap();
+
+        let found = connection_repo.get(connection_id).unwrap().unwrap();
+        assert_eq!(found.workspace_id, None);
+        assert!(found.updated_at.expect("删除后应保留更新时间") >= original_updated_at);
+        assert_eq!(found.last_synced_at, Some(123));
+    }
+
+    #[test]
+    fn connection_repository_update_from_cloud_preserves_sync_baseline() {
+        let conn = create_test_sqlite_connection();
+        let repo = ConnectionRepository::new(conn);
+
+        let mut connection = StoredConnection::new_ssh(
+            "云端回写连接".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.1".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            None,
+        );
+        repo.insert(&mut connection).unwrap();
+
+        let connection_id = connection.id.expect("插入后应生成连接 ID");
+        connection.name = "云端回写连接-已更新".to_string();
+        connection.cloud_id = Some("cloud-connection-sync".to_string());
+        connection.updated_at = Some(456);
+        connection.last_synced_at = Some(456);
+
+        repo.update_from_cloud(&connection).unwrap();
+
+        let found = repo.get(connection_id).unwrap().unwrap();
+        assert_eq!(found.name, "云端回写连接-已更新");
+        assert_eq!(found.cloud_id.as_deref(), Some("cloud-connection-sync"));
+        assert_eq!(found.updated_at, Some(456));
+        assert_eq!(found.last_synced_at, Some(456));
+    }
+
+    #[test]
+    fn pending_cloud_deletion_repository_persists_context_fields() {
+        let conn = create_test_sqlite_connection();
+        let repo = PendingCloudDeletionRepository::new(conn);
+
+        let metadata = PendingCloudDeletionMetadata {
+            workspace_local_id: Some(9),
+            affected_connection_ids: vec![1, 2, 3],
+        };
+
+        repo.add_with_context(
+            "workspace-cloud-ctx",
+            "workspace",
+            Some(456),
+            Some(&metadata),
+        )
+        .unwrap();
+
+        let pending = repo
+            .list_workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|item| item.cloud_id == "workspace-cloud-ctx")
+            .expect("应能查到待删除工作区");
+
+        assert_eq!(pending.base_last_synced_at, Some(456));
+        assert_eq!(pending.metadata, Some(metadata));
     }
 }

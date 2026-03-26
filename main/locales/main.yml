@@ -560,13 +560,13 @@ Workspace:
     zh-CN: "确定要删除工作区 \"%{workspace_name}\" 吗？"
     zh-HK: "確定要刪除工作區 \"%{workspace_name}\" 嗎？"
   delete_has_connections:
-    en: "Workspace \"%{workspace_name}\" still contains %{count} connections. Choose how to handle them before deleting the workspace."
-    zh-CN: "工作区 \"%{workspace_name}\" 下还有 %{count} 个连接。请先选择这些连接的处理方式，再删除工作区。"
-    zh-HK: "工作區 \"%{workspace_name}\" 下還有 %{count} 個連線。請先選擇這些連線的處理方式，再刪除工作區。"
+    en: "Workspace \"%{workspace_name}\" still contains %{count} connections. After deletion, these connections will be moved to Unassigned."
+    zh-CN: "工作区 \"%{workspace_name}\" 下还有 %{count} 个连接。删除后，这些连接会自动移动到未分区。"
+    zh-HK: "工作區 \"%{workspace_name}\" 下還有 %{count} 個連線。刪除後，這些連線會自動移到未分區。"
   delete_move_to_unassigned:
-    en: "Move to Unassigned"
-    zh-CN: "移到未分区"
-    zh-HK: "移到未分區"
+    en: "Delete and Unassign"
+    zh-CN: "删除并解绑连接"
+    zh-HK: "刪除並解除連線關聯"
   delete_all_connections:
     en: "Delete All Connections"
     zh-CN: "删除全部连接"

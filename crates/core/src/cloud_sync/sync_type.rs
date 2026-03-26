@@ -74,6 +74,13 @@ impl<T: SyncableItem> Default for GenericSyncPlan<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingDeletionDecision {
+    DeleteCloud,
+    DropPending,
+    KeepPending,
+}
+
 /// 数据类型同步处理器
 ///
 /// 封装特定数据类型的存储操作、加解密逻辑和同步回调。
@@ -171,5 +178,18 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
 
         repo.remove(cloud_id)
             .map_err(|e| SyncError::StorageError(e.to_string()))
+    }
+
+    fn decide_pending_deletion(
+        &self,
+        _engine: &SyncEngine,
+        _pending: &PendingCloudDeletion,
+        current_cloud: Option<&CloudSyncData>,
+    ) -> Result<PendingDeletionDecision, SyncError> {
+        if current_cloud.is_some_and(|item| item.deleted_at.is_some()) {
+            Ok(PendingDeletionDecision::DropPending)
+        } else {
+            Ok(PendingDeletionDecision::DeleteCloud)
+        }
     }
 }

@@ -22,6 +22,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260326000001",
         include_str!("../../migrations/20260326000001_workspace_sync_state.sql"),
     ),
+    (
+        "20260326000002",
+        include_str!("../../migrations/20260326000002_workspace_delete_context.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {

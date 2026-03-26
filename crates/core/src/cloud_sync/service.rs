@@ -519,9 +519,9 @@ impl CloudSyncService {
             remark: plain_data.remark,
             sync_enabled: true,
             cloud_id: Some(cloud_data.id.clone()),
-            last_synced_at: Some(cloud_data.updated_at),
+            last_synced_at: Some(cloud_data.updated_at / 1000),
             created_at: None,
-            updated_at: None,
+            updated_at: Some(cloud_data.updated_at / 1000),
             team_id: cloud_data.team_id.clone(),
             owner_id: plain_data.owner_id,
         })

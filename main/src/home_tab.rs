@@ -36,7 +36,8 @@ use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
-    PendingCloudDeletionRepository, RedisMode, StoredConnection, Workspace, WorkspaceRepository,
+    PendingCloudDeletionMetadata, PendingCloudDeletionRepository, RedisMode, StoredConnection,
+    Workspace, WorkspaceRepository,
 };
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use redis_view::{RedisFormWindow, RedisFormWindowConfig};
@@ -73,12 +74,6 @@ struct SyncFeedback {
 }
 
 struct SyncResultNotification;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkspaceDeleteMode {
-    MoveToUnassigned,
-    DeleteAllConnections,
-}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -384,6 +379,46 @@ impl HomePage {
                     cloud_id,
                     error
                 );
+            }
+        }
+    }
+
+    fn queue_pending_workspace_deletion(
+        storage: &one_core::storage::StorageManager,
+        workspace: &Workspace,
+        affected_connections: &[StoredConnection],
+    ) {
+        let Some(cloud_id) = workspace.cloud_id.as_deref() else {
+            return;
+        };
+
+        let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() else {
+            tracing::error!("[删除] 无法记录待删除工作空间：PendingCloudDeletionRepository 不存在");
+            return;
+        };
+
+        let metadata = PendingCloudDeletionMetadata {
+            workspace_local_id: workspace.id,
+            affected_connection_ids: affected_connections
+                .iter()
+                .filter_map(|connection| connection.id)
+                .collect(),
+        };
+
+        match pending_repo.add_with_context(
+            cloud_id,
+            "workspace",
+            workspace.last_synced_at,
+            Some(&metadata),
+        ) {
+            Ok(()) => {
+                tracing::info!(
+                    "[删除] 已登记待删除工作空间，等待同步引擎处理: {}",
+                    cloud_id
+                );
+            }
+            Err(error) => {
+                tracing::error!("[删除] 记录待删除工作空间失败: {} - {}", cloud_id, error);
             }
         }
     }
@@ -1575,23 +1610,21 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let workspace_name = self
+        let workspace = self
             .workspaces
             .iter()
             .find(|w| w.id == Some(workspace_id))
-            .map(|w| w.name.clone())
-            .unwrap_or_default();
+            .cloned();
+        let Some(workspace) = workspace else {
+            return;
+        };
+        let workspace_name = workspace.name.clone();
         let workspace_connections: Vec<StoredConnection> = self
             .connections
             .iter()
             .filter(|connection| connection.workspace_id == Some(workspace_id))
             .cloned()
             .collect();
-        let has_active_connections = workspace_connections.iter().any(|connection| {
-            connection
-                .id
-                .is_some_and(|id| cx.global::<ActiveConnections>().is_active(id))
-        });
 
         let view = cx.entity().clone();
         if workspace_connections.is_empty() {
@@ -1607,11 +1640,7 @@ impl HomePage {
                     .confirm()
                     .on_ok(move |_, _window, cx| {
                         let _ = view_clone.update(cx, |this, cx| {
-                            this.handle_delete_workspace(
-                                workspace_id,
-                                WorkspaceDeleteMode::MoveToUnassigned,
-                                cx,
-                            );
+                            this.handle_delete_workspace(workspace_id, cx);
                         });
                         true
                     })
@@ -1619,64 +1648,33 @@ impl HomePage {
             return;
         }
 
-        let warning_color = cx.theme().warning;
         window.open_dialog(cx, move |dialog, _window, _cx| {
-            let view_for_move = view.clone();
-            let view_for_delete = view.clone();
+            let view_for_confirm = view.clone();
             dialog
                 .title(t!("Workspace.delete").to_string().into_any_element())
                 .child(
-                    v_flex()
-                        .gap_2()
-                        .child(
-                            t!(
-                                "Workspace.delete_has_connections",
-                                workspace_name = workspace_name,
-                                count = workspace_connections.len()
-                            )
-                            .to_string()
-                            .into_any_element(),
+                    v_flex().gap_2().child(
+                        t!(
+                            "Workspace.delete_has_connections",
+                            workspace_name = workspace_name,
+                            count = workspace_connections.len()
                         )
-                        .when(has_active_connections, |this| {
-                            this.child(div().text_sm().text_color(warning_color).child(
-                                t!("Workspace.delete_active_connections_blocked").to_string(),
-                            ))
-                        }),
+                        .to_string()
+                        .into_any_element(),
+                    ),
                 )
                 .footer(move |_ok, cancel, window, cx| {
                     vec![
                         cancel(window, cx),
-                        Button::new(format!("workspace-move-{}", workspace_id))
+                        Button::new(format!("workspace-delete-{}", workspace_id))
                             .label(t!("Workspace.delete_move_to_unassigned").to_string())
                             .with_variant(ButtonVariant::Primary)
                             .on_click({
-                                let view_for_move = view_for_move.clone();
+                                let view_for_confirm = view_for_confirm.clone();
                                 move |_, window, cx| {
                                     window.close_dialog(cx);
-                                    let _ = view_for_move.update(cx, |this, cx| {
-                                        this.handle_delete_workspace(
-                                            workspace_id,
-                                            WorkspaceDeleteMode::MoveToUnassigned,
-                                            cx,
-                                        );
-                                    });
-                                }
-                            })
-                            .into_any_element(),
-                        Button::new(format!("workspace-delete-all-{}", workspace_id))
-                            .label(t!("Workspace.delete_all_connections").to_string())
-                            .danger()
-                            .disabled(has_active_connections)
-                            .on_click({
-                                let view_for_delete = view_for_delete.clone();
-                                move |_, window, cx| {
-                                    window.close_dialog(cx);
-                                    let _ = view_for_delete.update(cx, |this, cx| {
-                                        this.handle_delete_workspace(
-                                            workspace_id,
-                                            WorkspaceDeleteMode::DeleteAllConnections,
-                                            cx,
-                                        );
+                                    let _ = view_for_confirm.update(cx, |this, cx| {
+                                        this.handle_delete_workspace(workspace_id, cx);
                                     });
                                 }
                             })
@@ -1688,26 +1686,22 @@ impl HomePage {
         });
     }
 
-    fn handle_delete_workspace(
-        &mut self,
-        workspace_id: i64,
-        mode: WorkspaceDeleteMode,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_delete_workspace(&mut self, workspace_id: i64, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
+        let workspace = self
+            .workspaces
+            .iter()
+            .find(|item| item.id == Some(workspace_id))
+            .cloned();
+        let Some(workspace) = workspace else {
+            return;
+        };
         let workspace_connections: Vec<StoredConnection> = self
             .connections
             .iter()
             .filter(|connection| connection.workspace_id == Some(workspace_id))
             .cloned()
             .collect();
-
-        // 获取工作空间的 cloud_id，用于删除云端数据
-        let cloud_id = self
-            .workspaces
-            .iter()
-            .find(|w| w.id == Some(workspace_id))
-            .and_then(|w| w.cloud_id.clone());
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let Some(connection_repo) = storage.get::<ConnectionRepository>() else {
@@ -1720,81 +1714,40 @@ impl HomePage {
             };
 
             let mut updated_connections = Vec::new();
-            let mut deleted_connection_ids = HashSet::new();
-
-            if mode == WorkspaceDeleteMode::DeleteAllConnections {
-                for connection in &workspace_connections {
-                    if let Some(connection_id) = connection.id {
-                        if let Err(e) = connection_repo.delete(connection_id) {
-                            tracing::error!("Failed to delete connection: {}", e);
-                            return;
-                        }
-                        Self::queue_pending_cloud_deletion(
-                            &storage,
-                            connection.cloud_id.as_deref(),
-                            "connection",
-                        );
-                        deleted_connection_ids.insert(connection_id);
-                    }
+            for connection in &workspace_connections {
+                let mut updated_connection = connection.clone();
+                updated_connection.workspace_id = None;
+                if let Err(e) = connection_repo.update(&updated_connection) {
+                    tracing::error!("Failed to move connection to unassigned: {}", e);
+                    return;
                 }
-            } else {
-                for connection in &workspace_connections {
-                    let mut updated_connection = connection.clone();
-                    updated_connection.workspace_id = None;
-                    if let Err(e) = connection_repo.update(&mut updated_connection) {
-                        tracing::error!("Failed to move connection to unassigned: {}", e);
-                        return;
-                    }
-                    updated_connections.push(updated_connection);
-                }
+                updated_connections.push(updated_connection);
             }
 
             if let Err(e) = workspace_repo.delete(workspace_id) {
                 tracing::error!("Failed to delete workspace: {}", e);
                 return;
             }
-            Self::queue_pending_cloud_deletion(&storage, cloud_id.as_deref(), "workspace");
+            Self::queue_pending_workspace_deletion(&storage, &workspace, &workspace_connections);
 
             _ = this.update(cx, |this, cx| {
                 this.workspaces.retain(|w| w.id != Some(workspace_id));
                 this.filtered_workspace_ids.remove(&workspace_id);
 
-                match mode {
-                    WorkspaceDeleteMode::MoveToUnassigned => {
-                        for updated_connection in updated_connections {
-                            if let Some(position) = this
-                                .connections
-                                .iter()
-                                .position(|connection| connection.id == updated_connection.id)
-                            {
-                                this.connections[position] = updated_connection.clone();
-                            }
-                            emit_connection_event(
-                                ConnectionDataEvent::ConnectionUpdated {
-                                    connection: updated_connection,
-                                },
-                                cx,
-                            );
-                        }
+                for updated_connection in updated_connections {
+                    if let Some(position) = this
+                        .connections
+                        .iter()
+                        .position(|connection| connection.id == updated_connection.id)
+                    {
+                        this.connections[position] = updated_connection.clone();
                     }
-                    WorkspaceDeleteMode::DeleteAllConnections => {
-                        this.connections.retain(|connection| {
-                            !connection.id.is_some_and(|connection_id| {
-                                deleted_connection_ids.contains(&connection_id)
-                            })
-                        });
-                        if this.selected_connection_id.is_some_and(|connection_id| {
-                            deleted_connection_ids.contains(&connection_id)
-                        }) {
-                            this.selected_connection_id = None;
-                        }
-                        for connection_id in deleted_connection_ids {
-                            emit_connection_event(
-                                ConnectionDataEvent::ConnectionDeleted { connection_id },
-                                cx,
-                            );
-                        }
-                    }
+                    emit_connection_event(
+                        ConnectionDataEvent::ConnectionUpdated {
+                            connection: updated_connection,
+                        },
+                        cx,
+                    );
                 }
 
                 emit_connection_event(ConnectionDataEvent::WorkspaceDeleted { workspace_id }, cx);
