@@ -3216,13 +3216,41 @@ impl HomePage {
             .map(|id| self.collapsed_workspaces.contains(&id))
             .unwrap_or(false);
         v_flex()
-            .gap_3()
+            .gap_0()
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().tab)
             .child(
                 h_flex()
+                    .id(ElementId::Name(SharedString::from(format!(
+                        "workspace-header-{}",
+                        workspace_id.unwrap_or(0)
+                    ))))
                     .items_center()
                     .gap_2()
-                    .px_2()
-                    .py_1()
+                    .px_3()
+                    .py_2()
+                    .cursor_pointer()
+                    .rounded_t_lg()
+                    .when(!is_collapsed, |this| this.border_b_1().border_color(cx.theme().border))
+                    .when(is_collapsed, |this| this.rounded_b_lg())
+                    .hover(|s| s.bg(cx.theme().list_hover))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(id) = workspace_id {
+                            if this.collapsed_workspaces.contains(&id) {
+                                this.collapsed_workspaces.remove(&id);
+                            } else {
+                                this.collapsed_workspaces.insert(id);
+                            }
+                            cx.notify();
+                        }
+                    }))
+                    .child(
+                        Icon::new(if is_collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
+                            .with_size(Size::Small)
+                            .text_color(cx.theme().muted_foreground),
+                    )
                     .child(
                         Icon::new(IconName::AppsColor)
                             .color()
@@ -3230,10 +3258,6 @@ impl HomePage {
                     )
                     .child(
                         div()
-                            .id(ElementId::Name(SharedString::from(format!(
-                                "workspace-name-{}",
-                                workspace_id.unwrap_or(0)
-                            ))))
                             .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().foreground)
@@ -3248,31 +3272,6 @@ impl HomePage {
                             ),
                     )
                     .child(div().flex_1())
-                    .child(
-                        Button::new(format!("workspace-collapse-{}", workspace_id.unwrap_or(0)))
-                            .icon(if is_collapsed {
-                                IconName::ChevronRight
-                            } else {
-                                IconName::ChevronDown
-                            })
-                            .xsmall()
-                            .ghost()
-                            .tooltip(if is_collapsed {
-                                t!("Workspace.expand").to_string()
-                            } else {
-                                t!("Workspace.collapse").to_string()
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(id) = workspace_id {
-                                    if this.collapsed_workspaces.contains(&id) {
-                                        this.collapsed_workspaces.remove(&id);
-                                    } else {
-                                        this.collapsed_workspaces.insert(id);
-                                    }
-                                    cx.notify();
-                                }
-                            })),
-                    )
                     .when_some(workspace_id, |this, workspace_id| {
                         this.child(
                             h_flex()
@@ -3305,12 +3304,16 @@ impl HomePage {
                     }),
             )
             .when(!connections.is_empty() && !is_collapsed, |this| {
-                this.child(self.render_connections_collection(
-                    connections,
-                    workspace_id,
-                    selected_id,
-                    cx,
-                ))
+                this.child(
+                    div()
+                        .p_3()
+                        .child(self.render_connections_collection(
+                            connections,
+                            workspace_id,
+                            selected_id,
+                            cx,
+                        ))
+                )
             })
     }
 
