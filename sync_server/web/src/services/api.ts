@@ -1,4 +1,12 @@
-import type { AdminOverview, AdminUserSummary, AuthPayload, PublicUser, SyncConfig, SyncItem } from "@/types/api";
+import type {
+  AdminOverview,
+  AdminUserSummary,
+  AuthPayload,
+  PublicUser,
+  SyncConfig,
+  SyncItem,
+  SyncItemDeleteResult,
+} from "@/types/api";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -128,6 +136,35 @@ export const api = {
 
   getSyncItem(token: string, id: string) {
     return request<SyncItem>(`/api/v1/sync/items/${id}`, {
+      token,
+    });
+  },
+
+  restoreSyncItem(token: string, item: SyncItem) {
+    return request<SyncItem>(`/api/v1/sync/items/${item.id}`, {
+      method: "PUT",
+      token,
+      body: JSON.stringify({
+        name: item.name,
+        encryptedData: item.encryptedData,
+        keyVersion: item.keyVersion,
+        checksum: item.checksum,
+        version: item.version,
+        deletedAt: null,
+      }),
+    });
+  },
+
+  deleteSyncItem(token: string, id: string, version?: number) {
+    const searchParams = new URLSearchParams();
+    if (version !== undefined) {
+      searchParams.set("version", String(version));
+    }
+
+    const query = searchParams.toString();
+
+    return request<SyncItemDeleteResult>(`/api/v1/sync/items/${id}${query ? `?${query}` : ""}`, {
+      method: "DELETE",
       token,
     });
   },

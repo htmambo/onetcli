@@ -45,6 +45,13 @@
         当前没有同步数据。
       </div>
       <div v-else class="mt-6 space-y-6">
+        <p v-if="actionMessage" class="feedback-success rounded-2xl px-4 py-3 text-sm">
+          {{ actionMessage }}
+        </p>
+        <p v-if="actionError" class="feedback-danger rounded-2xl px-4 py-3 text-sm">
+          {{ actionError }}
+        </p>
+
         <div class="hover-card rounded-3xl border border-[var(--line)] bg-[var(--panel-strong)] p-5">
           <div class="space-y-4">
             <div class="grid gap-4 md:grid-cols-3">
@@ -101,7 +108,7 @@
         </div>
 
         <p class="feedback-warning rounded-2xl px-4 py-3 text-sm leading-6">
-          远端删除采用软删除保留审计痕迹。默认仅显示有效项；如果需要核对删除记录，可切换到“仅已软删除”或“全部状态”。
+          远端删除采用软删除保留审计痕迹。删除工作区时只会解除子级关联，不会删除子项；恢复工作区时只会恢复工作区记录本身，不会自动重新关联此前解绑的子连接；如果删除与更新并发，以更新为准。默认仅显示有效项；如果需要核对删除记录，可切换到“仅已软删除”或“全部状态”。
         </p>
 
         <div
@@ -121,7 +128,7 @@
                   <th class="px-3 py-3 font-medium">密钥版本</th>
                   <th class="px-3 py-3 font-medium">记录版本</th>
                   <th class="px-3 py-3 font-medium">更新时间</th>
-                  <th class="px-3 py-3 font-medium">状态</th>
+                  <!-- <th class="px-3 py-3 font-medium">状态</th> -->
                   <th class="px-3 py-3 font-medium">操作</th>
                 </tr>
               </thead>
@@ -134,21 +141,39 @@
                   <td class="px-3 py-4">{{ formatKeyVersion(item.keyVersion) }}</td>
                   <td class="px-3 py-4">{{ formatRecordVersion(item.version) }}</td>
                   <td class="px-3 py-4 text-[var(--muted)]">{{ formatDate(item.updatedAt) }}</td>
-                  <td class="px-3 py-4">
+                  <!-- <td class="px-3 py-4">
                     <span
                       class="rounded-full px-3 py-1 text-xs font-medium"
                       :class="item.deletedAt ? 'status-danger' : 'status-success'"
                     >
                       {{ item.deletedAt ? "已软删除" : "有效" }}
                     </span>
-                  </td>
+                  </td> -->
                   <td class="px-3 py-4">
-                    <RouterLink
-                      :to="{ name: 'sync-item-detail', params: { id: item.id } }"
-                      class="inline-button inline-flex rounded-xl px-3 py-2 text-xs font-medium"
-                    >
-                      查看详情
-                    </RouterLink>
+                    <div class="flex flex-wrap gap-2">
+                      <RouterLink
+                        :to="{ name: 'sync-item-detail', params: { id: item.id } }"
+                        class="inline-button inline-flex rounded-xl px-3 py-2 text-xs font-medium"
+                      >
+                        查看详情
+                      </RouterLink>
+                      <button
+                        v-if="!item.deletedAt"
+                        class="danger-button rounded-xl px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="deletingItemId === item.id"
+                        @click="deleteItem(item)"
+                      >
+                        {{ deletingItemId === item.id ? "删除中..." : "删除" }}
+                      </button>
+                      <button
+                        v-else
+                        class="inline-button rounded-xl px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="restoringItemId === item.id"
+                        @click="restoreItem(item)"
+                      >
+                        {{ restoringItemId === item.id ? "恢复中..." : "恢复" }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -213,10 +238,14 @@ const auth = useAuthStore();
 const loading = ref(false);
 const items = ref<SyncItem[]>([]);
 const errorMessage = ref("");
+const actionMessage = ref("");
+const actionError = ref("");
 const selectedType = ref(ALL_TYPES);
 const selectedStatus = ref(ACTIVE_STATUS);
 const pageSize = ref(20);
 const currentPage = ref(1);
+const deletingItemId = ref("");
+const restoringItemId = ref("");
 
 const itemTypeOptions = computed(() => {
   const uniqueTypes = new Map<string, string>();
@@ -297,6 +326,65 @@ function formatDate(value: string) {
   return new Date(value).toLocaleString("zh-CN");
 }
 
+function getItemDisplayName(item: SyncItem) {
+  return item.name.trim() || item.id;
+}
+
+function buildDeletePrompt(item: SyncItem) {
+  const lines = [
+    `确认要删除${getSyncItemTypeLabel(item.dataType)}「${getItemDisplayName(item)}」吗？`,
+    "这会把当前远端记录标记为已软删除。",
+  ];
+
+  if (isSyncItemType(item.dataType, "workspace")) {
+    lines.push("删除工作区时只会解除子级连接关联，不会删除子连接本身。");
+  }
+
+  lines.push("如果这条记录已被其他设备更新，则更新优先，本次删除会被拒绝。");
+
+  return lines.join("\n");
+}
+
+function buildRestorePrompt(item: SyncItem) {
+  const lines = [
+    `确认要恢复${getSyncItemTypeLabel(item.dataType)}「${getItemDisplayName(item)}」吗？`,
+    "这会清除当前远端记录的软删除标记。",
+  ];
+
+  if (isSyncItemType(item.dataType, "workspace")) {
+    lines.push("恢复工作区时只会恢复工作区记录本身，不会自动重新关联此前解绑的子连接。");
+  }
+
+  lines.push("如果这条记录已被其他设备更新，则会按最新版本校验恢复请求。");
+
+  return lines.join("\n");
+}
+
+function applyDeletedItem(itemId: string, version: number, updatedAt: string, deletedAt: string | null) {
+  items.value = items.value.map((item) => {
+    if (item.id !== itemId) {
+      return item;
+    }
+
+    return {
+      ...item,
+      version,
+      updatedAt,
+      deletedAt,
+    };
+  });
+}
+
+function applyRestoredItem(restoredItem: SyncItem) {
+  items.value = items.value.map((item) => {
+    if (item.id !== restoredItem.id) {
+      return item;
+    }
+
+    return restoredItem;
+  });
+}
+
 function goToPage(page: number) {
   currentPage.value = page;
 }
@@ -327,6 +415,75 @@ async function loadItems() {
     errorMessage.value = error instanceof ApiError ? error.message : "读取同步项列表失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function deleteItem(item: SyncItem) {
+  if (deletingItemId.value || restoringItemId.value || item.deletedAt) {
+    return;
+  }
+
+  const confirmed = window.confirm(buildDeletePrompt(item));
+  if (!confirmed) {
+    return;
+  }
+
+  actionMessage.value = "";
+  actionError.value = "";
+  deletingItemId.value = item.id;
+
+  try {
+    const result = await api.deleteSyncItem(auth.token!, item.id, item.version);
+    applyDeletedItem(
+      result.item.id,
+      result.item.version,
+      result.item.updatedAt,
+      result.item.deletedAt,
+    );
+    actionMessage.value = isSyncItemType(item.dataType, "workspace")
+      ? "工作区同步项已软删除，子连接会在后续同步中解除关联。"
+      : "同步项已软删除。";
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      actionError.value = "删除未生效：该记录已被更新或状态已变化，已刷新为最新数据。";
+      await loadItems();
+    } else {
+      actionError.value = error instanceof ApiError ? error.message : "删除同步项失败";
+    }
+  } finally {
+    deletingItemId.value = "";
+  }
+}
+
+async function restoreItem(item: SyncItem) {
+  if (restoringItemId.value || deletingItemId.value || !item.deletedAt) {
+    return;
+  }
+
+  const confirmed = window.confirm(buildRestorePrompt(item));
+  if (!confirmed) {
+    return;
+  }
+
+  actionMessage.value = "";
+  actionError.value = "";
+  restoringItemId.value = item.id;
+
+  try {
+    const restored = await api.restoreSyncItem(auth.token!, item);
+    applyRestoredItem(restored);
+    actionMessage.value = isSyncItemType(item.dataType, "workspace")
+      ? "工作区同步项已恢复。注意：此前解绑的子连接不会自动重新关联。"
+      : "同步项已恢复。";
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      actionError.value = "恢复未生效：该记录已被更新或状态已变化，已刷新为最新数据。";
+      await loadItems();
+    } else {
+      actionError.value = error instanceof ApiError ? error.message : "恢复同步项失败";
+    }
+  } finally {
+    restoringItemId.value = "";
   }
 }
 

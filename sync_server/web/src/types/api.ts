@@ -34,6 +34,16 @@ export interface SyncItem {
   deletedAt: string | null;
 }
 
+export interface SyncItemDeleteResult {
+  success: boolean;
+  item: {
+    id: string;
+    version: number;
+    deletedAt: string | null;
+    updatedAt: string;
+  };
+}
+
 export interface AdminOverview {
   users: number;
   activeUsers: number;
