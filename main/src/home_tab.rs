@@ -3164,9 +3164,9 @@ impl HomePage {
             .id("home-content")
             .size_full()
             .overflow_y_scroll()
-            .p_6()
+            .p_3()
             .child({
-                let mut container = v_flex().gap_8().w_full();
+                let mut container = v_flex().gap_3().w_full();
 
                 // 过滤掉空的工作区
                 for (workspace, connections) in workspaces_with_connections {
