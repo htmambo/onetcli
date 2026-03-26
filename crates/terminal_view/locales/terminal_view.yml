@@ -139,6 +139,14 @@ SSH:
     en: SSH Agent
     zh-CN: SSH Agent
     zh-HK: SSH Agent
+  auto_publickey:
+    en: Auto Public Key
+    zh-CN: 自动公钥认证
+    zh-HK: 自動公鑰認證
+  auto_publickey_hint:
+    en: Try SSH Agent first, then default private keys under ~/.ssh.
+    zh-CN: 将优先尝试 SSH Agent，若不可用则尝试 ~/.ssh 下的默认私钥。
+    zh-HK: 將優先嘗試 SSH Agent，若不可用則嘗試 ~/.ssh 下的預設私鑰。
   key_path:
     en: Key Path
     zh-CN: 密钥路径

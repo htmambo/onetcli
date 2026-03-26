@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,6 +62,7 @@ pub enum SshAuth {
         certificate_path: Option<String>,
     },
     Agent,
+    AutoPublicKey,
 }
 
 #[derive(Clone)]
@@ -71,6 +73,9 @@ pub struct AuthFailureMessages {
     pub agent_connect_failed: String,
     pub agent_no_identities: String,
     pub agent_auth_failed: String,
+    pub auto_publickey_failed: String,
+    pub no_local_identity: String,
+    pub auto_publickey_next_step: String,
 }
 
 #[derive(Clone)]
@@ -237,8 +242,79 @@ where
             }
         }
         SshAuth::Agent => authenticate_with_agent(session, username, hash_alg, &messages).await?,
+        SshAuth::AutoPublicKey => unreachable!("AutoPublicKey 应由高层认证编排处理"),
     }
     Ok(())
+}
+
+pub fn discover_default_private_keys() -> Vec<String> {
+    let Some(home_dir) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    let ssh_dir = home_dir.join(".ssh");
+    ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]
+        .into_iter()
+        .map(|f| ssh_dir.join(f))
+        .filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
+}
+
+pub fn expand_auto_publickey_auth() -> Vec<SshAuth> {
+    let mut candidates = vec![SshAuth::Agent];
+    candidates.extend(discover_default_private_keys().into_iter().map(|key_path| {
+        SshAuth::PrivateKey { key_path, passphrase: None, certificate_path: None }
+    }));
+    candidates
+}
+
+pub async fn authenticate_session_with_fallbacks<H>(
+    session: &mut client::Handle<H>,
+    username: &str,
+    auth_candidates: &[SshAuth],
+    messages: AuthFailureMessages,
+) -> anyhow::Result<()>
+where
+    H: client::Handler,
+{
+    let filtered: Vec<&SshAuth> = auth_candidates
+        .iter()
+        .filter(|a| !matches!(a, SshAuth::AutoPublicKey))
+        .collect();
+    if filtered.is_empty() {
+        anyhow::bail!(messages.no_local_identity.clone());
+    }
+    let has_keys = filtered.iter().any(|a| matches!(a, SshAuth::PrivateKey { .. }));
+    let mut errors = Vec::new();
+    for auth in filtered {
+        match authenticate_session(session, username, auth, messages.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(e) => errors.push(e.to_string()),
+        }
+    }
+    let mut parts = vec![messages.auto_publickey_failed.clone()];
+    if !has_keys { parts.push(messages.no_local_identity.clone()); }
+    if !errors.is_empty() { parts.push(errors.join("; ")); }
+    parts.push(messages.auto_publickey_next_step.clone());
+    anyhow::bail!(parts.join(": "));
+}
+
+pub async fn authenticate_with_strategy<H>(
+    session: &mut client::Handle<H>,
+    username: &str,
+    auth: &SshAuth,
+    messages: AuthFailureMessages,
+) -> Result<()>
+where
+    H: client::Handler,
+{
+    match auth {
+        SshAuth::AutoPublicKey => {
+            let auth_candidates = expand_auto_publickey_auth();
+            authenticate_session_with_fallbacks(session, username, &auth_candidates, messages).await
+        }
+        _ => authenticate_session(session, username, auth, messages).await,
+    }
 }
 
 fn default_auth_failure_messages() -> AuthFailureMessages {
@@ -249,6 +325,9 @@ fn default_auth_failure_messages() -> AuthFailureMessages {
         agent_connect_failed: t!("Ssh.auth_agent_connect_failed").to_string(),
         agent_no_identities: t!("Ssh.auth_agent_no_identities").to_string(),
         agent_auth_failed: t!("Ssh.auth_agent_failed").to_string(),
+        auto_publickey_failed: t!("Ssh.auth_auto_publickey_failed").to_string(),
+        no_local_identity: t!("Ssh.auth_no_local_identity").to_string(),
+        auto_publickey_next_step: t!("Ssh.auth_auto_publickey_next_step").to_string(),
     }
 }
 

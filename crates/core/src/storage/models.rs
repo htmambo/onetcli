@@ -254,6 +254,7 @@ pub enum SshAuthMethod {
         passphrase: Option<String>,
     },
     Agent,
+    AutoPublicKey,
 }
 
 /// Redis 连接模式

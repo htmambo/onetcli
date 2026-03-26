@@ -5,7 +5,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
-    app_style,
+    app_style, ActiveTheme,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -173,6 +173,7 @@ pub enum AuthMethodSelection {
     Password,
     PrivateKey,
     Agent,
+    AutoPublicKey,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -352,6 +353,9 @@ impl SshFormWindow {
                         if let Some(ref pass) = passphrase {
                             passphrase_input.update(cx, |s, cx| s.set_value(pass, window, cx));
                         }
+                    }
+                    SshAuthMethod::AutoPublicKey => {
+                        auth_method = AuthMethodSelection::AutoPublicKey;
                     }
                     SshAuthMethod::Agent => {
                         auth_method = AuthMethodSelection::Agent;
@@ -649,6 +653,7 @@ impl SshFormWindow {
                     }
                 }
                 AuthMethodSelection::Agent => SshAuthMethod::Agent,
+                AuthMethodSelection::AutoPublicKey => SshAuthMethod::AutoPublicKey,
             }
         };
 
@@ -796,6 +801,7 @@ impl SshFormWindow {
                 certificate_path: None,
             },
             SshAuthMethod::Agent => SshAuth::Agent,
+            SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
         };
 
         // 构建跳板机配置
@@ -811,6 +817,7 @@ impl SshFormWindow {
                     certificate_path: None,
                 },
                 SshAuthMethod::Agent => SshAuth::Agent,
+                SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
             };
             JumpServerConnectConfig {
                 host: jump.host.clone(),
@@ -1059,9 +1066,27 @@ impl SshFormWindow {
                                     this.auth_method = AuthMethodSelection::Agent;
                                     cx.notify();
                                 })),
+                        )
+                        .child(
+                            Radio::new("auto-publickey")
+                                .label(t!("SSH.auto_publickey").to_string())
+                                .checked(auth_method == AuthMethodSelection::AutoPublicKey)
+                                .disabled(use_certificate)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.auth_method = AuthMethodSelection::AutoPublicKey;
+                                    cx.notify();
+                                })),
                         ),
                 ),
             )
+            .when(auth_method == AuthMethodSelection::AutoPublicKey, |this| {
+                this.child(
+                    div()
+                        .pl_4()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("SSH.auto_publickey_hint").to_string()),
+                )
+            })
             .when(auth_method == AuthMethodSelection::Password, |this| {
                 this.child(
                     self.render_form_row(
