@@ -84,7 +84,6 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::AutoCopyChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -93,7 +92,6 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::MiddleClickPasteChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -102,7 +100,6 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::SyncPathChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -111,7 +108,6 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
 
                     // ---- 持久化到 AppSettings 并同步 ----
@@ -124,7 +120,6 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, window, cx| {
                             view.apply_theme(&theme, window, cx);
                         });
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::CursorBlinkChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -135,7 +130,6 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, window, cx| {
                             view.apply_cursor_blink(enabled, window, cx);
                         });
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::ConfirmMultilinePasteChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -146,7 +140,6 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, _window, cx| {
                             view.apply_confirm_multiline_paste(enabled, cx);
                         });
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                     TerminalViewEvent::ConfirmHighRiskCommandChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -157,7 +150,6 @@ impl HomePage {
                         this.for_each_terminal_view(window, cx, |view, _window, cx| {
                             view.apply_confirm_high_risk_command(enabled, cx);
                         });
-                        crate::setting_tab::trigger_app_settings_sync(cx);
                     }
                 }
                 cx.notify();

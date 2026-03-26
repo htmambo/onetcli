@@ -705,6 +705,9 @@ pub struct Workspace {
     /// 云端 ID（用于同步）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloud_id: Option<String>,
+    /// 最后同步时间戳
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<i64>,
 }
 
 impl Entity for Workspace {
@@ -733,6 +736,7 @@ impl Workspace {
             created_at: None,
             updated_at: None,
             cloud_id: None,
+            last_synced_at: None,
         }
     }
 }
@@ -760,6 +764,14 @@ impl SyncableItem for Workspace {
 
     fn updated_at(&self) -> Option<i64> {
         self.updated_at
+    }
+
+    fn last_synced_at(&self) -> Option<i64> {
+        self.last_synced_at
+    }
+
+    fn uses_sync_state(&self) -> bool {
+        true
     }
 }
 

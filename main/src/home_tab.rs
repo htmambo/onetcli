@@ -1,13 +1,14 @@
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Context, ElementId, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions,
-    div, px,
+    AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Context, ElementId, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    WeakEntity, Window, actions, div, px,
 };
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
@@ -44,13 +45,15 @@ use terminal_view::TerminalView;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
-use crate::app_settings_sync::AppSettingsSyncType;
 use crate::auth::{AuthService, PasswordAuthAction, show_password_auth_dialog};
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::WorkspaceFilterDelegate;
-use crate::setting_tab::GlobalCurrentUser;
+use crate::setting_tab::{
+    AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
+    GlobalCurrentUser,
+};
 use crate::user_avatar::render_user_avatar;
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
@@ -598,8 +601,7 @@ impl HomePage {
         }
 
         // 创建同步引擎
-        let engine =
-            SyncEngine::new(cloud_client, sync_service, storage).register_type(AppSettingsSyncType);
+        let engine = SyncEngine::new(cloud_client, sync_service, storage);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let result = engine.sync().await;
@@ -656,23 +658,6 @@ impl HomePage {
             });
         })
         .detach();
-    }
-
-    pub(crate) fn request_app_settings_sync(&mut self, cx: &mut Context<Self>) {
-        if self.current_user.is_none() {
-            return;
-        }
-
-        if !self.auth_service.has_valid_sync_server_url() {
-            return;
-        }
-
-        if !crypto::has_master_key() {
-            return;
-        }
-
-        tracing::info!("应用设置变化，自动触发云同步");
-        self.trigger_sync(cx);
     }
 
     /// 同步前记录本地连接解密状态，用于提示哪些连接会被引擎按连接粒度跳过。
@@ -884,7 +869,7 @@ impl HomePage {
                 .confirm()
                 .button_props(
                     gpui_component::dialog::DialogButtonProps::default()
-                        .ok_text(t!("Home.sync_conflict_apply")),
+                        .ok_text(t!("Home.sync_conflict_apply_strategy")),
                 )
                 .on_ok(move |_event, _window, cx| {
                     let selected_strategies = strategies_for_ok.read(cx).clone();
@@ -933,8 +918,7 @@ impl HomePage {
         cx.notify();
 
         // 创建同步引擎
-        let engine =
-            SyncEngine::new(cloud_client, sync_service, storage).register_type(AppSettingsSyncType);
+        let engine = SyncEngine::new(cloud_client, sync_service, storage);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             // 使用策略映射应用冲突解决方案
@@ -948,8 +932,17 @@ impl HomePage {
                 match result {
                     Ok(stats) => {
                         let feedback = Self::build_conflict_resolution_feedback(&stats);
-                        tracing::info!("冲突解决完成");
-                        this.pending_conflicts.clear();
+                        if stats.errors.is_empty() && stats.conflicts.is_empty() {
+                            tracing::info!("冲突解决完成");
+                            this.pending_conflicts.clear();
+                        } else {
+                            tracing::warn!(
+                                "冲突解决未完全生效：剩余 {} 个未解决冲突，{} 个错误",
+                                stats.conflicts.len(),
+                                stats.errors.len()
+                            );
+                            this.pending_conflicts = stats.conflicts.clone();
+                        }
                         this.cloud_error = if stats.errors.is_empty() {
                             None
                         } else {
@@ -1146,6 +1139,165 @@ impl HomePage {
                         true
                     })
             });
+        }
+    }
+
+    fn duplicate_connection_and_open_editor(
+        &mut self,
+        source: &StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ensure_master_key_ready_for_new_connection(window, cx) {
+            return;
+        }
+
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+        let Some(repo) = storage.get::<ConnectionRepository>() else {
+            window.open_dialog(cx, move |dialog, _window, _cx| {
+                dialog
+                    .title(t!("Common.error_info").to_string().into_any_element())
+                    .child(
+                        t!(
+                            "Home.duplicate_connection_failed",
+                            error = "无法获取连接存储库"
+                        )
+                        .to_string()
+                        .into_any_element(),
+                    )
+                    .alert()
+            });
+            return;
+        };
+
+        let mut duplicated = source.clone();
+        duplicated.id = None;
+        duplicated.cloud_id = None;
+        duplicated.last_synced_at = None;
+        duplicated.created_at = None;
+        duplicated.updated_at = None;
+        duplicated.owner_id = self
+            .current_user
+            .as_ref()
+            .map(|user| user.id.clone())
+            .or_else(|| source.owner_id.clone());
+
+        match repo.insert(&mut duplicated) {
+            Ok(_) => {
+                self.connections.push(duplicated.clone());
+                self.selected_connection_id = duplicated.id;
+                self.load_connections(cx);
+                cx.notify();
+                self.open_existing_connection_editor(duplicated, window, cx);
+            }
+            Err(error) => {
+                let error_message = t!(
+                    "Home.duplicate_connection_failed",
+                    error = error.to_string()
+                )
+                .to_string();
+                window.open_dialog(cx, move |dialog, _window, _cx| {
+                    dialog
+                        .title(t!("Common.error_info").to_string().into_any_element())
+                        .child(error_message.clone().into_any_element())
+                        .alert()
+                });
+            }
+        }
+    }
+
+    fn open_existing_connection_editor(
+        &mut self,
+        connection: StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match connection.connection_type {
+            ConnectionType::SshSftp => {
+                let config = SshFormWindowConfig {
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+
+                open_popup_window(
+                    PopupWindowOptions::new(t!("SSH.edit").to_string()).size(700.0, 650.0),
+                    move |window, cx| cx.new(|cx| SshFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+            ConnectionType::Database => {
+                let Some(db_type) = connection.to_db_connection().ok().map(|p| p.database_type)
+                else {
+                    window.open_dialog(cx, move |dialog, _window, _cx| {
+                        dialog
+                            .title(t!("Common.error_info").to_string().into_any_element())
+                            .child(
+                                t!(
+                                    "Home.duplicate_connection_failed",
+                                    error = "无法识别数据库连接类型"
+                                )
+                                .to_string()
+                                .into_any_element(),
+                            )
+                            .alert()
+                    });
+                    return;
+                };
+
+                let config = ConnectionFormWindowConfig {
+                    db_type,
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+
+                open_popup_window(
+                    PopupWindowOptions::new(
+                        t!("Connection.edit", db_type = db_type.as_str()).to_string(),
+                    )
+                    .size(700.0, 650.0),
+                    move |window, cx| cx.new(|cx| ConnectionFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+            ConnectionType::Redis => {
+                let config = RedisFormWindowConfig {
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+
+                open_popup_window(
+                    PopupWindowOptions::new(t!("Connection.edit", db_type = "Redis").to_string())
+                        .size(700.0, 650.0),
+                    move |window, cx| cx.new(|cx| RedisFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+            ConnectionType::MongoDB => {
+                let config = MongoFormWindowConfig {
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+
+                open_popup_window(
+                    PopupWindowOptions::new(t!("Connection.edit", db_type = "MongoDB").to_string())
+                        .size(700.0, 520.0),
+                    move |window, cx| cx.new(|cx| MongoFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+            ConnectionType::Serial => {
+                let config = SerialFormWindowConfig {
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+
+                open_popup_window(
+                    PopupWindowOptions::new(t!("Serial.edit").to_string()).size(700.0, 650.0),
+                    move |window, cx| cx.new(|cx| SerialFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+            _ => {}
         }
     }
 
@@ -2012,11 +2164,16 @@ impl HomePage {
     }
 
     fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity();
+        let view_for_new_connection = cx.entity();
+        let view_for_sort_field = view_for_new_connection.clone();
+        let view_for_view_mode = view_for_new_connection.clone();
 
         let workspace_filter_open = self.workspace_filter_open;
         let workspace_filter =
             self.render_workspace_filter_popover(workspace_filter_open, window, cx);
+        let sort_field = Self::connection_list_sort_field(cx);
+        let sort_order = Self::connection_list_sort_order(cx);
+        let view_mode = Self::connection_list_view_mode(cx);
 
         let is_syncing = self.syncing;
         let is_logged_in = self.current_user.is_some();
@@ -2057,7 +2214,7 @@ impl HomePage {
                                                 IconName::AppsColor.color().with_size(Size::Medium),
                                             )
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.show_workspace_form(None, window, cx);
                                                 },
@@ -2072,7 +2229,7 @@ impl HomePage {
                                                     .with_size(Size::Medium),
                                             )
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_ssh_form(window, cx);
@@ -2088,7 +2245,7 @@ impl HomePage {
                                                     .with_size(Size::Medium),
                                             )
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.add_terminal_tab(window, cx);
                                                 },
@@ -2098,7 +2255,7 @@ impl HomePage {
                                         PopupMenuItem::new("Redis")
                                             .icon(IconName::Redis.color().with_size(Size::Medium))
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_redis_form(window, cx);
@@ -2109,7 +2266,7 @@ impl HomePage {
                                         PopupMenuItem::new("MongoDB")
                                             .icon(IconName::MongoDB.color().with_size(Size::Medium))
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_mongodb_form(window, cx);
@@ -2124,7 +2281,7 @@ impl HomePage {
                                                     .with_size(Size::Medium),
                                             )
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_serial_form(window, cx);
@@ -2140,7 +2297,7 @@ impl HomePage {
                                         PopupMenuItem::new(label)
                                             .icon(db_type.as_node_icon().with_size(Size::Medium))
                                             .on_click(window.listener_for(
-                                                &view,
+                                                &view_for_new_connection,
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_connection_form(db_type, window, cx);
@@ -2282,6 +2439,114 @@ impl HomePage {
                             .cleanable(true)
                             .w(px(240.0))
                             .bg(cx.theme().muted),
+                    )
+                    .child(
+                        Button::new("connection-sort-field-button")
+                            .icon(IconName::ChevronsUpDown)
+                            .label(Self::connection_sort_field_label(sort_field))
+                            .ghost()
+                            .tooltip(t!("Home.sort_field"))
+                            .dropdown_menu({
+                                let view = view_for_sort_field.clone();
+                                move |menu, window, _cx| {
+                                    menu.item(
+                                        PopupMenuItem::new(t!("Home.sort_by_updated_at"))
+                                            .checked(
+                                                sort_field == ConnectionListSortField::UpdatedAt,
+                                            )
+                                            .on_click(window.listener_for(
+                                                &view,
+                                                move |this, _, _, cx| {
+                                                    this.set_connection_list_sort_field(
+                                                        ConnectionListSortField::UpdatedAt,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(t!("Home.sort_by_created_at"))
+                                            .checked(
+                                                sort_field == ConnectionListSortField::CreatedAt,
+                                            )
+                                            .on_click(window.listener_for(
+                                                &view,
+                                                move |this, _, _, cx| {
+                                                    this.set_connection_list_sort_field(
+                                                        ConnectionListSortField::CreatedAt,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(t!("Home.sort_by_name"))
+                                            .checked(sort_field == ConnectionListSortField::Name)
+                                            .on_click(window.listener_for(
+                                                &view,
+                                                move |this, _, _, cx| {
+                                                    this.set_connection_list_sort_field(
+                                                        ConnectionListSortField::Name,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("connection-sort-order-button")
+                            .icon(match sort_order {
+                                ConnectionListSortOrder::Ascending => IconName::SortAscending,
+                                ConnectionListSortOrder::Descending => IconName::SortDescending,
+                            })
+                            .ghost()
+                            .tooltip(Self::connection_sort_order_label(sort_order))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_connection_list_sort_order(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("connection-view-mode-button")
+                            .icon(match view_mode {
+                                ConnectionListViewMode::Card => IconName::Apps,
+                                ConnectionListViewMode::List => IconName::Table,
+                            })
+                            .label(Self::connection_list_view_mode_label(view_mode))
+                            .ghost()
+                            .tooltip(t!("Home.view_mode"))
+                            .dropdown_menu({
+                                let view = view_for_view_mode.clone();
+                                move |menu, window, _cx| {
+                                    menu.item(
+                                        PopupMenuItem::new(t!("Home.view_mode_card"))
+                                            .checked(view_mode == ConnectionListViewMode::Card)
+                                            .on_click(window.listener_for(
+                                                &view,
+                                                move |this, _, _, cx| {
+                                                    this.set_connection_list_view_mode(
+                                                        ConnectionListViewMode::Card,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(t!("Home.view_mode_list"))
+                                            .checked(view_mode == ConnectionListViewMode::List)
+                                            .on_click(window.listener_for(
+                                                &view,
+                                                move |this, _, _, cx| {
+                                                    this.set_connection_list_view_mode(
+                                                        ConnectionListViewMode::List,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                }
+                            }),
                     )
                     // 刷新按钮
                     .child(
@@ -2678,6 +2943,219 @@ impl HomePage {
             .into_any_element()
     }
 
+    fn sort_connections_for_display(
+        &self,
+        mut connections: Vec<StoredConnection>,
+        cx: &App,
+    ) -> Vec<StoredConnection> {
+        let sort_field = Self::connection_list_sort_field(cx);
+        let sort_order = Self::connection_list_sort_order(cx);
+        connections.sort_by(|a, b| compare_connections(a, b, sort_field, sort_order));
+        connections
+    }
+
+    fn connection_list_sort_field(cx: &App) -> ConnectionListSortField {
+        if cx.has_global::<AppSettings>() {
+            AppSettings::global(cx).connection_list_sort_field
+        } else {
+            ConnectionListSortField::default()
+        }
+    }
+
+    fn connection_list_sort_order(cx: &App) -> ConnectionListSortOrder {
+        if cx.has_global::<AppSettings>() {
+            AppSettings::global(cx).connection_list_sort_order
+        } else {
+            ConnectionListSortOrder::default()
+        }
+    }
+
+    fn connection_list_view_mode(cx: &App) -> ConnectionListViewMode {
+        if cx.has_global::<AppSettings>() {
+            AppSettings::global(cx).connection_list_view_mode
+        } else {
+            ConnectionListViewMode::default()
+        }
+    }
+
+    fn connection_sort_field_label(sort_field: ConnectionListSortField) -> String {
+        match sort_field {
+            ConnectionListSortField::Name => t!("Home.sort_by_name").to_string(),
+            ConnectionListSortField::CreatedAt => t!("Home.sort_by_created_at").to_string(),
+            ConnectionListSortField::UpdatedAt => t!("Home.sort_by_updated_at").to_string(),
+        }
+    }
+
+    fn connection_sort_order_label(sort_order: ConnectionListSortOrder) -> String {
+        match sort_order {
+            ConnectionListSortOrder::Ascending => t!("Home.sort_order_ascending").to_string(),
+            ConnectionListSortOrder::Descending => t!("Home.sort_order_descending").to_string(),
+        }
+    }
+
+    fn connection_list_view_mode_label(view_mode: ConnectionListViewMode) -> String {
+        match view_mode {
+            ConnectionListViewMode::Card => t!("Home.view_mode_card").to_string(),
+            ConnectionListViewMode::List => t!("Home.view_mode_list").to_string(),
+        }
+    }
+
+    fn update_connection_list_preferences(
+        &mut self,
+        update: impl FnOnce(&mut AppSettings),
+        cx: &mut Context<Self>,
+    ) {
+        cx.update_global::<AppSettings, _>(|settings, _| {
+            update(settings);
+            settings.save();
+        });
+        cx.notify();
+    }
+
+    fn set_connection_list_sort_field(
+        &mut self,
+        sort_field: ConnectionListSortField,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_list_preferences(
+            move |settings| {
+                settings.connection_list_sort_field = sort_field;
+            },
+            cx,
+        );
+    }
+
+    fn set_connection_list_view_mode(
+        &mut self,
+        view_mode: ConnectionListViewMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_list_preferences(
+            move |settings| {
+                settings.connection_list_view_mode = view_mode;
+            },
+            cx,
+        );
+    }
+
+    fn toggle_connection_list_sort_order(&mut self, cx: &mut Context<Self>) {
+        self.update_connection_list_preferences(
+            |settings| {
+                settings.connection_list_sort_order = match settings.connection_list_sort_order {
+                    ConnectionListSortOrder::Ascending => ConnectionListSortOrder::Descending,
+                    ConnectionListSortOrder::Descending => ConnectionListSortOrder::Ascending,
+                };
+            },
+            cx,
+        );
+    }
+
+    fn connection_subtitle(&self, conn: &StoredConnection) -> Option<String> {
+        match conn.connection_type {
+            ConnectionType::Database => conn.to_db_connection().ok().map(|params| {
+                if params.database_type == DatabaseType::SQLite {
+                    params.host
+                } else {
+                    let database = match params.database {
+                        Some(database) => format!("/{}", database),
+                        None => String::new(),
+                    };
+                    format!(
+                        "{}@{}:{}{}",
+                        params.username, params.host, params.port, database
+                    )
+                }
+            }),
+            ConnectionType::SshSftp => conn
+                .to_ssh_params()
+                .ok()
+                .map(|params| format!("{}@{}:{}", params.username, params.host, params.port)),
+            ConnectionType::Redis => conn.to_redis_params().ok().map(|params| match params.mode {
+                RedisMode::Standalone => {
+                    format!("{}:{}/{}", params.host, params.port, params.db_index)
+                }
+                RedisMode::Sentinel => {
+                    let (master_name, sentinel_count) = params
+                        .sentinel
+                        .as_ref()
+                        .map(|sentinel| (sentinel.master_name.as_str(), sentinel.sentinels.len()))
+                        .unwrap_or(("sentinel", 0));
+                    format!("{} (sentinel:{})", master_name, sentinel_count)
+                }
+                RedisMode::Cluster => {
+                    let node_count = params
+                        .cluster
+                        .as_ref()
+                        .map(|cluster| cluster.nodes.len())
+                        .unwrap_or(0);
+                    format!("cluster ({} nodes)", node_count)
+                }
+            }),
+            ConnectionType::MongoDB => conn.to_mongodb_params().ok().map(|params| {
+                if !params.host.is_empty() {
+                    if let Some(port) = params.port {
+                        format!("{}:{}", params.host, port)
+                    } else {
+                        params.host
+                    }
+                } else if !params.connection_string.is_empty() {
+                    params.connection_string
+                } else {
+                    "MongoDB".to_string()
+                }
+            }),
+            ConnectionType::Serial => conn.to_serial_params().ok().map(|params| {
+                let parity_char = match params.parity {
+                    one_core::storage::models::SerialParity::None => 'N',
+                    one_core::storage::models::SerialParity::Odd => 'O',
+                    one_core::storage::models::SerialParity::Even => 'E',
+                };
+                format!(
+                    "{} ({}, {}{}{})",
+                    params.port_name,
+                    params.baud_rate,
+                    params.data_bits,
+                    parity_char,
+                    params.stop_bits,
+                )
+            }),
+            _ => None,
+        }
+    }
+
+    fn render_connection_icon(&self, conn: &StoredConnection, size: f32) -> AnyElement {
+        let icon = match conn.connection_type {
+            ConnectionType::Database => conn
+                .to_db_connection()
+                .map(|c| c.database_type.as_icon())
+                .unwrap_or_else(|_| IconName::Database.color())
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            ConnectionType::SshSftp => IconName::TerminalColor
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::rgb(0x8b5cf6)),
+            ConnectionType::Redis => IconName::Redis
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            ConnectionType::MongoDB => IconName::MongoDB
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            ConnectionType::Serial => IconName::SerialPort
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            _ => IconName::Server
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+        };
+
+        icon.into_any_element()
+    }
+
     fn render_workspace_view(
         &self,
         search_query: &str,
@@ -2705,18 +3183,21 @@ impl HomePage {
                     .filter(|conn| self.match_connection_type(conn))
                     .cloned()
                     .collect();
+                let conn_list = self.sort_connections_for_display(conn_list, cx);
                 (ws.clone(), conn_list)
             })
             .collect();
 
-        let unassigned_connections: Vec<_> = self
-            .connections
-            .iter()
-            .filter(|conn| conn.workspace_id.is_none())
-            .filter(|conn| self.match_connection(conn, search_query))
-            .filter(|conn| self.match_connection_type(conn))
-            .cloned()
-            .collect();
+        let unassigned_connections = self.sort_connections_for_display(
+            self.connections
+                .iter()
+                .filter(|conn| conn.workspace_id.is_none())
+                .filter(|conn| self.match_connection(conn, search_query))
+                .filter(|conn| self.match_connection_type(conn))
+                .cloned()
+                .collect(),
+            cx,
+        );
 
         div()
             .id("home-content")
@@ -2749,9 +3230,9 @@ impl HomePage {
                             cx,
                         ));
                     } else {
-                        // 没有工作区时，直接显示连接卡片
-                        container = container.child(self.render_connections_grid(
+                        container = container.child(self.render_connections_collection(
                             unassigned_connections,
+                            None,
                             selected_id,
                             cx,
                         ));
@@ -2835,30 +3316,314 @@ impl HomePage {
                     }),
             )
             .when(!connections.is_empty(), |this| {
-                // 使用 flex 布局实现响应式卡片网格
-                let mut container = div().flex().flex_wrap().w_full().gap_3();
+                this.child(self.render_connections_collection(
+                    connections,
+                    workspace_id,
+                    selected_id,
+                    cx,
+                ))
+            })
+    }
 
-                for conn in connections {
-                    container = container.child(
-                        div()
-                            .w(px(320.0)) // 固定宽度，不增长
-                            .flex_shrink_0() // 不收缩
-                            .child(self.render_connection_card(
-                                conn,
-                                workspace_id,
-                                selected_id,
-                                cx,
-                            )),
-                    );
+    fn render_connections_collection(
+        &self,
+        connections: Vec<StoredConnection>,
+        workspace_id: Option<i64>,
+        selected_id: Option<i64>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match Self::connection_list_view_mode(cx) {
+            ConnectionListViewMode::Card => self
+                .render_connections_grid(connections, workspace_id, selected_id, cx)
+                .into_any_element(),
+            ConnectionListViewMode::List => self
+                .render_connections_list(connections, workspace_id, selected_id, cx)
+                .into_any_element(),
+        }
+    }
+
+    fn render_connections_list(
+        &self,
+        connections: Vec<StoredConnection>,
+        workspace_id: Option<i64>,
+        selected_id: Option<i64>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let mut container = v_flex().w_full().gap_2();
+
+        for conn in connections {
+            container = container.child(self.render_connection_list_item(
+                conn,
+                workspace_id,
+                selected_id,
+                cx,
+            ));
+        }
+
+        container
+    }
+
+    fn render_connection_list_item(
+        &self,
+        conn: StoredConnection,
+        workspace_id: Option<i64>,
+        selected_id: Option<i64>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let conn_id = conn.id;
+        let clone_conn = conn.clone();
+        let sftp_hover_conn = conn.clone();
+        let edit_conn = conn.clone();
+        let edit_conn_type = conn.connection_type;
+        let edit_conn_name = conn.name.clone();
+        let duplicate_conn = conn.clone();
+        let delete_conn_id = conn.id;
+        let delete_conn_name = conn.name.clone();
+        let is_selected = selected_id == conn.id;
+        let subtitle = self.connection_subtitle(&conn);
+        let workspace =
+            workspace_id.and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
+
+        let is_active = conn
+            .id
+            .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
+        let can_edit = can_edit_connection(&conn, cx);
+
+        h_flex()
+            .justify_between()
+            .items_center()
+            .gap_3()
+            .id(SharedString::from(format!(
+                "conn-list-item-{}",
+                conn.id.unwrap_or(0)
+            )))
+            .w_full()
+            .min_h(px(58.0))
+            .px_3()
+            .py_2()
+            .rounded_lg()
+            .bg(cx.theme().background)
+            .border_1()
+            .relative()
+            .overflow_hidden()
+            .shadow_sm()
+            .cursor_pointer()
+            .when(is_selected, |this| {
+                this.border_color(cx.theme().list_active_border)
+                    .shadow_lg()
+                    .border_l_3()
+            })
+            .when(!is_selected, |this| this.border_color(cx.theme().border))
+            .hover(|style| {
+                style
+                    .shadow_lg()
+                    .border_color(cx.theme().list_active_border)
+            })
+            .on_double_click(cx.listener(move |this, _, window, cx| {
+                if !crypto::has_master_key() && crypto::has_repo_password_set() {
+                    this.show_encryption_key_dialog(window, cx);
+                    return;
                 }
 
-                this.child(container)
+                let strategy =
+                    build_connection_open_strategy(clone_conn.clone(), workspace.clone());
+                strategy.open(this, window, cx);
+                cx.notify();
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected_connection_id = conn_id;
+                cx.notify();
+            }))
+            .when(is_active, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(5.0))
+                        .left(px(5.0))
+                        .w(px(8.0))
+                        .h(px(8.0))
+                        .rounded_full()
+                        .bg(cx.theme().success)
+                        .shadow_lg(),
+                )
             })
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_3()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .size(px(32.0))
+                            .rounded(px(8.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(cx.theme().muted)
+                            .child(self.render_connection_icon(&conn, 20.0)),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .flex_1()
+                            .min_w_0()
+                            .child({
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(cx.theme().foreground)
+                                    .flex_shrink()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .child(conn.name.clone())
+                            })
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .flex_shrink_0()
+                                    .child(format!("({})", conn.connection_type.label())),
+                            )
+                            .when_some(subtitle, |this, subtitle| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .whitespace_nowrap()
+                                        .child(subtitle),
+                                )
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_1()
+                    .flex_shrink_0()
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .when(conn.connection_type == ConnectionType::SshSftp, |this| {
+                        this.child(
+                            Button::new(SharedString::from(format!(
+                                "list-sftp-conn-{}",
+                                conn.id.unwrap_or(0)
+                            )))
+                            .icon(IconName::Folder1.color())
+                            .with_size(Size::Small)
+                            .primary()
+                            .tooltip(t!("Home.open_sftp"))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.open_sftp_view(sftp_hover_conn.clone(), window, cx);
+                                },
+                            )),
+                        )
+                    })
+                    .when(can_edit, |this| {
+                        this.child(
+                            Button::new(SharedString::from(format!(
+                                "list-edit-conn-{}",
+                                conn.id.unwrap_or(0)
+                            )))
+                            .icon(IconName::Edit)
+                            .with_size(Size::Small)
+                            .primary()
+                            .tooltip(t!("Home.edit_connection"))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    if let Some(conn_id) = edit_conn.id {
+                                        let conn_name = edit_conn_name.clone();
+                                        match edit_conn_type {
+                                            ConnectionType::SshSftp => {
+                                                this.editing_connection_id = Some(conn_id);
+                                                this.show_ssh_form(window, cx);
+                                            }
+                                            ConnectionType::Database => {
+                                                let db_type = edit_conn
+                                                    .to_db_connection()
+                                                    .ok()
+                                                    .map(|p| p.database_type);
+                                                this.confirm_edit_connection(
+                                                    conn_id, conn_name, db_type, window, cx,
+                                                );
+                                            }
+                                            ConnectionType::Redis => {
+                                                this.editing_connection_id = Some(conn_id);
+                                                this.show_redis_form(window, cx);
+                                            }
+                                            ConnectionType::MongoDB => {
+                                                this.editing_connection_id = Some(conn_id);
+                                                this.show_mongodb_form(window, cx);
+                                            }
+                                            ConnectionType::Serial => {
+                                                this.editing_connection_id = Some(conn_id);
+                                                this.show_serial_form(window, cx);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                },
+                            )),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!(
+                                "list-duplicate-conn-{}",
+                                conn.id.unwrap_or(0)
+                            )))
+                            .icon(IconName::Copy)
+                            .with_size(Size::Small)
+                            .primary()
+                            .tooltip(t!("Home.duplicate_connection"))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.duplicate_connection_and_open_editor(
+                                        &duplicate_conn,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            )),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!(
+                                "list-delete-conn-{}",
+                                conn.id.unwrap_or(0)
+                            )))
+                            .icon(IconName::Remove)
+                            .with_size(Size::Small)
+                            .danger()
+                            .tooltip(t!("Home.delete_connection"))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    if let Some(conn_id) = delete_conn_id {
+                                        let conn_name = delete_conn_name.clone();
+                                        this.confirm_delete_connection(
+                                            conn_id, conn_name, window, cx,
+                                        );
+                                    }
+                                },
+                            )),
+                        )
+                    }),
+            )
+            .into_any_element()
     }
 
     fn render_connections_grid(
         &self,
         connections: Vec<StoredConnection>,
+        workspace_id: Option<i64>,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -2869,7 +3634,7 @@ impl HomePage {
                 div()
                     .w(px(320.0))
                     .flex_shrink_0()
-                    .child(self.render_connection_card(conn, None, selected_id, cx)),
+                    .child(self.render_connection_card(conn, workspace_id, selected_id, cx)),
             );
         }
         container
@@ -2909,20 +3674,7 @@ impl HomePage {
                             ),
                     ),
             )
-            .child({
-                // 使用 flex 布局实现响应式卡片网格
-                let mut container = div().flex().flex_wrap().w_full().gap_3();
-
-                for conn in connections {
-                    container = container.child(
-                        div()
-                            .w(px(320.0)) // 固定宽度，不增长
-                            .flex_shrink_0() // 不收缩
-                            .child(self.render_connection_card(conn, None, selected_id, cx)),
-                    );
-                }
-                container
-            })
+            .child(self.render_connections_collection(connections, None, selected_id, cx))
     }
 
     fn render_connection_card(
@@ -2938,9 +3690,11 @@ impl HomePage {
         let edit_conn = conn.clone();
         let edit_conn_type = conn.connection_type;
         let edit_conn_name = conn.name.clone();
+        let duplicate_conn = conn.clone();
         let delete_conn_id = conn.id;
         let delete_conn_name = conn.name.clone();
         let is_selected = selected_id == conn.id;
+        let subtitle = self.connection_subtitle(&conn);
         let workspace =
             workspace_id.and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
 
@@ -2949,6 +3703,7 @@ impl HomePage {
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
 
         let can_edit = can_edit_connection(&conn, cx);
+        let group_name: SharedString = format!("conn-card-group-{}", conn.id.unwrap_or(0)).into();
         let card = v_flex()
             .justify_center()
             .id(SharedString::from(format!(
@@ -2965,7 +3720,7 @@ impl HomePage {
             .relative()
             .overflow_hidden()
             .shadow_sm()
-            .group("")
+            .group(group_name.clone())
             .when(is_selected, |this| {
                 this.border_color(cx.theme().list_active_border)
                     .shadow_lg()
@@ -3014,7 +3769,7 @@ impl HomePage {
                     .top_2()
                     .right_2()
                     .gap_1()
-                    .group_hover("", |style| style.opacity(1.0))
+                    .group_hover(group_name, |style| style.opacity(1.0))
                     .opacity(0.0)
                     .when(conn.connection_type == ConnectionType::SshSftp, |this| {
                         this.child(
@@ -3083,6 +3838,26 @@ impl HomePage {
                         )
                         .child(
                             Button::new(SharedString::from(format!(
+                                "duplicate-conn-{}",
+                                conn.id.unwrap_or(0)
+                            )))
+                            .icon(IconName::Copy)
+                            .with_size(Size::Small)
+                            .primary()
+                            .tooltip(t!("Home.duplicate_connection"))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.duplicate_connection_and_open_editor(
+                                        &duplicate_conn,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            )),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!(
                                 "delete-conn-{}",
                                 conn.id.unwrap_or(0)
                             )))
@@ -3116,35 +3891,7 @@ impl HomePage {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(match conn.connection_type {
-                                ConnectionType::Database => {
-                                    let icon = conn
-                                        .to_db_connection()
-                                        .map(|c| c.database_type.as_icon())
-                                        .unwrap_or_else(|_| IconName::Database.color());
-                                    icon.with_size(px(40.0)).text_color(gpui::white())
-                                }
-                                ConnectionType::SshSftp => IconName::TerminalColor
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::rgb(0x8b5cf6)),
-                                ConnectionType::Redis => IconName::Redis
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                ConnectionType::MongoDB => IconName::MongoDB
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                ConnectionType::Serial => IconName::SerialPort
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                _ => IconName::Server
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                            }),
+                            .child(self.render_connection_icon(&conn, 40.0)),
                     )
                     .child(
                         v_flex()
@@ -3174,201 +3921,153 @@ impl HomePage {
                                         .child(conn.name.clone()),
                                 )
                             })
-                            .when(conn.connection_type == ConnectionType::Database, |this| {
-                                if let Ok(params) = conn.to_db_connection() {
-                                    let conn_info = if params.database_type == DatabaseType::SQLite
-                                    {
-                                        params.host.clone()
-                                    } else {
-                                        let database = match params.database {
-                                            Some(database) => format!("/{}", database),
-                                            None => "".to_string(),
-                                        };
-                                        format!(
-                                            "{}@{}:{}{}",
-                                            params.username, params.host, params.port, database
-                                        )
-                                    };
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::SshSftp, |this| {
-                                if let Ok(params) = conn.to_ssh_params() {
-                                    let conn_info = format!(
-                                        "{}@{}:{}",
-                                        params.username, params.host, params.port
-                                    );
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::Redis, |this| {
-                                if let Ok(params) = conn.to_redis_params() {
-                                    let conn_info = match params.mode {
-                                        RedisMode::Standalone => {
-                                            format!(
-                                                "{}:{}/{}",
-                                                params.host, params.port, params.db_index
-                                            )
-                                        }
-                                        RedisMode::Sentinel => {
-                                            let (master_name, sentinel_count) = params
-                                                .sentinel
-                                                .as_ref()
-                                                .map(|sentinel| {
-                                                    (
-                                                        sentinel.master_name.as_str(),
-                                                        sentinel.sentinels.len(),
-                                                    )
-                                                })
-                                                .unwrap_or(("sentinel", 0));
-                                            format!("{} (sentinel:{})", master_name, sentinel_count)
-                                        }
-                                        RedisMode::Cluster => {
-                                            let node_count = params
-                                                .cluster
-                                                .as_ref()
-                                                .map(|cluster| cluster.nodes.len())
-                                                .unwrap_or(0);
-                                            format!("cluster ({} nodes)", node_count)
-                                        }
-                                    };
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::MongoDB, |this| {
-                                if let Ok(params) = conn.to_mongodb_params() {
-                                    let conn_info = if !params.host.is_empty() {
-                                        if let Some(port) = params.port {
-                                            format!("{}:{}", params.host, port)
-                                        } else {
-                                            params.host
-                                        }
-                                    } else if !params.connection_string.is_empty() {
-                                        params.connection_string
-                                    } else {
-                                        "MongoDB".to_string()
-                                    };
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::Serial, |this| {
-                                if let Ok(params) = conn.to_serial_params() {
-                                    // 格式：/dev/ttyUSB0 (115200, 8N1)
-                                    let parity_char = match params.parity {
-                                        one_core::storage::models::SerialParity::None => 'N',
-                                        one_core::storage::models::SerialParity::Odd => 'O',
-                                        one_core::storage::models::SerialParity::Even => 'E',
-                                    };
-                                    let conn_info = format!(
-                                        "{} ({}, {}{}{})",
-                                        params.port_name,
-                                        params.baud_rate,
-                                        params.data_bits,
-                                        parity_char,
-                                        params.stop_bits,
-                                    );
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
+                            .when_some(subtitle, |this, subtitle| {
+                                let tooltip_text: SharedString = subtitle.clone().into();
+                                this.child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "conn-info-{}",
+                                            conn.id.unwrap_or(0)
+                                        )))
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .whitespace_nowrap()
+                                        .max_w_full()
+                                        .tooltip(move |window, cx| {
+                                            Tooltip::new(tooltip_text.clone()).build(window, cx)
+                                        })
+                                        .child(subtitle),
+                                )
                             }),
                     ),
             );
 
         card.into_any_element()
+    }
+}
+
+fn compare_connections(
+    a: &StoredConnection,
+    b: &StoredConnection,
+    sort_field: ConnectionListSortField,
+    sort_order: ConnectionListSortOrder,
+) -> Ordering {
+    let cmp = match sort_field {
+        ConnectionListSortField::Name => a
+            .name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| timestamp_value(a.updated_at).cmp(&timestamp_value(b.updated_at)))
+            .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
+        ConnectionListSortField::CreatedAt => timestamp_value(a.created_at)
+            .cmp(&timestamp_value(b.created_at))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| timestamp_value(a.updated_at).cmp(&timestamp_value(b.updated_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
+        ConnectionListSortField::UpdatedAt => timestamp_value(a.updated_at)
+            .cmp(&timestamp_value(b.updated_at))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
+    };
+
+    match sort_order {
+        ConnectionListSortOrder::Ascending => cmp,
+        ConnectionListSortOrder::Descending => cmp.reverse(),
+    }
+}
+
+fn timestamp_value(value: Option<i64>) -> i64 {
+    value.unwrap_or(0)
+}
+
+#[cfg(test)]
+mod connection_list_sort_tests {
+    use super::*;
+
+    fn make_connection(id: i64, name: &str, created_at: i64, updated_at: i64) -> StoredConnection {
+        StoredConnection {
+            id: Some(id),
+            name: name.to_string(),
+            connection_type: ConnectionType::Database,
+            params: String::new(),
+            workspace_id: None,
+            selected_databases: None,
+            remark: None,
+            sync_enabled: true,
+            cloud_id: None,
+            last_synced_at: None,
+            created_at: Some(created_at),
+            updated_at: Some(updated_at),
+            team_id: None,
+            owner_id: None,
+        }
+    }
+
+    #[test]
+    fn compare_connections_sorts_by_name_ascending() {
+        let mut items = vec![
+            make_connection(1, "zeta", 10, 30),
+            make_connection(2, "alpha", 20, 10),
+            make_connection(3, "Beta", 30, 20),
+        ];
+
+        items.sort_by(|a, b| {
+            compare_connections(
+                a,
+                b,
+                ConnectionListSortField::Name,
+                ConnectionListSortOrder::Ascending,
+            )
+        });
+
+        let names: Vec<_> = items.into_iter().map(|item| item.name).collect();
+        assert_eq!(names, vec!["alpha", "Beta", "zeta"]);
+    }
+
+    #[test]
+    fn compare_connections_sorts_by_updated_at_descending() {
+        let mut items = vec![
+            make_connection(1, "alpha", 10, 100),
+            make_connection(2, "beta", 20, 300),
+            make_connection(3, "gamma", 30, 200),
+        ];
+
+        items.sort_by(|a, b| {
+            compare_connections(
+                a,
+                b,
+                ConnectionListSortField::UpdatedAt,
+                ConnectionListSortOrder::Descending,
+            )
+        });
+
+        let ids: Vec<_> = items.into_iter().map(|item| item.id.unwrap()).collect();
+        assert_eq!(ids, vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn compare_connections_sorts_by_created_at_ascending() {
+        let mut items = vec![
+            make_connection(1, "alpha", 30, 100),
+            make_connection(2, "beta", 10, 300),
+            make_connection(3, "gamma", 20, 200),
+        ];
+
+        items.sort_by(|a, b| {
+            compare_connections(
+                a,
+                b,
+                ConnectionListSortField::CreatedAt,
+                ConnectionListSortOrder::Ascending,
+            )
+        });
+
+        let ids: Vec<_> = items.into_iter().map(|item| item.id.unwrap()).collect();
+        assert_eq!(ids, vec![2, 3, 1]);
     }
 }
 

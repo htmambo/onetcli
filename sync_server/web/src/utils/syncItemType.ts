@@ -1,7 +1,6 @@
 const syncItemTypeAliases: Record<string, string> = {
   connection: "connection",
   workspace: "workspace",
-  app_settings: "app_settings",
   certificate: "credential",
   credential: "credential",
 };
@@ -10,7 +9,6 @@ const syncItemTypeLabels: Record<string, string> = {
   connection: "连接项",
   workspace: "工作区",
   credential: "凭证",
-  app_settings: "应用设置",
 };
 
 export function normalizeSyncItemType(dataType: string) {

@@ -87,6 +87,7 @@ struct WorkspaceRow {
     created_at: i64,
     updated_at: i64,
     cloud_id: Option<String>,
+    last_synced_at: Option<i64>,
 }
 
 impl FromSqliteRow for WorkspaceRow {
@@ -99,6 +100,7 @@ impl FromSqliteRow for WorkspaceRow {
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
             cloud_id: row.get("cloud_id")?,
+            last_synced_at: row.get("last_synced_at")?,
         })
     }
 }
@@ -113,6 +115,7 @@ impl From<WorkspaceRow> for Workspace {
             created_at: Some(row.created_at),
             updated_at: Some(row.updated_at),
             cloud_id: row.cloud_id,
+            last_synced_at: row.last_synced_at,
         }
     }
 }
@@ -697,22 +700,28 @@ impl WorkspaceRepository {
         let icon = item.icon.clone();
         let cloud_id = item.cloud_id.clone();
         let updated_at = item.updated_at.unwrap_or_else(now);
+        let last_synced_at = item.last_synced_at.or(Some(updated_at));
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE workspaces SET name = ?1, color = ?2, icon = ?3, cloud_id = ?4, updated_at = ?5 WHERE id = ?6",
-                params![name, color, icon, cloud_id, updated_at, id],
+                "UPDATE workspaces SET name = ?1, color = ?2, icon = ?3, cloud_id = ?4, last_synced_at = ?5, updated_at = ?6 WHERE id = ?7",
+                params![name, color, icon, cloud_id, last_synced_at, updated_at, id],
             )?;
             Ok(())
         })
     }
 
     /// 更新工作空间的云端同步状态
-    pub fn update_cloud_id(&self, local_id: i64, cloud_id: Option<String>) -> Result<()> {
+    pub fn update_sync_status(
+        &self,
+        local_id: i64,
+        cloud_id: Option<String>,
+        last_synced_at: Option<i64>,
+    ) -> Result<()> {
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE workspaces SET cloud_id = ?1 WHERE id = ?2",
-                params![cloud_id, local_id],
+                "UPDATE workspaces SET cloud_id = ?1, last_synced_at = ?2 WHERE id = ?3",
+                params![cloud_id, last_synced_at, local_id],
             )?;
             Ok(())
         })
@@ -721,7 +730,7 @@ impl WorkspaceRepository {
     pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<Workspace>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, color, icon, created_at, updated_at, cloud_id FROM workspaces WHERE cloud_id = ?1",
+                "SELECT id, name, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces WHERE cloud_id = ?1",
             )?;
             let mut rows = stmt.query(params![cloud_id])?;
             if let Some(row) = rows.next()? {
@@ -745,19 +754,21 @@ impl Repository for WorkspaceRepository {
         let color = item.color.clone();
         let icon = item.icon.clone();
         let cloud_id = item.cloud_id.clone();
+        let last_synced_at = item.last_synced_at;
         let ts = now();
+        let updated_at = item.updated_at.unwrap_or(ts);
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO workspaces (name, color, icon, cloud_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![name, color, icon, cloud_id, ts, ts],
+                "INSERT INTO workspaces (name, color, icon, cloud_id, last_synced_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![name, color, icon, cloud_id, last_synced_at, ts, updated_at],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
 
         item.id = Some(id);
         item.created_at = Some(ts);
-        item.updated_at = Some(ts);
+        item.updated_at = Some(updated_at);
 
         Ok(id)
     }
@@ -774,7 +785,7 @@ impl Repository for WorkspaceRepository {
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE workspaces SET name = ?1, color = ?2, icon = ?3, cloud_id = ?4, updated_at = ?5 WHERE id = ?6",
+                "UPDATE workspaces SET name = ?1, color = ?2, icon = ?3, cloud_id = ?4, last_synced_at = NULL, updated_at = ?5 WHERE id = ?6",
                 params![name, color, icon, cloud_id, ts, id],
             )?;
             Ok(())
@@ -794,7 +805,7 @@ impl Repository for WorkspaceRepository {
 
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, color, icon, created_at, updated_at, cloud_id FROM workspaces WHERE id = ?1")?;
+            let mut stmt = conn.prepare("SELECT id, name, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces WHERE id = ?1")?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
                 Ok(Some(WorkspaceRow::from_row(row)?.into()))
@@ -806,7 +817,7 @@ impl Repository for WorkspaceRepository {
 
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, color, icon, created_at, updated_at, cloud_id FROM workspaces ORDER BY updated_at DESC")?;
+            let mut stmt = conn.prepare("SELECT id, name, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces ORDER BY updated_at DESC")?;
             let rows = stmt.query_map([], |row| WorkspaceRow::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -1126,5 +1137,46 @@ mod tests {
         assert_eq!(found.id, workspace.id);
         assert_eq!(found.name, "测试工作区");
         assert_eq!(found.cloud_id.as_deref(), Some("workspace-cloud-1"));
+    }
+
+    #[test]
+    fn workspace_repository_update_sync_status_persists_last_synced_at() {
+        let conn = create_test_sqlite_connection();
+        let repo = WorkspaceRepository::new(conn);
+
+        let mut workspace = Workspace::new("同步工作区".to_string());
+        repo.insert(&mut workspace).unwrap();
+
+        let workspace_id = workspace.id.expect("插入后应生成工作区 ID");
+        repo.update_sync_status(
+            workspace_id,
+            Some("workspace-cloud-sync".to_string()),
+            Some(456),
+        )
+        .unwrap();
+
+        let found = repo.get(workspace_id).unwrap().unwrap();
+        assert_eq!(found.cloud_id.as_deref(), Some("workspace-cloud-sync"));
+        assert_eq!(found.last_synced_at, Some(456));
+    }
+
+    #[test]
+    fn workspace_repository_local_update_clears_last_synced_at() {
+        let conn = create_test_sqlite_connection();
+        let repo = WorkspaceRepository::new(conn);
+
+        let mut workspace = Workspace::new("本地修改工作区".to_string());
+        workspace.cloud_id = Some("workspace-cloud-local".to_string());
+        workspace.last_synced_at = Some(789);
+        repo.insert(&mut workspace).unwrap();
+
+        workspace.name = "本地修改工作区-已更新".to_string();
+        repo.update(&workspace).unwrap();
+
+        let workspace_id = workspace.id.expect("插入后应生成工作区 ID");
+        let found = repo.get(workspace_id).unwrap().unwrap();
+        assert_eq!(found.name, "本地修改工作区-已更新");
+        assert_eq!(found.cloud_id.as_deref(), Some("workspace-cloud-local"));
+        assert_eq!(found.last_synced_at, None);
     }
 }

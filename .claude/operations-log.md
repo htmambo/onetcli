@@ -1,5 +1,77 @@
 ## 操作日志
 
+## 编码前检查 - connection-list-view-preferences
+时间：2026-03-26 12:11:31 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-connection-list-view-preferences.md`
+- 已分析相似实现：
+  - `main/src/home_tab.rs::render_toolbar`
+  - `main/src/home_tab.rs::render_workspace_view / render_connection_card`
+  - `crates/sftp_view/src/file_list_panel.rs::SortColumn / SortOrder / sort_items`
+  - `main/src/setting_tab.rs::AppSettings`
+- 将使用以下可复用组件：
+  - `AppSettings`：持久化连接列表偏好
+  - `PopupMenuItem + dropdown_menu`：复用现有首页工具栏交互样式
+  - `StoredConnection::{created_at, updated_at}`：直接作为排序字段来源
+- 将遵循命名约定：偏好枚举命名统一使用 `ConnectionList*`
+- 将遵循代码风格：排序逻辑抽成纯比较器，渲染层保留链式构建
+- 确认不重复造轮子，证明：未新建额外配置文件或数据库字段，直接复用 `settings.json`
+- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、格式化、编译和单测作为替代并留痕
+
+## 编码后声明 - connection-list-view-preferences
+时间：2026-03-26 12:11:31 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/setting_tab.rs::AppSettings`：新增列表排序与展示偏好字段，继续走现有 `settings.json` 持久化
+- `main/src/home_tab.rs::render_toolbar`：继续在首页工具栏统一承载控制入口
+- `main/src/home_tab.rs::render_connection_card`：保留卡片视图，只抽共用连接摘要与图标渲染
+- `crates/sftp_view/src/file_list_panel.rs`：沿用“字段 + 方向”排序建模方式
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `ConnectionListSortField`、`ConnectionListSortOrder`、`ConnectionListViewMode`
+- 代码风格：排序比较器独立为纯函数，列表/卡片渲染按职责拆开
+- 文件组织：配置在 `setting_tab.rs`，主页行为在 `home_tab.rs`，文案在 `main.yml`
+
+### 3. 对比了以下相似实现
+- `crates/sftp_view/src/file_list_panel.rs`：参考其排序切换模式，但当前实现改为全局偏好持久化
+- `main/src/home_tab.rs` 既有卡片网格：保留工作区分组结构，只把容器抽象为“卡片/列表”双模式
+- `main/src/setting_tab.rs`：沿用已有 `AppSettings::save()` 机制，不引入新状态仓库
+
+### 4. 未重复造轮子的证明
+- 已检查首页工具栏、工作区分组、连接卡片和全局设置存储
+- 最终没有新增新的配置系统或列表组件，只在现有主页结构上扩展
+
+## 实施与验证记录 - connection-list-view-preferences
+时间：2026-03-26 12:11:31 +0800
+
+### 已完成修改
+- `main/src/setting_tab.rs`
+  - 新增连接列表排序字段、排序方向、展示方式三个偏好枚举和设置字段
+- `main/src/home_tab.rs`
+  - 首页工具栏新增排序字段选择、升降序切换、卡片/列表展示切换
+  - 工作区内连接列表统一按当前偏好排序
+  - 新增列表展示模式，并复用现有连接打开/编辑/复制/删除动作
+  - 提取连接摘要、图标、时间格式化和排序比较器
+  - 新增 3 个排序单测
+- `main/locales/main.yml`
+  - 补充排序与展示方式相关文案
+- `main/Cargo.toml`
+  - 为 `main` crate 接入 workspace `chrono` 依赖，用于时间展示格式化
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p main compare_connections -- --nocapture`
+  - 结果：通过（3 个新增排序测试全部通过）
+
+### 当前限制
+- 本次未补 GUI 自动化；建议你在首页手工确认：
+  - 卡片/列表切换后，工作区分组仍正常
+  - 排序字段切换后，未分配工作区与各工作区内部顺序都正确
+  - 列表模式下的编辑、复制、删除、打开 SFTP 行为与卡片模式一致
+
 ## 编码前检查 - certificate-settings-navigation
 时间：2026-03-26 00:00:00 +0800
 
@@ -4759,6 +4831,80 @@
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
 
+## 编码前检查 - workspace-sync-upload
+时间：2026-03-26 09:54:59 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-workspace-sync-upload.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/connection_sync.rs`：复用 `last_synced_at` 判定思路
+- `crates/core/src/cloud_sync/certificate_sync.rs`：复用同步成功后的 `update_sync_status(...)` 回写模式
+- `crates/core/src/cloud_sync/generic_sync.rs`：继续作为工作区同步主流程，只补充状态判定和回调
+- `crates/core/src/storage/repository.rs`：复用仓储层集中维护同步字段的模式
+□ 将遵循命名约定：继续使用 `cloud_id / updated_at / last_synced_at` 的同步状态命名
+□ 将遵循代码风格：只在模型、仓储、同步流程和迁移层补齐行为，不在 UI 侧添加补丁逻辑
+□ 确认不重复造轮子，证明：已检查连接同步、证书同步、工作区仓储和通用同步计划，确认当前缺口是工作区同步状态未落库且未参与计划判定
+
+## 执行记录 - workspace-sync-upload
+时间：2026-03-26 09:54:59 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/cloud_sync/workspace_sync.rs`
+- `crates/core/src/cloud_sync/generic_sync.rs`
+- `crates/core/src/cloud_sync/connection_sync.rs`
+- `crates/core/src/cloud_sync/certificate_sync.rs`
+- `crates/core/src/storage/models.rs`
+- `crates/core/src/storage/repository.rs`
+- `crates/core/src/storage/migration.rs`
+- `crates/core/migrations/20260225000001_init.sql`
+
+### 2. 对比的相似实现
+- `connection_sync.rs`：通过 `last_synced_at` 区分本地改动与云端改动
+- `certificate_sync.rs`：上传成功后统一回写同步状态
+- `repository.rs` 中证书/连接仓储：同步状态字段统一放在仓储层持久化
+
+### 3. 当前发现
+- 工作区模型和表结构没有 `last_synced_at`，只能靠 `updated_at` 和云端时间直接比较
+- `generic_sync` 在“更新云端成功”后没有回调同步状态，导致即使补字段也会重复判脏
+- 工作区本地编辑后原先不会显式进入“待同步”状态
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - workspace-sync-upload
+时间：2026-03-26 09:54:59 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/cloud_sync/generic_sync.rs`：继续承担工作区同步计划与执行，只补了状态判定函数和云端更新后的回调
+- `crates/core/src/cloud_sync/certificate_sync.rs`：沿用上传成功后回写 `cloud_id + last_synced_at` 的模式
+- `crates/core/src/storage/repository.rs`：继续作为工作区同步状态的唯一持久化入口
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增字段与方法统一使用 `last_synced_at`、`update_sync_status`
+- 代码风格：状态变更集中在模型/仓储/同步层，没有在业务页面埋额外同步判断
+- 文件组织：迁移仍放在 `crates/core/migrations`，注册仍走 `storage/migration.rs`
+
+### 3. 对比了以下相似实现
+- `connection_sync.rs`：我的方案没有引入完整冲突系统，只借用了“晚于上次同步才算变更”的判定方式
+- `certificate_sync.rs`：工作区同步回写现在与证书同步保持一致，差异仅在工作区仍走通用同步流程
+- `repository.rs` 中本地更新逻辑：工作区本地编辑会清空 `last_synced_at`，而云端回写则保留/更新它
+
+### 4. 未重复造轮子的证明
+- 没有新增独立的工作区同步引擎
+- 没有在 `home_tab.rs` 或其它 UI 调用点写死“修改后强制上传”逻辑
+- 仅在既有通用同步和工作区仓储中补齐缺失的同步状态链路
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo test -p one-core workspace_repository --lib`：通过
+- `cargo test -p one-core generic_sync --lib`：通过
+- `cargo check -p one-core -p main`：通过
+
+### 6. 风险与限制
+- 已绑定云端但历史上没有 `last_synced_at` 的工作区，升级后首次同步可能会补传一次
+- 当前只为工作区启用了基于同步状态的通用判定，应用设置仍保留原有比较方式
+- 现有 `gpui-component` 未使用函数告警和 `num-bigint-dig` 的 future incompatibility 提示均为仓库既有问题，与本次改动无关
+
 ## 编码后声明 - certificate-settings-navigation
 时间：2026-03-26 03:34:20 +0800
 
@@ -5119,3 +5265,379 @@
 ### 4. 工具限制留痕
 - 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
 - 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码前检查 - remove-app-settings-sync
+时间：2026-03-26 10:05:22 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-remove-app-settings-sync.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs`：移除应用设置同步注册点
+- `main/src/setting_tab.rs`：保留本地设置保存，只删除同步触发与同步元数据
+- `main/src/home/home_tabs.rs`：保留终端设置广播，只删除同步触发
+- `main/src/main.rs`：移除应用设置同步模块声明
+□ 将遵循命名约定：不新增新抽象，只删除 `AppSettingsSyncType` 及相关触发符号
+□ 将遵循代码风格：直接清理整条链路，不保留空函数或无效条件分支
+□ 确认不重复造轮子，证明：已检查应用设置同步模块、首页同步入口、设置页触发点和终端事件触发点，确认是单独链路
+
+## 执行记录 - remove-app-settings-sync
+时间：2026-03-26 10:05:22 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/app_settings_sync.rs`
+- `main/src/home_tab.rs`
+- `main/src/setting_tab.rs`
+- `main/src/home/home_tabs.rs`
+- `main/src/main.rs`
+- `crates/core/src/cloud_sync/models.rs`
+
+### 2. 对比的相似实现
+- `main/src/home_tab.rs`：应用层通过 `register_type(...)` 追加额外同步类型
+- `main/src/home/home_tabs.rs`：终端设置变更的本地广播与云同步触发是分离的
+- `main/src/setting_tab.rs`：设置保存和同步 URL 生效本身不依赖应用设置云同步
+
+### 3. 当前发现
+- 应用设置同步不是核心引擎默认行为，而是桌面端额外加上的类型
+- 设置页与终端设置变更会频繁触发整轮云同步
+- `AppSettings` 中的 `local_id / remote_id / last_synced_at / updated_at` 都只服务于这一条同步链路
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修改
+
+## 编码后声明 - remove-app-settings-sync
+时间：2026-03-26 10:05:22 +0800
+
+### 1. 复用了以下既有组件
+- `AppSettings::save()`：继续作为所有应用设置的本地持久化入口
+- `sync_terminal_settings_to_all(...)` 与 `apply_terminal_settings_to_all(...)`：继续负责本地终端设置广播
+- `SyncEngine::new(...)`：回退到默认同步处理器，不再追加应用设置类型
+
+### 2. 遵循了以下项目约定
+- 命名约定：直接删除 `AppSettingsSyncType` 相关命名，不额外保留兼容层
+- 代码风格：只删应用设置同步链路，不改连接、工作区、凭证同步行为
+- 文件组织：同步实现文件删除，接入点和触发点同步收口
+
+### 3. 对比了以下相似实现
+- `home_tab.rs` 常规同步与冲突解决：两处都统一去掉了额外的 `register_type(...)`
+- `setting_tab.rs` 设置保存回调：保留 `save()`，删除紧随其后的同步触发
+- `home/home_tabs.rs` 终端事件处理：保留本地广播，删除云同步调用
+
+### 4. 未重复造轮子的证明
+- 没有新增“禁用应用设置同步”的配置开关
+- 没有保留空的 `AppSettingsSyncType` 实现
+- 直接删除同步模块、触发函数和同步元数据，行为更清晰
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p one-core -p main`：通过
+- `cargo test -p one-core --lib`：通过
+- `cargo test -p main --lib`：失败，原因是包 `main` 不存在 `lib` target，不属于代码错误
+
+### 6. 风险与限制
+- 旧 `settings.json` 若含历史同步字段，当前版本读取时会忽略，下一次保存后会自动移除
+- 现有 `gpui-component` 未使用函数告警和 `num-bigint-dig` 的 future incompatibility 提示仍为仓库既有问题，与本次修改无关
+
+## 编码前检查 - conflict-resolution-persist
+时间：2026-03-26 10:37:22 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-conflict-resolution-persist.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/connection_sync.rs`：对齐正常更新云端后的 `update_sync_status(...)` 模式
+- `crates/core/src/cloud_sync/engine.rs`：继续作为手动冲突解决的唯一执行入口
+- `main/src/home_tab.rs`：继续负责冲突解决反馈与待处理冲突列表
+□ 将遵循命名约定：继续使用 `last_synced_at`、`update_sync_status`、`pending_conflicts`
+□ 将遵循代码风格：优先在引擎层修正状态推进，不在 UI 层伪造“已解决”
+□ 确认不重复造轮子，证明：已检查正常连接同步、冲突解决引擎和首页冲突处理，确认问题是手动冲突解决缺少同步状态回写且 UI 无条件清空
+
+## 执行记录 - conflict-resolution-persist
+时间：2026-03-26 10:37:22 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/connection_sync.rs`
+- `crates/core/src/storage/repository.rs`
+- `main/src/home_tab.rs`
+
+### 2. 对比的相似实现
+- `connection_sync.rs`：正常“更新云端”完成后会推进本地同步状态
+- `engine.rs`：手动冲突解决原先只更新云端，不推进本地状态
+- `home_tab.rs`：收到 `Ok(stats)` 后原先直接清空待处理冲突并输出完成日志
+
+### 3. 当前发现
+- “使用本地版本”冲突解决后，本地连接的 `last_synced_at` 没有更新
+- `apply_conflict_resolutions(...)` 原先把输入冲突直接复制到 `result.conflicts`，无法区分真正未解决的项
+- 首页原先即使有残余错误，也会打印“冲突解决完成”
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - conflict-resolution-persist
+时间：2026-03-26 10:37:22 +0800
+
+### 1. 复用了以下既有组件
+- `ConnectionRepository::update_sync_status(...)`：用于在冲突解决后推进本地连接同步状态
+- `SyncEngine::current_timestamp()`：继续作为同步状态时间戳来源
+- `build_conflict_resolution_feedback(...)`：保留原有反馈文案，只修正其前置状态判断
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增辅助方法继续使用同步状态现有命名，不引入新的状态概念
+- 代码风格：只修冲突解决引擎与首页处理，不影响常规同步和其它数据类型
+- 文件组织：测试直接放在 `engine.rs` 内，与修复点同文件维护
+
+### 3. 对比了以下相似实现
+- `connection_sync.rs` 正常同步：现在手动冲突解决的 `UseLocal` 分支也会像它一样回写同步状态
+- `home_tab.rs` 常规同步：现在冲突解决只有在确实无错误、无残余冲突时才清空列表
+- `conflict.rs` 冲突副本：`KeepBoth` 分支也同步清理了副本的 `last_synced_at`
+
+### 4. 未重复造轮子的证明
+- 没有新增独立“冲突解决后再同步”状态表
+- 没有在 UI 层写死“解决后强制忽略冲突”
+- 直接复用了现有连接同步状态更新能力
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
+- `cargo check -p one-core -p main`：通过
+- `cargo test -p one-core --lib`：通过
+
+### 6. 风险与限制
+- 当前 UI 仍然不会把“部分成功、部分失败”的冲突按粒度拆分展示，只会保留未解决列表并给出警告
+- 现有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍为仓库既有问题，与本次修复无关
+
+## 编码前检查 - login-translation-audit
+时间：2026-03-26 10:55:31 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-login-translation-audit.md`
+□ 将使用以下可复用组件：
+- `main/src/setting_tab.rs`：复用 `Settings.General.Sync.*` 的正确翻译命名空间
+- `main/src/home_tab.rs`：复用 `Home.sync_conflict_*` 的冲突操作命名组
+- `crates/terminal_view/src/ssh_form_window.rs` 与 `crates/terminal_view/src/serial_form_window.rs`：确认 SSH/串口窗口标题和表单字段的翻译引用点
+□ 将遵循命名约定：继续沿用 `Home.*`、`Settings.General.Sync.*`、`SSH.*`、`Serial.*`
+□ 将遵循代码风格：UI 继续使用 `t!(...)` 取翻译，不在组件里保留裸字符串
+□ 确认不重复造轮子，证明：已检查登录窗、设置页和表单窗口的既有翻译模式，直接补齐语言键并修正错误引用，不新增自定义翻译层
+
+## 执行记录 - login-translation-audit
+时间：2026-03-26 10:55:31 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/auth.rs`
+- `main/src/setting_tab.rs`
+- `main/src/home_tab.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+- `crates/terminal_view/src/serial_form_window.rs`
+- `main/locales/main.yml`
+
+### 2. 对比的相似实现
+- `setting_tab.rs`：同步设置页已正确使用 `Settings.General.Sync.server_url_desc`
+- `home_tab.rs`：冲突解决按钮已有 `use_cloud` / `use_local` 键，缺少 `keep_both`
+- `ssh_form_window.rs` / `serial_form_window.rs`：窗口和字段广泛依赖 `SSH.*` / `Serial.*`，语言文件此前缺整组键
+
+### 3. 当前发现
+- 登录窗把 `"sync_server"` 直接作为可见文本渲染
+- 登录窗错误引用 `Settings.General.Account.sync_server_url_desc`，语言树中不存在该键
+- 设置页账号卡片同样直接渲染 `"sync_server"`
+- SSH/串口窗口中存在一批历史缺失键，会直接显示原始 key
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`python3`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - login-translation-audit
+时间：2026-03-26 10:55:31 +0800
+
+### 1. 复用了以下既有组件
+- `Settings.General.Sync.server_url_desc`：作为登录窗同步地址说明的唯一来源
+- `Home.sync_conflict_*`：沿用首页冲突解决现有命名组补齐 `keep_both`
+- `t!(...)`：继续作为所有 UI 翻译入口，不新增包装层
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增键继续归入 `Common`、`ConnectionForm`、`Settings.General.Sync`、`SSH`、`Serial`
+- 代码风格：只修用户可见文案和缺失键，不改业务逻辑
+- 文件组织：代码引用修正在 `main/src`，语言补齐统一落在 `main/locales/main.yml`
+
+### 3. 对比了以下相似实现
+- `auth.rs` 与 `setting_tab.rs`：现在都统一显示 `Settings.General.Sync.server_name`
+- `home_tab.rs` 冲突按钮：现在三种策略键都完整存在
+- `ssh_form_window.rs` 与 `serial_form_window.rs`：窗口标题、字段标签、提示文案不再依赖缺失键
+
+### 4. 未重复造轮子的证明
+- 没有新增第二份语言文件
+- 没有在组件里硬编码中文替代翻译系统
+- 直接补齐现有 `main.yml` 的缺失叶子节点并修正错误引用
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main -p terminal_view`：通过
+- 定向翻译键扫描：`main/src/auth.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`crates/terminal_view/src/ssh_form_window.rs`、`crates/terminal_view/src/serial_form_window.rs` 均为 `MISSING 0`
+
+### 6. 风险与限制
+- 全仓仍可能存在本次范围之外的历史翻译缺口，但当前用户反馈涉及的登录窗、同步设置、冲突对话框、SSH/串口窗口已完成定向清理
+- 编译仍存在仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示，与本次修改无关
+
+## 编码前检查 - conflict-resolution-deleted-cloud
+时间：2026-03-26 11:14:46 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-conflict-resolution-deleted-cloud.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/conflict.rs`：复用 `LocalModifiedCloudDeleted` 冲突类型作为语义分支
+- `crates/core/src/cloud_sync/engine.rs`：继续在引擎层处理冲突，不把语义泄漏到 UI
+- `crates/core/src/cloud_sync/connection_sync.rs`：复用正常上传与同步状态回写思路
+□ 将遵循命名约定：继续使用 `mark_connection_synced`、`apply_conflict_resolutions`、`ConflictType::*`
+□ 将遵循代码风格：只修冲突解决语义和验证，不改 UI 流程
+□ 确认不重复造轮子，证明：已检查连接同步正常上传/更新流程与冲突占位模型，确认问题是占位云端数据被误用，而不是缺少新的同步层
+
+## 执行记录 - conflict-resolution-deleted-cloud
+时间：2026-03-26 11:14:46 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/conflict.rs`
+- `crates/core/src/cloud_sync/connection_sync.rs`
+- `main/src/home_tab.rs`
+- `crates/core/src/cloud_sync/service.rs`
+- `sync_server/server/src/http/routes/sync.ts`
+
+### 2. 对比的相似实现
+- `connection_sync.rs` 正常上传：本地版本可通过 `create_sync_data(...)` 重建云端，并在成功后回写同步状态
+- `conflict.rs` 删除冲突检测：`LocalModifiedCloudDeleted` 仅提供占位 `cloud`
+- `engine.rs` 旧实现：无论何种冲突都把 `cloud` 当成真实云端记录处理
+
+### 3. 当前发现
+- `LocalModifiedCloudDeleted` 的占位 `cloud` 带有 `encrypted_data=""`、`version=0`
+- 旧的 `UseCloud` 分支会尝试解密占位数据，因此出现 `EOF while parsing a value at line 1 column 0`
+- 旧的 `UseLocal` 分支会把 `version=0` 送到 `/api/v1/sync/items/:id`，因此 sync_server 返回 `Too small: expected number to be >=1`
+- 手动冲突解决原先不会补做 `ensure_personal_key_config()`，理论上也存在 `key_version=0` 风险
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
+
+## 编码后声明 - conflict-resolution-deleted-cloud
+时间：2026-03-26 11:14:46 +0800
+
+### 1. 复用了以下既有组件
+- `SyncEngine::ensure_personal_key_config(...)`：让手动冲突解决先恢复 `key_version`
+- `SyncEngine::mark_connection_synced(...)`：重建云端后继续复用同步状态回写
+- `ConnectionRepository::delete(...)`：接受云端删除时直接删本地
+
+### 2. 遵循了以下项目约定
+- 命名约定：继续沿用 `ConflictType::LocalModifiedCloudDeleted`
+- 代码风格：按冲突类型分支，不在 UI 层补丁式规避
+- 文件组织：修复与测试都收敛在 `crates/core/src/cloud_sync/engine.rs`
+
+### 3. 对比了以下相似实现
+- `connection_sync.rs` 的正常上传：现在删除冲突的 `UseLocal` 也改为“创建云端 + 回写状态”
+- `engine.rs` 的正常本地更新：现在删除冲突的 `UseCloud` 改为“删除本地”，不再尝试解密占位数据
+- 旧回归测试 `use_local_conflict_resolution_updates_local_sync_status`：继续保留，确保 `BothModified` 旧路径不回退
+
+### 4. 未重复造轮子的证明
+- 没有新增新的冲突状态表或“手动解决专用同步器”
+- 没有在 UI 层特殊判断错误文案
+- 直接复用现有上传、删除、本地同步状态回写能力
+
+### 5. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item --lib`：通过
+- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection --lib`：通过
+- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
+- `cargo check -p one-core`：通过
+- `cargo check -p one-core -p main`：通过
+
+### 6. 风险与限制
+- 当前 UI 仍允许在“云端已删除”冲突上选择 `KeepBoth`，本次将其语义收敛为“保留本地并重建云端”，未另外改单独按钮文案
+- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
+
+## 编码前检查 - remove-team-support
+时间：2026-03-26 13:18:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-remove-team-support.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/cloud_sync/service.rs`：统一收敛同步数据的加解密入口
+- `crates/core/src/cloud_sync/sync_type.rs`：统一删除 `team_id` 相关 trait 契约
+- `crates/core/src/storage/repository.rs`：统一删除连接与凭证的团队列映射
+□ 将遵循命名约定：保留既有 `owner_id`、`cloud_id`、`last_synced_at` 命名，删除 `team_id` 相关命名
+□ 将遵循代码风格：只做团队能力移除，不顺带重构无关模块
+□ 确认不重复造轮子，证明：已检查同步模型、同步引擎、SQLite 仓库和各表单窗口，当前团队逻辑为历史残留分支，不需要新增替代层
+
+## 执行记录 - remove-team-support
+时间：2026-03-26 13:18:00 +0800
+
+### 1. 已检索并阅读的关键实现
+- `crates/core/src/cloud_sync/service.rs`
+- `crates/core/src/cloud_sync/engine.rs`
+- `crates/core/src/cloud_sync/client.rs`
+- `crates/core/src/cloud_sync/mod.rs`
+- `crates/core/src/cloud_sync/sync_type.rs`
+- `crates/core/src/storage/models.rs`
+- `crates/core/src/storage/repository.rs`
+- `crates/core/src/storage/migration.rs`
+
+### 2. 对比的相似实现
+- `generic_sync.rs` 与 `connection_sync.rs`：两条同步链路都在云端拉取后再做团队过滤
+- `storage/models.rs` 与 `storage/repository.rs`：连接和凭证都把 `team_id` 当成持久化字段
+- `sync_server.rs` 与 `client.rs`：客户端 trait 仍保留完整团队接口，但 `sync_server` 实现只返回空数据或不支持
+
+### 3. 当前发现
+- “团队”当前没有实际产品能力，但仍残留在日志、同步模型、数据库字段、客户端 trait 和多处窗口保存逻辑里
+- `sync_server` 并不支持团队同步，因此这些代码大多只会制造误导日志或空分支
+- 若只删 UI，不删 `CloudSyncData.team_id` 与 migration，后续编译和运行时都仍会携带残留
+
+### 4. 工具限制留痕
+- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`nl`、`cargo` 与本地验证完成清理
+
+## 编码前检查 - duplicate-connection
+时间：2026-03-26 13:47:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-duplicate-connection.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs`：复用连接卡片按钮区和各类表单打开入口
+- `ConnectionRepository::insert(...)`：直接落一条新记录
+- 各连接表单 `*FormWindowConfig.editing_connection`：直接打开新记录的编辑窗
+□ 将遵循命名约定：沿用 `show_*` / `confirm_*` / `*_connection_*`
+□ 将遵循代码风格：用户文案放到 `main/locales/main.yml`
+□ 确认不重复造轮子，证明：不新增新窗口或表单模式，直接复用现有编辑窗
+
+## 执行记录 - duplicate-connection
+时间：2026-03-26 13:47:00 +0800
+
+### 1. 已检索并阅读的关键实现
+- `main/src/home_tab.rs`
+- `crates/db_view/src/connection_form_window.rs`
+- `crates/terminal_view/src/ssh_form_window.rs`
+- `crates/terminal_view/src/serial_form_window.rs`
+- `crates/redis_view/src/redis_form_window.rs`
+- `crates/mongodb_view/src/mongo_form_window.rs`
+
+### 2. 对比的相似实现
+- 现有编辑按钮：通过连接类型分发到不同编辑窗
+- 现有新建流程：新建连接保存后由连接事件刷新列表并触发同步
+- 现有窗口配置：传 `editing_connection` 即可直接加载现有记录
+
+### 3. 当前发现
+- 复制连接如果走“模板新建”模式，需要改动所有表单窗口的编辑态判定
+- 用户已明确接受更简单方案：先插入新记录，再打开该记录的编辑窗
+- 若复制动作直接发 `ConnectionCreated` 事件，会过早触发自动同步，因此本次刻意避免
+
+## 编码后声明 - duplicate-connection
+时间：2026-03-26 13:47:00 +0800
+
+### 1. 复用了以下既有组件
+- `ConnectionRepository::insert(...)`：生成新副本记录
+- `open_popup_window(...)`：复用现有编辑窗弹出方式
+- `*FormWindowConfig.editing_connection`：直接让新副本进入编辑态
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增方法为 `duplicate_connection_and_open_editor(...)` 与 `open_existing_connection_editor(...)`
+- 代码风格：新按钮提示文案已放入 `main/locales/main.yml`
+- 文件组织：改动仅落在 `main/src/home_tab.rs` 与 `main/locales/main.yml`
+
+### 3. 未重复造轮子的证明
+- 没有新增独立的“复制连接窗口”
+- 没有改造全部表单为“复制模式”
+- 直接复用现有编辑窗和仓库插入能力
+
+### 4. 本地验证结果
+- `cargo fmt --all`：通过
+- `cargo check -p main`：通过

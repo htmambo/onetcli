@@ -10,6 +10,13 @@ use crate::cloud_sync::service::SyncError;
 use crate::cloud_sync::sync_type::{GenericSyncPlan, SyncTypeHandler, SyncableItem};
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkedSyncAction {
+    None,
+    UpdateCloud,
+    UpdateLocal,
+}
+
 /// 通用同步入口
 ///
 /// 按统一流程同步指定类型的数据：
@@ -223,10 +230,26 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 };
 
                 match update_cloud_item(engine, handler, local_item, cloud_data).await {
-                    Ok(()) => {
-                        result.uploaded += 1;
-                        tracing::info!("[更新云端{}] 成功: {}", type_name, local_item.item_name());
-                    }
+                    Ok(()) => match handler.on_uploaded(engine, local_id, &cloud_id) {
+                        Ok(()) => {
+                            result.uploaded += 1;
+                            tracing::info!(
+                                "[更新云端{}] 成功: {}",
+                                type_name,
+                                local_item.item_name()
+                            );
+                        }
+                        Err(e) => {
+                            let msg = format!(
+                                "更新云端{}失败 {}: {}",
+                                type_name,
+                                local_item.item_name(),
+                                e
+                            );
+                            result.errors.push(msg.clone());
+                            queue.mark_failed(queued_operation, msg);
+                        }
+                    },
                     Err(e) => {
                         let msg = format!(
                             "更新云端{}失败 {}: {}",
@@ -500,12 +523,21 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
                     let local_updated = local_item.updated_at().unwrap_or(0);
                     let cloud_updated = cloud_data.updated_at / 1000;
 
-                    if local_updated > cloud_updated {
-                        plan.to_update_cloud
-                            .push((local_item.clone(), (*cloud_data).clone()));
-                    } else if cloud_updated > local_updated {
-                        plan.to_update_local
-                            .push(((*cloud_data).clone(), local_item.clone()));
+                    match decide_linked_sync_action(
+                        local_item.uses_sync_state(),
+                        local_updated,
+                        local_item.last_synced_at(),
+                        cloud_updated,
+                    ) {
+                        LinkedSyncAction::UpdateCloud => {
+                            plan.to_update_cloud
+                                .push((local_item.clone(), (*cloud_data).clone()));
+                        }
+                        LinkedSyncAction::UpdateLocal => {
+                            plan.to_update_local
+                                .push(((*cloud_data).clone(), local_item.clone()));
+                        }
+                        LinkedSyncAction::None => {}
                     }
                 } else {
                     tracing::info!(
@@ -576,6 +608,50 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
     }
 
     Ok(plan)
+}
+
+fn decide_linked_sync_action(
+    uses_sync_state: bool,
+    local_updated: i64,
+    last_synced_at: Option<i64>,
+    cloud_updated: i64,
+) -> LinkedSyncAction {
+    if !uses_sync_state {
+        return if local_updated > cloud_updated {
+            LinkedSyncAction::UpdateCloud
+        } else if cloud_updated > local_updated {
+            LinkedSyncAction::UpdateLocal
+        } else {
+            LinkedSyncAction::None
+        };
+    }
+
+    match last_synced_at {
+        Some(last_synced_at) => {
+            let local_changed = local_updated > last_synced_at;
+            let cloud_changed = cloud_updated > last_synced_at;
+
+            match (local_changed, cloud_changed) {
+                (true, false) => LinkedSyncAction::UpdateCloud,
+                (false, true) => LinkedSyncAction::UpdateLocal,
+                (true, true) => {
+                    if local_updated >= cloud_updated {
+                        LinkedSyncAction::UpdateCloud
+                    } else {
+                        LinkedSyncAction::UpdateLocal
+                    }
+                }
+                (false, false) => LinkedSyncAction::None,
+            }
+        }
+        None => {
+            if local_updated >= cloud_updated {
+                LinkedSyncAction::UpdateCloud
+            } else {
+                LinkedSyncAction::UpdateLocal
+            }
+        }
+    }
 }
 
 /// 获取待删除的云端 ID 集合
@@ -676,4 +752,41 @@ async fn download_and_update_item<H: SyncTypeHandler>(
     drop(service);
 
     handler.update_local_item(engine, &updated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LinkedSyncAction, decide_linked_sync_action};
+
+    #[test]
+    fn non_sync_state_items_keep_original_timestamp_comparison() {
+        assert_eq!(
+            decide_linked_sync_action(false, 100, Some(90), 100),
+            LinkedSyncAction::None
+        );
+    }
+
+    #[test]
+    fn sync_state_items_prefer_local_when_unsynced_timestamps_are_equal() {
+        assert_eq!(
+            decide_linked_sync_action(true, 100, None, 100),
+            LinkedSyncAction::UpdateCloud
+        );
+    }
+
+    #[test]
+    fn sync_state_items_detect_cloud_side_changes_since_last_sync() {
+        assert_eq!(
+            decide_linked_sync_action(true, 100, Some(100), 101),
+            LinkedSyncAction::UpdateLocal
+        );
+    }
+
+    #[test]
+    fn sync_state_items_stay_idle_when_nothing_changed_since_last_sync() {
+        assert_eq!(
+            decide_linked_sync_action(true, 100, Some(100), 100),
+            LinkedSyncAction::None
+        );
+    }
 }

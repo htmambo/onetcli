@@ -23,6 +23,7 @@ rust-i18n = { workspace = true }
 dirs = {workspace = true}
 futures = { workspace = true }
 smol = { workspace = true }
+chrono = { workspace = true }
 db_view = { workspace = true }
 terminal = { workspace = true }
 terminal_view = { workspace = true }

@@ -80,8 +80,12 @@ impl SyncTypeHandler for WorkspaceSyncType {
             .get::<WorkspaceRepository>()
             .ok_or_else(|| SyncError::StorageError("WorkspaceRepository not found".to_string()))?;
 
-        repo.update_cloud_id(local_id, Some(cloud_id.to_string()))
-            .map_err(|e| SyncError::StorageError(e.to_string()))
+        repo.update_sync_status(
+            local_id,
+            Some(cloud_id.to_string()),
+            Some(SyncEngine::current_timestamp()),
+        )
+        .map_err(|e| SyncError::StorageError(e.to_string()))
     }
 
     fn decrypt_name(&self, service: &CloudSyncService, data: &CloudSyncData) -> Option<String> {

@@ -545,6 +545,7 @@ impl CloudSyncService {
             created_at: None,
             updated_at: Some(cloud_data.updated_at / 1000),
             cloud_id: Some(cloud_data.id.clone()),
+            last_synced_at: Some(cloud_data.updated_at / 1000),
         })
     }
 

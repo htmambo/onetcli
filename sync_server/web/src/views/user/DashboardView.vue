@@ -18,12 +18,11 @@
       </div>
     </section>
 
-    <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+    <section class="grid gap-4 md:grid-cols-4">
       <StatCard label="有效同步项" :value="stats.total" tone="success" tone-text="当前生效" />
       <StatCard label="连接项" :value="stats.connection" />
       <StatCard label="工作区" :value="stats.workspace" />
       <StatCard label="凭证" :value="stats.credential" />
-      <StatCard label="应用设置" :value="stats.appSettings" />
     </section>
 
     <section class="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
@@ -201,7 +200,6 @@ const stats = computed(() => ({
   connection: activeItems.value.filter((item) => isSyncItemType(item.dataType, "connection")).length,
   workspace: activeItems.value.filter((item) => isSyncItemType(item.dataType, "workspace")).length,
   credential: activeItems.value.filter((item) => isSyncItemType(item.dataType, "credential")).length,
-  appSettings: activeItems.value.filter((item) => isSyncItemType(item.dataType, "app_settings")).length,
 }));
 
 const previewItems = computed(() => activeItems.value.slice(0, 5));

@@ -3,6 +3,39 @@
 
 ---
 
+## 审查报告（connection-list-view-preferences）
+生成时间：2026-03-26 12:11:31 +0800
+
+### 需求完整性检查
+- 目标明确：连接列表支持按名称、更新时间、创建时间排序，支持升序/降序，并新增列表展示方式
+- 范围明确：仅涉及应用窗口首页连接列表与本地偏好存储
+- 交付物明确：设置字段、主页工具栏、卡片/列表双视图、排序单测、本地验证
+- 风险与依赖明确：展示偏好当前只本地持久化，不参与同步
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：93/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 偏好存储位置合理：[`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L158) 新增三个枚举，[`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L183) 将排序字段、排序方向和展示方式并入 `AppSettings`，老配置缺字段时也能自动回落到默认值。
+- 交互入口集中：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L2166) 在首页工具栏新增排序字段菜单、升降序按钮和展示方式菜单，没有另起新弹窗或隐藏设置页，操作路径短。
+- 排序范围符合当前信息架构：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3239) 在工作区分组内部统一应用排序，既保留现有工作区结构，又满足“连接列表可自定义排序”的需求。
+- 展示方式闭环完整：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3337) 新增卡片/列表统一分发；[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3375) 的列表模式复用了连接打开和管理动作，没有牺牲功能。
+- 共用逻辑抽取得当：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3062) 和 [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3963) 把连接摘要、图标和排序比较器抽出，避免卡片视图和列表视图各维护一套类型分支。
+- 验证有效：`cargo fmt --all`、`cargo check -p main`、`cargo test -p main compare_connections -- --nocapture` 均通过；残余风险主要在于尚未做 GUI 自动化或手工录屏级验收。
+
+---
+
 ## 审查报告（terminal-sidebar-paste-focus）
 生成时间：2026-03-25 21:03:13 +0800
 
@@ -2733,3 +2766,215 @@
 - 仍缺少自动化 GUI 验证，建议手工确认“弹窗内点击管理凭证 -> 主窗口切到设置页 -> 保存凭证后原弹窗列表自动刷新”这一完整链路
 - 当前主窗口句柄假设应用只有一个主窗口；若后续出现多主窗口并存，需要补充选择策略
 - 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次改动无关
+
+---
+
+## 审查报告（workspace-sync-upload）
+生成时间：2026-03-26 09:54:59 +0800
+
+### 需求完整性检查
+- 目标明确：修复工作区本地修改后未能正常上传到云端的问题
+- 范围明确：工作区模型、仓储、通用同步判定、同步状态回写、数据库迁移
+- 交付物明确：代码修复、本地单元测试、编译验证、`.claude` 留痕
+- 风险与依赖明确：旧数据升级后的首次同步可能存在一次补偿上传
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：93/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L693) 为工作区补充了 `last_synced_at`，并在 [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L744) 启用了基于同步状态的通用比较逻辑。
+- [`repository.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L694) 现在会在云端回写时持久化 `last_synced_at`，而 [`repository.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L780) 会在本地编辑工作区时清空该字段，确保下一轮同步认定为本地已修改。
+- [`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L230) 已在“更新云端成功”后统一执行同步状态回写；[`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L523) 新增了基于 `last_synced_at` 的比较逻辑，并在同秒情况下优先本地，避免漏传。
+- [`workspace_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/workspace_sync.rs#L68) 改为使用 `update_sync_status(...)`，工作区上传或更新云端后都会刷新同步状态。
+- [`20260326000001_workspace_sync_state.sql`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/migrations/20260326000001_workspace_sync_state.sql) 和 [`migration.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/migration.rs#L21) 已补齐旧库迁移；[`20260225000001_init.sql`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/migrations/20260225000001_init.sql#L4) 也同步更新，避免新库缺字段。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p one-core workspace_repository --lib`：通过
+- `cargo test -p one-core generic_sync --lib`：通过
+- `cargo check -p one-core -p main`：通过
+
+### 残余风险
+- 旧数据若此前已绑定云端但未记录同步状态，升级后首次工作区同步可能会补传一次，这是预期的补偿行为
+- 目前通用同步里的“基于同步状态比较”只对启用了 `uses_sync_state()` 的类型生效，应用设置仍沿用旧逻辑
+- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
+
+---
+
+## 审查报告（remove-app-settings-sync）
+生成时间：2026-03-26 10:05:22 +0800
+
+### 需求完整性检查
+- 目标明确：移除“应用设置”的云同步操作
+- 范围明确：应用设置同步模块、同步引擎注册点、设置页/终端设置的同步触发、同步专用字段
+- 交付物明确：代码清理、本地编译验证、`.claude` 留痕
+- 风险与依赖明确：旧本地设置文件可能残留历史同步字段，但后续保存后会自然清理
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- [`main.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/main.rs#L1) 已移除 `app_settings_sync` 模块声明，[`app_settings_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/app_settings_sync.rs) 已被删除，应用设置不再作为独立同步类型存在。
+- [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L598) 与 [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L918) 已改回只使用默认 `SyncEngine::new(...)`，不再追加应用设置同步处理器；原先的 `request_app_settings_sync(...)` 也已删除。
+- [`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L160) 删除了应用设置专用的同步元数据字段和辅助方法；[`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L353) 的 `save()` 现在只负责本地持久化。
+- [`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L558) 起的各项设置回调与 [`home_tabs.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home/home_tabs.rs#L70) 起的终端事件处理，都已保留本地保存/广播逻辑，但不再触发整轮云同步。
+- [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L255) 同步清理了不再使用的 `app_settings` 数据类型常量。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p one-core -p main`：通过
+- `cargo test -p one-core --lib`：通过
+- `cargo test -p main --lib`：失败，原因是包 `main` 没有 `lib` target，不属于代码问题
+
+### 残余风险
+- 旧 `settings.json` 中若还有历史 `local_id / remote_id / last_synced_at / updated_at` 字段，当前版本读取时会忽略；任意一次设置保存后这些字段会被写出清理
+- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修改无关
+
+---
+
+## 审查报告（conflict-resolution-persist）
+生成时间：2026-03-26 10:37:22 +0800
+
+### 需求完整性检查
+- 目标明确：修复“冲突解决完成”后冲突仍存在、下次启动仍提示的问题
+- 范围明确：连接冲突解决引擎、冲突解决结果语义、首页冲突解决反馈
+- 交付物明确：代码修复、回归测试、本地编译验证、`.claude` 留痕
+- 风险与依赖明确：部分失败场景下当前 UI 仍按整体提示，不做更细粒度拆分展示
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：91/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L383) 的 `apply_conflict_resolutions(...)` 现在只把真正未解决的冲突放入 `result.conflicts`，不再把输入冲突原样回传。
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L473) 的 “使用本地版本” 分支在云端更新成功后会调用新的 [`mark_connection_synced(...)`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L512)，把本地连接的 `last_synced_at` 推进到当前时间，避免下一轮同步再次识别成冲突。
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L428) 的 `KeepBoth` 副本现在也会清除 `last_synced_at`，避免副本继承旧同步状态。
+- [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L923) 现在只有在确实无错误且无残余冲突时才记录“冲突解决完成”并清空 `pending_conflicts`；否则会保留未解决冲突并输出警告。
+- 新增回归测试 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L543)，覆盖“使用本地版本后本地同步状态必须被更新”这一关键路径。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
+- `cargo check -p one-core -p main`：通过
+- `cargo test -p one-core --lib`：通过
+
+### 残余风险
+- 当前 UI 在“部分成功、部分失败”时会保留未解决冲突并告警，但不会把每一项失败原因拆到列表项级别
+- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
+
+---
+
+## 审查报告（login-translation-audit）
+生成时间：2026-03-26 10:55:31 +0800
+
+### 需求完整性检查
+- 目标明确：修复登录窗里未翻译的 `sync_server` 与错误翻译键，并检查同类遗漏
+- 范围明确：登录窗、设置页账号卡片、同步冲突弹窗、SSH/串口编辑窗
+- 交付物明确：代码修复、语言文件补键、本地验证、`.claude` 留痕
+- 风险与依赖明确：全仓存在历史翻译缺口，本次按用户可见且已确认的相关窗口定向收敛
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- [`auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L623) 不再直接渲染 `"sync_server"`，已改为 `Settings.General.Sync.server_name`；[`auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L635) 的同步地址说明也已改回正确键 `Settings.General.Sync.server_url_desc`。
+- [`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L977) 的账号卡片同步服务副标题已统一改为 `Settings.General.Sync.server_name`，避免设置页继续显示原始字符串。
+- [`main.yml`](/Volumes/Workarea/usr/htdocs/onetcli/main/locales/main.yml#L176) 补齐了 `Home.sync_conflict_keep_both`，解决同步冲突对话框第三个策略按钮显示 key 的问题。
+- [`main.yml`](/Volumes/Workarea/usr/htdocs/onetcli/main/locales/main.yml#L582) 新增 `Common.none`、`ConnectionForm.cloud_sync`、`ConnectionForm.cloud_sync_desc`，并在 [`main.yml`](/Volumes/Workarea/usr/htdocs/onetcli/main/locales/main.yml#L1228) 起补齐 `SSH.*` 与 `Serial.*` 相关窗口字段键，覆盖 SSH/串口编辑窗原先的整组翻译缺口。
+- 通过定向脚本核对，`main/src/auth.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`crates/terminal_view/src/ssh_form_window.rs`、`crates/terminal_view/src/serial_form_window.rs` 当前引用的 `t!(...)` 键均已在 `main/locales/main.yml` 中命中。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo check -p main -p terminal_view`：通过
+- 定向翻译键扫描：通过，目标文件均为 `MISSING 0`
+
+### 残余风险
+- 这次是按用户反馈相关路径做定向清理，仓库其他未触达模块仍可能存在历史翻译缺口
+- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
+
+---
+
+## 审查报告（conflict-resolution-deleted-cloud）
+生成时间：2026-03-26 11:14:46 +0800
+
+### 需求完整性检查
+- 目标明确：修复“云端已删除”类冲突在手动解决时仍报错并反复残留的问题
+- 范围明确：连接冲突解决引擎、删除冲突语义分支、手动冲突解决前置密钥配置、回归测试
+- 交付物明确：代码修复、本地回归测试、本地编译验证、`.claude` 留痕
+- 风险与依赖明确：当前 UI 仍允许该冲突类型选择 `KeepBoth`，但其底层语义已收敛
+
+### 技术维度评分
+- 代码质量：97/100
+- 测试覆盖：93/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L384) 的 `apply_conflict_resolutions(...)` 现在会先执行 `ensure_personal_key_config().await`，避免手动冲突解决阶段继续带着无效 `key_version` 进入上传流程。
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L450) 的 `UseCloud` 分支在 `LocalModifiedCloudDeleted` 上改为直接删除本地连接，不再把占位云端数据当成真实记录解密，因此消除了 `EOF while parsing a value at line 1 column 0`。
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L479) 的 `UseLocal` 分支在云端占位版本 `< 1` 时改为走 [`recreate_cloud_from_local(...)`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L575)，不再调用带 `version=0` 的更新接口，因此规避了服务端 `Too small: expected number to be >=1`。
+- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L506) 的 `KeepBoth` 在该冲突类型下也统一收敛为“保留本地并重建云端”，避免继续落到无效云端占位记录。
+- 新增回归测试 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L902) 与 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L1009)，分别覆盖“使用本地时重建云端”和“使用云端时删除本地”两条关键路径；并保留 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L786) 验证既有冲突解决回写同步状态的路径未回退。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item --lib`：通过
+- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection --lib`：通过
+- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
+- `cargo check -p one-core`：通过
+- `cargo check -p one-core -p main`：通过
+
+### 残余风险
+- 当前 UI 仍允许在“云端已删除”冲突上选择 `KeepBoth`，本次仅修正其执行语义为“保留本地并重建云端”，未同步调整按钮层面的交互文案
+- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关

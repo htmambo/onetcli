@@ -37,6 +37,11 @@ pub trait SyncableItem: Clone + Send + Sync + 'static {
         None
     }
 
+    /// 是否启用基于同步状态的比较逻辑
+    fn uses_sync_state(&self) -> bool {
+        false
+    }
+
     /// 团队归属 ID（默认 None）
     fn team_id(&self) -> Option<&str> {
         None
@@ -103,7 +108,7 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
 
     // --- 同步后回调 ---
 
-    /// 上传成功后的回调（通常更新 cloud_id）
+    /// 上传或更新云端成功后的回调（通常更新 cloud_id / last_synced_at）
     fn on_uploaded(
         &self,
         engine: &SyncEngine,

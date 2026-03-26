@@ -152,9 +152,9 @@ impl AuthService {
         self.cloud_client.clear_auth();
         clear_auth_data();
 
-        if SyncServerClient::is_valid_base_url(&normalized) {
-            info!("sync_server 地址已更新: {}", normalized);
-        } else {
+        if !SyncServerClient::is_valid_base_url(&normalized) {
+            //     info!("sync_server 地址已更新: {}", normalized);
+            // } else {
             warn!("sync_server 地址已更新，但当前值无效: {}", normalized);
         }
 
@@ -620,7 +620,10 @@ pub fn show_password_auth_dialog<V: 'static>(
                                                             .text_color(
                                                                 sync_server_theme::text_soft(),
                                                             )
-                                                            .child("sync_server"),
+                                                            .child(
+                                                                t!("Settings.General.Sync.server_name")
+                                                                    .to_string(),
+                                                            ),
                                                     ),
                                             ),
                                     )
@@ -629,7 +632,7 @@ pub fn show_password_auth_dialog<V: 'static>(
                                             .text_sm()
                                             .text_color(sync_server_theme::text_muted())
                                             .child(
-                                                t!("Settings.General.Account.sync_server_url_desc")
+                                                t!("Settings.General.Sync.server_url_desc")
                                                     .to_string(),
                                             ),
                                     ),

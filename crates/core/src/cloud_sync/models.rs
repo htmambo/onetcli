@@ -257,7 +257,6 @@ pub mod data_type {
     pub const CONNECTION: &str = "connection";
     pub const WORKSPACE: &str = "workspace";
     pub const CERTIFICATE: &str = "certificate";
-    pub const APP_SETTINGS: &str = "app_settings";
 }
 
 #[cfg(test)]
