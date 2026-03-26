@@ -20,6 +20,7 @@ struct ConnectionRow {
     name: String,
     connection_type: String,
     params: String,
+    sort_order: i64,
     workspace_id: Option<i64>,
     selected_databases: Option<String>,
     remark: Option<String>,
@@ -39,6 +40,7 @@ impl FromSqliteRow for ConnectionRow {
             name: row.get("name")?,
             connection_type: row.get("connection_type")?,
             params: row.get("params")?,
+            sort_order: row.get("sort_order")?,
             workspace_id: row.get("workspace_id")?,
             selected_databases: row.get("selected_databases")?,
             remark: row.get("remark")?,
@@ -63,6 +65,7 @@ impl From<ConnectionRow> for StoredConnection {
             name: row.name,
             connection_type: ConnectionType::from_str(&row.connection_type),
             params: row.params,
+            sort_order: Some(row.sort_order),
             workspace_id: row.workspace_id,
             selected_databases: row.selected_databases,
             remark: row.remark,
@@ -83,6 +86,7 @@ impl From<ConnectionRow> for StoredConnection {
 struct WorkspaceRow {
     id: i64,
     name: String,
+    sort_order: i64,
     color: Option<String>,
     icon: Option<String>,
     created_at: i64,
@@ -96,6 +100,7 @@ impl FromSqliteRow for WorkspaceRow {
         Ok(WorkspaceRow {
             id: row.get("id")?,
             name: row.get("name")?,
+            sort_order: row.get("sort_order")?,
             color: row.get("color")?,
             icon: row.get("icon")?,
             created_at: row.get("created_at")?,
@@ -111,6 +116,7 @@ impl From<WorkspaceRow> for Workspace {
         Workspace {
             id: Some(row.id),
             name: row.name,
+            sort_order: Some(row.sort_order),
             color: row.color,
             icon: row.icon,
             created_at: Some(row.created_at),
@@ -127,6 +133,35 @@ fn encrypt_secret(value: &Option<String>) -> Option<String> {
 
 fn decrypt_secret(value: Option<String>) -> Option<String> {
     value.map(|secret| crypto::decrypt_password(&secret))
+}
+
+fn next_workspace_sort_order(conn: &rusqlite::Connection) -> Result<i64> {
+    let sort_order = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM workspaces",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(sort_order)
+}
+
+fn next_connection_sort_order(
+    conn: &rusqlite::Connection,
+    workspace_id: Option<i64>,
+) -> Result<i64> {
+    let sort_order = if let Some(workspace_id) = workspace_id {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM connections WHERE workspace_id = ?1",
+            params![workspace_id],
+            |row| row.get(0),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM connections WHERE workspace_id IS NULL",
+            [],
+            |row| row.get(0),
+        )?
+    };
+    Ok(sort_order)
 }
 
 struct CertificateRow {
@@ -208,6 +243,7 @@ impl ConnectionRepository {
         let name = item.name.clone();
         let connection_type = item.connection_type.to_string();
         let params_str = item.encrypt_params();
+        let requested_sort_order = item.sort_order;
         let workspace_id = item.workspace_id;
         let selected_databases = item.selected_databases.clone();
         let remark = item.remark.clone();
@@ -218,15 +254,21 @@ impl ConnectionRepository {
         let team_id = item.team_id.clone();
         let owner_id = item.owner_id.clone();
         let created_at = now();
+        let computed_sort_order = self.conn.with_connection(|conn| {
+            requested_sort_order
+                .map(Ok)
+                .unwrap_or_else(|| next_connection_sort_order(conn, workspace_id))
+        })?;
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO connections (name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                "INSERT INTO connections (name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     name,
                     connection_type,
                     params_str,
+                    computed_sort_order,
                     workspace_id,
                     selected_databases,
                     remark,
@@ -243,6 +285,7 @@ impl ConnectionRepository {
         })?;
 
         item.id = Some(id);
+        item.sort_order = Some(computed_sort_order);
         item.created_at = Some(created_at);
         item.updated_at = Some(updated_at);
         item.last_synced_at = last_synced_at;
@@ -257,6 +300,7 @@ impl ConnectionRepository {
         let name = item.name.clone();
         let connection_type = item.connection_type.to_string();
         let params_str = item.encrypt_params();
+        let requested_sort_order = item.sort_order;
         let workspace_id = item.workspace_id;
         let selected_databases = item.selected_databases.clone();
         let remark = item.remark.clone();
@@ -267,13 +311,30 @@ impl ConnectionRepository {
         let team_id = item.team_id.clone();
         let owner_id = item.owner_id.clone();
 
+        let (previous_workspace_id, previous_sort_order) = self.conn.with_connection(|conn| {
+            conn.query_row(
+                "SELECT workspace_id, sort_order FROM connections WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .map_err(anyhow::Error::from)
+        })?;
+        let computed_sort_order = self
+            .conn
+            .with_connection(|conn| match requested_sort_order {
+                Some(sort_order) => Ok(sort_order),
+                None if previous_workspace_id == workspace_id => Ok(previous_sort_order),
+                None => next_connection_sort_order(conn, workspace_id),
+            })?;
+
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, workspace_id = ?4, selected_databases = ?5, remark = ?6, sync_enabled = ?7, cloud_id = ?8, last_synced_at = ?9, team_id = ?10, owner_id = ?11, updated_at = ?12 WHERE id = ?13",
+                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, sort_order = ?4, workspace_id = ?5, selected_databases = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
                 params![
                     name,
                     connection_type,
                     params_str,
+                    computed_sort_order,
                     workspace_id,
                     selected_databases,
                     remark,
@@ -286,6 +347,43 @@ impl ConnectionRepository {
                     id
                 ],
             )?;
+            Ok(())
+        })
+    }
+
+    pub fn reorder_within_workspace(
+        &self,
+        workspace_id: Option<i64>,
+        connection_ids: &[i64],
+    ) -> Result<()> {
+        if connection_ids.is_empty() {
+            return Ok(());
+        }
+
+        let ts = now();
+        self.conn.with_connection_mut(|conn| {
+            let tx = conn.transaction()?;
+            for (sort_order, connection_id) in connection_ids.iter().enumerate() {
+                let rows = if let Some(workspace_id) = workspace_id {
+                    tx.execute(
+                        "UPDATE connections SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND workspace_id = ?4",
+                        params![sort_order as i64, ts, connection_id, workspace_id],
+                    )?
+                } else {
+                    tx.execute(
+                        "UPDATE connections SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND workspace_id IS NULL",
+                        params![sort_order as i64, ts, connection_id],
+                    )?
+                };
+
+                if rows == 0 {
+                    return Err(anyhow::anyhow!(
+                        "连接 {} 不在目标工作区内，无法重排",
+                        connection_id
+                    ));
+                }
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -526,6 +624,7 @@ impl Repository for ConnectionRepository {
         let name = item.name.clone();
         let connection_type = item.connection_type.to_string();
         let params_str = item.encrypt_params();
+        let sort_order = item.sort_order;
         let workspace_id = item.workspace_id;
         let selected_databases = item.selected_databases.clone();
         let remark = item.remark.clone();
@@ -536,16 +635,23 @@ impl Repository for ConnectionRepository {
         let owner_id = item.owner_id.clone();
         let ts = now();
 
+        let computed_sort_order = self.conn.with_connection(|conn| {
+            sort_order
+                .map(Ok)
+                .unwrap_or_else(|| next_connection_sort_order(conn, workspace_id))
+        })?;
+
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO connections (name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![name, connection_type, params_str, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, ts],
+                "INSERT INTO connections (name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![name, connection_type, params_str, computed_sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, ts],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
 
         item.id = Some(id);
+        item.sort_order = Some(computed_sort_order);
         item.created_at = Some(ts);
         item.updated_at = Some(ts);
 
@@ -559,6 +665,7 @@ impl Repository for ConnectionRepository {
         let name = item.name.clone();
         let connection_type = item.connection_type.to_string();
         let params_str = item.encrypt_params();
+        let requested_sort_order = item.sort_order;
         let workspace_id = item.workspace_id;
         let selected_databases = item.selected_databases.clone();
         let remark = item.remark.clone();
@@ -569,10 +676,26 @@ impl Repository for ConnectionRepository {
         let owner_id = item.owner_id.clone();
         let ts = now();
 
+        let (previous_workspace_id, previous_sort_order) = self.conn.with_connection(|conn| {
+            conn.query_row(
+                "SELECT workspace_id, sort_order FROM connections WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .map_err(anyhow::Error::from)
+        })?;
+        let computed_sort_order = self
+            .conn
+            .with_connection(|conn| match requested_sort_order {
+                Some(sort_order) => Ok(sort_order),
+                None if previous_workspace_id == workspace_id => Ok(previous_sort_order),
+                None => next_connection_sort_order(conn, workspace_id),
+            })?;
+
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, workspace_id = ?4, selected_databases = ?5, remark = ?6, sync_enabled = ?7, cloud_id = ?8, last_synced_at = ?9, team_id = ?10, owner_id = ?11, updated_at = ?12 WHERE id = ?13",
-                params![name, connection_type, params_str, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, id],
+                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, sort_order = ?4, workspace_id = ?5, selected_databases = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
+                params![name, connection_type, params_str, computed_sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, id],
             )?;
             Ok(())
         })
@@ -588,7 +711,7 @@ impl Repository for ConnectionRepository {
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE id = ?1",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE id = ?1",
             )?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
@@ -602,7 +725,7 @@ impl Repository for ConnectionRepository {
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -637,9 +760,9 @@ impl ConnectionRepository {
     pub fn list_by_workspace(&self, workspace_id: Option<i64>) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let sql = if workspace_id.is_some() {
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id = ?1 ORDER BY updated_at DESC"
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id = ?1 ORDER BY updated_at DESC"
             } else {
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id IS NULL ORDER BY updated_at DESC"
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id IS NULL ORDER BY updated_at DESC"
             };
             let mut stmt = conn.prepare(sql)?;
 
@@ -681,7 +804,7 @@ impl ConnectionRepository {
     pub fn list_pending_sync(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id
                  FROM connections
                  WHERE sync_enabled = 1 AND (cloud_id IS NULL OR updated_at > COALESCE(last_synced_at, 0))
                  ORDER BY updated_at DESC",
@@ -699,7 +822,7 @@ impl ConnectionRepository {
     pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id
                  FROM connections WHERE cloud_id = ?1",
             )?;
             let mut rows = stmt.query(params![cloud_id])?;
@@ -741,7 +864,7 @@ impl ConnectionRepository {
     pub fn list_by_team(&self, team_id: &str) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id = ?1 ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map(params![team_id], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -756,7 +879,7 @@ impl ConnectionRepository {
     pub fn list_personal(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id IS NULL ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id IS NULL ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -783,16 +906,27 @@ impl WorkspaceRepository {
             .id
             .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
         let name = item.name.clone();
+        let requested_sort_order = item.sort_order;
         let color = item.color.clone();
         let icon = item.icon.clone();
         let cloud_id = item.cloud_id.clone();
         let updated_at = item.updated_at.unwrap_or_else(now);
         let last_synced_at = item.last_synced_at.or(Some(updated_at));
 
+        let previous_sort_order = self.conn.with_connection(|conn| {
+            conn.query_row(
+                "SELECT sort_order FROM workspaces WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })?;
+        let computed_sort_order = requested_sort_order.unwrap_or(previous_sort_order);
+
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE workspaces SET name = ?1, color = ?2, icon = ?3, cloud_id = ?4, last_synced_at = ?5, updated_at = ?6 WHERE id = ?7",
-                params![name, color, icon, cloud_id, last_synced_at, updated_at, id],
+                "UPDATE workspaces SET name = ?1, sort_order = ?2, color = ?3, icon = ?4, cloud_id = ?5, last_synced_at = ?6, updated_at = ?7 WHERE id = ?8",
+                params![name, computed_sort_order, color, icon, cloud_id, last_synced_at, updated_at, id],
             )?;
             Ok(())
         })
@@ -817,7 +951,7 @@ impl WorkspaceRepository {
     pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<Workspace>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces WHERE cloud_id = ?1",
+                "SELECT id, name, sort_order, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces WHERE cloud_id = ?1",
             )?;
             let mut rows = stmt.query(params![cloud_id])?;
             if let Some(row) = rows.next()? {
@@ -825,6 +959,28 @@ impl WorkspaceRepository {
             } else {
                 Ok(None)
             }
+        })
+    }
+
+    pub fn reorder(&self, workspace_ids: &[i64]) -> Result<()> {
+        if workspace_ids.is_empty() {
+            return Ok(());
+        }
+
+        let ts = now();
+        self.conn.with_connection_mut(|conn| {
+            let tx = conn.transaction()?;
+            for (sort_order, workspace_id) in workspace_ids.iter().enumerate() {
+                let rows = tx.execute(
+                    "UPDATE workspaces SET sort_order = ?1, last_synced_at = NULL, updated_at = ?2 WHERE id = ?3",
+                    params![sort_order as i64, ts, workspace_id],
+                )?;
+                if rows == 0 {
+                    return Err(anyhow::anyhow!("工作区 {} 不存在，无法重排", workspace_id));
+                }
+            }
+            tx.commit()?;
+            Ok(())
         })
     }
 }
@@ -838,6 +994,7 @@ impl Repository for WorkspaceRepository {
 
     fn insert(&self, item: &mut Self::Entity) -> Result<i64> {
         let name = item.name.clone();
+        let sort_order = item.sort_order;
         let color = item.color.clone();
         let icon = item.icon.clone();
         let cloud_id = item.cloud_id.clone();
@@ -845,15 +1002,22 @@ impl Repository for WorkspaceRepository {
         let ts = now();
         let updated_at = item.updated_at.unwrap_or(ts);
 
+        let computed_sort_order = self.conn.with_connection(|conn| {
+            sort_order
+                .map(Ok)
+                .unwrap_or_else(|| next_workspace_sort_order(conn))
+        })?;
+
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO workspaces (name, color, icon, cloud_id, last_synced_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![name, color, icon, cloud_id, last_synced_at, ts, updated_at],
+                "INSERT INTO workspaces (name, sort_order, color, icon, cloud_id, last_synced_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![name, computed_sort_order, color, icon, cloud_id, last_synced_at, ts, updated_at],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
 
         item.id = Some(id);
+        item.sort_order = Some(computed_sort_order);
         item.created_at = Some(ts);
         item.updated_at = Some(updated_at);
 
@@ -865,15 +1029,27 @@ impl Repository for WorkspaceRepository {
             .id
             .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
         let name = item.name.clone();
+        let sort_order = item.sort_order;
         let color = item.color.clone();
         let icon = item.icon.clone();
         let cloud_id = item.cloud_id.clone();
         let ts = now();
 
+        let computed_sort_order = self.conn.with_connection(|conn| match sort_order {
+            Some(sort_order) => Ok(sort_order),
+            None => conn
+                .query_row(
+                    "SELECT sort_order FROM workspaces WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(anyhow::Error::from),
+        })?;
+
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE workspaces SET name = ?1, color = ?2, icon = ?3, cloud_id = ?4, last_synced_at = NULL, updated_at = ?5 WHERE id = ?6",
-                params![name, color, icon, cloud_id, ts, id],
+                "UPDATE workspaces SET name = ?1, sort_order = ?2, color = ?3, icon = ?4, cloud_id = ?5, last_synced_at = NULL, updated_at = ?6 WHERE id = ?7",
+                params![name, computed_sort_order, color, icon, cloud_id, ts, id],
             )?;
             Ok(())
         })
@@ -893,7 +1069,7 @@ impl Repository for WorkspaceRepository {
 
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces WHERE id = ?1")?;
+            let mut stmt = conn.prepare("SELECT id, name, sort_order, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces WHERE id = ?1")?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
                 Ok(Some(WorkspaceRow::from_row(row)?.into()))
@@ -905,7 +1081,7 @@ impl Repository for WorkspaceRepository {
 
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces ORDER BY updated_at DESC")?;
+            let mut stmt = conn.prepare("SELECT id, name, sort_order, color, icon, created_at, updated_at, cloud_id, last_synced_at FROM workspaces ORDER BY updated_at DESC")?;
             let rows = stmt.query_map([], |row| WorkspaceRow::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -1413,5 +1589,229 @@ mod tests {
 
         assert_eq!(pending.base_last_synced_at, Some(456));
         assert_eq!(pending.metadata, Some(metadata));
+    }
+
+    #[test]
+    fn workspace_repository_reorder_updates_sort_order() {
+        let conn = create_test_sqlite_connection();
+        let repo = WorkspaceRepository::new(conn);
+
+        let mut first = Workspace::new("工作区-A".to_string());
+        let mut second = Workspace::new("工作区-B".to_string());
+        let mut third = Workspace::new("工作区-C".to_string());
+        repo.insert(&mut first).unwrap();
+        repo.insert(&mut second).unwrap();
+        repo.insert(&mut third).unwrap();
+
+        repo.reorder(&[
+            third.id.expect("第三个工作区应有 ID"),
+            first.id.expect("第一个工作区应有 ID"),
+            second.id.expect("第二个工作区应有 ID"),
+        ])
+        .unwrap();
+
+        let reloaded = repo.list().unwrap();
+        let third = reloaded
+            .iter()
+            .find(|workspace| workspace.id == third.id)
+            .expect("应能重新读到第三个工作区");
+        let first = reloaded
+            .iter()
+            .find(|workspace| workspace.id == first.id)
+            .expect("应能重新读到第一个工作区");
+        let second = reloaded
+            .iter()
+            .find(|workspace| workspace.id == second.id)
+            .expect("应能重新读到第二个工作区");
+
+        assert_eq!(third.sort_order, Some(0));
+        assert_eq!(first.sort_order, Some(1));
+        assert_eq!(second.sort_order, Some(2));
+    }
+
+    #[test]
+    fn connection_repository_reorder_within_workspace_only_changes_target_group() {
+        let conn = create_test_sqlite_connection();
+        let workspace_repo = WorkspaceRepository::new(conn.clone());
+        let connection_repo = ConnectionRepository::new(conn);
+
+        let mut workspace = Workspace::new("目标工作区".to_string());
+        let mut other_workspace = Workspace::new("其他工作区".to_string());
+        workspace_repo.insert(&mut workspace).unwrap();
+        workspace_repo.insert(&mut other_workspace).unwrap();
+
+        let workspace_id = workspace.id.expect("目标工作区应有 ID");
+        let other_workspace_id = other_workspace.id.expect("其他工作区应有 ID");
+
+        let mut first = StoredConnection::new_ssh(
+            "连接-A".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.1".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(workspace_id),
+        );
+        let mut second = StoredConnection::new_ssh(
+            "连接-B".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.2".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(workspace_id),
+        );
+        let mut third = StoredConnection::new_ssh(
+            "连接-C".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.3".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(workspace_id),
+        );
+        let mut other = StoredConnection::new_ssh(
+            "其他连接".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.4".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(other_workspace_id),
+        );
+        connection_repo.insert(&mut first).unwrap();
+        connection_repo.insert(&mut second).unwrap();
+        connection_repo.insert(&mut third).unwrap();
+        connection_repo.insert(&mut other).unwrap();
+
+        connection_repo
+            .reorder_within_workspace(
+                Some(workspace_id),
+                &[
+                    third.id.expect("第三个连接应有 ID"),
+                    first.id.expect("第一个连接应有 ID"),
+                    second.id.expect("第二个连接应有 ID"),
+                ],
+            )
+            .unwrap();
+
+        let first = connection_repo
+            .get(first.id.expect("第一个连接应有 ID"))
+            .unwrap()
+            .unwrap();
+        let second = connection_repo
+            .get(second.id.expect("第二个连接应有 ID"))
+            .unwrap()
+            .unwrap();
+        let third = connection_repo
+            .get(third.id.expect("第三个连接应有 ID"))
+            .unwrap()
+            .unwrap();
+        let other = connection_repo
+            .get(other.id.expect("其他连接应有 ID"))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(third.sort_order, Some(0));
+        assert_eq!(first.sort_order, Some(1));
+        assert_eq!(second.sort_order, Some(2));
+        assert_eq!(other.sort_order, Some(0));
+    }
+
+    #[test]
+    fn connection_repository_update_assigns_end_order_when_workspace_changes() {
+        let conn = create_test_sqlite_connection();
+        let workspace_repo = WorkspaceRepository::new(conn.clone());
+        let connection_repo = ConnectionRepository::new(conn);
+
+        let mut workspace = Workspace::new("迁移目标工作区".to_string());
+        workspace_repo.insert(&mut workspace).unwrap();
+        let workspace_id = workspace.id.expect("工作区应有 ID");
+
+        let mut existing = StoredConnection::new_ssh(
+            "现有连接".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.10".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(workspace_id),
+        );
+        connection_repo.insert(&mut existing).unwrap();
+
+        let mut moving = StoredConnection::new_ssh(
+            "待移动连接".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.0.11".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            None,
+        );
+        connection_repo.insert(&mut moving).unwrap();
+
+        let moving_id = moving.id.expect("待移动连接应有 ID");
+        let mut updated = connection_repo.get(moving_id).unwrap().unwrap();
+        updated.workspace_id = Some(workspace_id);
+        updated.sort_order = None;
+        connection_repo.update(&updated).unwrap();
+
+        let moved = connection_repo.get(moving_id).unwrap().unwrap();
+        assert_eq!(moved.workspace_id, Some(workspace_id));
+        assert_eq!(moved.sort_order, Some(1));
     }
 }

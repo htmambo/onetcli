@@ -97,6 +97,10 @@ Home:
     en: Created Time
     zh-CN: 创建时间
     zh-HK: 建立時間
+  sort_by_manual:
+    en: Manual Order
+    zh-CN: 手动排序
+    zh-HK: 手動排序
   sort_order_ascending:
     en: Ascending
     zh-CN: 升序
@@ -105,6 +109,10 @@ Home:
     en: Descending
     zh-CN: 降序
     zh-HK: 降序
+  manual_sort_save_failed:
+    en: "Manual order could not be saved: %{error}"
+    zh-CN: "手动排序保存失败：%{error}"
+    zh-HK: "手動排序保存失敗：%{error}"
   view_mode:
     en: View Mode
     zh-CN: 展示方式

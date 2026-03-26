@@ -169,6 +169,7 @@ impl ConflictResolver {
 
         let mut copy = conn.clone();
         copy.id = None; // 清除 ID，作为新连接插入
+        copy.sort_order = None; // 让仓库层为副本分配新的组内顺序
         copy.cloud_id = None; // 清除云端关联
         copy.last_synced_at = None; // 清除同步状态
         copy.name = format!("{} ({} {})", conn.name, source, formatted_time);
@@ -328,6 +329,7 @@ mod tests {
             id: Some(1),
             name: "Test Connection".to_string(),
             connection_type: crate::storage::ConnectionType::Database,
+            sort_order: Some(0),
             workspace_id: None,
             params: "{}".to_string(),
             selected_databases: None,

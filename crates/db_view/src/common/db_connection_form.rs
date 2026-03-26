@@ -1792,6 +1792,9 @@ impl DbConnectionForm {
             Some(conn) => {
                 let mut c = conn.clone();
                 c.name = connection.name.clone();
+                if c.workspace_id != connection.workspace_id {
+                    c.sort_order = None;
+                }
                 c.workspace_id = connection.workspace_id;
                 c.sync_enabled = sync_enabled;
                 c.team_id = None;

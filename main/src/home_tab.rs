@@ -1,20 +1,20 @@
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Context, ElementId, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, actions, div, px,
+    AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Context, DragMoveEvent, ElementId,
+    Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
+    KeyBinding, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, WeakEntity, Window, actions, div, px,
 };
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt, Sizable, Size, WindowExt,
-    app_style,
+    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
+    WindowExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -75,6 +75,96 @@ struct SyncFeedback {
 
 struct SyncResultNotification;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManualInsertPosition {
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceDropPreview {
+    target_workspace_id: i64,
+    position: ManualInsertPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConnectionDropPreview {
+    workspace_id: Option<i64>,
+    target_connection_id: i64,
+    position: ManualInsertPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DragPreviewSize {
+    width: f32,
+    height: f32,
+}
+
+#[derive(Clone)]
+struct DragWorkspace {
+    workspace_id: i64,
+    name: SharedString,
+    preview_size: Option<DragPreviewSize>,
+}
+
+impl Render for DragWorkspace {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let preview_size = self.preview_size.unwrap_or(DragPreviewSize {
+            width: 280.0,
+            height: 40.0,
+        });
+        div()
+            .id("drag-workspace")
+            .cursor_grabbing()
+            .flex()
+            .items_center()
+            .w(px(preview_size.width))
+            .h(px(preview_size.height))
+            .px_3()
+            .py_2()
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().drag_border)
+            .bg(cx.theme().drop_target.opacity(0.95))
+            .text_color(cx.theme().foreground)
+            .shadow_lg()
+            .child(self.name.clone())
+    }
+}
+
+#[derive(Clone)]
+struct DragConnection {
+    connection_id: i64,
+    workspace_id: Option<i64>,
+    name: SharedString,
+    preview_size: Option<DragPreviewSize>,
+}
+
+impl Render for DragConnection {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let preview_size = self.preview_size.unwrap_or(DragPreviewSize {
+            width: 320.0,
+            height: 58.0,
+        });
+        div()
+            .id("drag-connection")
+            .cursor_grabbing()
+            .flex()
+            .items_center()
+            .w(px(preview_size.width))
+            .h(px(preview_size.height))
+            .px_3()
+            .py_2()
+            .rounded_lg()
+            .border_1()
+            .border_color(cx.theme().drag_border)
+            .bg(cx.theme().drop_target.opacity(0.95))
+            .text_color(cx.theme().foreground)
+            .shadow_lg()
+            .child(self.name.clone())
+    }
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         #[cfg(target_os = "macos")]
@@ -113,6 +203,16 @@ pub struct HomePage {
     cloud_error: Option<String>,
     /// 最近一次同步反馈，用于主界面显式展示
     sync_feedback: Option<SyncFeedback>,
+    /// 手动排序时工作区的当前插入预览位置
+    workspace_drop_preview: Option<WorkspaceDropPreview>,
+    /// 手动排序时连接项的当前插入预览位置
+    connection_drop_preview: Option<ConnectionDropPreview>,
+    /// 工作区拖拽预览的实际尺寸缓存
+    workspace_drag_preview_sizes: HashMap<i64, DragPreviewSize>,
+    /// 连接列表项拖拽预览的实际尺寸缓存
+    connection_list_drag_preview_sizes: HashMap<i64, DragPreviewSize>,
+    /// 连接卡片拖拽预览的实际尺寸缓存
+    connection_card_drag_preview_sizes: HashMap<i64, DragPreviewSize>,
     /// 是否正在同步
     syncing: bool,
     /// 同步期间收到的新同步请求
@@ -179,6 +279,11 @@ impl HomePage {
             cloud_sync_service: Arc::new(std::sync::RwLock::new(CloudSyncService::new())),
             cloud_error: None,
             sync_feedback: None,
+            workspace_drop_preview: None,
+            connection_drop_preview: None,
+            workspace_drag_preview_sizes: HashMap::new(),
+            connection_list_drag_preview_sizes: HashMap::new(),
+            connection_card_drag_preview_sizes: HashMap::new(),
             syncing: false,
             sync_requested: false,
             pending_conflicts: Vec::new(),
@@ -1209,6 +1314,7 @@ impl HomePage {
 
         let mut duplicated = source.clone();
         duplicated.id = None;
+        duplicated.sort_order = None;
         duplicated.cloud_id = None;
         duplicated.last_synced_at = None;
         duplicated.created_at = None;
@@ -1719,6 +1825,7 @@ impl HomePage {
             for connection in &workspace_connections {
                 let mut updated_connection = connection.clone();
                 updated_connection.workspace_id = None;
+                updated_connection.sort_order = None;
                 if let Err(e) = connection_repo.update(&updated_connection) {
                     tracing::error!("Failed to move connection to unassigned: {}", e);
                     return;
@@ -2447,6 +2554,19 @@ impl HomePage {
                                                 },
                                             )),
                                     )
+                                    .item(
+                                        PopupMenuItem::new(t!("Home.sort_by_manual"))
+                                            .checked(sort_field == ConnectionListSortField::Manual)
+                                            .on_click(window.listener_for(
+                                                &view,
+                                                move |this, _, _, cx| {
+                                                    this.set_connection_list_sort_field(
+                                                        ConnectionListSortField::Manual,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
                                 }
                             }),
                     )
@@ -2458,6 +2578,7 @@ impl HomePage {
                             })
                             .ghost()
                             .tooltip(Self::connection_sort_order_label(sort_order))
+                            .disabled(sort_field == ConnectionListSortField::Manual)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_connection_list_sort_order(cx);
                             })),
@@ -2937,6 +3058,7 @@ impl HomePage {
         match sort_field {
             ConnectionListSortField::Name => t!("Home.sort_by_name").to_string(),
             ConnectionListSortField::CreatedAt => t!("Home.sort_by_created_at").to_string(),
+            ConnectionListSortField::Manual => t!("Home.sort_by_manual").to_string(),
             ConnectionListSortField::UpdatedAt => t!("Home.sort_by_updated_at").to_string(),
         }
     }
@@ -2993,7 +3115,439 @@ impl HomePage {
         );
     }
 
+    fn is_manual_sort_mode(cx: &App) -> bool {
+        Self::connection_list_sort_field(cx) == ConnectionListSortField::Manual
+    }
+
+    fn clear_manual_drop_preview(&mut self, cx: &mut Context<Self>) {
+        let had_preview = self.workspace_drop_preview.take().is_some()
+            || self.connection_drop_preview.take().is_some();
+        if had_preview {
+            cx.notify();
+        }
+    }
+
+    fn update_workspace_drop_preview(
+        &mut self,
+        target_workspace_id: i64,
+        position: ManualInsertPosition,
+        cx: &mut Context<Self>,
+    ) {
+        let next_preview = Some(WorkspaceDropPreview {
+            target_workspace_id,
+            position,
+        });
+        if self.workspace_drop_preview == next_preview && self.connection_drop_preview.is_none() {
+            return;
+        }
+
+        self.workspace_drop_preview = next_preview;
+        self.connection_drop_preview = None;
+        cx.notify();
+    }
+
+    fn update_connection_drop_preview(
+        &mut self,
+        workspace_id: Option<i64>,
+        target_connection_id: i64,
+        position: ManualInsertPosition,
+        cx: &mut Context<Self>,
+    ) {
+        let next_preview = Some(ConnectionDropPreview {
+            workspace_id,
+            target_connection_id,
+            position,
+        });
+        if self.connection_drop_preview == next_preview && self.workspace_drop_preview.is_none() {
+            return;
+        }
+
+        self.connection_drop_preview = next_preview;
+        self.workspace_drop_preview = None;
+        cx.notify();
+    }
+
+    fn render_manual_drop_indicator(position: ManualInsertPosition, cx: &App) -> AnyElement {
+        let indicator = div()
+            .absolute()
+            .left_3()
+            .right_3()
+            .h(px(3.0))
+            .rounded_full()
+            .bg(cx.theme().drag_border);
+
+        match position {
+            ManualInsertPosition::Before => indicator.top_0(),
+            ManualInsertPosition::After => indicator.bottom_0(),
+        }
+        .into_any_element()
+    }
+
+    fn update_workspace_drag_preview_size(&mut self, workspace_id: i64, size: DragPreviewSize) {
+        self.workspace_drag_preview_sizes.insert(workspace_id, size);
+    }
+
+    fn update_connection_list_drag_preview_size(
+        &mut self,
+        connection_id: i64,
+        size: DragPreviewSize,
+    ) {
+        self.connection_list_drag_preview_sizes
+            .insert(connection_id, size);
+    }
+
+    fn update_connection_card_drag_preview_size(
+        &mut self,
+        connection_id: i64,
+        size: DragPreviewSize,
+    ) {
+        self.connection_card_drag_preview_sizes
+            .insert(connection_id, size);
+    }
+
+    fn reorder_workspaces_to_end_manually(
+        &mut self,
+        dragged_workspace_id: i64,
+        last_workspace_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_workspace_id == last_workspace_id {
+            self.clear_manual_drop_preview(cx);
+            return;
+        }
+
+        self.reorder_workspaces_manually(
+            dragged_workspace_id,
+            last_workspace_id,
+            ManualInsertPosition::After,
+            cx,
+        );
+    }
+
+    fn reorder_connections_to_end_manually(
+        &mut self,
+        workspace_id: Option<i64>,
+        dragged_connection_id: i64,
+        last_connection_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_connection_id == last_connection_id {
+            self.clear_manual_drop_preview(cx);
+            return;
+        }
+
+        self.reorder_connections_manually_at(
+            workspace_id,
+            dragged_connection_id,
+            last_connection_id,
+            ManualInsertPosition::After,
+            cx,
+        );
+    }
+
+    fn apply_workspace_manual_order(&mut self, ordered_workspace_ids: &[i64]) {
+        for (sort_order, workspace_id) in ordered_workspace_ids.iter().enumerate() {
+            if let Some(workspace) = self
+                .workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == Some(*workspace_id))
+            {
+                workspace.sort_order = Some(sort_order as i64);
+            }
+        }
+    }
+
+    fn reorder_workspaces_manually(
+        &mut self,
+        dragged_workspace_id: i64,
+        target_workspace_id: i64,
+        position: ManualInsertPosition,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_workspace_id == target_workspace_id {
+            return;
+        }
+
+        let mut ordered_workspace_ids: Vec<i64> = self
+            .workspaces
+            .iter()
+            .filter_map(|workspace| workspace.id)
+            .collect();
+        ordered_workspace_ids.sort_by(|a, b| {
+            let left = self
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == Some(*a))
+                .expect("工作区 ID 已存在于当前列表");
+            let right = self
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == Some(*b))
+                .expect("工作区 ID 已存在于当前列表");
+            compare_workspaces(
+                left,
+                right,
+                ConnectionListSortField::Manual,
+                ConnectionListSortOrder::Ascending,
+            )
+        });
+
+        let Some(source_index) = ordered_workspace_ids
+            .iter()
+            .position(|workspace_id| *workspace_id == dragged_workspace_id)
+        else {
+            return;
+        };
+        let Some(target_index) = ordered_workspace_ids
+            .iter()
+            .position(|workspace_id| *workspace_id == target_workspace_id)
+        else {
+            return;
+        };
+
+        move_item_relative_to_target(
+            &mut ordered_workspace_ids,
+            source_index,
+            target_index,
+            position,
+        );
+        self.apply_workspace_manual_order(&ordered_workspace_ids);
+        self.workspace_drop_preview = None;
+        cx.notify();
+
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let result = (|| {
+                let repo = storage
+                    .get::<WorkspaceRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
+                repo.reorder(&ordered_workspace_ids)
+            })();
+
+            match result {
+                Ok(()) => {
+                    _ = this.update(cx, |this, cx| {
+                        if this.current_user.is_some() && crypto::has_master_key() {
+                            this.trigger_sync(cx);
+                        }
+                    });
+                }
+                Err(error) => {
+                    _ = this.update(cx, |this, cx| {
+                        this.load_workspaces(cx);
+                        let message = t!("Home.manual_sort_save_failed", error = error.to_string())
+                            .to_string();
+                        this.set_sync_feedback(SyncFeedbackLevel::Error, message);
+                        if let Some(feedback) = &this.sync_feedback {
+                            Self::push_sync_notification(feedback, cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn apply_connection_manual_order(
+        &mut self,
+        workspace_id: Option<i64>,
+        ordered_connection_ids: &[i64],
+    ) {
+        for (sort_order, connection_id) in ordered_connection_ids.iter().enumerate() {
+            if let Some(connection) = self.connections.iter_mut().find(|connection| {
+                connection.id == Some(*connection_id) && connection.workspace_id == workspace_id
+            }) {
+                connection.sort_order = Some(sort_order as i64);
+            }
+        }
+    }
+
+    fn reorder_connections_manually(
+        &mut self,
+        workspace_id: Option<i64>,
+        dragged_connection_id: i64,
+        target_connection_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_connection_id == target_connection_id {
+            return;
+        }
+
+        let mut ordered_connection_ids: Vec<i64> = self
+            .connections
+            .iter()
+            .filter(|connection| connection.workspace_id == workspace_id)
+            .filter_map(|connection| connection.id)
+            .collect();
+        ordered_connection_ids.sort_by(|a, b| {
+            let left = self
+                .connections
+                .iter()
+                .find(|connection| connection.id == Some(*a))
+                .expect("连接 ID 已存在于当前列表");
+            let right = self
+                .connections
+                .iter()
+                .find(|connection| connection.id == Some(*b))
+                .expect("连接 ID 已存在于当前列表");
+            compare_connections(
+                left,
+                right,
+                ConnectionListSortField::Manual,
+                ConnectionListSortOrder::Ascending,
+            )
+        });
+
+        let Some(source_index) = ordered_connection_ids
+            .iter()
+            .position(|connection_id| *connection_id == dragged_connection_id)
+        else {
+            return;
+        };
+        let Some(target_index) = ordered_connection_ids
+            .iter()
+            .position(|connection_id| *connection_id == target_connection_id)
+        else {
+            return;
+        };
+
+        move_item_to_target(&mut ordered_connection_ids, source_index, target_index);
+        self.apply_connection_manual_order(workspace_id, &ordered_connection_ids);
+        cx.notify();
+
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let result = (|| {
+                let repo = storage
+                    .get::<ConnectionRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+                repo.reorder_within_workspace(workspace_id, &ordered_connection_ids)
+            })();
+
+            match result {
+                Ok(()) => {
+                    _ = this.update(cx, |this, cx| {
+                        if this.current_user.is_some() && crypto::has_master_key() {
+                            this.trigger_sync(cx);
+                        }
+                    });
+                }
+                Err(error) => {
+                    _ = this.update(cx, |this, cx| {
+                        this.load_connections(cx);
+                        let message = t!("Home.manual_sort_save_failed", error = error.to_string())
+                            .to_string();
+                        this.set_sync_feedback(SyncFeedbackLevel::Error, message);
+                        if let Some(feedback) = &this.sync_feedback {
+                            Self::push_sync_notification(feedback, cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn reorder_connections_manually_at(
+        &mut self,
+        workspace_id: Option<i64>,
+        dragged_connection_id: i64,
+        target_connection_id: i64,
+        position: ManualInsertPosition,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_connection_id == target_connection_id {
+            return;
+        }
+
+        let mut ordered_connection_ids: Vec<i64> = self
+            .connections
+            .iter()
+            .filter(|connection| connection.workspace_id == workspace_id)
+            .filter_map(|connection| connection.id)
+            .collect();
+        ordered_connection_ids.sort_by(|a, b| {
+            let left = self
+                .connections
+                .iter()
+                .find(|connection| connection.id == Some(*a))
+                .expect("连接 ID 已存在于当前列表");
+            let right = self
+                .connections
+                .iter()
+                .find(|connection| connection.id == Some(*b))
+                .expect("连接 ID 已存在于当前列表");
+            compare_connections(
+                left,
+                right,
+                ConnectionListSortField::Manual,
+                ConnectionListSortOrder::Ascending,
+            )
+        });
+
+        let Some(source_index) = ordered_connection_ids
+            .iter()
+            .position(|connection_id| *connection_id == dragged_connection_id)
+        else {
+            return;
+        };
+        let Some(target_index) = ordered_connection_ids
+            .iter()
+            .position(|connection_id| *connection_id == target_connection_id)
+        else {
+            return;
+        };
+
+        move_item_relative_to_target(
+            &mut ordered_connection_ids,
+            source_index,
+            target_index,
+            position,
+        );
+        self.apply_connection_manual_order(workspace_id, &ordered_connection_ids);
+        self.connection_drop_preview = None;
+        cx.notify();
+
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let result = (|| {
+                let repo = storage
+                    .get::<ConnectionRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+                repo.reorder_within_workspace(workspace_id, &ordered_connection_ids)
+            })();
+
+            match result {
+                Ok(()) => {
+                    _ = this.update(cx, |this, cx| {
+                        if this.current_user.is_some() && crypto::has_master_key() {
+                            this.trigger_sync(cx);
+                        }
+                    });
+                }
+                Err(error) => {
+                    _ = this.update(cx, |this, cx| {
+                        this.load_connections(cx);
+                        let message = t!("Home.manual_sort_save_failed", error = error.to_string())
+                            .to_string();
+                        this.set_sync_feedback(SyncFeedbackLevel::Error, message);
+                        if let Some(feedback) = &this.sync_feedback {
+                            Self::push_sync_notification(feedback, cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
     fn toggle_connection_list_sort_order(&mut self, cx: &mut Context<Self>) {
+        if Self::connection_list_sort_field(cx) == ConnectionListSortField::Manual {
+            return;
+        }
         self.update_connection_list_preferences(
             |settings| {
                 settings.connection_list_sort_order = match settings.connection_list_sort_order {
@@ -3215,6 +3769,22 @@ impl HomePage {
         let is_collapsed = workspace_id
             .map(|id| self.collapsed_workspaces.contains(&id))
             .unwrap_or(false);
+        let manual_sort_mode = Self::is_manual_sort_mode(cx);
+        let view = cx.entity().clone();
+        let draggable_workspace_id = workspace_id;
+        let draggable_workspace_name: SharedString = workspace.name.clone().into();
+        let workspace_preview_size = workspace_id.and_then(|workspace_id| {
+            self.workspace_drag_preview_sizes
+                .get(&workspace_id)
+                .copied()
+        });
+        let workspace_drop_indicator = workspace_id
+            .and_then(|workspace_id| {
+                self.workspace_drop_preview
+                    .filter(|preview| preview.target_workspace_id == workspace_id)
+                    .map(|preview| preview.position)
+            })
+            .filter(|_| manual_sort_mode && cx.has_active_drag());
         v_flex()
             .gap_0()
             .rounded_lg()
@@ -3231,13 +3801,93 @@ impl HomePage {
                     .gap_2()
                     .px_3()
                     .py_2()
+                    .relative()
+                    .overflow_hidden()
                     .cursor_pointer()
+                    .when(manual_sort_mode && workspace_id.is_some(), |this| {
+                        this.cursor_grab()
+                    })
                     .rounded_t_lg()
                     .when(!is_collapsed, |this| {
                         this.border_b_1().border_color(cx.theme().border)
                     })
                     .when(is_collapsed, |this| this.rounded_b_lg())
                     .hover(|s| s.bg(cx.theme().list_hover))
+                    .when(
+                        manual_sort_mode && draggable_workspace_id.is_some(),
+                        |this| {
+                            let workspace_id = draggable_workspace_id.expect("工作区 ID 应存在");
+                            let workspace_name = draggable_workspace_name.clone();
+                            this.on_drag(
+                                DragWorkspace {
+                                    workspace_id,
+                                    name: workspace_name,
+                                    preview_size: workspace_preview_size,
+                                },
+                                |drag, _, _, cx| {
+                                    cx.stop_propagation();
+                                    cx.new(|_| drag.clone())
+                                },
+                            )
+                            .on_drag_move(cx.listener(
+                                move |this, drag: &DragMoveEvent<DragWorkspace>, _, cx| {
+                                    let drag_workspace = drag.drag(cx);
+                                    if drag_workspace.workspace_id == workspace_id {
+                                        this.clear_manual_drop_preview(cx);
+                                        return;
+                                    }
+
+                                    let current_position = this
+                                        .workspace_drop_preview
+                                        .filter(|preview| {
+                                            preview.target_workspace_id == workspace_id
+                                        })
+                                        .map(|preview| preview.position);
+                                    let position =
+                                        insert_position_from_drag(drag, current_position);
+                                    this.update_workspace_drop_preview(workspace_id, position, cx);
+                                },
+                            ))
+                            .drag_over::<DragWorkspace>(move |this, drag, _, cx| {
+                                if drag.workspace_id == workspace_id {
+                                    this
+                                } else {
+                                    this.border_color(cx.theme().drag_border)
+                                        .bg(cx.theme().drop_target.opacity(0.35))
+                                }
+                            })
+                            .on_drop(cx.listener(
+                                move |this, drag: &DragWorkspace, _, cx| {
+                                    cx.stop_propagation();
+                                    let position = this
+                                        .workspace_drop_preview
+                                        .filter(|preview| {
+                                            preview.target_workspace_id == workspace_id
+                                        })
+                                        .map(|preview| preview.position)
+                                        .unwrap_or(ManualInsertPosition::After);
+                                    this.reorder_workspaces_manually(
+                                        drag.workspace_id,
+                                        workspace_id,
+                                        position,
+                                        cx,
+                                    );
+                                },
+                            ))
+                        },
+                    )
+                    .when_some(workspace_id, |this, workspace_id| {
+                        let view = view.clone();
+                        this.on_prepaint(move |bounds, _, cx| {
+                            let size = DragPreviewSize {
+                                width: f32::from(bounds.size.width),
+                                height: f32::from(bounds.size.height),
+                            };
+                            view.update(cx, |this, _| {
+                                this.update_workspace_drag_preview_size(workspace_id, size);
+                            });
+                        })
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(id) = workspace_id {
                             if this.collapsed_workspaces.contains(&id) {
@@ -3282,6 +3932,9 @@ impl HomePage {
                         this.child(
                             h_flex()
                                 .gap_1()
+                                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
                                 .child(
                                     Button::new(format!("workspace-edit-{}", workspace_id))
                                         .icon(IconName::Edit)
@@ -3307,6 +3960,9 @@ impl HomePage {
                                         })),
                                 ),
                         )
+                    })
+                    .when_some(workspace_drop_indicator, |this, position| {
+                        this.child(Self::render_manual_drop_indicator(position, cx))
                     }),
             )
             .when(!connections.is_empty() && !is_collapsed, |this| {
@@ -3382,6 +4038,26 @@ impl HomePage {
             .id
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
         let can_edit = can_edit_connection(&conn, cx);
+        let manual_sort_mode = Self::is_manual_sort_mode(cx);
+        let view = cx.entity().clone();
+        let drag_connection_id = conn.id;
+        let drag_workspace_id = workspace_id;
+        let drag_connection_name: SharedString = conn.name.clone().into();
+        let list_preview_size = drag_connection_id.and_then(|connection_id| {
+            self.connection_list_drag_preview_sizes
+                .get(&connection_id)
+                .copied()
+        });
+        let connection_drop_indicator = drag_connection_id
+            .and_then(|connection_id| {
+                self.connection_drop_preview
+                    .filter(|preview| {
+                        preview.target_connection_id == connection_id
+                            && preview.workspace_id == drag_workspace_id
+                    })
+                    .map(|preview| preview.position)
+            })
+            .filter(|_| manual_sort_mode && cx.has_active_drag());
 
         h_flex()
             .justify_between()
@@ -3402,6 +4078,9 @@ impl HomePage {
             .overflow_hidden()
             .shadow_sm()
             .cursor_pointer()
+            .when(manual_sort_mode && drag_connection_id.is_some(), |this| {
+                this.cursor_grab()
+            })
             .when(is_selected, |this| {
                 this.border_color(cx.theme().list_active_border)
                     .shadow_lg()
@@ -3412,6 +4091,94 @@ impl HomePage {
                 style
                     .shadow_lg()
                     .border_color(cx.theme().list_active_border)
+            })
+            .when(manual_sort_mode && drag_connection_id.is_some(), |this| {
+                let connection_id = drag_connection_id.expect("连接 ID 应存在");
+                let connection_name = drag_connection_name.clone();
+                this.on_drag(
+                    DragConnection {
+                        connection_id,
+                        workspace_id: drag_workspace_id,
+                        name: connection_name,
+                        preview_size: list_preview_size,
+                    },
+                    |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    },
+                )
+                .on_drag_move(cx.listener(
+                    move |this, drag: &DragMoveEvent<DragConnection>, _, cx| {
+                        let drag_connection = drag.drag(cx);
+                        if drag_connection.connection_id == connection_id
+                            || drag_connection.workspace_id != drag_workspace_id
+                        {
+                            this.clear_manual_drop_preview(cx);
+                            return;
+                        }
+
+                        let current_position = this
+                            .connection_drop_preview
+                            .filter(|preview| {
+                                preview.target_connection_id == connection_id
+                                    && preview.workspace_id == drag_workspace_id
+                            })
+                            .map(|preview| preview.position);
+                        let position = insert_position_from_drag(drag, current_position);
+                        this.update_connection_drop_preview(
+                            drag_workspace_id,
+                            connection_id,
+                            position,
+                            cx,
+                        );
+                    },
+                ))
+                .drag_over::<DragConnection>(move |this, drag, _, cx| {
+                    if drag.connection_id == connection_id || drag.workspace_id != drag_workspace_id
+                    {
+                        this
+                    } else {
+                        this.border_color(cx.theme().drag_border)
+                            .bg(cx.theme().drop_target.opacity(0.35))
+                    }
+                })
+                .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
+                    cx.stop_propagation();
+                    if drag.workspace_id != drag_workspace_id {
+                        this.clear_manual_drop_preview(cx);
+                        return;
+                    }
+                    let position = this
+                        .connection_drop_preview
+                        .filter(|preview| {
+                            preview.target_connection_id == connection_id
+                                && preview.workspace_id == drag_workspace_id
+                        })
+                        .map(|preview| preview.position)
+                        .unwrap_or(ManualInsertPosition::After);
+                    this.reorder_connections_manually_at(
+                        drag_workspace_id,
+                        drag.connection_id,
+                        connection_id,
+                        position,
+                        cx,
+                    );
+                }))
+            })
+            .when_some(drag_connection_id, |this, connection_id| {
+                let view = view.clone();
+                this.on_prepaint(move |bounds, _, cx| {
+                    let size = DragPreviewSize {
+                        width: f32::from(bounds.size.width),
+                        height: f32::from(bounds.size.height),
+                    };
+                    view.update(cx, |this, _| {
+                        this.update_connection_list_drag_preview_size(connection_id, size);
+                    });
+                })
+            })
+            .when_some(connection_drop_indicator, |this, position| {
+                this.child(Self::render_manual_drop_indicator(position, cx))
             })
             .on_double_click(cx.listener(move |this, _, window, cx| {
                 if !crypto::has_master_key() && crypto::has_repo_password_set() {
@@ -3697,6 +4464,16 @@ impl HomePage {
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
 
         let can_edit = can_edit_connection(&conn, cx);
+        let manual_sort_mode = Self::is_manual_sort_mode(cx);
+        let view = cx.entity().clone();
+        let drag_connection_id = conn.id;
+        let drag_workspace_id = workspace_id;
+        let drag_connection_name: SharedString = conn.name.clone().into();
+        let card_preview_size = drag_connection_id.and_then(|connection_id| {
+            self.connection_card_drag_preview_sizes
+                .get(&connection_id)
+                .copied()
+        });
         let group_name: SharedString = format!("conn-card-group-{}", conn.id.unwrap_or(0)).into();
         let card = v_flex()
             .justify_center()
@@ -3722,10 +4499,62 @@ impl HomePage {
             })
             .when(!is_selected, |this| this.border_color(cx.theme().border))
             .cursor_pointer()
+            .when(manual_sort_mode && drag_connection_id.is_some(), |this| {
+                this.cursor_grab()
+            })
             .hover(|style| {
                 style
                     .shadow_lg()
                     .border_color(cx.theme().list_active_border)
+            })
+            .when(manual_sort_mode && drag_connection_id.is_some(), |this| {
+                let connection_id = drag_connection_id.expect("连接 ID 应存在");
+                let connection_name = drag_connection_name.clone();
+                this.on_drag(
+                    DragConnection {
+                        connection_id,
+                        workspace_id: drag_workspace_id,
+                        name: connection_name,
+                        preview_size: card_preview_size,
+                    },
+                    |drag, _, _, cx| {
+                        cx.stop_propagation();
+                        cx.new(|_| drag.clone())
+                    },
+                )
+                .drag_over::<DragConnection>(move |this, drag, _, cx| {
+                    if drag.connection_id == connection_id || drag.workspace_id != drag_workspace_id
+                    {
+                        this
+                    } else {
+                        this.border_color(cx.theme().drag_border)
+                            .bg(cx.theme().drop_target.opacity(0.35))
+                    }
+                })
+                .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
+                    cx.stop_propagation();
+                    if drag.workspace_id != drag_workspace_id {
+                        return;
+                    }
+                    this.reorder_connections_manually(
+                        drag_workspace_id,
+                        drag.connection_id,
+                        connection_id,
+                        cx,
+                    );
+                }))
+            })
+            .when_some(drag_connection_id, |this, connection_id| {
+                let view = view.clone();
+                this.on_prepaint(move |bounds, _, cx| {
+                    let size = DragPreviewSize {
+                        width: f32::from(bounds.size.width),
+                        height: f32::from(bounds.size.height),
+                    };
+                    view.update(cx, |this, _| {
+                        this.update_connection_card_drag_preview_size(connection_id, size);
+                    });
+                })
             })
             .on_double_click(cx.listener(move |this, _, w, cx| {
                 // 如果主密钥未解锁且已设置过密码，拦截连接操作并弹出解锁对话框
@@ -3763,6 +4592,7 @@ impl HomePage {
                     .top_2()
                     .right_2()
                     .gap_1()
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .group_hover(group_name, |style| style.opacity(1.0))
                     .opacity(0.0)
                     .when(conn.connection_type == ConnectionType::SshSftp, |this| {
@@ -3955,6 +4785,12 @@ fn compare_workspaces(
         _ => {}
     }
     let cmp = match sort_field {
+        ConnectionListSortField::Manual => manual_sort_value(a.sort_order)
+            .cmp(&manual_sort_value(b.sort_order))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| timestamp_value(a.updated_at).cmp(&timestamp_value(b.updated_at)))
+            .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
         ConnectionListSortField::Name => a
             .name
             .to_lowercase()
@@ -3973,6 +4809,9 @@ fn compare_workspaces(
             .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
             .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
     };
+    if sort_field == ConnectionListSortField::Manual {
+        return cmp;
+    }
     match sort_order {
         ConnectionListSortOrder::Ascending => cmp,
         ConnectionListSortOrder::Descending => cmp.reverse(),
@@ -3986,6 +4825,12 @@ fn compare_connections(
     sort_order: ConnectionListSortOrder,
 ) -> Ordering {
     let cmp = match sort_field {
+        ConnectionListSortField::Manual => manual_sort_value(a.sort_order)
+            .cmp(&manual_sort_value(b.sort_order))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| timestamp_value(a.updated_at).cmp(&timestamp_value(b.updated_at)))
+            .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
+            .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
         ConnectionListSortField::Name => a
             .name
             .to_lowercase()
@@ -4004,6 +4849,9 @@ fn compare_connections(
             .then_with(|| timestamp_value(a.created_at).cmp(&timestamp_value(b.created_at)))
             .then_with(|| a.id.unwrap_or(0).cmp(&b.id.unwrap_or(0))),
     };
+    if sort_field == ConnectionListSortField::Manual {
+        return cmp;
+    }
 
     match sort_order {
         ConnectionListSortOrder::Ascending => cmp,
@@ -4015,16 +4863,84 @@ fn timestamp_value(value: Option<i64>) -> i64 {
     value.unwrap_or(0)
 }
 
+fn manual_sort_value(value: Option<i64>) -> i64 {
+    value.unwrap_or(i64::MAX)
+}
+
+fn move_item_to_target<T>(items: &mut Vec<T>, source_index: usize, target_index: usize) {
+    if source_index == target_index || source_index >= items.len() || target_index >= items.len() {
+        return;
+    }
+
+    let item = items.remove(source_index);
+    let insert_index = target_index.min(items.len());
+    items.insert(insert_index, item);
+}
+
+fn move_item_relative_to_target<T>(
+    items: &mut Vec<T>,
+    source_index: usize,
+    target_index: usize,
+    position: ManualInsertPosition,
+) {
+    if source_index == target_index || source_index >= items.len() || target_index >= items.len() {
+        return;
+    }
+
+    let item = items.remove(source_index);
+    let mut insert_index = match position {
+        ManualInsertPosition::Before => target_index,
+        ManualInsertPosition::After => target_index + 1,
+    };
+
+    if source_index < target_index {
+        insert_index = insert_index.saturating_sub(1);
+    }
+
+    items.insert(insert_index.min(items.len()), item);
+}
+
+fn insert_position_from_drag<T>(
+    drag: &DragMoveEvent<T>,
+    current_position: Option<ManualInsertPosition>,
+) -> ManualInsertPosition {
+    let bounds = drag.bounds;
+    let position = drag.event.position;
+    let upper_bound = bounds.top() + bounds.size.height * 0.45;
+    let lower_bound = bounds.top() + bounds.size.height * 0.55;
+
+    if position.y <= upper_bound {
+        ManualInsertPosition::Before
+    } else if position.y >= lower_bound {
+        ManualInsertPosition::After
+    } else {
+        current_position.unwrap_or_else(|| {
+            if position.y < bounds.top() + bounds.size.height * 0.5 {
+                ManualInsertPosition::Before
+            } else {
+                ManualInsertPosition::After
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod connection_list_sort_tests {
     use super::*;
 
-    fn make_connection(id: i64, name: &str, created_at: i64, updated_at: i64) -> StoredConnection {
+    fn make_connection(
+        id: i64,
+        name: &str,
+        created_at: i64,
+        updated_at: i64,
+        sort_order: i64,
+    ) -> StoredConnection {
         StoredConnection {
             id: Some(id),
             name: name.to_string(),
             connection_type: ConnectionType::Database,
             params: String::new(),
+            sort_order: Some(sort_order),
             workspace_id: None,
             selected_databases: None,
             remark: None,
@@ -4041,9 +4957,9 @@ mod connection_list_sort_tests {
     #[test]
     fn compare_connections_sorts_by_name_ascending() {
         let mut items = vec![
-            make_connection(1, "zeta", 10, 30),
-            make_connection(2, "alpha", 20, 10),
-            make_connection(3, "Beta", 30, 20),
+            make_connection(1, "zeta", 10, 30, 2),
+            make_connection(2, "alpha", 20, 10, 1),
+            make_connection(3, "Beta", 30, 20, 0),
         ];
 
         items.sort_by(|a, b| {
@@ -4062,9 +4978,9 @@ mod connection_list_sort_tests {
     #[test]
     fn compare_connections_sorts_by_updated_at_descending() {
         let mut items = vec![
-            make_connection(1, "alpha", 10, 100),
-            make_connection(2, "beta", 20, 300),
-            make_connection(3, "gamma", 30, 200),
+            make_connection(1, "alpha", 10, 100, 2),
+            make_connection(2, "beta", 20, 300, 1),
+            make_connection(3, "gamma", 30, 200, 0),
         ];
 
         items.sort_by(|a, b| {
@@ -4083,9 +4999,9 @@ mod connection_list_sort_tests {
     #[test]
     fn compare_connections_sorts_by_created_at_ascending() {
         let mut items = vec![
-            make_connection(1, "alpha", 30, 100),
-            make_connection(2, "beta", 10, 300),
-            make_connection(3, "gamma", 20, 200),
+            make_connection(1, "alpha", 30, 100, 2),
+            make_connection(2, "beta", 10, 300, 1),
+            make_connection(3, "gamma", 20, 200, 0),
         ];
 
         items.sort_by(|a, b| {
@@ -4099,6 +5015,45 @@ mod connection_list_sort_tests {
 
         let ids: Vec<_> = items.into_iter().map(|item| item.id.unwrap()).collect();
         assert_eq!(ids, vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn compare_connections_sorts_by_manual_order() {
+        let mut items = vec![
+            make_connection(1, "alpha", 30, 100, 2),
+            make_connection(2, "beta", 10, 300, 0),
+            make_connection(3, "gamma", 20, 200, 1),
+        ];
+
+        items.sort_by(|a, b| {
+            compare_connections(
+                a,
+                b,
+                ConnectionListSortField::Manual,
+                ConnectionListSortOrder::Descending,
+            )
+        });
+
+        let ids: Vec<_> = items.into_iter().map(|item| item.id.unwrap()).collect();
+        assert_eq!(ids, vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn move_item_relative_to_target_moves_before_target() {
+        let mut items = vec![1, 2, 3, 4];
+
+        move_item_relative_to_target(&mut items, 3, 1, ManualInsertPosition::Before);
+
+        assert_eq!(items, vec![1, 4, 2, 3]);
+    }
+
+    #[test]
+    fn move_item_relative_to_target_moves_after_target() {
+        let mut items = vec![1, 2, 3, 4];
+
+        move_item_relative_to_target(&mut items, 0, 2, ManualInsertPosition::After);
+
+        assert_eq!(items, vec![2, 3, 1, 4]);
     }
 }
 

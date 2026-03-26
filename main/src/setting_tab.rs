@@ -163,6 +163,7 @@ impl DatabaseOpenMode {
 pub enum ConnectionListSortField {
     Name,
     CreatedAt,
+    Manual,
     #[default]
     UpdatedAt,
 }

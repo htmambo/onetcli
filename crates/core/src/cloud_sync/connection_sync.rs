@@ -1195,6 +1195,7 @@ mod tests {
                 name: "远端删除连接".to_string(),
                 connection_type: ConnectionType::Database,
                 params: "{}".to_string(),
+                sort_order: None,
                 workspace_id: None,
                 selected_databases: None,
                 remark: None,

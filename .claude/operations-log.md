@@ -6574,3 +6574,186 @@
 ### 风险结论
 - 根因是 ChatDB 在入口把当前输入先塞进 `chat_history`，而 Agent 层又默认追加一次 `ctx.user_input`
 - 修复后，传给模型的上下文中不会再出现同一轮用户输入的重复封装
+
+## 规划记录 - home-manual-sort
+时间：2026-03-26 22:13:40 +0800
+
+- 已完成上下文收集并写入：`.claude/context-summary-home-manual-sort.md`
+- 已完成设计文档：`docs/plans/2026-03-26-home-manual-sort-design.md`
+- 已完成实现计划：`docs/plans/2026-03-26-home-manual-sort.md`
+- 关键决策：
+  - 手动排序作为 `ConnectionListSortField` 的第四种模式
+  - `Workspace` / `StoredConnection` 直接新增 `sort_order`
+  - 只支持工作区之间重排、同一工作区内连接重排、未分配区内重排
+  - 不支持跨工作区拖拽改归属
+  - 顺序字段进入云同步明文数据，沿用现有实体级冲突策略
+- 会话策略：
+  - 当前未自动提交设计/计划文档
+  - 若继续实现，将直接在当前会话按计划推进，不启用子代理
+
+## 编码前检查 - home-manual-sort
+时间：2026-03-26 22:28:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-home-manual-sort.md`
+- 将使用以下可复用组件：
+  - `main/src/home_tab.rs::compare_workspaces(...)`
+  - `main/src/home_tab.rs::compare_connections(...)`
+  - `one_core::storage::ConnectionRepository`
+  - `one_core::storage::WorkspaceRepository`
+  - `one_core::cloud_sync::{ConnectionPlainData, WorkspacePlainData}`
+- 将遵循命名约定：继续沿用 `reorder_*` / `sort_order` 的直白命名，不额外引入第二套首页排序抽象
+- 将遵循代码风格：顺序字段挂在实体本身，UI 只复用现有 `ConnectionListSortField` / GPUI `on_drag + drag_over + on_drop` 模式
+- 确认不重复造轮子：不新增独立排序表，不新增自定义同步通道，直接复用现有 repository 与 cloud_sync 链路
+- 工具缺失留痕：当前环境无 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次以本地代码检索、设计文档、编译和针对性测试替代
+
+## 编码后声明 - home-manual-sort
+时间：2026-03-26 23:41:00 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home_tab.rs`：继续复用现有首页排序、设置和渲染入口，只把 `Manual` 并入同一套分发逻辑
+- `crates/core/src/storage/repository.rs`：继续作为本地持久化唯一入口，在仓库层补顺序分配和批量重排
+- `crates/core/src/cloud_sync/service.rs` 与 `crates/core/src/cloud_sync/connection_sync.rs`：继续复用现有明文打包和云端回写链路，只扩展 `sort_order`
+- `crates/ui` 现有拖拽范式：沿用 `on_drag + drag_over + on_drop`
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增字段统一命名为 `sort_order`，新增仓库接口统一命名为 `reorder(...)` / `reorder_within_workspace(...)`
+- 代码风格：没有新增首页专用排序表或同步通道，而是把顺序视为实体状态的一部分
+- 测试策略：补仓库层重排测试与首页比较函数测试，避免引入重 UI 自动化
+
+### 3. 对比了以下相似实现
+- `compare_workspaces(...)` / `compare_connections(...)`：确认手动排序应作为第四个分支并入同一比较函数
+- `crates/ui/src/table/state.rs` 与 `crates/ui/src/dock/tab_panel.rs`：确认首页拖拽直接复用现有 GPUI 模式即可
+- 连接与工作区现有同步模型：确认最小改动方案是把 `sort_order` 放进 plain data，而不是额外同步排序表
+
+### 4. 未重复造轮子的证明
+- 没有创建新的首页排序配置表
+- 没有创建新的同步实体类型
+- 没有把拖拽结果只存放在 UI 内存里
+- 只是把“手动排序”接进已有的设置、仓库、同步和首页渲染链路
+
+## 实施与验证记录 - home-manual-sort
+时间：2026-03-26 23:41:00 +0800
+
+### 已完成修改
+- `main/src/setting_tab.rs`
+  - 排序字段枚举新增 `Manual`
+- `main/src/home_tab.rs`
+  - 首页排序菜单新增“手动排序”
+  - `Manual` 模式下禁用排序方向按钮
+  - 工作区、连接列表项、连接卡片接入拖拽重排
+  - 新增手动排序比较逻辑与单测
+- `main/locales/main.yml`
+  - 新增手动排序相关文案
+- `crates/core/src/storage/models.rs`
+  - `Workspace` / `StoredConnection` 增加 `sort_order`
+- `crates/core/migrations/20260326000003_home_manual_sort.sql`
+  - 新增顺序字段 migration 和旧数据回填
+- `crates/core/src/storage/repository.rs`
+  - 读写 / 云端回写接入 `sort_order`
+  - 新增工作区重排与连接组内重排接口
+  - 新增重排和改组顺序分配测试
+- `crates/core/src/cloud_sync/models.rs`
+  - 明文结构新增 `sort_order`
+- `crates/core/src/cloud_sync/service.rs`
+  - 上传 / 下载接入 `sort_order`
+- `crates/db_view/src/common/db_connection_form.rs`
+  - 编辑连接且工作区变化时，清空顺序以便仓库层重新分配目标组末尾
+- `crates/core/src/cloud_sync/conflict.rs`
+  - 冲突副本创建时清空顺序，避免组内重复顺序
+
+### 本地验证
+- `cargo check -p one-core`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p one-core storage::repository::tests::`
+  - 结果：通过
+- `cargo test -p main connection_list_sort_tests`
+  - 结果：通过
+- `cargo fmt --all`
+  - 结果：通过
+
+### 额外留痕
+- `cargo test -p one-core`
+  - 结果：失败 4 条
+  - 结论：失败点落在 LLM 默认提供商和同步引擎既有测试，不属于本次手动排序新增路径；已在 `.claude/verification-report-home-manual-sort.md` 明确记录
+
+## 编码前检查 - home-manual-sort-insert-position
+时间：2026-03-26 23:55:00 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-home-manual-sort.md`
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs::render_workspace_section(...)`：复用工作区 header 的拖拽挂载点
+- `main/src/home_tab.rs::render_connection_list_item(...)`：复用连接列表项的拖拽挂载点
+- `main/src/home_tab.rs::reorder_workspaces_manually(...)` / `reorder_connections_manually(...)`：复用现有内存重排、落库和同步触发链路
+- `crates/ui/src/dock/tab_panel.rs::on_panel_drag_move(...)`：复用 GPUI 基于 `DragMoveEvent` 坐标判定落点的做法
+□ 将遵循命名约定：新增状态统一使用 `*_drop_preview`，新增插入语义统一使用 `ManualInsertPosition`
+□ 将遵循代码风格：只在首页视图状态层补“插入前/后”语义，不改仓库和同步接口，不把卡片模式一起改造
+□ 确认不重复造轮子，证明：未新增第二套排序持久化逻辑，只是在现有手动排序链路前补一个目标索引计算层
+
+## 编码后声明 - home-manual-sort-insert-position
+时间：2026-03-27 00:08:00 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home_tab.rs::DragWorkspace` / `DragConnection`：继续作为首页拖拽 payload，不新增新的拖拽实体
+- `main/src/home_tab.rs::reorder_workspaces_manually(...)` 与连接组内重排仓库调用：继续承担持久化和同步触发
+- `crates/ui/src/dock/tab_panel.rs` 的 `DragMoveEvent` 坐标判定范式：作为首页“按鼠标上下半区判定 before/after”的直接参考
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `ManualInsertPosition`、`WorkspaceDropPreview`、`ConnectionDropPreview`，都沿用现有直白命名
+- 代码风格：仍然把行为改动集中在 `main/src/home_tab.rs`，没有把 UI 预览状态泄漏到存储层
+- 范围控制：只增强工作区与列表模式，卡片模式继续保留现有拖拽行为
+
+### 3. 对比了以下相似实现
+- `main/src/home_tab.rs` 现有工作区拖拽：原本只按目标项落点重排，现在改为按目标项前/后插入
+- `main/src/home_tab.rs` 现有连接列表项拖拽：原本只看目标项 ID，现在增加 `before/after` 预判
+- `crates/ui/src/dock/tab_panel.rs::on_panel_drag_move(...)`：确认 GPUI 已支持基于 `bounds + position` 的拖拽区域判定
+
+### 4. 未重复造轮子的证明
+- 没有新增新的 repository 方法来表达插入前后
+- 没有新增新的同步字段
+- 只是把最终目标索引的计算从“目标项槽位”提升为“目标项前/后”
+
+## 实施与验证记录 - home-manual-sort-insert-position
+时间：2026-03-27 00:08:00 +0800
+
+### 已完成修改
+- `main/src/home_tab.rs`
+  - 新增 `ManualInsertPosition` 与拖拽预览状态
+  - 工作区 header 使用 `DragMoveEvent` 的纵向坐标判定插入前/后
+  - 连接列表项使用 `DragMoveEvent` 的纵向坐标判定插入前/后
+  - 新增插入线预览
+  - 新增 `move_item_relative_to_target(...)` helper 和对应单测
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p main connection_list_sort_tests`
+  - 结果：通过（6/6）
+
+### 已知边界
+- 连接卡片模式仍然保留现有按目标项重排的行为，本轮没有改成坐标插入
+- 尚未补“拖到容器底部空白区域直接插到末尾”的交互
+
+## 实施与验证记录 - drag-preview-size
+时间：2026-03-27 00:20:00 +0800
+
+### 已完成修改
+- `main/src/home_tab.rs`
+  - 为工作区 header、连接列表项、连接卡片增加最近一次渲染尺寸缓存
+  - 拖拽开始时把缓存尺寸带入 `DragWorkspace` / `DragConnection`
+  - 拖拽预览从固定小浮层改为按源元素宽高渲染的半透明幽灵框
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+- `cargo test -p main connection_list_sort_tests`
+  - 结果：通过（6/6）
+
+### 已知边界
+- 当前拖拽预览保持的是“最近一次渲染尺寸”，因此首次渲染后的首次拖拽才会达到与源元素一致的效果
+- 本轮只调整了拖拽预览尺寸，没有新增 UI 自动化验证，仍建议做一次真实拖拽观察

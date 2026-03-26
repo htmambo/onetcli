@@ -360,6 +360,7 @@ impl CloudSyncService {
         let plain_data = ConnectionPlainData {
             name: conn.name.clone(),
             connection_type: conn.connection_type.to_string(),
+            sort_order: conn.sort_order,
             workspace_cloud_id,
             selected_databases: conn.selected_databases.clone(),
             remark: conn.remark.clone(),
@@ -399,6 +400,7 @@ impl CloudSyncService {
     ) -> Result<CloudSyncData, SyncError> {
         let plain_data = WorkspacePlainData {
             name: ws.name.clone(),
+            sort_order: ws.sort_order,
             color: ws.color.clone(),
             icon: ws.icon.clone(),
         };
@@ -513,6 +515,7 @@ impl CloudSyncService {
             id: None,
             name: plain_data.name,
             connection_type,
+            sort_order: plain_data.sort_order,
             workspace_id: None, // 由调用者根据 workspace_cloud_id 解析
             params,
             selected_databases: plain_data.selected_databases,
@@ -540,6 +543,7 @@ impl CloudSyncService {
         Ok(crate::storage::Workspace {
             id: None,
             name: plain_data.name,
+            sort_order: plain_data.sort_order,
             color: plain_data.color,
             icon: plain_data.icon,
             created_at: None,

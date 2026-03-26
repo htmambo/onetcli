@@ -360,6 +360,9 @@ pub struct ConnectionPlainData {
     pub name: String,
     /// 连接类型
     pub connection_type: String,
+    /// 手动排序顺序
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
     /// 关联的工作空间云端 ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_cloud_id: Option<String>,
@@ -381,6 +384,9 @@ pub struct ConnectionPlainData {
 pub struct WorkspacePlainData {
     /// 工作空间名称
     pub name: String,
+    /// 手动排序顺序
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
     /// 颜色
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,

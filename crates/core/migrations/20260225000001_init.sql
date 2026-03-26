@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS workspaces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     color TEXT,
     icon TEXT,
     cloud_id TEXT,
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS connections (
     name TEXT NOT NULL,
     connection_type TEXT NOT NULL,
     params TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     workspace_id INTEGER,
     selected_databases TEXT,
     remark TEXT,

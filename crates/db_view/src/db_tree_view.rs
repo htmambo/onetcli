@@ -2613,6 +2613,7 @@ mod tests {
             name: "conn".to_string(),
             connection_type: ConnectionType::Database,
             params: "{}".to_string(),
+            sort_order: Some(id),
             workspace_id: None,
             selected_databases: selected_databases.map(|dbs| {
                 serde_json::to_string(
