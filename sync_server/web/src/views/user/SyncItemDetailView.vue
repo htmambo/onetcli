@@ -1,13 +1,13 @@
 <template>
   <div class="space-y-6">
     <section class="panel hover-card rounded-[28px] p-6">
-      <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">同步记录详情</p>
+      <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">项目名称</p>
       <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 class="text-3xl font-semibold text-[var(--text)]">单条同步项详细信息</h2>
-          <p class="mt-2 max-w-2xl text-sm leading-7 text-[var(--muted)]">
+          <h2 class="text-3xl font-semibold text-[var(--text)]">{{ detailTitle }}</h2>
+          <!-- <p class="mt-2 max-w-2xl text-sm leading-7 text-[var(--muted)]">
             这里可以核对同步项的类型、密钥版本、记录版本、校验值、时间戳以及完整加密载荷，方便排查某一条同步记录。
-          </p>
+          </p> -->
         </div>
         <div class="flex flex-wrap gap-3">
           <RouterLink
@@ -22,7 +22,7 @@
             :disabled="deleting"
             @click="deleteItem"
           >
-            {{ deleting ? "删除中..." : "删除同步项" }}
+            {{ deleting ? "删除中..." : "删除" }}
           </button>
           <button
             v-else-if="item?.deletedAt"
@@ -30,13 +30,13 @@
             :disabled="restoring"
             @click="restoreItem"
           >
-            {{ restoring ? "恢复中..." : "恢复同步项" }}
+            {{ restoring ? "恢复中..." : "恢复" }}
           </button>
           <button
             class="ghost-button rounded-2xl px-4 py-3 text-sm font-medium"
             @click="loadItem"
           >
-            刷新详情
+            刷新
           </button>
         </div>
       </div>
@@ -58,10 +58,10 @@
         <div class="panel hover-card rounded-[28px] p-6">
           <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">基础信息</p>
           <div class="mt-6 grid gap-4 md:grid-cols-2">
-            <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 md:col-span-2">
+            <!-- <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 md:col-span-2">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">项目名称</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ item.name || "未提供名称" }}</p>
-            </article>
+            </article> -->
             <article class="hover-card rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4">
               <p class="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">数据类型</p>
               <p class="mt-2 text-base font-semibold text-[var(--text)]">{{ getSyncItemTypeLabel(item.dataType) }}</p>
@@ -268,6 +268,14 @@ const decryptError = ref("");
 const decryptedPlaintext = ref("");
 
 const syncItemId = computed(() => String(route.params.id ?? ""));
+const detailTitle = computed(() => {
+  if (!item.value) {
+    return "详细信息";
+  }
+
+  const displayName = item.value.name.trim() || "未提供名称";
+  return `${displayName}`;
+});
 const formattedDecryptedPayload = computed(() => formatDecryptedPayload(decryptedPlaintext.value));
 const decryptedPayloadFields = computed<PayloadField[] | null>(() => {
   if (!decryptedPlaintext.value || !item.value) return null;

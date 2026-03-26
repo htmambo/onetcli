@@ -4,7 +4,7 @@
       <aside class="panel flex flex-col rounded-[28px] p-6 lg:min-h-0 lg:h-full lg:overflow-y-auto">
         <div class="border-b soft-line pb-5">
           <p class="text-xs uppercase tracking-[0.32em] text-[var(--muted)]">Sync Server</p>
-          <h1 class="mt-3 text-2xl font-semibold text-[var(--text)]">账号与同步中心</h1>
+          <h1 class="mt-3 text-2xl font-semibold text-[var(--text)]">同步中心</h1>
           <p class="mt-2 text-sm leading-6 text-[var(--muted)]">
             统一管理账户、同步密钥和云端数据。
           </p>
