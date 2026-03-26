@@ -91,6 +91,14 @@ impl RenderOnce for WindowBorder {
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
         #[cfg(not(target_os = "linux"))]
         let prefers_system_frame = matches!(decorations, Decorations::Server);
+        let shadow_size = match decorations {
+            Decorations::Client { tiling }
+                if tiling.top && tiling.bottom && tiling.left && tiling.right =>
+            {
+                px(0.0)
+            }
+            _ => shadow_size,
+        };
         let client_inset = if prefers_system_frame {
             px(0.0)
         } else {
@@ -122,6 +130,12 @@ impl RenderOnce for WindowBorder {
                             move |_bounds, hitbox, window, _| {
                                 let mouse = window.mouse_position();
                                 let size = window.window_bounds().get_bounds().size;
+                                let Decorations::Client { tiling } = window.window_decorations() else {
+                                    return;
+                                };
+                                if tiling.top && tiling.bottom && tiling.left && tiling.right {
+                                    return;
+                                }
                                 let Some(edge) = resize_edge(mouse, shadow_size, size) else {
                                     return;
                                 };
@@ -158,6 +172,12 @@ impl RenderOnce for WindowBorder {
                     .when(!tiling.left, |div| div.pl(shadow_size))
                     .when(!tiling.right, |div| div.pr(shadow_size))
                     .on_mouse_down(MouseButton::Left, move |_, window, _| {
+                        let Decorations::Client { tiling } = window.window_decorations() else {
+                            return;
+                        };
+                        if tiling.top && tiling.bottom && tiling.left && tiling.right {
+                            return;
+                        }
                         let size = window.window_bounds().get_bounds().size;
                         let pos = window.mouse_position();
 
