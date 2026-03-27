@@ -9,6 +9,7 @@ pub mod certificate_notifier;
 pub mod cloud_sync;
 pub mod config;
 pub mod connection_notifier;
+pub mod connection_restore;
 pub mod crypto;
 pub mod gpui_tokio;
 pub mod key_storage;
@@ -33,6 +34,7 @@ pub use crate::ai_chat::{
 pub use crate::ai_chat::{
     ChatEngine, ChatMessageRenderer, ChatStreamProcessor, CoreStreamEvent, StreamError,
 };
+pub use serde_json;
 
 pub fn init(cx: &mut App) {
     gpui_tokio::init(cx);

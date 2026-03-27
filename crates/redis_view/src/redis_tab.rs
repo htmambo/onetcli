@@ -14,10 +14,12 @@ use gpui::{
     Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
 };
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::layout::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
 };
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent, TabItem};
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
@@ -273,6 +275,36 @@ impl TabContent for RedisTabView {
 
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let kind = if self.workspace.is_some() {
+            ConnectionRestoreKind::RedisWorkspace
+        } else {
+            ConnectionRestoreKind::Redis
+        };
+        let connection_id = if kind.is_workspace() {
+            None
+        } else {
+            self.active_connection_id.or_else(|| {
+                self.connections
+                    .first()
+                    .and_then(|connection| connection.id)
+            })
+        };
+
+        if !kind.is_workspace() && connection_id.is_none() {
+            return JsonValue::Null;
+        }
+
+        ConnectionRestorePayload {
+            kind,
+            connection_id,
+            workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
+            active_connection_id: self.active_connection_id,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn on_activate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

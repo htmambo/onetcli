@@ -15,9 +15,11 @@ use gpui::{
 };
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, v_flex};
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
 };
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, Workspace};
 use one_core::{
     storage::StoredConnection,
@@ -40,6 +42,7 @@ enum ResizingPanel {
 
 pub struct DatabaseTabView {
     connections: Vec<StoredConnection>,
+    active_connection_id: Option<i64>,
     tab_container: Entity<TabContainer>,
     db_tree_view: Entity<DbTreeView>,
     status_msg: Entity<String>,
@@ -137,6 +140,7 @@ impl DatabaseTabView {
 
         Self {
             connections: connections.clone(),
+            active_connection_id: active_conn_id,
             tab_container,
             db_tree_view,
             status_msg,
@@ -483,6 +487,34 @@ impl TabContent for DatabaseTabView {
 
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let kind = if self.workspace.is_some() {
+            ConnectionRestoreKind::DatabaseWorkspace
+        } else {
+            ConnectionRestoreKind::Database
+        };
+        let connection_id = if kind.is_workspace() {
+            None
+        } else {
+            self.connections
+                .first()
+                .and_then(|connection| connection.id)
+        };
+
+        if !kind.is_workspace() && connection_id.is_none() {
+            return JsonValue::Null;
+        }
+
+        ConnectionRestorePayload {
+            kind,
+            connection_id,
+            workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
+            active_connection_id: self.active_connection_id,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn on_activate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

@@ -2484,3 +2484,125 @@
   - 结果：通过（16 passed）
 - 已执行：`cargo check -p main`
   - 结果：通过
+
+## 编码前检查 - 首页连接恢复提示
+时间：2026-03-27 23:55:53 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-connection-restore.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/tab_persistence.rs`：复用配置目录与 JSON 持久化模式
+- `main/src/home/home_tabs.rs`：复用各类连接页打开入口
+- `main/src/home_tab.rs`：复用首页启动后延迟弹窗与 `Checkbox` 交互模式
+□ 将遵循命名约定：新增恢复类型与快照结构使用 `ConnectionRestore*` 命名，模块名保持蛇形
+□ 将遵循代码风格：继续沿用 `window.defer(...)`、`cx.notify()`、现有导入顺序和 `cargo fmt`
+□ 确认不重复造轮子，证明：已检查现有 `tab_state.json`、`TabContent::dump()`、首页弹窗和连接打开链路，仓库中不存在现成的“启动时勾选恢复连接”实现
+
+## 实施计划 - 首页连接恢复提示
+时间：2026-03-27 23:55:53 +0800
+
+### 1. 方案结论
+- 不直接扩展现有 tab 自动恢复链路
+- 新增独立连接恢复快照文件
+- 退出时写快照，启动后由首页弹窗提示并支持勾选恢复
+
+### 2. 执行顺序
+- 先新增恢复快照模型与持久化读写
+- 再为连接页补 `dump()` 元数据
+- 再接入退出保存
+- 再实现首页恢复提示与批量恢复
+- 最后补本地验证与审查报告
+
+## 编码前检查 - connection-restore
+时间：2026-03-28 00:33:01 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-connection-restore.md`
+- 已分析相似实现：
+  - `main/src/onetcli_app.rs`
+  - `crates/core/src/tab_container.rs`
+  - `crates/core/src/tab_persistence.rs`
+  - `main/src/home/home_tabs.rs`
+  - `main/src/home_tab.rs`
+- 将使用以下可复用组件：
+  - `TabContainer::dump()`：复用现有标签页状态导出能力构建恢复快照
+  - `save_tab_state(...)`：沿用现有退出持久化时机
+  - `open_ssh_terminal` / `open_serial_terminal` / `open_sftp_view`
+  - `restore_database_tab` / `restore_redis_tab` / `restore_mongodb_tab`
+  - `window.defer(...)`：沿用首页已有的启动后弹窗时序模式
+- 将遵循命名约定：恢复模型统一使用 `ConnectionRestore*` 命名，首页侧动作使用 `restore_*` / `skip_*`
+- 将遵循代码风格：保持 Rust 既有导入顺序、最小持久化模型、首页实体内集中调度
+- 确认不重复造轮子，证明：已检查现有 tab 持久化、首页连接打开入口和启动弹窗模式，本次只补独立快照与恢复提示，不重做完整 tab 自动恢复框架
+
+## 编码后声明 - connection-restore
+时间：2026-03-28 00:33:01 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/tab_container.rs`：继续使用 `TabContainerState` / `TabItemState` 作为退出时的状态来源
+- `crates/core/src/tab_persistence.rs`：复用配置目录与 JSON 状态文件的持久化模式
+- `main/src/home/home_tabs.rs`：继续由首页统一负责各类连接页打开与恢复
+- `main/src/home_tab.rs`：复用 `window.defer(...)` 的弹窗时序和首页数据加载完成后的调度模式
+- `gpui_component` 对话框与复选框组件：承接“提示恢复 + 勾选恢复”的交互
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增模型统一采用 `ConnectionRestoreKind`、`ConnectionRestoreSnapshot`、`ConnectionRestoreItem`
+- 代码风格：连接页 `dump()` 只输出最小恢复元数据，不把复杂视图状态写入快照
+- 文件组织：恢复模型位于 `crates/core/src/`，首页接入位于 `main/src/`，规划和留痕落在项目本地 `docs/plans/` 与 `.claude/`
+- 文案规范：本轮新增日志与实施文档已统一改为简体中文
+
+### 3. 对比了以下相似实现
+- `tab_persistence.rs`：现有 tab 恢复需要 builder 注册，而连接页当前并未完整接入，因此本次没有强行走自动恢复链路
+- `home_tabs.rs`：现有数据库/Redis/Mongo 打开逻辑会读取 `DatabaseOpenMode`，因此恢复入口单独抽出“按指定模式打开”方法
+- `home_tab.rs`：认证弹窗已采用 `window.defer(...)`，本次恢复提示与无效快照清理时序保持一致
+
+### 4. 未重复造轮子的证明
+- 已检查 `TabContainer`、tab 持久化模块、首页连接打开策略和各连接页 `dump()` 能力
+- 结论：仓库已有退出保存、首页打开、弹窗交互三条成熟链路；本次只新增连接恢复快照这层粘合，不引入第二套连接打开流程
+
+## 实施与验证记录 - connection-restore
+时间：2026-03-28 00:33:01 +0800
+
+### 已完成修改
+- 新增 `crates/core/src/connection_restore.rs`，实现连接恢复快照模型、持久化与最小过滤逻辑
+- 为 SSH/串口终端、SFTP、数据库、Redis、MongoDB 标签页补齐 `dump()` 恢复元数据输出
+- 在 `main/src/onetcli_app.rs` 的退出收尾中同时保存标签状态与连接恢复快照
+- 在 `main/src/connection_restore.rs` 实现待恢复项解析、恢复弹窗与勾选状态管理
+- 在 `main/src/home_tab.rs` 接入“连接和工作区加载完成后提示恢复”，并补齐跳过/恢复所选执行链路
+- 在 `main/src/home/home_tabs.rs` 抽出按指定模式恢复数据库、Redis、MongoDB 标签页的入口
+- 修正 `main/src/home_tab.rs` 中无效快照在 `render()` 阶段直接清理状态的问题，改为延迟到事件循环中处理
+- 将 `main/src/onetcli_app.rs` 与 `docs/plans/2026-03-27-connection-restore.md` 的本轮新增英文文案收敛为中文
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core connection_restore -- --nocapture`
+  - 结果：通过，3 个恢复快照相关单元测试全部通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 当前限制
+- 尚未执行 GUI 手动回归；恢复弹窗勾选交互、跳过逻辑和多标签恢复仍需在实际桌面环境下点测一轮
+- 当前仍有仓库既有告警：
+  - `crates/ui/src/window_ext.rs` 的未使用导入和死代码告警
+  - `main/src/home_tab.rs` 的 `connection_list_view_mode_label` 未使用告警
+
+## 追加修复 - 未出现恢复提示
+时间：2026-03-28 00:44:22 +0800
+
+### 1. 根因定位
+- 本机配置目录中只存在 `tab_state.json`，不存在 `connection_restore_state.json`
+- 现有实现把连接恢复快照保存仅挂在 `on_app_quit` 的后台任务里
+- `tab_state.json` 则主要由 `schedule_save(...)` 在布局变更后异步保存，因此会出现“标签状态已落盘，但连接恢复快照没有落盘”的分叉
+
+### 2. 修复策略
+- 将连接恢复快照保存并入 `save_tab_state(...)`
+- 这样无论是定时布局保存还是退出保存，只要标签状态写盘，连接恢复快照就一定同步写盘
+- 同时把 `on_app_quit` 的保存从后台任务改为同步执行，避免进程退出前后台任务来不及写文件
+
+### 3. 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core connection_restore -- --nocapture`
+  - 结果：通过
+- `cargo test -p one-core 保存标签状态时同步写入连接恢复快照 -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过

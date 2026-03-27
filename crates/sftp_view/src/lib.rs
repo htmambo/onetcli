@@ -26,7 +26,9 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex,
 };
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
 };
@@ -3842,6 +3844,21 @@ impl TabContent for SftpView {
 
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let Some(connection_id) = self.stored_connection.id else {
+            return JsonValue::Null;
+        };
+
+        ConnectionRestorePayload {
+            kind: ConnectionRestoreKind::Sftp,
+            connection_id: Some(connection_id),
+            workspace_id: None,
+            active_connection_id: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn try_close(

@@ -399,11 +399,10 @@ impl OnetCliApp {
             let tab_container = tab_container.clone();
             move |_, cx| {
                 let state = tab_container.read(cx).dump(cx);
-                cx.background_executor().spawn(async move {
-                    if let Err(err) = save_tab_state(&state) {
-                        tracing::error!("Failed to save tab state on quit: {:?}", err);
-                    }
-                })
+                if let Err(err) = save_tab_state(&state) {
+                    tracing::error!("退出时保存标签状态失败：{:?}", err);
+                }
+                Task::ready(())
             }
         })
         .detach();

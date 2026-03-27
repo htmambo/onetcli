@@ -258,6 +258,7 @@
 - 建议：通过
 
 ### 结论
+
 - 根因已修复：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L1000) 在筛选写库成功后会发 `ConnectionUpdated`，不再只更新仓库而忽略内存连接列表。
 - 打开的树视图也会同步筛选状态：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L725) 现在会从传入的 `StoredConnection` 刷新 `selected_databases`。
 - 纯逻辑测试已覆盖“保留筛选”和“恢复全选”：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L2669)。
@@ -1023,3 +1024,64 @@
 - `..` 行右键菜单已补齐，可直接执行进入上级目录等操作。
 - 文件行新增 `occlude()` 避免父容器空白区菜单误命中。
 - 已补充纯单测覆盖父目录推导逻辑，并修复本地单段相对路径的父目录边界。
+
+---
+
+## 审查报告（connection-restore 实现）
+生成时间：2026-03-28 00:33:01 +0800
+
+### 需求完整性检查
+- 目标明确：退出时保存当前已打开的连接页，并在下次启动后提示是否恢复
+- 范围明确：覆盖恢复快照模型、连接页最小状态导出、退出保存、首页恢复提示与按类型恢复执行
+- 交付物明确：代码实现、上下文摘要、实施方案、操作日志、验证报告、本地验证结果
+- 风险与依赖明确：启动提示依赖工作区和连接数据先完成加载；GUI 弹窗交互仍需桌面回归
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：90/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 验证结果
+- 已执行：`cargo fmt --all`
+  - 结果：通过
+- 已执行：`cargo test -p one-core connection_restore -- --nocapture`
+  - 结果：通过，3 个测试全部通过
+- 已执行：`cargo check -p main`
+  - 结果：通过
+
+### 结论
+- 恢复模型边界清晰：[`connection_restore.rs`](/usr/htdocs/onetcli/crates/core/src/connection_restore.rs) 独立维护连接恢复快照，避免把需求扩展成完整 tab builder 恢复。
+- 连接页状态导出收敛：[`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs)、[`lib.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/lib.rs)、[`database_tab.rs`](/usr/htdocs/onetcli/crates/db_view/src/database_tab.rs)、[`redis_tab.rs`](/usr/htdocs/onetcli/crates/redis_view/src/redis_tab.rs)、[`mongo_tab.rs`](/usr/htdocs/onetcli/crates/mongodb_view/src/mongo_tab.rs) 现在只输出恢复所需的最小元数据。
+- 启动提示链路已闭环：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs) 在连接与工作区均加载完成后弹出恢复对话框，并支持跳过或按勾选项恢复。
+- 恢复类型不会漂移：[`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs) 新增按指定模式恢复数据库、Redis、MongoDB 的入口，不再被当前 `DatabaseOpenMode` 改写。
+- 时序隐患已处理：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs) 对无效快照改为 `window.defer(...)` 后清理，避免在 `render()` 阶段直接改状态。
+
+### 残余风险
+- 恢复弹窗的勾选交互和多标签恢复顺序还没有做桌面手工回归。
+- 快照文件解析失败时当前策略是忽略并告警，不会自动清理损坏文件。
+
+---
+
+## 审查补充（connection-restore 提示未出现修复）
+生成时间：2026-03-28 00:44:22 +0800
+
+### 结论
+- 根因已确认：恢复提示缺失不是首页弹窗逻辑没走，而是 `connection_restore_state.json` 没有被稳定写出。
+- 保存链路已收敛：[`tab_persistence.rs`](/usr/htdocs/onetcli/crates/core/src/tab_persistence.rs) 现在会在 `save_tab_state(...)` 内同步保存连接恢复快照。
+- 退出保存已加固：[`onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 的 `on_app_quit` 现在同步保存，不再依赖可能来不及执行的后台任务。
+- 回归测试已补齐：[`tab_persistence.rs`](/usr/htdocs/onetcli/crates/core/src/tab_persistence.rs) 新增“保存标签状态时同步写入连接恢复快照”单测。
+
+### 验证结果
+- `cargo test -p one-core 保存标签状态时同步写入连接恢复快照 -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过

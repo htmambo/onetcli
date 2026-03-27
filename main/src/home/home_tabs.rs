@@ -21,6 +21,14 @@ impl HomePage {
         }
     }
 
+    fn database_open_mode(cx: &App) -> DatabaseOpenMode {
+        if cx.has_global::<AppSettings>() {
+            AppSettings::global(cx).database_open_mode
+        } else {
+            DatabaseOpenMode::default()
+        }
+    }
+
     fn register_terminal_view(&mut self, terminal_view: &Entity<TerminalView>) {
         self.terminal_views.retain(|view| view.upgrade().is_some());
         self.terminal_views.push(terminal_view.downgrade());
@@ -461,21 +469,16 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn open_redis_tab(
+    fn open_redis_tab_in_mode(
         &mut self,
         conn: StoredConnection,
         workspace: Option<Workspace>,
+        open_mode: DatabaseOpenMode,
+        active_conn_id: Option<i64>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let open_mode = if cx.has_global::<AppSettings>() {
-            AppSettings::global(cx).database_open_mode
-        } else {
-            DatabaseOpenMode::default()
-        };
-
         let workspace_id = workspace.as_ref().and_then(|ws| ws.id);
-        let active_conn_id = conn.id;
 
         let (tab_id, connections, workspace_for_tab) = match open_mode {
             DatabaseOpenMode::Workspace if workspace_id.is_some() => {
@@ -521,21 +524,52 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn open_mongodb_tab(
+    pub(crate) fn open_redis_tab(
         &mut self,
         conn: StoredConnection,
         workspace: Option<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let open_mode = if cx.has_global::<AppSettings>() {
-            AppSettings::global(cx).database_open_mode
-        } else {
-            DatabaseOpenMode::default()
-        };
-
-        let workspace_id = workspace.as_ref().and_then(|ws| ws.id);
         let active_conn_id = conn.id;
+        self.open_redis_tab_in_mode(
+            conn,
+            workspace,
+            Self::database_open_mode(cx),
+            active_conn_id,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn restore_redis_tab(
+        &mut self,
+        conn: StoredConnection,
+        workspace: Option<Workspace>,
+        use_workspace_tab: bool,
+        active_conn_id: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open_mode =
+            if use_workspace_tab && workspace.as_ref().and_then(|item| item.id).is_some() {
+                DatabaseOpenMode::Workspace
+            } else {
+                DatabaseOpenMode::Single
+            };
+        self.open_redis_tab_in_mode(conn, workspace, open_mode, active_conn_id, window, cx);
+    }
+
+    fn open_mongodb_tab_in_mode(
+        &mut self,
+        conn: StoredConnection,
+        workspace: Option<Workspace>,
+        open_mode: DatabaseOpenMode,
+        active_conn_id: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace_id = workspace.as_ref().and_then(|ws| ws.id);
 
         let (tab_id, connections, workspace_for_tab) = match open_mode {
             DatabaseOpenMode::Workspace if workspace_id.is_some() => {
@@ -579,6 +613,42 @@ impl HomePage {
                 );
             });
         });
+    }
+
+    pub(crate) fn open_mongodb_tab(
+        &mut self,
+        conn: StoredConnection,
+        workspace: Option<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active_conn_id = conn.id;
+        self.open_mongodb_tab_in_mode(
+            conn,
+            workspace,
+            Self::database_open_mode(cx),
+            active_conn_id,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn restore_mongodb_tab(
+        &mut self,
+        conn: StoredConnection,
+        workspace: Option<Workspace>,
+        use_workspace_tab: bool,
+        active_conn_id: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open_mode =
+            if use_workspace_tab && workspace.as_ref().and_then(|item| item.id).is_some() {
+                DatabaseOpenMode::Workspace
+            } else {
+                DatabaseOpenMode::Single
+            };
+        self.open_mongodb_tab_in_mode(conn, workspace, open_mode, active_conn_id, window, cx);
     }
 
     pub(crate) fn add_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -672,20 +742,15 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn add_item_to_tab(
+    fn open_database_tab_in_mode(
         &mut self,
         conn: &StoredConnection,
         workspace: Option<Workspace>,
+        open_mode: DatabaseOpenMode,
+        active_conn_id: Option<i64>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // 根据设置中的数据库打开方式决定如何打开
-        let open_mode = if cx.has_global::<AppSettings>() {
-            AppSettings::global(cx).database_open_mode
-        } else {
-            DatabaseOpenMode::default()
-        };
-
         // 在 defer 之前准备所有需要的数据，避免在 HomePage 更新期间
         // 触发 on_deactivate 导致双重借用 panic
         let workspace_id = workspace.as_ref().and_then(|w| w.id);
@@ -713,7 +778,7 @@ impl HomePage {
                                 DatabaseTabView::new_with_active_conn(
                                     None,
                                     vec![conn_clone.clone()],
-                                    conn_clone.id,
+                                    active_conn_id.or(conn_clone.id),
                                     window,
                                     cx,
                                 )
@@ -731,7 +796,6 @@ impl HomePage {
                         format!("database-tab-{}", conn_clone.id.unwrap_or(0))
                     };
 
-                    let active_conn_id = conn_clone.id;
                     tc.activate_or_add_tab_lazy(
                         tab_id.clone(),
                         move |window, cx| {
@@ -752,6 +816,41 @@ impl HomePage {
                 }
             });
         });
+    }
+
+    pub(crate) fn add_item_to_tab(
+        &mut self,
+        conn: &StoredConnection,
+        workspace: Option<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_database_tab_in_mode(
+            conn,
+            workspace,
+            Self::database_open_mode(cx),
+            conn.id,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn restore_database_tab(
+        &mut self,
+        conn: &StoredConnection,
+        workspace: Option<Workspace>,
+        use_workspace_tab: bool,
+        active_conn_id: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open_mode =
+            if use_workspace_tab && workspace.as_ref().and_then(|item| item.id).is_some() {
+                DatabaseOpenMode::Workspace
+            } else {
+                DatabaseOpenMode::Single
+            };
+        self.open_database_tab_in_mode(conn, workspace, open_mode, active_conn_id, window, cx);
     }
 
     /// 复制当前活动标签并打开

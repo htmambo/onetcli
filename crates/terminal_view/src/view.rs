@@ -24,7 +24,9 @@ use crate::theme::{
     TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
     MIN_LINE_HEIGHT_SCALE,
 };
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
@@ -2243,6 +2245,27 @@ impl TabContent for TerminalView {
 
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let kind = match self.connection_kind(cx) {
+            TerminalConnectionKind::Ssh => ConnectionRestoreKind::SshTerminal,
+            TerminalConnectionKind::Serial => ConnectionRestoreKind::SerialTerminal,
+            TerminalConnectionKind::Local => return JsonValue::Null,
+        };
+
+        let Some(connection_id) = self.connection_id(cx) else {
+            return JsonValue::Null;
+        };
+
+        ConnectionRestorePayload {
+            kind,
+            connection_id: Some(connection_id),
+            workspace_id: None,
+            active_connection_id: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn try_close(

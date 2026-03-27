@@ -47,6 +47,10 @@ use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::auth::{AuthService, PasswordAuthAction, show_password_auth_dialog};
+use crate::connection_restore::{
+    ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
+    open_connection_restore_dialog, resolve_restore_items,
+};
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
@@ -56,6 +60,7 @@ use crate::setting_tab::{
     GlobalCurrentUser,
 };
 use crate::user_avatar::render_user_avatar;
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestoreSnapshot};
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
 
@@ -252,6 +257,14 @@ pub struct HomePage {
     logging_in: bool,
     /// 认证错误消息（登录/注册失败时设置）
     auth_error: Option<String>,
+    /// 待处理的连接恢复快照
+    pending_connection_restore_snapshot: Option<ConnectionRestoreSnapshot>,
+    /// 工作区是否已完成初次加载
+    workspaces_loaded: bool,
+    /// 连接是否已完成初次加载
+    connections_loaded: bool,
+    /// 恢复提示是否已经弹出
+    connection_restore_prompt_opened: bool,
 }
 
 impl HomePage {
@@ -320,6 +333,10 @@ impl HomePage {
             current_user: None,
             logging_in: false,
             auth_error: None,
+            pending_connection_restore_snapshot: load_pending_connection_restore_snapshot(),
+            workspaces_loaded: false,
+            connections_loaded: false,
+            connection_restore_prompt_opened: false,
         };
 
         // 异步加载工作区
@@ -425,6 +442,7 @@ impl HomePage {
                 Ok(workspaces) => {
                     _ = this.update(cx, |this, cx| {
                         this.workspaces = workspaces;
+                        this.workspaces_loaded = true;
                         cx.notify();
                     });
                 }
@@ -450,6 +468,7 @@ impl HomePage {
                 Ok(connections) => {
                     _ = this.update(cx, |this, cx| {
                         this.connections = connections;
+                        this.connections_loaded = true;
                         cx.notify();
                     });
                 }
@@ -481,6 +500,152 @@ impl HomePage {
                 });
             });
         });
+    }
+
+    fn maybe_prompt_connection_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.connection_restore_prompt_opened
+            || !self.workspaces_loaded
+            || !self.connections_loaded
+        {
+            return;
+        }
+
+        let Some(snapshot) = self.pending_connection_restore_snapshot.clone() else {
+            return;
+        };
+
+        let resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
+        if resolved_items.is_empty() {
+            // 避免在 render 阶段直接清理状态，延后到窗口事件循环中执行。
+            self.connection_restore_prompt_opened = true;
+            let home_page = cx.entity();
+            window.defer(cx, move |_window, cx| {
+                let _ = home_page.update(cx, |home, cx| {
+                    home.skip_pending_connection_restore(cx);
+                });
+            });
+            return;
+        }
+
+        self.connection_restore_prompt_opened = true;
+        let home_page = cx.entity();
+        window.defer(cx, move |window, cx| {
+            open_connection_restore_dialog(home_page, resolved_items, window, cx);
+        });
+    }
+
+    pub(crate) fn skip_pending_connection_restore(&mut self, cx: &mut Context<Self>) {
+        self.pending_connection_restore_snapshot = None;
+        self.connection_restore_prompt_opened = false;
+        crate::connection_restore::clear_pending_connection_restore_snapshot();
+        cx.notify();
+    }
+
+    pub(crate) fn restore_saved_connection_sessions(
+        &mut self,
+        selected_snapshot_ids: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(snapshot) = self.pending_connection_restore_snapshot.clone() else {
+            return;
+        };
+
+        let selected_snapshot_ids = selected_snapshot_ids
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
+
+        self.skip_pending_connection_restore(cx);
+
+        for item in resolved_items
+            .into_iter()
+            .filter(|item| selected_snapshot_ids.contains(&item.snapshot_id))
+        {
+            self.restore_connection_restore_item(item, window, cx);
+        }
+
+        cx.notify();
+    }
+
+    fn restore_connection_restore_item(
+        &mut self,
+        item: ResolvedConnectionRestoreItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match item.kind {
+            ConnectionRestoreKind::SshTerminal => {
+                self.open_ssh_terminal(item.connection, window, cx);
+            }
+            ConnectionRestoreKind::SerialTerminal => {
+                self.open_serial_terminal(item.connection, window, cx);
+            }
+            ConnectionRestoreKind::Sftp => {
+                self.open_sftp_view(item.connection, window, cx);
+            }
+            ConnectionRestoreKind::Database => {
+                self.restore_database_tab(
+                    &item.connection,
+                    None,
+                    false,
+                    item.active_connection_id,
+                    window,
+                    cx,
+                );
+            }
+            ConnectionRestoreKind::DatabaseWorkspace => {
+                self.restore_database_tab(
+                    &item.connection,
+                    item.workspace,
+                    true,
+                    item.active_connection_id,
+                    window,
+                    cx,
+                );
+            }
+            ConnectionRestoreKind::Redis => {
+                self.restore_redis_tab(
+                    item.connection,
+                    None,
+                    false,
+                    item.active_connection_id,
+                    window,
+                    cx,
+                );
+            }
+            ConnectionRestoreKind::RedisWorkspace => {
+                self.restore_redis_tab(
+                    item.connection,
+                    item.workspace,
+                    true,
+                    item.active_connection_id,
+                    window,
+                    cx,
+                );
+            }
+            ConnectionRestoreKind::MongoDb => {
+                self.restore_mongodb_tab(
+                    item.connection,
+                    None,
+                    false,
+                    item.active_connection_id,
+                    window,
+                    cx,
+                );
+            }
+            ConnectionRestoreKind::MongoDbWorkspace => {
+                self.restore_mongodb_tab(
+                    item.connection,
+                    item.workspace,
+                    true,
+                    item.active_connection_id,
+                    window,
+                    cx,
+                );
+            }
+        }
     }
 
     fn queue_pending_cloud_deletion(
@@ -6733,6 +6898,8 @@ impl Render for HomePage {
                 });
             });
         }
+
+        self.maybe_prompt_connection_restore(window, cx);
 
         div().size_full().track_focus(&self.focus_handle).child(
             h_flex()
