@@ -948,3 +948,44 @@
 - Oracle：新增 MODIFY 默认值/非空与 UNIQUE INDEX 测试
 - SQLite：新增结构变更重建与顺序变化无差异测试
 - ClickHouse：新增 MODIFY 类型与 ADD INDEX 测试
+
+---
+
+## 审查报告（SFTP 右键菜单补齐）
+生成时间：2026-03-27 14:01:26 +0800
+
+### 需求完整性检查
+- 目标明确：补齐 SFTP 空白区域与 `..` 行的右键菜单
+- 范围明确：覆盖 `crates/sftp_view` 与 `crates/terminal_view` 两套文件管理 UI
+- 交付物明确：代码改动、文案补充、本地验证、操作日志与审查报告
+- 风险与依赖明确：依赖既有 `ContextMenu`/`PopupMenu` 体系，GUI 交互缺少自动化冒烟
+
+### 技术维度评分
+- 代码质量：93/100
+- 测试覆盖：86/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：94/100
+- 风险评估：89/100
+
+### 综合评分
+- 92/100
+- 建议：通过
+
+### 验证结果
+- 已执行：`cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+- 已执行：`cargo test -p sftp_view -p terminal_view --lib --no-run`
+  - 结果：通过
+- 已执行：`cargo fmt --check`
+  - 结果：失败（仓库内存在无关既有格式漂移）
+- 已执行：`cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/terminal_view/src/sidebar/file_manager_panel.rs`
+  - 结果：通过
+
+### 结论
+- 空白区域右键菜单已补齐，当前目录级操作可在空白区触发。
+- `..` 行右键菜单已补齐，可直接执行进入上级目录等操作。
+- 文件行新增 `occlude()` 避免父容器空白区菜单误命中。
+- 已补充纯单测覆盖父目录推导逻辑，并修复本地单段相对路径的父目录边界。

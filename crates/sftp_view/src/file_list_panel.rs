@@ -275,7 +275,10 @@ impl FileListPanel {
         if self.is_remote {
             self.current_path == "/" || self.current_path == "." || self.current_path.is_empty()
         } else {
-            self.current_path == "/" || std::path::Path::new(&self.current_path).parent().is_none()
+            self.current_path == "/"
+                || std::path::Path::new(&self.current_path)
+                    .parent()
+                    .is_none_or(|path| path.as_os_str().is_empty())
         }
     }
 
@@ -574,6 +577,26 @@ impl FileListPanel {
             .child(div().w(px(80.)).px_2())
     }
 
+    fn parent_path(current_path: &str, is_remote: bool) -> String {
+        if is_remote {
+            if current_path == "/" || current_path == "." || current_path.is_empty() {
+                return "/".to_string();
+            }
+
+            let trimmed = current_path.trim_end_matches('/');
+            match trimmed.rfind('/') {
+                Some(0) | None => "/".to_string(),
+                Some(pos) => trimmed[..pos].to_string(),
+            }
+        } else {
+            std::path::Path::new(current_path)
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| current_path.to_string())
+        }
+    }
+
     /// 构建文件项的右键菜单
     /// 根据 is_remote（远程/本地）和 is_dir（文件夹/文件）显示不同的菜单项
     fn build_file_context_menu(
@@ -806,6 +829,168 @@ impl FileListPanel {
 
         menu
     }
+
+    /// 构建当前目录空白区域的右键菜单
+    fn build_panel_context_menu(
+        mut menu: PopupMenu,
+        current_path: &str,
+        is_remote: bool,
+        view: &Entity<Self>,
+        window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let path_for_copy = current_path.to_string();
+
+        let view_new_file = view.clone();
+        let view_new_folder = view.clone();
+        let view_terminal = view.clone();
+        let view_copy_path = view.clone();
+        let view_refresh = view.clone();
+        let view_toggle_hidden = view.clone();
+
+        menu = menu
+            .item(
+                PopupMenuItem::new(t!("File.new_file").to_string())
+                    .icon(IconName::File)
+                    .on_click(window.listener_for(&view_new_file, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::NewFile);
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("File.new_folder").to_string())
+                    .icon(IconName::NewFolder)
+                    .on_click(
+                        window.listener_for(&view_new_folder, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::NewFolder);
+                        }),
+                    ),
+            );
+
+        if is_remote {
+            let view_upload_file = view.clone();
+            let view_upload_folder = view.clone();
+            menu = menu
+                .item(
+                    PopupMenuItem::new(t!("File.upload_file").to_string())
+                        .icon(IconName::Upload)
+                        .on_click(window.listener_for(
+                            &view_upload_file,
+                            move |_this, _, _, cx| {
+                                cx.emit(FileListPanelEvent::UploadFile);
+                            },
+                        )),
+                )
+                .item(
+                    PopupMenuItem::new(t!("File.upload_folder").to_string())
+                        .icon(IconName::Upload)
+                        .on_click(window.listener_for(
+                            &view_upload_folder,
+                            move |_this, _, _, cx| {
+                                cx.emit(FileListPanelEvent::UploadFolder);
+                            },
+                        )),
+                );
+        }
+
+        menu = menu
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("Terminal.open_in_current").to_string())
+                    .icon(IconName::SquareTerminal)
+                    .on_click(window.listener_for(&view_terminal, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::OpenInTerminal);
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("File.copy_path").to_string())
+                    .icon(IconName::Copy)
+                    .on_click(
+                        window.listener_for(&view_copy_path, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::CopyAbsolutePath {
+                                full_path: path_for_copy.clone(),
+                            });
+                        }),
+                    ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("Common.refresh").to_string())
+                    .icon(IconName::Refresh)
+                    .on_click(window.listener_for(&view_refresh, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::Refresh);
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("File.toggle_hidden").to_string())
+                    .icon(IconName::Eye)
+                    .on_click(
+                        window.listener_for(&view_toggle_hidden, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::ToggleHiddenFiles);
+                        }),
+                    ),
+            );
+
+        menu
+    }
+
+    /// 构建上级目录行（..）的右键菜单
+    fn build_parent_context_menu(
+        mut menu: PopupMenu,
+        parent_path: &str,
+        view: &Entity<Self>,
+        window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let path_for_terminal = parent_path.to_string();
+        let path_for_copy = parent_path.to_string();
+
+        let view_go_parent = view.clone();
+        let view_terminal = view.clone();
+        let view_copy_path = view.clone();
+        let view_refresh = view.clone();
+
+        menu = menu
+            .item(
+                PopupMenuItem::new(t!("File.go_parent").to_string())
+                    .icon(IconName::ArrowUp)
+                    .on_click(
+                        window.listener_for(&view_go_parent, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::ItemDoubleClicked("..".to_string()));
+                        }),
+                    ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("Terminal.open_here").to_string())
+                    .icon(IconName::Terminal)
+                    .on_click(window.listener_for(&view_terminal, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::OpenInTerminalAt {
+                            full_path: path_for_terminal.clone(),
+                        });
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("File.copy_path").to_string())
+                    .icon(IconName::Copy)
+                    .on_click(
+                        window.listener_for(&view_copy_path, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::CopyAbsolutePath {
+                                full_path: path_for_copy.clone(),
+                            });
+                        }),
+                    ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("Common.refresh").to_string())
+                    .icon(IconName::Refresh)
+                    .on_click(window.listener_for(&view_refresh, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::Refresh);
+                    })),
+            );
+
+        menu
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1003,161 +1188,229 @@ impl Render for FileListPanel {
         } else {
             filtered_count
         };
+        let current_path_for_menu = self.current_path.clone();
+        let is_remote_for_menu = self.is_remote;
+        let view_for_menu = cx.entity();
 
         v_flex()
             .size_full()
             .child(self.render_search_bar(cx))
             .child(self.render_header(cx))
             .child(
-                uniform_list("file-list", total_count, {
-                    cx.processor(move |state: &mut Self, range: Range<usize>, _window, cx| {
-                        let current_path = state.current_path.clone();
-                        let is_remote = state.is_remote;
-                        let has_parent = !state.is_at_root();
-                        let view = cx.entity();
-                        range
-                            .map(|list_ix| {
-                                if has_parent && list_ix == 0 {
-                                    return div()
-                                        .id(list_ix)
-                                        .cursor_pointer()
-                                        .on_double_click(cx.listener(
-                                            move |_this, _, _window, cx| {
-                                                cx.emit(FileListPanelEvent::ItemDoubleClicked(
-                                                    "..".to_string(),
-                                                ));
-                                            },
-                                        ))
-                                        .child(state.render_parent_row(cx))
-                                        .into_any_element();
-                                }
-
-                                let filtered_ix = if has_parent { list_ix - 1 } else { list_ix };
-                                let real_ix = state.filtered_indices[filtered_ix];
-                                let item = &state.items[real_ix];
-                                let is_selected = state.selected_indices.contains(&filtered_ix);
-                                let item_name = item.name.clone();
-                                let is_dir = item.is_dir;
-                                let full_path = if is_remote {
-                                    if current_path.ends_with('/') {
-                                        format!("{}{}", current_path, item_name)
-                                    } else {
-                                        format!("{}/{}", current_path, item_name)
-                                    }
-                                } else {
-                                    std::path::Path::new(&current_path)
-                                        .join(&item_name)
-                                        .to_string_lossy()
-                                        .to_string()
-                                };
-
-                                // 构建拖拽项目列表
-                                // 如果当前文件在选中列表中且有多个选中项，则拖拽所有选中项
-                                // 否则只拖拽当前文件
-                                let drag_items = if state.selected_indices.contains(&filtered_ix)
-                                    && state.selected_indices.len() > 1
-                                {
-                                    // 拖拽所有选中的文件
-                                    let items: Vec<DraggedFileItem> = state
-                                        .selected_indices
-                                        .iter()
-                                        .filter_map(|&idx| {
-                                            state.filtered_indices.get(idx).and_then(|&real_ix| {
-                                                state.items.get(real_ix).map(|item| {
-                                                    let item_path = if is_remote {
-                                                        if current_path.ends_with('/') {
-                                                            format!("{}{}", current_path, item.name)
-                                                        } else {
-                                                            format!(
-                                                                "{}/{}",
-                                                                current_path, item.name
-                                                            )
-                                                        }
-                                                    } else {
-                                                        std::path::Path::new(&current_path)
-                                                            .join(&item.name)
-                                                            .to_string_lossy()
-                                                            .to_string()
-                                                    };
-                                                    DraggedFileItem {
-                                                        name: item.name.clone(),
-                                                        is_dir: item.is_dir,
-                                                        full_path: item_path,
-                                                        is_remote,
-                                                    }
-                                                })
-                                            })
-                                        })
-                                        .collect();
-                                    DraggedFileItems::multiple(items, is_remote)
-                                } else {
-                                    // 只拖拽当前文件
-                                    DraggedFileItems::single(DraggedFileItem {
-                                        name: item_name.clone(),
-                                        is_dir,
-                                        full_path: full_path.clone(),
-                                        is_remote,
-                                    })
-                                };
-
-                                // 右键菜单需要的变量
-                                let ctx_name = item_name.clone();
-                                let ctx_full_path = full_path.clone();
-                                let ctx_is_dir = is_dir;
-                                let ctx_is_remote = is_remote;
-                                let ctx_view = view.clone();
-
-                                div()
-                                    .id(list_ix)
-                                    .cursor_pointer()
-                                    .on_drag(drag_items, |drag, _, _, cx| cx.new(|_| drag.clone()))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(
-                                            move |this, event: &MouseDownEvent, _window, cx| {
-                                                let multi_select = event.modifiers.secondary();
-                                                this.toggle_selection(filtered_ix, multi_select);
-                                                cx.notify();
-                                            },
-                                        ),
-                                    )
-                                    .on_double_click(cx.listener({
-                                        let name = item_name.clone();
-                                        move |_this, _, _window, cx| {
-                                            if is_dir {
-                                                cx.emit(FileListPanelEvent::ItemDoubleClicked(
-                                                    name.clone(),
-                                                ));
-                                            }
-                                        }
-                                    }))
-                                    .context_menu(move |menu, window, cx| {
-                                        Self::build_file_context_menu(
-                                            menu,
-                                            &ctx_name,
-                                            &ctx_full_path,
-                                            ctx_is_dir,
-                                            ctx_is_remote,
-                                            &ctx_view,
-                                            window,
-                                            cx,
-                                        )
-                                    })
-                                    .child(state.render_file_row(
-                                        filtered_ix,
-                                        item,
-                                        is_selected,
-                                        cx,
-                                    ))
-                                    .into_any_element()
-                            })
-                            .collect()
+                div()
+                    .flex_1()
+                    .size_full()
+                    .context_menu(move |menu, window, cx| {
+                        Self::build_panel_context_menu(
+                            menu,
+                            &current_path_for_menu,
+                            is_remote_for_menu,
+                            &view_for_menu,
+                            window,
+                            cx,
+                        )
                     })
-                })
-                .flex_1()
-                .size_full()
-                .track_scroll(&self.scroll_handle)
-                .with_sizing_behavior(ListSizingBehavior::Auto),
+                    .child(
+                        uniform_list("file-list", total_count, {
+                            cx.processor(move |state: &mut Self, range: Range<usize>, _window, cx| {
+                                let current_path = state.current_path.clone();
+                                let is_remote = state.is_remote;
+                                let has_parent = !state.is_at_root();
+                                let parent_path = Self::parent_path(&current_path, is_remote);
+                                let view = cx.entity();
+                                range
+                                    .map(|list_ix| {
+                                        if has_parent && list_ix == 0 {
+                                            let parent_path_for_menu = parent_path.clone();
+                                            let parent_view = view.clone();
+                                            return div()
+                                                .id(list_ix)
+                                                .cursor_pointer()
+                                                .occlude()
+                                                .on_double_click(cx.listener(
+                                                    move |_this, _, _window, cx| {
+                                                        cx.emit(FileListPanelEvent::ItemDoubleClicked(
+                                                            "..".to_string(),
+                                                        ));
+                                                    },
+                                                ))
+                                                .context_menu(move |menu, window, cx| {
+                                                    Self::build_parent_context_menu(
+                                                        menu,
+                                                        &parent_path_for_menu,
+                                                        &parent_view,
+                                                        window,
+                                                        cx,
+                                                    )
+                                                })
+                                                .child(state.render_parent_row(cx))
+                                                .into_any_element();
+                                        }
+
+                                        let filtered_ix = if has_parent { list_ix - 1 } else { list_ix };
+                                        let real_ix = state.filtered_indices[filtered_ix];
+                                        let item = &state.items[real_ix];
+                                        let is_selected = state.selected_indices.contains(&filtered_ix);
+                                        let item_name = item.name.clone();
+                                        let is_dir = item.is_dir;
+                                        let full_path = if is_remote {
+                                            if current_path.ends_with('/') {
+                                                format!("{}{}", current_path, item_name)
+                                            } else {
+                                                format!("{}/{}", current_path, item_name)
+                                            }
+                                        } else {
+                                            std::path::Path::new(&current_path)
+                                                .join(&item_name)
+                                                .to_string_lossy()
+                                                .to_string()
+                                        };
+
+                                        // 构建拖拽项目列表
+                                        // 如果当前文件在选中列表中且有多个选中项，则拖拽所有选中项
+                                        // 否则只拖拽当前文件
+                                        let drag_items = if state.selected_indices.contains(&filtered_ix)
+                                            && state.selected_indices.len() > 1
+                                        {
+                                            // 拖拽所有选中的文件
+                                            let items: Vec<DraggedFileItem> = state
+                                                .selected_indices
+                                                .iter()
+                                                .filter_map(|&idx| {
+                                                    state.filtered_indices.get(idx).and_then(|&real_ix| {
+                                                        state.items.get(real_ix).map(|item| {
+                                                            let item_path = if is_remote {
+                                                                if current_path.ends_with('/') {
+                                                                    format!("{}{}", current_path, item.name)
+                                                                } else {
+                                                                    format!(
+                                                                        "{}/{}",
+                                                                        current_path, item.name
+                                                                    )
+                                                                }
+                                                            } else {
+                                                                std::path::Path::new(&current_path)
+                                                                    .join(&item.name)
+                                                                    .to_string_lossy()
+                                                                    .to_string()
+                                                            };
+                                                            DraggedFileItem {
+                                                                name: item.name.clone(),
+                                                                is_dir: item.is_dir,
+                                                                full_path: item_path,
+                                                                is_remote,
+                                                            }
+                                                        })
+                                                    })
+                                                })
+                                                .collect();
+                                            DraggedFileItems::multiple(items, is_remote)
+                                        } else {
+                                            // 只拖拽当前文件
+                                            DraggedFileItems::single(DraggedFileItem {
+                                                name: item_name.clone(),
+                                                is_dir,
+                                                full_path: full_path.clone(),
+                                                is_remote,
+                                            })
+                                        };
+
+                                        // 右键菜单需要的变量
+                                        let ctx_name = item_name.clone();
+                                        let ctx_full_path = full_path.clone();
+                                        let ctx_is_dir = is_dir;
+                                        let ctx_is_remote = is_remote;
+                                        let ctx_view = view.clone();
+
+                                        div()
+                                            .id(list_ix)
+                                            .cursor_pointer()
+                                            .occlude()
+                                            .on_drag(drag_items, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(
+                                                    move |this, event: &MouseDownEvent, _window, cx| {
+                                                        let multi_select = event.modifiers.secondary();
+                                                        this.toggle_selection(filtered_ix, multi_select);
+                                                        cx.notify();
+                                                    },
+                                                ),
+                                            )
+                                            .on_double_click(cx.listener({
+                                                let name = item_name.clone();
+                                                move |_this, _, _window, cx| {
+                                                    if is_dir {
+                                                        cx.emit(FileListPanelEvent::ItemDoubleClicked(
+                                                            name.clone(),
+                                                        ));
+                                                    }
+                                                }
+                                            }))
+                                            .context_menu(move |menu, window, cx| {
+                                                Self::build_file_context_menu(
+                                                    menu,
+                                                    &ctx_name,
+                                                    &ctx_full_path,
+                                                    ctx_is_dir,
+                                                    ctx_is_remote,
+                                                    &ctx_view,
+                                                    window,
+                                                    cx,
+                                                )
+                                            })
+                                            .child(state.render_file_row(
+                                                filtered_ix,
+                                                item,
+                                                is_selected,
+                                                cx,
+                                            ))
+                                            .into_any_element()
+                                    })
+                                    .collect()
+                            })
+                        })
+                        .size_full()
+                        .track_scroll(&self.scroll_handle)
+                        .with_sizing_behavior(ListSizingBehavior::Auto),
+                    ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileListPanel;
+
+    #[test]
+    fn parent_path_returns_remote_parent_directory() {
+        assert_eq!(
+            FileListPanel::parent_path("/root/projects/demo", true),
+            "/root/projects"
+        );
+        assert_eq!(
+            FileListPanel::parent_path("/root/projects/demo/", true),
+            "/root/projects"
+        );
+    }
+
+    #[test]
+    fn parent_path_keeps_remote_root_stable() {
+        assert_eq!(FileListPanel::parent_path("/", true), "/");
+        assert_eq!(FileListPanel::parent_path(".", true), "/");
+        assert_eq!(FileListPanel::parent_path("", true), "/");
+    }
+
+    #[test]
+    fn parent_path_returns_local_parent_directory() {
+        assert_eq!(
+            FileListPanel::parent_path("workspace/project", false),
+            "workspace"
+        );
+    }
+
+    #[test]
+    fn parent_path_keeps_local_rootless_path_stable() {
+        assert_eq!(FileListPanel::parent_path("workspace", false), "workspace");
     }
 }

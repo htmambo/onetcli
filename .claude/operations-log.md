@@ -2261,3 +2261,75 @@
 - cargo test -p db sqlite::plugin::tests::（21 passed）
 - cargo test -p db clickhouse::plugin::tests::（20 passed）
 - LSP 诊断未执行：rust-analyzer 不可用
+
+## 编码前检查 - SFTP 右键菜单补齐
+时间：2026-03-27 13:51:22 +0800
+
+□ 已查阅上下文摘要文件：.claude/context-summary-sftp-right-click-menu.md
+□ 将使用以下可复用组件：
+- crates/ui/src/menu/context_menu.rs - 复用统一右键菜单命中与弹出机制
+- crates/sftp_view/src/file_list_panel.rs - 复用 `FileListPanelEvent` 和文件项菜单组织方式
+- crates/terminal_view/src/sidebar/file_manager_panel.rs - 复用现有目录操作、上传与刷新逻辑
+  □ 将遵循命名约定：Rust `snake_case` / `CamelCase`
+  □ 将遵循代码风格：局部补函数、最小化调整链式 UI 构建
+  □ 确认不重复造轮子，证明：已检查 SFTP 文件列表、终端侧边栏文件管理器、Redis 树及通用 `ContextMenu` 实现
+
+## 工具可用性说明 - SFTP 右键菜单补齐
+时间：2026-03-27 13:51:22 +0800
+
+- `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code` 在当前执行环境不可用
+- 已采用仓库内现有实现检索与源码分析作为替代，并在上下文摘要中记录证据路径
+
+## 编码后声明 - SFTP 右键菜单补齐
+时间：2026-03-27 14:01:26 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ui/src/menu/context_menu.rs`：继续使用统一右键菜单挂载机制
+- `crates/sftp_view/src/file_list_panel.rs`：沿用 `FileListPanelEvent` 事件回发和文件项菜单构造
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：沿用现有上传、刷新、目录跳转与剪贴板逻辑
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 helper 和 builder 保持 Rust `snake_case`
+- 代码风格：在原有链式 UI 构建里局部补菜单与 `occlude()`，未引入额外状态容器
+- 文件组织：SFTP 双面板逻辑留在 `file_list_panel.rs`，侧边栏逻辑留在 `file_manager_panel.rs`
+
+### 3. 对比了以下相似实现
+- `crates/sftp_view/src/file_list_panel.rs`：原始文件项菜单绑定模式
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：侧边栏文件项菜单绑定模式
+- `crates/redis_view/src/redis_tree_view.rs`：节点级右键菜单上下文切换模式
+- `crates/story/src/stories/menu_story.rs`：整块区域右键菜单挂载模式
+
+### 4. 未重复造轮子的证明
+- 已检查通用 `ContextMenu`/`PopupMenu` 体系，未新建弹层或自研菜单状态机
+- 空白区菜单通过给文件行增加 `occlude()` 并复用现有菜单体系实现，未引入并行右键框架
+
+### 5. 本地验证记录
+- 已执行：`cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+- 已执行：`cargo test -p sftp_view -p terminal_view --lib --no-run`
+  - 结果：通过
+- 已执行：`cargo fmt --check`
+  - 结果：失败
+  - 原因：仓库内存在与本任务无关的既有格式漂移（`crates/db/src/clickhouse/plugin.rs`、`crates/db/src/sqlite/plugin.rs`）
+- 已执行：`cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/terminal_view/src/sidebar/file_manager_panel.rs`
+  - 结果：通过
+- 额外处理：已手动回退 `cargo fmt` 误触及的无关文件改动，保持任务改动面最小
+
+## 追加收口 - 路径父目录边界与纯单测
+时间：2026-03-27 14:01:26 +0800
+
+### 1. 新增验证能力
+- `crates/sftp_view/src/file_list_panel.rs`：新增 `parent_path` 纯单测 4 个
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：新增 `remote_path_parent` 纯单测 3 个
+
+### 2. 修复的边界行为
+- 本地单段相对路径现在视为顶层，不再显示 `..`
+- `go_up_local` 现在会忽略空父路径，避免跳到空字符串目录
+
+### 3. 本地验证记录
+- 已执行：`cargo test -p sftp_view file_list_panel::tests:: -- --nocapture`
+  - 结果：通过（4 passed）
+- 已执行：`cargo test -p terminal_view sidebar::file_manager_panel::tests:: -- --nocapture`
+  - 结果：通过（3 passed）
+- 已执行：`cargo check -p sftp_view -p terminal_view`
+  - 结果：通过

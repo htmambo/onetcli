@@ -913,7 +913,11 @@ impl SftpView {
     }
 
     fn go_up_local(&mut self, cx: &mut Context<Self>) {
-        if let Some(parent) = self.local_current_path.parent() {
+        if let Some(parent) = self
+            .local_current_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
             self.local_current_path = parent.to_path_buf();
             self.push_local_history(self.local_current_path.clone());
             self.refresh_local_dir(cx);
