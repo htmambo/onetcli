@@ -1227,6 +1227,7 @@ impl Render for FileListPanel {
                                                 .id(list_ix)
                                                 .cursor_pointer()
                                                 .occlude()
+                                                .hover(|style| style.bg(cx.theme().list_hover))
                                                 .on_double_click(cx.listener(
                                                     move |_this, _, _window, cx| {
                                                         cx.emit(FileListPanelEvent::ItemDoubleClicked(
@@ -1326,6 +1327,9 @@ impl Render for FileListPanel {
                                             .id(list_ix)
                                             .cursor_pointer()
                                             .occlude()
+                                            .when(!is_selected, |el| {
+                                                el.hover(|style| style.bg(cx.theme().list_hover))
+                                            })
                                             .on_drag(drag_items, |drag, _, _, cx| cx.new(|_| drag.clone()))
                                             .on_mouse_down(
                                                 MouseButton::Left,

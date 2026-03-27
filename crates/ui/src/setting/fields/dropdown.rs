@@ -44,6 +44,10 @@ where
         let old_value = get_value::<T>(&field, cx);
         let set_value = set_value::<T>(&field, cx);
         let dropdown_options = self.options.clone();
+        let button_id = SharedString::from(format!(
+            "setting-dropdown-{}-{}-{}",
+            options.page_ix, options.group_ix, options.item_ix
+        ));
 
         let old_label = dropdown_options
             .iter()
@@ -51,7 +55,7 @@ where
             .map(|(_, label)| label.clone())
             .unwrap_or_else(|| old_value.clone().into());
 
-        Button::new("btn")
+        Button::new(button_id)
             .when(options.layout.is_vertical(), |this| this.w_full())
             .label(old_label)
             .dropdown_caret(true)

@@ -1,11 +1,15 @@
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::process::Command;
 use std::sync::{Arc, RwLock};
 
 use gpui::{
     App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Render, SharedString,
-    StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    StyleRefinement, Styled, Window, WindowAppearance, div, prelude::FluentBuilder, px,
 };
+#[cfg(target_os = "linux")]
+use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, Theme, ThemeMode,
     button::{Button, ButtonVariants as _},
@@ -250,6 +254,95 @@ fn clamp_ui_font_size(size: f64) -> f32 {
     size.clamp(8.0, 72.0) as f32
 }
 
+#[cfg(target_os = "linux")]
+fn parse_deepin_theme_appearance(value: &str) -> Option<WindowAppearance> {
+    let normalized = value
+        .trim()
+        .trim_matches('\'')
+        .trim_matches('"')
+        .trim()
+        .to_ascii_lowercase();
+
+    if normalized.is_empty() {
+        None
+    } else if normalized.contains("dark") {
+        Some(WindowAppearance::Dark)
+    } else {
+        Some(WindowAppearance::Light)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_command_stdout(command: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(command).args(args).output().ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        None
+    } else {
+        Some(stdout)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_gsettings_string(schema: &str, key: &str) -> Option<String> {
+    read_command_stdout("gsettings", &["get", schema, key])
+}
+
+#[cfg(target_os = "linux")]
+fn read_deepin_appearance_property(property: &str) -> Option<String> {
+    read_command_stdout(
+        "gdbus",
+        &[
+            "call",
+            "--session",
+            "--dest",
+            "org.deepin.dde.Appearance1",
+            "--object-path",
+            "/org/deepin/dde/Appearance1",
+            "--method",
+            "org.freedesktop.DBus.Properties.Get",
+            "org.deepin.dde.Appearance1",
+            property,
+        ],
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_deepin_window_appearance() -> Option<WindowAppearance> {
+    if !linux_prefers_system_window_controls() {
+        return None;
+    }
+
+    ["GlobalTheme", "GtkTheme"]
+        .into_iter()
+        .find_map(|property| {
+            read_deepin_appearance_property(property)
+                .and_then(|value| parse_deepin_theme_appearance(&value))
+        })
+        .or_else(|| {
+            [
+                ("com.deepin.xsettings", "theme-name"),
+                ("com.deepin.xsettings", "gtk-theme-name"),
+                ("com.deepin.dde.appearance", "gtk-theme"),
+            ]
+            .into_iter()
+            .find_map(|(schema, key)| {
+                read_gsettings_string(schema, key)
+                    .and_then(|value| parse_deepin_theme_appearance(&value))
+            })
+        })
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn resolve_linux_window_appearance_override() -> Option<WindowAppearance> {
+    resolve_deepin_window_appearance()
+}
+
 fn default_terminal_font_size() -> f64 {
     15.0
 }
@@ -416,17 +509,43 @@ impl AppSettings {
         cx.refresh_windows();
     }
 
-    pub fn apply(&self, cx: &mut App) {
-        gpui_component::set_locale(&self.locale);
-
-        let mode = if self.theme_mode == "dark" {
+    fn manual_theme_mode(&self) -> ThemeMode {
+        if self.theme_mode == "dark" {
             ThemeMode::Dark
         } else {
             ThemeMode::Light
-        };
-        Theme::global_mut(cx).mode = mode;
-        Theme::change(mode, None, cx);
+        }
+    }
+
+    fn effective_theme_mode(&self, appearance: WindowAppearance) -> ThemeMode {
+        if self.auto_switch_theme {
+            appearance.into()
+        } else {
+            self.manual_theme_mode()
+        }
+    }
+
+    fn resolve_system_appearance(window: Option<&Window>, cx: &mut App) -> WindowAppearance {
+        #[cfg(target_os = "linux")]
+        if let Some(appearance) = resolve_linux_window_appearance_override() {
+            return appearance;
+        }
+
+        window
+            .map(|window| window.appearance())
+            .unwrap_or_else(|| cx.window_appearance())
+    }
+
+    pub fn apply_theme_preferences(&self, window: Option<&mut Window>, cx: &mut App) {
+        let appearance = Self::resolve_system_appearance(window.as_deref(), cx);
+        let mode = self.effective_theme_mode(appearance);
+        Theme::change(mode, window, cx);
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
+    }
+
+    pub fn apply(&self, cx: &mut App) {
+        gpui_component::set_locale(&self.locale);
+        self.apply_theme_preferences(None, cx);
 
         // 同步自动保存配置
         self.sync_auto_save_config(cx);
@@ -612,30 +731,17 @@ impl SettingsPanel {
                                 SettingField::switch(
                                     |cx: &App| cx.theme().mode.is_dark(),
                                     |val: bool, cx: &mut App| {
-                                        let (font_family, font_size) = {
-                                            let settings = AppSettings::global(cx);
-                                            (settings.font_family.clone(), settings.font_size)
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.theme_mode = if val {
+                                                "dark".to_string()
+                                            } else {
+                                                "light".to_string()
+                                            };
+                                            settings.save();
+                                            settings.clone()
                                         };
-                                        let mode = if val {
-                                            ThemeMode::Dark
-                                        } else {
-                                            ThemeMode::Light
-                                        };
-                                        Theme::global_mut(cx).mode = mode;
-                                        Theme::change(mode, None, cx);
-                                        AppSettings::apply_ui_font_preferences(
-                                            font_family,
-                                            font_size,
-                                            cx,
-                                        );
-
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.theme_mode = if val {
-                                            "dark".to_string()
-                                        } else {
-                                            "light".to_string()
-                                        };
-                                        settings.save();
+                                        settings_snapshot.apply_theme_preferences(None, cx);
                                     },
                                 )
                                 .default_value(false),
@@ -648,9 +754,13 @@ impl SettingsPanel {
                                 SettingField::checkbox(
                                     |cx: &App| AppSettings::global(cx).auto_switch_theme,
                                     |val: bool, cx: &mut App| {
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.auto_switch_theme = val;
-                                        settings.save();
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.auto_switch_theme = val;
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
                                     },
                                 )
                                 .default_value(default_settings.auto_switch_theme),
@@ -692,6 +802,7 @@ impl SettingsPanel {
                                         ("Helvetica".into(), "Helvetica".into()),
                                         ("Times New Roman".into(), "Times New Roman".into()),
                                         ("Courier New".into(), "Courier New".into()),
+                                        ("JetBrains Mono".into(), "JetBrains Mono".into()),
                                     ],
                                     |cx: &App| {
                                         SharedString::from(
@@ -999,6 +1110,66 @@ impl SettingsPanel {
                 )),
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+    #[cfg(target_os = "linux")]
+    use super::parse_deepin_theme_appearance;
+    use gpui::{WindowAppearance, WindowAppearance::*};
+    use gpui_component::ThemeMode;
+
+    #[test]
+    fn 自动切换关闭时沿用手动主题() {
+        let mut settings = AppSettings::default();
+        settings.theme_mode = "dark".to_string();
+        settings.auto_switch_theme = false;
+
+        assert_eq!(settings.effective_theme_mode(Light), ThemeMode::Dark);
+        assert_eq!(settings.effective_theme_mode(Dark), ThemeMode::Dark);
+    }
+
+    #[test]
+    fn 自动切换开启时跟随系统外观() {
+        let mut settings = AppSettings::default();
+        settings.theme_mode = "light".to_string();
+        settings.auto_switch_theme = true;
+
+        assert_eq!(
+            settings.effective_theme_mode(WindowAppearance::Light),
+            ThemeMode::Light
+        );
+        assert_eq!(
+            settings.effective_theme_mode(WindowAppearance::Dark),
+            ThemeMode::Dark
+        );
+        assert_eq!(
+            settings.effective_theme_mode(WindowAppearance::VibrantDark),
+            ThemeMode::Dark
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn deepin_主题名可映射为亮暗模式() {
+        assert_eq!(
+            parse_deepin_theme_appearance("'deepin-dark'"),
+            Some(WindowAppearance::Dark)
+        );
+        assert_eq!(
+            parse_deepin_theme_appearance("(<\'hazy-color.dark\'>,)"),
+            Some(WindowAppearance::Dark)
+        );
+        assert_eq!(
+            parse_deepin_theme_appearance("'deepin'"),
+            Some(WindowAppearance::Light)
+        );
+        assert_eq!(
+            parse_deepin_theme_appearance("(<\'hazy-color.light\'>,)"),
+            Some(WindowAppearance::Light)
+        );
     }
 }
 

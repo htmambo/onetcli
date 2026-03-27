@@ -55,6 +55,11 @@ pub fn should_render_custom_window_controls(window: &Window) -> bool {
     true
 }
 
+fn should_round_window_controls(window: &Window) -> bool {
+    let _ = window;
+    cfg!(target_os = "linux") && linux_prefers_system_window_controls()
+}
+
 /// TitleBar used to customize the appearance of the title bar.
 ///
 /// We can put some elements inside the title bar.
@@ -187,12 +192,22 @@ impl ControlIcon {
 }
 
 impl RenderOnce for ControlIcon {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
-        let hover_fg = self.hover_fg(cx);
-        let hover_bg = self.hover_bg(cx);
+        let unify_hover_style = should_round_window_controls(window);
+        let hover_fg = if unify_hover_style {
+            cx.theme().danger_foreground
+        } else {
+            self.hover_fg(cx)
+        };
+        let hover_bg = if unify_hover_style {
+            cx.theme().danger
+        } else {
+            self.hover_bg(cx)
+        };
         let active_bg = self.active_bg(cx);
+        let should_round_self = should_round_window_controls(window);
         let icon = self.clone();
         let on_close_window = match &self {
             ControlIcon::Close { on_close_window } => on_close_window.clone(),
@@ -209,6 +224,9 @@ impl RenderOnce for ControlIcon {
             .content_center()
             .items_center()
             .text_color(cx.theme().foreground)
+            .when(should_round_self, |this| {
+                this.rounded(cx.theme().radius_lg).overflow_hidden()
+            })
             .hover(|style| style.bg(hover_bg).text_color(hover_fg))
             .active(|style| style.bg(active_bg).text_color(hover_fg))
             .when(is_windows, |this| {
@@ -244,7 +262,7 @@ struct WindowControls {
 }
 
 impl RenderOnce for WindowControls {
-    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         if cfg!(target_os = "macos") {
             return div().id("window-controls");
         }

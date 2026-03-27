@@ -115,11 +115,13 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "PingFang SC".into(),
             "PingFang TC".into(),
             "Hiragino Sans GB".into(),
+            "JetBrains Mono".into(),
         ]
     } else if cfg!(target_os = "windows") {
         vec![
             "Cascadia Mono".into(),
             "Courier New".into(),
+            "JetBrains Mono".into(),
             "Lucida Console".into(),
             "Segoe UI Emoji".into(),
             "Microsoft YaHei".into(),
@@ -131,6 +133,7 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "Ubuntu Mono".into(),
             "Liberation Mono".into(),
             "Courier New".into(),
+            "JetBrains Mono".into(),
             "Noto Color Emoji".into(),
             "Noto Sans CJK SC".into(),
             "WenQuanYi Micro Hei".into(),

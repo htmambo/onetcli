@@ -1,5 +1,136 @@
 ## 操作日志
 
+## 编码前检查 - auto-switch-theme
+时间：2026-03-28 02:35:25 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-auto-switch-theme.md`
+- 已分析相似实现：
+  - `main/src/setting_tab.rs`
+  - `crates/ui/src/theme/mod.rs`
+  - `vendor/zed/crates/gpui/src/window.rs`
+  - `main/src/onetcli_app.rs`
+- 将使用以下可复用组件：
+  - `AppSettings`：设置保存与应用入口
+  - `ThemeMode` / `Theme::change(...)`：主题切换统一路径
+  - `observe_window_appearance(...)`：系统主题变化监听
+- 将遵循命名约定：新增辅助函数使用 `resolve_*` / `effective_*` 风格
+- 将遵循代码风格：先提取纯判定函数，再把副作用收敛到少量 helper
+- 确认不重复造轮子，证明：已检查设置页、主题模块和窗口观察接口，当前缺失的是链路接线而不是底层能力
+
+## 编码后声明 - auto-switch-theme
+时间：2026-03-28 02:35:25 +0800
+
+### 1. 复用了以下既有组件
+- `AppSettings`：继续作为主题偏好的持久化与应用入口
+- `Theme::change(...)`：继续作为唯一主题切换路径
+- `WindowAppearance -> ThemeMode`：沿用 `gpui-component` 现有转换规则
+- `observe_window_appearance(...)`：复用 `gpui` 的窗口外观变化回调
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `manual_theme_mode`、`effective_theme_mode`、`apply_theme_preferences`
+- 代码风格：把纯判定和副作用拆开，避免在设置项闭包里堆叠重复逻辑
+- 文件组织：设置计算逻辑留在 `main/src/setting_tab.rs`，窗口监听留在 `main/src/onetcli_app.rs`
+
+### 3. 对比了以下相似实现
+- `main/src/setting_tab.rs`：原来只保存 `auto_switch_theme`，现在把它接入有效主题计算
+- `crates/ui/src/theme/mod.rs`：继续沿用 `Theme::change(...)` 和 `WindowAppearance` 转换，不重造主题系统
+- `vendor/zed/crates/gpui/src/window.rs`：复用现成的窗口外观观察能力，而不是手写轮询或平台分支
+- `main/src/onetcli_app.rs`：主窗口初始化本来就是全局 UI 生命周期入口，适合挂监听
+
+### 4. 未重复造轮子的证明
+- 已检查设置页、主题模块、窗口观察接口和主窗口初始化流程
+- 结论：现有底层能力完整，缺失的是“设置 -> 生效逻辑 -> 系统事件”三段接线，因此本次只补链路，不引入新的主题管理抽象
+
+## 实施与验证记录 - auto-switch-theme
+时间：2026-03-28 02:35:25 +0800
+
+### 已完成修改
+- 在 `main/src/setting_tab.rs` 新增 `manual_theme_mode`、`effective_theme_mode`、`apply_theme_preferences`
+- 在 `main/src/setting_tab.rs` 新增 Deepin `gsettings` 主题名回退，解决 portal 不提供颜色方案时的当前主题识别
+- 让 `AppSettings::apply(...)` 改为根据 `auto_switch_theme` 和系统外观计算有效主题
+- 让“深色模式”与“自动切换主题”设置项在变更后立即重新应用主题
+- 在 `main/src/onetcli_app.rs` 为主窗口注册 `observe_window_appearance(...)`，系统主题变化时自动跟随
+- 在 `main/src/onetcli_app.rs` 为主窗口注册 `observe_window_activation(...)`，Deepin 下切回应用时重新同步主题
+- 为有效主题计算补了 2 个单元测试
+
+### 本地验证
+- `gdbus call --session --dest org.freedesktop.portal.Desktop ... org.freedesktop.appearance color-scheme`
+  - 结果：返回 `org.freedesktop.portal.Error.NotFound`
+- `gsettings get com.deepin.xsettings theme-name`
+  - 结果：当前返回 `'deepin'`
+- `cargo test -p main 自动切换 --bin onetcli -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 当前限制
+- 我这里无法直接自动切换桌面主题做 GUI 实测
+- 但从代码链路上，勾选/取消已经会立即重算主题；Deepin 下当前主题读取已改为 `gsettings` 回退，切回窗口时也会重新同步
+
+## 编码前检查 - deepin-window-control-corner
+时间：2026-03-28 02:00:23 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-control-corner.md`
+- 已分析相似实现：
+  - `crates/core/src/tab_container.rs`
+  - `crates/ui/src/title_bar.rs`
+  - `crates/ui/src/window_border.rs`
+  - `vendor/zed/crates/gpui/src/platform/linux/x11/window.rs`
+- 将使用以下可复用组件：
+  - `linux_prefers_system_window_controls()`：判断 Deepin/DDE 兼容分支
+  - `render_window_controls(...)` / `WindowControls`
+  - `window.window_decorations()`：避免在贴边/最大化时误加关闭按钮圆角裁剪
+- 将遵循命名约定：新增判断保持 `should_*` 风格，不引入新状态对象
+- 将遵循代码风格：最小改动，仅修正右上角按钮容器布局，不扩散到平台层
+- 确认不重复造轮子，证明：已检查平台层 Deepin 原子、主窗口按钮实现和通用标题栏实现，当前问题属于布局与壳层裁剪错位，不需要新增装饰系统
+
+## 编码后声明 - deepin-window-control-corner
+时间：2026-03-28 02:00:23 +0800
+
+### 1. 复用了以下既有组件
+- `linux_prefers_system_window_controls()`：继续作为 Deepin/DDE 兼容入口
+- `render_window_controls(...)`：主窗口标签栏右上角按钮容器
+- `WindowControls`：通用标题栏右上角按钮容器
+- `window.window_decorations()`：继续作为贴边/最大化时关闭按钮圆角裁剪的判定来源
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `should_inset_window_controls_top_right`，保持 `should_*` 布尔命名
+- 代码风格：沿用链式 `.when(...)` 条件渲染，不额外拆分结构
+- 文件组织：主窗口修复留在 `crates/core`，通用标题栏修复留在 `crates/ui`
+
+### 3. 对比了以下相似实现
+- `crates/core/src/tab_container.rs`：原实现只负责直贴右侧渲染，本次保留其按钮组成，仅补关闭按钮包装层
+- `crates/ui/src/title_bar.rs`：原实现和主窗口逻辑相似，因此同步补齐同一兼容策略
+- `crates/ui/src/window_border.rs`：确认圆角属于内容层裁剪，不能替代 Deepin 外层壳层的物理 shape
+- `vendor/zed/.../x11/window.rs`：确认 `_DEEPIN_NO_TITLEBAR` / `_DEEPIN_FORCE_DECORATE` 已正确写入，因此无需继续改平台属性
+
+### 4. 未重复造轮子的证明
+- 已检查主窗口按钮、通用标题栏、窗口边框和 X11 平台层
+- 结论：现有代码中没有“关闭按钮独立圆角裁剪”这类现成抽象，但已存在可复用的桌面环境与贴边状态判断，因此只补最小包装层逻辑，不新增独立装饰系统
+
+## 实施与验证记录 - deepin-window-control-corner
+时间：2026-03-28 02:00:23 +0800
+
+### 已完成修改
+- 在 `crates/core/src/tab_container.rs` 为主窗口最右侧关闭按钮补上 Deepin 独立圆角裁剪包装层
+- 在 `crates/ui/src/title_bar.rs` 为通用标题栏最右侧关闭按钮补上同样的圆角裁剪包装层
+- 撤销了整组按钮右移方案，保留按钮组原始贴边布局
+- 新增 `.claude/context-summary-deepin-window-control-corner.md`，记录窗口属性、窗口树和 shape 证据
+
+### 本地验证
+- `cargo test -p gpui-component title_bar::tests -- --nocapture`
+  - 结果：通过
+- `cargo check -p gpui-component -p one-core -p main`
+  - 结果：通过
+- `DISPLAY=:0 xprop -id 0x8000002 ...`
+  - 结果：确认 `_DEEPIN_NO_TITLEBAR=1`、`_DEEPIN_FORCE_DECORATE=0`
+- `DISPLAY=:0 xwininfo -tree/-shape -id 0x8000002`
+  - 结果：确认主窗口存在 Deepin 外层无名父窗口，且没有 X11 shape
+
+### 当前限制
+- 当前环境缺少可直接导出窗口截图的工具，无法自动完成视觉比对
+- 右上角视觉效果仍需你在 Deepin 桌面实机确认；若圆角仍不够，应优先微调关闭按钮包装层的圆角半径，而不是回到平台属性层盲改
+
 ## 编码前检查 - windows-owner-id-build
 时间：2026-03-20 15:29:09 +0800
 
@@ -2603,6 +2734,49 @@
 - `cargo test -p one-core connection_restore -- --nocapture`
   - 结果：通过
 - `cargo test -p one-core 保存标签状态时同步写入连接恢复快照 -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+## Deepin 自动切换主题排查与修复
+时间：2026-03-28 03:08:00 +0800
+
+### 1. 根因定位
+- 通过与用户协作切换系统亮暗模式，实时对比了 `gsettings` 与 Deepin DBus 信号
+- 结论是 `gsettings` 中的
+  - `com.deepin.dde.appearance gtk-theme`
+  - `com.deepin.xsettings gtk-theme-name`
+  - `com.deepin.xsettings theme-name`
+  在当前环境下都停留在 `'deepin'`，不会随系统切换更新
+- 真正会变化的是会话总线上的 `org.deepin.dde.Appearance1`
+  - `GtkTheme`: `deepin-dark -> deepin`
+  - `GlobalTheme`: `hazy-color.dark -> hazy-color.light`
+  - 同时会发出 `Changed('gtk', ...)` 与 `Changed('globaltheme', ...)`
+
+### 2. 修复策略
+- 不再把 Deepin 主题判断建立在 `gsettings` 上
+- 在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 中改为优先读取 `org.deepin.dde.Appearance1` 的 `GlobalTheme` / `GtkTheme`
+- 保留原有 `gsettings` 作为兜底，以兼容极端环境
+- 按用户要求，不新增常驻实时监听；仍沿用原有触发点：
+  - 应用启动时应用设置
+  - 窗口重新激活时重新读取系统主题
+
+### 3. 影响范围
+- [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs)
+  - 新增通用命令输出读取辅助函数
+  - 新增 `gdbus` 读取 Deepin Appearance1 属性逻辑
+  - 调整 Linux 下系统外观解析优先级
+  - 补充 Deepin `hazy-color.dark/light` 解析测试
+- [`main/src/onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs)
+  - 未新增实时轮询
+  - 保持现有启动与窗口激活时重算主题的策略
+
+### 4. 本地验证
+- `cargo fmt -- main/src/setting_tab.rs main/src/onetcli_app.rs`
+  - 结果：通过
+- `cargo test -p main 自动切换 --bin onetcli -- --nocapture`
+  - 结果：通过
+- `cargo test -p main deepin_主题名可映射为亮暗模式 --bin onetcli -- --nocapture`
   - 结果：通过
 - `cargo check -p main`
   - 结果：通过

@@ -11,7 +11,8 @@ use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable, Sizable, Size,
-    WindowExt as _, h_flex, should_render_custom_window_controls, v_flex,
+    WindowExt as _, h_flex, linux_prefers_system_window_controls,
+    should_render_custom_window_controls, v_flex,
 };
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -1943,14 +1944,15 @@ impl TabContainer {
                     }),
             )
             .when(show_custom_window_controls, |el| {
-                el.child(self.render_window_controls(window))
+                el.child(self.render_window_controls(window, cx))
             })
     }
 
-    fn render_window_controls(&self, window: &mut Window) -> impl IntoElement {
+    fn render_window_controls(&self, window: &mut Window, cx: &App) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
         let is_maximized = window.is_maximized();
+        let should_round_control_buttons = is_linux && linux_prefers_system_window_controls();
 
         h_flex()
             .id("window-controls")
@@ -1964,6 +1966,8 @@ impl TabContainer {
                 is_linux,
                 is_windows,
                 false,
+                should_round_control_buttons,
+                cx,
             ))
             .child(self.render_control_button(
                 if is_maximized { "restore" } else { "maximize" },
@@ -1976,6 +1980,8 @@ impl TabContainer {
                 is_linux,
                 is_windows,
                 false,
+                should_round_control_buttons,
+                cx,
             ))
             .child(self.render_control_button(
                 "close",
@@ -1984,6 +1990,8 @@ impl TabContainer {
                 is_linux,
                 is_windows,
                 true,
+                should_round_control_buttons,
+                cx,
             ))
     }
 
@@ -1995,6 +2003,8 @@ impl TabContainer {
         is_linux: bool,
         is_windows: bool,
         is_close: bool,
+        round_self: bool,
+        cx: &App,
     ) -> impl IntoElement {
         div()
             .id(id)
@@ -2006,8 +2016,11 @@ impl TabContainer {
             .content_center()
             .items_center()
             .text_color(gpui::white())
+            .when(round_self, |this| {
+                this.rounded(cx.theme().radius_lg).overflow_hidden()
+            })
             .hover(move |style| {
-                if is_close {
+                if round_self || is_close {
                     style.bg(gpui::rgb(0xe81123)).text_color(gpui::white())
                 } else {
                     style.bg(gpui::rgb(0x3a3a3a)).text_color(gpui::white())

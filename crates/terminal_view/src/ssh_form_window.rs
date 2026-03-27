@@ -1,11 +1,11 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, px,
+    div, px, App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar, app_style,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -14,14 +14,14 @@ use gpui_component::{
     select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     tab::{Tab, TabBar},
-    v_flex,
+    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
 };
 use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::certificate_notifier::{
-    CertificateDataEvent, get_notifier as get_certificate_notifier,
+    get_notifier as get_certificate_notifier, CertificateDataEvent,
 };
 use one_core::cloud_sync::GlobalCloudUser;
-use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
+use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
@@ -30,8 +30,8 @@ use one_core::storage::{
 };
 use rust_i18n::t;
 use ssh::{
-    JumpServerConnectConfig, ProxyConnectConfig, ProxyType, RusshClient, SshAuth, SshClient,
-    SshConnectConfig, SshConnectionStage, format_connection_progress_message,
+    format_connection_progress_message, JumpServerConnectConfig, ProxyConnectConfig, ProxyType,
+    RusshClient, SshAuth, SshClient, SshConnectConfig, SshConnectionStage,
 };
 use std::time::{Duration, Instant};
 
@@ -657,7 +657,11 @@ impl SshFormWindow {
                     let key_path = self.key_path_input.read(cx).text().to_string();
                     let passphrase = {
                         let p = self.passphrase_input.read(cx).text().to_string();
-                        if p.is_empty() { None } else { Some(p) }
+                        if p.is_empty() {
+                            None
+                        } else {
+                            Some(p)
+                        }
                     };
                     SshAuthMethod::PrivateKey {
                         key_path,
@@ -695,11 +699,19 @@ impl SshFormWindow {
         // 初始化设置
         let default_directory = {
             let d = self.default_directory_input.read(cx).text().to_string();
-            if d.is_empty() { None } else { Some(d) }
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
+            }
         };
         let init_script = {
             let s = self.init_script_input.read(cx).text().to_string();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
 
         // 跳板机配置
@@ -743,11 +755,19 @@ impl SshFormWindow {
                     .unwrap_or(1080);
                 let proxy_username = {
                     let u = self.proxy_username_input.read(cx).text().to_string();
-                    if u.is_empty() { None } else { Some(u) }
+                    if u.is_empty() {
+                        None
+                    } else {
+                        Some(u)
+                    }
                 };
                 let proxy_password = {
                     let p = self.proxy_password_input.read(cx).text().to_string();
-                    if p.is_empty() { None } else { Some(p) }
+                    if p.is_empty() {
+                        None
+                    } else {
+                        Some(p)
+                    }
                 };
                 let proxy_type = match self.proxy_type {
                     ProxyTypeSelection::Socks5 => StorageProxyType::Socks5,
@@ -1358,22 +1378,20 @@ impl SshFormWindow {
 
     fn spawn_test_status_tick(cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
-        cx.spawn(async move |_, cx: &mut AsyncApp| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                let keep_running = entity
-                    .update(cx, |this, cx| {
-                        if this.is_testing && this.test_started_at.is_some() {
-                            cx.notify();
-                            true
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if !keep_running {
-                    break;
-                }
+        cx.spawn(async move |_, cx: &mut AsyncApp| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let keep_running = entity
+                .update(cx, |this, cx| {
+                    if this.is_testing && this.test_started_at.is_some() {
+                        cx.notify();
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if !keep_running {
+                break;
             }
         })
         .detach();

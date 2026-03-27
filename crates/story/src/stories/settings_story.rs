@@ -238,6 +238,7 @@ impl SettingsStory {
                                     vec![
                                         ("Arial".into(), "Arial".into()),
                                         ("Helvetica".into(), "Helvetica".into()),
+                                        ("JetBrains Mono".into(), "JetBrains Mono".into()),
                                         ("Times New Roman".into(), "Times New Roman".into()),
                                         ("Courier New".into(), "Courier New".into()),
                                     ],

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
+use crate::setting_tab::AppSettings;
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement,
     Render, Styled, Task, Window, actions, div,
@@ -327,6 +328,11 @@ impl OnetCliApp {
             window_handle: window.window_handle(),
         });
 
+        if AppSettings::global(cx).auto_switch_theme {
+            let settings = AppSettings::global(cx).clone();
+            settings.apply_theme_preferences(Some(window), cx);
+        }
+
         let tab_container = cx.new(|cx| {
             let mut container = TabContainer::new(window, cx)
                 .with_tab_bar_colors(
@@ -393,6 +399,26 @@ impl OnetCliApp {
                 }
             },
         )
+        .detach();
+
+        cx.observe_window_appearance(window, |_this, window, cx| {
+            let settings = AppSettings::global(cx).clone();
+            if settings.auto_switch_theme {
+                settings.apply_theme_preferences(Some(window), cx);
+            }
+        })
+        .detach();
+
+        cx.observe_window_activation(window, |_this, window, cx| {
+            if !window.is_window_active() {
+                return;
+            }
+
+            let settings = AppSettings::global(cx).clone();
+            if settings.auto_switch_theme {
+                settings.apply_theme_preferences(Some(window), cx);
+            }
+        })
         .detach();
 
         cx.on_app_quit({

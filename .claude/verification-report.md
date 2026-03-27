@@ -47,6 +47,95 @@
 
 ---
 
+## 审查报告（deepin-window-control-corner 实现）
+生成时间：2026-03-28 02:00:23 +0800
+
+### 需求完整性检查
+- 目标明确：重新定位 Deepin 下主窗口右上角关闭按钮越出圆角的问题，并给出可落地修复
+- 范围明确：主窗口标签栏、通用标题栏、窗口边框与 X11 平台证据链
+- 交付物明确：代码实现、上下文摘要、操作日志、本地验证记录
+- 风险与依赖明确：Deepin 实际视觉结果仍需桌面实测
+
+### 技术维度评分
+- 代码质量：93/100
+  - 改动集中在两个按钮容器，不触碰平台层与窗口创建逻辑。
+  - 修复直接绑定已有 Deepin 环境判断与 `window.window_decorations()`，约束清晰。
+- 测试覆盖：84/100
+  - 复用了现有 Deepin 识别单测，并完成相关 crate 编译验证。
+  - 受环境限制，无法自动截图确认最终视觉效果。
+- 规范遵循：95/100
+  - 仅增加最小布局逻辑，并补齐了上下文与操作留痕。
+
+### 战略维度评分
+- 需求匹配：94/100
+  - 先拿到真实窗口属性和窗口树证据，再实施修复，避免继续在错误层级补丁。
+- 架构一致：92/100
+  - 保持平台层不变，把修复收敛为 Deepin 兼容布局调整，符合当前证据。
+- 风险评估：87/100
+  - 已明确剩余风险为圆角半径主题差异，而不是 X11 属性缺失。
+
+### 综合评分
+- 91/100
+- 建议：通过
+
+### 结论
+- 现场证据已经排除“属性没写对”的假设：主窗口 `0x8000002` 的 `_DEEPIN_NO_TITLEBAR=1`、`_DEEPIN_FORCE_DECORATE=0` 都正确。
+- 现场证据确认 Deepin 仍然给主窗口包裹了额外无名父窗口，且应用窗口和父窗口都没有 X11 shape，因此右上角问题更接近壳层圆角与内容布局不共用裁剪面。
+- 修复策略改为“关闭按钮独立圆角裁剪”而不是继续追加无效裁剪：
+  - [`crates/core/src/tab_container.rs`](/usr/htdocs/onetcli/crates/core/src/tab_container.rs) 为主窗口关闭按钮增加 Deepin 专用圆角包装层
+  - [`crates/ui/src/title_bar.rs`](/usr/htdocs/onetcli/crates/ui/src/title_bar.rs) 为通用标题栏关闭按钮同步增加同样逻辑
+- 本地验证通过：`cargo test -p gpui-component title_bar::tests -- --nocapture`、`cargo check -p gpui-component -p one-core -p main`
+- 剩余工作仅为 Deepin 实机视觉确认；若仍有轻微越界，应优先微调关闭按钮包装层的圆角半径，而不是回退到平台属性层
+
+---
+
+## 审查报告（auto-switch-theme 实现）
+生成时间：2026-03-28 02:35:25 +0800
+
+### 需求完整性检查
+- 目标明确：修复设置页“自动切换主题”无论勾选与否都看不到效果的问题
+- 范围明确：设置持久化、主题生效逻辑、主窗口系统外观变化监听
+- 交付物明确：代码实现、上下文摘要、操作日志、针对性单测、本地编译验证
+- 风险与依赖明确：GUI 级实测仍需桌面环境验证
+
+### 技术维度评分
+- 代码质量：94/100
+  - 根因修复集中在 `AppSettings` 和主窗口初始化，不扩散到无关 UI 组件。
+  - 纯判定函数与副作用逻辑已分离，便于后续维护和测试。
+- 测试覆盖：89/100
+  - 新增了“自动切换关闭/开启”两条单元测试。
+  - 受当前终端环境限制，无法自动化验证桌面主题切换后的实际界面观感。
+- 规范遵循：96/100
+  - 沿用现有 `Theme::change(...)` 和窗口观察接口，没有引入新的主题状态系统。
+
+### 战略维度评分
+- 需求匹配：96/100
+  - 同时修复了“勾选/取消无即时效果”和“系统亮暗变化不跟随”两类问题。
+- 架构一致：94/100
+  - 设置仍由 `AppSettings` 主导，窗口事件仍由主窗口生命周期接入，边界清晰。
+- 风险评估：88/100
+  - 剩余风险主要是不同平台对 `WindowAppearance` 事件触发时机的差异，但主路径已完整闭环。
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 根因已确认：
+  - [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 里 `auto_switch_theme` 原先只保存，不参与主题模式选择
+  - 设置项变更后没有立即重新应用主题
+  - [`main/src/onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 原先没有注册窗口外观变化监听
+  - 当前 Deepin/X11 会话的 `xdg-desktop-portal` 不提供 `org.freedesktop.appearance color-scheme`，默认系统外观来源不可用
+- 修复方式：
+  - 在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 中新增“有效主题模式”计算和统一主题应用入口
+  - 在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 中增加 Deepin `gsettings theme-name` 回退
+  - 在 [`main/src/onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 中为主窗口注册 `observe_window_appearance(...)` 和 `observe_window_activation(...)`
+- 本地验证通过：
+  - `cargo test -p main 自动切换 --bin onetcli -- --nocapture`
+  - `cargo check -p main`
+
+---
+
 ## 审查报告（home-cross-workspace-drag 实现）
 生成时间：2026-03-27 20:38:18 +0800
 
@@ -1085,3 +1174,45 @@
   - 结果：通过
 - `cargo check -p main`
   - 结果：通过
+
+---
+
+## 审查补充（Deepin 自动切换主题）
+生成时间：2026-03-28 03:08:00 +0800
+
+### 需求完整性检查
+- 目标明确：排查 Deepin 下“自动切换主题”无效的真实原因，并修正取值来源
+- 范围明确：仅修复主题来源与判定逻辑，不引入新的实时监听机制
+- 交付物明确：代码修复、本地验证、交互式现场取证结论、操作日志
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：94/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- `gsettings` 不是当前 Deepin 会话里的可靠亮暗模式来源
+- 会真实反映系统切换的是会话总线服务 `org.deepin.dde.Appearance1`
+- 其中 `GlobalTheme` 与 `GtkTheme` 都能体现亮暗态，且实机切换时确实发生变化
+- 当前实现已改为优先读取 `Appearance1`，并保留 `gsettings` 兜底
+
+### 验证结果
+- `cargo test -p main 自动切换 --bin onetcli -- --nocapture`
+  - 结果：通过
+- `cargo test -p main deepin_主题名可映射为亮暗模式 --bin onetcli -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 残余风险
+- 当前仍未做“应用持续前台时系统切换后秒级自动刷新”的额外增强；这是按当前需求刻意不实现
+- 运行期依赖系统存在 `gdbus` 命令；若极端环境缺失，则会回退到原有 `gsettings` / GPUI 外观判断
