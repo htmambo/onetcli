@@ -905,6 +905,29 @@ impl DatabasePlugin for ClickHousePlugin {
         )
     }
 
+    fn build_backup_table_sql(
+        &self,
+        database: &str,
+        _schema: Option<&str>,
+        source_table: &str,
+        target_table: &str,
+    ) -> String {
+        let source = format!(
+            "{}.{}",
+            self.quote_identifier(database),
+            self.quote_identifier(source_table)
+        );
+        let target = format!(
+            "{}.{}",
+            self.quote_identifier(database),
+            self.quote_identifier(target_table)
+        );
+        format!(
+            "CREATE TABLE {} AS {};\nINSERT INTO {} SELECT * FROM {};",
+            target, source, target, source
+        )
+    }
+
     fn build_column_def(&self, col: &ColumnDefinition) -> String {
         let mut def = String::new();
         def.push_str(&self.quote_identifier(&col.name));
@@ -1143,6 +1166,16 @@ mod tests {
         assert!(sql.contains("RENAME TABLE"));
         assert!(sql.contains("`old_name`"));
         assert!(sql.contains("`new_name`"));
+    }
+
+    #[test]
+    fn test_build_backup_table_sql() {
+        let plugin = create_plugin();
+        let sql = plugin.build_backup_table_sql("test_db", None, "orders", "orders_bak");
+        assert!(sql.contains("CREATE TABLE `test_db`.`orders_bak` AS `test_db`.`orders`;"));
+        assert!(
+            sql.contains("INSERT INTO `test_db`.`orders_bak` SELECT * FROM `test_db`.`orders`;")
+        );
     }
 
     #[test]

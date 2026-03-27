@@ -10,6 +10,8 @@ use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
+    clipboard::Clipboard,
+    dialog::DialogButtonProps,
     form::{field, h_form},
     h_flex,
     highlighter::Language,
@@ -25,6 +27,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::database_view_plugin::{ColumnEditorCapabilities, DatabaseViewPluginRegistry};
 use db::GlobalDbState;
+use db::plugin::DatabasePlugin;
 use db::types::{
     CharsetInfo, CollationInfo, ColumnDefinition, ColumnInfo, IndexDefinition, IndexInfo,
     ParsedColumnType, TableDesign, TableOptions,
@@ -40,6 +43,7 @@ pub enum DesignerTab {
     Indexes,
     Options,
     SqlPreview,
+    Ddl,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +100,121 @@ impl TableDesignerConfig {
     }
 }
 
+pub(crate) fn build_table_design_from_metadata(
+    database_type: DatabaseType,
+    database_name: String,
+    table_name: String,
+    columns: &[ColumnInfo],
+    indexes: &[IndexInfo],
+    plugin: Option<&dyn DatabasePlugin>,
+) -> TableDesign {
+    let column_defs: Vec<ColumnDefinition> = columns
+        .iter()
+        .map(|col| {
+            let parsed = plugin
+                .map(|plugin| plugin.parse_column_type(&col.data_type))
+                .unwrap_or_else(|| fallback_parse_column_type(&col.data_type));
+            column_info_to_definition(database_type, col, parsed)
+        })
+        .collect();
+
+    let index_defs: Vec<IndexDefinition> = indexes
+        .iter()
+        .filter(|idx| idx.name.to_uppercase() != "PRIMARY")
+        .map(|idx| IndexDefinition {
+            name: idx.name.clone(),
+            columns: idx.columns.clone(),
+            is_unique: idx.is_unique,
+            is_primary: false,
+            index_type: idx.index_type.clone(),
+            comment: String::new(),
+        })
+        .collect();
+
+    TableDesign {
+        database_name,
+        table_name,
+        columns: column_defs,
+        indexes: index_defs,
+        foreign_keys: vec![],
+        options: TableOptions::default(),
+    }
+}
+
+fn column_info_to_definition(
+    database_type: DatabaseType,
+    col: &ColumnInfo,
+    parsed: ParsedColumnType,
+) -> ColumnDefinition {
+    let base_type = parsed.base_type;
+    let data_type = if let Some(enum_values) = parsed.enum_values {
+        format!("{}({})", base_type, enum_values)
+    } else {
+        base_type.clone()
+    };
+    let is_auto_increment = if database_type == DatabaseType::SQLite {
+        col.is_primary_key && base_type.eq_ignore_ascii_case("INTEGER")
+    } else {
+        parsed.is_auto_increment
+    };
+
+    ColumnDefinition {
+        name: col.name.clone(),
+        data_type,
+        length: parsed.length,
+        precision: None,
+        scale: parsed.scale,
+        is_nullable: col.is_nullable,
+        is_primary_key: col.is_primary_key,
+        is_auto_increment,
+        is_unsigned: parsed.is_unsigned,
+        default_value: col.default_value.clone(),
+        comment: col.comment.clone().unwrap_or_default(),
+        charset: col.charset.clone(),
+        collation: col.collation.clone(),
+    }
+}
+
+fn fallback_parse_column_type(data_type: &str) -> ParsedColumnType {
+    let (base_type, length) = parse_data_type(data_type);
+    ParsedColumnType {
+        base_type,
+        length,
+        scale: extract_scale_from_type_str(data_type),
+        enum_values: None,
+        is_unsigned: data_type.to_uppercase().contains("UNSIGNED"),
+        is_auto_increment: data_type.to_uppercase().contains("AUTO_INCREMENT"),
+    }
+}
+
+fn parse_data_type(data_type: &str) -> (String, Option<u32>) {
+    if let Some(start) = data_type.find('(') {
+        if let Some(end) = data_type.find(')') {
+            let base_type = data_type[..start].trim().to_string();
+            let len_str = &data_type[start + 1..end];
+            if let Some(comma) = len_str.find(',') {
+                let length = len_str[..comma].trim().parse().ok();
+                return (base_type, length);
+            }
+            let length = len_str.trim().parse().ok();
+            return (base_type, length);
+        }
+    }
+    (data_type.to_string(), None)
+}
+
+fn extract_scale_from_type_str(data_type: &str) -> Option<u32> {
+    if let Some(start) = data_type.find('(') {
+        if let Some(end) = data_type.find(')') {
+            let len_str = &data_type[start + 1..end];
+            if let Some(comma) = len_str.find(',') {
+                return len_str[comma + 1..].trim().parse().ok();
+            }
+        }
+    }
+    None
+}
+
 pub struct TableDesigner {
     title: SharedString,
     focus_handle: FocusHandle,
@@ -111,8 +230,32 @@ pub struct TableDesigner {
     indexes_editor: Entity<IndexesEditor>,
     _charsets: Vec<CharsetInfo>,
     sql_preview_input: Entity<InputState>,
+    ddl_preview_input: Entity<InputState>,
     original_design: Option<TableDesign>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone)]
+enum ExecuteSuccessBehavior {
+    StayOpen {
+        tab_id: Option<String>,
+    },
+    CloseTab {
+        tab_container: Entity<TabContainer>,
+        tab_id: String,
+        emitted_tab_id: Option<String>,
+    },
+}
+
+#[derive(Clone)]
+struct TableDesignerExecutionRequest {
+    connection_id: String,
+    database_name: String,
+    schema_name: Option<String>,
+    sql: String,
+    table_name: String,
+    is_new_table: bool,
+    success_behavior: ExecuteSuccessBehavior,
 }
 
 impl TableDesigner {
@@ -217,13 +360,19 @@ impl TableDesigner {
                 .line_number(false)
                 .multi_line(true)
         });
+        let ddl_preview_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .code_editor(Language::from_str("sql"))
+                .line_number(false)
+                .multi_line(true)
+        });
 
         let name_sub = cx.subscribe_in(
             &table_name_input,
             window,
             |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
-                    this.update_sql_preview(window, cx);
+                    this.update_previews(window, cx);
                 }
             },
         );
@@ -233,7 +382,7 @@ impl TableDesigner {
             window,
             |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
-                    this.update_sql_preview(window, cx);
+                    this.update_previews(window, cx);
                 }
             },
         );
@@ -243,30 +392,30 @@ impl TableDesigner {
             window,
             |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
-                    this.update_sql_preview(window, cx);
+                    this.update_previews(window, cx);
                 }
             },
         );
 
         let engine_sub = cx.observe_in(&engine_select, window, |this, _, window, cx| {
-            this.update_sql_preview(window, cx);
+            this.update_previews(window, cx);
         });
 
         let charset_select_clone = charset_select.clone();
         let charset_sub = cx.observe_in(&charset_select, window, move |this, _, window, cx| {
-            this.update_sql_preview(window, cx);
+            this.update_previews(window, cx);
             this.update_collations_for_charset(&charset_select_clone, window, cx);
         });
 
         let collation_sub = cx.observe_in(&collation_select, window, |this, _, window, cx| {
-            this.update_sql_preview(window, cx);
+            this.update_previews(window, cx);
         });
 
         let cols_sub = cx.subscribe_in(
             &columns_editor,
             window,
             |this, _, _: &ColumnsEditorEvent, window, cx| {
-                this.update_sql_preview(window, cx);
+                this.update_previews(window, cx);
             },
         );
 
@@ -274,7 +423,7 @@ impl TableDesigner {
             &indexes_editor,
             window,
             |this, _, _: &IndexesEditorEvent, window, cx| {
-                this.update_sql_preview(window, cx);
+                this.update_previews(window, cx);
             },
         );
 
@@ -293,6 +442,7 @@ impl TableDesigner {
             indexes_editor,
             _charsets: charsets,
             sql_preview_input,
+            ddl_preview_input,
             original_design: None,
             _subscriptions: vec![
                 name_sub,
@@ -306,7 +456,7 @@ impl TableDesigner {
             ],
         };
 
-        designer.update_sql_preview(window, cx);
+        designer.update_previews(window, cx);
 
         if designer.config.table_name.is_some() {
             designer.load_table_structure(cx);
@@ -440,33 +590,61 @@ impl TableDesigner {
             .collect()
     }
 
-    fn update_sql_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let design = self.collect_design(cx);
-        let column_renames = self.collect_column_renames(cx);
+    fn build_diff_preview_sql(
+        &self,
+        design: &TableDesign,
+        column_renames: &[(String, String)],
+        cx: &App,
+    ) -> String {
         let global_state = cx.global::<GlobalDbState>().clone();
 
-        let sql = if let Ok(plugin) = global_state
+        if let Ok(plugin) = global_state
             .db_manager
             .get_plugin(&self.config.database_type)
         {
             if let Some(original) = &self.original_design {
-                let normalized = Self::normalize_column_renames(original, &design, &column_renames);
-                plugin.build_alter_table_sql_with_renames(original, &design, &normalized)
+                let normalized = Self::normalize_column_renames(original, design, column_renames);
+                plugin.build_alter_table_sql_with_renames(original, design, &normalized)
             } else {
-                plugin.build_create_table_sql(&design)
+                plugin.build_create_table_sql(design)
             }
         } else {
             String::new()
-        };
+        }
+    }
+
+    fn build_ddl_preview_sql(&self, design: &TableDesign, cx: &App) -> String {
+        if design.table_name.trim().is_empty() || design.columns.is_empty() {
+            return String::new();
+        }
+
+        let global_state = cx.global::<GlobalDbState>().clone();
+        if let Ok(plugin) = global_state
+            .db_manager
+            .get_plugin(&self.config.database_type)
+        {
+            plugin.build_create_table_sql(design)
+        } else {
+            String::new()
+        }
+    }
+
+    fn update_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let design = self.collect_design(cx);
+        let column_renames = self.collect_column_renames(cx);
+        let sql = self.build_diff_preview_sql(&design, &column_renames, cx);
+        let ddl = self.build_ddl_preview_sql(&design, cx);
 
         self.sql_preview_input.update(cx, |state, cx| {
             state.set_value(sql, window, cx);
         });
+        self.ddl_preview_input.update(cx, |state, cx| {
+            state.set_value(ddl, window, cx);
+        });
         cx.notify();
     }
 
-    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
-        let sql = self.sql_preview_input.read(cx).text().to_string();
+    fn sql_has_changes(sql: &str) -> bool {
         let trimmed = sql.trim();
         let no_changes_localized = t!("SqlEditor.no_changes").to_string();
         !trimmed.is_empty()
@@ -474,86 +652,35 @@ impl TableDesigner {
             && !trimmed.starts_with(no_changes_localized.as_str())
     }
 
-    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.handle_execute(&gpui::ClickEvent::default(), window, cx);
+    fn contains_destructive_sql(sql: &str) -> bool {
+        if !Self::sql_has_changes(sql) {
+            return false;
+        }
+
+        let normalized_sql = sql
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("--"))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_uppercase();
+
+        ["DROP COLUMN", "DROP INDEX", "DROP CONSTRAINT", "DROP TABLE"]
+            .iter()
+            .any(|keyword| normalized_sql.contains(keyword))
     }
 
-    pub fn save_and_close(
-        &mut self,
-        tab_container: Entity<TabContainer>,
-        tab_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let design = self.collect_design(cx);
-        if design.table_name.is_empty() {
-            window.push_notification(t!("Table.please_enter_table_name").to_string(), cx);
-            return;
-        }
-        if design.columns.is_empty() {
-            window.push_notification(t!("Table.please_add_column").to_string(), cx);
-            return;
-        }
-
+    fn execute_request(&mut self, request: TableDesignerExecutionRequest, cx: &mut Context<Self>) {
         let global_state = cx.global::<GlobalDbState>().clone();
-        let connection_id = self.config.connection_id.clone();
-        let database_name = self.config.database_name.clone();
-        let database_type = self.config.database_type;
-        let schema = self.config.schema_name.clone();
-        let original_design = self.original_design.clone();
-        let column_renames = self.collect_column_renames(cx);
-        let is_new_table = original_design.is_none();
-        let table_name = design.table_name.clone();
-        let config_tab_id = self.config.tab_id.clone();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let sql = {
-                let plugin_result = cx.update(|cx: &mut App| {
-                    let global_state = cx.global::<GlobalDbState>().clone();
-                    global_state.db_manager.get_plugin(&database_type)
-                });
-                match plugin_result {
-                    Ok(plugin) => {
-                        if let Some(original) = &original_design {
-                            let normalized =
-                                Self::normalize_column_renames(original, &design, &column_renames);
-                            plugin.build_alter_table_sql_with_renames(
-                                original,
-                                &design,
-                                &normalized,
-                            )
-                        } else {
-                            plugin.build_create_table_sql(&design)
-                        }
-                    }
-                    _ => return,
-                }
-            };
-
-            let no_changes_localized = t!("SqlEditor.no_changes").to_string();
-            if sql.trim().is_empty()
-                || sql.starts_with("-- No changes")
-                || sql.starts_with(no_changes_localized.as_str())
-            {
-                let _ = cx.update(|cx: &mut App| {
-                    if let Some(window_id) = cx.active_window() {
-                        let _ = cx.update_window(window_id, |_, _window, cx| {
-                            tab_container.update(cx, |container: &mut TabContainer, cx| {
-                                container.force_close_tab_by_id(&tab_id, cx);
-                            });
-                        });
-                    }
-                });
-                return;
-            }
-
             let result = global_state
                 .execute_script(
                     cx,
-                    connection_id.clone(),
-                    sql,
-                    Some(database_name.clone()),
-                    schema.clone(),
+                    request.connection_id.clone(),
+                    request.sql.clone(),
+                    Some(request.database_name.clone()),
+                    request.schema_name.clone(),
                     None,
                 )
                 .await;
@@ -584,29 +711,55 @@ impl TableDesigner {
                                     cx,
                                 );
                             } else {
-                                let msg = if is_new_table {
+                                let msg = if request.is_new_table {
                                     t!("Table.create_success").to_string()
                                 } else {
                                     t!("Table.modify_success").to_string()
                                 };
                                 window.push_notification(msg, cx);
-                                let _ = this.update(cx, |_designer, cx| {
-                                    cx.emit(TableDesignerEvent::Saved {
-                                        connection_id: connection_id.clone(),
-                                        database_name: database_name.clone(),
-                                        schema_name: schema.clone(),
-                                        table_name: table_name.clone(),
-                                        is_new_table,
-                                        tab_id: config_tab_id.clone(),
-                                    });
-                                });
-                                tab_container.update(cx, |container: &mut TabContainer, cx| {
-                                    container.force_close_tab_by_id(&tab_id, cx);
+                                let _ = this.update(cx, |designer, cx| {
+                                    match &request.success_behavior {
+                                        ExecuteSuccessBehavior::StayOpen { tab_id } => {
+                                            cx.emit(TableDesignerEvent::Saved {
+                                                connection_id: request.connection_id.clone(),
+                                                database_name: request.database_name.clone(),
+                                                schema_name: request.schema_name.clone(),
+                                                table_name: request.table_name.clone(),
+                                                is_new_table: request.is_new_table,
+                                                tab_id: tab_id.clone(),
+                                            });
+                                            if request.is_new_table {
+                                                designer.config.table_name =
+                                                    Some(request.table_name.clone());
+                                            }
+                                            designer.load_table_structure(cx);
+                                        }
+                                        ExecuteSuccessBehavior::CloseTab {
+                                            tab_container,
+                                            tab_id,
+                                            emitted_tab_id,
+                                        } => {
+                                            cx.emit(TableDesignerEvent::Saved {
+                                                connection_id: request.connection_id.clone(),
+                                                database_name: request.database_name.clone(),
+                                                schema_name: request.schema_name.clone(),
+                                                table_name: request.table_name.clone(),
+                                                is_new_table: request.is_new_table,
+                                                tab_id: emitted_tab_id.clone(),
+                                            });
+                                            tab_container.update(
+                                                cx,
+                                                |container: &mut TabContainer, cx| {
+                                                    container.force_close_tab_by_id(tab_id, cx);
+                                                },
+                                            );
+                                        }
+                                    }
                                 });
                             }
                         }
                         Err(e) => {
-                            let msg = if is_new_table {
+                            let msg = if request.is_new_table {
                                 t!("Table.create_failed").to_string()
                             } else {
                                 t!("Table.modify_failed").to_string()
@@ -620,6 +773,104 @@ impl TableDesigner {
         .detach();
     }
 
+    fn maybe_confirm_and_execute(
+        &mut self,
+        request: TableDesignerExecutionRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !Self::contains_destructive_sql(&request.sql) {
+            self.execute_request(request, cx);
+            return;
+        }
+
+        self.active_tab = DesignerTab::SqlPreview;
+        self.update_previews(window, cx);
+
+        let designer_entity = cx.entity().clone();
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let request_for_ok = request.clone();
+            let designer_entity = designer_entity.clone();
+
+            dialog
+                .title(t!("Table.destructive_sql_confirm_title").to_string())
+                .confirm()
+                .overlay(false)
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(t!("Table.destructive_sql_confirm_execute").to_string())
+                        .cancel_text(t!("Common.cancel").to_string()),
+                )
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(t!("Table.destructive_sql_confirm_message").to_string())
+                        .child(t!("Table.destructive_sql_confirm_desc").to_string())
+                        .child(t!("Common.irreversible").to_string()),
+                )
+                .on_ok(move |_, _, cx| {
+                    let request = request_for_ok.clone();
+                    designer_entity.update(cx, |designer, cx| {
+                        designer.execute_request(request, cx);
+                    });
+                    true
+                })
+        });
+    }
+
+    pub fn has_unsaved_changes(&self, cx: &App) -> bool {
+        let sql = self.sql_preview_input.read(cx).text().to_string();
+        Self::sql_has_changes(&sql)
+    }
+
+    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_execute(&gpui::ClickEvent::default(), window, cx);
+    }
+
+    pub fn save_and_close(
+        &mut self,
+        tab_container: Entity<TabContainer>,
+        tab_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let design = self.collect_design(cx);
+        if design.table_name.is_empty() {
+            window.push_notification(t!("Table.please_enter_table_name").to_string(), cx);
+            return;
+        }
+        if design.columns.is_empty() {
+            window.push_notification(t!("Table.please_add_column").to_string(), cx);
+            return;
+        }
+
+        let column_renames = self.collect_column_renames(cx);
+        let sql = self.build_diff_preview_sql(&design, &column_renames, cx);
+
+        if !Self::sql_has_changes(&sql) {
+            tab_container.update(cx, |container: &mut TabContainer, cx| {
+                container.force_close_tab_by_id(&tab_id, cx);
+            });
+            return;
+        }
+
+        let request = TableDesignerExecutionRequest {
+            connection_id: self.config.connection_id.clone(),
+            database_name: self.config.database_name.clone(),
+            schema_name: self.config.schema_name.clone(),
+            sql,
+            table_name: design.table_name.clone(),
+            is_new_table: self.original_design.is_none(),
+            success_behavior: ExecuteSuccessBehavior::CloseTab {
+                tab_container,
+                tab_id,
+                emitted_tab_id: self.config.tab_id.clone(),
+            },
+        };
+
+        self.maybe_confirm_and_execute(request, window, cx);
+    }
+
     pub fn load_table_structure(&mut self, cx: &mut Context<Self>) {
         let Some(table_name) = self.config.table_name.clone() else {
             return;
@@ -631,8 +882,6 @@ impl TableDesigner {
         let schema_name = self.config.schema_name.clone();
         let columns_editor = self.columns_editor.clone();
         let indexes_editor = self.indexes_editor.clone();
-        let sql_preview_input = self.sql_preview_input.clone();
-        let database_type = self.config.database_type;
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let columns_result = global_state
@@ -673,44 +922,14 @@ impl TableDesigner {
                             });
                         }
 
-                        let sql = this
-                            .update(cx, |designer, cx| {
-                                let original_design = designer.build_original_design(
-                                    columns.unwrap_or_default(),
-                                    indexes.unwrap_or_default(),
-                                    cx,
-                                );
-                                designer.original_design = Some(original_design);
-
-                                let design = designer.collect_design(cx);
-                                let column_renames = designer.collect_column_renames(cx);
-                                let global_state = cx.global::<GlobalDbState>().clone();
-                                if let Ok(plugin) =
-                                    global_state.db_manager.get_plugin(&database_type)
-                                {
-                                    if let Some(original) = &designer.original_design {
-                                        let normalized = Self::normalize_column_renames(
-                                            original,
-                                            &design,
-                                            &column_renames,
-                                        );
-                                        plugin.build_alter_table_sql_with_renames(
-                                            original,
-                                            &design,
-                                            &normalized,
-                                        )
-                                    } else {
-                                        plugin.build_create_table_sql(&design)
-                                    }
-                                } else {
-                                    String::new()
-                                }
-                            })
-                            .ok()
-                            .unwrap_or_default();
-
-                        sql_preview_input.update(cx, |state, cx| {
-                            state.set_value(sql, window, cx);
+                        let _ = this.update(cx, |designer, cx| {
+                            let original_design = designer.build_original_design(
+                                columns.unwrap_or_default(),
+                                indexes.unwrap_or_default(),
+                                cx,
+                            );
+                            designer.original_design = Some(original_design);
+                            designer.update_previews(window, cx);
                         });
                     })
                 } else {
@@ -732,112 +951,14 @@ impl TableDesigner {
             .db_manager
             .get_plugin(&self.config.database_type)
             .ok();
-        let column_defs: Vec<ColumnDefinition> = columns
-            .iter()
-            .map(|col| {
-                let parsed = plugin
-                    .as_deref()
-                    .map(|plugin| plugin.parse_column_type(&col.data_type))
-                    .unwrap_or_else(|| Self::fallback_parse_column_type(&col.data_type));
-                Self::column_info_to_definition(self.config.database_type, col, parsed)
-            })
-            .collect();
-
-        let index_defs: Vec<IndexDefinition> = indexes
-            .iter()
-            .filter(|idx| idx.name.to_uppercase() != "PRIMARY")
-            .map(|idx| IndexDefinition {
-                name: idx.name.clone(),
-                columns: idx.columns.clone(),
-                is_unique: idx.is_unique,
-                is_primary: false,
-                index_type: idx.index_type.clone(),
-                comment: String::new(),
-            })
-            .collect();
-
-        TableDesign {
-            database_name: self.config.database_name.clone(),
-            table_name: self.config.table_name.clone().unwrap_or_default(),
-            columns: column_defs,
-            indexes: index_defs,
-            foreign_keys: vec![],
-            options: TableOptions::default(),
-        }
-    }
-
-    fn column_info_to_definition(
-        database_type: DatabaseType,
-        col: &ColumnInfo,
-        parsed: ParsedColumnType,
-    ) -> ColumnDefinition {
-        let base_type = parsed.base_type;
-        let data_type = if let Some(enum_values) = parsed.enum_values {
-            format!("{}({})", base_type, enum_values)
-        } else {
-            base_type.clone()
-        };
-        let is_auto_increment = if database_type == DatabaseType::SQLite {
-            col.is_primary_key && base_type.eq_ignore_ascii_case("INTEGER")
-        } else {
-            parsed.is_auto_increment
-        };
-
-        ColumnDefinition {
-            name: col.name.clone(),
-            data_type,
-            length: parsed.length,
-            precision: None,
-            scale: parsed.scale,
-            is_nullable: col.is_nullable,
-            is_primary_key: col.is_primary_key,
-            is_auto_increment,
-            is_unsigned: parsed.is_unsigned,
-            default_value: col.default_value.clone(),
-            comment: col.comment.clone().unwrap_or_default(),
-            charset: col.charset.clone(),
-            collation: col.collation.clone(),
-        }
-    }
-
-    fn fallback_parse_column_type(data_type: &str) -> ParsedColumnType {
-        let (base_type, length) = Self::parse_data_type(data_type);
-        ParsedColumnType {
-            base_type,
-            length,
-            scale: Self::extract_scale_from_type_str(data_type),
-            enum_values: None,
-            is_unsigned: data_type.to_uppercase().contains("UNSIGNED"),
-            is_auto_increment: data_type.to_uppercase().contains("AUTO_INCREMENT"),
-        }
-    }
-
-    fn parse_data_type(data_type: &str) -> (String, Option<u32>) {
-        if let Some(start) = data_type.find('(') {
-            if let Some(end) = data_type.find(')') {
-                let base_type = data_type[..start].trim().to_string();
-                let len_str = &data_type[start + 1..end];
-                if let Some(comma) = len_str.find(',') {
-                    let length = len_str[..comma].trim().parse().ok();
-                    return (base_type, length);
-                }
-                let length = len_str.trim().parse().ok();
-                return (base_type, length);
-            }
-        }
-        (data_type.to_string(), None)
-    }
-
-    fn extract_scale_from_type_str(data_type: &str) -> Option<u32> {
-        if let Some(start) = data_type.find('(') {
-            if let Some(end) = data_type.find(')') {
-                let len_str = &data_type[start + 1..end];
-                if let Some(comma) = len_str.find(',') {
-                    return len_str[comma + 1..].trim().parse().ok();
-                }
-            }
-        }
-        None
+        build_table_design_from_metadata(
+            self.config.database_type,
+            self.config.database_name.clone(),
+            self.config.table_name.clone().unwrap_or_default(),
+            &columns,
+            &indexes,
+            plugin.as_deref(),
+        )
     }
 
     fn handle_execute(
@@ -856,128 +977,27 @@ impl TableDesigner {
             return;
         }
 
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let connection_id = self.config.connection_id.clone();
-        let database_name = self.config.database_name.clone();
-        let database_type = self.config.database_type;
-        let schema = self.config.schema_name.clone();
-        let original_design = self.original_design.clone();
         let column_renames = self.collect_column_renames(cx);
-        let is_new_table = original_design.is_none();
-        let table_name = design.table_name.clone();
-        let tab_id = self.config.tab_id.clone();
+        let sql = self.build_diff_preview_sql(&design, &column_renames, cx);
 
-        cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let sql = {
-                let plugin_result = cx.update(|cx: &mut App| {
-                    let global_state = cx.global::<GlobalDbState>().clone();
-                    global_state.db_manager.get_plugin(&database_type)
-                });
-                match plugin_result {
-                    Ok(plugin) => {
-                        if let Some(original) = &original_design {
-                            let normalized =
-                                Self::normalize_column_renames(original, &design, &column_renames);
-                            plugin.build_alter_table_sql_with_renames(
-                                original,
-                                &design,
-                                &normalized,
-                            )
-                        } else {
-                            plugin.build_create_table_sql(&design)
-                        }
-                    }
-                    _ => return,
-                }
-            };
+        if !Self::sql_has_changes(&sql) {
+            window.push_notification(t!("Table.no_changes").to_string(), cx);
+            return;
+        }
 
-            let no_changes_localized = t!("SqlEditor.no_changes").to_string();
-            if sql.trim().is_empty()
-                || sql.starts_with("-- No changes")
-                || sql.starts_with(no_changes_localized.as_str())
-            {
-                let _ = cx.update(|cx: &mut App| {
-                    if let Some(window_id) = cx.active_window() {
-                        let _ = cx.update_window(window_id, |_, window, cx| {
-                            window.push_notification(t!("Table.no_changes").to_string(), cx);
-                        });
-                    }
-                });
-                return;
-            }
+        let request = TableDesignerExecutionRequest {
+            connection_id: self.config.connection_id.clone(),
+            database_name: self.config.database_name.clone(),
+            schema_name: self.config.schema_name.clone(),
+            sql,
+            table_name: design.table_name.clone(),
+            is_new_table: self.original_design.is_none(),
+            success_behavior: ExecuteSuccessBehavior::StayOpen {
+                tab_id: self.config.tab_id.clone(),
+            },
+        };
 
-            let result = global_state
-                .execute_script(
-                    cx,
-                    connection_id.clone(),
-                    sql,
-                    Some(database_name.clone()),
-                    schema.clone(),
-                    None,
-                )
-                .await;
-
-            let _ = cx.update(|cx: &mut App| {
-                if let Some(window_id) = cx.active_window() {
-                    let _ = cx.update_window(window_id, |_, window, cx| match &result {
-                        Ok(results) => {
-                            let has_error = results.iter().any(|r| r.is_error());
-                            if has_error {
-                                let error_msg = results
-                                    .iter()
-                                    .filter_map(|r| {
-                                        if let db::executor::SqlResult::Error(err) = r {
-                                            Some(err.message.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("; ");
-                                window.push_notification(
-                                    format!(
-                                        "{}: {}",
-                                        &t!("Table.execute_failed").to_string(),
-                                        error_msg
-                                    ),
-                                    cx,
-                                );
-                            } else {
-                                let msg = if is_new_table {
-                                    t!("Table.create_success").to_string()
-                                } else {
-                                    t!("Table.modify_success").to_string()
-                                };
-                                window.push_notification(msg, cx);
-                                let _ = this.update(cx, |designer, cx| {
-                                    cx.emit(TableDesignerEvent::Saved {
-                                        connection_id: connection_id.clone(),
-                                        database_name: database_name.clone(),
-                                        schema_name: schema.clone(),
-                                        table_name: table_name.clone(),
-                                        is_new_table,
-                                        tab_id: tab_id.clone(),
-                                    });
-                                    if is_new_table {
-                                        designer.config.table_name = Some(table_name.clone());
-                                    }
-                                    designer.load_table_structure(cx);
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            let msg = if is_new_table {
-                                t!("Table.create_failed").to_string()
-                            } else {
-                                t!("Table.modify_failed").to_string()
-                            };
-                            window.push_notification(format!("{}: {}", msg, e), cx);
-                        }
-                    });
-                }
-            });
-        })
-        .detach();
+        self.maybe_confirm_and_execute(request, window, cx);
     }
 
     fn render_toolbar(&self, cx: &Context<Self>) -> AnyElement {
@@ -1030,6 +1050,7 @@ impl TableDesigner {
             DesignerTab::Indexes => 1,
             DesignerTab::Options => 2,
             DesignerTab::SqlPreview => 3,
+            DesignerTab::Ddl => 4,
         };
 
         h_flex()
@@ -1048,6 +1069,7 @@ impl TableDesigner {
                             1 => DesignerTab::Indexes,
                             2 => DesignerTab::Options,
                             3 => DesignerTab::SqlPreview,
+                            4 => DesignerTab::Ddl,
                             _ => DesignerTab::Columns,
                         };
                         cx.notify();
@@ -1055,7 +1077,8 @@ impl TableDesigner {
                     .child(Tab::new().label(t!("Table.columns").to_string()))
                     .child(Tab::new().label(t!("Table.indexes").to_string()))
                     .child(Tab::new().label(t!("Table.options").to_string()))
-                    .child(Tab::new().label(t!("Table.sql_preview").to_string())),
+                    .child(Tab::new().label(t!("Table.sql_preview").to_string()))
+                    .child(Tab::new().label(t!("Table.ddl").to_string())),
             )
             .into_any_element()
     }
@@ -1066,6 +1089,7 @@ impl TableDesigner {
             DesignerTab::Indexes => self.indexes_editor.clone().into_any_element(),
             DesignerTab::Options => self.render_options(cx),
             DesignerTab::SqlPreview => self.render_sql_preview(cx),
+            DesignerTab::Ddl => self.render_ddl_preview(cx),
         }
     }
 
@@ -1149,6 +1173,27 @@ impl TableDesigner {
             .p_4()
             .child(
                 Input::new(&self.sql_preview_input)
+                    .size_full()
+                    .disabled(true),
+            )
+            .into_any_element()
+    }
+
+    fn render_ddl_preview(&self, cx: &Context<Self>) -> AnyElement {
+        let ddl_sql = self.ddl_preview_input.read(cx).text().to_string();
+
+        v_flex()
+            .size_full()
+            .p_4()
+            .gap_3()
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .child(Clipboard::new("table-designer-copy-ddl").value(ddl_sql)),
+            )
+            .child(
+                Input::new(&self.ddl_preview_input)
                     .size_full()
                     .disabled(true),
             )
@@ -1818,7 +1863,7 @@ impl ColumnsEditor {
             let parsed_type = plugin
                 .as_ref()
                 .map(|p| p.parse_column_type(&col.data_type))
-                .unwrap_or_else(|| TableDesigner::fallback_parse_column_type(&col.data_type));
+                .unwrap_or_else(|| fallback_parse_column_type(&col.data_type));
             let base_type = parsed_type.base_type.clone();
             let type_idx = self
                 .data_types
@@ -3184,6 +3229,51 @@ mod tests {
     }
 
     #[test]
+    fn test_contains_destructive_sql_detects_drop_column() {
+        let sql = "ALTER TABLE users DROP COLUMN age;";
+        assert!(TableDesigner::contains_destructive_sql(sql));
+    }
+
+    #[test]
+    fn test_contains_destructive_sql_detects_drop_index() {
+        let sql = "ALTER TABLE users DROP INDEX idx_users_name;";
+        assert!(TableDesigner::contains_destructive_sql(sql));
+    }
+
+    #[test]
+    fn test_contains_destructive_sql_detects_drop_constraint_and_table() {
+        assert!(TableDesigner::contains_destructive_sql(
+            "ALTER TABLE users DROP CONSTRAINT users_pk;"
+        ));
+        assert!(TableDesigner::contains_destructive_sql(
+            "DROP TABLE users_backup;"
+        ));
+    }
+
+    #[test]
+    fn test_contains_destructive_sql_ignores_comment_only_drop_keyword() {
+        let sql = "-- DROP COLUMN age\nALTER TABLE users ADD COLUMN age INT;";
+        assert!(!TableDesigner::contains_destructive_sql(sql));
+    }
+
+    #[test]
+    fn test_contains_destructive_sql_ignores_non_drop_changes() {
+        assert!(!TableDesigner::contains_destructive_sql(
+            "ALTER TABLE users ADD COLUMN age INT;"
+        ));
+        assert!(!TableDesigner::contains_destructive_sql(
+            "ALTER TABLE users MODIFY COLUMN age BIGINT;"
+        ));
+    }
+
+    #[test]
+    fn test_contains_destructive_sql_ignores_no_changes_output() {
+        assert!(!TableDesigner::contains_destructive_sql(
+            "-- No changes detected"
+        ));
+    }
+
+    #[test]
     fn test_normalize_column_renames_filters_invalid_items() {
         let original = build_design(
             vec![build_col("a"), build_col("b"), build_col("c")],
@@ -4121,8 +4211,7 @@ mod tests {
         };
         let parsed = MySqlPlugin::new().parse_column_type(&column.data_type);
 
-        let definition =
-            TableDesigner::column_info_to_definition(DatabaseType::MySQL, &column, parsed);
+        let definition = column_info_to_definition(DatabaseType::MySQL, &column, parsed);
 
         assert_eq!(definition.data_type, "varchar");
         assert_eq!(definition.length, Some(255));
@@ -4154,12 +4243,12 @@ mod tests {
             collation: Some("utf8mb4_bin".to_string()),
         };
 
-        let numeric_definition = TableDesigner::column_info_to_definition(
+        let numeric_definition = column_info_to_definition(
             DatabaseType::MySQL,
             &numeric,
             MySqlPlugin::new().parse_column_type(&numeric.data_type),
         );
-        let enum_definition = TableDesigner::column_info_to_definition(
+        let enum_definition = column_info_to_definition(
             DatabaseType::MySQL,
             &enum_col,
             MySqlPlugin::new().parse_column_type(&enum_col.data_type),

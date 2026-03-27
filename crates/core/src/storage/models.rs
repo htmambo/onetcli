@@ -1709,4 +1709,13 @@ mod serial_tests {
         let parsed: SshParams = serde_json::from_str(json).expect("旧格式 SSH 参数应可反序列化");
         assert!(!parsed.enable_legacy_kex);
     }
+
+    #[test]
+    fn ssh_auth_method_auto_publickey_serialize_deserialize() {
+        let auth = SshAuthMethod::AutoPublicKey;
+        let json = serde_json::to_string(&auth).expect("自动公钥认证方式应可序列化");
+        let parsed: SshAuthMethod =
+            serde_json::from_str(&json).expect("自动公钥认证方式应可反序列化");
+        assert!(matches!(parsed, SshAuthMethod::AutoPublicKey));
+    }
 }

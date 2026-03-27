@@ -2133,6 +2133,22 @@ pub trait DatabasePlugin: Send + Sync {
     /// Rename table
     fn rename_table(&self, database: &str, old_name: &str, new_name: &str) -> String;
 
+    /// Build native backup-table SQL.
+    /// 默认实现使用 `CREATE TABLE ... AS SELECT ...`，数据库插件可按方言覆盖。
+    fn build_backup_table_sql(
+        &self,
+        _database: &str,
+        _schema: Option<&str>,
+        source_table: &str,
+        target_table: &str,
+    ) -> String {
+        format!(
+            "CREATE TABLE {} AS SELECT * FROM {};",
+            self.quote_identifier(target_table),
+            self.quote_identifier(source_table)
+        )
+    }
+
     /// Drop view
     fn drop_view(&self, _database: &str, view: &str) -> String {
         format!("DROP VIEW IF EXISTS {}", self.quote_identifier(view))

@@ -187,6 +187,22 @@ SSH:
     en: Connection test successful
     zh-CN: 连接测试成功
     zh-HK: 連線測試成功
+  save_failed:
+    en: "Failed to save SSH connection: %{error}"
+    zh-CN: 保存 SSH 连接失败：%{error}
+    zh-HK: 保存 SSH 連線失敗：%{error}
+  save_while_testing:
+    en: Please wait for the connection test to finish before saving
+    zh-CN: 请等待连接测试完成后再保存
+    zh-HK: 請等待連線測試完成後再保存
+  test_required_before_save:
+    en: Please complete a successful connection test before saving
+    zh-CN: 请先完成一次成功的连接测试再保存
+    zh-HK: 請先完成一次成功的連線測試再保存
+  retest_after_change:
+    en: Connection parameters changed, please test again before saving
+    zh-CN: 连接参数已变更，请重新测试后再保存
+    zh-HK: 連線參數已變更，請重新測試後再保存
   # 标签页
   tab_basic:
     en: Basic

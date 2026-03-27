@@ -46,5 +46,11 @@ Thumbs.db
 # Local-only scripts
 /supabase.sql
 
+# AI Coding 生成的提交文档
+commit-info.md
+
+# macOS 应用图标（二进制资源，单独提交）
+resources/macos/OnetCli.icns
+
 # vibe coding
 .omc/
