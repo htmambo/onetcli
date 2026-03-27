@@ -1401,8 +1401,7 @@ mod tests {
             database_name: "test_db".to_string(),
             table_name: "events".to_string(),
             columns: vec![ColumnDefinition::new("value").data_type("UInt64")],
-            indexes: vec![IndexDefinition::new("idx_value")
-                .columns(vec!["value".to_string()])],
+            indexes: vec![IndexDefinition::new("idx_value").columns(vec!["value".to_string()])],
             foreign_keys: vec![],
             options: TableOptions::default(),
         };

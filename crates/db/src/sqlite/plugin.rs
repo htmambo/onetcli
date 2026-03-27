@@ -1379,9 +1379,7 @@ mod tests {
         let original = TableDesign {
             database_name: "main".to_string(),
             table_name: "users".to_string(),
-            columns: vec![ColumnDefinition::new("name")
-                .data_type("TEXT")
-                .length(50)],
+            columns: vec![ColumnDefinition::new("name").data_type("TEXT").length(50)],
             indexes: vec![],
             foreign_keys: vec![],
             options: TableOptions::default(),
@@ -1390,9 +1388,7 @@ mod tests {
         let new = TableDesign {
             database_name: "main".to_string(),
             table_name: "users".to_string(),
-            columns: vec![ColumnDefinition::new("name")
-                .data_type("TEXT")
-                .length(100)],
+            columns: vec![ColumnDefinition::new("name").data_type("TEXT").length(100)],
             indexes: vec![],
             foreign_keys: vec![],
             options: TableOptions::default(),

@@ -2464,3 +2464,23 @@
 - 已执行：`cargo check -p main`
   - 结果：通过
   - 备注：保留仓库既有 warning，来自 `crates/ui/src/window_ext.rs` 与 `main/src/home_tab.rs` 未使用项
+
+## 追加调整 - 卡片模式拖拽时恢复尾部空卡片占位
+时间：2026-03-27 21:50:37 +0800
+
+### 1. 需求修正
+- 用户要求：开始拖拽后，工作区最后的空卡片占位应出现，便于直接拖到末尾
+- 约束：不要立即提交
+
+### 2. 实现方式
+- 在卡片模式下恢复“尾部空卡片占位”，但只在 `manual_sort_mode && cx.has_active_drag()` 时渲染
+- 删除针对“最后一个卡片之后”的 overlay 特判，避免和真实尾部占位重复
+- 这样静止状态不占空间，拖拽时才出现真正可命中的末尾占位卡片
+
+### 3. 本地验证记录
+- 已执行：`cargo fmt --all -- main/src/home_tab.rs`
+  - 结果：通过
+- 已执行：`cargo test -p main connection_list_sort_tests -- --nocapture`
+  - 结果：通过（16 passed）
+- 已执行：`cargo check -p main`
+  - 结果：通过
