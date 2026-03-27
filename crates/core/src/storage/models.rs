@@ -202,6 +202,9 @@ pub struct SshParams {
     /// 最大心跳失败次数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keepalive_max: Option<usize>,
+    /// 是否启用旧版 KEX 兼容模式
+    #[serde(default)]
+    pub enable_legacy_kex: bool,
     /// 默认工作目录
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_directory: Option<String>,
@@ -1698,5 +1701,12 @@ mod serial_tests {
         let parsed: SshAuthMethod =
             serde_json::from_str(&json).expect("Agent 认证方式应可反序列化");
         assert!(matches!(parsed, SshAuthMethod::Agent));
+    }
+
+    #[test]
+    fn ssh_params_defaults_legacy_kex_to_false_when_missing() {
+        let json = r#"{"host":"127.0.0.1","port":22,"username":"root","auth_method":"Agent"}"#;
+        let parsed: SshParams = serde_json::from_str(json).expect("旧格式 SSH 参数应可反序列化");
+        assert!(!parsed.enable_legacy_kex);
     }
 }

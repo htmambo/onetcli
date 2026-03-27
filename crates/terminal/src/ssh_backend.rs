@@ -6,7 +6,10 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
-use ssh::{ChannelEvent, PtyConfig, RusshClient, SshChannel, SshClient, SshConnectConfig};
+use ssh::{
+    ChannelEvent, PtyConfig, RusshClient, SshChannel, SshClient, SshConnectConfig,
+    SshConnectionStage,
+};
 
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
 use crate::{TerminalBackend, TerminalSize};
@@ -107,14 +110,49 @@ impl SshBackend {
         on_disconnect: Option<UnboundedSender<()>>,
         init_commands: Option<String>,
     ) -> anyhow::Result<Self> {
-        let mut client = RusshClient::connect(config).await?;
+        Self::connect_with_progress(
+            config,
+            pty_config,
+            term,
+            event_proxy,
+            event_tx,
+            notify_tx,
+            on_disconnect,
+            init_commands,
+            |_| {},
+        )
+        .await
+    }
+
+    pub async fn connect_with_progress<F>(
+        config: SshConnectConfig,
+        pty_config: PtyConfig,
+        term: Arc<FairMutex<Term<GpuiEventProxy>>>,
+        event_proxy: GpuiEventProxy,
+        event_tx: UnboundedSender<TerminalEvent>,
+        notify_tx: UnboundedSender<()>,
+        on_disconnect: Option<UnboundedSender<()>>,
+        init_commands: Option<String>,
+        mut progress: F,
+    ) -> anyhow::Result<Self>
+    where
+        F: FnMut(SshConnectionStage) + Send,
+    {
+        let mut client = RusshClient::connect_with_progress(config, |stage| {
+            progress(stage);
+        })
+        .await?;
+        progress(SshConnectionStage::OpeningSessionChannel);
         let mut channel = client.open_channel().await?;
 
+        progress(SshConnectionStage::RequestingPty);
         channel.request_pty(&pty_config).await?;
+        progress(SshConnectionStage::StartingShell);
         channel.request_shell().await?;
 
         // 有初始化命令时直接写入 shell
         if let Some(ref commands) = init_commands {
+            progress(SshConnectionStage::RunningInitCommands);
             for line in commands.lines() {
                 if !line.trim().is_empty() {
                     let mut data = line.as_bytes().to_vec();

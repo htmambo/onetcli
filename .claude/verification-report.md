@@ -3407,3 +3407,130 @@
 ### 残余风险
 - 这是 ChatDB 入口修复，不影响普通 AI 面板。
 - 当前没有真实网络请求抓包验证，但从代码路径看，导致重复的源头已经被切断。
+
+## 审查报告（ssh-loading-status）
+生成时间：2026-03-27 10:56:30 +0800
+
+### 需求完整性检查
+- 目标明确：让 SSH 连接 loading 期间显示当前阶段状态，而不是只显示笼统的“连接中”
+- 范围明确：SSH 终端连接遮罩、SSH 测试连接窗口、底层 SSH 建连流程
+- 交付物明确：阶段状态抽象、界面展示、本地测试、`.claude` 留痕
+- 审查要点明确：不新增第二套状态机，复用现有异步回流链路，确保本地可验证
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- `crates/ssh/src/ssh.rs` 新增 `SshConnectionStage`，把代理、跳板机、目标主机认证和会话建立拆成可复用阶段，避免 UI 层自行猜测进度。
+- `crates/terminal/src/ssh_backend.rs` 和 `crates/terminal/src/terminal.rs` 已接入阶段回调，SSH 终端连接遮罩会实时刷新当前阶段文案，重连路径也会同步更新。
+- `crates/terminal_view/src/ssh_form_window.rs` 的测试连接流程已新增状态条，测试期间会持续展示当前所处的连接阶段。
+- `crates/terminal_view/src/view.rs` 只消费模型层提供的 `connection_status_message`，符合现有“状态在模型层，视图只渲染”的分层约定。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p ssh -p terminal -p terminal_view`：通过
+
+### 残余风险
+- 当前阶段提示只覆盖 SSH 终端和 SSH 测试连接，`sftp_view` 与侧边文件管理器里的 SFTP 建连尚未接入同一套阶段展示。
+- 阶段粒度已经覆盖主要用户可感知节点，但不会细到 DNS、TCP 握手等更底层网络细节。
+
+## 复审补充（ssh-loading-status）
+生成时间：2026-03-27 11:12:00 +0800
+
+### 复审结论
+- 用户反馈“仍长期停在正在连接目标主机”是合理的，原因不是状态回调失效，而是 `russh::client::connect()` 把 TCP 建连和 SSH 握手包在同一个 await 里。
+- 复审后已把直连路径改为“显式建立 TCP 流 + `connect_stream(...)` 完成 SSH 握手”，因此现在能额外显示“正在与目标主机进行 SSH 握手...”。
+- 同时增加了等待时长刷新，避免仍卡在首阶段时界面看起来像死掉。
+
+### 复审评分
+- 代码质量：96/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：93/100
+- 综合评分：95/100
+- 建议：通过
+
+### 复审验证
+- `cargo fmt --all`：通过
+- `cargo test -p ssh -p terminal -p terminal_view`：通过
+
+## 审查报告（ssh-legacy-kex-compatibility）
+生成时间：2026-03-27 11:46:19 +0800
+
+### 需求完整性检查
+- 目标明确：为只支持旧版 SSH 密钥交换算法的主机提供按连接开启的兼容开关
+- 范围明确：SSH 表单、持久化参数、终端/SFTP/侧边文件管理入口、底层 `russh` 客户端配置
+- 交付物明确：兼容开关、运行时算法列表调整、本地测试、`.claude` 留痕
+- 审查要点明确：默认行为不降级，兼容模式仅作回退，不制造终端/SFTP 行为分叉
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：91/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- `crates/core/src/storage/models.rs` 为 `SshParams` 增加了 `enable_legacy_kex`，并通过 `#[serde(default)]` 保证旧连接配置可继续反序列化。
+- `crates/ssh/src/ssh.rs` 把 `russh::client::Config` 构造收敛为统一函数；兼容模式开启时只在默认安全列表后追加旧版 KEX，因此不会改变现代算法的优先级。
+- `crates/terminal_view/src/ssh_form_window.rs` 在高级设置页暴露“旧版 KEX 兼容模式”，并确保测试连接与保存连接走同一参数链路。
+- `crates/terminal/src/terminal.rs`、`crates/terminal_view/src/sidebar/file_manager_panel.rs`、`crates/sftp_view/src/lib.rs` 与 `crates/sftp/src/russh_impl.rs` 已全部透传该字段，避免出现终端与 SFTP 行为不一致。
+- `crates/db/src/ssh_tunnel.rs`、`crates/db/src/mysql/connection.rs`、`crates/db/src/postgresql/connection.rs` 的改动仅用于修补当前分支测试辅助构造，恢复本地验证能力，不改变生产逻辑。
+
+### 本地验证
+- `cargo fmt --all`：通过
+- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`：通过
+- `cargo test -p one-core ssh_params_defaults_legacy_kex_to_false_when_missing`：通过
+- `cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline`：通过
+
+### 额外观察
+- `cargo test -p one-core` 当前仍有 4 个与本次改动无关的既有失败，分别位于 `llm::storage` 与 `cloud_sync::engine`。它们不会影响本次 SSH 兼容开关结论，但说明仓库主干当前并非全绿。
+
+### 残余风险
+- 当前兼容模式是“整条 SSH 链路共享一个开关”，目标机与跳板机会一起启用旧版 KEX；如果后续需要细分到跳板机单独配置，需要再扩展参数模型。
+- 本次只补了旧版 KEX，不会自动复用用户 `~/.ssh/config` 中其它 OpenSSH 专有兼容项。
+
+## 复审补充（ssh-legacy-kex-compatibility）
+生成时间：2026-03-27 12:02:00 +0800
+
+### 复审结论
+- 用户实测表明“仅放宽 KEX”仍不足以连接老设备，这个反馈成立。
+- 复审 `russh` 默认 cipher 列表后确认：默认只带 `gcm/ctr/chacha20`，没有许多旧设备常见的 `aes*-cbc`。
+- 当前兼容开关已扩展为“旧版 SSH 协商兼容模式”：在保留现代算法优先级的前提下，同时把旧 KEX 和旧 CBC cipher 追加到候选列表末尾。
+
+### 复审评分
+- 代码质量：95/100
+- 测试覆盖：91/100
+- 规范遵循：95/100
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：92/100
+- 综合评分：95/100
+- 建议：通过
+
+### 复审验证
+- `cargo fmt --all`：通过
+- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`：通过
+
+### 新的残余风险
+- 如果目标服务端进一步依赖 `ssh-dss` 或 `3des-cbc` 这类更老算法，当前兼容模式仍可能不足；因为当前工作区启用的 `russh` feature 不包含 `dsa` / `des`。

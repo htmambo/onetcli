@@ -6918,3 +6918,236 @@
 ### 已知边界
 - 当前仍沿用“最近卡片边缘”来决定命中目标，优化的是插槽标记的落点，而不是命中算法本身
 - 如果用户继续感觉跳位，下一步应改为按网格插槽直接判定，而不是先命中卡片边缘再换算插槽
+
+### 2026-03-27 10:30:05 +0800
+- 开始处理“SSH 连接 loading 阶段展示当前状态”需求。
+- 已完成上下文检索：
+  - 文件名/范围扫描：`crates/ssh`、`crates/terminal`、`crates/terminal_view`、`crates/sftp_view`
+  - 内容搜索：`ssh`、`connecting`、`loading`、`connection_state`
+  - 深读实现：`crates/terminal/src/terminal.rs`、`crates/terminal_view/src/view.rs`、`crates/terminal_view/src/ssh_form_window.rs`、`main/src/update.rs`
+- 工具说明：
+  - 仓库规范中要求的 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code` 在当前执行环境不可用。
+  - 采用本地代码检索、现有测试与仓库内实现模式作为替代，并保留可追溯文件路径。
+
+## 编码前检查 - SSH 连接加载状态展示
+时间：2026-03-27 10:30:05 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-ssh-loading-status.md`
+□ 将使用以下可复用组件：
+- `spawn_ssh_connect`: `crates/terminal/src/terminal.rs` - 连接任务和结果回流
+- `render_connection_overlay`: `crates/terminal_view/src/view.rs` - SSH loading 遮罩展示
+- `on_test`: `crates/terminal_view/src/ssh_form_window.rs` - 测试连接异步流程
+- `status_message` 模式：`main/src/update.rs` - 动态文案刷新参考
+□ 将遵循命名约定：Rust 类型 `PascalCase`，字段/函数 `snake_case`
+□ 将遵循代码风格：小步状态更新，中文注释只解释意图，不重复代码
+□ 确认不重复造轮子，证明：已检查 `terminal`、`terminal_view`、`sftp_view` 中连接状态实现，当前不存在 SSH 阶段状态的统一抽象
+
+## 编码后声明 - SSH 连接加载状态展示
+时间：2026-03-27 10:56:30 +0800
+
+### 1. 复用了以下既有组件
+- `crates/terminal/src/terminal.rs::spawn_ssh_connect`：继续作为 SSH 终端连接的异步回流入口
+- `crates/terminal_view/src/view.rs::render_connection_overlay`：继续承载 SSH loading 遮罩，只替换副标题来源
+- `crates/terminal_view/src/ssh_form_window.rs::on_test`：继续承载测试连接流程，增加阶段状态展示
+- `main/src/update.rs::status_message` 模式：作为“异步任务持续刷新文案”的参考实现
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `SshConnectionStage`、`connection_status_message`、`test_status_message`，都采用项目现有直白命名
+- 代码风格：连接阶段统一从底层 `ssh` crate 产出，不在 UI 层猜测进度
+- 文件组织：底层阶段抽象放在 `crates/ssh`，终端模型状态放在 `crates/terminal`，视图消费落在 `crates/terminal_view`
+
+### 3. 对比了以下相似实现
+- `render_connection_overlay`：原本副标题固定为“正在建立 SSH 连接”，现在改为读取模型层动态状态
+- `on_test`：原本测试连接只有按钮态变化，现在补充状态条展示当前阶段
+- `status_message` 模式：沿用项目中已有的“后台任务更新文案，UI 只负责渲染”的分层方式
+
+### 4. 未重复造轮子的证明
+- 已检查 `terminal`、`terminal_view`、`sftp_view` 中现有连接状态模型
+- 最终没有新增第二套 SSH 连接状态机，而是扩展现有 `RusshClient` / `SshBackend` 流程向上抛阶段状态
+
+## 实施与验证记录 - SSH 连接加载状态展示
+时间：2026-03-27 10:56:30 +0800
+
+### 已完成修改
+- `crates/ssh/src/ssh.rs`
+  - 新增 `SshConnectionStage`，统一表达连接跳板机、代理、认证、打开通道等阶段
+  - `RusshClient` 新增 `connect_with_progress(...)`，在建连关键步骤回调阶段状态
+  - 新增 3 条单测，覆盖不同连接拓扑的初始阶段推导
+- `crates/terminal/src/ssh_backend.rs`
+  - 新增 `connect_with_progress(...)`，补充“打开会话通道 / 请求 PTY / 启动 Shell / 执行初始化命令”阶段
+- `crates/terminal/src/terminal.rs`
+  - 新增 `connection_status_message`
+  - 在 SSH 初次连接和重连期间接收阶段更新，并在成功/失败/断开时清理状态
+- `crates/terminal_view/src/view.rs`
+  - SSH 遮罩副标题改为展示当前阶段文案
+- `crates/terminal_view/src/ssh_form_window.rs`
+  - 测试连接时新增动态状态条，显示当前阶段而不是只显示“测试中...”
+- `crates/ssh/locales/ssh.yml`
+  - 补充各连接阶段的多语言文案
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p ssh -p terminal -p terminal_view`
+  - 结果：通过
+
+### 当前限制
+- 本次状态展示覆盖 SSH 终端连接和 SSH 测试连接；`sftp_view` / 文件管理器里的 SFTP 建连尚未接入同样的阶段提示
+- 当前阶段粒度已经能区分代理、跳板机、认证和会话建立，但不会展示更细的底层网络细节
+
+## 补充修正 - SSH 连接首阶段长期停留
+时间：2026-03-27 11:12:00 +0800
+
+### 根因
+- 用户反馈界面仍长期停留在“正在连接目标主机...”
+- 本地核查 `russh 0.57.0` 源码确认：`client::connect()` 内部会先执行 `TcpStream::connect(...)`，随后直接进入 `connect_stream(...)` 完成 SSH ID 交换和首轮 KEX，这两段都包在同一次 `await` 内
+- 结论：之前的阶段拆分只能覆盖“进入 connect 前”和“connect 返回后”，无法区分 TCP 建连与 SSH 握手
+
+### 已追加修改
+- `crates/ssh/src/ssh.rs`
+  - 直连路径改为先显式建立 `TcpStream`，再调用 `client::connect_stream(...)`
+  - 新增 `HandshakingJumpServer` / `HandshakingTarget` 两个阶段
+  - 新增 `format_connection_progress_message(...)`，统一拼接“已等待 N 秒”
+- `crates/terminal/src/terminal.rs`
+  - 新增连接等待起始时间和每秒刷新任务
+  - SSH 遮罩现在会显示“当前阶段 + 已等待秒数”
+- `crates/terminal_view/src/ssh_form_window.rs`
+  - 测试连接状态条也改为按秒刷新等待时长
+
+### 再次本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p ssh -p terminal -p terminal_view`
+  - 结果：通过
+
+## 补充修正 - 状态定时器 reactor panic
+时间：2026-03-27 11:20:00 +0800
+
+### 根因
+- 启动应用后在 `crates/terminal/src/terminal.rs:588` 触发 panic：`there is no reactor running`
+- 根因是连接状态和测试状态的每秒刷新任务运行在 `cx.spawn(...)` 上下文中，却调用了 `tokio::time::sleep(...)`
+- 该上下文可安全使用 GPUI 的 `background_executor()`，但不能假设一定处于 Tokio reactor 内
+
+### 修正
+- `crates/terminal/src/terminal.rs`
+  - `spawn_connection_status_tick(...)` 改为 `cx.background_executor().timer(...)`
+- `crates/terminal_view/src/ssh_form_window.rs`
+  - `spawn_test_status_tick(...)` 同样改为 `cx.background_executor().timer(...)`
+
+### 验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p ssh -p terminal -p terminal_view`
+  - 结果：通过
+
+## 编码前检查 - SSH 旧版 KEX 兼容开关
+时间：2026-03-27 11:46:19 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-ssh-legacy-kex.md`
+□ 将使用以下可复用组件：
+- `crates/ssh/src/ssh.rs`: 统一构造 `russh::client::Config`
+- `crates/terminal_view/src/ssh_form_window.rs`: 复用 checkbox + 持久化参数模式
+- `crates/sftp/src/russh_impl.rs`: 在统一 SSH 配置基础上叠加 SFTP 专属窗口参数
+□ 将遵循命名约定：布尔开关统一使用 `enable_legacy_kex`
+□ 将遵循代码风格：不新建兼容对象，直接贯穿现有 `SshParams` / `SshConnectConfig`
+□ 确认不重复造轮子，证明：已检查 `terminal`、`terminal_view`、`sftp_view`、`sftp` 中现有 SSH 参数构造链路
+
+## 实施与验证记录 - SSH 旧版 KEX 兼容开关
+时间：2026-03-27 11:46:19 +0800
+
+### 根因判断
+- 用户提供的 OpenSSH 调试信息显示 `kex names ok: [diffie-hellman-group1-sha1]`
+- 本地核查 `russh 0.57.0` 源码确认：
+  - `Key exchange init failed` 对应早期握手错误
+  - 默认 `SAFE_KEX_ORDER` 不包含 `diffie-hellman-group1-sha1`
+- 结论：当前应用没有复用用户 `~/.ssh/config` 中可能存在的宽松 KEX 配置，因此对只支持旧版 KEX 的服务端会在认证前失败
+
+### 已完成修改
+- `crates/core/src/storage/models.rs`
+  - 为 `SshParams` 新增 `enable_legacy_kex: bool`
+  - 使用 `#[serde(default)]` 保证旧连接记录缺字段时默认为 `false`
+- `crates/ssh/src/ssh.rs`
+  - 为 `SshConnectConfig` 新增 `enable_legacy_kex`
+  - 新增统一的 `build_client_config(...)`
+  - 兼容模式开启时，在默认安全 KEX 列表末尾追加 `DH_G14_SHA1`、`DH_GEX_SHA1`、`DH_G1_SHA1`
+- `crates/sftp/src/russh_impl.rs`
+  - SFTP 改为复用 `ssh::build_client_config(...)`，再叠加 SFTP 自身窗口参数
+- `crates/terminal_view/src/ssh_form_window.rs`
+  - 高级设置页新增“旧版 KEX 兼容模式”开关与说明
+  - 测试连接与保存连接均复用该字段
+- `crates/terminal/src/terminal.rs`
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`
+- `crates/sftp_view/src/lib.rs`
+  - 三处入口同步把持久化字段透传到运行时 SSH 配置
+
+### 实施中额外修补
+- `crates/db/src/ssh_tunnel.rs`
+- `crates/db/src/mysql/connection.rs`
+- `crates/db/src/postgresql/connection.rs`
+  - 为现有测试辅助构造补上 `DbConnectionConfig` 新增字段，恢复本地验证能力
+
+### 编码后声明 - SSH 旧版 KEX 兼容开关
+时间：2026-03-27 11:46:19 +0800
+
+### 1. 复用了以下既有组件
+- `crates/ssh/src/ssh.rs`: 继续使用现有 SSH 建连入口，只扩展配置构造
+- `crates/terminal_view/src/ssh_form_window.rs`: 复用现有高级设置 checkbox 模式
+- `crates/sftp/src/russh_impl.rs`: 保留原有窗口大小和 `nodelay` 设置，只替换其基础 SSH 配置来源
+
+### 2. 遵循了以下项目约定
+- 命名约定：UI 状态、持久化字段、运行时字段全部使用 `enable_legacy_kex`
+- 代码风格：未新增兼容模式专用对象，而是在现有参数对象上扩展一个布尔字段
+- 文件组织：持久化、运行时、UI 与本地化文案分别落在原有职责文件中
+
+### 3. 对比了以下相似实现
+- `enable_proxy` / `enable_jump_server`：沿用“布尔字段 + 表单 checkbox + 参数构造透传”模式
+- `RusshClient::connect_with_progress(...)`：兼容逻辑放在统一配置构造层，而不是散落在每条连接路径里
+- `sftp` 的窗口配置：保留其特有参数，仅抽取通用 SSH 配置部分
+
+### 4. 未重复造轮子的证明
+- 已检查 `terminal`、`terminal_view`、`sftp_view`、`sftp` 的 SSH 参数构造点
+- 最终没有再造第二套 SSH 运行时配置对象，而是扩展 `SshParams` 与 `SshConnectConfig`
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`
+  - 结果：通过
+- `cargo test -p one-core ssh_params_defaults_legacy_kex_to_false_when_missing`
+  - 结果：通过
+- `cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline`
+  - 结果：通过
+
+### 验证中的已知仓库问题
+- `cargo test -p one-core`
+  - 结果：失败
+  - 失败项：
+    - `llm::storage::tests::ensure_onetcli_provider_is_not_default_when_auto_created`
+    - `cloud_sync::engine::tests::use_cloud_deleted_cloud_conflict_deletes_local_connection`
+    - `cloud_sync::engine::tests::use_local_conflict_resolution_updates_local_sync_status`
+    - `cloud_sync::engine::tests::use_local_deleted_cloud_conflict_recreates_remote_item`
+  - 说明：这些失败与本次 SSH 旧版 KEX 开关无直接代码耦合，本次未扩大修复范围
+
+## 补充修正 - 旧版兼容模式扩展到 CBC cipher
+时间：2026-03-27 12:02:00 +0800
+
+### 根因补充
+- 用户开启“旧版 KEX 兼容模式”后仍无法连接
+- 本地继续核查 `russh` 默认协商列表确认：
+  - 默认 KEX 列表外，默认 cipher 只包含 `chacha20-poly1305`、`aes*-gcm`、`aes*-ctr`
+  - 不包含许多旧 SSH 服务端常见的 `aes*-cbc`
+- 结论：仅放宽 KEX 不足以覆盖一批老设备，兼容模式需要同时放宽旧 CBC cipher
+
+### 已追加修改
+- `crates/ssh/src/ssh.rs`
+  - 兼容模式开启时，除旧版 KEX 外，再追加 `aes128-cbc`、`aes192-cbc`、`aes256-cbc`
+  - 单测同步校验 CBC cipher 追加顺序位于默认安全 cipher 之后
+- `crates/terminal_view/locales/terminal_view.yml`
+  - 界面文案从“旧版 KEX 兼容模式”调整为“旧版 SSH 协商兼容模式”
+  - 说明文案补充“CBC cipher”场景，避免继续误导为仅覆盖 KEX
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`
+  - 结果：通过

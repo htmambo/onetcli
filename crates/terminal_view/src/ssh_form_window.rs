@@ -12,6 +12,7 @@ use gpui_component::{
     input::{Input, InputState},
     radio::Radio,
     select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
+    spinner::Spinner,
     tab::{Tab, TabBar},
     v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
 };
@@ -29,10 +30,10 @@ use one_core::storage::{
 };
 use rust_i18n::t;
 use ssh::{
-    JumpServerConnectConfig, ProxyConnectConfig, ProxyType, RusshClient, SshAuth, SshClient,
-    SshConnectConfig,
+    format_connection_progress_message, JumpServerConnectConfig, ProxyConnectConfig, ProxyType,
+    RusshClient, SshAuth, SshClient, SshConnectConfig, SshConnectionStage,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct SshFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
@@ -151,6 +152,7 @@ pub struct SshFormWindow {
     connect_timeout_input: Entity<InputState>,
     keepalive_interval_input: Entity<InputState>,
     keepalive_max_input: Entity<InputState>,
+    enable_legacy_kex: bool,
 
     // 初始化
     init_script_input: Entity<InputState>,
@@ -163,6 +165,8 @@ pub struct SshFormWindow {
     sync_enabled: bool,
 
     is_testing: bool,
+    test_status_message: Option<String>,
+    test_started_at: Option<Instant>,
     test_result: Option<Result<(), String>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -323,6 +327,7 @@ impl SshFormWindow {
         let mut enable_jump_server = false;
         let mut enable_proxy = false;
         let mut proxy_type = ProxyTypeSelection::default();
+        let mut enable_legacy_kex = false;
         let mut sync_enabled = true; // 默认启用云同步
         let mut editing_credential_ref: Option<CertificateReference> = None;
 
@@ -375,6 +380,7 @@ impl SshFormWindow {
                     keepalive_max_input
                         .update(cx, |s, cx| s.set_value(&max.to_string(), window, cx));
                 }
+                enable_legacy_kex = params.enable_legacy_kex;
 
                 // 加载初始化设置
                 if let Some(ref dir) = params.default_directory {
@@ -461,11 +467,14 @@ impl SshFormWindow {
             connect_timeout_input,
             keepalive_interval_input,
             keepalive_max_input,
+            enable_legacy_kex,
             init_script_input,
             default_directory_input,
             remark_input,
             sync_enabled,
             is_testing: false,
+            test_status_message: None,
+            test_started_at: None,
             test_result: None,
             _subscriptions: Vec::new(),
         };
@@ -782,6 +791,7 @@ impl SshFormWindow {
             connect_timeout,
             keepalive_interval,
             keepalive_max,
+            enable_legacy_kex: self.enable_legacy_kex,
             default_directory,
             init_script,
             jump_server,
@@ -850,6 +860,7 @@ impl SshFormWindow {
             timeout: params.connect_timeout.map(Duration::from_secs),
             keepalive_interval: params.keepalive_interval.map(Duration::from_secs),
             keepalive_max: params.keepalive_max,
+            enable_legacy_kex: params.enable_legacy_kex,
             jump_server,
             proxy,
         }
@@ -857,20 +868,48 @@ impl SshFormWindow {
 
     fn on_test(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(params) = self.build_ssh_params(cx) else {
+            self.test_status_message = None;
+            self.test_started_at = None;
             self.test_result = Some(Err(t!("SSH.validation_error").to_string()));
             cx.notify();
             return;
         };
 
+        let config = self.build_ssh_connect_config(&params);
+        let initial_status = SshConnectionStage::initial_for_config(&config).description();
+        let (progress_tx, mut progress_rx) =
+            tokio::sync::mpsc::unbounded_channel::<SshConnectionStage>();
+
         self.is_testing = true;
+        self.test_status_message = Some(initial_status);
+        self.test_started_at = Some(Instant::now());
         self.test_result = None;
         cx.notify();
+        Self::spawn_test_status_tick(cx);
 
-        let config = self.build_ssh_connect_config(&params);
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            while let Some(stage) = progress_rx.recv().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.is_testing {
+                            this.test_status_message = Some(stage.description());
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let spawn_result = Tokio::spawn_result(cx, async move {
-                let mut client = RusshClient::connect(config).await?;
+                let mut client = RusshClient::connect_with_progress(config, move |stage| {
+                    let _ = progress_tx.send(stage);
+                })
+                .await?;
                 client.disconnect().await?;
                 Ok::<(), anyhow::Error>(())
             })
@@ -883,6 +922,8 @@ impl SshFormWindow {
 
             let _ = this.update(cx, |this, cx| {
                 this.is_testing = false;
+                this.test_status_message = None;
+                this.test_started_at = None;
                 this.test_result = Some(test_result);
                 cx.notify();
             });
@@ -1262,7 +1303,7 @@ impl SshFormWindow {
     }
 
     /// 渲染高级设置标签页
-    fn render_advanced_tab(&self) -> impl IntoElement {
+    fn render_advanced_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_2()
             .child(self.render_form_row(
@@ -1277,6 +1318,27 @@ impl SshFormWindow {
                 &t!("SSH.keepalive_max"),
                 self.styled_input(Input::new(&self.keepalive_max_input)),
             ))
+            .child(
+                self.render_form_row(
+                    &t!("SSH.enable_legacy_kex"),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Checkbox::new("enable-legacy-kex")
+                                .checked(self.enable_legacy_kex)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.enable_legacy_kex = !this.enable_legacy_kex;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(app_style::text_muted())
+                                .child(t!("SSH.enable_legacy_kex_hint").to_string()),
+                        ),
+                ),
+            )
     }
 
     /// 渲染其他设置标签页
@@ -1285,6 +1347,27 @@ impl SshFormWindow {
             &t!("SSH.remark"),
             self.styled_input(Input::new(&self.remark_input)),
         ))
+    }
+
+    fn spawn_test_status_tick(cx: &mut Context<Self>) {
+        let entity = cx.entity().downgrade();
+        cx.spawn(async move |_, cx: &mut AsyncApp| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let keep_running = entity
+                .update(cx, |this, cx| {
+                    if this.is_testing && this.test_started_at.is_some() {
+                        cx.notify();
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if !keep_running {
+                break;
+            }
+        })
+        .detach();
     }
 }
 
@@ -1298,6 +1381,35 @@ impl Render for SshFormWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_testing = self.is_testing;
         let active_tab = self.active_tab;
+        let test_status_message = self
+            .test_status_message
+            .clone()
+            .unwrap_or_else(|| t!("Connection.testing").to_string());
+        let test_status_message = format_connection_progress_message(
+            &test_status_message,
+            self.test_started_at
+                .map(|started_at| started_at.elapsed().as_secs())
+                .unwrap_or(0),
+        );
+
+        let test_status_element = is_testing.then(|| {
+            h_flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .border_1()
+                .border_color(app_style::border())
+                .bg(app_style::panel_bg())
+                .child(Spinner::new().small())
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(app_style::text_muted())
+                        .child(test_status_message),
+                )
+        });
 
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
@@ -1388,11 +1500,14 @@ impl Render for SshFormWindow {
                         1 => self.render_init_tab().into_any_element(),
                         2 => self.render_jump_server_tab(cx).into_any_element(),
                         3 => self.render_proxy_tab(cx).into_any_element(),
-                        4 => self.render_advanced_tab().into_any_element(),
+                        4 => self.render_advanced_tab(cx).into_any_element(),
                         5 => self.render_other_tab().into_any_element(),
                         _ => div().into_any_element(),
                     }),
             )
+            .when_some(test_status_element, |this, elem| {
+                this.child(h_flex().justify_center().pb_2().child(elem))
+            })
             // 测试结果
             .when_some(test_result_element, |this, elem| {
                 this.child(h_flex().justify_center().pb_2().child(elem))

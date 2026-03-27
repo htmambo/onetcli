@@ -45,6 +45,10 @@ Theme:
 
 # 通用文本
 Common:
+  settings:
+    en: Settings
+    zh-CN: 设置
+    zh-HK: 設定
   ok:
     en: OK
     zh-CN: 确定
@@ -271,6 +275,14 @@ SSH:
     en: Keepalive Max
     zh-CN: 最大心跳次数
     zh-HK: 最大心跳次數
+  enable_legacy_kex:
+    en: Legacy SSH Compatibility
+    zh-CN: 旧版 SSH 协商兼容模式
+    zh-HK: 舊版 SSH 協商相容模式
+  enable_legacy_kex_hint:
+    en: Enable only for old SSH servers that fail negotiation and only support legacy SHA1-based KEX or CBC ciphers.
+    zh-CN: 仅在旧 SSH 服务端协商失败、且只支持老旧 SHA1 类 KEX 或 CBC cipher 时启用。
+    zh-HK: 僅在舊 SSH 伺服器協商失敗、且只支援舊式 SHA1 類 KEX 或 CBC cipher 時啟用。
   # 初始化
   init_script:
     en: Init Script

@@ -2828,8 +2828,8 @@ impl HomePage {
                 v_flex()
                     .flex_1()
                     .w_full()
-                    .p_2()
-                    .gap_2()
+                    // .p_2()
+                    // .gap_2()
                     .children(filter_types.into_iter().map(|filter_type| {
                         let is_selected = self.selected_filter == filter_type;
                         let filter_type_clone = filter_type;
@@ -2876,8 +2876,8 @@ impl HomePage {
                 // 底部区域：主题切换、设置和用户头像
                 v_flex()
                     .w_full()
-                    .p_4()
-                    .gap_3()
+                    // .p_4()
+                    // .gap_3()
                     .border_t_1()
                     .border_color(cx.theme().border)
                     .child(
@@ -2897,8 +2897,8 @@ impl HomePage {
                         v_flex()
                             .relative()
                             .w_full()
-                            .mt_2()
-                            .pt_2()
+                            // .mt_2()
+                            // .pt_2()
                             .border_t_1()
                             .border_color(cx.theme().border)
                             .child(render_user_avatar(

@@ -20,7 +20,7 @@ use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::interval;
 
@@ -29,6 +29,7 @@ use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 use crate::{LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalEvent, TerminalSize};
 pub use ssh::{
     JumpServerConnectConfig, ProxyConnectConfig, ProxyType, PtyConfig, SshAuth, SshConnectConfig,
+    SshConnectionStage,
 };
 
 /// Terminal 发出的事件，供 TerminalView 订阅
@@ -169,6 +170,10 @@ pub struct Terminal {
     child_exited: Option<i32>,
     /// 连接状态
     connection_state: ConnectionState,
+    /// SSH 连接中的阶段提示文案
+    connection_status_message: Option<String>,
+    /// 连接阶段提示的起始时间，用于显示已等待时长
+    connection_wait_started_at: Option<Instant>,
 
     /// 终端尺寸
     cols: usize,
@@ -283,6 +288,8 @@ impl Terminal {
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Connected,
+            connection_status_message: None,
+            connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
@@ -343,6 +350,7 @@ impl Terminal {
             timeout: ssh_params.connect_timeout.map(Duration::from_secs),
             keepalive_interval: ssh_params.keepalive_interval.map(Duration::from_secs),
             keepalive_max: ssh_params.keepalive_max,
+            enable_legacy_kex: ssh_params.enable_legacy_kex,
             jump_server: ssh_params.jump_server.map(|jump| {
                 let jump_auth = match jump.auth_method {
                     SshAuthMethod::Password { password } => SshAuth::Password(password),
@@ -403,6 +411,7 @@ impl Terminal {
             init_commands.clone(),
             cx,
         );
+        Self::spawn_connection_status_tick(cx);
 
         Self {
             term,
@@ -411,6 +420,10 @@ impl Terminal {
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Connecting,
+            connection_status_message: Some(
+                SshConnectionStage::initial_for_config(&config.ssh_config).description(),
+            ),
+            connection_wait_started_at: Some(Instant::now()),
             cols,
             rows,
             ssh_config: Some(config),
@@ -453,6 +466,8 @@ impl Terminal {
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Connecting,
+            connection_status_message: None,
+            connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
@@ -558,10 +573,35 @@ impl Terminal {
             let _ = disconnect_rx.await;
             let _ = entity.update(cx, |this, cx| {
                 this.connection_state = ConnectionState::Disconnected { error: None };
+                this.connection_status_message = None;
+                this.connection_wait_started_at = None;
                 this.backend = None;
                 this.set_connection_active(false, cx);
                 cx.emit(TerminalModelEvent::Wakeup);
             });
+        })
+        .detach();
+    }
+
+    fn spawn_connection_status_tick(cx: &mut Context<Self>) {
+        let entity = cx.entity().downgrade();
+        cx.spawn(async move |_, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let keep_running = entity
+                .update(cx, |this, cx| {
+                    if matches!(this.connection_state, ConnectionState::Connecting)
+                        && this.connection_wait_started_at.is_some()
+                    {
+                        cx.emit(TerminalModelEvent::Wakeup);
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if !keep_running {
+                break;
+            }
         })
         .detach();
     }
@@ -577,6 +617,7 @@ impl Terminal {
     ) {
         // 创建 SSH 后端需要的通知通道（UnboundedSender<()>）
         let (notify_tx, mut notify_rx) = unbounded_channel::<()>();
+        let (progress_tx, mut progress_rx) = unbounded_channel::<SshConnectionStage>();
 
         let task = Tokio::spawn(cx, async move {
             // 转发 SSH 通知到事件通道（必须在 tokio runtime 内部）
@@ -596,7 +637,7 @@ impl Terminal {
                 });
                 sender
             });
-            SshBackend::connect(
+            SshBackend::connect_with_progress(
                 config.ssh_config,
                 config.pty_config,
                 term,
@@ -605,9 +646,29 @@ impl Terminal {
                 notify_tx,
                 disconnect_tx,
                 init_commands,
+                move |stage| {
+                    let _ = progress_tx.send(stage);
+                },
             )
             .await
         });
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Some(stage) = progress_rx.recv().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if matches!(this.connection_state, ConnectionState::Connecting) {
+                            this.connection_status_message = Some(stage.description());
+                            cx.emit(TerminalModelEvent::Wakeup);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = task.await;
@@ -626,6 +687,8 @@ impl Terminal {
         match result {
             Ok(Ok(backend)) => {
                 self.connection_state = ConnectionState::Connected;
+                self.connection_status_message = None;
+                self.connection_wait_started_at = None;
                 self.set_connection_active(true, cx);
                 // 连接后重新调整终端大小
                 self.term.lock().resize(TermDimensions {
@@ -652,12 +715,16 @@ impl Terminal {
                 self.connection_state = ConnectionState::Disconnected {
                     error: Some(e.to_string()),
                 };
+                self.connection_status_message = None;
+                self.connection_wait_started_at = None;
                 self.set_connection_active(false, cx);
             }
             Err(e) => {
                 self.connection_state = ConnectionState::Disconnected {
                     error: Some(e.to_string()),
                 };
+                self.connection_status_message = None;
+                self.connection_wait_started_at = None;
                 self.set_connection_active(false, cx);
             }
         }
@@ -778,6 +845,24 @@ impl Terminal {
         &self.connection_state
     }
 
+    /// 获取当前连接阶段提示
+    pub fn connection_status_message(&self) -> Option<&str> {
+        self.connection_status_message.as_deref()
+    }
+
+    /// 获取当前连接阶段提示和等待时长
+    pub fn connection_status_label(&self) -> Option<String> {
+        let message = self.connection_status_message.as_deref()?;
+        let elapsed_secs = self
+            .connection_wait_started_at
+            .map(|started_at| started_at.elapsed().as_secs())
+            .unwrap_or(0);
+        Some(ssh::format_connection_progress_message(
+            message,
+            elapsed_secs,
+        ))
+    }
+
     /// 获取连接名称
     pub fn connection_name(&self) -> Option<&str> {
         self.connection_name.as_deref()
@@ -852,6 +937,9 @@ impl Terminal {
             };
 
             self.connection_state = ConnectionState::Connecting;
+            self.connection_status_message =
+                Some(SshConnectionStage::initial_for_config(&config.ssh_config).description());
+            self.connection_wait_started_at = Some(Instant::now());
 
             let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
             Self::spawn_disconnect_handler(disconnect_rx, cx);
@@ -864,12 +952,15 @@ impl Terminal {
                 self.init_commands.clone(),
                 cx,
             );
+            Self::spawn_connection_status_tick(cx);
         } else if let Some(params) = self.serial_params.clone() {
             let Some(event_tx) = self.event_tx.clone() else {
                 return;
             };
 
             self.connection_state = ConnectionState::Connecting;
+            self.connection_status_message = None;
+            self.connection_wait_started_at = None;
 
             let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
             Self::spawn_disconnect_handler(disconnect_rx, cx);

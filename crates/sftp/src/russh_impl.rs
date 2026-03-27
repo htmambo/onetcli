@@ -592,17 +592,11 @@ impl RusshSftpClient {
 #[async_trait]
 impl SftpClient for RusshSftpClient {
     async fn connect(ssh_config: SshConnectConfig) -> Result<Self> {
-        let config = Arc::new(client::Config {
-            inactivity_timeout: ssh_config.timeout.or(Some(Duration::from_secs(300))),
-            keepalive_interval: ssh_config
-                .keepalive_interval
-                .or(Some(Duration::from_secs(60))),
-            keepalive_max: ssh_config.keepalive_max.unwrap_or(3),
-            window_size: 16 * 1024 * 1024, // 16 MB
-            maximum_packet_size: 0xFFFF,   // 65535, max allowed by russh
-            nodelay: true,
-            ..<_>::default()
-        });
+        let mut config = ssh::build_client_config(&ssh_config);
+        config.window_size = 16 * 1024 * 1024; // 16 MB
+        config.maximum_packet_size = 0xFFFF; // 65535, max allowed by russh
+        config.nodelay = true;
+        let config = Arc::new(config);
 
         let (mut session, jump_session) = if let Some(ref jump) = ssh_config.jump_server {
             tracing::info!("SFTP: 通过跳板机 {}:{} 连接", jump.host, jump.port);

@@ -399,6 +399,7 @@ fn build_ssh_config(conn: &StoredConnection) -> anyhow::Result<SshConnectConfig>
         timeout: ssh_params.connect_timeout.map(Duration::from_secs),
         keepalive_interval: ssh_params.keepalive_interval.map(Duration::from_secs),
         keepalive_max: ssh_params.keepalive_max,
+        enable_legacy_kex: ssh_params.enable_legacy_kex,
         jump_server: ssh_params.jump_server.map(|jump| {
             let jump_auth = match jump.auth_method {
                 SshAuthMethod::Password { password } => SshAuth::Password(password),

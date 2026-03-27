@@ -62,6 +62,7 @@ pub async fn resolve_connection_target(
         timeout: Some(Duration::from_secs(ssh_timeout_secs)),
         keepalive_interval: None,
         keepalive_max: None,
+        enable_legacy_kex: false,
         jump_server: None,
         proxy: None,
     };
@@ -161,6 +162,8 @@ mod tests {
             database: None,
             service_name: None,
             sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
             workspace_id: None,
             extra_params,
         }

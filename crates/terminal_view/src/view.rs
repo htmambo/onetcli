@@ -1790,7 +1790,9 @@ impl TerminalView {
         can_reconnect: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let connection_state = self.terminal.read(cx).connection_state().clone();
+        let terminal = self.terminal.read(cx);
+        let connection_state = terminal.connection_state().clone();
+        let connection_status_message = terminal.connection_status_label();
         let is_connecting = matches!(connection_state, ConnectionState::Connecting);
         let error_msg = match &connection_state {
             ConnectionState::Disconnected { error } => error.clone(),
@@ -1867,9 +1869,10 @@ impl TerminalView {
                             .text_sm()
                             .text_color(rgb(0x9ca3af))
                             .child(if is_connecting {
-                                t!("SshSession.establishing")
+                                connection_status_message
+                                    .unwrap_or_else(|| t!("SshSession.establishing").to_string())
                             } else {
-                                t!("SshSession.disconnected")
+                                t!("SshSession.disconnected").to_string()
                             }),
                     )
                     .when(can_reconnect && !is_connecting, |this| {
