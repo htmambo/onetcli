@@ -626,8 +626,21 @@ impl DbTreeView {
             }
             ConnectionDataEvent::ConnectionUpdated { connection } => {
                 if let Some(conn_id) = connection.id {
-                    if self.tracked_connection_ids.contains(&conn_id) {
-                        self.update_connection_info(connection, cx);
+                    match classify_connection_workspace_update(
+                        self.workspace_id,
+                        self.tracked_connection_ids.contains(&conn_id),
+                        connection.workspace_id,
+                    ) {
+                        ConnectionWorkspaceUpdateEffect::Remove => {
+                            self.remove_connection(&conn_id.to_string(), cx);
+                        }
+                        ConnectionWorkspaceUpdateEffect::Update => {
+                            self.update_connection_info(connection, cx);
+                        }
+                        ConnectionWorkspaceUpdateEffect::Add => {
+                            self.add_connection(connection, cx);
+                        }
+                        ConnectionWorkspaceUpdateEffect::Ignore => {}
                     }
                 }
             }
@@ -2586,6 +2599,32 @@ impl Focusable for DbTreeView {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectionWorkspaceUpdateEffect {
+    Remove,
+    Update,
+    Add,
+    Ignore,
+}
+
+fn classify_connection_workspace_update(
+    tree_workspace_id: Option<i64>,
+    is_tracked: bool,
+    connection_workspace_id: Option<i64>,
+) -> ConnectionWorkspaceUpdateEffect {
+    if is_tracked {
+        if connection_workspace_id == tree_workspace_id {
+            ConnectionWorkspaceUpdateEffect::Update
+        } else {
+            ConnectionWorkspaceUpdateEffect::Remove
+        }
+    } else if tree_workspace_id.is_some() && connection_workspace_id == tree_workspace_id {
+        ConnectionWorkspaceUpdateEffect::Add
+    } else {
+        ConnectionWorkspaceUpdateEffect::Ignore
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2640,6 +2679,38 @@ mod tests {
         assert_eq!(
             resolve_refresh_metadata_scope(&node),
             RefreshMetadataScope::Connection
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_remove_when_tracked_conn_moves_out() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), true, Some(9)),
+            ConnectionWorkspaceUpdateEffect::Remove
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_update_when_tracked_conn_stays() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), true, Some(7)),
+            ConnectionWorkspaceUpdateEffect::Update
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_add_when_untracked_conn_moves_in() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), false, Some(7)),
+            ConnectionWorkspaceUpdateEffect::Add
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_ignore_for_other_workspace() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), false, Some(9)),
+            ConnectionWorkspaceUpdateEffect::Ignore
         );
     }
 

@@ -363,30 +363,108 @@ impl ConnectionRepository {
         let ts = now();
         self.conn.with_connection_mut(|conn| {
             let tx = conn.transaction()?;
-            for (sort_order, connection_id) in connection_ids.iter().enumerate() {
-                let rows = if let Some(workspace_id) = workspace_id {
-                    tx.execute(
-                        "UPDATE connections SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND workspace_id = ?4",
-                        params![sort_order as i64, ts, connection_id, workspace_id],
-                    )?
-                } else {
-                    tx.execute(
-                        "UPDATE connections SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND workspace_id IS NULL",
-                        params![sort_order as i64, ts, connection_id],
-                    )?
-                };
-
-                if rows == 0 {
-                    return Err(anyhow::anyhow!(
-                        "连接 {} 不在目标工作区内，无法重排",
-                        connection_id
-                    ));
-                }
-            }
+            apply_connection_orders_in_workspace(&tx, workspace_id, connection_ids, ts)?;
             tx.commit()?;
             Ok(())
         })
     }
+
+    pub fn move_across_workspaces(
+        &self,
+        connection_id: i64,
+        source_workspace_id: Option<i64>,
+        target_workspace_id: Option<i64>,
+        source_connection_ids: &[i64],
+        target_connection_ids: &[i64],
+    ) -> Result<()> {
+        if source_workspace_id == target_workspace_id {
+            return Err(anyhow::anyhow!(
+                "源工作区和目标工作区相同，无法跨工作区移动"
+            ));
+        }
+        if source_connection_ids.contains(&connection_id) {
+            return Err(anyhow::anyhow!(
+                "跨工作区移动后的源工作区排序中仍包含目标连接 {}",
+                connection_id
+            ));
+        }
+        if !target_connection_ids.contains(&connection_id) {
+            return Err(anyhow::anyhow!(
+                "目标工作区排序中缺少被移动连接 {}",
+                connection_id
+            ));
+        }
+
+        let ts = now();
+        self.conn.with_connection_mut(|conn| {
+            let tx = conn.transaction()?;
+            let current_workspace_id = tx
+                .query_row(
+                    "SELECT workspace_id FROM connections WHERE id = ?1",
+                    params![connection_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .map_err(anyhow::Error::from)?;
+            if current_workspace_id != source_workspace_id {
+                return Err(anyhow::anyhow!(
+                    "连接 {} 当前工作区已变化，预期 {:?}，实际 {:?}",
+                    connection_id,
+                    source_workspace_id,
+                    current_workspace_id
+                ));
+            }
+
+            tx.execute(
+                "UPDATE connections SET workspace_id = ?1, updated_at = ?2 WHERE id = ?3",
+                params![target_workspace_id, ts, connection_id],
+            )?;
+
+            apply_connection_orders_in_workspace(
+                &tx,
+                source_workspace_id,
+                source_connection_ids,
+                ts,
+            )?;
+            apply_connection_orders_in_workspace(
+                &tx,
+                target_workspace_id,
+                target_connection_ids,
+                ts,
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+}
+
+fn apply_connection_orders_in_workspace(
+    tx: &rusqlite::Transaction<'_>,
+    workspace_id: Option<i64>,
+    connection_ids: &[i64],
+    ts: i64,
+) -> Result<()> {
+    for (sort_order, connection_id) in connection_ids.iter().enumerate() {
+        let rows = if let Some(workspace_id) = workspace_id {
+            tx.execute(
+                "UPDATE connections SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND workspace_id = ?4",
+                params![sort_order as i64, ts, connection_id, workspace_id],
+            )?
+        } else {
+            tx.execute(
+                "UPDATE connections SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND workspace_id IS NULL",
+                params![sort_order as i64, ts, connection_id],
+            )?
+        };
+
+        if rows == 0 {
+            return Err(anyhow::anyhow!(
+                "连接 {} 不在目标工作区内，无法重排",
+                connection_id
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -1821,5 +1899,170 @@ mod tests {
         let moved = connection_repo.get(moving_id).unwrap().unwrap();
         assert_eq!(moved.workspace_id, Some(workspace_id));
         assert_eq!(moved.sort_order, Some(1));
+    }
+
+    #[test]
+    fn connection_repository_move_across_workspaces_reorders_source_and_target() {
+        let conn = create_test_sqlite_connection();
+        let workspace_repo = WorkspaceRepository::new(conn.clone());
+        let connection_repo = ConnectionRepository::new(conn);
+
+        let mut source_workspace = Workspace::new("源工作区".to_string());
+        workspace_repo.insert(&mut source_workspace).unwrap();
+        let source_workspace_id = source_workspace.id.expect("源工作区应有 ID");
+
+        let mut target_workspace = Workspace::new("目标工作区".to_string());
+        workspace_repo.insert(&mut target_workspace).unwrap();
+        let target_workspace_id = target_workspace.id.expect("目标工作区应有 ID");
+
+        let mut source_first = StoredConnection::new_ssh(
+            "源连接-A".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.1.1".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                enable_legacy_kex: false,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(source_workspace_id),
+        );
+        let mut moving = StoredConnection::new_ssh(
+            "待移动连接".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.1.2".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                enable_legacy_kex: false,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(source_workspace_id),
+        );
+        let mut source_last = StoredConnection::new_ssh(
+            "源连接-B".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.1.3".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                enable_legacy_kex: false,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(source_workspace_id),
+        );
+        let mut target_first = StoredConnection::new_ssh(
+            "目标连接-A".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.2.1".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                enable_legacy_kex: false,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(target_workspace_id),
+        );
+        let mut target_last = StoredConnection::new_ssh(
+            "目标连接-B".to_string(),
+            crate::storage::models::SshParams {
+                host: "127.0.2.2".to_string(),
+                port: 22,
+                username: "tester".to_string(),
+                auth_method: crate::storage::models::SshAuthMethod::Agent,
+                credential_ref: None,
+                connect_timeout: None,
+                keepalive_interval: None,
+                keepalive_max: None,
+                enable_legacy_kex: false,
+                default_directory: None,
+                init_script: None,
+                jump_server: None,
+                proxy: None,
+            },
+            Some(target_workspace_id),
+        );
+
+        connection_repo.insert(&mut source_first).unwrap();
+        connection_repo.insert(&mut moving).unwrap();
+        connection_repo.insert(&mut source_last).unwrap();
+        connection_repo.insert(&mut target_first).unwrap();
+        connection_repo.insert(&mut target_last).unwrap();
+
+        let moving_id = moving.id.expect("待移动连接应有 ID");
+        connection_repo
+            .move_across_workspaces(
+                moving_id,
+                Some(source_workspace_id),
+                Some(target_workspace_id),
+                &[
+                    source_first.id.expect("源连接-A 应有 ID"),
+                    source_last.id.expect("源连接-B 应有 ID"),
+                ],
+                &[
+                    target_first.id.expect("目标连接-A 应有 ID"),
+                    moving_id,
+                    target_last.id.expect("目标连接-B 应有 ID"),
+                ],
+            )
+            .unwrap();
+
+        let source_first = connection_repo
+            .get(source_first.id.expect("源连接-A 应有 ID"))
+            .unwrap()
+            .unwrap();
+        let moving = connection_repo.get(moving_id).unwrap().unwrap();
+        let source_last = connection_repo
+            .get(source_last.id.expect("源连接-B 应有 ID"))
+            .unwrap()
+            .unwrap();
+        let target_first = connection_repo
+            .get(target_first.id.expect("目标连接-A 应有 ID"))
+            .unwrap()
+            .unwrap();
+        let target_last = connection_repo
+            .get(target_last.id.expect("目标连接-B 应有 ID"))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(source_first.workspace_id, Some(source_workspace_id));
+        assert_eq!(source_first.sort_order, Some(0));
+        assert_eq!(source_last.workspace_id, Some(source_workspace_id));
+        assert_eq!(source_last.sort_order, Some(1));
+
+        assert_eq!(target_first.workspace_id, Some(target_workspace_id));
+        assert_eq!(target_first.sort_order, Some(0));
+        assert_eq!(moving.workspace_id, Some(target_workspace_id));
+        assert_eq!(moving.sort_order, Some(1));
+        assert_eq!(target_last.workspace_id, Some(target_workspace_id));
+        assert_eq!(target_last.sort_order, Some(2));
     }
 }

@@ -47,6 +47,40 @@
 
 ---
 
+## 审查报告（home-cross-workspace-drag 实现）
+生成时间：2026-03-27 20:38:18 +0800
+
+### 需求完整性检查
+- 目标明确：首页连接卡片拖拽支持跨工作区移动，且虚拟占位只在拖拽时出现
+- 范围明确：主要落在 `main/src/home_tab.rs`，并补齐 `crates/db_view/src/db_tree_view.rs` 的连接换组订阅行为
+- 交付物明确：代码实现、上下文摘要、操作日志、专项验证报告、本地验证结果
+- 风险与依赖明确：空工作区/未分配区不支持作为目标；跨区落下仍统一进入目标工作区末尾
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：93/100
+- 风险评估：87/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 占位逻辑已收敛：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L3080) 现在会同时清理 `workspace_drop_preview`、`connection_drop_preview` 和 `connection_workspace_drop_target`，避免非拖拽状态下残留虚拟占位。
+- 跨区拖拽已打通：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L4125) 为工作区标题补充连接跨区落点，[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L4267) 又把工作区内容区外层容器也变成跨区落点，不再局限于标题区域。
+- 精准落位已补齐：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L3580) 之后新增跨工作区移动计划与提交链路，列表 gap、列表项、卡片项、卡片尾部 slot 在跨区时都能按目标位置插入，而不再只进末尾。
+- 同区排序未被破坏：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L4569) 之后的列表/卡片排序链路仍保留原有同区重排逻辑，只在 `drop` 分支上增加跨区插入路径。
+- 树视图同步已补齐：[`db_tree_view.rs`](/usr/htdocs/onetcli/crates/db_view/src/db_tree_view.rs#L626) 会在连接换工作区时根据跟踪状态执行 `Remove/Update/Add/Ignore`，避免首页移动后树节点残留在旧工作区。
+- 仓储排序一致性已补齐：[`repository.rs`](/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L365) 新增 `move_across_workspaces(...)`，在单个事务里完成换组、源组压实与目标组重排。
+- 本地验证有效：`cargo test -p one-core connection_repository_move_across_workspaces --lib -- --nocapture`、`cargo test -p main connection_list_sort_tests -- --nocapture` 与 `cargo check -p main -p db_view -p one-core` 均已通过。
+
+---
+
 ## 审查报告（ssh-agent-auth 实现）
 生成时间：2026-03-24 09:35:05 +0800
 

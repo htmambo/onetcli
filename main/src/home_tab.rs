@@ -174,6 +174,14 @@ impl Render for DragConnection {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConnectionWorkspaceMovePlan {
+    source_workspace_id: Option<i64>,
+    target_workspace_id: Option<i64>,
+    source_connection_ids: Vec<i64>,
+    target_connection_ids: Vec<i64>,
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         #[cfg(target_os = "macos")]
@@ -216,6 +224,8 @@ pub struct HomePage {
     workspace_drop_preview: Option<WorkspaceDropPreview>,
     /// 手动排序时连接项的当前插入预览位置
     connection_drop_preview: Option<ConnectionDropPreview>,
+    /// 手动排序时跨工作区移动连接的目标工作区
+    connection_workspace_drop_target: Option<i64>,
     /// 工作区拖拽预览的实际尺寸缓存
     workspace_drag_preview_sizes: HashMap<i64, DragPreviewSize>,
     /// 连接列表项拖拽预览的实际尺寸缓存
@@ -294,6 +304,7 @@ impl HomePage {
             sync_feedback: None,
             workspace_drop_preview: None,
             connection_drop_preview: None,
+            connection_workspace_drop_target: None,
             workspace_drag_preview_sizes: HashMap::new(),
             connection_list_drag_preview_sizes: HashMap::new(),
             connection_card_drag_preview_sizes: HashMap::new(),
@@ -3077,7 +3088,8 @@ impl HomePage {
 
     fn clear_manual_drop_preview(&mut self, cx: &mut Context<Self>) {
         let had_preview = self.workspace_drop_preview.take().is_some()
-            || self.connection_drop_preview.take().is_some();
+            || self.connection_drop_preview.take().is_some()
+            || self.connection_workspace_drop_target.take().is_some();
         if had_preview {
             cx.notify();
         }
@@ -3093,12 +3105,16 @@ impl HomePage {
             target_workspace_id,
             position,
         });
-        if self.workspace_drop_preview == next_preview && self.connection_drop_preview.is_none() {
+        if self.workspace_drop_preview == next_preview
+            && self.connection_drop_preview.is_none()
+            && self.connection_workspace_drop_target.is_none()
+        {
             return;
         }
 
         self.workspace_drop_preview = next_preview;
         self.connection_drop_preview = None;
+        self.connection_workspace_drop_target = None;
         cx.notify();
     }
 
@@ -3116,12 +3132,35 @@ impl HomePage {
             position,
             edge,
         });
-        if self.connection_drop_preview == next_preview && self.workspace_drop_preview.is_none() {
+        if self.connection_drop_preview == next_preview
+            && self.workspace_drop_preview.is_none()
+            && self.connection_workspace_drop_target.is_none()
+        {
             return;
         }
 
         self.connection_drop_preview = next_preview;
         self.workspace_drop_preview = None;
+        self.connection_workspace_drop_target = None;
+        cx.notify();
+    }
+
+    fn update_connection_workspace_drop_target(
+        &mut self,
+        target_workspace_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        let next_target = Some(target_workspace_id);
+        if self.connection_workspace_drop_target == next_target
+            && self.workspace_drop_preview.is_none()
+            && self.connection_drop_preview.is_none()
+        {
+            return;
+        }
+
+        self.connection_workspace_drop_target = next_target;
+        self.workspace_drop_preview = None;
+        self.connection_drop_preview = None;
         cx.notify();
     }
 
@@ -3230,39 +3269,22 @@ impl HomePage {
             .connection_drop_preview
             .filter(|preview| preview.workspace_id == workspace_id)?;
         let grid_bounds = self.connection_grid_bounds.get(&workspace_id).copied()?;
-        let anchor_index = connection_card_slot_anchor_index(preview, visible_connection_ids)?;
-        let anchor_bounds = self
-            .connection_card_bounds
-            .get(&visible_connection_ids[anchor_index])
-            .copied()?;
-        let relative_anchor_bounds = Bounds::new(
-            Point::new(
-                anchor_bounds.origin.x - grid_bounds.origin.x,
-                anchor_bounds.origin.y - grid_bounds.origin.y,
-            ),
-            anchor_bounds.size,
-        );
-        let relative_partner_bounds = anchor_index
-            .checked_sub(1)
-            .and_then(|index| {
+        let card_bounds = visible_connection_ids
+            .iter()
+            .filter_map(|connection_id| {
                 self.connection_card_bounds
-                    .get(&visible_connection_ids[index])
+                    .get(connection_id)
+                    .copied()
+                    .map(|bounds| (*connection_id, bounds))
             })
-            .copied()
-            .map(|bounds| {
-                Bounds::new(
-                    Point::new(
-                        bounds.origin.x - grid_bounds.origin.x,
-                        bounds.origin.y - grid_bounds.origin.y,
-                    ),
-                    bounds.size,
-                )
-            });
+            .collect::<Vec<_>>();
 
-        Some(connection_card_slot_indicator_bounds(
-            relative_anchor_bounds,
-            relative_partner_bounds,
-        ))
+        connection_card_overlay_preview_bounds_from_bounds(
+            preview,
+            visible_connection_ids,
+            grid_bounds,
+            &card_bounds,
+        )
     }
 
     fn reorder_workspaces_to_end_manually(
@@ -3435,30 +3457,8 @@ impl HomePage {
             return;
         }
 
-        let mut ordered_connection_ids: Vec<i64> = self
-            .connections
-            .iter()
-            .filter(|connection| connection.workspace_id == workspace_id)
-            .filter_map(|connection| connection.id)
-            .collect();
-        ordered_connection_ids.sort_by(|a, b| {
-            let left = self
-                .connections
-                .iter()
-                .find(|connection| connection.id == Some(*a))
-                .expect("连接 ID 已存在于当前列表");
-            let right = self
-                .connections
-                .iter()
-                .find(|connection| connection.id == Some(*b))
-                .expect("连接 ID 已存在于当前列表");
-            compare_connections(
-                left,
-                right,
-                ConnectionListSortField::Manual,
-                ConnectionListSortOrder::Ascending,
-            )
-        });
+        let mut ordered_connection_ids =
+            ordered_connection_ids_for_workspace(&self.connections, workspace_id);
 
         let Some(source_index) = ordered_connection_ids
             .iter()
@@ -3515,6 +3515,128 @@ impl HomePage {
             }
         })
         .detach();
+    }
+
+    fn apply_connection_workspace_move_plan(
+        &mut self,
+        connection_id: i64,
+        plan: &ConnectionWorkspaceMovePlan,
+    ) {
+        if let Some(connection) = self
+            .connections
+            .iter_mut()
+            .find(|connection| connection.id == Some(connection_id))
+        {
+            connection.workspace_id = plan.target_workspace_id;
+        }
+        self.apply_connection_manual_order(plan.source_workspace_id, &plan.source_connection_ids);
+        self.apply_connection_manual_order(plan.target_workspace_id, &plan.target_connection_ids);
+    }
+
+    fn move_connection_with_plan(
+        &mut self,
+        connection_id: i64,
+        plan: ConnectionWorkspaceMovePlan,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_manual_drop_preview(cx);
+        self.apply_connection_workspace_move_plan(connection_id, &plan);
+        cx.notify();
+
+        let storage = cx.global::<GlobalStorageState>().storage.clone();
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let result = (|| -> anyhow::Result<StoredConnection> {
+                let repo = storage
+                    .get::<ConnectionRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+                repo.move_across_workspaces(
+                    connection_id,
+                    plan.source_workspace_id,
+                    plan.target_workspace_id,
+                    &plan.source_connection_ids,
+                    &plan.target_connection_ids,
+                )?;
+                repo.get(connection_id)?
+                    .ok_or_else(|| anyhow::anyhow!("连接 {} 更新后丢失", connection_id))
+            })();
+
+            match result {
+                Ok(updated_connection) => {
+                    _ = this.update(cx, |this, cx| {
+                        if let Some(position) = this
+                            .connections
+                            .iter()
+                            .position(|connection| connection.id == updated_connection.id)
+                        {
+                            this.connections[position] = updated_connection.clone();
+                        } else {
+                            this.connections.push(updated_connection.clone());
+                        }
+
+                        emit_connection_event(
+                            ConnectionDataEvent::ConnectionUpdated {
+                                connection: updated_connection,
+                            },
+                            cx,
+                        );
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    _ = this.update(cx, |this, cx| {
+                        this.load_connections(cx);
+                        let message = t!("Home.manual_sort_save_failed", error = error.to_string())
+                            .to_string();
+                        this.set_sync_feedback(SyncFeedbackLevel::Error, message);
+                        if let Some(feedback) = &this.sync_feedback {
+                            Self::push_sync_notification(feedback, cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn move_connection_to_workspace_at(
+        &mut self,
+        connection_id: i64,
+        target_workspace_id: i64,
+        target_connection_id: i64,
+        position: ManualInsertPosition,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(plan) = plan_connection_move_to_workspace_position(
+            &self.connections,
+            connection_id,
+            Some(target_workspace_id),
+            target_connection_id,
+            position,
+        ) else {
+            self.clear_manual_drop_preview(cx);
+            return;
+        };
+
+        self.move_connection_with_plan(connection_id, plan, cx);
+    }
+
+    fn move_connection_to_workspace_end(
+        &mut self,
+        connection_id: i64,
+        target_workspace_id: i64,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(plan) = plan_connection_move_to_workspace_end(
+            &self.connections,
+            connection_id,
+            Some(target_workspace_id),
+        ) else {
+            self.clear_manual_drop_preview(cx);
+            return;
+        };
+
+        self.move_connection_with_plan(connection_id, plan, cx);
     }
 
     fn toggle_connection_list_sort_order(&mut self, cx: &mut Context<Self>) {
@@ -3912,6 +4034,13 @@ impl HomePage {
                     .map(|preview| preview.position)
             })
             .filter(|_| manual_sort_mode && cx.has_active_drag());
+        let connection_workspace_drop_active = workspace_id
+            .map(|workspace_id| {
+                manual_sort_mode
+                    && cx.has_active_drag()
+                    && self.connection_workspace_drop_target == Some(workspace_id)
+            })
+            .unwrap_or(false);
         v_flex()
             .gap_0()
             .rounded_lg()
@@ -3940,6 +4069,10 @@ impl HomePage {
                     })
                     .when(is_collapsed, |this| this.rounded_b_lg())
                     .hover(|s| s.bg(cx.theme().list_hover))
+                    .when(connection_workspace_drop_active, |this| {
+                        this.border_color(cx.theme().drag_border)
+                            .bg(cx.theme().drop_target.opacity(0.28))
+                    })
                     .when(
                         manual_sort_mode && draggable_workspace_id.is_some(),
                         |this| {
@@ -4007,6 +4140,58 @@ impl HomePage {
                             ))
                         },
                     )
+                    .when(manual_sort_mode && workspace_id.is_some(), |this| {
+                        let workspace_id = workspace_id.expect("工作区 ID 应存在");
+                        this.on_drag_move(cx.listener(
+                            move |this, drag: &DragMoveEvent<DragConnection>, _, cx| {
+                                if !drag.bounds.contains(&drag.event.position) {
+                                    return;
+                                }
+
+                                let drag_connection = drag.drag(cx);
+                                if !can_drop_connection_on_workspace(
+                                    drag_connection.workspace_id,
+                                    Some(workspace_id),
+                                ) {
+                                    if this.connection_workspace_drop_target == Some(workspace_id) {
+                                        this.clear_manual_drop_preview(cx);
+                                    }
+                                    return;
+                                }
+
+                                this.update_connection_workspace_drop_target(workspace_id, cx);
+                            },
+                        ))
+                        .drag_over::<DragConnection>(move |this, drag, _, cx| {
+                            if !can_drop_connection_on_workspace(
+                                drag.workspace_id,
+                                Some(workspace_id),
+                            ) {
+                                this
+                            } else {
+                                this.border_color(cx.theme().drag_border)
+                                    .bg(cx.theme().drop_target.opacity(0.35))
+                            }
+                        })
+                        .on_drop(cx.listener(
+                            move |this, drag: &DragConnection, _, cx| {
+                                cx.stop_propagation();
+                                if !can_drop_connection_on_workspace(
+                                    drag.workspace_id,
+                                    Some(workspace_id),
+                                ) {
+                                    this.clear_manual_drop_preview(cx);
+                                    return;
+                                }
+
+                                this.move_connection_to_workspace_end(
+                                    drag.connection_id,
+                                    workspace_id,
+                                    cx,
+                                );
+                            },
+                        ))
+                    })
                     .when_some(workspace_id, |this, workspace_id| {
                         let view = view.clone();
                         this.on_prepaint(move |bounds, _, cx| {
@@ -4097,12 +4282,82 @@ impl HomePage {
                     }),
             )
             .when(!connections.is_empty() && !is_collapsed, |this| {
-                this.child(div().p_3().child(self.render_connections_collection(
-                    connections,
-                    workspace_id,
-                    selected_id,
-                    cx,
-                )))
+                this.child(
+                    div()
+                        .p_3()
+                        .when(manual_sort_mode && workspace_id.is_some(), |this| {
+                            let workspace_id = workspace_id.expect("工作区 ID 应存在");
+                            this.on_drag_move(cx.listener(
+                                move |this, drag: &DragMoveEvent<DragConnection>, _, cx| {
+                                    if !drag.bounds.contains(&drag.event.position) {
+                                        return;
+                                    }
+
+                                    let drag_connection = drag.drag(cx);
+                                    if can_drop_connection_on_workspace(
+                                        drag_connection.workspace_id,
+                                        Some(workspace_id),
+                                    ) && this
+                                        .connection_drop_preview
+                                        .map(|preview| preview.workspace_id)
+                                        != Some(Some(workspace_id))
+                                    {
+                                        this.update_connection_workspace_drop_target(
+                                            workspace_id,
+                                            cx,
+                                        );
+                                    }
+                                },
+                            ))
+                            .drag_over::<DragConnection>(move |this, drag, _, cx| {
+                                if can_drop_connection_on_workspace(
+                                    drag.workspace_id,
+                                    Some(workspace_id),
+                                ) {
+                                    this.bg(cx.theme().drop_target.opacity(0.22))
+                                } else {
+                                    this
+                                }
+                            })
+                            .on_drop(cx.listener(
+                                move |this, drag: &DragConnection, _, cx| {
+                                    if !can_drop_connection_on_workspace(
+                                        drag.workspace_id,
+                                        Some(workspace_id),
+                                    ) {
+                                        return;
+                                    }
+
+                                    cx.stop_propagation();
+                                    if let Some(preview) =
+                                        this.connection_drop_preview.filter(|preview| {
+                                            preview.workspace_id == Some(workspace_id)
+                                        })
+                                    {
+                                        this.move_connection_to_workspace_at(
+                                            drag.connection_id,
+                                            workspace_id,
+                                            preview.target_connection_id,
+                                            preview.position,
+                                            cx,
+                                        );
+                                    } else {
+                                        this.move_connection_to_workspace_end(
+                                            drag.connection_id,
+                                            workspace_id,
+                                            cx,
+                                        );
+                                    }
+                                },
+                            ))
+                        })
+                        .child(self.render_connections_collection(
+                            connections,
+                            workspace_id,
+                            selected_id,
+                            cx,
+                        )),
+                )
             })
     }
 
@@ -4161,11 +4416,16 @@ impl HomePage {
                                     }
 
                                     let drag_connection = drag.drag(cx);
-                                    if drag_connection.workspace_id != workspace_id {
-                                        return;
-                                    }
                                     if drag_connection.connection_id == target_connection_id {
                                         this.clear_manual_drop_preview(cx);
+                                        return;
+                                    }
+                                    if !can_drop_connection_on_connection_target(
+                                        drag_connection.connection_id,
+                                        drag_connection.workspace_id,
+                                        target_connection_id,
+                                        workspace_id,
+                                    ) {
                                         return;
                                     }
 
@@ -4179,26 +4439,44 @@ impl HomePage {
                                 },
                             ))
                             .drag_over::<DragConnection>(move |this, drag, _, cx| {
-                                if drag.workspace_id != workspace_id
-                                    || drag.connection_id == target_connection_id
-                                {
+                                if !can_drop_connection_on_connection_target(
+                                    drag.connection_id,
+                                    drag.workspace_id,
+                                    target_connection_id,
+                                    workspace_id,
+                                ) {
                                     this
                                 } else {
                                     this.bg(cx.theme().drop_target.opacity(0.2))
                                 }
                             })
                             .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
-                                cx.stop_propagation();
-                                if drag.workspace_id != workspace_id {
+                                if !can_drop_connection_on_connection_target(
+                                    drag.connection_id,
+                                    drag.workspace_id,
+                                    target_connection_id,
+                                    workspace_id,
+                                ) {
                                     return;
                                 }
-                                this.reorder_connections_manually_at(
-                                    workspace_id,
-                                    drag.connection_id,
-                                    target_connection_id,
-                                    ManualInsertPosition::Before,
-                                    cx,
-                                );
+                                cx.stop_propagation();
+                                if drag.workspace_id == workspace_id {
+                                    this.reorder_connections_manually_at(
+                                        workspace_id,
+                                        drag.connection_id,
+                                        target_connection_id,
+                                        ManualInsertPosition::Before,
+                                        cx,
+                                    );
+                                } else if let Some(workspace_id) = workspace_id {
+                                    this.move_connection_to_workspace_at(
+                                        drag.connection_id,
+                                        workspace_id,
+                                        target_connection_id,
+                                        ManualInsertPosition::Before,
+                                        cx,
+                                    );
+                                }
                             }))
                             .when(cx.has_active_drag() || zone_active, |this| {
                                 this.child(
@@ -4230,7 +4508,15 @@ impl HomePage {
             ));
         }
 
-        if manual_sort_mode {
+        let show_tail_slot = should_render_connection_grid_tail_slot(
+            manual_sort_mode,
+            cx.has_active_drag(),
+            self.connection_drop_preview
+                .map(|preview| preview.workspace_id),
+            workspace_id,
+        );
+
+        if show_tail_slot {
             if let Some(last_connection_id) = last_connection_id {
                 let zone_active = self.connection_drop_preview
                     == Some(ConnectionDropPreview {
@@ -4254,11 +4540,16 @@ impl HomePage {
                                 }
 
                                 let drag_connection = drag.drag(cx);
-                                if drag_connection.workspace_id != workspace_id {
-                                    return;
-                                }
                                 if drag_connection.connection_id == last_connection_id {
                                     this.clear_manual_drop_preview(cx);
+                                    return;
+                                }
+                                if !can_drop_connection_on_connection_target(
+                                    drag_connection.connection_id,
+                                    drag_connection.workspace_id,
+                                    last_connection_id,
+                                    workspace_id,
+                                ) {
                                     return;
                                 }
 
@@ -4272,25 +4563,43 @@ impl HomePage {
                             },
                         ))
                         .drag_over::<DragConnection>(move |this, drag, _, cx| {
-                            if drag.workspace_id != workspace_id
-                                || drag.connection_id == last_connection_id
-                            {
+                            if !can_drop_connection_on_connection_target(
+                                drag.connection_id,
+                                drag.workspace_id,
+                                last_connection_id,
+                                workspace_id,
+                            ) {
                                 this
                             } else {
                                 this.bg(cx.theme().drop_target.opacity(0.25))
                             }
                         })
                         .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
-                            cx.stop_propagation();
-                            if drag.workspace_id != workspace_id {
+                            if !can_drop_connection_on_connection_target(
+                                drag.connection_id,
+                                drag.workspace_id,
+                                last_connection_id,
+                                workspace_id,
+                            ) {
                                 return;
                             }
-                            this.reorder_connections_to_end_manually(
-                                workspace_id,
-                                drag.connection_id,
-                                last_connection_id,
-                                cx,
-                            );
+                            cx.stop_propagation();
+                            if drag.workspace_id == workspace_id {
+                                this.reorder_connections_to_end_manually(
+                                    workspace_id,
+                                    drag.connection_id,
+                                    last_connection_id,
+                                    cx,
+                                );
+                            } else if let Some(workspace_id) = workspace_id {
+                                this.move_connection_to_workspace_at(
+                                    drag.connection_id,
+                                    workspace_id,
+                                    last_connection_id,
+                                    ManualInsertPosition::After,
+                                    cx,
+                                );
+                            }
                         }))
                         .when(cx.has_active_drag() || zone_active, |this| {
                             this.child(
@@ -4416,10 +4725,16 @@ impl HomePage {
                         }
 
                         let drag_connection = drag.drag(cx);
-                        if drag_connection.connection_id == connection_id
-                            || drag_connection.workspace_id != drag_workspace_id
-                        {
+                        if drag_connection.connection_id == connection_id {
                             this.clear_manual_drop_preview(cx);
+                            return;
+                        }
+                        if !can_drop_connection_on_connection_target(
+                            drag_connection.connection_id,
+                            drag_connection.workspace_id,
+                            connection_id,
+                            drag_workspace_id,
+                        ) {
                             return;
                         }
 
@@ -4445,8 +4760,12 @@ impl HomePage {
                     },
                 ))
                 .drag_over::<DragConnection>(move |this, drag, _, cx| {
-                    if drag.connection_id == connection_id || drag.workspace_id != drag_workspace_id
-                    {
+                    if !can_drop_connection_on_connection_target(
+                        drag.connection_id,
+                        drag.workspace_id,
+                        connection_id,
+                        drag_workspace_id,
+                    ) {
                         this
                     } else {
                         this.border_color(cx.theme().drag_border)
@@ -4454,11 +4773,15 @@ impl HomePage {
                     }
                 })
                 .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
-                    cx.stop_propagation();
-                    if drag.workspace_id != drag_workspace_id {
-                        this.clear_manual_drop_preview(cx);
+                    if !can_drop_connection_on_connection_target(
+                        drag.connection_id,
+                        drag.workspace_id,
+                        connection_id,
+                        drag_workspace_id,
+                    ) {
                         return;
                     }
+                    cx.stop_propagation();
                     let position = this
                         .connection_drop_preview
                         .filter(|preview| {
@@ -4467,13 +4790,23 @@ impl HomePage {
                         })
                         .map(|preview| preview.position)
                         .unwrap_or(ManualInsertPosition::After);
-                    this.reorder_connections_manually_at(
-                        drag_workspace_id,
-                        drag.connection_id,
-                        connection_id,
-                        position,
-                        cx,
-                    );
+                    if drag.workspace_id == drag_workspace_id {
+                        this.reorder_connections_manually_at(
+                            drag_workspace_id,
+                            drag.connection_id,
+                            connection_id,
+                            position,
+                            cx,
+                        );
+                    } else if let Some(workspace_id) = drag_workspace_id {
+                        this.move_connection_to_workspace_at(
+                            drag.connection_id,
+                            workspace_id,
+                            connection_id,
+                            position,
+                            cx,
+                        );
+                    }
                 }))
             })
             .when_some(drag_connection_id, |this, connection_id| {
@@ -4700,7 +5033,6 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let manual_sort_mode = Self::is_manual_sort_mode(cx);
-        let last_connection_id = connections.last().and_then(|connection| connection.id);
         let visible_connection_ids = connections
             .iter()
             .filter_map(|connection| connection.id)
@@ -4729,7 +5061,12 @@ impl HomePage {
                         }
 
                         let drag_connection = drag.drag(cx);
-                        if drag_connection.workspace_id != workspace_id {
+                        let is_same_workspace = drag_connection.workspace_id == workspace_id;
+                        let is_cross_workspace = can_drop_connection_on_workspace(
+                            drag_connection.workspace_id,
+                            workspace_id,
+                        );
+                        if !is_same_workspace && !is_cross_workspace {
                             return;
                         }
 
@@ -4746,15 +5083,42 @@ impl HomePage {
                                 preview.edge,
                                 cx,
                             );
+                        } else if is_cross_workspace {
+                            this.update_connection_workspace_drop_target(
+                                workspace_id.expect("工作区 ID 应存在"),
+                                cx,
+                            );
                         }
                     },
                 ))
                 .on_drop(cx.listener(
                     move |this, drag: &DragConnection, _, cx| {
-                        cx.stop_propagation();
+                        if can_drop_connection_on_workspace(drag.workspace_id, workspace_id) {
+                            let preview = this
+                                .connection_drop_preview
+                                .filter(|preview| preview.workspace_id == workspace_id);
+                            cx.stop_propagation();
+                            if let Some(preview) = preview {
+                                this.move_connection_to_workspace_at(
+                                    drag.connection_id,
+                                    workspace_id.expect("工作区 ID 应存在"),
+                                    preview.target_connection_id,
+                                    preview.position,
+                                    cx,
+                                );
+                            } else {
+                                this.move_connection_to_workspace_end(
+                                    drag.connection_id,
+                                    workspace_id.expect("工作区 ID 应存在"),
+                                    cx,
+                                );
+                            }
+                            return;
+                        }
                         if drag.workspace_id != workspace_id {
                             return;
                         }
+                        cx.stop_propagation();
 
                         let Some(preview) = this
                             .connection_drop_preview
@@ -4788,109 +5152,6 @@ impl HomePage {
                 .child(self.render_connection_card_overlay_indicator(overlay_preview_bounds, cx));
         }
 
-        if manual_sort_mode {
-            if let Some(last_connection_id) = last_connection_id {
-                let zone_active = self.connection_drop_preview
-                    == Some(ConnectionDropPreview {
-                        workspace_id,
-                        target_connection_id: last_connection_id,
-                        position: ManualInsertPosition::After,
-                        edge: ManualDropIndicatorEdge::Right,
-                    })
-                    && cx.has_active_drag();
-                container = container.child(
-                    div().w(px(240.0)).flex_shrink_0().child(
-                        div()
-                            .w_full()
-                            .h(px(60.0))
-                            .rounded_lg()
-                            .relative()
-                            .overflow_hidden()
-                            .on_drag_move(cx.listener(
-                                move |this, drag: &DragMoveEvent<DragConnection>, _, cx| {
-                                    if !drag.bounds.contains(&drag.event.position) {
-                                        return;
-                                    }
-
-                                    let drag_connection = drag.drag(cx);
-                                    if drag_connection.workspace_id != workspace_id {
-                                        return;
-                                    }
-                                    if drag_connection.connection_id == last_connection_id {
-                                        this.clear_manual_drop_preview(cx);
-                                        return;
-                                    }
-
-                                    this.update_connection_drop_preview(
-                                        workspace_id,
-                                        last_connection_id,
-                                        ManualInsertPosition::After,
-                                        ManualDropIndicatorEdge::Right,
-                                        cx,
-                                    );
-                                },
-                            ))
-                            .drag_over::<DragConnection>(move |this, drag, _, cx| {
-                                if drag.workspace_id != workspace_id
-                                    || drag.connection_id == last_connection_id
-                                {
-                                    this
-                                } else {
-                                    this.border_1()
-                                        .border_color(cx.theme().drag_border)
-                                        .bg(cx.theme().drop_target.opacity(0.25))
-                                }
-                            })
-                            .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
-                                cx.stop_propagation();
-                                if drag.workspace_id != workspace_id {
-                                    return;
-                                }
-                                this.reorder_connections_to_end_manually(
-                                    workspace_id,
-                                    drag.connection_id,
-                                    last_connection_id,
-                                    cx,
-                                );
-                            }))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h_full()
-                                    .rounded_lg()
-                                    .border_2()
-                                    .border_dashed()
-                                    .border_color(cx.theme().drag_border.opacity(if zone_active {
-                                        1.0
-                                    } else if cx.has_active_drag() {
-                                        0.45
-                                    } else {
-                                        0.0
-                                    }))
-                                    .bg(cx.theme().drop_target.opacity(if zone_active {
-                                        0.24
-                                    } else if cx.has_active_drag() {
-                                        0.12
-                                    } else {
-                                        0.0
-                                    }))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(div().w(px(56.0)).h(px(6.0)).rounded_full().bg(
-                                        cx.theme().drag_border.opacity(if zone_active {
-                                            0.85
-                                        } else if cx.has_active_drag() {
-                                            0.4
-                                        } else {
-                                            0.0
-                                        }),
-                                    )),
-                            ),
-                    ),
-                );
-            }
-        }
         container
     }
 
@@ -5036,10 +5297,16 @@ impl HomePage {
                         }
 
                         let drag_connection = drag.drag(cx);
-                        if drag_connection.connection_id == connection_id
-                            || drag_connection.workspace_id != drag_workspace_id
-                        {
+                        if drag_connection.connection_id == connection_id {
                             this.clear_manual_drop_preview(cx);
+                            return;
+                        }
+                        if !can_drop_connection_on_connection_target(
+                            drag_connection.connection_id,
+                            drag_connection.workspace_id,
+                            connection_id,
+                            drag_workspace_id,
+                        ) {
                             return;
                         }
 
@@ -5054,19 +5321,27 @@ impl HomePage {
                     },
                 ))
                 .drag_over::<DragConnection>(move |this, drag, _, _cx| {
-                    if drag.connection_id == connection_id || drag.workspace_id != drag_workspace_id
-                    {
+                    if !can_drop_connection_on_connection_target(
+                        drag.connection_id,
+                        drag.workspace_id,
+                        connection_id,
+                        drag_workspace_id,
+                    ) {
                         this
                     } else {
                         this
                     }
                 })
                 .on_drop(cx.listener(move |this, drag: &DragConnection, _, cx| {
-                    cx.stop_propagation();
-                    if drag.workspace_id != drag_workspace_id {
-                        this.clear_manual_drop_preview(cx);
+                    if !can_drop_connection_on_connection_target(
+                        drag.connection_id,
+                        drag.workspace_id,
+                        connection_id,
+                        drag_workspace_id,
+                    ) {
                         return;
                     }
+                    cx.stop_propagation();
                     let position = this
                         .connection_drop_preview
                         .filter(|preview| {
@@ -5075,13 +5350,23 @@ impl HomePage {
                         })
                         .map(|preview| preview.position)
                         .unwrap_or(ManualInsertPosition::After);
-                    this.reorder_connections_manually_at(
-                        drag_workspace_id,
-                        drag.connection_id,
-                        connection_id,
-                        position,
-                        cx,
-                    );
+                    if drag.workspace_id == drag_workspace_id {
+                        this.reorder_connections_manually_at(
+                            drag_workspace_id,
+                            drag.connection_id,
+                            connection_id,
+                            position,
+                            cx,
+                        );
+                    } else if let Some(workspace_id) = drag_workspace_id {
+                        this.move_connection_to_workspace_at(
+                            drag.connection_id,
+                            workspace_id,
+                            connection_id,
+                            position,
+                            cx,
+                        );
+                    }
                 }))
             })
             .when_some(drag_connection_id, |this, connection_id| {
@@ -5429,6 +5714,134 @@ fn manual_sort_value(value: Option<i64>) -> i64 {
     value.unwrap_or(i64::MAX)
 }
 
+fn ordered_connection_ids_for_workspace(
+    connections: &[StoredConnection],
+    workspace_id: Option<i64>,
+) -> Vec<i64> {
+    let mut ordered_connection_ids: Vec<i64> = connections
+        .iter()
+        .filter(|connection| connection.workspace_id == workspace_id)
+        .filter_map(|connection| connection.id)
+        .collect();
+    ordered_connection_ids.sort_by(|a, b| {
+        let left = connections
+            .iter()
+            .find(|connection| connection.id == Some(*a))
+            .expect("连接 ID 已存在于当前列表");
+        let right = connections
+            .iter()
+            .find(|connection| connection.id == Some(*b))
+            .expect("连接 ID 已存在于当前列表");
+        compare_connections(
+            left,
+            right,
+            ConnectionListSortField::Manual,
+            ConnectionListSortOrder::Ascending,
+        )
+    });
+    ordered_connection_ids
+}
+
+fn can_drop_connection_on_workspace(
+    drag_workspace_id: Option<i64>,
+    target_workspace_id: Option<i64>,
+) -> bool {
+    target_workspace_id.is_some() && drag_workspace_id != target_workspace_id
+}
+
+fn can_drop_connection_on_connection_target(
+    drag_connection_id: i64,
+    drag_workspace_id: Option<i64>,
+    target_connection_id: i64,
+    target_workspace_id: Option<i64>,
+) -> bool {
+    drag_connection_id != target_connection_id
+        && (drag_workspace_id == target_workspace_id
+            || can_drop_connection_on_workspace(drag_workspace_id, target_workspace_id))
+}
+
+fn plan_connection_move_to_workspace_position(
+    connections: &[StoredConnection],
+    connection_id: i64,
+    target_workspace_id: Option<i64>,
+    target_connection_id: i64,
+    position: ManualInsertPosition,
+) -> Option<ConnectionWorkspaceMovePlan> {
+    let dragged_connection = connections
+        .iter()
+        .find(|connection| connection.id == Some(connection_id))?;
+    let source_workspace_id = dragged_connection.workspace_id;
+    if source_workspace_id == target_workspace_id {
+        return None;
+    }
+
+    let mut source_connection_ids =
+        ordered_connection_ids_for_workspace(connections, source_workspace_id);
+    let source_index = source_connection_ids
+        .iter()
+        .position(|candidate_id| *candidate_id == connection_id)?;
+    source_connection_ids.remove(source_index);
+
+    let mut target_connection_ids =
+        ordered_connection_ids_for_workspace(connections, target_workspace_id);
+    let target_index = target_connection_ids
+        .iter()
+        .position(|candidate_id| *candidate_id == target_connection_id)?;
+    let insert_index = match position {
+        ManualInsertPosition::Before => target_index,
+        ManualInsertPosition::After => target_index + 1,
+    };
+    target_connection_ids.insert(insert_index, connection_id);
+
+    Some(ConnectionWorkspaceMovePlan {
+        source_workspace_id,
+        target_workspace_id,
+        source_connection_ids,
+        target_connection_ids,
+    })
+}
+
+fn plan_connection_move_to_workspace_end(
+    connections: &[StoredConnection],
+    connection_id: i64,
+    target_workspace_id: Option<i64>,
+) -> Option<ConnectionWorkspaceMovePlan> {
+    let dragged_connection = connections
+        .iter()
+        .find(|connection| connection.id == Some(connection_id))?;
+    let source_workspace_id = dragged_connection.workspace_id;
+    if source_workspace_id == target_workspace_id {
+        return None;
+    }
+
+    let mut source_connection_ids =
+        ordered_connection_ids_for_workspace(connections, source_workspace_id);
+    let source_index = source_connection_ids
+        .iter()
+        .position(|candidate_id| *candidate_id == connection_id)?;
+    source_connection_ids.remove(source_index);
+
+    let mut target_connection_ids =
+        ordered_connection_ids_for_workspace(connections, target_workspace_id);
+    target_connection_ids.push(connection_id);
+
+    Some(ConnectionWorkspaceMovePlan {
+        source_workspace_id,
+        target_workspace_id,
+        source_connection_ids,
+        target_connection_ids,
+    })
+}
+
+fn should_render_connection_grid_tail_slot(
+    manual_sort_mode: bool,
+    has_active_drag: bool,
+    preview_workspace_id: Option<Option<i64>>,
+    workspace_id: Option<i64>,
+) -> bool {
+    manual_sort_mode && has_active_drag && preview_workspace_id == Some(workspace_id)
+}
+
 fn move_item_relative_to_target<T>(
     items: &mut Vec<T>,
     source_index: usize,
@@ -5611,6 +6024,54 @@ fn preview_for_connection_card_gap_from_bounds(
     }
 
     best_preview.map(|(_, preview)| preview)
+}
+
+fn relative_bounds_in_grid(bounds: Bounds<Pixels>, grid_bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    Bounds::new(
+        Point::new(
+            bounds.origin.x - grid_bounds.origin.x,
+            bounds.origin.y - grid_bounds.origin.y,
+        ),
+        bounds.size,
+    )
+}
+
+fn connection_card_overlay_preview_bounds_from_bounds(
+    preview: ConnectionDropPreview,
+    visible_connection_ids: &[i64],
+    grid_bounds: Bounds<Pixels>,
+    card_bounds: &[(i64, Bounds<Pixels>)],
+) -> Option<Bounds<Pixels>> {
+    let find_bounds = |connection_id| {
+        card_bounds
+            .iter()
+            .find(|(candidate_id, _)| *candidate_id == connection_id)
+            .map(|(_, bounds)| *bounds)
+    };
+
+    if let Some(anchor_index) = connection_card_slot_anchor_index(preview, visible_connection_ids) {
+        let anchor_bounds = find_bounds(visible_connection_ids[anchor_index])?;
+        let relative_anchor_bounds = relative_bounds_in_grid(anchor_bounds, grid_bounds);
+        let relative_partner_bounds = anchor_index
+            .checked_sub(1)
+            .and_then(|index| find_bounds(visible_connection_ids[index]))
+            .map(|bounds| relative_bounds_in_grid(bounds, grid_bounds));
+
+        Some(connection_card_slot_indicator_bounds(
+            relative_anchor_bounds,
+            relative_partner_bounds,
+        ))
+    } else if preview.position == ManualInsertPosition::After
+        && visible_connection_ids.last().copied() == Some(preview.target_connection_id)
+    {
+        let last_bounds = find_bounds(preview.target_connection_id)?;
+        Some(connection_card_overlay_indicator_bounds(
+            relative_bounds_in_grid(last_bounds, grid_bounds),
+            preview.edge,
+        ))
+    } else {
+        None
+    }
 }
 
 fn connection_card_slot_anchor_index(
@@ -5827,6 +6288,83 @@ mod connection_list_sort_tests {
     }
 
     #[test]
+    fn can_drop_connection_on_workspace_rejects_same_workspace_and_empty_target() {
+        assert!(!can_drop_connection_on_workspace(Some(7), Some(7)));
+        assert!(can_drop_connection_on_workspace(Some(7), Some(9)));
+        assert!(can_drop_connection_on_workspace(None, Some(9)));
+        assert!(!can_drop_connection_on_workspace(Some(7), None));
+    }
+
+    #[test]
+    fn plan_connection_move_to_workspace_position_inserts_before_target_and_compacts_source() {
+        let mut source_first = make_connection(1, "source-a", 10, 10, 0);
+        source_first.workspace_id = Some(7);
+        let mut moving = make_connection(2, "moving", 20, 20, 1);
+        moving.workspace_id = Some(7);
+        let mut source_last = make_connection(3, "source-b", 30, 30, 2);
+        source_last.workspace_id = Some(7);
+        let mut target_first = make_connection(4, "target-a", 40, 40, 0);
+        target_first.workspace_id = Some(9);
+        let mut target_last = make_connection(5, "target-b", 50, 50, 1);
+        target_last.workspace_id = Some(9);
+
+        let plan = plan_connection_move_to_workspace_position(
+            &[source_first, moving, source_last, target_first, target_last],
+            2,
+            Some(9),
+            5,
+            ManualInsertPosition::Before,
+        )
+        .expect("应生成跨工作区插入计划");
+
+        assert_eq!(plan.source_workspace_id, Some(7));
+        assert_eq!(plan.target_workspace_id, Some(9));
+        assert_eq!(plan.source_connection_ids, vec![1, 3]);
+        assert_eq!(plan.target_connection_ids, vec![4, 2, 5]);
+    }
+
+    #[test]
+    fn plan_connection_move_to_workspace_end_appends_to_target_end() {
+        let mut moving = make_connection(2, "moving", 20, 20, 0);
+        moving.workspace_id = Some(7);
+        let mut target_first = make_connection(4, "target-a", 40, 40, 0);
+        target_first.workspace_id = Some(9);
+        let mut target_last = make_connection(5, "target-b", 50, 50, 1);
+        target_last.workspace_id = Some(9);
+
+        let plan =
+            plan_connection_move_to_workspace_end(&[moving, target_first, target_last], 2, Some(9))
+                .expect("应生成跨工作区末尾移动计划");
+
+        assert_eq!(plan.source_workspace_id, Some(7));
+        assert_eq!(plan.target_workspace_id, Some(9));
+        assert!(plan.source_connection_ids.is_empty());
+        assert_eq!(plan.target_connection_ids, vec![4, 5, 2]);
+    }
+
+    #[test]
+    fn should_render_connection_grid_tail_slot_only_when_workspace_preview_matches() {
+        assert!(should_render_connection_grid_tail_slot(
+            true,
+            true,
+            Some(Some(7)),
+            Some(7)
+        ));
+        assert!(!should_render_connection_grid_tail_slot(
+            true,
+            true,
+            Some(Some(9)),
+            Some(7)
+        ));
+        assert!(!should_render_connection_grid_tail_slot(
+            true,
+            false,
+            Some(Some(7)),
+            Some(7)
+        ));
+    }
+
+    #[test]
     fn move_item_relative_to_target_moves_before_target() {
         let mut items = vec![1, 2, 3, 4];
 
@@ -5945,6 +6483,30 @@ mod connection_list_sort_tests {
         assert_eq!(bounds.origin.y, px(84.0));
         assert_eq!(bounds.size.width, px(84.0));
         assert_eq!(bounds.size.height, px(12.0));
+    }
+
+    #[test]
+    fn connection_card_overlay_preview_bounds_for_after_last_uses_last_card_edge() {
+        let bounds = connection_card_overlay_preview_bounds_from_bounds(
+            ConnectionDropPreview {
+                workspace_id: Some(7),
+                target_connection_id: 22,
+                position: ManualInsertPosition::After,
+                edge: ManualDropIndicatorEdge::Right,
+            },
+            &[11, 22],
+            make_card_bounds(0.0, 0.0),
+            &[
+                (11, make_card_bounds(0.0, 0.0)),
+                (22, make_card_bounds(140.0, 0.0)),
+            ],
+        )
+        .expect("最后一个卡片后的 overlay 应存在");
+
+        assert_eq!(bounds.origin.x, px(234.0));
+        assert_eq!(bounds.origin.y, px(8.0));
+        assert_eq!(bounds.size.width, px(12.0));
+        assert_eq!(bounds.size.height, px(64.0));
     }
 }
 

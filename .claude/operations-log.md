@@ -2333,3 +2333,134 @@
   - 结果：通过（3 passed）
 - 已执行：`cargo check -p sftp_view -p terminal_view`
   - 结果：通过
+
+## 编码前检查 - 首页跨工作区拖拽与卡片尾部占位
+时间：2026-03-27 20:05:00 +0800
+
+□ 已查阅上下文摘要文件：.claude/context-summary-home-cross-workspace-drag.md
+□ 将使用以下可复用组件：
+- `main/src/home_tab.rs` - 复用现有 `DragConnection` / `DragWorkspace` payload、同组重排函数与拖拽预览状态
+- `crates/core/src/storage/repository.rs` - 复用 `ConnectionRepository::update(...)` 的换组末尾分配语义
+- `crates/db_view/src/db_tree_view.rs` - 复用现有 `remove_connection(...)` / `add_connection(...)` / `update_connection_info(...)`
+  □ 将遵循命名约定：Rust `snake_case` / `CamelCase`
+  □ 将遵循代码风格：局部新增轻量状态与 helper，避免改动现有同组拖拽链路
+  □ 确认不重复造轮子，证明：已检查首页工作区 header 拖拽、连接卡片拖拽、仓库换组排序与树视图订阅分支
+
+## 工具可用性说明 - 首页跨工作区拖拽与卡片尾部占位
+时间：2026-03-27 20:05:00 +0800
+
+- `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code` 在当前执行环境不可用
+- 已采用仓库内现有实现检索、设计文档与源码交叉分析作为替代，并在上下文摘要中记录证据路径
+
+## 需求修正 - 首页跨工作区拖拽与卡片尾部占位
+时间：2026-03-27 20:38:18 +0800
+
+- 用户追加约束：跨工作区拖拽不能只落在工作区标题，工作区内容区内部也必须允许落下
+- 调整后的实现策略：
+  - 保留工作区标题作为跨区落点
+  - 新增工作区内容区外层容器作为跨区落点
+  - 同区拖拽继续复用原有 gap/card/tail slot 精确重排
+  - 跨区拖到内容区子节点时不再吞掉事件，由父级内容区统一执行“移入目标工作区末尾”
+- 未变更边界：
+  - 空工作区仍不能作为目标
+  - 未分配区仍不能作为目标
+  - 跨区拖拽仍不支持精确插入目标工作区中间位置
+
+## 编码后声明 - 首页跨工作区拖拽与卡片尾部占位
+时间：2026-03-27 20:38:18 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/home_tab.rs` 的 `DragConnection`、`ConnectionDropPreview` 与同区重排链路：继续作为同区排序唯一实现
+- `main/src/home_tab.rs` 的工作区 section / 连接列表 / 卡片容器：在既有 UI 容器上补跨区命中，不新建第二套拖拽状态机
+- `crates/core/src/storage/repository.rs` 的 `ConnectionRepository::update(...)`：继续复用 `workspace_id` 变更后 `sort_order = None` 的目标区末尾排序语义
+- `crates/db_view/src/db_tree_view.rs` 的 `ConnectionUpdated` 响应链路：继续承接跨区更新后的树节点移入/移出
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 helper 仍使用 Rust `snake_case`
+- 代码风格：优先扩展已有容器与事件链，不重写同区拖拽逻辑
+- 文件组织：本轮功能代码仍集中在 `main/src/home_tab.rs`，树视图修复保持在 `crates/db_view/src/db_tree_view.rs`
+
+### 3. 对比了以下相似实现
+- `render_workspace_section(...)`：原始工作区标题拖拽区域，现已扩展为“标题 + 内容区”双落点
+- `render_connections_list(...)` / `render_connection_list_item(...)`：原始同区列表重排逻辑，现仅调整跨区时的事件透传
+- `render_connections_grid(...)` / `render_connection_card(...)`：原始卡片模式重排逻辑，现保留同区插入预览，跨区统一退化为移入目标区末尾
+
+### 4. 未重复造轮子的证明
+- 已检查首页 header、内容容器、列表 gap、卡片容器、尾部 slot 的既有拖拽链路
+- 本次没有新增仓储层排序算法，也没有新增独立 drag state；只是在现有组件上补齐跨区命中和事件分发
+
+### 5. 本地验证记录
+- 已执行：`cargo fmt --all -- main/src/home_tab.rs`
+  - 结果：通过
+- 已执行：`cargo check -p main -p db_view`
+  - 结果：通过
+  - 备注：存在仓库既有 warning，来自 `crates/ui/src/window_ext.rs` 和 `main/src/home_tab.rs` 的未使用项，与本次修改无关
+- 已执行：`cargo test -p main connection_list_sort_tests -- --nocapture`
+  - 结果：通过（14 passed）
+
+### 6. 当前剩余限制
+- 尚未执行 GUI 手动回归，因此“拖入目标工作区内容区任意子节点”的交互体验仍以本地构建与纯逻辑验证为主
+- 当前跨区拖拽仍只支持“落到目标工作区并进入末尾”，不支持跨区精准插到目标连接前后
+
+## 追加实现 - 首页跨工作区精准插入
+时间：2026-03-27 21:07:30 +0800
+
+### 1. 本轮目标
+- 在上一轮“可跨区落到标题和内容区”的基础上，继续补齐“跨区时可按目标卡片/间隙位置插入”，而不再只进入目标工作区末尾
+
+### 2. 实现策略
+- `main/src/home_tab.rs`
+  - 新增纯函数 `ordered_connection_ids_for_workspace(...)`
+  - 新增纯函数 `plan_connection_move_to_workspace_position(...)`
+  - 新增纯函数 `plan_connection_move_to_workspace_end(...)`
+  - 新增 `ConnectionWorkspaceMovePlan`
+  - 新增 `move_connection_to_workspace_at(...)` / `move_connection_with_plan(...)`
+  - 列表 gap、列表项、卡片容器、卡片尾部 slot 在跨区时都开始复用现有插入预览
+- `crates/core/src/storage/repository.rs`
+  - 新增 `move_across_workspaces(...)` 事务方法
+  - 在同一事务内完成：
+    - 被拖拽连接换工作区
+    - 源工作区排序压实
+    - 目标工作区按指定位置重排
+
+### 3. 对比与取舍
+- 旧方案：跨区一律落到工作区末尾，源工作区不压实
+- 新方案：跨区可插到目标连接前后，并在仓储层一次性完成源/目标两侧排序
+- 取舍理由：现在用户已经明确要求内容区内部也能正常落位，继续停留在“只进末尾”会导致交互语义不完整
+
+### 4. 本地验证记录
+- 已执行：`cargo fmt --all -- main/src/home_tab.rs crates/core/src/storage/repository.rs`
+  - 结果：通过
+- 已执行：`cargo test -p one-core connection_repository_move_across_workspaces --lib -- --nocapture`
+  - 结果：通过（1 passed）
+- 已执行：`cargo test -p main connection_list_sort_tests -- --nocapture`
+  - 结果：通过（16 passed）
+- 已执行：`cargo check -p main -p db_view -p one-core`
+  - 结果：通过
+  - 备注：保留仓库既有 warning，来自 `crates/ui/src/window_ext.rs` 与 `main/src/home_tab.rs` 未使用项
+
+### 5. 当前剩余限制
+- 空工作区仍不能作为目标
+- 未分配区仍不能作为目标
+- 尚未执行 GUI 手动回归
+
+## 追加修复 - 卡片模式尾部空行
+时间：2026-03-27 21:27:49 +0800
+
+### 1. 问题确认
+- 用户反馈：卡片模式下，当工作区内卡片刚好铺满整行时，底部会多出一个空行
+- 根因：卡片模式“最后一个位置”的拖拽占位仍通过真实 `flex` 子项渲染；当一行刚好铺满时，该子项会自动换到下一行，从视觉上形成多余空白行
+
+### 2. 修复策略
+- 删除卡片模式里用于“末尾落点”的真实尾部 slot 子项
+- 保留原有拖拽命中和落位能力，改为通过 overlay 指示器显示“最后一个卡片之后”的插入位置
+- 新增纯函数 `connection_card_overlay_preview_bounds_from_bounds(...)`，专门覆盖“After + 最后一个卡片”时的 overlay 计算
+
+### 3. 本地验证记录
+- 已执行：`cargo fmt --all -- main/src/home_tab.rs`
+  - 结果：通过
+- 已执行：`cargo test -p main connection_list_sort_tests -- --nocapture`
+  - 结果：通过（17 passed）
+- 已执行：`cargo check -p main`
+  - 结果：通过
+  - 备注：保留仓库既有 warning，来自 `crates/ui/src/window_ext.rs` 与 `main/src/home_tab.rs` 未使用项
