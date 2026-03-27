@@ -4506,19 +4506,6 @@ impl HomePage {
                 this.selected_connection_id = conn_id;
                 cx.notify();
             }))
-            .when(is_active, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top(px(5.0))
-                        .left(px(5.0))
-                        .w(px(8.0))
-                        .h(px(8.0))
-                        .rounded_full()
-                        .bg(cx.theme().success)
-                        .shadow_lg(),
-                )
-            })
             .child(
                 h_flex()
                     .items_center()
@@ -4689,6 +4676,19 @@ impl HomePage {
                         )
                     }),
             )
+            .when(is_active, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(5.0))
+                        .left(px(5.0))
+                        .w(px(8.0))
+                        .h(px(8.0))
+                        .rounded_full()
+                        .bg(cx.theme().success)
+                        .shadow_lg(),
+                )
+            })
             .into_any_element()
     }
 
@@ -5116,19 +5116,6 @@ impl HomePage {
                 this.selected_connection_id = conn_id;
                 cx.notify();
             }))
-            .when(is_active, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top(px(6.0))
-                        .left(px(6.0))
-                        .w(px(10.0))
-                        .h(px(10.0))
-                        .rounded_full()
-                        .bg(cx.theme().success)
-                        .shadow_lg(),
-                )
-            })
             .child(
                 h_flex()
                     .items_center()
@@ -5197,9 +5184,9 @@ impl HomePage {
                 // hover时显示的编辑和删除按钮（放在最后渲染，确保层级高于文字内容）
                 h_flex()
                     .absolute()
-                    .top_2()
-                    .right_2()
-                    .gap_1()
+                    .top_0()
+                    .right_0()
+                    // .gap_1()
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .group_hover(group_name.clone(), |style| style.opacity(1.0))
                     .bg(cx.theme().background.opacity(1.0))
@@ -5217,7 +5204,7 @@ impl HomePage {
                             )))
                             .icon(IconName::Folder1.color())
                             .with_size(Size::Small)
-                            .primary()
+                            // .primary()
                             .cursor_pointer()
                             .tooltip(t!("Home.open_sftp"))
                             .on_click(cx.listener(
@@ -5236,7 +5223,7 @@ impl HomePage {
                             )))
                             .icon(IconName::Edit)
                             .with_size(Size::Small)
-                            .primary()
+                            // .primary()
                             .cursor_pointer()
                             .tooltip(t!("Home.edit_connection"))
                             .on_click(cx.listener(
@@ -5283,7 +5270,7 @@ impl HomePage {
                             )))
                             .icon(IconName::Copy)
                             .with_size(Size::Small)
-                            .primary()
+                            // .primary()
                             .cursor_pointer()
                             .tooltip(t!("Home.duplicate_connection"))
                             .on_click(cx.listener(
@@ -5320,7 +5307,28 @@ impl HomePage {
                             )),
                         )
                     }),
-            );
+            )
+            .when(is_active, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(2.0))
+                        .left(px(2.0))
+                        .w(px(16.0))
+                        .h(px(16.0))
+                        .rounded_full()
+                        .bg(cx.theme().success)
+                        .shadow_lg()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            Icon::new(IconName::Check)
+                                .with_size(px(14.0))
+                                .text_color(gpui::white()),
+                        ),
+                )
+            });
 
         card.into_any_element()
     }
