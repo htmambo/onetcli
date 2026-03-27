@@ -1,1186 +1,5 @@
 ## 操作日志
 
-## 编码前检查 - llm-onetcli-default
-时间：2026-03-26 21:25:33 CST
-
-- 已查阅上下文摘要文件：`.claude/context-summary-llm-onetcli-default.md`
-- 已分析相似实现：
-  - `main/src/settings/llm_providers_view.rs`
-  - `crates/core/src/llm/storage.rs`
-  - `crates/core/src/ai_chat/components/provider_select.rs`
-- 将使用以下可复用组件：
-  - `ProviderRepository::ensure_onetcli_provider()` 作为默认行为源头
-  - `LlmProvidersView::toggle_default()` 作为手动默认切换入口
-  - `ProviderSelectState` 的“无默认则回退第一个”逻辑，确保取消自动默认后仍可正常选择
-- 将遵循命名约定：继续使用现有 `ProviderConfig.is_default`
-- 将遵循代码风格：修复落在仓库层，不在设置页 UI 层做临时屏蔽
-- 确认不重复造轮子，证明：直接修改内置 provider 自动创建策略，而不是新增额外的“忽略默认”标记
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、单测和编译验证作为替代并留痕
-
-## 编码后声明 - llm-onetcli-default
-时间：2026-03-26 21:25:33 CST
-
-### 1. 复用了以下既有组件
-- `crates/core/src/llm/storage.rs::ProviderRepository::ensure_onetcli_provider`
-- `main/src/settings/llm_providers_view.rs::toggle_default`
-- `crates/core/src/ai_chat/components/provider_select.rs::set_providers`
-
-### 2. 遵循了以下项目约定
-- 命名约定：默认状态仍然只使用 `ProviderConfig.is_default`
-- 文件组织：修复只落在 `one-core` 的 provider 仓库层与对应单测
-- 行为边界：保留 `OnetCli AI` 内置 provider 与手动默认切换能力，只取消自动默认
-
-### 3. 对比了以下相似实现
-- `LlmProvidersView`：设置页只是读取/操作仓库数据，不适合在 UI 层硬改默认来源
-- `ProviderSelectState`：无默认 provider 时会回退选第一个，因此取消自动默认不会打断选择流程
-- `toggle_default()`：仍保留用户显式设为默认或取消默认的能力
-
-### 4. 未重复造轮子的证明
-- 已检查设置页加载逻辑、provider 仓库创建逻辑和 provider 下拉选择逻辑
-- 最终没有新增新的配置字段或 UI 特判，只删除了自动默认赋值
-
-## 实施与验证记录 - llm-onetcli-default
-时间：2026-03-26 21:25:33 CST
-
-### 已完成修改
-- `crates/core/src/llm/storage.rs`
-  - 去掉 `OnetCli AI` 自动创建时的自动默认逻辑
-  - 新增单测，验证自动创建出来的 `OnetCli AI` 不再带默认标记
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture`
-  - 结果：通过
-- `cargo check -p one-core -p main`
-  - 结果：通过
-
-### 当前限制
-- 已经存在于用户本地数据库中的 `OnetCli AI` 默认标记不会被这次自动迁移清掉
-- 用户仍然可以在设置页手动把 `OnetCli AI` 设为默认或取消默认
-
-## 编码前检查 - terminal-ligatures-setting
-时间：2026-03-26 21:16:53 CST
-
-- 已查阅上下文摘要文件：`.claude/context-summary-terminal-ligatures-setting.md`
-- 已分析相似实现：
-  - `main/src/setting_tab.rs`
-  - `main/src/home/home_tabs.rs`
-  - `crates/terminal_view/src/view.rs`
-  - `crates/terminal_view/src/terminal_element.rs`
-- 将使用以下可复用组件：
-  - `sync_terminal_settings_to_all(...)` 的首页设置广播入口
-  - `HomePage::setup_terminal_view(...) / apply_terminal_settings_to_all(...)` 的终端同步链路
-  - `TerminalView::apply_terminal_settings(...)` 的终端统一应用入口
-  - `FontVariants` 的终端字体构造逻辑
-- 将遵循命名约定：新增全局字段命名为 `terminal_font_ligatures`
-- 将遵循代码风格：只在首页设置增加开关，不在终端右侧设置面板新增入口；渲染与字宽测量使用同一布尔值
-- 确认不重复造轮子，证明：继续复用现有终端设置广播与渲染链路，不新建额外终端配置对象
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、格式化和编译验证作为替代并留痕
-
-## 编码后声明 - terminal-ligatures-setting
-时间：2026-03-26 21:16:53 CST
-
-### 1. 复用了以下既有组件
-- `main/src/setting_tab.rs::sync_terminal_settings_to_all`：继续作为首页终端设置广播入口
-- `main/src/home/home_tabs.rs::setup_terminal_view`
-- `main/src/home/home_tabs.rs::apply_terminal_settings_to_all`
-- `crates/terminal_view/src/view.rs::apply_terminal_settings`
-- `crates/terminal_view/src/terminal_element.rs::FontVariants`
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增字段使用 `terminal_font_ligatures`
-- 代码风格：设置存储仍放在 `AppSettings`，终端渲染与测量仍收敛在 `terminal_view` crate
-- 范围控制：按用户要求仅在首页设置新增开关，没有在终端右侧设置面板增加入口
-
-### 3. 对比了以下相似实现
-- `terminal_font_family`：沿用首页设置写入 `AppSettings` 后广播到所有终端的模式
-- `terminal_font_size / terminal_line_height_scale`：沿用 `apply_terminal_settings(...)` 统一下发的模式
-- 终端渲染中的 `calt` 关闭逻辑：改成由布尔开关统一控制，不再硬编码
-
-### 4. 未重复造轮子的证明
-- 已检查首页终端设置、终端批量同步和终端绘制链路
-- 最终没有新增新的终端配置模型，只是把既有“关闭连字”的硬编码提升为全局设置
-
-## 实施与验证记录 - terminal-ligatures-setting
-时间：2026-03-26 21:16:53 CST
-
-### 已完成修改
-- `main/src/setting_tab.rs`
-  - 为 `AppSettings` 新增 `terminal_font_ligatures`
-  - 首页设置“终端”分组新增“终端连字”开关
-  - 修改后继续通过 `sync_terminal_settings_to_all(...)` 同步到所有终端实例
-- `main/src/home/home_tabs.rs`
-  - 终端初始化与批量同步时新增下发 `terminal_font_ligatures`
-- `crates/terminal_view/src/view.rs`
-  - `TerminalView` 新增 `font_ligatures_enabled`
-  - `apply_terminal_settings(...)` 新增连字参数
-  - 字宽测量时使用统一的字体特性开关
-- `crates/terminal_view/src/terminal_element.rs`
-  - 抽出 `terminal_font_features(...)`
-  - 终端真实文本绘制与字宽测量共用同一套连字开关
-- `main/locales/main.yml`
-  - 补充首页终端连字设置文案
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p terminal_view -p main`
-  - 结果：通过
-
-### 当前限制
-- 本次按用户要求，没有在终端右侧设置面板加入连字开关
-- 当前没有 GUI 自动化测试，本次主要依赖本地编译验证；实际连字显示效果仍建议手工切换字体后点验
-
-## 编码前检查 - terminal-font-home-setting
-时间：2026-03-26 20:55:57 CST
-
-- 已查阅上下文摘要文件：`.claude/context-summary-terminal-font-home-setting.md`
-- 已分析相似实现：
-  - `main/src/setting_tab.rs`
-  - `main/src/home/home_tabs.rs`
-  - `crates/terminal_view/src/view.rs`
-  - `crates/terminal_view/src/sidebar/settings_panel.rs`
-  - `crates/terminal_view/src/theme.rs`
-- 将使用以下可复用组件：
-  - `sync_terminal_settings_to_all(...)` 的首页设置广播入口
-  - `HomePage::setup_terminal_view(...) / apply_terminal_settings_to_all(...)` 的终端同步模式
-  - `TerminalTheme::available_monospace_fonts()` 的固定等宽字体列表
-  - `preserve_theme_typography(...)` 的主题切换保留排版策略
-- 将遵循命名约定：终端新增全局设置字段命名为 `terminal_font_family`，终端事件沿用 `*Changed` 命名
-- 将遵循代码风格：改动收敛在设置模型、首页设置 UI、终端事件和同步入口，不新增第二套终端状态
-- 确认不重复造轮子，证明：首页设置直接复用右侧终端设置已有字体候选和现有全局同步链路
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、格式化和编译验证作为替代并留痕
-
-## 编码前检查 - connection-remote-delete-conflict
-时间：2026-03-26 16:18:00 CST
-
-- 已查阅上下文摘要文件：`.claude/context-summary-connection-remote-delete-conflict.md`
-- 已分析相似实现：
-  - `crates/core/src/cloud_sync/connection_sync.rs`
-  - `crates/core/src/cloud_sync/generic_sync.rs`
-  - `crates/core/src/storage/repository.rs`
-  - `crates/core/src/cloud_sync/service.rs`
-- 将使用以下可复用组件：
-  - `generic_sync::should_keep_local_item_on_cloud_delete` 的判定思路
-  - `WorkspaceRepository::update_from_cloud` / `CertificateRepository::update_from_cloud` 的仓库分层模式
-  - `engine.rs` 里的同步测试夹具模式
-- 将遵循命名约定：连接仓库新增 `insert_from_cloud` / `update_from_cloud`
-- 将遵循代码风格：修复收敛在连接同步、仓库层和云端解密时间戳，不扩散 UI 改动
-- 确认不重复造轮子，证明：优先复用工作区/证书已有“云端回写”模式，不新造另一套同步状态系统
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、Rust 单测和编译作为替代并留痕
-
-## 编码后声明 - connection-remote-delete-conflict
-时间：2026-03-26 16:32:30 CST
-
-### 1. 复用了以下既有组件
-- `crates/core/src/cloud_sync/generic_sync.rs::should_keep_local_item_on_cloud_delete`：沿用“本地有未同步更新则跳过远端删除”的判定思路
-- `crates/core/src/storage/repository.rs::WorkspaceRepository::update_from_cloud`
-- `crates/core/src/storage/repository.rs::CertificateRepository::update_from_cloud`
-- `crates/core/src/cloud_sync/engine.rs` 现有同步测试夹具模式
-
-### 2. 遵循了以下项目约定
-- 命名约定：连接仓库新增 `insert_from_cloud` / `update_from_cloud`
-- 代码风格：修复收敛在 `connection_sync.rs`、`repository.rs`、`service.rs`
-- 文件组织：同步策略留在 `cloud_sync` 层，时间戳落库规则留在仓库层
-
-### 3. 对比了以下相似实现
-- `WorkspaceRepository::update_from_cloud`：参考其“保留云端 updated_at + last_synced_at”的写法
-- `CertificateRepository::update_from_cloud`：沿用“本地普通 update 与云端回写 update 分离”的边界
-- `generic_sync.rs`：参考其在远端软删除后对“本地更新优先”的判定方式
-
-### 4. 未重复造轮子的证明
-- 已检查连接同步现有主流程、工作区/证书云端回写模式和通用软删除判定
-- 最终没有新增新的冲突状态系统，只把连接同步对齐到项目已有模式
-
-## 实施与验证记录 - connection-remote-delete-conflict-and-sync-server-restore
-时间：2026-03-26 16:32:30 CST
-
-### 已完成修改
-- `crates/core/src/cloud_sync/connection_sync.rs`
-  - 远端软删除后刷新本地连接快照，避免后续同步计划继续使用已删除的旧列表
-  - 远端删除连接时，如果本地有未同步修改，则跳过本地删除
-  - 当云端记录缺失时，不再制造伪冲突，而是按既定语义重新加入上传计划
-  - 新增回归测试，覆盖“远端删连接不再冒假冲突，也不会误回写新连接”
-- `crates/core/src/storage/repository.rs`
-  - 为连接仓库新增 `insert_from_cloud` 与 `update_from_cloud`
-  - 新增仓库层测试，覆盖“云端回写保持 updated_at / last_synced_at 基线”
-- `crates/core/src/cloud_sync/service.rs`
-  - 修正连接解密后的秒级时间基线，避免毫秒/秒混用
-- `sync_server/web/src/services/api.ts`
-  - 新增远端恢复 `restoreSyncItem(...)` API
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 列表页已软删除记录新增“恢复”按钮
-  - 恢复确认文案补充“工作区恢复不自动重连子连接”的边界说明
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - 详情页已软删除记录新增“恢复同步项”按钮
-  - 删除 / 恢复都支持版本冲突后的自动刷新
-
-### 本地验证
-- `cargo test -p one-core remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item -- --nocapture`
-  - 结果：通过
-- `cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline -- --nocapture`
-  - 结果：通过
-- `cargo check -p one-core`
-  - 结果：通过
-- `npm run build`
-  - 目录：`sync_server/web`
-  - 结果：通过
-
-### 当前限制
-- 远端“恢复工作区”只恢复工作区记录本身，不会自动重新关联此前解绑的子连接
-- Web 端仍缺少自动化交互测试，删除/恢复确认流程主要依赖本地构建和手工点验
-
-## 编码前检查 - sync-server-web-delete-entry
-时间：2026-03-26 15:49:58 CST
-
-- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-web-delete-entry.md`
-- 已分析相似实现：
-  - `sync_server/web/src/views/user/SyncItemsView.vue`
-  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - `sync_server/web/src/views/user/ProfileView.vue`
-  - `sync_server/web/src/views/admin/AdminOverviewView.vue`
-  - `sync_server/server/src/http/routes/sync.ts`
-- 将使用以下可复用组件：
-  - `api.request(...)`：复用统一请求和 `ApiError`
-  - `loadItems()` / `loadItem()`：复用已有刷新逻辑
-  - `danger-button + window.confirm`：复用站内危险操作交互
-  - `getSyncItemTypeLabel / isSyncItemType`：复用类型标签和工作区判断
-- 将遵循命名约定：新增状态命名使用 `actionMessage`、`actionError`、`deleting*`
-- 将遵循代码风格：Composition API + `<script setup>`，不引入新的状态管理层或弹窗组件
-- 确认不重复造轮子，证明：服务端已存在删除接口，本次只补 Web 端 API 封装和页面入口
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、Vue 构建和类型检查作为替代并留痕
-
-## 编码后声明 - sync-server-web-delete-entry
-时间：2026-03-26 15:55:48 CST
-
-### 1. 复用了以下既有组件
-- `sync_server/server/src/http/routes/sync.ts::DELETE /api/v1/sync/items/:id`：继续使用现有单条软删除接口和 409 冲突语义
-- `sync_server/web/src/services/api.ts::request`：继续作为统一请求和错误包装入口
-- `sync_server/web/src/views/user/SyncItemsView.vue::loadItems`：删除冲突后直接复用列表刷新逻辑
-- `sync_server/web/src/views/user/SyncItemDetailView.vue::loadItem`：删除冲突后直接复用详情刷新逻辑
-- `sync_server/web/src/views/user/ProfileView.vue::clearData`：复用危险操作的确认与反馈样式
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `deleteSyncItem`、`actionMessage`、`actionError`、`deletingItemId`、`deleting`
-- 代码风格：继续使用 `<script setup lang=\"ts\">`、`ref`、`computed` 和模板内条件渲染
-- 文件组织：API 变更只落在 `services/api.ts` 与 `types/api.ts`，页面交互只落在 `views/user` 下两个页面
-
-### 3. 对比了以下相似实现
-- `sync_server/web/src/views/user/ProfileView.vue`：沿用 `window.confirm + danger-button` 危险操作模式，但本次改成单条记录粒度
-- `sync_server/web/src/views/admin/AdminOverviewView.vue`：参考表格行级危险操作布局，但补上了版本冲突处理
-- `sync_server/web/src/views/user/SyncItemDetailView.vue` 既有刷新逻辑：保留详情页本地刷新模式，不改成跳页删除
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/server` 路由，确认服务端已有单条删除接口
-- 最终没有新增自定义弹窗、全局状态或新路由，只把现有接口接入到现有页面
-
-## 实施与验证记录 - sync-server-web-delete-entry
-时间：2026-03-26 15:55:48 CST
-
-### 已完成修改
-- `sync_server/web/src/types/api.ts`
-  - 新增 `SyncItemDeleteResult`，定义单条删除响应结构
-- `sync_server/web/src/services/api.ts`
-  - 新增 `api.deleteSyncItem(...)`，支持携带 `version` 查询参数
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 列表页新增行级删除入口、删除确认文案、删除中状态和 409 冲突自动刷新
-  - 删除成功后本地更新当前记录的 `deletedAt`、`updatedAt`、`version`
-  - 页面说明补充“工作区删除只解绑子级”和“更新优先”
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - 详情页顶部新增“删除同步项”按钮和已删除状态展示
-  - 删除成功后当前详情直接更新为软删除状态
-  - 路由切换时会清理上一条记录的删除提示，避免串页
-- `.claude/context-summary-sync-server-web-delete-entry.md`
-  - 记录服务端接口现状、前端复用点、风险与验证策略
-
-### 本地验证
-- `npm run build`
-  - 目录：`sync_server/web`
-  - 结果：通过
-
-### 当前限制
-- 当前仓库没有 Web 端自动化测试，本次主要依赖 `vue-tsc + vite build`
-- 仍建议手工确认两条交互：
-  - 在同步项列表页删除一条有效记录后，当前筛选和分页表现符合预期
-  - 在详情页删除工作区记录时，确认提示文案和删除后状态展示符合预期
-
-## 编码前检查 - connection-list-view-preferences
-时间：2026-03-26 12:11:31 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-connection-list-view-preferences.md`
-- 已分析相似实现：
-  - `main/src/home_tab.rs::render_toolbar`
-  - `main/src/home_tab.rs::render_workspace_view / render_connection_card`
-  - `crates/sftp_view/src/file_list_panel.rs::SortColumn / SortOrder / sort_items`
-  - `main/src/setting_tab.rs::AppSettings`
-- 将使用以下可复用组件：
-  - `AppSettings`：持久化连接列表偏好
-  - `PopupMenuItem + dropdown_menu`：复用现有首页工具栏交互样式
-  - `StoredConnection::{created_at, updated_at}`：直接作为排序字段来源
-- 将遵循命名约定：偏好枚举命名统一使用 `ConnectionList*`
-- 将遵循代码风格：排序逻辑抽成纯比较器，渲染层保留链式构建
-- 确认不重复造轮子，证明：未新建额外配置文件或数据库字段，直接复用 `settings.json`
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索、格式化、编译和单测作为替代并留痕
-
-## 编码后声明 - connection-list-view-preferences
-时间：2026-03-26 12:11:31 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/setting_tab.rs::AppSettings`：新增列表排序与展示偏好字段，继续走现有 `settings.json` 持久化
-- `main/src/home_tab.rs::render_toolbar`：继续在首页工具栏统一承载控制入口
-- `main/src/home_tab.rs::render_connection_card`：保留卡片视图，只抽共用连接摘要与图标渲染
-- `crates/sftp_view/src/file_list_panel.rs`：沿用“字段 + 方向”排序建模方式
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `ConnectionListSortField`、`ConnectionListSortOrder`、`ConnectionListViewMode`
-- 代码风格：排序比较器独立为纯函数，列表/卡片渲染按职责拆开
-- 文件组织：配置在 `setting_tab.rs`，主页行为在 `home_tab.rs`，文案在 `main.yml`
-
-### 3. 对比了以下相似实现
-- `crates/sftp_view/src/file_list_panel.rs`：参考其排序切换模式，但当前实现改为全局偏好持久化
-- `main/src/home_tab.rs` 既有卡片网格：保留工作区分组结构，只把容器抽象为“卡片/列表”双模式
-- `main/src/setting_tab.rs`：沿用已有 `AppSettings::save()` 机制，不引入新状态仓库
-
-### 4. 未重复造轮子的证明
-- 已检查首页工具栏、工作区分组、连接卡片和全局设置存储
-- 最终没有新增新的配置系统或列表组件，只在现有主页结构上扩展
-
-## 实施与验证记录 - connection-list-view-preferences
-时间：2026-03-26 12:11:31 +0800
-
-### 已完成修改
-- `main/src/setting_tab.rs`
-  - 新增连接列表排序字段、排序方向、展示方式三个偏好枚举和设置字段
-- `main/src/home_tab.rs`
-  - 首页工具栏新增排序字段选择、升降序切换、卡片/列表展示切换
-  - 工作区内连接列表统一按当前偏好排序
-  - 新增列表展示模式，并复用现有连接打开/编辑/复制/删除动作
-  - 提取连接摘要、图标、时间格式化和排序比较器
-  - 新增 3 个排序单测
-- `main/locales/main.yml`
-  - 补充排序与展示方式相关文案
-- `main/Cargo.toml`
-  - 为 `main` crate 接入 workspace `chrono` 依赖，用于时间展示格式化
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main compare_connections -- --nocapture`
-  - 结果：通过（3 个新增排序测试全部通过）
-
-### 当前限制
-- 本次未补 GUI 自动化；建议你在首页手工确认：
-  - 卡片/列表切换后，工作区分组仍正常
-  - 排序字段切换后，未分配工作区与各工作区内部顺序都正确
-  - 列表模式下的编辑、复制、删除、打开 SFTP 行为与卡片模式一致
-
-## 编码前检查 - certificate-settings-navigation
-时间：2026-03-26 00:00:00 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-certificate-settings-navigation.md`
-- 已分析相似实现：
-  - `main/src/home/home_tabs.rs::add_settings_tab / open_account_settings_tab`
-  - `main/src/setting_tab.rs::SettingsPanelPage / SettingsPanel::setting_pages`
-  - `crates/core/src/certificate_manager.rs::open_certificate_manager_popup`
-  - `main/src/onetcli_app.rs::GlobalHomePage / 主窗口初始化`
-- 将使用以下可复用组件：
-  - `SettingsPanel::request_page(...)`：复用设置页默认选中逻辑
-  - `CertificateManagerView`：直接嵌入设置页，不重写凭证列表 UI
-  - `HomePage::add_settings_tab(...)`：复用主窗口打开设置标签逻辑
-  - `open_certificate_manager_popup(...)`：保留现有 API，对内改为“导航优先，弹窗回退”
-- 将遵循命名约定：新增 `Certificate` 页面枚举、`open_certificate_settings_tab(...)` 导航函数和“navigator”类型名，保持现有语义风格
-- 将遵循代码风格：只在通用层补桥接，不修改各连接表单的按钮调用点
-- 确认不重复造轮子，证明：设置页已有嵌入自定义视图能力，主页已有设置页导航模式，凭证管理已有独立视图
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但本次会话未提供这些工具；已改用本地代码检索和 Rust 构建验证作为替代并留痕
-
-## 分析记录 - upstream-merge-analysis
-时间：2026-03-25 21:29:12 +0800
-
-- 已查阅分支状态：
-  - 当前分支：`fix/deepin-window-controls`
-  - 跟踪分支：`origin/fix/deepin-window-controls`
-  - `upstream` 默认分支：`dev`
-- 已执行远端同步分析：
-  - `git ls-remote --symref upstream HEAD 'refs/heads/*'`
-  - `git fetch --no-tags upstream dev main`
-- 已执行差异分析：
-  - `git rev-list --left-right --count HEAD...upstream/dev`
-  - `git log --oneline --graph --left-right HEAD...upstream/dev`
-  - `git diff --name-status`
-  - `git diff --dirstat`
-- 已执行模拟合并：
-  - `git merge-tree --write-tree --messages HEAD upstream/dev`
-- 结论摘要：
-  - 当前分支相对 `upstream/dev` 为 14 ahead / 9 behind
-  - 存在 5 个文本冲突，其中真正的代码冲突集中在 `storage/models.rs`、`db_connection_form.rs`、`ssh_form_window.rs`
-  - 结论为“可以整合，但不建议直接在当前分支上盲目 merge；更适合先建临时整合分支做冲突解决和回归验证”
-
-## 执行记录 - upstream-merge-attempt
-时间：2026-03-25 21:37:03 +0800
-
-- 当前主工作区状态：
-  - 分支：`fix/deepin-window-controls`
-  - 存在未提交留痕：`.claude/operations-log.md`、`.claude/context-summary-upstream-merge-analysis.md`
-- 为避免污染当前工作区，已创建独立临时 worktree：
-  - 分支：`tmp-merge-upstream-dev-20260325`
-  - 路径：`/tmp/onetcli-merge-upstream-dev-20260325`
-- 已在临时 worktree 中执行真实合并：
-  - 命令：`git merge --no-commit --no-ff upstream/dev`
-  - 结果：进入冲突待解决状态
-- 当前未合并文件：
-  - `.claude/operations-log.md`
-  - `.claude/verification-report.md`
-  - `crates/core/src/storage/models.rs`
-  - `crates/db_view/src/common/db_connection_form.rs`
-  - `crates/terminal_view/src/ssh_form_window.rs`
-- 其余大量文件已自动合并进暂存区，可在临时 worktree 中继续逐个解冲突
-
-## 编码前检查 - terminal-sidebar-paste-focus
-时间：2026-03-25 21:00:29 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-terminal-sidebar-paste-focus.md`
-- 已分析相似实现：
-  - `crates/terminal_view/src/sidebar/mod.rs`
-  - `crates/terminal_view/src/view.rs::handle_sidebar_event`
-  - `crates/terminal_view/src/view.rs::handle_mouse_down`
-  - `crates/terminal_view/src/view.rs::paste_code_block`
-- 将使用以下可复用组件：
-  - `TerminalSidebarEvent::PasteCodeToTerminal`：复用 AI 代码块按钮现有事件
-  - `window.focus(&self.focus_handle, cx)`：复用终端既有聚焦方式
-  - `paste_code_block(...)`：继续使用终端既有 bracketed paste 和确认逻辑
-- 将遵循命名约定：不新增新事件名或状态字段，只在现有事件处理路径补行为
-- 将遵循代码风格：改动收敛在 `crates/terminal_view/src/view.rs`，sidebar 保持只发事件
-- 确认不重复造轮子，证明：终端已有成熟聚焦 API，本次只补调用时机
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和编译验证作为替代并留痕
-
-## 编码后声明 - terminal-sidebar-paste-focus
-时间：2026-03-25 21:03:13 +0800
-
-### 1. 复用了以下既有组件
-- `crates/terminal_view/src/sidebar/mod.rs::TerminalSidebarEvent::PasteCodeToTerminal`：继续作为 AI 代码块“粘贴到终端”的唯一事件入口
-- `crates/terminal_view/src/view.rs::handle_sidebar_event`：继续在终端视图侧统一消费 sidebar 动作
-- `crates/terminal_view/src/view.rs::focus_handle`：直接复用终端现有焦点句柄
-- `crates/terminal_view/src/view.rs::paste_code_block`：继续使用现有 bracketed paste 和确认逻辑
-
-### 2. 遵循了以下项目约定
-- 命名约定：未新增任何事件、状态或辅助类型
-- 代码风格：只在 `PasteCodeToTerminal` 分支补一条显式聚焦，保持 sidebar 只发事件、view 负责交互
-- 文件组织：改动收敛在 `crates/terminal_view/src/view.rs`
-
-### 3. 对比了以下相似实现
-- `crates/terminal_view/src/view.rs::handle_mouse_down`：沿用终端鼠标点击时的聚焦写法 `window.focus(&self.focus_handle, cx)`
-- `crates/terminal_view/src/view.rs::paste`：保留普通终端粘贴路径，不做无关改动
-- `crates/terminal_view/src/sidebar/mod.rs`：保持 AI 面板只发 `PasteCodeToTerminal` 事件，不耦合终端聚焦细节
-
-### 4. 未重复造轮子的证明
-- 已检查 sidebar 事件注册、TerminalView 事件消费、终端鼠标聚焦和现有粘贴实现
-- 最终没有新增新的“聚焦终端”事件或中间桥接层，只复用终端既有焦点 API
-
-## 实施与验证记录 - terminal-sidebar-paste-focus
-时间：2026-03-25 21:03:13 +0800
-
-### 已完成修改
-- `crates/terminal_view/src/view.rs`
-  - 在 `TerminalSidebarEvent::PasteCodeToTerminal` 分支中，先执行 `window.focus(&self.focus_handle, cx)`，再执行 `paste_code_block(...)`
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-
-### 当前限制
-- 本次没有补 GUI 自动化；建议手工确认两种场景：
-  - 普通单行代码块点击“粘贴到终端”后可直接继续键入
-  - 会触发多行/高危确认框的代码块在确认后仍保持合理焦点
-
-## 编码前检查 - table-data-printable-key-edit
-时间：2026-03-25 20:26:57 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-table-data-printable-key-edit.md`
-- 已分析相似实现：
-  - `crates/one_ui/src/edit_table/state.rs`
-  - `crates/one_ui/src/edit_table/delegate.rs`
-  - `crates/db_view/src/table_data/results_delegate.rs`
-  - `crates/redis_view/src/redis_cli_view.rs`
-  - `crates/ui/src/input/otp_input.rs`
-- 将使用以下可复用组件：
-  - `EditTableState::current_cell_for_navigation`：定位当前活动单元格
-  - `EditTableState::start_editing`：统一进入编辑态
-  - `EditTableDelegate::cell_edit_enabled`：判定当前表格是否可编辑
-  - `Window::dispatch_keystroke`：重放首个字符到新焦点输入框
-- 将遵循命名约定：新增 `on_key_down` / `should_start_edit_on_printable_key` 一类表格内部函数，保持事件处理命名风格
-- 将遵循代码风格：只改 `one_ui` 通用表格层，不在 `db_view` 追加业务特判
-- 确认不重复造轮子，证明：数据库结果页已有完整输入构建与聚焦逻辑，当前缺失点仅是表格级键盘编辑入口
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和编译验证作为替代并留痕
-
-## 编码后声明 - table-data-printable-key-edit
-时间：2026-03-25 20:36:26 +0800
-
-### 1. 复用了以下既有组件
-- `crates/one_ui/src/edit_table/state.rs::current_cell_for_navigation`：沿用既有活动单元格定位逻辑，避免单独维护“当前单元格”状态
-- `crates/one_ui/src/edit_table/state.rs::start_editing`：沿用统一编辑态切换入口，不在按键处理里重复创建输入控件
-- `crates/db_view/src/table_data/results_delegate.rs::build_input`：继续使用数据库结果页现有输入构建和聚焦能力
-- `vendor/zed/crates/gpui/src/window.rs::dispatch_keystroke`：复用 GPUI 的按键重放能力，把首个字符交给真实输入控件处理
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `should_start_edit_on_printable_key`、`on_key_down`，保持事件处理函数的现有命名风格
-- 代码风格：改动收敛在 `crates/one_ui/src/edit_table/state.rs`，数据库视图无需额外分支
-- 文件组织：通用交互逻辑继续留在 `one_ui` 表格层，测试也跟随状态文件放置
-
-### 3. 对比了以下相似实现
-- `crates/one_ui/src/edit_table/delegate.rs`：继续保留 `single_click_to_edit = false` 的默认行为，不把需求实现成单击编辑
-- `crates/redis_view/src/redis_cli_view.rs`：参考现有 `.on_key_down(cx.listener(...))` 接入方式，将键盘事件绑定在表格根容器
-- `crates/ui/src/input/otp_input.rs`：参考现有键盘事件处理方式，在命中时调用 `window.prevent_default()` 和 `cx.stop_propagation()`
-
-### 4. 未重复造轮子的证明
-- 已检查 `one_ui` 表格编辑入口、delegate 策略、数据库结果页输入构建和 GPUI 按键派发机制
-- 最终没有在 `db_view`、输入组件或数据库业务层额外造一套“首字符注入”逻辑
-
-## 实施与验证记录 - table-data-printable-key-edit
-时间：2026-03-25 20:36:26 +0800
-
-### 已完成修改
-- `crates/one_ui/src/edit_table/state.rs`
-  - 新增可打印键判定逻辑，过滤 `Ctrl/Cmd/Fn` 和控制字符
-  - 新增表格级 `on_key_down` 监听
-  - 在未处于编辑态时，按可打印键会先进入编辑，再通过 `window.defer + dispatch_keystroke` 重放首个字符
-  - 新增 3 个纯逻辑单测，覆盖正常字符、快捷键、控制字符三类场景
-- `.claude/context-summary-table-data-printable-key-edit.md`
-  - 记录相似实现、复用点、测试策略和风险
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p one-ui`
-  - 结果：通过（7 个测试全部通过，含新增 3 个回归测试）
-- `cargo check -p main`
-  - 结果：通过
-
-### 当前限制
-- 本次没有补真实 GUI 自动化回放；交互层行为主要依赖编译验证和按键判定单测兜底，建议你在数据库结果表里再手工确认一次“选中单元格后直接敲字”的实际体验
-
-## 补充修复记录 - table-data-printable-key-edit
-时间：2026-03-25 20:41:53 +0800
-
-### 根因定位
-- `commit_and_move_to_prev_cell` / `commit_and_move_to_next_cell` 在结束编辑后会显式 `focus_handle.focus(window, cx)`，因此 Tab 导航路径正常
-- 普通 `commit_cell_edit` 与 `cancel_cell_edit` 在结束编辑后没有把焦点还给表格
-- 结果是按 Enter / Esc 退出编辑后，方向键和 Tab 仍然落在已退出的输入控件焦点链上，只有鼠标再次选中单元格后表格才重新拿回焦点
-
-### 已完成修复
-- `crates/one_ui/src/edit_table/state.rs`
-  - `commit_cell_edit(...)` 在关闭编辑器后统一把焦点还给表格
-  - `cancel_cell_edit(...)` 改为接收 `window`，并在取消编辑后统一把焦点还给表格
-  - `action_cancel(...)` 改为走新的带 `window` 取消路径
-
-### 补充本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p one-ui`
-  - 结果：通过（7 个测试全部通过）
-- `cargo check -p main`
-  - 结果：通过
-
-## 追加编码前检查 - sync-server-sidebar-account-entry
-时间：2026-03-25 10:48:33 +0800
-
-- 已复查相关实现：
-  - `sync_server/web/src/layouts/AppLayout.vue`
-  - `sync_server/web/src/router/index.ts`
-  - `sync_server/web/src/views/user/ProfileView.vue`
-- 将使用以下复用方式：
-  - 继续复用 `/app/profile` 既有账号设置页作为点击落点
-  - 复用 `isActive(...)` 路由高亮逻辑控制账号入口选中样式
-- 将遵循代码风格：只调整侧栏布局和交互，不新增路由或额外状态
-- 确认不重复造轮子，证明：资料页已存在，当前只缺少更直观的侧栏入口
-
-## 编码后声明 - sync-server-sidebar-account-entry
-时间：2026-03-25 10:49:14 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/layouts/AppLayout.vue::isActive`
-- `/app/profile` 既有账号设置页
-
-### 2. 遵循了以下项目约定
-- 命名约定：未新增新的路由和状态字段
-- 代码风格：通过 `RouterLink` 直接承载账号入口点击跳转，保持现有导航交互模式
-- 文件组织：改动仅限于侧栏布局文件
-
-### 3. 未重复造轮子的证明
-- 已有账号设置页和资料路由可直接复用，因此未新增新的账号详情页或弹窗
-
-## 实施与验证记录 - sync-server-sidebar-account-entry
-时间：2026-03-25 10:49:14 +0800
-
-### 已完成修改
-- `sync_server/web/src/layouts/AppLayout.vue`
-  - 侧栏改为纵向布局
-  - 账号信息入口移到底部区域
-  - 账号信息卡改为可点击，点击后进入 `/app/profile`
-  - 账号入口在资料页激活时显示选中状态
-
-### 本地验证
-- `npm run build`（工作目录：`sync_server/web`）
-  - 结果：通过
-
-## 编码前检查 - sync-server-user-nickname
-时间：2026-03-25 10:40:01 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-user-nickname.md`
-- 已分析相似实现：
-  - `sync_server/server/src/db/database.ts`
-  - `sync_server/server/src/http/routes/auth.ts`
-  - `sync_server/server/src/services/auth.ts`
-  - `sync_server/web/src/views/user/ProfileView.vue`
-  - `sync_server/web/src/layouts/AppLayout.vue`
-  - `sync_server/web/src/views/admin/AdminOverviewView.vue`
-- 将使用以下可复用组件：
-  - `toPublicUser(...)`：统一把昵称透出到公开用户对象
-  - `AuthService`：沿用现有账号自助能力承载昵称更新
-  - `auth.refreshMe()`：在资料页提交昵称后刷新当前登录态
-- 将遵循命名约定：数据库字段使用 `nickname`，前端接口字段使用 `nickname`
-- 将遵循代码风格：昵称自助修改继续挂在用户资料页和 `/api/v1/auth/*` 下，不新增独立模块
-- 确认不重复造轮子，证明：当前需求属于用户资料字段扩展，沿用现有账号模型和资料页即可完成
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和构建脚本作为替代并留痕
-
-## 编码后声明 - sync-server-user-nickname
-时间：2026-03-25 10:44:22 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/server/src/db/database.ts::toPublicUser`：昵称字段统一通过公开用户映射向外暴露
-- `sync_server/server/src/services/auth.ts::createSessionForUser`：登录、注册、刷新后的用户载荷沿用同一收敛点补齐昵称
-- `sync_server/web/src/views/user/ProfileView.vue`：沿用现有自助表单和消息提示模式新增昵称设置
-- `sync_server/web/src/stores/auth.ts`：沿用现有登录态 store，补一个轻量 `replaceUser` 以便资料修改后即时刷新界面
-
-### 2. 遵循了以下项目约定
-- 命名约定：数据库列和服务端字段使用 `nickname`，前端接口字段同样使用 `nickname`
-- 代码风格：昵称默认值通过数据库/服务层统一处理，前端仅做表单提交和展示，不引入额外状态层
-- 文件组织：结构变更集中在 `migrations` 和 `database.ts`，用户自助入口继续放在 `ProfileView.vue`
-
-### 3. 对比了以下相似实现
-- `change-password`：昵称修改沿用同样的 `auth` 路由和资料页表单结构
-- `toPublicUser + me`：昵称和角色/邮箱一样，作为登录态基础字段贯穿后端与前端
-- `AdminOverviewView`：管理员页继续通过 `PublicUser`/`AdminUserSummary` 展示账号信息，只补充昵称展示，不新增单独查询
-
-### 4. 未重复造轮子的证明
-- 已检查账号模型、认证会话返回、管理员用户列表和资料页表单
-- 结论：昵称是现有用户资料模型的自然扩展，使用既有账号链路即可完成，不需要新增独立用户资料服务
-
-## 实施与验证记录 - sync-server-user-nickname
-时间：2026-03-25 10:44:22 +0800
-
-### 已完成修改
-- `sync_server/server/migrations/002_add_user_nickname.sql`
-  - 新增 `nickname` 列
-  - 将历史用户昵称回填为邮箱
-- `sync_server/server/src/db/database.ts`
-  - 新用户默认 `nickname = email`
-  - 会话查询、公开用户映射和用户更新逻辑全部补齐昵称字段
-- `sync_server/server/src/services/auth.ts`
-  - 认证返回中补齐昵称
-  - 新增昵称资料更新服务
-- `sync_server/server/src/http/routes/auth.ts`
-  - 新增 `PATCH /api/v1/auth/profile`
-- `sync_server/web/src/views/user/ProfileView.vue`
-  - 新增昵称设置表单，支持用户自行修改
-- `sync_server/web/src/layouts/AppLayout.vue`
-  - 当前账号卡片优先展示昵称
-- `sync_server/web/src/views/admin/AdminOverviewView.vue`
-  - 管理员账号列表补充昵称展示
-
-### 本地验证
-- `npm run build`（工作目录：`sync_server`）
-  - 结果：通过
-  - 说明：`web` 构建与 `server` TypeScript 编译均成功
-- `node --import tsx/esm -e "...new DatabaseClient(...)"`（工作目录：`sync_server/server`）
-  - 结果：通过
-  - 说明：新增迁移可在临时 SQLite 数据库中成功执行，已验证 `nickname` 列添加与回填 SQL 无语法错误
-
-### 当前限制
-- 当前注册页没有单独收集昵称，仍按你的要求默认使用邮箱作为昵称；后续如需要注册时直接填写昵称，可在现有资料模型上继续扩展
-
-## 追加编码前检查 - sync-server-version-label-clarify
-时间：2026-03-25 10:26:24 +0800
-
-- 已复查相关实现：
-  - `sync_server/web/src/views/user/DashboardView.vue`
-  - `sync_server/web/src/views/user/SyncItemsView.vue`
-  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
-- 将使用以下复用方式：
-  - 抽出共享版本格式化函数，统一“密钥版本”和“记录版本”的展示方式
-- 将遵循代码风格：只改展示层文案和说明，不动接口协议
-- 确认不重复造轮子，证明：当前问题属于展示语义不清晰，使用共享格式化工具即可解决
-
-## 编码后声明 - sync-server-version-label-clarify
-时间：2026-03-25 10:31:56 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/views/user/DashboardView.vue`
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-
-### 2. 遵循了以下项目约定
-- 命名约定：共享格式化函数命名为 `formatKeyVersion`、`formatRecordVersion`
-- 代码风格：仅在展示层追加说明文案和格式化输出，不修改接口字段
-- 文件组织：版本展示逻辑集中放在 `sync_server/web/src/utils/syncItemVersion.ts`
-
-### 3. 未重复造轮子的证明
-- 密钥版本和记录版本的格式化逻辑已收敛到单一工具文件，页面模板没有重复拼接文案
-
-## 实施与验证记录 - sync-server-version-label-clarify
-时间：2026-03-25 10:31:56 +0800
-
-### 已完成修改
-- `sync_server/web/src/utils/syncItemVersion.ts`
-  - 新增密钥版本和记录版本的统一展示格式化函数
-- `sync_server/web/src/views/user/DashboardView.vue`
-  - 密钥配置面板补充字段说明和当前生效配置说明
-  - 最近同步项预览将 `key_version` / `版本` 改为更直观的展示
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 列表表头改为“密钥版本”“记录版本”
-  - 顶部补充两者区别说明
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - 详情页补充密钥版本和记录版本的解释文字
-
-### 本地验证
-- `npm run build`（工作目录：`sync_server/web`）
-  - 结果：通过
-
-## 追加编码前检查 - sync-server-sync-item-type-label
-时间：2026-03-25 10:22:38 +0800
-
-- 已复查相关实现：
-  - `sync_server/web/src/views/user/DashboardView.vue`
-  - `sync_server/web/src/views/user/SyncItemsView.vue`
-  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
-- 将使用以下复用方式：
-  - 抽出共享映射函数，避免三处页面各写一套类型文案
-- 将遵循代码风格：继续使用纯函数 + `<script setup lang="ts">` 导入调用，不引入额外状态
-- 确认不重复造轮子，证明：当前问题是展示层文案统一，不涉及接口和状态模型变更
-
-## 编码后声明 - sync-server-sync-item-type-label
-时间：2026-03-25 10:26:24 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/views/user/DashboardView.vue`
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-
-### 2. 遵循了以下项目约定
-- 命名约定：共享工具函数命名为 `getSyncItemTypeLabel`
-- 代码风格：通过单一纯函数完成展示层映射，不修改接口类型和页面状态结构
-- 文件组织：共享展示逻辑集中放入 `sync_server/web/src/utils`
-
-### 3. 未重复造轮子的证明
-- 三个页面都改为导入同一个映射函数，没有在模板里重复写条件判断
-
-## 实施与验证记录 - sync-server-sync-item-type-label
-时间：2026-03-25 10:26:24 +0800
-
-### 已完成修改
-- `sync_server/web/src/utils/syncItemType.ts`
-  - 新增同步类型中文映射
-- `sync_server/web/src/views/user/DashboardView.vue`
-  - 最近同步项卡片改为展示可读类型文案
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 列表页类型列改为展示可读类型文案
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - 详情页“数据类型”值改为展示可读类型文案
-
-### 本地验证
-- `npm run build`（工作目录：`sync_server/web`）
-  - 结果：通过
-
-## 编码前检查 - sync-server-sync-items-list
-时间：2026-03-25 10:00:22 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-items-list.md`
-- 已分析相似实现：
-  - `sync_server/web/src/views/user/DashboardView.vue`
-  - `sync_server/web/src/layouts/AppLayout.vue`
-  - `sync_server/web/src/views/admin/AdminOverviewView.vue`
-  - `sync_server/server/src/http/routes/sync.ts`
-- 将使用以下可复用组件：
-  - `api.listSyncItems(...)`：复用现有完整同步项接口
-  - `AppLayout.vue` 的 `links`：复用侧边栏导航组织方式
-  - `DashboardView.vue` 的概览卡片和时间格式化模式：保持用户页风格一致
-- 将遵循命名约定：新增视图继续放在 `sync_server/web/src/views/user`，路由名使用语义清晰的英文短横线路径
-- 将遵循代码风格：继续使用 Vue 3 `<script setup lang="ts">`、`ref`/`computed` 和现有面板布局
-- 确认不重复造轮子，证明：已检查同步接口、用户布局和后台表格页，当前仅缺少完整列表入口与页面，不需要新增后端协议
-- 工具说明：仓库要求优先使用 `desktop-commander`、`context7`、`github.search_code`，但本次会话未提供这些工具；已改用本地代码检索和现有构建脚本作为替代并留痕
-
-## 编码后声明 - sync-server-sync-items-list
-时间：2026-03-25 10:03:27 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/services/api.ts::api.listSyncItems`：完整列表页直接复用现有同步项接口
-- `sync_server/web/src/layouts/AppLayout.vue::links`：沿用统一侧边栏导航组织方式，新增“全部同步项”入口
-- `sync_server/web/src/views/admin/AdminOverviewView.vue` 的表格页面结构：复用完整列表视图的头部、错误提示和表格展示模式
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增用户页命名为 `SyncItemsView.vue`，路由名为 `sync-items`
-- 代码风格：仍使用 `<script setup lang=\"ts\">`、`ref`/`computed` 和现有面板样式类
-- 文件组织：用户页面继续放在 `sync_server/web/src/views/user`，未新增额外状态层或后端接口
-
-### 3. 对比了以下相似实现
-- `DashboardView.vue`：保留仪表盘“最近同步项”定位，只把预览条数从 8 缩减到 5，并增加完整列表跳转按钮
-- `AppLayout.vue`：延续现有固定路由链接模式，把完整列表页作为普通用户导航项接入
-- `AdminOverviewView.vue`：参考其完整表格页结构，但未复用管理员权限或批量操作逻辑
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/server/src/http/routes/sync.ts` 和 `sync_server/server/src/db/database.ts`，确认 `/api/v1/sync/items` 已能返回按 `updated_at DESC` 排序的完整列表
-- 结论：当前只需新增前端入口和展示页，不需要新增后端路由、分页协议或并行数据模型
-
-## 实施与验证记录 - sync-server-sync-items-list
-时间：2026-03-25 10:03:27 +0800
-
-### 已完成修改
-- `sync_server/web/src/views/user/DashboardView.vue`
-  - 最近同步项预览改为通过 `previewItems` 计算属性截取前 5 条
-  - 区块头部新增“查看全部同步项”按钮，跳转到完整列表页
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 新增当前账号完整同步项列表页
-  - 展示类型、同步项 ID、`key_version`、版本、更新时间和软删除状态
-  - 补齐加载中、空状态、错误提示和返回概览按钮
-- `sync_server/web/src/router/index.ts`
-  - 新增 `/app/sync-items` 用户子路由
-- `sync_server/web/src/layouts/AppLayout.vue`
-  - 侧边栏新增“全部同步项”导航入口
-
-### 本地验证
-- `npm run build`（工作目录：`sync_server/web`）
-  - 结果：通过
-  - 说明：`vue-tsc -b && vite build` 成功，产物中已生成 `SyncItemsView` 对应构建文件
-
-### 当前限制
-- `sync_server/web` 当前没有独立的前端单元测试或组件测试；本次只能通过类型检查和生产构建验证回归
-
-## 追加编码前检查 - sync-server-sync-item-detail
-时间：2026-03-25 10:09:35 +0800
-
-- 已补充查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-items-list.md` 中“追加上下文（详情能力）”
-- 已分析新增复用点：
-  - `sync_server/server/src/db/database.ts::getSyncItem`
-  - `sync_server/web/src/views/user/SyncItemsView.vue`
-  - `sync_server/web/src/layouts/AppLayout.vue`
-- 将使用以下可复用组件：
-  - `DatabaseClient::getSyncItem(...)`：直接复用数据库层单条读取能力
-  - `api.request(...)`：沿用现有前端 API 封装补单条详情读取
-  - `AppLayout.vue` 导航模式：补齐详情页时“全部同步项”入口高亮
-- 将遵循命名约定：详情路由使用 `sync-item-detail`，详情页组件使用 `SyncItemDetailView.vue`
-- 将遵循代码风格：详情页继续使用现有面板布局，不新增模态框状态层或本地缓存层
-- 确认不重复造轮子，证明：数据库层已有单条读取能力，补 HTTP 路由和前端详情页即可完成，不需要前端全量拉取后手动筛一条
-
-## 编码后声明 - sync-server-sync-item-detail
-时间：2026-03-25 10:09:35 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/server/src/db/database.ts::getSyncItem`：直接作为单条详情读取的数据来源
-- `sync_server/web/src/services/api.ts::request`：继续复用统一鉴权和错误处理封装
-- `sync_server/web/src/layouts/AppLayout.vue::links`：沿用侧边栏导航入口，只补充详情页高亮规则
-
-### 2. 遵循了以下项目约定
-- 命名约定：动态路由命名为 `sync-item-detail`，页面组件为 `SyncItemDetailView`
-- 代码风格：详情页仍使用 `<script setup lang=\"ts\">`，通过 `watch(route.params.id)` 驱动数据刷新
-- 文件组织：服务端改动仅位于 `sync.ts` 路由层，前端改动集中在 `views/user`、`router` 和 `services/api`
-
-### 3. 对比了以下相似实现
-- `SyncItemsView.vue`：列表页继续负责“发现记录”，详情页负责“展开完整字段”，职责分离更清晰
-- `DashboardView.vue`：最近同步项预览新增“查看详情”按钮，但不承担详情渲染本身
-- `AppLayout.vue`：延续固定入口高亮模式，对详情页增加同组前缀匹配
-
-### 4. 未重复造轮子的证明
-- 已检查 `getSyncItem`、`listSyncItems` 和当前前端路由结构
-- 结论：通过独立详情 API 和详情页即可满足需求，不需要再加模态、额外 store 或重复的列表数据缓存
-
-## 实施与验证记录 - sync-server-sync-item-detail
-时间：2026-03-25 10:09:35 +0800
-
-### 已完成修改
-- `sync_server/server/src/http/routes/sync.ts`
-  - 新增 `GET /api/v1/sync/items/:id`
-  - 抽出 `toSyncItemResponse`，统一单条和列表响应结构
-- `sync_server/web/src/services/api.ts`
-  - 新增 `api.getSyncItem(token, id)`
-- `sync_server/web/src/router/index.ts`
-  - 新增 `/app/sync-items/:id` 详情路由
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 列表新增“查看详情”操作列
-- `sync_server/web/src/views/user/DashboardView.vue`
-  - 最近同步项卡片新增“查看详情”入口
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - 新增详情页，展示类型、状态、ID、owner_id、版本、时间戳、校验值和加密数据
-- `sync_server/web/src/layouts/AppLayout.vue`
-  - 补齐详情页时“全部同步项”导航高亮
-
-### 本地验证
-- `npm run build`（工作目录：`sync_server`）
-  - 结果：通过
-  - 说明：`web` 构建成功，`server` 的 `tsc -p tsconfig.json` 成功
-- `npm run check`（工作目录：`sync_server/server`）
-  - 结果：通过
-  - 说明：服务端无输出类型检查通过
-
-### 当前限制
-- 详情页当前展示的是原始 `encryptedData` 文本，不尝试做解密或结构化解析；这符合现有接口能力边界
-
-## 编码前检查 - deepin-client-decorations
-时间：2026-03-25 02:06:00 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-deepin-client-decorations.md`
-- 已分析相似实现：
-  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs`
-  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
-  - `crates/ui/src/title_bar.rs`
-- 将使用以下可复用组件：
-  - `check_gtk_frame_extents_supported(...)`：沿用 `_NET_SUPPORTED` 探测模式扩展 Deepin 原子支持
-  - `request_decorations(...)`：沿用现有 `_MOTIF_WM_HINTS` 切换路径补写 `_DEEPIN_NO_TITLEBAR`
-  - `window.window_decorations()`：作为应用层是否显示自绘按钮的唯一真实来源
-- 将遵循命名约定：新增能力标记继续使用 `*_supported`，不引入业务层特判状态
-- 将遵循代码风格：平台兼容逻辑集中在 `gpui` X11 层，OnetCli 仅做标题栏联动修正
-- 确认不重复造轮子，证明：已检查现有窗口装饰探测、请求路径和标题栏渲染入口，当前问题属于既有平台链路缺少 Deepin 分支，不需要新增并行装饰系统
-
-## 编码后声明 - deepin-client-decorations
-时间：2026-03-25 02:22:00 +0800
-
-### 1. 复用了以下既有组件
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs::check_root_atom_supported`：沿用 `_NET_SUPPORTED` 探测模式，补入 Deepin 原子判断
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs::request_decorations`：沿用既有 `_MOTIF_WM_HINTS` 写入链路，补写 Deepin 专有属性
-- `crates/ui/src/title_bar.rs::should_render_custom_window_controls`：继续用真实 `window.window_decorations()` 决定按钮是否显示
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增字段和能力探测继续使用 `*_supported`
-- 代码风格：Deepin 兼容性优先放在 `gpui` 平台层；OnetCli UI 层只做最小联动
-- 文件组织：保留既有 Deepin 双按钮修复和 A 方案标题同步，不回退已确认有效的仓库内改动
-
-### 3. 对比了以下相似实现
-- `client.rs` 原实现：客户端装饰能力只依赖 `compositor_present && _GTK_FRAME_EXTENTS`
-- Deepin 现场结论：系统标题栏隐藏实际依赖 `_DEEPIN_NO_TITLEBAR`
-- `title_bar.rs` 原实现：按桌面环境名隐藏自绘按钮，和真实窗口装饰状态可能分叉
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/main.rs`、`crates/ui/src/window_border.rs`、`crates/ui/src/title_bar.rs` 与 `gpui` 的 X11 装饰链路
-- 结论：根因在平台层装饰协商和 UI 显示条件不一致，继续在业务层兜底会形成重复分叉
-
-## 实施与验证记录 - deepin-client-decorations
-时间：2026-03-25 02:27:00 +0800
-
-### 已完成修改
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs`
-  - 新增 Deepin `_DEEPIN_NO_TITLEBAR` 能力探测
-  - 将 Deepin 客户端装饰路径从“必须依赖 `_GTK_FRAME_EXTENTS` / 合成器”中独立出来
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
-  - 新增 `_DEEPIN_NO_TITLEBAR` / `_DEEPIN_FORCE_DECORATE` 原子
-  - `request_decorations(WindowDecorations::Client)` 时写入 `_DEEPIN_NO_TITLEBAR=1`、`_DEEPIN_FORCE_DECORATE=0`
-  - `request_decorations(WindowDecorations::Server)` 时写回对应服务端值
-- `crates/ui/src/title_bar.rs`
-  - 不再仅按 Deepin 桌面环境名隐藏应用自绘按钮
-  - 改为只依据真实 `window.window_decorations()` 判断是否显示
-
-### 本地验证
-- `cargo clean -p gpui`
-  - 结果：通过，用于强制主工程重新编译外部 git `gpui` 依赖
-- `cargo build -p main`
-  - 结果：通过，并确认日志出现 `Compiling gpui v0.2.2`
-- `CARGO_TARGET_DIR=/usr/htdocs/onetcli/target/gpui-x11-restore-test cargo test --manifest-path /home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/Cargo.toml --lib maximized_windows_use_remove_for_restore -- --nocapture`
-  - 结果：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`
-  - 结果：通过，2 个测试全部成功
-- `DISPLAY=:0 xprop -id 150994946 _DEEPIN_NO_TITLEBAR _DEEPIN_FORCE_DECORATE _MOTIF_WM_HINTS _NET_WM_STATE WM_CLASS WM_NAME`
-  - 结果：`_DEEPIN_NO_TITLEBAR(CARDINAL) = 1`
-  - 结果：`_DEEPIN_FORCE_DECORATE(CARDINAL) = 0`
-  - 结果：`_MOTIF_WM_HINTS(_MOTIF_WM_HINTS) = 0x2, 0x0, 0x0, 0x0, 0x0`
-
-### 当前限制
-- 真实 GUI 交互仍需你确认：系统标题栏是否已经完全消失、应用标题栏按钮是否位置和交互都符合预期
-
-## 编码前检查 - deepin-window-restore-x11-zoom
-时间：2026-03-25 01:06:00 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-restore.md`
-- 已分析相似实现：
-  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
-  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/wayland/window.rs`
-  - `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/window.rs`
-- 将使用以下可复用组件：
-  - `X11Window::is_maximized()`：作为 X11 当前状态判断入口
-  - `X11Window::set_wm_hints(...)`：沿用既有 EWMH 发送通道
-  - Wayland `zoom()` 的显式状态切换模式：作为语义对照
-- 将遵循命名约定：仅在 `gpui` X11 平台层补齐状态语义，不改应用层 API
-- 将遵循代码风格：最小改动，只修 `zoom()` 的状态选择并补最小单测
-- 确认不重复造轮子，证明：已检查 OnetCli UI 层双击/按钮入口和 `gpui` 上层 `window.rs`，所有入口最终都收敛到平台层 `zoom()`，继续在 UI 层兜底会重复并放大分叉
-
-## 编码后声明 - deepin-window-restore-x11-zoom
-时间：2026-03-25 01:12:00 +0800
-
-### 1. 复用了以下既有组件
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs::set_wm_hints`：继续通过既有 `_NET_WM_STATE` 发送链路修改最大化状态
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs::is_maximized`：作为 X11 当前窗口状态判定依据
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/wayland/window.rs::zoom`：作为显式最大化/还原语义的对照实现
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增辅助函数 `maximized_wm_hint_property_state`，保持 `snake_case`
-- 代码风格：未新增新的窗口状态字段，也未改动 OnetCli 业务层；修复集中在 `gpui` X11 平台层
-- 文件组织：应用层已确认有效的 Deepin 双按钮修复和 A 方案标题同步均保持不动
-
-### 3. 对比了以下相似实现
-- X11 旧实现：`zoom()` 固定使用 `WmHintPropertyState::Toggle`
-- Wayland 对照实现：`zoom()` 已根据 `state.maximized` 显式 `set_maximized` / `unset_maximized`
-- `gpui/src/window.rs` 上层抽象：所有“最大化/还原”入口最终都只会调用平台层 `zoom()`
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/main.rs`、`crates/ui/src/title_bar.rs`、`crates/core/src/tab_container.rs` 与 `gpui` 上层 `window.rs`
-- 结论：问题根因位于 X11 平台层状态切换语义，继续修改 UI 层会形成重复补丁，且无法覆盖系统标题栏主按钮路径
-
-## 实施与验证记录 - deepin-window-restore-x11-zoom
-时间：2026-03-25 01:28:00 +0800
-
-### 已完成修改
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
-  - 恢复 `WmHintPropertyState::Remove` / `Add`
-  - 新增 `maximized_wm_hint_property_state(is_maximized)`，统一决定 X11 最大化/还原动作
-  - `zoom()` 不再固定发送 `Toggle`，改为“已最大化则 `Remove`，未最大化则 `Add`”
-  - 新增 2 个最小单测，分别验证恢复和最大化分支
-
-### 本地验证
-- `CARGO_TARGET_DIR=/usr/htdocs/onetcli/target/gpui-x11-restore-test cargo test --manifest-path /home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/Cargo.toml --lib maximized_windows_use_remove_for_restore -- --nocapture`
-  - 结果：通过，`platform::linux::x11::window::tests::maximized_windows_use_remove_for_restore ... ok`
-- `CARGO_TARGET_DIR=/usr/htdocs/onetcli/target/gpui-x11-restore-test cargo test --manifest-path /home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/Cargo.toml --lib windowed_windows_use_add_for_maximize -- --nocapture`
-  - 结果：通过，`platform::linux::x11::window::tests::windowed_windows_use_add_for_maximize ... ok`
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`
-  - 结果：通过，2 个测试全部成功
-- `cargo build -p main`
-  - 结果：通过
-
-### 当前限制
-- Deepin 25 的系统标题栏主按钮与双击恢复仍需要你在真实 GUI 上复测；本地自动验证只能证明 X11 平台层现在已具备“显式最大化/显式还原”的语义
-
-## 追加诊断记录 - deepin-window-restore-x11-zoom
-时间：2026-03-25 01:36:00 +0800
-
-### 现场观察
-- 通过 `qdbus org.kde.KWin /KWin supportInformation` 确认当前窗口管理器为 `KWin 5.27.2`，装饰插件为 `com.deepin.chameleon`
-- 当前配置中：
-  - `operationTitlebarDblClick=5000`
-  - `operationMaxButtonLeftClick=5000`
-  - `operationMaxButtonMiddleClick=5015`
-- 新开的 OnetCli 调试窗口 `0x8c00002` 在普通态下具备：
-  - `WM_NORMAL_HINTS`：`user specified location/size` + `gravity: NorthWest`
-  - `WM_HINTS`
-  - `WM_CLIENT_LEADER`
-  - `_MOTIF_WM_HINTS = 0x3, 0x3e, 0x7e, 0x0, 0x0`
-
-### 手工 X11 对照实验
-- 用 `libX11` 直接发送 `_NET_WM_STATE Add(MAXIMIZED_VERT, MAXIMIZED_HORZ)`：
-  - 结果：窗口成功最大化到 `3840x2080 +0+80`
-- 再直接发送 `_NET_WM_STATE Toggle(MAXIMIZED_VERT, MAXIMIZED_HORZ)`：
-  - 结果：窗口成功恢复到 `3200x1836 +322+242`
-
-### 当前判断
-- 标准 EWMH 最大化/还原链路在 OnetCli 窗口上是正常的
-- 用户仍遇到“系统主按钮和双击标题栏不能还原”，剩余问题更接近 Deepin/KWin `com.deepin.chameleon` 装饰插件路径
-- 结论：继续在 OnetCli 应用层或 `gpui` 的普通 `_NET_WM_STATE` 切换上加补丁，预计不能修复系统主按钮这条路径
-
-## 编码前检查 - sync-server-url-settings
-时间：2026-03-24 22:35:21 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-url-settings.md`
-- 已分析相似实现：
-  - `main/src/auth.rs`
-  - `main/src/setting_tab.rs`
-  - `main/src/home_tab.rs`
-  - `crates/core/src/cloud_sync/sync_server.rs`
-- 将使用以下可复用组件：
-  - `AppSettings::load/save`：复用现有设置持久化
-  - `SettingField::input`：复用现有字符串输入设置项
-  - `SyncServerClient`：在同一客户端对象上热更新地址
-  - `HomePage::push_sync_notification`：复用现有同步结果通知
-- 将遵循命名约定：设置字段继续使用 `snake_case`，文案键继续使用 `Settings.General.*`、`Auth.*`、`Home.*`
-- 将遵循代码风格：只在现有认证、设置、首页同步链路内补齐逻辑，不新增并行配置来源
-- 确认不重复造轮子，证明：已检查设置页字段组件、认证服务初始化、首页同步提示和 sync_server 客户端，当前需求属于既有链路补齐，不需要新增独立模块
-
-## 编码后声明 - sync-server-url-settings
-时间：2026-03-24 22:45:33 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/setting_tab.rs::AppSettings`：继续使用 `settings.json` 持久化同步地址
-- `crates/ui/src/setting/fields/string.rs`：继续使用即时保存的字符串输入组件
-- `main/src/home_tab.rs::push_sync_notification`：继续用现有通知系统显式提示同步结果
-- `crates/core/src/cloud_sync/sync_server.rs::SyncServerClient`：在同一客户端对象上热更新地址，避免替换 `Arc`
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增字段使用 `sync_server_url`，新增方法沿用 `snake_case`
-- 代码风格：修改集中在认证、设置、首页同步入口和配置清理，没有新增平行配置层
-- 文件组织：设置相关逻辑仍然集中在 `main/src/setting_tab.rs`，认证检查仍然集中在 `main/src/auth.rs`
-
-### 3. 对比了以下相似实现
-- `main/src/auth.rs`：延续现有认证服务持有全局客户端、负责会话恢复和令牌持久化的模式
-- `main/src/home_tab.rs`：延续现有 `sync_feedback + notification` 的失败提示模式
-- `crates/ui/src/setting/fields/string.rs`：沿用“输入变化立即写回全局状态”的设置组件行为
-
-### 4. 未重复造轮子的证明
-- 已检查 `AppSettings`、`SettingField::input`、`SyncServerClient` 和 `HomePage` 现有状态管理
-- 结论：当前需求可通过补齐既有链路完成，不需要新增独立同步配置服务或新的弹窗体系
-
-## 实施与验证记录 - sync-server-url-settings
-时间：2026-03-24 22:45:33 +0800
-
-### 已完成修改
-- `crates/core/src/cloud_sync/sync_server.rs`
-  - 新增同步地址规范化与有效性校验
-  - 改为运行时可更新的 `base_url`
-- `main/src/auth.rs`
-  - 启动时从 `AppSettings` 读取同步地址
-  - 登录、注册、会话恢复前增加同步地址有效性检查
-  - 新增同步地址热更新方法
-- `main/src/setting_tab.rs`
-  - 新增 `sync_server_url` 设置项和持久化字段
-  - 设置修改后立即更新认证服务并重置首页登录状态
-- `main/src/home_tab.rs`
-  - 登录前未配置地址时弹出准确提示，并引导打开设置页
-  - 同步前未配置地址时显式展示失败原因并推送通知
-- `crates/core/src/config.rs` / `crates/core/build.rs` / `CLAUDE.md`
-  - 删除 `SYNC_SERVER_URL` 相关环境变量入口和文档说明
-- `main/locales/main.yml`
-  - 新增设置项文案和未配置提示文案
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p main`
-  - 结果：通过，6 个测试全部成功
-- `cargo test -p one-core --no-run`
-  - 结果：通过
-- `rg -n "SYNC_SERVER_URL|SyncServerConfig::get" /usr/htdocs/onetcli --glob '!target' --glob '!**/node_modules/**'`
-  - 结果：无匹配，确认已移除该配置入口
-
-### 当前限制
-- 尚未执行 GUI 手动回归；需要在界面中实际验证“未配置时登录弹提示并跳设置页”和“未配置时同步显示明确失败原因”两条交互链路
-
-## 增量完善记录 - auth-state-consistency
-时间：2026-03-24 22:53:03 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 抽取统一的认证状态清理逻辑
-  - 会话过期时不再只清空 `current_user`，同时清理全局用户状态、同步服务状态和反馈状态
-- `main/src/setting_tab.rs`
-  - 设置页执行登出后，额外同步刷新首页登录态与同步状态
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p main`
-  - 结果：通过，6 个测试全部成功
-- `cargo test -p one-core --no-run`
-  - 结果：通过
-
 ## 编码前检查 - windows-owner-id-build
 时间：2026-03-20 15:29:09 +0800
 
@@ -2349,4805 +1168,1096 @@
 - 结果：全部通过
 - 备注：仍存在既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次改动无关
 
-## 编码前检查 - macOS 本地快速打包
-时间：2026-03-23 12:37:59 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-macos-local-fast-package.md`
-□ 将使用以下可复用组件：
-- `script/bundle-macos.sh`：复用 `.app` 组装逻辑
-- `script/bundle-macos-dmg.sh`：复用 `.dmg` 组装入口和目标架构约定
-- `Cargo.toml` 中的 `profile.release`：作为 `release-fast` 的基线
-□ 将遵循命名约定：脚本文件使用 kebab-case，环境变量使用全大写蛇形
-□ 将遵循代码风格：Shell 脚本统一 `set -euo pipefail`，路径通过 `SCRIPT_DIR/PROJECT_DIR` 计算
-□ 确认不重复造轮子，证明：不新建第二套 `.app` 组装逻辑，只在现有 bundle 脚本外层增加本地快速入口
-
-## 编码后声明 - macOS 本地快速打包
-时间：2026-03-23 12:37:59 +0800
-
-### 1. 复用了以下既有组件
-- `script/bundle-macos.sh`：继续负责 `.app` 目录结构和资源复制
-- `script/bundle-macos-dmg.sh`：保留 DMG 输出逻辑，仅补默认 target 识别
-- `Cargo.toml` 的 `release` profile：通过 `inherits = "release"` 构建 `release-fast`
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增脚本命名为 `package-macos-local.sh`
-- 代码风格：继续使用 `set -euo pipefail` 和路径变量
-- 文件组织：构建 profile 放在根 `Cargo.toml`，打包入口放在 `script/`
-
-### 3. 对比了以下相似实现
-- `script/bundle-macos.sh`：我的方案在其外层补构建入口，不重写 `.app` 打包细节
-- `script/bundle-macos-dmg.sh`：沿用参数风格和产物命名，仅修复默认 target
-- `Cargo.toml` 的 `profile.release`：保留正式发布配置不变，仅派生本地快速 profile
-
-### 4. 未重复造轮子的证明
-- 未新增第二套 `.app`/`.dmg` 组装流程
-- 仅新增一个“本地快速打包”编排脚本，并让既有脚本支持按 profile 读取二进制
-
-## 实施与验证记录 - macOS 本地快速打包
-时间：2026-03-23 12:50:10 +0800
-
-### 已完成修改
-- 在 `Cargo.toml` 新增 `profile.release-fast`，用于本地快速构建
-- 在 `script/bundle-macos.sh` 增加默认 macOS 架构识别和 `ONETCLI_BUILD_PROFILE` 支持
-- 在 `script/bundle-macos-dmg.sh` 增加默认 macOS 架构识别
-- 新增 `script/package-macos-local.sh`，统一执行本地快速构建和 `.app` 打包
-
-### 本地验证
-- `bash script/package-macos-local.sh`
-- 第一次结果：通过，`release-fast` 首次全量构建完成并输出 `target/OnetCli.app`，总耗时约 `10:36.06`
-- 第二次结果：通过，增量构建 `Finished release-fast profile` 耗时 `2.59s`，整套脚本耗时约 `4.426s`
-- 产物校验：
-  - `target/x86_64-apple-darwin/release-fast/onetcli`
-  - `target/OnetCli.app/Contents/MacOS/onetcli`
-  - 两者均存在，文件大小均为约 `94M`
-
-
-## 编码前检查 - 标题栏双击常规功能
-时间：2026-03-23 13:31:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-titlebar-double-click.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/window_ext.rs`：统一窗口辅助行为
-- `crates/ui/src/title_bar.rs`：通用标题栏双击入口
-- `crates/core/src/tab_container.rs`：主工作区顶部条双击入口
-□ 将遵循命名约定：扩展行为放在 `WindowExt`，组件层只保留调用
-□ 将遵循代码风格：最小改动、避免重复平台判断
-□ 确认不重复造轮子，证明：复用现有 `zoom_window` / `minimize_window`，只补系统偏好兼容
-
-## 编码后声明 - 标题栏双击常规功能
-时间：2026-03-23 13:31:00 +0800
-
-### 1. 复用了以下既有组件
-- `WindowExt`：新增统一标题栏双击兼容入口
-- `TitleBar`：继续作为通用标题栏绑定点
-- `TabContainer`：继续作为工作区顶部条绑定点
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增方法 `handle_titlebar_double_click`
-- 代码风格：平台兼容逻辑集中在一个文件，两个调用点只替换方法名
-- 文件组织：测试内聚在 `crates/ui/src/window_ext.rs`
-
-### 3. 对比了以下相似实现
-- `crates/ui/src/title_bar.rs`：原先直接调用 `window.titlebar_double_click()`
-- `crates/core/src/tab_container.rs`：原先同样直接调用 `window.titlebar_double_click()`
-- `gpui` macOS 平台实现：只读取 `AppleActionOnDoubleClick`，缺少本机可见的旧 key 兼容
-
-### 4. 未重复造轮子的证明
-- 未自建窗口缩放/最小化实现，仍调用 `gpui::Window` 的平台动作
-- 仅补充系统偏好解析与统一入口
-
-## 实施与验证记录 - 标题栏双击常规功能
-时间：2026-03-23 13:31:00 +0800
-
-### 已完成修改
-- 在 `crates/ui/src/window_ext.rs` 新增 macOS 标题栏双击偏好兼容逻辑
-- 在 `crates/ui/src/title_bar.rs` 和 `crates/core/src/tab_container.rs` 统一改为调用 `handle_titlebar_double_click`
-- 新增 5 个单元测试覆盖 `AppleActionOnDoubleClick` 与 `AppleMiniaturizeOnDoubleClick` 的解析分支
-
-### 本地验证
-- `cargo test -p gpui-component window_ext::tests --lib`
-- 结果：通过（5 passed）
-- `cargo check -p main`
-- 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-
-
-## 审查前检查 - 升级Pro与同步功能
-时间：2026-03-24 15:18:53 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-upgrade-pro-sync-review.md`
-□ 本次优先复用以下既有组件进行审查：
-- `main/src/license.rs`：升级 Pro 入口与 License 门禁
-- `main/src/home_tab.rs`：登录、订阅、同步与冲突解决的 UI 编排
-- `crates/core/src/license/service.rs`：License 降级/缓存语义
-- `crates/core/src/cloud_sync/engine.rs`：同步与单独冲突解决的执行入口
-- `crates/core/src/cloud_sync/service.rs`：团队密钥版本选择
-□ 将遵循命名约定：按“UI 编排 / 服务逻辑 / 存储与测试”三层检查，不臆造不存在的职责
-□ 将遵循代码风格：基于现有源码和本地验证结果给出结论，不做无证据推断
-□ 确认不重复造轮子，证明：审查完全沿用项目现有 `LicenseService`、`AuthService`、`SyncEngine`、`CloudSyncService`
-
-### 工具与替代记录
-- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
-  - 代码检索：`rg`
-  - 文件阅读：`sed` / `nl`
-  - 本地验证：`cargo test` / `cargo check`
-
-## 审查执行记录 - 升级Pro与同步功能
-时间：2026-03-24 15:18:53 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/license.rs`
-- `main/src/home_tab.rs`
-- `main/src/auth.rs`
-- `crates/core/src/license/service.rs`
-- `crates/core/src/license/models.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/cloud_sync/connection_sync.rs`
-- `crates/core/src/cloud_sync/generic_sync.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `crates/core/src/storage/repository.rs`
-
-### 2. 对比的相似实现
-- `main/src/home_tab.rs:319`：常规同步完整入口
-- `main/src/home_tab.rs:717`：会话恢复后的 License 刷新与自动同步
-- `main/src/home_tab.rs:751`：OTP 登录后的 License 刷新与自动同步
-- `crates/core/src/cloud_sync/engine.rs:143`：常规 `sync()` 的团队缓存预热逻辑
-
-### 3. 发现的主要问题
-- Pro 状态会因订阅接口瞬时失败被错误降级为 Free：`get_subscription().await.ok().flatten()` 把请求失败和“无订阅”混为同一 `None`，随后 `LicenseService::update_from_subscription` 会落盘免费版 License
-- 单独冲突解决绕过团队缓存预热：`apply_conflict_resolutions` 不会像 `sync()` 一样先拉团队列表，团队数据冲突在 `UseLocal/KeepBoth` 下会走 `select_key_version(...).unwrap_or(1)`
-- 升级 Pro 购买完成后缺少回流刷新：升级对话框只打开外链，代码里只有“会话恢复/OTP 登录”会拉取订阅
-
-### 4. 本地验证
-- `cargo test -p one-core license::`
-- 结果：通过（8 passed）
-- `cargo test -p one-core cloud_sync::`
-- 结果：通过（13 passed）
-- `cargo check -p main`
-- 结果：通过（存在既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-
-## 审查后声明 - 升级Pro与同步功能
-时间：2026-03-24 15:18:53 +0800
-
-### 1. 复用了以下既有组件和证据
-- `LicenseService::update_from_subscription`：用于确认 `None` 会直接降级到 Free
-- `HomePage::try_restore_session` / `verify_otp`：用于确认订阅拉取错误被静默吞掉
-- `SyncEngine::sync` 与 `SyncEngine::apply_conflict_resolutions`：用于对比常规同步和单独冲突解决的初始化差异
-
-### 2. 遵循了以下项目约定
-- 命名和职责按现有分层分析：UI 在 `main`，核心逻辑在 `crates/core`
-- 审查结论全部引用现有源码和本地验证结果
-- 不修改任何业务代码，只新增审查留痕文件
-
-### 3. 未重复造轮子的证明
-- 没有引入新的验证脚本，直接使用项目既有 `cargo test` / `cargo check`
-- 没有复写已有结论，所有问题都直接定位到现有实现链路
-
-## 编码前检查 - 云同步服务端开发方案
-时间：2026-03-24 15:35:05 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-server-plan.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/config.rs`：确认 Supabase 服务器地址来自环境注入
-- `crates/core/src/cloud_sync/client.rs`：确认客户端强依赖的服务端接口集合
-- `crates/core/src/cloud_sync/supabase.rs`：确认表名、字段映射、RLS 依赖点、RPC 名称
-- `crates/core/src/cloud_sync/models.rs`：确认统一 `sync_data` 结构与冲突字段
-- `crates/core/src/cloud_sync/generic_sync.rs`：确认同步流程、软删除与增量拉取约束
-- `crates/core/src/cloud_sync/service.rs`：确认加密 blob、`checksum`、`key_version` 语义
-□ 将遵循命名约定：沿用现有 Supabase 表名、字段名、RPC 名称，不发明新的协议层命名
-□ 将遵循代码风格：文档中的所有结论都必须能回溯到当前仓库代码实现或本地环境检查
-□ 确认不重复造轮子，证明：方案明确要求继续使用 Supabase 官方能力，不设计自研认证和自研同步网关
-
-### 工具与替代记录
-- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
-  - 代码检索：`rg`
-  - 文件阅读：`sed`
-  - 环境核对：`printenv`
-  - 文档校验：`test` / `rg`
-
-## 执行记录 - 云同步服务端开发方案
-时间：2026-03-24 15:35:05 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/config.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/models.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/generic_sync.rs`
-- `crates/core/src/cloud_sync/connection_sync.rs`
-- `crates/core/src/cloud_sync/workspace_sync.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/storage/models.rs`
-- `crates/core/src/storage/repository.rs`
-- `crates/core/migrations/20260315000001_team_sync.sql`
-- `crates/core/migrations/20260317000001_connection_owner.sql`
-
-### 2. 对比的相似实现
-- `crates/core/src/config.rs:88`：Supabase URL 和 Key 的注入方式
-- `crates/core/src/cloud_sync/supabase.rs:208`：Auth/REST/Functions URL 拼接规则
-- `crates/core/src/cloud_sync/models.rs:203`：统一 `sync_data` 结构
-- `crates/core/src/cloud_sync/engine.rs:147`：同步前团队列表预热逻辑
-- `crates/core/src/cloud_sync/supabase.rs:1530`：`list_sync_data` 依赖 RLS 自动过滤
-
-### 3. 本次输出
-- 新增 `.claude/context-summary-cloud-sync-server-plan.md`
-- 新增 `.claude/cloud-sync-server-development-plan.md`
-- 追加 `.claude/operations-log.md`
-- 追加 `.claude/verification-report.md`
-
-### 4. 关键结论
-- 当前云同步服务端类型已经明确为 Supabase，而非自研 API。
-- 当前无法从仓库和本地环境确定真实生产服务器域名或地域，因为 `SUPABASE_URL` 未写死且当前环境变量为空。
-- 客户端已强依赖 `user_configs`、`user_subscriptions`、`sync_data`、`teams`、`team_members` 与 `rpc/add_team_member_by_email`。
-- 正确的服务端开发重点是：表结构、RLS、触发器、RPC、订阅回写，而不是重写同步协议。
-
-### 5. 本地验证
-- `test -f .claude/context-summary-cloud-sync-server-plan.md`
-- `test -f .claude/cloud-sync-server-development-plan.md`
-- `rg -n "SUPABASE_URL|sync_data|add_team_member_by_email|云同步服务器在哪里|正确实现清单" .claude/cloud-sync-server-development-plan.md`
-- `printenv | rg '^SUPABASE_(URL|ANON_KEY)=' -n -S || true`
-
-## 编码后声明 - 云同步服务端开发方案
-时间：2026-03-24 15:35:05 +0800
-
-### 1. 复用了以下既有组件
-- `CloudSyncData`：用于约束统一同步表设计
-- `generic_sync` / `SyncEngine`：用于约束软删除、增量拉取和团队缓存语义
-
-### 2. 遵循了以下项目约定
-- 文档全部落在项目内 `.claude/` 目录
-- 使用现有表名、字段名和同步概念，不引入新的抽象层
-- 所有关键结论均可映射回仓库源码或本地环境检查结果
-
-### 3. 未重复造轮子的证明
-- 方案明确采用 Supabase 官方能力，不新增自研认证、会话或同步服务
-- 方案中的“正确实现清单”全部围绕现有客户端契约展开，没有发明新的客户端协议
-
-## 编码前检查 - 移除 Pro 验证
-时间：2026-03-24 15:56:22 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-remove-pro-validation.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs`：云同步按钮门禁与登录后状态更新
-- `main/src/license.rs`：应用启动时的 License 接入点
-- `main/src/setting_tab.rs`：账户区域中的离线 License 入口与登出清理
-- `crates/core/src/license/service.rs`：核心 License 行为
-□ 将遵循命名约定：保留 `LicenseService`、`Feature`、`PlanTier` 等接口名，避免跨模块连锁重构
-□ 将遵循代码风格：以删门禁、删入口、改默认值为主，不引入新的授权抽象
-□ 确认不重复造轮子，证明：直接复用现有 License 模块做兼容层，不重新设计一套功能开关系统
-
-### 工具与替代记录
-- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
-  - 代码检索：`rg`
-  - 文件阅读：`sed`
-  - 本地验证：`cargo test` / `cargo check`
-
-## 执行记录 - 移除 Pro 验证
-时间：2026-03-24 15:56:22 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `main/src/license.rs`
-- `main/src/setting_tab.rs`
-- `crates/core/src/license/service.rs`
-- `crates/core/src/license/models.rs`
-- `crates/core/src/license/mod.rs`
-
-### 2. 对比的相似实现
-- `main/src/home_tab.rs:319`：同步门禁
-- `main/src/home_tab.rs:717`：恢复会话后同步订阅
-- `main/src/home_tab.rs:751`：OTP 登录后同步订阅
-- `main/src/license.rs:1`：全局 License 初始化与升级入口
-- `main/src/setting_tab.rs:720`：离线 License 导入入口
-
-### 3. 本次改动
-- 删除了 `home_tab` 中的 Pro/License 门禁与升级提示逻辑
-- 删除了恢复会话和 OTP 登录后的订阅同步回写
-- 将 `main/src/license.rs` 改为空兼容层，不再初始化 Pro 校验
-- 删除了设置页中的“导入离线 License”入口
-- 将 `LicenseService` 改为默认返回 Pro 并始终启用 `CloudSync`
-- 更新了 `one_core::license` 模块说明和相关测试预期
-
-### 4. 本地验证
-- `cargo test -p one-core license:: --lib`
-- 结果：通过（8 passed）
-- `cargo check -p main`
-- 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-- `rg -n "show_upgrade_dialog|offline_license_public_key|get_license_service\\(|License.upgrade_to_pro|License.pro_required|导入离线 License|从服务端获取订阅信息|用户无订阅记录" main/src crates/core/src -S`
-- 结果：无匹配，确认关键旧入口已移除
-
-## 编码后声明 - 移除 Pro 验证
-时间：2026-03-24 15:56:22 +0800
-
-### 1. 复用了以下既有组件
-- `HomePage::trigger_sync`：作为同步统一入口，直接去掉 License 前置门禁
-- `LicenseService`：保留原接口，改为默认 Pro 行为
-- `main/src/license.rs::init`：保留主程序接入点，改为空兼容层
-
-### 2. 遵循了以下项目约定
-- 仍保持 UI 在 `main`、核心逻辑在 `crates/core`
-- 没有改动云同步协议和存储模型，只移除授权验证与相关 UI
-- 所有结论均经过本地编译和单测验证
-
-### 3. 未重复造轮子的证明
-- 没有新增新的功能开关模块
-- 没有重写同步逻辑，只移除了 Pro 校验及其衍生入口
-
-## 编码前检查 - 删除 License 模块
-时间：2026-03-24 16:04:47 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-delete-license-module.md`
-□ 将使用以下可复用组件：
-- `main/src/main.rs`：删除顶层 `mod license;`
-- `main/src/onetcli_app.rs`：删除运行时 License 初始化接入
-- `crates/core/src/lib.rs`：删除公共模块导出
-- `crates/core/src/cloud_sync/client.rs` / `supabase.rs`：删除仅供 License 使用的订阅接口
-- `Cargo.toml`：移除 `crates/license_tool` 工作区成员
-□ 将遵循命名约定：只保留账号登录与云同步相关接口，不保留任何 License 兼容层命名
-□ 将遵循代码风格：以删除式改动为主，直接清理无用模块、文件与依赖
-□ 确认不重复造轮子，证明：继续复用现有 `auth` 与 `cloud_sync`，不新增新的授权/配置层
-
-### 工具与替代记录
-- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
-  - 代码检索：`rg`
-  - 文件阅读：`sed`
-  - 本地验证：`cargo check` / `cargo test`
-
-## 执行记录 - 删除 License 模块
-时间：2026-03-24 16:04:47 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/main.rs`
-- `main/src/onetcli_app.rs`
-- `crates/core/src/lib.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `Cargo.toml`
-- `crates/core/Cargo.toml`
-- `main/Cargo.toml`
-- `crates/license_tool/Cargo.toml`
-
-### 2. 对比的相似实现
-- `main/src/main.rs:1`：顶层模块接入
-- `main/src/onetcli_app.rs:147`：应用初始化链路
-- `crates/core/src/cloud_sync/client.rs:1`：对外 trait 收口
-- `crates/core/src/lib.rs:1`：公共模块导出
-- `Cargo.toml:19`：工作区成员管理
-
-### 3. 本次改动
-- 删除 `main/src/license.rs`
-- 删除 `crates/core/src/license/` 整个模块目录
-- 删除 `crates/license_tool/` 工具源码并移出工作区
-- 删除 `main` 和 `one-core` 对 License 模块的启动/导出接入
-- 删除 `CloudApiClient::get_subscription()` 与 `SupabaseClient` 中对应实现
-- 清理 `main` 与 `one-core` 中已无用的授权依赖
-
-### 4. 本地验证
-- `rg -n "one_core::license|crate::license|pub mod license;|mod license;|SubscriptionInfo|get_subscription\\(|license_tool|user_subscriptions|OfflineLicense|PlanTier|Feature::CloudSync" main/src crates/core/src crates/license_tool Cargo.toml main/Cargo.toml crates/core/Cargo.toml -S`
-- 结果：无匹配
-- `cargo check -p one-core`
-- 结果：通过
-- `cargo check -p main`
-- 结果：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-- `cargo test -p one-core cloud_sync:: --lib`
-- 结果：通过（13 passed）
-
-## 编码后声明 - 删除 License 模块
-时间：2026-03-24 16:04:47 +0800
-
-### 1. 复用了以下既有组件
-- `auth` 模块：保留账号登录
-- `cloud_sync` 模块：保留账号相关同步能力
-- 工作区 Cargo 配置：作为删除独立授权工具的唯一入口
-
-### 2. 遵循了以下项目约定
-- 模块删除同步更新了启动链路、公共导出和 Cargo 依赖
-- 没有保留名义上的 License 兼容层
-- 本地验证覆盖了主程序、核心库和保留的云同步测试
-
-### 3. 未重复造轮子的证明
-- 没有新增任何新的授权、订阅或配置模块
-- 删除后仅保留账号登录和云同步所需的最小代码路径
-
-## 编码前检查 - 云同步服务端完整方案
-时间：2026-03-24 16:04:47 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-server-complete-plan.md`
-□ 将使用以下可复用组件：
-- `/.claude/cloud-sync-server-development-plan.md`：原始服务端方案草稿
-- `crates/core/src/cloud_sync/client.rs`：当前真实生效的服务端接口契约
-- `crates/core/src/cloud_sync/supabase.rs`：当前 Supabase 协议约束
-- `crates/core/src/cloud_sync/engine.rs`：同步执行顺序
-- `crates/core/src/cloud_sync/models.rs`：统一 `sync_data` 模型
-□ 将遵循命名约定：基础版以当前代码接口为准，订阅/商业化统一放到可选增强段落
-□ 将遵循代码风格：方案文档明确区分“当前必选能力”和“未来可选能力”
-□ 确认不重复造轮子，证明：继续以 Supabase 协议兼容为核心，不发明新的同步协议
-
-### 工具与替代记录
-- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
-  - 文件阅读：`sed`
-  - 代码检索：`rg`
-  - 文档校验：`test` / `rg`
-
-## 执行记录 - 云同步服务端完整方案
-时间：2026-03-24 16:04:47 +0800
-
-### 1. 已检索并阅读的关键实现
-- `/.claude/cloud-sync-server-development-plan.md`
-- `/.claude/context-summary-cloud-sync-server-plan.md`
-- `/.claude/context-summary-delete-license-module.md`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/models.rs`
-
-### 2. 对比的相似实现
-- `/.claude/cloud-sync-server-development-plan.md`：原始架构草案
-- `crates/core/src/cloud_sync/client.rs:1`：当前基础版接口契约
-- `crates/core/src/cloud_sync/engine.rs:147`：同步执行顺序
-- `crates/core/src/cloud_sync/models.rs:203`：统一同步模型
-
-### 3. 本次输出
-- 新增 `.claude/context-summary-cloud-sync-server-complete-plan.md`
-- 新增 `.claude/cloud-sync-server-complete-development-plan.md`
-- 追加 `.claude/operations-log.md`
-- 追加 `.claude/verification-report.md`
-
-### 4. 关键结论
-- 原始方案文档可继续作为基础，但必须按当前代码状态重构为“基础版 + 可选增强版”
-- 当前基础版必选对象不再包含 `user_subscriptions`
-- 技术选型应至少提供 3 组可选方案，推荐以 Supabase 托管标准版为第一阶段正式方案
-
-### 5. 本地验证
-- `test -f .claude/cloud-sync-server-complete-development-plan.md`
-- `test -f .claude/context-summary-cloud-sync-server-complete-plan.md`
-- `rg -n "技术选型备选组|方案 A|方案 B|方案 C|方案 D|当前代码已经删除 License|基础版必选|可选增强" .claude/cloud-sync-server-complete-development-plan.md`
-
-## 编码后声明 - 云同步服务端完整方案
-时间：2026-03-24 16:04:47 +0800
-
-### 1. 复用了以下既有组件
-- 复用了原始云同步方案文档中的 Supabase 兼容约束
-- 复用了当前 `CloudApiClient` 作为真实接口边界
-- 复用了 `SyncEngine` 和 `CloudSyncData` 作为同步流程和数据模型依据
-
-### 2. 遵循了以下项目约定
-- 所有工作文件落在项目 `.claude/` 目录
-- 全文使用简体中文
-- 文档中的结论都能映射到当前代码或原始方案文档
-
-### 3. 未重复造轮子的证明
-- 没有新造同步协议或新造后端抽象
-- 技术选型始终围绕 Supabase 兼容与演进展开
-
-## 编码前检查 - 云同步轻量重设计（账号+设备授权）
-时间：2026-03-24 16:21:31 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-account-authorization-plan.md`
-□ 将使用以下可复用组件：
-- `main/src/auth.rs`：现有账号登录与会话恢复链路
-- `crates/core/src/cloud_sync/client.rs`：当前云端协议契约
-- `crates/core/src/cloud_sync/supabase.rs`：Supabase 读写模式与 RPC 模式
-- `crates/core/src/cloud_sync/engine.rs`：个人同步主链路
-- `crates/core/src/cloud_sync/models.rs`：统一 `sync_data` 数据模型
-□ 将遵循命名约定：继续沿用 `user_configs`、`sync_data` 这类表语义命名，新增授权对象命名为设备级对象
-□ 将遵循代码风格：优先复用 Supabase Auth + PostgREST + RPC，不引入新的 BFF 服务
-□ 确认不重复造轮子，证明：当前重设计只在现有账号同步体系上补“设备授权”这一层，不发明新的同步协议
-
-### 工具与替代记录
-- 仓库规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 本次会话未提供上述工具，因此改用本地可用工具完成等价步骤：
-  - 文件阅读：`sed`
-  - 代码检索：`rg`
-  - 文档校验：`test` / `rg`
-
-## 执行记录 - 云同步轻量重设计（账号+设备授权）
-时间：2026-03-24 16:21:31 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/auth.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/models.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `.claude/cloud-sync-server-complete-development-plan.md`
-
-### 2. 对比的相似实现
-- `main/src/auth.rs:80`：当前账号登录与会话恢复能力
-- `crates/core/src/cloud_sync/client.rs:59`：当前客户端云端接口边界
-- `crates/core/src/cloud_sync/supabase.rs:1399`：`user_configs` / `sync_data` / RPC 的 Supabase 访问方式
-- `crates/core/src/cloud_sync/engine.rs:147`：个人同步主链与团队失败降级逻辑
-- `crates/core/src/cloud_sync/models.rs:191`：统一同步 blob 模型
-
-### 3. 本次输出
-- 新增 `.claude/context-summary-cloud-sync-account-authorization-plan.md`
-- 新增 `.claude/cloud-sync-server-account-authorization-plan.md`
-- 追加 `.claude/operations-log.md`
-- 追加 `.claude/verification-report.md`
-
-### 4. 关键结论
-- 当前最合适的“授权”不是 Pro/License，而是设备级同步授权
-- 服务端最小可行闭环只需要 `user_configs`、`sync_data`、`device_authorizations` 和 3 个 RPC
-- 第一阶段推荐做“同步前预检阻断”，不建议直接引入 BFF 或强制每请求设备鉴权
-
-### 5. 本地验证
-- `test -f .claude/cloud-sync-server-account-authorization-plan.md`
-- `test -f .claude/context-summary-cloud-sync-account-authorization-plan.md`
-- `rg -n "设备授权|register_device|check_sync_access|revoke_device|device_authorizations|app_settings|轻量阻断" .claude/cloud-sync-server-account-authorization-plan.md`
-
-## 编码后声明 - 云同步轻量重设计（账号+设备授权）
-时间：2026-03-24 16:21:31 +0800
-
-### 1. 复用了以下既有组件
-- 复用了 `main/src/auth.rs` 的账号登录和会话恢复链路
-- 复用了 `CloudApiClient` / `SupabaseClient` 的 Supabase 协议边界
-- 复用了 `sync_data` 统一 blob 模型，没有拆新同步表
-
-### 2. 遵循了以下项目约定
-- 所有工作文件写入项目本地 `.claude/`
-- 全文使用简体中文
-- 所有结论都以当前代码中的真实边界为依据，而不是基于旧授权模块假设
-
-### 3. 未重复造轮子的证明
-- 没有重新设计新的认证系统
-- 没有新增新的同步网关协议
-- 只是把“授权”的语义收敛为设备级同步授权，并继续使用 Supabase 表 + RPC
-
-## 编码前检查 - 云同步最简方案（账号+同步密钥）
-时间：2026-03-24 16:24:59 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-cloud-sync-account-key-plan.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/mod.rs`：现有“账号登录 + 主密钥 + 同步”流程定义
-- `main/src/auth.rs`：账号登录与会话恢复
-- `crates/core/src/cloud_sync/service.rs`：主密钥验证、修改与版本升级
-- `crates/core/src/cloud_sync/supabase.rs`：`user_configs` / `sync_data` 的实际服务端协议边界
-- `crates/core/src/cloud_sync/models.rs`：账号级配置与账号级数据模型
-□ 将遵循命名约定：保持账号级命名空间设计，主对象收敛为 `user_configs` 与 `sync_data`
-□ 将遵循代码风格：优先复用现有主密钥模型，不新增设备授权层
-□ 确认不重复造轮子，证明：当前重设计直接复用已有“主密钥 + key_verification”方案，只做产品层收敛
-
-## 执行记录 - 云同步最简方案（账号+同步密钥）
-时间：2026-03-24 16:24:59 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/cloud_sync/mod.rs`
-- `main/src/auth.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/cloud_sync/models.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-
-### 2. 对比的相似实现
-- `crates/core/src/cloud_sync/mod.rs:1`：现有同步使用流程
-- `main/src/auth.rs:80`：账号登录能力
-- `crates/core/src/cloud_sync/service.rs:162`：主密钥验证与升级
-- `crates/core/src/cloud_sync/supabase.rs:1399`：账号级配置与数据读写
-- `crates/core/src/cloud_sync/models.rs:7`：账号级同步模型
-
-### 3. 本次输出
-- 新增 `.claude/context-summary-cloud-sync-account-key-plan.md`
-- 新增 `.claude/cloud-sync-server-account-key-plan.md`
-- 追加 `.claude/operations-log.md`
-- 追加 `.claude/verification-report.md`
-
-### 4. 关键结论
-- 当前最简方案不需要设备授权
-- 只要同一账号共享同一同步密钥，就可以保证跨平台内容一致
-- 服务端最小闭环可收敛为 `user_configs` + `sync_data`
-- 若用户坚持少一步输入，也可以走“登录密码派生同步密钥”，但不作为首推
-
-### 5. 本地验证
-- `test -f .claude/cloud-sync-server-account-key-plan.md`
-- `test -f .claude/context-summary-cloud-sync-account-key-plan.md`
-- `rg -n "账号 \\+ 同步密钥|user_configs|sync_data|app_settings|登录密码派生同步密钥|不需要设备授权" .claude/cloud-sync-server-account-key-plan.md`
-
-## 编码后声明 - 云同步最简方案（账号+同步密钥）
-时间：2026-03-24 16:24:59 +0800
-
-### 1. 复用了以下既有组件
-- 复用了当前云同步模块中“主密钥 + key_verification”的设计
-- 复用了 `user_configs` 和 `sync_data` 的现有协议边界
-- 复用了现有账号登录和会话恢复链路
-
-### 2. 遵循了以下项目约定
-- 所有工作文件写入项目本地 `.claude/`
-- 全文使用简体中文
-- 设计结论直接映射当前代码能力，不再基于额外设备授权假设
-
-### 3. 未重复造轮子的证明
-- 没有新增设备授权表和注册接口作为主路径
-- 没有新增额外认证或同步网关
-- 只是把已有主密钥能力明确提升为最终产品方案
-
-## 编码前检查 - sync_server Rust 接入
-时间：2026-03-24 17:31:54 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-rust-integration.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/client.rs`：既有云端抽象，避免重做同步引擎接口
-- `crates/core/src/cloud_sync/supabase.rs`：HTTP 客户端、认证状态与自动刷新模式参考
-- `main/src/auth.rs`：会话持久化和恢复
-- `main/src/home_tab.rs`：登录成功后的全局用户状态与自动同步触发
-- `sync_server/server/src/http/routes/auth.ts`：密码登录/刷新真实接口
-- `sync_server/server/src/http/routes/sync.ts`：用户配置与同步项真实接口
-□ 将遵循命名约定：新增 `SyncServerConfig`、`SyncServerClient` 等命名
-□ 将遵循代码风格：继续通过 `CloudApiClient` 抽象给同步引擎供给客户端实例
-□ 确认不重复造轮子，证明：不重写同步引擎，只新增第二个后端实现并在 UI 层分登录模式
-
-## 执行记录 - sync_server Rust 接入
-时间：2026-03-24 17:31:54 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/server/src/services/auth.ts`
-- `sync_server/server/src/http/routes/auth.ts`
-- `sync_server/server/src/http/routes/sync.ts`
-- `crates/core/src/config.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/supabase.rs`
-- `crates/core/src/cloud_sync/models.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `main/src/auth.rs`
-- `main/src/home_tab.rs`
-
-### 2. 对比的相似实现
-- `crates/core/src/cloud_sync/supabase.rs`：现有云端客户端模式
-- `main/src/auth.rs`：现有认证恢复模式
-- `main/src/home_tab.rs`：现有登录弹窗与同步触发模式
-
-### 3. 当前发现
-- `sync_server` 的 refresh 会话改动尚未闭环，`npm run check --workspace server` / `build` 均因 `src/services/auth.ts` 中误解构 `publicUser` 失败
-- Rust 侧当前只能读取 `SUPABASE_URL` / `SUPABASE_ANON_KEY`
-- Rust 侧登录 UI 仍是 OTP 专用
-
-### 4. 工具限制留痕
-- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
-- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
-
-## 编码后声明 - sync_server Rust 接入
-时间：2026-03-24 17:53:05 +0800
-
-### 1. 复用了以下既有组件
-- 复用了 `CloudApiClient` 作为统一云端抽象，没有重写同步引擎
-- 复用了 `main/src/auth.rs` 的本地 `auth.json` 会话持久化模型
-- 复用了 `crates/core/src/cloud_sync/supabase.rs` 的认证状态、401 重试与刷新回调模式
-- 复用了 `main/src/home_tab.rs` 的登录成功后更新全局用户并触发自动同步的流程
-
-### 2. 实际落地的代码
-- 新增 `crates/core/src/cloud_sync/sync_server.rs`，实现 `sync_server` 版认证、配置同步、同步项读写
-- `crates/core/src/config.rs` 新增 `SYNC_SERVER_URL` 读取与规范化
-- `main/src/auth.rs` 改为支持 `Supabase` / `sync_server` 两种后端，并新增密码登录/注册能力
-- `main/src/home_tab.rs` 按后端模式切换 OTP 或邮箱密码登录弹窗
-- `sync_server/server/src/services/auth.ts` 修复 refresh 改造过程中的编译错误
-
-### 3. 本地验证结果
-- `npm run check --workspace server`：通过
-- `npm run build --workspace server`：通过
-- `npm run build`（`sync_server` 根目录）：通过
-- `cargo check -p one-core`：通过
-- `cargo check -p main`：通过
-- `curl http://127.0.0.1:8787/health`：通过
-- 本地冒烟：
-  - 注册返回 `token`、`refreshToken`、`expiresAt`、`user`
-  - 登录返回 `token`、`refreshToken`、`expiresAt`、`user`
-  - 刷新返回 `token`、`refreshToken`、`expiresAt`、`user`
-  - 使用刷新后的 `token` 请求 `/api/v1/auth/me` 成功返回用户信息
-
-### 4. 风险与限制
-- `sync_server` 目前只覆盖账号级同步，不支持团队功能；Rust 客户端对此已降级为空团队列表或明确返回不支持
-- 当前工作树中本就存在大量与 License 删除相关的未提交改动，本次未回退这些无关变更
-
-## 编码前检查 - sync_server 启动期 OPTIONS 路由冲突
-时间：2026-03-24 19:20:45 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-proxy-options-conflict.md`
-□ 将使用以下可复用组件：
-- `sync_server/server/src/http/app.ts`：现有 Fastify 插件注册入口
-- `sync_server/server/src/config/env.ts`：开发/生产分支判定来源
-- `sync_server/node_modules/@fastify/cors/index.js`：预检路由真实注册行为
-- `sync_server/node_modules/@fastify/http-proxy/index.js`：默认代理方法集与路由生成逻辑
-□ 将遵循命名约定：保持现有 Fastify 配置对象写法，不新增额外封装
-□ 将遵循代码风格：只在现有代理配置上做最小修改，保留既有前端代理与 API 分流模式
-□ 确认不重复造轮子，证明：直接使用 `@fastify/http-proxy` 已支持的 `httpMethods` 配置解决冲突，不新增自研代理层
-
-## 执行记录 - sync_server 启动期 OPTIONS 路由冲突
-时间：2026-03-24 19:20:45 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/server/src/http/app.ts`
-- `sync_server/server/src/main.ts`
-- `sync_server/server/src/config/env.ts`
-- `sync_server/README.md`
-- `sync_server/node_modules/@fastify/cors/index.js`
-- `sync_server/node_modules/@fastify/http-proxy/index.js`
-- `sync_server/node_modules/@fastify/http-proxy/README.md`
-
-### 2. 对比的相似实现
-- `sync_server/server/src/http/app.ts:44`：生产模式静态前端回退只处理 `GET`
-- `sync_server/node_modules/@fastify/cors/index.js:72`：CORS 全局预检路由
-- `sync_server/node_modules/@fastify/http-proxy/index.js:564`：代理默认方法集含 `OPTIONS`
-
-### 3. 当前发现
-- 开发模式下 `web/dist` 不存在，因此 `createApp()` 会走前端开发代理分支
-- `@fastify/cors` 默认注册 `OPTIONS *`
-- `@fastify/http-proxy` 默认对 `['/', '/*']` 注册 `DELETE/GET/HEAD/PATCH/POST/PUT/OPTIONS`
-- 两者在 `OPTIONS /*` 上冲突，导致服务在 `app.ready()/listen()` 阶段启动失败
-
-### 4. 工具限制留痕
-- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
-- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
-
-## 编码后声明 - sync_server 启动期 OPTIONS 路由冲突
-时间：2026-03-24 19:22:45 +0800
-
-### 1. 复用了以下既有组件
-- 复用了 `@fastify/http-proxy` 原生 `httpMethods` 配置能力，没有新增代理包装层
-- 复用了 `sync_server/server/src/http/app.ts` 既有的开发/生产分支结构
-- 继续复用了 `@fastify/cors` 的全局预检处理逻辑，没有改动 API 的 CORS 行为
-
-### 2. 遵循了以下项目约定
-- 命名约定：未新增新模块或工具函数，只在现有插件配置对象里补充字段
-- 代码风格：继续使用对象字面量注册 Fastify 插件，没有引入额外抽象
-- 文件组织：修复点保持在 `sync_server/server/src/http/app.ts`，没有扩散到业务路由文件
-
-### 3. 对比了以下相似实现
-- `sync_server/server/src/http/app.ts:44`：生产模式只让前端回退接收 `GET`；本次把开发代理也收敛到页面资源所需的 `GET/HEAD`
-- `sync_server/node_modules/@fastify/cors/index.js:72`：保留 CORS 统一接管 `OPTIONS` 预检，不在代理层重复声明
-- `sync_server/node_modules/@fastify/http-proxy/index.js:564`：未修改插件源码，只覆写当前实例的默认方法集
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/server/src/http/app.ts`、`sync_server/node_modules/@fastify/http-proxy/README.md`、`sync_server/node_modules/@fastify/http-proxy/index.js`
-- 确认 `httpMethods` 已是官方提供的解决位点，因此无需新增自研过滤逻辑或前置插件
-
-### 5. 本地验证结果
-- `npm run check --workspace server`：通过
-- `npm run build --workspace server`：通过
-- `node --input-type=module -e "... await app.ready() ..."`：通过，输出 `READY_OK`
-- `node --input-type=module -e "... OPTIONS /foo ..."`：通过，返回 `204` 且 `access-control-allow-origin` 为 `http://localhost:5173`
-- `node --input-type=module -e "... GET /health ..."`：通过，返回 `200`
-- `node --input-type=module -e "... await app.listen({ host: '127.0.0.1', port: 0 }) ..."`：失败，原因为当前沙箱禁止监听本地端口，错误 `listen EPERM`
-
-## 编码前检查 - sync_server 单端口开发模式
-时间：2026-03-24 19:31:20 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-single-port-dev.md`
-□ 将使用以下可复用组件：
-- `sync_server/server/src/http/app.ts`：现有统一 Web/API 入口
-- `sync_server/server/src/config/env.ts`：运行模式和路径配置来源
-- `sync_server/web/vite.config.ts`：现有前端构建与插件配置
-- `sync_server/package.json`：默认开发命令入口
-□ 将遵循命名约定：保留 `createApp` 作为统一入口，不新增与现有模块风格不一致的“管理器”类
-□ 将遵循代码风格：通过少量 helper 和官方 API 完成单端口集成，不引入自研代理协议
-□ 确认不重复造轮子，证明：直接使用 Vite 官方 `middlewareMode` 能力，而不是再写一层自定义开发服务器
-
-## 执行记录 - sync_server 单端口开发模式
-时间：2026-03-24 19:31:20 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/package.json`
-- `sync_server/server/src/http/app.ts`
-- `sync_server/server/src/config/env.ts`
-- `sync_server/server/src/main.ts`
-- `sync_server/web/package.json`
-- `sync_server/web/vite.config.ts`
-- `sync_server/web/index.html`
-- `sync_server/README.md`
-- `sync_server/.env.example`
-- `sync_server/node_modules/vite/dist/node/index.d.ts`
-- `sync_server/node_modules/vite/dist/node/chunks/config.js`
-
-### 2. 对比的相似实现
-- `sync_server/package.json:10`：当前默认双进程开发入口
-- `sync_server/server/src/http/app.ts:44`：现有单入口 Web/API 编排方式
-- `sync_server/node_modules/vite/dist/node/index.d.ts:2388`：Vite 官方 middleware 模式
-
-### 3. 当前发现
-- 现有双端口并非业务必须，而是默认脚本同时启动了 `tsx watch` 和 `vite`
-- `sync_server/server/src/http/app.ts` 已经承担统一入口职责，适合直接接入 Vite middleware
-- 只靠 `web/dist` 是否存在来判断开发/生产不可靠，因为开发环境可能保留旧构建产物
-- Vite 官方允许把 HMR WebSocket 挂到父级 HTTP server，可满足“真正只用一个端口”
-
-### 4. 工具限制留痕
-- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
-- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
-
-## 编码后声明 - sync_server 单端口开发模式
-时间：2026-03-24 19:34:24 +0800
-
-### 1. 复用了以下既有组件
-- 复用了 `sync_server/server/src/http/app.ts` 作为统一 Web/API 编排入口，没有新增第二套开发服务器
-- 复用了 `sync_server/web/vite.config.ts` 作为前端唯一配置来源，未复制插件配置
-- 复用了 Vite 官方 `middlewareMode` 与父级 `server` 挂载能力，实现同端口 HMR
-
-### 2. 遵循了以下项目约定
-- 命名约定：继续保留 `createApp`、`env` 等既有入口名称
-- 代码风格：通过少量 helper 函数处理运行模式和请求分流，没有引入额外抽象层
-- 文件组织：变更集中在 `server` 入口、根脚本和说明文档，没有改动业务路由
-
-### 3. 对比了以下相似实现
-- `sync_server/package.json:10`：此前默认双进程启动；现在保留 workspace 结构但把默认入口收敛为单进程
-- `sync_server/server/src/http/app.ts:44`：此前生产静态、开发代理都由 Fastify 管；现在开发分支改为内嵌 Vite middleware，仍保持统一入口
-- `sync_server/node_modules/vite/dist/node/index.d.ts:2388`：直接采用官方 middleware 模式，而不是自研端口转发
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/web/vite.config.ts`、`sync_server/node_modules/vite/dist/node/index.d.ts`、`sync_server/node_modules/vite/dist/node/chunks/config.js`
-- 确认 Vite 已原生支持把 HMR 绑定到父级 HTTP server，因此无需新增自定义代理或自研资源服务器
-
-### 5. 本地验证结果
-- `npm run check --workspace server`：通过
-- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); console.log('SRC_READY_OK'); } catch (error) { console.error('SRC_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过，输出 `SRC_READY_OK`
-- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('SRC_INDEX_STATUS', response.statusCode); console.log('SRC_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('SRC_INDEX_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过，返回 `200` 且 HTML 包含 `@vite/client`
-- `npm run build`：通过
-- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('DIST_INDEX_STATUS', response.statusCode); console.log('DIST_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('DIST_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过，返回 `200` 且 HTML 不包含 `@vite/client`
-
-### 6. 风险与限制
-- 当前沙箱禁止真实监听端口，因此未直接执行 `npm run dev` 做长时间监听验证
-- `dev:web` 仍可单独启动独立 Vite 服务，但此时属于可选调试路径，不再是默认开发入口
-
-## 编码前检查 - sync_server dev 启动失败
-时间：2026-03-24 19:39:10 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-dev-startup.md`
-□ 将使用以下可复用组件：
-- `sync_server/package.json`：根级默认开发入口
-- `sync_server/server/package.json`：实际 `dev` 脚本定义
-- `sync_server/server/src/config/env.ts`：环境变量加载逻辑
-- `sync_server/server/src/main.ts`：开发启动目标入口
-□ 将遵循命名约定：继续沿用现有 `dev` / `start` 脚本名称，不新增旁路脚本
-□ 将遵循代码风格：仅调整现有脚本与配置路径，不引入额外守护工具
-□ 确认不重复造轮子，证明：优先使用 Node 原生 `--watch` 与 `tsx/esm` 组合，而不是再引入 `nodemon` 一类新工具
-
-## 执行记录 - sync_server dev 启动失败
-时间：2026-03-24 19:39:10 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/package.json`
-- `sync_server/server/package.json`
-- `sync_server/server/src/config/env.ts`
-- `sync_server/server/src/main.ts`
-
-### 2. 对比的相似实现
-- `sync_server/package.json:10`：默认开发入口如何转发到 workspace
-- `sync_server/server/package.json:7`：当前 `tsx watch` 脚本
-- `sync_server/server/src/config/env.ts:5`：当前 `.env` 路径绑定 `process.cwd()`
-
-### 3. 当前发现
-- `npm run dev` 失败发生在 `tsx watch` 自己的 IPC 管道初始化阶段，报错 `listen EPERM ... /tmp/tsx-*.pipe`
-- `npm --workspace server exec -- node -p 'process.cwd()'` 显示 workspace 脚本运行目录是 `sync_server/server`
-- 因此默认开发命令不会读取 `sync_server/.env`，这是独立于 `tsx watch` 的第二个真实缺陷
-- `node --watch --import tsx/esm server/src/main.ts` 可以进入业务启动逻辑，说明替换 watch 方案可行
-
-### 4. 工具限制留痕
-- 用户规范要求优先使用 `context7`、`github.search_code`、`desktop-commander`
-- 当前执行环境未提供这些工具，本次改为基于仓库现有源码与本地命令完成上下文检索和实现
-
-## 编码后声明 - sync_server dev 启动失败
-时间：2026-03-24 19:41:55 +0800
-
-### 1. 复用了以下既有组件
-- 继续复用了 `tsx/esm` 作为 TypeScript ESM 运行时
-- 继续复用了根级 `npm run dev` → workspace `server` 的启动链路
-- 继续复用了 `dotenv`，但改为稳定读取项目根目录 `.env`
-
-### 2. 遵循了以下项目约定
-- 命名约定：保留既有 `dev` 语义，同时新增显式的 `dev:watch` 作为可选脚本
-- 代码风格：只调整脚本和配置路径，不增加额外守护脚本文件
-- 文件组织：变更只落在 `server/package.json`、`server/src/config/env.ts` 和说明文档
-
-### 3. 对比了以下相似实现
-- `sync_server/server/package.json:7`：原先默认 `tsx watch` 会在失败时造成自动重启循环
-- `sync_server/package.json:10`：根级 `dev` 继续转发到 `server` 包，不改调用入口
-- `sync_server/server/src/config/env.ts:5`：原先绑定 `process.cwd()`，默认 workspace 启动下会漏读根 `.env`
-
-### 4. 未重复造轮子的证明
-- 已检查 Node 原生 `--watch` 与 `tsx/esm` 组合能力
-- 最终采用“默认稳定单次启动 + 可选 watch 脚本”的最小修复，没有引入 `nodemon` 等新依赖
-
-### 5. 本地验证结果
-- `npm run check --workspace server`：通过
-- `npm --workspace server exec -- node --import tsx/esm --input-type=module -e "import { env } from './src/config/env.ts'; console.log('ENV_PROJECT_ROOT', env.projectRoot); console.log('ENV_ADMIN_EMAIL', env.adminEmail ?? '');"`：通过，确认默认 workspace 启动会读取 `sync_server/.env`
-- `npm run dev`：已越过原来的 `tsx watch` IPC 失败点，不再自动重启；当前仅因沙箱禁止监听 `0.0.0.0:8787` 而单次退出
-- `node -e "const pkg=require('./sync_server/server/package.json'); console.log('DEV_SCRIPT', pkg.scripts.dev); console.log('DEV_WATCH_SCRIPT', pkg.scripts['dev:watch']);"`：通过，确认默认 `dev` 与可选 `dev:watch` 脚本都已写入
-
-### 6. 风险与限制
-- 当前沙箱禁止真实监听端口，因此无法在这里验证常驻成功监听
-- 如果你本机仍然启动失败，下一步需要看启动时的首个报错，而不是 watch 循环日志
-
-## 编码前检查 - auth-error-dialog-auto-close
-时间：2026-03-24 21:07:51 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-auth-error-dialog-auto-close.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs::show_login_dialog`：失败提示关闭后的统一登录入口
-- `main/src/auth.rs::show_auth_dialog`：现有 OTP 登录弹窗实现
-- `crates/ui/src/dialog.rs::Dialog::on_ok`：确认按钮关闭时序
-□ 将遵循命名约定：继续沿用现有 `show_*` / `verify_*` 命名和 Rust `snake_case`
-□ 将遵循代码风格：只调整闭包时序，不引入新状态字段或新组件
-□ 确认不重复造轮子，证明：复用现有 `window.defer` 延迟窗口修改模式，不新增旁路弹窗管理逻辑
-
-## 执行记录 - auth-error-dialog-auto-close
-时间：2026-03-24 21:07:51 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `main/src/auth.rs`
-- `crates/ui/src/dialog.rs`
-
-### 2. 对比的相似实现
-- `main/src/home_tab.rs:3038`：认证错误通过 `window.defer + open_dialog` 提示
-- `main/src/auth.rs:531`：登录弹窗统一由 `show_auth_dialog` 创建
-- `crates/ui/src/dialog.rs:323`：确认按钮先执行 `on_ok`，再关闭当前栈顶对话框
-
-### 3. 当前发现
-- 认证失败后错误信息写入 `self.auth_error`，在 `render` 中消费并弹出 `alert` 错误框
-- 错误框 `on_ok` 里会立即调用 `show_login_dialog`
-- `Dialog` 的确认按钮随后执行 `window.close_dialog(cx)`，因此会关闭刚打开的新登录弹窗，而不是错误弹窗本身
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
-
-## 编码前检查 - deepin-window-controls
-时间：2026-03-24 23:15:51 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-controls.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/title_bar.rs`：通用标题栏和窗口三键实现
-- `crates/core/src/tab_container.rs`：主标签栏窗口三键实现
-- `main/src/main.rs`：Linux 主窗口装饰配置入口
-□ 将遵循命名约定：沿用 `show_*`、`is_*`、`should_*` 的布尔命名风格
-□ 将遵循代码风格：继续使用局部布尔变量配合 `.when(...)` 控制渲染，不改现有窗口按钮点击逻辑
-□ 确认不重复造轮子，证明：直接复用已有 `TitleBar`、`TabContainer`、`Window::window_decorations()`，不新增第二套窗口控件组件
-
-## 执行记录 - deepin-window-controls
-时间：2026-03-24 23:15:51 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/main.rs`
-- `main/src/onetcli_app.rs`
-- `crates/core/src/tab_container.rs`
-- `crates/ui/src/title_bar.rs`
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
-
-### 2. 对比的相似实现
-- `crates/core/src/tab_container.rs:1935`：主窗口标签栏右侧自绘窗口按钮
-- `crates/ui/src/title_bar.rs:255`：通用标题栏尾部自绘窗口按钮
-- `.../gpui/src/platform/linux/x11/window.rs:1697`：X11 下通过 `_MOTIF_WM_HINTS` 请求客户端装饰
-
-### 3. 当前发现
-- Linux 主窗口已经请求 `WindowDecorations::Client`，但 Deepin 25 X11 仍会出现系统标题栏与应用按钮并存
-- 问题不只存在于主窗口，所有复用 `TitleBar::new()` 的弹窗/表单窗口理论上也会重复显示按钮
-- 单纯依赖 `window.window_decorations()` 仍可能遗漏 Deepin 这类桌面环境，因此需要补一个最小兼容分支
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg`、本地环境变量和 Cargo 本地验证完成检索与确认
-
-## 编码后声明 - deepin-window-controls
-时间：2026-03-24 23:20:04 +0800
-
-### 1. 复用了以下既有组件
-- `crates/ui/src/title_bar.rs::WindowControls`：保留原有通用窗口按钮实现，只增加显示条件
-- `crates/core/src/tab_container.rs::render_window_controls`：保留主标签栏按钮绘制和点击行为
-- `Window::window_decorations()`：继续作为 Linux 运行时装饰状态的基础判断
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `should_render_custom_window_controls` 与 `show_custom_window_controls`，符合现有布尔命名风格
-- 代码风格：仍使用局部布尔变量配合 `.when(...)` 控制 UI 分支，没有重构窗口层结构
-- 文件组织：通用兼容判断放在 `crates/ui`，业务主窗口只引入该判断函数
-
-### 3. 对比了以下相似实现
-- `crates/ui/src/title_bar.rs`：保持原有 `WindowControls` 结构不变，只把追加时机改成条件渲染
-- `crates/core/src/tab_container.rs`：保持 `render_window_controls` 原逻辑不变，只把渲染入口改成条件判断
-- `.../gpui/src/platform/linux/x11/window.rs:1710`：上游仍尝试请求客户端装饰，本次不逆向篡改上游行为，只在应用层规避 Deepin 重复按钮
-
-### 4. 未重复造轮子的证明
-- 已检查 `crates/ui/src/title_bar.rs`、`crates/core/src/tab_container.rs`、`main/src/main.rs`
-- 最终只新增一个通用显示判断函数，没有再造新的标题栏组件或第三套窗口控件逻辑
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p gpui-component --lib title_bar`：通过，新增 2 个标题栏兼容分支测试全部通过
-
-### 6. 风险与限制
-- 当前修复对 Deepin/DDE 做了显式兼容分支，若其它 Linux 桌面环境也存在同样问题，后续需要扩展判断条件
-- 本次没有在图形界面里直接截图验证，只能依赖编译、单测和当前桌面环境信息进行确认
-- `cargo check` 与 `cargo test` 仍输出既有 `crates/ui/src/window_ext.rs` 未使用代码警告，以及 `num-bigint-dig` future incompatibility 提示，均与本次改动无关
-
-## 编码前检查 - window-title-sync
-时间：2026-03-24 23:31:55 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-window-title-sync.md`
-□ 将使用以下可复用组件：
-- `main/src/onetcli_app.rs`：主窗口渲染和 `TabContainerEvent` 订阅入口
-- `crates/core/src/tab_container.rs::active_tab`：当前普通活动标签读取
-- `crates/core/src/tab_container.rs::pinned_tab_active`：首页固定标签状态判断
-□ 将遵循命名约定：使用 `current_title`、`window_title`、`build_window_title` 这种状态/构造命名
-□ 将遵循代码风格：保持小型辅助函数 + 主窗口局部状态缓存，不改主布局结构
-□ 确认不重复造轮子，证明：直接复用 `window.set_window_title` 和现有标签状态，不新增标题同步管理器
-
-## 执行记录 - window-title-sync
-时间：2026-03-24 23:31:55 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/onetcli_app.rs`
-- `crates/core/src/tab_container.rs`
-- `main/src/home_tab.rs`
-- `crates/core/src/popup_window.rs`
-
-### 2. 对比的相似实现
-- `main/src/onetcli_app.rs:338`：主窗口已订阅 `TabContainerEvent`，是标签状态外溢的天然挂点
-- `crates/core/src/tab_container.rs:1322`：普通活动标签读取入口
-- `crates/core/src/popup_window.rs:120`：窗口标题设置的既有调用方式
-
-### 3. 当前发现
-- 主窗口现在没有独立 `TitleBar`，所以 A 方案唯一可控手段是同步系统窗口标题文本
-- 普通标签和固定首页标签是两套状态，不能只读取 `active_tab()`
-- `activate_pinned_tab` 本身不发激活事件，因此仅靠事件订阅不足以覆盖“切回首页”场景
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Cargo 验证完成检索与确认
-
-## 编码后声明 - window-title-sync
-时间：2026-03-24 23:31:55 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/tab_container.rs::active_tab`：继续作为普通活动标签来源
-- `crates/core/src/tab_container.rs::pinned_tab_active`：继续判断首页固定标签是否为当前活动项
-- `gpui::Window::set_window_title`：继续使用框架现有窗口标题 API
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `current_title`、`window_title`、`build_window_title`，符合既有状态/辅助函数命名风格
-- 代码风格：采用最小辅助函数和渲染期缓存同步，没有拆出额外服务层
-- 文件组织：通用标题读取落在 `crates/core`，主窗口标题拼接和同步落在 `main`
-
-### 3. 对比了以下相似实现
-- `crates/core/src/popup_window.rs:120`：沿用同一个 `set_window_title` API，不引入平台分支
-- `crates/core/src/tab_container.rs:1322`：在此基础上扩展为 `current_title`，补齐首页固定标签场景
-- `main/src/onetcli_app.rs:384`：继续以主窗口 `render` 作为顶层状态同步点，不额外插入新的观察层
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/onetcli_app.rs`、`crates/core/src/tab_container.rs`、`crates/core/src/popup_window.rs`
-- 最终只补了一个当前标题读取方法和一个窗口标题拼接函数，没有新增标题栏组件或标签同步框架
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，新增 2 个窗口标题测试全部通过
-
-### 6. 风险与限制
-- A 方案只能让系统标题栏显示当前标签名，不能把真实标签控件放进系统标题栏
-- 当前没有自动化图形验证链路，A 是否“视觉上足够好”仍需要你实际观察
-- 验证输出里仍有既有 `crates/ui/src/window_ext.rs` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，与本次改动无关
-
-## 编码后声明 - sync-server-only
-时间：2026-03-24 22:08:05 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/auth.rs::show_password_auth_dialog`：继续作为唯一登录/注册弹窗
-- `main/src/auth.rs::finish_auth`：继续统一处理令牌持久化和用户信息回填
-- `main/src/home_tab.rs::authenticate_with_password`：继续承接首页登录后的状态更新和自动同步
-- `crates/core/src/config.rs::SyncServerConfig`：继续作为同步地址唯一配置入口
-
-### 2. 遵循了以下项目约定
-- 命名约定：保留既有 `sync_server`、`CloudApiClient`、`PasswordAuthAction` 命名体系
-- 代码风格：通过删除分支和接口收缩完成清理，没有引入新的包装层
-- 文件组织：UI 清理集中在 `main/src/auth.rs` 与 `main/src/home_tab.rs`，底层清理集中在 `crates/core/src`
-
-### 3. 对比了以下相似实现
-- `main/src/auth.rs`：原本通过 `AuthBackend` 包装双后端；现在收敛成单一 `SyncServerClient`
-- `main/src/home_tab.rs`：原本按 `AuthMode` 分支决定 OTP/密码登录；现在直接固定密码登录
-- `crates/core/src/cloud_sync/client.rs`：原本保留 OTP 接口；现在只保留 sync_server 实际支持的认证能力
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/auth.rs`、`main/src/home_tab.rs`、`crates/core/src/config.rs`、`crates/core/src/cloud_sync/client.rs`、`crates/core/src/cloud_sync/sync_server.rs`
-- 最终直接删除 `Supabase` 模块、配置和 OTP 登录分支，完全复用现有 `sync_server` 密码认证和同步实现
-
-### 5. 本地验证结果
-- `rg -n "SUPABASE|Supabase|supabase|AuthMode|show_auth_dialog|send_otp|verify_otp\\(|sign_in_with_otp|验证码登录" main crates/core CLAUDE.md --glob '!target'`：无结果，确认主代码路径已无旧后端残留
-- `cargo fmt --all`：通过
-- `git restore crates/db/src/clickhouse/connection.rs ... crates/ui/src/window_ext.rs`：已执行，回退 `cargo fmt --all` 误改的无关文件
-- `cargo test -p main`：通过，6 个测试全部通过
-- `cargo test -p one-core --no-run`：通过，确认 `one-core` 编译成功
-
-### 6. 风险与限制
-- 仓库中仍有 OTP 输入组件文档 `docs/docs/components/otp-input.md`，它描述的是通用 UI 组件，不属于本次业务链路清理范围
-- 验证过程中仍存在既有 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，均与本次清理无关
-
-## 编码前检查 - sync-server-url-settings
-时间：2026-03-24 22:24:31 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-url-settings.md`
-□ 将使用以下可复用组件：
-- `main/src/setting_tab.rs::AppSettings`：作为同步地址唯一持久化位置
-- `crates/ui/src/setting/fields/string.rs`：作为设置页字符串输入控件
-- `main/src/home_tab.rs::add_settings_tab`：用于未配置时引导用户进入设置页
-- `main/src/auth.rs::AuthService`：作为同步地址变更后的统一认证入口
-□ 将遵循命名约定：沿用 `Settings.General.*`、`Auth.*`、`Home.*` 的翻译命名空间和 `sync_server_url` 字段命名
-□ 将遵循代码风格：在现有设置回调里即时保存和应用，不新增额外的设置管理器
-□ 确认不重复造轮子，证明：直接复用 `AppSettings` 与现有全局认证服务，不再引入环境变量或独立配置文件
-
-## 执行记录 - sync-server-url-settings
-时间：2026-03-24 22:24:31 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/setting_tab.rs`
-- `crates/ui/src/setting/fields/mod.rs`
-- `crates/ui/src/setting/fields/string.rs`
-- `main/src/auth.rs`
-- `main/src/home_tab.rs`
-- `main/src/onetcli_app.rs`
-- `crates/core/src/llm/manager.rs`
-
-### 2. 对比的相似实现
-- `main/src/setting_tab.rs`：全局设置字段持久化和设置项即时生效模式
-- `crates/ui/src/setting/fields/string.rs`：字符串输入设置项的实现方式
-- `main/src/home_tab.rs`：登录入口和同步前置检查提示链路
-- `crates/core/src/llm/manager.rs`：云端客户端被 AI provider 复用的全局状态
-
-### 3. 当前发现
-- 目前 `sync_server` 地址仍在 `AuthService` 初始化阶段固定，设置页无法接管
-- LLM provider 复用的是同一个 `CloudApiClient` 引用，因此最好让客户端对象原地更新地址
-- 未配置地址时，现有首页登录入口会继续打开密码登录框，缺少明确引导
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
-
-## 编码前检查 - sync-server-only
-时间：2026-03-24 21:53:39 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-only.md`
-□ 将使用以下可复用组件：
-- `main/src/auth.rs::show_password_auth_dialog`：作为唯一保留的登录入口
-- `main/src/auth.rs::finish_auth`：继续统一处理认证成功后的落盘和用户信息收敛
-- `crates/core/src/config.rs::normalize_url`：继续用于 `SYNC_SERVER_URL` 标准化
-- `main/src/home_tab.rs::authenticate_with_password`：继续承接首页登录后的状态更新
-□ 将遵循命名约定：保留现有 `sync_*`、`Auth.*`、`CloudApiClient` 命名体系，不新增旁路概念
-□ 将遵循代码风格：使用现有 `match` / 链式 UI / 配置 `get()` 模式，不新增抽象层
-□ 确认不重复造轮子，证明：直接删除 `Supabase`/OTP 分支并复用既有 `sync_server` 密码认证链路
-
-## 执行记录 - sync-server-only
-时间：2026-03-24 21:53:39 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/auth.rs`
-- `main/src/home_tab.rs`
-- `crates/core/src/config.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/mod.rs`
-- `crates/core/src/cloud_sync/sync_server.rs`
-- `crates/core/build.rs`
-- `crates/core/src/llm/onet_cli_provider.rs`
-- `main/locales/main.yml`
-
-### 2. 对比的相似实现
-- `main/src/auth.rs`：统一认证服务封装和本地认证持久化
-- `main/src/home_tab.rs`：首页登录入口和同步反馈展示
-- `crates/core/src/config.rs`：运行时/编译时配置收敛模式
-- `crates/core/src/cloud_sync/client.rs`：云端接口抽象层
-
-### 3. 当前发现
-- `Supabase` 相关内容仍分散在认证后端、配置读取、模块导出、文案和仓库说明中
-- OTP 登录仅服务于旧后端，项目内没有其它真实调用价值
-- `sync_server` 已具备完整的密码登录、注册、会话恢复和同步能力，可以独立承接全部流程
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
-
-## 编码后声明 - auth-error-dialog-auto-close
-时间：2026-03-24 21:15:36 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/home_tab.rs::show_login_dialog`：继续作为认证失败后的唯一重试入口
-- `window.defer`：继续复用项目内“延迟修改窗口状态”的既有模式
-- `crates/ui/src/dialog.rs::Dialog::on_ok`：继续沿用现有确认按钮返回 `bool` 的关闭协议
-
-### 2. 遵循了以下项目约定
-- 命名约定：未新增状态字段和类型，只在既有 `on_ok` 闭包中调整时序
-- 代码风格：保持现有链式弹窗构造风格和 `window.defer` 用法
-- 文件组织：修复保持在 `main/src/home_tab.rs`，没有扩散到通用认证或对话框框架
-
-### 3. 对比了以下相似实现
-- `main/src/home_tab.rs:3030`：会话过期已使用 `window.defer` 延迟重新打开登录弹窗，本次失败路径对齐同一时序模式
-- `main/src/auth.rs:531`：登录弹窗仍由既有 `show_auth_dialog` 创建，没有新增旁路 UI
-- `crates/ui/src/dialog.rs:323`：确认按钮仍保持“回调返回 `true` 后关闭弹窗”的约定，本次只避免在关闭前抢先打开新弹窗
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/home_tab.rs`、`main/src/auth.rs`、`crates/ui/src/dialog.rs`
-- 最终采用延迟调用现有 `show_login_dialog` 的最小修复，没有新增弹窗管理器或额外状态机
-
-### 5. 本地验证结果
-- `cargo test -p main --no-run`：通过，确认 `main` 包编译和测试目标都可正常构建
-- `cargo test -p main -- --list`：通过，确认当前 `main` 包共有 3 个现有测试
-- `cargo test -p main`：通过，3 个现有测试全部通过
-
-### 6. 风险与限制
-- 当前仓库没有直接覆盖“认证失败弹窗确认后重开登录弹窗”的 UI 自动化测试，本次主要依靠源码时序推理和编译/单测兜底
-- `cargo test` 输出了既有的 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，均与本次修复无关
-
-## 编码前检查 - home-sync-feedback
-时间：2026-03-24 21:36:51 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-home-sync-feedback.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs::trigger_sync`：同步主流程与错误来源
-- `main/src/home_tab.rs::render_toolbar`：主界面显式状态展示位置
-- `main/src/settings/provider_form_dialog.rs`：异步完成后发送通知的既有模式
-□ 将遵循命名约定：继续沿用 `sync_*` 字段和 `Home.*` 文案命名空间
-□ 将遵循代码风格：只在首页同步相关逻辑内增加状态汇总和通知，不引入新的全局管理器
-□ 确认不重复造轮子，证明：直接复用 `window.push_notification` 和工具栏渲染，不新增自研弹层系统
-
-## 执行记录 - home-sync-feedback
-时间：2026-03-24 21:36:51 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `main/src/settings/provider_form_dialog.rs`
-- `crates/ui/src/notification.rs`
-
-### 2. 对比的相似实现
-- `main/src/home_tab.rs:321`：同步失败只写入 `cloud_error`
-- `main/src/home_tab.rs:1836`：同步按钮和冲突按钮所在工具栏
-- `main/src/settings/provider_form_dialog.rs:462`：异步任务完成后通过活动窗口推送通知
-
-### 3. 当前发现
-- `cloud_error` 会在同步前置校验失败、同步失败、部分成功有错误时被写入
-- `render_toolbar` 中没有任何地方读取 `cloud_error`，所以主界面上看不到失败原因
-- 正常同步完成只写 tracing 日志，没有成功/部分成功通知
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
-
-## 编码前检查 - title-bar-tabs-b
-时间：2026-03-24 23:59:30 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-title-bar-tabs-b.md`
-□ 将使用以下可复用组件：
-- `gpui_component::TitleBar`：主窗口标题栏容器
-- `crates/core/src/tab_container.rs::render_tab_content`：保留内容区渲染
-- `crates/ui/src/title_bar.rs::should_render_custom_window_controls`：延续 Deepin 控件兼容
-□ 将遵循命名约定：新 builder 使用 `with_embedded_tab_bar_in_title_bar`，新渲染方法使用 `render_title_bar_tabs`
-□ 将遵循代码风格：只拆分渲染层，不引入新的全局状态或额外标签状态机
-□ 确认不重复造轮子，证明：沿用 `TitleBar` 和 `TabContainer` 现有能力，只补最小连接层
-
-## 执行记录 - title-bar-tabs-b
-时间：2026-03-24 23:59:30 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/onetcli_app.rs`
-- `main/src/main.rs`
-- `crates/core/src/tab_container.rs`
-- `crates/story/src/lib.rs`
-- `crates/story/src/title_bar.rs`
-- `crates/core/src/popup_window.rs`
-
-### 2. 对比的相似实现
-- `crates/story/src/lib.rs:649`：窗口层已存在 `TitleBar + 内容区` 组合模式
-- `crates/story/src/title_bar.rs:57`：`TitleBar` 已支持承载复杂交互子元素
-- `crates/core/src/tab_container.rs:1491`：标签条和内容区当前耦合在同一实体渲染中
-- `main/src/main.rs:49` 与 `crates/core/src/popup_window.rs:98`：主窗口和弹窗在标题栏选项上此前并不一致
-
-### 3. 当前发现
-- B 方案要成立，必须同时做两件事：主窗口启用 `TitleBar` 区域，`TabContainer` 将标签条从自身根布局中拆出
-- 直接在 `OnetCliApp::render` 中返回 `tab_container.update(... -> impl IntoElement)` 会触发生命周期问题，需要转成 `AnyElement`
-- Deepin 双按钮兼容逻辑可以直接复用，不需要再发明新的平台判断
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地命令完成检索与验证
-
-## 编码后声明 - title-bar-tabs-b
-时间：2026-03-25 00:08:30 +0800
-
-### 1. 复用了以下既有组件
-- `gpui_component::TitleBar`：主窗口标题栏承载标签区
-- `gpui_component::TitleBar::title_bar_options`：主窗口窗口选项层标题栏能力
-- `crates/core/src/tab_container.rs::render_tab_content`：保留原有内容区渲染
-- `crates/ui/src/title_bar.rs::should_render_custom_window_controls`：继续控制 Deepin 下是否渲染应用自绘按钮
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 builder 为 `with_embedded_tab_bar_in_title_bar`，新增渲染方法为 `render_title_bar_tabs`
-- 代码风格：采用小范围 builder 配置和渲染拆分，没有引入新的全局状态
-- 文件组织：`TabContainer` 负责渲染模式拆分，`OnetCliApp` 负责窗口级组装，`main.rs` 负责窗口选项
-
-### 3. 对比了以下相似实现
-- `crates/story/src/lib.rs:659`：主窗口布局对齐为 `TitleBar + 内容区` 结构
-- `crates/story/src/title_bar.rs:57`：标题栏内放交互内容的模式被直接复用到主窗口标签区
-- `crates/core/src/tab_container.rs:1491`：原有标签状态机、拖拽和关闭逻辑全部保留，仅新增嵌入标题栏模式
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/onetcli_app.rs`、`main/src/main.rs`、`crates/core/src/tab_container.rs`、`crates/ui/src/title_bar.rs`
-- 最终没有新增第二套标签组件，只让现有 `TabContainer` 提供“独立标签条渲染”和“内容区渲染”两种输出
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个既有测试全部通过
-- `cargo test -p gpui-component --lib title_bar`：通过，2 个 Deepin 兼容测试全部通过
-- `cargo test -p one-core --no-run`：通过，确认核心包测试目标可编译
-
-### 6. 风险与限制
-- B 方案已经完成代码级尝试，但是否真正达到“标签进入标题栏”的视觉预期，仍需要你在 Deepin 25 实机确认
-- 当前没有自动化 GUI 测试覆盖标题栏布局和鼠标交互，本次主要依靠编译、单测和现有交互代码复用来兜底
-- 验证输出中仍有既有 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，与本次改动无关
-
-## 编码前检查 - deepin-window-restore
-时间：2026-03-25 00:31:30 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-deepin-window-restore.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/title_bar.rs::linux_prefers_system_window_controls`：判断 Deepin/DDE 系统控件路径
-- `crates/ui/src/window_border.rs::WindowBorder`：收敛窗口边框与 `client inset`
-- `main/src/main.rs::WindowOptions`：收敛主窗口背景策略
-□ 将遵循命名约定：只增加 `prefers_system_frame` 这类平台语义变量，不引入新的状态实体
-□ 将遵循代码风格：最小化修改窗口创建和边框逻辑，不碰标签状态机
-□ 确认不重复造轮子，证明：沿用现有 Deepin 桌面判断和窗口边框封装，不新建第二套 Linux 窗口策略
-
-## 执行记录 - deepin-window-restore
-时间：2026-03-25 00:31:30 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/main.rs`
-- `crates/ui/src/window_border.rs`
-- `crates/ui/src/title_bar.rs`
-- `crates/ui/src/root.rs`
-- `crates/core/src/tab_container.rs`
-- `/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs`
-
-### 2. 对比的相似实现
-- `main/src/main.rs:47`：主窗口背景和装饰的唯一入口
-- `crates/ui/src/window_border.rs:69`：此前无条件写入 `set_client_inset(SHADOW_SIZE)`
-- `crates/ui/src/title_bar.rs:33`：已有 Deepin/DDE 桌面环境识别
-- `gpui x11 window.rs:1697`：平台侧会在无合成器时强制回退到 `Server decorations`
-
-### 3. 当前发现
-- 当前 Deepin 25 会话是 `X11`，并且 `gpui` 启动日志明确显示“无合成器，回退到系统装饰”
-- 这意味着主窗口实际由系统标题栏托管，继续声明客户端边框 inset 会向窗口管理器传递错误信号
-- Linux 主窗口仍使用 `Transparent` 背景，也会继续保留一层不必要的窗口外观歧义
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg`、本地构建和一次 GUI 启动日志完成诊断
-
-## 编码后声明 - deepin-window-restore
-时间：2026-03-25 00:31:30 +0800
-
-### 1. 复用了以下既有组件
-- `linux_prefers_system_window_controls`：复用 Deepin/DDE 判断，不新增桌面检测代码
-- `WindowBorder`：继续沿用统一窗口边框封装，只调整系统装饰路径的行为
-- `WindowOptions`：继续沿用主窗口参数集中配置
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增局部变量 `prefers_system_frame`、`client_inset`、`window_background`
-- 代码风格：只改窗口兼容路径，不改现有标签栏渲染和标题同步逻辑
-- 文件组织：窗口行为改动仍集中在 `main/src/main.rs` 和 `crates/ui/src/window_border.rs`
-
-### 3. 对比了以下相似实现
-- `crates/ui/src/window_border.rs:69`：原先无条件写 inset；现在只在真正需要自绘边框时才声明 inset
-- `main/src/main.rs:62`：原先 Linux 一律透明背景；现在在 Deepin 系统控件路径下改为不透明
-- `gpui x11 window.rs:1700`：平台已经会回退系统装饰，因此应用层不再继续伪装客户端边框
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/main.rs`、`crates/ui/src/window_border.rs`、`crates/ui/src/title_bar.rs`、`crates/ui/src/root.rs`
-- 最终没有新增新的窗口管理抽象，只是纠正现有窗口兼容分支的输入参数
-
-### 5. 本地验证结果
-- `cargo fmt --all`：已执行
-- `cargo check -p main`：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个测试通过
-- `cargo test -p gpui-component --lib title_bar -- --nocapture`：通过，2 个 Deepin 兼容测试通过
-- 启动 `target/debug/onetcli` 观察日志：确认当前环境出现 `x11: no compositor present, falling back to server-side window decorations`
-
-### 6. 风险与限制
-- 当前仍缺少自动化 GUI 手段去点击 Deepin 的系统“还原”主按钮，所以最终结论仍需你实机确认
-- 现有 `window_ext.rs` 仍有既有未使用代码告警，与本次改动无关
-
-## 编码前检查 - desktop-account-entry
-时间：2026-03-25 11:07:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-desktop-account-entry.md`
-□ 将使用以下可复用组件：
-- `main/src/home/home_tabs.rs::add_settings_tab`：复用现有设置标签打开逻辑
-- `gpui_component::setting::Settings::default_selected_index`：复用设置页默认选中能力
-- `main/src/user_avatar.rs::render_user_avatar`：复用侧栏账号入口组件
-- `crates/core/src/cloud_sync/sync_server.rs::map_user_info`：复用当前用户映射链路补昵称
-□ 将遵循命名约定：新增 `SettingsPanelPage` 这类页面语义枚举和 `display_name` 这类展示语义方法
-□ 将遵循代码风格：只在现有设置页、用户模型和侧栏组件上做增量修改，不引入新的窗口或标签体系
-□ 确认不重复造轮子，证明：已检查 `home_tab.rs`、`home/home_tabs.rs`、`setting_tab.rs`、`user_avatar.rs`、`cloud_sync/sync_server.rs`，现有设置页和账号组件已满足复用条件
-
-## 执行记录 - desktop-account-entry
-时间：2026-03-25 11:07:00 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `main/src/home/home_tabs.rs`
-- `main/src/setting_tab.rs`
-- `main/src/user_avatar.rs`
-- `main/src/auth.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/sync_server.rs`
-- `crates/ui/src/setting/settings.rs`
-
-### 2. 对比的相似实现
-- `main/src/home_tab.rs:2375`：主页侧栏底部集中承载设置和账号入口
-- `main/src/setting_tab.rs:679`：账户页已存在于主设置面板中
-- `main/src/user_avatar.rs:27`：账号入口渲染已抽成独立组件
-- `crates/ui/src/setting/settings.rs:86`：设置组件支持默认页选中
-
-### 3. 当前发现
-- 左侧栏登录后点击账号区域没有行为，未满足“打开设置中的账号页面”的要求
-- 桌面端 `UserInfo` 尚未解析服务端 `nickname`，所以即使 web 已完成昵称链路，桌面端仍拿不到
-- `Settings::default_selected_index` 可以直接复用，但要补一个“待打开页面”请求，才能兼容已存在的设置标签
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
-
-## 编码前检查 - main-window-spotlight
-时间：2026-03-26 00:32:13 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-main-window-spotlight.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/window_border.rs`：复用 `canvas` 和 `window.mouse_position()` 的自绘模式
-- `crates/ui/src/color_picker.rs`：复用 `on_mouse_move(...)` 驱动 hover 状态更新
-- `main/src/home_tab.rs`：复用卡片边框、左侧强调线和 hover 表达
-- `main/src/sync_server_theme.rs`：复用 sync_server 深色主题色板
-□ 将遵循命名约定：通用组件使用 `SpotlightCard`，业务包装函数使用 `spotlight_card` / `danger_spotlight_card`
-□ 将遵循代码风格：保持链式 GPUI builder 和小范围主题包装，不重写现有页面结构
-□ 确认不重复造轮子，证明：已检查 `crates/ui/src/hover_card.rs`、`crates/ui/src/color_picker.rs`、`crates/ui/src/window_border.rs`、`main/src/home_tab.rs`、`main/src/auth.rs`、`main/src/setting_tab.rs`
-
-## 执行记录 - main-window-spotlight
-时间：2026-03-26 00:32:13 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/ui/src/window_border.rs`
-- `crates/ui/src/color_picker.rs`
-- `crates/ui/src/hover_card.rs`
-- `main/src/home_tab.rs`
-- `main/src/auth.rs`
-- `main/src/setting_tab.rs`
-- `main/src/sync_server_theme.rs`
-
-### 2. 对比的相似实现
-- `crates/ui/src/window_border.rs:94`：主应用内自绘和鼠标位置跟踪
-- `crates/ui/src/color_picker.rs:395`：hover 和鼠标移动驱动状态
-- `main/src/home_tab.rs:2920`：卡片边框、阴影和左侧强调线
-
-### 3. 当前实施策略
-- 在 `crates/ui/src` 新增可复用 `SpotlightCard`
-- 在 `main/src/sync_server_theme.rs` 提供绿色和危险态预设
-- 首先接入 `main/src/setting_tab.rs` 账户区域与 `main/src/auth.rs` 认证面板
-
-## 编码后声明 - main-window-spotlight
-时间：2026-03-26 02:17:00 +0800
-
-### 1. 复用了以下既有组件
-- `crates/ui/src/window_border.rs`：复用了 `canvas` + 鼠标位置驱动的主应用自绘模式
-- `crates/ui/src/color_picker.rs`：复用了 `on_mouse_move(...)` 更新 hover 状态的交互方式
-- `main/src/home_tab.rs`：复用了左侧强调线和 hover 卡片的表达方式
-- `main/src/sync_server_theme.rs`：继续沿用 sync_server 主题 token，不散落新增颜色常量
-
-### 2. 遵循了以下项目约定
-- 命名约定：通用组件命名为 `SpotlightCard`，主题包装保持 `spotlight_card` / `danger_spotlight_card`
-- 代码风格：保持链式 GPUI builder 风格，没有引入新的状态管理模型
-- 文件组织：通用能力放 `crates/ui/src`，业务侧只保留主题包装和调用
-
-### 3. 对比了以下相似实现
-- `crates/ui/src/window_border.rs`：我的实现不做窗口级命中处理，只复用局部自绘叠层思路
-- `crates/ui/src/color_picker.rs`：我的实现不修改业务值，只记录 hover 和鼠标位置
-- `main/src/home_tab.rs`：我的实现把左侧强调线抽到通用组件，避免业务页重复写
-
-### 4. 未重复造轮子的证明
-- 已检查 `crates/ui/src/hover_card.rs`、`crates/ui/src/color_picker.rs`、`crates/ui/src/window_border.rs`、`main/src/home_tab.rs`
-- 现有仓库没有可直接复用的“卡片 spotlight”组件，因此新增最小通用组件 `SpotlightCard`
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main`：通过
-- `cargo test -p main --no-run`：通过
-
-### 6. 风险与限制
-- 当前只验证了编译和测试目标构建，没有自动化 GUI 截图或交互回归
-- GPUI 暂未直接使用 Web 那种径向渐变，本次采用多层半透明圆形叠层近似 spotlight
-- 工作区存在与本任务无关的已有改动：`sync_server/web/src/utils/syncPayloadTable.ts`
-
-## 编码前检查 - sync-server-theme-kiro2api
-时间：2026-03-26 00:00:36 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-theme-kiro2api.md`
-□ 将使用以下可复用组件：
-- `main/src/auth.rs::show_password_auth_dialog`：复用现有认证弹窗结构和提交逻辑
-- `main/src/setting_tab.rs::render_account_section`：复用设置页账户区渲染入口
-- `gpui_component::dialog::DialogButtonProps`：复用对话框确认/取消按钮配置
-- `gpui_component::button::ButtonCustomVariant`：复用自定义按钮视觉方案
-□ 将遵循命名约定：新增主题辅助函数统一使用语义化命名，不在业务代码里散落魔法颜色值
-□ 将遵循代码风格：只改 `sync_server` 相关局部 UI，不改全局主题，不改业务流程
-□ 确认不重复造轮子，证明：已检查 `main/src/auth.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`main/src/encourage.rs` 和 `../kiro2api/frontend-vue/src/styles/globals.css`
-
-## 执行记录 - sync-server-theme-kiro2api
-时间：2026-03-26 00:00:36 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/auth.rs`
-- `main/src/setting_tab.rs`
-- `main/src/home_tab.rs`
-- `main/src/encourage.rs`
-- `main/src/main.rs`
-- `../kiro2api/frontend-vue/src/styles/globals.css`
-- `../kiro2api/frontend-vue/src/views/login/LoginPage.vue`
-- `../kiro2api/frontend-vue/src/layouts/DashboardLayout.vue`
-
-### 2. 对比的相似实现
-- `main/src/auth.rs:445`：`sync_server` 密码登录/注册弹窗入口
-- `main/src/setting_tab.rs:814`：设置页账户区自定义渲染入口
-- `main/src/home_tab.rs:2009`：仓库内已有 `ButtonVariant::Custom(...)` 用法
-- `../kiro2api/frontend-vue/src/styles/globals.css:1`：目标配色变量来源
-
-### 3. 本次实现
-- 新增 `main/src/sync_server_theme.rs`，统一 `sync_server` 深色面板、文字层级、强调色和按钮 variant。
-- 在 `main/src/main.rs` 注册 `mod sync_server_theme;`。
-- 在 `main/src/auth.rs` 将密码登录/注册弹窗替换为深色卡片 + 绿色主按钮 + 深色输入框 + 红色弱提示面板。
-- 在 `main/src/setting_tab.rs` 将账户区替换为深色卡片风格，统一已登录态、未登录态和登出按钮配色。
-
-### 4. 未重复造轮子的证明
-- 没有新增新的弹窗系统、按钮组件或设置页容器，只是复用现有结构并抽出一个局部主题模块
-- 仓库已有自定义按钮 variant 模式，因此本次直接沿用，而不是额外造一套 `sync_server` 专属按钮组件
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 6. 风险与限制
-- 当前没有 GUI 截图或自动化交互验证，最终视觉效果和间距细节仍建议你本地打开账户页与登录弹窗确认
-- 构建输出中的 `gpui-component` 历史 warning 与本次配色改动无关
-
-## 编码前检查 - sync-reference-recovery
-时间：2026-03-25 20:08:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-reference-recovery.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/workspace_sync.rs::on_uploaded`：复用工作区同步后回写 `cloud_id` 的既有模式
-- `crates/core/src/storage/models.rs::CertificateReference`：复用凭证引用模型，不新建第二套引用结构
-- `crates/core/src/storage/repository.rs::ConnectionRepository::get_by_cloud_id`：沿用按 `cloud_id` 反查的仓储接口风格
-- `crates/core/src/cloud_sync/service.rs::ConnectionPlainData`：复用现有连接同步明文字段，不新增独立同步载荷
-□ 将遵循命名约定：远端稳定引用统一沿用 `cloud_id`，工作区字段沿用现有 `workspace_cloud_id`
-□ 将遵循代码风格：在同步层和仓储层做小范围增量修复，不把恢复逻辑下沉到 UI
-□ 确认不重复造轮子，证明：已检查 `connection_sync.rs`、`workspace_sync.rs`、`certificate_sync.rs`、`service.rs`、`storage/models.rs`、`storage/repository.rs`
-
-## 执行记录 - sync-reference-recovery
-时间：2026-03-25 20:08:00 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/cloud_sync/connection_sync.rs`
-- `crates/core/src/cloud_sync/workspace_sync.rs`
-- `crates/core/src/cloud_sync/certificate_sync.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/cloud_sync/models.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/storage/models.rs`
-- `crates/core/src/storage/repository.rs`
-- `crates/db_view/src/common/db_connection_form.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/mongodb_view/src/mongo_form_window.rs`
-
-### 2. 对比的相似实现
-- `crates/core/src/cloud_sync/workspace_sync.rs:13`：工作区同步的标准接入与 `cloud_id` 回写模式
-- `crates/core/src/cloud_sync/service.rs:348`：连接同步明文结构中已预留 `workspace_cloud_id`
-- `crates/core/src/storage/models.rs:544`：凭证引用的双 ID 结构与同步辅助方法
-- `crates/core/src/storage/repository.rs:609`：连接仓储已具备按 `cloud_id` 反查本地实体的模式
-
-### 3. 当前发现
-- 连接同步上传时始终把 `workspace_cloud_id` 写成 `None`
-- 连接同步下载/更新本地时没有按 `workspace_cloud_id` 恢复本地 `workspace_id`
-- `CertificateReference` 已有 `cloud_id`，但匹配逻辑会在跨设备场景下错误优先使用 `local_id`
-- 表单与连接参数恢复都统一依赖 `CertificateReference::matches_certificate`，修复匹配语义可以覆盖多个入口
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续使用本地源码检索、Rust 单元测试和构建命令完成修复与验证
-
-## 编码后声明 - sync-reference-recovery
-时间：2026-03-25 20:28:00 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/cloud_sync/service.rs::ConnectionPlainData`：继续作为连接同步 blob 的唯一明文模型，补齐 `workspace_cloud_id` 的实际写入
-- `crates/core/src/storage/models.rs::CertificateReference`：继续作为凭证跨连接引用的唯一模型，只修正匹配语义
-- `crates/core/src/cloud_sync/workspace_sync.rs::on_uploaded`：延续工作区先同步、再供连接恢复映射的既有流程
-- `crates/core/src/storage/repository.rs::ConnectionRepository::get_by_cloud_id`：沿用按 `cloud_id` 反查本地实体的仓储设计，并为工作区补齐同类接口
-
-### 2. 遵循了以下项目约定
-- 命名约定：远端稳定标识继续统一使用 `cloud_id`，没有引入新的 `remote_id` 命名分支
-- 代码风格：改动集中在 `cloud_sync` 与 `storage` 两层，没有把恢复逻辑下沉到表单或 UI
-- 文件组织：工作区恢复能力放在 `connection_sync.rs`，仓储查询能力放在 `repository.rs`，引用匹配规则放在 `models.rs`
-
-### 3. 对比了以下相似实现
-- `crates/core/src/cloud_sync/workspace_sync.rs:75`：沿用工作区上传后回写 `cloud_id` 的模式，为连接上传前解析工作区远端 ID 提供前置保障
-- `crates/core/src/storage/models.rs:551`：沿用 `CertificateReference` 既有双 ID 结构，只调整“先远端、后本地”的匹配顺序
-- `crates/core/src/storage/repository.rs:609`：工作区新增 `get_by_cloud_id` 时对齐连接仓储现有查询模式，避免新建另类接口
-
-### 4. 未重复造轮子的证明
-- 已检查 `connection_sync.rs`、`workspace_sync.rs`、`certificate_sync.rs`、`service.rs`、`storage/models.rs`、`storage/repository.rs`
-- 最终没有新增新的引用模型、同步表或中间映射表，而是复用现有 `cloud_id` 与 `CertificateReference`
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo test -p one-core`：通过（38 个测试全部通过，含新增 3 个回归测试）
-- `cargo check -p main`：通过
-
-### 6. 风险与限制
-- 若云端历史连接记录本身没有 `workspace_cloud_id`，旧数据仍需要下一次本地改动后重新上传才能补齐归属
-- 当前没有完整“多设备真实同步往返”自动化测试，本次以模型回归测试和上层编译验证兜底
-
-## 编码前检查 - selection-contrast-in-app
-时间：2026-03-25 17:31:06 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-selection-contrast-in-app.md`
-- 已分析相似实现：
-  - `crates/ui/src/text/inline.rs`
-  - `crates/ui/src/input/element.rs`
-  - `crates/ui/src/theme/schema.rs`
-  - `crates/ui/src/theme/default-theme.json`
+## 检索记录 - db-tree-csv-import-target
+时间：2026-03-24 18:20:00 +0800
+
+- 已阅读 `/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_event.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/import_export/table_import_view.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db/src/manager.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db/src/plugin.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/csv.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/json.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/txt.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/sql.rs`。
+- 已确认 `db_tree_event::handle_import_data` 会把树节点的 `database/schema/table` 传到 `TableImportView`。
+- 已确认 `TableImportView::start_import` 会把 `database/schema/table` 写入 `ImportConfig`。
+- 已确认 `manager::import_data_with_progress_sync` 不重写导入 SQL，只负责会话创建和插件分发。
+- 已确认 `plugin::query_table_data`、`plugin::export_table_data_sql` 以及 `csv/json/txt/xml` 导出路径统一使用 `format_table_reference`。
+- 已确认 `csv/json/txt/sql` 导入路径仍在直接使用裸 `quote_identifier(table)`，这是当前落错库的根因。
+
+## 编码前检查 - db-tree-csv-import-target
+时间：2026-03-24 18:20:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-tree-csv-import-target.md`
 - 将使用以下可复用组件：
-  - `paint_selection(...)`：统一修正 `TextView` 选区绘制顺序
-  - `split_runs_by_bg_segments(...)`：复用输入框已有的黑/白字自动切换逻辑
-  - `ThemeColor` token：通过主题层统一提升对比度，不在业务页面散落修色
-- 将遵循命名约定：继续沿用 `selection` / `list_active` / `table_active` 现有 token，不新增业务专用颜色名
-- 将遵循代码风格：优先修公共 UI 基础设施，不在 AI 页面、表格页和各表单里分别特判
-- 确认不重复造轮子，证明：选区绘制、背景区间切字色、主题 token 三套基础能力都已存在，本次只做正确接线与默认值调整
-- 工具说明：仓库要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`，但当前会话未提供这些工具；已改用本地源码检索与 Rust 构建验证作为替代并留痕
+  - `DatabasePlugin::format_table_reference`：`crates/db/src/plugin.rs`，作为唯一目标表定位入口。
+  - `ImportConfig`：`crates/db/src/import_export/mod.rs`，继续复用既有 `database/schema/table` 字段。
+  - `MySqlPlugin::new` / `MsSqlPlugin::new`：用于最小范围单元测试。
+- 将遵循命名约定：新增 helper 使用 `snake_case`，测试沿用模块内 `#[cfg(test)] mod tests`。
+- 将遵循代码风格：仅在 `import_export/formats` 内修复，保持 `anyhow` 错误风格和现有导入顺序。
+- 确认不重复造轮子：已检查 `plugin.rs` 和导出路径，项目内已经存在统一的表引用格式化接口，不新增第二套规则。
 
-## 编码后声明 - selection-contrast-in-app
-时间：2026-03-25 17:31:06 +0800
+## 检索记录 - db-tree-filter-persist
+时间：2026-03-24 18:33:00 +0800
+
+- 已阅读 `/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/database_tab.rs`、`/Users/hufei/RustroverProjects/onetcli/main/src/home_tab.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/core/src/connection_notifier.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/core/src/storage/models.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/core/src/storage/repository.rs`、`/Users/hufei/RustroverProjects/onetcli/crates/mongodb_view/src/mongo_form_window.rs`。
+- 已确认 `save_database_filter` 会写入 `ConnectionRepository.selected_databases`，存储层本身支持持久化。
+- 已确认 `DatabaseTabView::new_with_active_conn` 使用外部传入的 `connections` 列表来创建 `DbTreeView`。
+- 已确认 `HomePage` 只有在收到 `ConnectionDataEvent::ConnectionUpdated` 时才会立即更新这份内存 `connections` 列表。
+- 已确认 `save_database_filter` 当前没有发 `ConnectionUpdated`，因此重新进入数据库页时可能继续使用旧连接对象。
+- 已确认 `DbTreeView::update_connection_info` 当前也没有把传入连接的 `selected_databases` 回写到树视图本地状态。
+
+## 编码前检查 - db-tree-filter-persist
+时间：2026-03-24 18:33:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-tree-filter-persist.md`
+- 将使用以下可复用组件：
+  - `emit_connection_event` / `ConnectionDataEvent::ConnectionUpdated`：沿用现有连接保存成功后的刷新链路。
+  - `StoredConnection::set_selected_databases`：继续复用仓库存储字段，不新增 schema。
+  - `DbTreeView` 现有测试模块：补纯逻辑测试验证连接筛选状态同步。
+- 将遵循命名约定：新增纯函数使用 `snake_case`，测试仍放在模块内 `#[cfg(test)] mod tests`。
+- 将遵循代码风格：保持 `cx.spawn` + `Tokio::spawn_result` 异步持久化模式，不新增第二套状态同步机制。
+- 确认不重复造轮子：已检查 `HomePage`、Mongo 连接表单和连接通知器，项目已有完整的连接更新事件链路，本次只复用它。
+
+## 编码后声明 - db-tree-csv-import-target
+时间：2026-03-24 18:40:00 +0800
 
 ### 1. 复用了以下既有组件
-- `crates/ui/src/text/inline.rs::paint_selection`：继续作为 `TextView` 唯一选区背景绘制入口
-- `crates/ui/src/input/element.rs::split_runs_by_bg_segments`：继续作为按背景区间切换前景色的唯一实现
-- `crates/ui/src/theme/default-theme.json`：继续作为默认主题源，不新增第二套硬编码配色
+- `DatabasePlugin::format_table_reference`：继续作为导入目标表定位的唯一入口。
+- `ImportConfig`：继续复用已有 `database/schema/table` 作为完整上下文来源。
+- `MySqlPlugin::new` / `MsSqlPlugin::new`：用于最小范围单元测试。
 
 ### 2. 遵循了以下项目约定
-- 命名约定：保持 `selection`、`table_active`、`list_active` 原有主题字段
-- 代码风格：改动集中在 `crates/ui`，没有把修复扩散到业务 crate
-- 文件组织：文本选区修复放 `text/` 和 `input/`，配色修复放 `theme/`
+- 命名约定：新增 `format_import_table_reference` 使用 `snake_case`。
+- 代码风格：只在 `import_export/formats` 内补共享 helper，不改 UI 或 manager 接口。
+- 文件组织：导入修复集中在 `crates/db/src/import_export/formats/*`，与既有按格式拆分结构保持一致。
 
 ### 3. 对比了以下相似实现
-- `TextView`：原先先画字后画选区背景，本次改为先画背景再画字
-- `Input`：原先只把文档颜色区间接入 `split_runs_by_bg_segments`，本次把 selection 区间也接入
-- `Theme`：原先在 `apply_config` 阶段强行压低 alpha，本次交还给主题 token 本身决定强度
+- `crates/db/src/plugin.rs` 的 `query_table_data`：查询路径统一使用完整表引用。
+- `crates/db/src/plugin.rs` 的 `export_table_data_sql`：导出路径同样依赖完整表引用。
+- `crates/db/src/import_export/formats/csv.rs` / `json.rs` / `txt.rs` / `xml.rs` 的导出路径：都已使用 `format_table_reference`。
 
 ### 4. 未重复造轮子的证明
-- 已检查 `Inline`、`Input`、`ThemeConfig`
-- 最终没有新增新的选区渲染组件、没有给 AI 消息或表格页面做局部补丁，只修公共基础层
+- 没有新增数据库类型分支拼接逻辑。
+- 所有导入格式处理器都转而复用同一个 helper，而不是各自手写库名/模式名拼接。
 
-## 实施与验证记录 - selection-contrast-in-app
-时间：2026-03-25 17:31:06 +0800
+## 验证记录 - db-tree-csv-import-target
+- `cargo test -p db format_import_table_reference --lib`
+  - 结果：通过（2 个新增测试通过）
+- `cargo check -p db`
+  - 结果：通过
+  - 备注：存在既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次修改无关
+
+## 编码后声明 - db-tree-filter-persist
+时间：2026-03-24 18:46:00 +0800
+
+### 1. 复用了以下既有组件
+- `ConnectionDataEvent::ConnectionUpdated` / `get_notifier`：复用现有连接更新广播链路。
+- `StoredConnection::set_selected_databases`：继续使用现有 JSON 字段存储数据库筛选状态。
+- `HomePage` 对连接更新事件的订阅逻辑：继续作为主页连接内存列表的刷新入口。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `sync_selected_databases_for_connection` 使用 `snake_case`。
+- 代码风格：保持 `cx.spawn` + `Tokio::spawn_result` 异步写库模式，成功后回主线程发事件。
+- 文件组织：修改集中在 `crates/db_view/src/db_tree_view.rs`，测试继续放在原文件 `#[cfg(test)]` 模块内。
+
+### 3. 对比了以下相似实现
+- `main/src/home_tab.rs`：主页依赖 `ConnectionUpdated` 来同步内存连接列表。
+- `crates/mongodb_view/src/mongo_form_window.rs`：连接保存成功后使用 notifier 发连接更新事件。
+- `crates/db_view/src/database_tab.rs`：重新进入数据库页时使用传入的 `connections` 列表重建 `DbTreeView`。
+
+### 4. 未重复造轮子的证明
+- 没有新增新的筛选刷新事件或强制整页 reload 逻辑。
+- 修复完全复用已有的连接通知器和现有 `StoredConnection` 字段。
+
+## 验证记录 - db-tree-filter-persist
+- `cargo test -p db_view sync_selected_databases_from_connection --lib`
+  - 结果：通过（2 个新增测试通过）
+- `cargo check -p db_view`
+  - 结果：通过
+  - 备注：存在既有 `num-bigint-dig v0.8.4` future-incompat 警告，与本次修改无关
+
+## 编码前检查 - ollama-thinking-fallback
+时间：2026-03-24 13:33:30 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-ollama-thinking-fallback.md`
+- 将使用以下可复用组件：
+  - `llm_connector::types::Delta::reasoning_any()`：第三方库已提供的 reasoning 聚合接口。
+  - `crates/core/src/llm/mod.rs`：共享 helper 的放置位置。
+  - `ChatStreamProcessor` 与 `GeneralChatAgent`：两条需要统一修复的流式消费链路。
+- 将遵循命名约定：新增 helper 使用 `snake_case`，测试函数采用行为式命名。
+- 将遵循代码风格：正文优先、最小侵入、共享逻辑抽取一次后双处复用。
+- 确认不重复造轮子：已检查 `llm`、`ai_chat`、`agent` 链路，不存在现成的“正文为空时回退 reasoning”项目内 helper。
+
+## 编码后声明 - ollama-thinking-fallback
+时间：2026-03-24 13:33:30 +0800
+
+### 1. 复用了以下既有组件
+- `Delta::reasoning_any()`：直接复用第三方库已做好的 reasoning 聚合，不重复解析字段名。
+- `crates/core/src/llm/mod.rs`：作为共享 helper 出口，避免在两个流式入口复制同样逻辑。
+- `ChatStreamProcessor` / `GeneralChatAgent`：仅替换文本提取点，其余节流、完成态和持久化保持不变。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `extract_stream_text` 与测试函数都使用 `snake_case` 风格。
+- 代码风格：保持正文优先逻辑，仅在正文为空时回退 reasoning，不改变既有消息事件结构。
+- 文件组织：共享能力放在 `llm` 模块，消费方只做调用侧替换，未扩散到 UI 层。
+
+### 3. 对比了以下相似实现
+- `crates/core/src/ai_chat/stream.rs`：原先会在 `Completed` 前累计空正文，本次改为复用共享 helper。
+- `crates/core/src/agent/builtin/general_chat.rs`：与聊天面板有同样的问题，本次同步收敛为同一实现。
+- `crates/core/src/ai_chat/panel.rs`：确认 UI 完成态仅消费上游 `full_content`，因此修复点必须在更上游的流式消费处。
+
+### 4. 未重复造轮子的证明
+- 未修改 `llm-connector` 第三方 crate。
+- 未新增第二套 streaming response 解析逻辑，只是复用现有 `reasoning_any()` 并补上项目侧消费缺口。
+
+## 验证记录 - ollama-thinking-fallback
+- `rustfmt --edition 2024 crates/core/src/llm/mod.rs crates/core/src/ai_chat/stream.rs crates/core/src/agent/builtin/general_chat.rs`：通过。
+- `cargo check -p one-core`：通过。
+- `cargo test -p one-core extract_stream_text --lib`：通过，2 个新增单测全部通过。
+- 提权 `ollama list`：确认本机存在 `qwen3:14b`，不存在 `qwen3.5`。
+- 提权 `curl http://127.0.0.1:11434/api/chat ...`：确认 `qwen3:14b` 仍返回 `message.content = ""` 且 `message.thinking` 有值，和本次修复目标一致。
+
+## 编码前检查 - aliyun-qwen35-url
+时间：2026-03-25 10:32:13 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-aliyun-qwen35-url.md`
+- 将使用以下可复用组件：
+  - `crates/core/src/llm/connector.rs`：provider URL 路由的唯一入口。
+  - `LlmClient::openai_compatible`：现有 OpenAI 兼容客户端能力。
+  - `LlmClient::aliyun` / `LlmClient::aliyun_private`：继续保留普通 DashScope 路径。
+- 将遵循命名约定：新增 helper 使用 `snake_case`，常量使用全大写下划线命名。
+- 将遵循代码风格：仅在 `connector.rs` 做条件分流，不改 manager、UI 和第三方库。
+- 确认不重复造轮子：已检查第三方 `llm-connector`，项目侧只需选择合适 client，无需重写 Aliyun 协议。
+
+## 编码后声明 - aliyun-qwen35-url
+时间：2026-03-25 10:32:13 +0800
+
+### 1. 复用了以下既有组件
+- `LlmClient::openai_compatible`：用于阿里云 `qwen3.5-*` 默认切到官方 compatible-mode。
+- `LlmClient::aliyun` / `aliyun_private`：普通阿里云模型和已有私有地址仍沿用旧路径。
+- `ProviderConfig.model/api_base`：作为模型路由和显式 compatible-mode 判断依据。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `aliyun_base_url`、`aliyun_prefers_compatible_mode`，保持 Rust `snake_case`。
+- 代码风格：继续沿用 `match ProviderType` 的最小条件分流结构。
+- 文件组织：只修改 `crates/core/src/llm/connector.rs`，未扩散到其他模块。
+
+### 3. 对比了以下相似实现
+- `connector.rs` 既有 provider 常量和 `provider_base_url`：本次沿相同模式补阿里云专属 helper。
+- 第三方 `AliyunProtocol::chat_endpoint`：确认原生协议固定命中文本生成 URL，是当前问题根因。
+- 第三方 `openai_compatible` 客户端：确认可直接复用以对接阿里云官方 compatible-mode。
+
+### 4. 未重复造轮子的证明
+- 未修改 `llm-connector` 第三方 crate。
+- 未新增新的协议解析器，只是根据模型选择现有 client 构造路径。
+
+## 验证记录 - aliyun-qwen35-url
+- `rustfmt --edition 2024 crates/core/src/llm/connector.rs`：通过。
+- `cargo test -p one-core aliyun_prefers_compatible_mode --lib`：通过。
+- `cargo check -p one-core`：通过。
+
+## 编码前检查 - aliyun-provider-cache
+时间：2026-03-25 10:38:33 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-aliyun-provider-cache.md`
+- 将使用以下可复用组件：
+  - `ProviderManager::get_provider`：provider 缓存和重建的唯一入口。
+  - `ChatStreamProcessor::run_stream`：ai_chat 链路创建 provider 的实际位置。
+  - `ProviderConfig`：作为缓存签名和运行时选中模型覆盖的承载对象。
+- 将遵循命名约定：缓存 helper 使用 `snake_case`，内部结构体使用简单职责命名。
+- 将遵循代码风格：不重构 provider 层，只增强缓存命中条件并补齐 ai_chat 的模型覆盖。
+- 确认不重复造轮子：db_view 侧已有“构造 provider 用当前选中模型”的模式，ai_chat 侧应对齐而非另起新方案。
+
+## 编码后声明 - aliyun-provider-cache
+时间：2026-03-25 10:38:33 +0800
+
+### 1. 复用了以下既有组件
+- `ProviderManager`：继续作为 provider 缓存唯一入口，只增强缓存签名判断。
+- `ProviderConfig`：复用现有字段构造缓存签名，不新增额外配置对象。
+- `ChatStreamProcessor`：只在创建 provider 前把 `selected_model` 回写到临时 config。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `ProviderCacheEntry` 和 `provider_cache_signature`，保持 Rust 风格。
+- 代码风格：继续沿用集中式 manager 缓存，未把 provider 选择逻辑散落到 UI。
+- 文件组织：只修改 `llm/manager.rs` 与 `ai_chat/stream.rs`。
+
+### 3. 对比了以下相似实现
+- `db_view/src/chatdb/chat_panel.rs`：这里构造 `ProviderConfig` 时已经会写入当前选中模型，本次让 ai_chat 路径对齐。
+- `llm/manager.rs` 原缓存逻辑：确认只按 `id` 复用，是本次真实根因之一。
+- `llm/connector.rs` 的阿里云模型路由补丁：确认需要与缓存修复同时存在才会在运行时生效。
+
+### 4. 未重复造轮子的证明
+- 没有新增第二套 provider 缓存层。
+- 没有在多个调用方分别绕过缓存，而是在 manager 内统一修正缓存命中规则。
+
+## 验证记录 - aliyun-provider-cache
+- `rustfmt --edition 2024 crates/core/src/llm/manager.rs crates/core/src/ai_chat/stream.rs`：通过。
+- `cargo test -p one-core provider_cache_signature_changes_with_model --lib`：通过。
+- `cargo check -p one-core`：通过。
+
+## 编码前检查 - db-tree-refresh-tokio-runtime
+时间：2026-03-25 10:45:01 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-tree-refresh-tokio-runtime.md`
+- 将使用以下可复用组件：
+  - `one_core::gpui_tokio::Tokio`：项目统一 Tokio runtime 包装。
+  - `GlobalNodeCache`：现有缓存失效入口，不改接口。
+  - `db_tree_view` 里已有 `Tokio::spawn_result` 持久化模式：作为刷新逻辑的对齐参考。
+- 将遵循命名约定：继续使用现有 `snake_case` 和中文日志。
+- 将遵循代码风格：只改 `refresh_tree` 的任务调度方式，不扩散到缓存实现层。
+- 确认不重复造轮子：已检查 `gpui_tokio.rs`、`db_connection_form.rs`、`db_tree_view.rs` 既有模式，无需自建 runtime 或新增 helper。
+
+## 编码后声明 - db-tree-refresh-tokio-runtime
+时间：2026-03-25 10:45:01 +0800
+
+### 1. 复用了以下既有组件
+- `one_core::gpui_tokio::Tokio`：用于把缓存失效 future 切到 Tokio runtime。
+- `GlobalNodeCache`：继续作为节点缓存和元数据失效的唯一入口。
+- `cx.spawn` + `this.update`：继续沿用 GPUI 侧后台任务结束后更新树的模式。
+
+### 2. 遵循了以下项目约定
+- 命名约定：沿用现有局部变量命名，没有新增额外抽象。
+- 代码风格：只调整 `refresh_tree` 中的后台执行边界，未修改 `NodeCache` 接口和行为。
+- 文件组织：改动集中在 `crates/db_view/src/db_tree_view.rs`。
+
+### 3. 对比了以下相似实现
+- `db_tree_view.rs` 的 `save_database_filter`：这里已经通过 `Tokio::spawn_result` 处理存储后台任务，本次刷新逻辑向它对齐。
+- `db_connection_form.rs` 的连接测试：同样在 `cx.spawn` 内使用 `Tokio::spawn_result` 执行依赖 Tokio 的异步工作。
+- `gpui_tokio.rs`：确认项目官方做法就是通过共享 runtime handle 调度 Tokio future。
+
+### 4. 未重复造轮子的证明
+- 没有在 `cache.rs` 中新增运行时判断或自建 runtime。
+- 没有引入第二套缓存失效接口，只是把原有调用放到正确的执行器上。
+
+## 验证记录 - db-tree-refresh-tokio-runtime
+- `rustfmt --edition 2024 crates/db_view/src/db_tree_view.rs`：通过。
+- `cargo check -p db_view`：通过。
+- `cargo test -p db_view sync_selected_databases_from_connection --lib`：通过。
+
+## 编码前检查 - db-connection-form-ssl
+时间：2026-03-25 13:35:05 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-connection-form-ssl.md`
+- 将使用以下可复用组件：
+  - `DbConnectionConfig.extra_params`：统一承载 SSL 扩展参数。
+  - `DbConnectionForm::build_connection/load_connection`：现有字段保存与回填链路。
+  - `DbConnectionConfig::get_param/get_param_as/get_param_bool`：驱动层读取扩展参数的统一入口。
+  - MSSQL 现有 `encrypt/trust_cert` 实现：作为驱动层 SSL 参数接入模式参考。
+- 将遵循命名约定：字段名和 extra_params key 均使用 `snake_case`。
+- 将遵循代码风格：UI 继续使用 `TabGroup/FormField` 配置式声明；驱动层只在建连阶段读取 SSL 参数，不改抽象边界。
+- 确认不重复造轮子：已检查存储模型和表单序列化逻辑，无需新增 SSL 专用持久化结构。
+
+## 编码后声明 - db-connection-form-ssl
+时间：2026-03-25 13:35:05 +0800
+
+### 1. 复用了以下既有组件
+- `DbConnectionConfig.extra_params`：直接保存 `require_ssl`、`ssl_mode` 等新增字段。
+- `DbConnectionForm::load_connection`：自动回填新增 SSL 字段，无需额外分支。
+- `MSSQL` 驱动已有 `encrypt/trust_cert`：继续沿用原行为，仅调整 UI 分组。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增字段和参数使用 `require_ssl`、`verify_ca`、`ssl_root_cert_path` 等 `snake_case` 名称。
+- 代码风格：保持“表单配置声明 + 驱动层解析参数”的现有架构，不引入新的状态对象。
+- 文件组织：UI 改动集中在 `db_connection_form.rs` 与 `db_view.yml`，驱动改动集中在 `mysql/connection.rs`、`postgresql/connection.rs` 和 Cargo 依赖配置。
+
+### 3. 对比了以下相似实现
+- `db_connection_form.rs` 原空白 `ssl` 标签页：本次用 helper 替换空白配置，并移除 Oracle 的误导性空页。
+- `mssql/connection.rs`：复用了通过 `extra_params` 控制建连行为的方式。
+- 本地依赖源码 `mysql_async` / `tokio-postgres` / `native-tls`：据当前锁定版本 API 接入，不依赖记忆猜测。
+
+### 4. 未重复造轮子的证明
+- 未新增新的连接配置结构或 SSL 专用存储表。
+- 未绕过现有 `DbConnectionConfig`，所有新增能力都通过既有 `extra_params` 和驱动扩展点落地。
+
+## 验证记录 - db-connection-form-ssl
+- `rustfmt --edition 2024 crates/db_view/src/common/db_connection_form.rs crates/db/src/mysql/connection.rs crates/db/src/postgresql/connection.rs`：通过。
+- `cargo check -p db_view`：通过。
+- `cargo test -p db ssl_ --lib`：通过。
+- `cargo test -p db_view ssl_tab --lib`：通过。
+
+## 编码前检查 - db-ssl-rustls-migration
+时间：2026-03-25 14:30:01 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-ssl-rustls-migration.md`
+- 将使用以下可复用组件：
+  - `ReqwestClient` 的 rustls provider 初始化模式：作为仓库内 `rustls 0.23` 既有参考。
+  - `DbConnectionConfig::get_param/get_param_bool`：继续承接 PostgreSQL/MySQL 的 SSL 参数读取。
+  - `MysqlDbConnection::build_ssl_opts`：确认 MySQL 只需 feature 切换，不扩散逻辑改动。
+  - 现有 `PostgresDbConnection::ssl_mode` 与 `Disable/非 Disable` 分支：保留连接流程结构。
+- 将遵循命名约定：继续使用现有 `snake_case` 参数键和中文日志。
+- 将遵循代码风格：依赖调整收敛在 `Cargo.toml`，驱动逻辑集中在 `postgresql/connection.rs`，不新增跨模块抽象。
+- 确认不重复造轮子：已检查仓库内 rustls 初始化模式、现有 SSL 参数契约与驱动 feature 能力，无需自建新的连接配置层。
+
+## 编码后声明 - db-ssl-rustls-migration
+时间：2026-03-25 14:30:01 +0800
+
+### 1. 复用了以下既有组件
+- `DbConnectionConfig.extra_params`：继续承载 `ssl_mode`、`ssl_root_cert_path`、`ssl_accept_invalid_certs`、`ssl_accept_invalid_hostnames`。
+- `PostgresDbConnection::ssl_mode`：保留原参数解析语义。
+- `MysqlDbConnection::build_ssl_opts`：未重写 MySQL TLS 逻辑，只把后端 feature 切到 rustls。
+- `ReqwestClient` 的 rustls provider 初始化模式：PostgreSQL TLS 构造时同样安装默认 provider。
+
+### 2. 遵循了以下项目约定
+- 命名约定：未更改任何已发布的 SSL 参数键，仍使用 `snake_case`。
+- 代码风格：PostgreSQL 继续在建连前集中构造 TLS connector；MySQL/ClickHouse/MSSQL 以依赖 feature 迁移为主。
+- 文件组织：改动集中在根 `Cargo.toml`、`crates/db/Cargo.toml` 与 `crates/db/src/postgresql/connection.rs`。
+
+### 3. 对比了以下相似实现
+- `reqwest_client/src/http_client_tls.rs`：证明仓库已有 `rustls 0.23` 的 provider 初始化方式，本次沿用这一习惯。
+- `mysql/connection.rs`：证明现有 SSL 参数契约已经稳定，迁移时不应改动表单和 `extra_params`。
+- 前一版 `postgresql/connection.rs`：证明连接流程和参数语义已存在，本次只替换 connector 与证书验证实现。
+
+### 4. 未重复造轮子的证明
+- 未新增新的数据库 SSL 配置结构或 UI 字段。
+- 未自行实现 PostgreSQL 的完整 TLS 连接器，而是复用 `tokio-postgres-rustls`。
+- 未把 feature 切换扩散到无关模块，MSSQL/ClickHouse 仍沿用原连接逻辑。
+
+## 验证记录 - db-ssl-rustls-migration
+- `cargo check -p db_view`：通过。
+- `cargo test -p db ssl_ --lib`：通过，7 个匹配测试全部通过。
+- `cargo test -p db_view ssl_tab --lib`：通过。
+
+## 编码前检查 - mysql-ssh-tls-lab-image-reuse
+时间：2026-03-25 15:09:17 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-mysql-ssh-tls-lab.md`
+- 将使用以下可复用组件：
+  - `.claude/mysql-ssh-tls-lab/docker-compose.yml`：当前方案B的服务编排入口。
+  - `.claude/mysql-ssh-tls-lab/verify.sh`：当前方案B的自动验证入口。
+  - `.claude/mysql-ssh-tls-lab/README.md`：当前方案B的参数与步骤说明。
+- 将遵循命名约定：Shell 与 Compose 变量使用全大写 `MYSQL_IMAGE`。
+- 将遵循代码风格：仅调整 `.claude` 下测试辅助文件，不改产品代码模块。
+- 确认不重复造轮子：沿用现有方案B目录结构，只消除内部镜像硬编码。
+
+## 编码后声明 - mysql-ssh-tls-lab-image-reuse
+时间：2026-03-25 15:09:17 +0800
+
+### 1. 复用了以下既有组件
+- `.claude/mysql-ssh-tls-lab/docker-compose.yml`：继续作为 MySQL 与 bastion 的统一编排入口。
+- `.claude/mysql-ssh-tls-lab/verify.sh`：继续作为三段式验证脚本，仅参数化镜像名。
+- `.claude/mysql-ssh-tls-lab/README.md`：继续承载 onetcli 表单填写与运行说明。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增变量名使用 `MYSQL_IMAGE`，符合 shell/compose 环境变量习惯。
+- 代码风格：只在测试辅助层做参数化，不引入新的脚本或目录。
+- 文件组织：改动全部收敛在项目本地 `.claude/mysql-ssh-tls-lab/`。
+
+### 3. 对比了以下相似实现
+- `docker-compose.yml` 原先把 MySQL 服务镜像写死为 `mysql:8.0`：本次改为 `${MYSQL_IMAGE:-mysql:8.4.5}`，保持 compose 语义不变。
+- `verify.sh` 原先只在 `docker run` 阶段写死 `mysql:8.0`：本次与 compose 共用同一个 `MYSQL_IMAGE` 默认值。
+- `README.md` 原先未说明镜像版本来源：本次补充默认值与覆盖方式，保证文档和脚本一致。
+
+### 4. 未重复造轮子的证明
+- 未新增新的测试脚本或第二套 compose 文件。
+- 未改动产品侧 MySQL/SSH/SSL 代码，仅复用现有方案B测试环境并做参数化。
+
+## 验证记录 - mysql-ssh-tls-lab-image-reuse
+- `zsh ./.claude/mysql-ssh-tls-lab/verify.sh`：已重新执行，当前确认默认走 `mysql:8.4.5`；剩余阻塞点是 bastion 首次构建依赖的 `ubuntu:24.04` 拉取/构建尚未完成。
+
+## 执行记录 - mysql-local-ssl-with-remote-sshd
+时间：2026-03-25 16:27:27 +0800
+
+- 复用 `.claude/mysql-ssh-tls-lab` 现有证书和 compose，只启动 `mysql` 服务，不再启动本地 bastion。
+- `docker compose -f ./.claude/mysql-ssh-tls-lab/docker-compose.yml up -d mysql`：通过。
+- `docker compose -f ./.claude/mysql-ssh-tls-lab/docker-compose.yml exec -T mysql mysqladmin ping -h 127.0.0.1 -uroot -prootpass`：通过，服务存活。
+- `docker compose -f ./.claude/mysql-ssh-tls-lab/docker-compose.yml exec -T mysql mysql -h 127.0.0.1 -P 3306 -uappuser -papppass appdb --ssl-mode=VERIFY_IDENTITY --ssl-ca=/etc/mysql/ssl/ca.pem -e "SELECT COUNT(*) AS direct_ssl_rows FROM smoke_test;"`：通过，结果为 `2`。
+- `mysql -h 127.0.0.1 -P 33306 -uappuser -papppass appdb --ssl-mode=VERIFY_IDENTITY --ssl-ca=/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/mysql/certs/ca.pem -e "SELECT COUNT(*) AS host_ssl_rows FROM smoke_test;"`：通过，结果为 `2`。
+- 说明：`docker run ... host.docker.internal:33306` 的证书校验失败是预期现象，因为服务端证书 SAN 不包含 `host.docker.internal`，实际 onetcli 经 SSH 隧道连库时使用的是 `127.0.0.1`，与现有证书 SAN 匹配。
+
+## 编码前检查 - mysql-rustls-provider-fix
+时间：2026-03-25 18:40:56 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-ssl-rustls-migration.md` 与 `.claude/context-summary-mysql-ssh-tls-lab.md`
+- 将使用以下可复用组件：
+  - `crates/reqwest_client/src/http_client_tls.rs`：仓库内既有的 `aws_lc_rs::default_provider().install_default().ok()` 模式。
+  - `crates/db/src/postgresql/connection.rs`：数据库层已存在的 rustls provider 安装逻辑。
+  - `crates/db/src/mysql/connection.rs`：当前 MySQL TLS 入口 `build_ssl_opts`。
+- 将遵循命名约定：公共 helper 使用 `ensure_rustls_crypto_provider`，与现有 `ensure_*` 风格一致。
+- 将遵循代码风格：把 provider 安装收敛成 db crate 公共 helper，避免在多个驱动里继续复制。
+- 确认不重复造轮子：已检查仓库已有 provider 安装实现，只做复用与统一，不引入第二套 TLS 初始化逻辑。
+
+## 编码后声明 - mysql-rustls-provider-fix
+时间：2026-03-25 18:40:56 +0800
+
+### 1. 复用了以下既有组件
+- `reqwest_client::http_client_tls`：沿用仓库既有的 `aws_lc_rs` provider 安装方式。
+- `PostgresDbConnection::build_tls_connector`：改为复用公共 helper，而不是保留重复安装代码。
+- `MysqlDbConnection::build_ssl_opts`：在进入 `mysql_async` rustls connector 前统一安装 provider。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增公共函数名使用 `snake_case`，模块名为 `rustls_provider`。
+- 代码风格：公共逻辑抽到 `crates/db/src/rustls_provider.rs`，驱动层只保留调用。
+- 文件组织：改动集中在 `db` crate 内，不扩散到 UI 或其它业务模块。
+
+### 3. 对比了以下相似实现
+- `crates/reqwest_client/src/http_client_tls.rs`：证明仓库已有安装默认 rustls provider 的成熟写法。
+- `crates/db/src/postgresql/connection.rs`：证明 PostgreSQL 已因 rustls 需要手动安装 provider。
+- `crates/db/src/mysql/connection.rs`：之前缺少同等安装步骤，因此在 `mysql_async` 首次构造 TLS connector 时 panic。
+
+### 4. 未重复造轮子的证明
+- 未在 MySQL 和 PostgreSQL 中各自新增一份相同初始化代码。
+- 新增的 `rustls_provider.rs` 仅封装现有仓库已采用的安装模式，并用 `Once` 保证进程级只初始化一次。
+
+## 验证记录 - mysql-rustls-provider-fix
+- `rustfmt --edition 2021 crates/db/src/rustls_provider.rs crates/db/src/lib.rs crates/db/src/mysql/connection.rs crates/db/src/postgresql/connection.rs`：通过。
+- `cargo check -p db`：通过。
+
+## 编码前检查 - bracketed-paste-fallback
+时间：2026-03-25 15:50:55 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-bracketed-paste-fallback.md`
+- 将使用以下可复用组件：
+  - `TerminalView::paste_text`：统一粘贴入口，继续作为唯一策略决策点。
+  - `TerminalView::show_paste_confirm_dialog`：复用现有确认对话样式。
+  - `TerminalView::contains_high_risk_command`：保留现有高危命令识别逻辑。
+  - `TerminalView::write_to_pty`：统一下发字节流，不新增旁路发送路径。
+- 将遵循命名约定：新增助手函数与测试使用 `snake_case`，中文注释只解释意图和约束。
+- 将遵循代码风格：改动收敛在 `crates/terminal_view/src/view.rs`，保持 `TerminalView -> Terminal -> Backend` 分层不变。
+- 确认不重复造轮子：已检查 `terminal_view`、`terminal`、`pty_backend` 与 sidebar 事件链路，仓库内不存在现成的无 bracketed paste 降级实现。
+- 外部依据：
+  - Context7 `/alacritty/alacritty`：确认 `CSI ? 2004 h/l` 为 bracketed paste 开关。
+  - `alacritty/alacritty`：核对终端仅在应用请求时按 paste 语义处理。
+  - `wezterm/wezterm`：核对“原始写入”和“发送 paste”是分离能力。
+- 本次决策：不在未开启 `BRACKETED_PASTE` 时伪造 `\x1b[200~...\x1b[201~`，而是在 `TerminalView` 层拦截 heredoc 等必须依赖原子块输入的高风险结构。
+
+## 编码后声明 - bracketed-paste-fallback
+时间：2026-03-25 16:12:44 +0800
+
+### 1. 复用了以下既有组件
+- `TerminalView::paste_text`：继续作为快捷键、右键菜单、快捷命令和 AI 代码块的统一粘贴入口。
+- `TerminalView::show_paste_confirm_dialog`：保留原有高危命令确认和普通多行确认的 UI 风格。
+- `TerminalView::write_to_pty`：所有最终发送仍复用既有 PTY 写入入口。
+- `main/locales/main.yml`：补齐 `TerminalView` / `TerminalSidebar` 缺失文案，避免新增提示显示原始 key。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `detect_unbracketed_paste_hazard`、`has_unterminated_shell_quote` 等函数均使用 `snake_case`。
+- 代码风格：把高风险判定拆成纯函数，并在 `view.rs` 底部沿用现有 `#[cfg(test)]` 单测模式。
+- 文件组织：产品逻辑只改 `crates/terminal_view/src/view.rs`，文案只改 `main/locales/main.yml`，未改 `terminal` / `pty_backend`。
+
+### 3. 对比了以下相似实现
+- `paste_text_unchecked` 原本在无 `BRACKETED_PASTE` 时直接原样写入：本次保留其职责，但在进入该函数前新增高风险拦截。
+- `show_paste_confirm_dialog` 原本用于“确认后仍发送”：本次新增 `show_unbracketed_paste_block_dialog`，用于必须阻断的 heredoc / 未闭合结构。
+- `Terminal::write` 与 `PtyWriteBack::write`：继续保持透明字节传输，不把粘贴语义下沉到后端。
+
+### 4. 未重复造轮子的证明
+- 未新增第二条粘贴事件链路，所有入口仍汇聚到 `TerminalView::paste_text`。
+- 未在 SSH、PTY 或 `Terminal` 层实现重复的风险检测逻辑。
+- 未伪造 bracketed paste 协议，而是复用终端现有 mode 判断并补充 view 层降级策略。
+
+## 验证记录 - bracketed-paste-fallback
+- `rustfmt --edition 2024 crates/terminal_view/src/view.rs`：通过。
+- `cargo test -p terminal_view --lib`：首次失败，原因是 `gpui` 的 Metal shader 编译尝试写入 `~/.cache/clang/ModuleCache`，被沙箱拒绝。
+- `env CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p terminal_view --lib`：在沙箱内重试仍失败，`gpui` 构建脚本继续写默认 clang 缓存路径。
+- `env CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p terminal_view --lib`（沙箱外）：通过，13 个测试全部通过。
+
+## 编码前检查 - db-connection-form-ssh-ssl-fixed
+时间：2026-03-25 21:40:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-db-connection-form-ssh-ssl-fixed.md`
+- 将使用以下可复用组件：
+  - `crates/db_view/src/common/db_connection_form.rs`：现有字段状态容器、回填与保存链路。
+  - `crates/terminal_view/src/ssh_form_window.rs`：`Checkbox/Radio/.when` 的固定代码渲染模式。
+  - `crates/db/src/ssh_tunnel.rs`：SSH 隧道字段键名与 `agent/private_key/password` 语义。
+  - `crates/core/src/storage/models.rs`：`DbConnectionConfig.extra_params` 与 `get_param_bool`。
+- 将遵循命名约定：新增 helper 和测试使用 `snake_case`，继续复用原有字段键名，不新增存储字段。
+- 将遵循代码风格：只在 `db_connection_form.rs` 内增加专用渲染分支和小型 helper，不改持久化结构。
+- 确认不重复造轮子：已检查仓库内现有表单联动模式，直接复用 `ssh_form_window.rs` 的交互结构，而不是再造新的表单框架。
+
+## 编码后声明 - db-connection-form-ssh-ssl-fixed
+时间：2026-03-25 21:57:00 +0800
+
+### 1. 复用了以下既有组件
+- `crates/db_view/src/common/db_connection_form.rs`：继续复用 `field_values`、`field_inputs`、`field_selects`、`set_field_value`、`get_field_value`、`build_connection`、`load_connection`。
+- `crates/terminal_view/src/ssh_form_window.rs`：复用 `Checkbox + Radio + .when(...)` 的固定代码渲染组织方式。
+- `crates/db/src/ssh_tunnel.rs`：继续复用 `ssh_tunnel_enabled`、`ssh_auth_type`、`ssh_password`、`ssh_private_key_path` 等既有存储键和语义。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增纯函数与 helper 使用 `snake_case`，未改动既有连接参数键名。
+- 代码风格：通用字段初始化/回填机制保留，仅在 `render()` 中为 `ssl/ssh` 标签页增加专用渲染分支。
+- 文件组织：功能改动和测试都收敛在 `crates/db_view/src/common/db_connection_form.rs`，未扩散到存储层。
+
+### 3. 对比了以下相似实现
+- `ssh_form_window.rs` 的跳板机/代理页签：本次直接借用其“复选框控制整块显示”的模式，差异是数据库表单继续写回 `extra_params`。
+- 原 `db_connection_form.rs` 的通用配置式渲染：本次未删除状态容器，只替换 `ssl/ssh` 的展示层，避免破坏回填和保存。
+- `db/src/ssh_tunnel.rs` 的认证解析：既有逻辑已支持 `agent`，因此本次把 UI 和校验对齐到同一语义。
+
+### 4. 未重复造轮子的证明
+- 未新增新的表单状态结构或第二套持久化模型。
+- 未为 `ssl/ssh` 另起一套保存/回填链路，仍走 `DbConnectionConfig.extra_params`。
+- 未复制 `ssh_form_window.rs` 的整段实现，只复用了交互模式并映射到数据库表单字段。
+
+## 验证记录 - db-connection-form-ssh-ssl-fixed
+- `rustfmt --edition 2021 crates/db_view/src/common/db_connection_form.rs`：通过。
+- `CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p db_view --lib db_connection_form`：通过，6 个相关测试全部通过。
+- `cargo check -p db_view`：通过。
+
+## 编码前检查 - home-encourage-tab
+时间：2026-03-25 19:39:55 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-home-encourage-tab.md`
+- 将使用以下可复用组件：
+  - `main/src/home/home_tabs.rs`：`add_settings_tab` 的单实例页签打开模式。
+  - `main/src/encourage.rs`：现有赞赏内容渲染逻辑和二维码资源加载。
+  - `main/src/setting_tab.rs`：`TabContent` 实现约定。
+  - `crates/core/src/tab_container.rs`：`TabContent` / `TabItem` 接口约束。
+- 将遵循命名约定：新增方法使用 `snake_case`，面板类型使用 `PascalCase`。
+- 将遵循代码风格：尽量复用现有视图和 `activate_or_add_tab_lazy`，不新增重复 UI 组件。
+- 确认不重复造轮子：已检查首页底部入口、设置页签和赞赏视图，确定直接复用而非新建第二套支持作者页面。
+
+## 编码后声明 - home-encourage-tab
+时间：2026-03-25 19:39:55 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/encourage.rs`：继续复用原有赞赏内容、二维码图片加载和 GitHub 链接区域，只补页签接口。
+- `main/src/home/home_tabs.rs`：复用 `add_settings_tab` 的单实例页签打开模式，新加 `add_encourage_tab`。
+- `crates/core/src/tab_container.rs`：严格按 `TabContent` 和 `TabItem` 约定接入页签容器。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `add_encourage_tab`，新类型命名为 `EncouragePanel`，与 `SettingsPanel` 保持一致。
+- 代码风格：入口逻辑仍由 `HomePage` 驱动，具体页签内容继续放在独立文件 `encourage.rs`。
+- 文件组织：只改 `main/src/encourage.rs`、`main/src/home/home_tabs.rs`、`main/src/home_tab.rs`，未扩散到其他模块。
+
+### 3. 对比了以下相似实现
+- `show_encourage_dialog`：原本通过 `window.open_dialog` 弹框展示；本次改为页签打开，原因是用户需要更大的展示空间和与设置一致的交互。
+- `add_settings_tab`：本次直接沿用其单实例模式，差异仅是页签类型和标题不同。
+- `open_ssh_terminal` / `open_sftp_view`：这些是多实例页签模式；本次不采用，因为“支持作者”不需要重复多开。
+
+### 4. 未重复造轮子的证明
+- 未新增第二套赞赏 UI，而是直接把现有 `encourage.rs` 升级为 `TabContent`。
+- 未自建新的页签管理逻辑，而是完全复用 `tab_container` 现有 API。
+- 未引入额外持久化恢复实现；当前仓库未发现实际 registry 注册入口，本次保持最小改动。
+
+## 验证记录 - home-encourage-tab
+- `rustfmt --edition 2024 main/src/encourage.rs main/src/home/home_tabs.rs main/src/home_tab.rs`：通过。
+- `cargo check -p main`：失败，失败原因来自既有文件 `crates/db_view/src/common/db_connection_form.rs`，出现多处 `Field: From<AnyElement>` 相关编译错误，与本次改动无关。
+- `cargo check -p main --keep-going --message-format short 2>&1 | rg 'main/src/(encourage|home_tab|home/home_tabs)\\.rs|error\\['`：通过过滤确认，本次改动文件未出现新的编译错误输出。
+- `rustfmt --edition 2024 main/src/encourage.rs main/src/home_tab.rs`（布局与图标二次调整后）：通过。
+- `cargo check -p main --keep-going --message-format short 2>&1 | rg 'main/src/(encourage|home_tab)\\.rs|error\\['`（布局与图标二次调整后）：无输出，说明 `encourage.rs` / `home_tab.rs` 本次调整未引入新错误。
+
+## 编码前检查 - oracle-connection
+时间：2026-03-26 09:12:31 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-oracle-connection.md`
+- 将使用以下可复用组件：
+  - `crates/db/src/oracle/connection.rs`：现有 Oracle 连接、执行、流式执行和 `SqlResult` 组装逻辑。
+  - `crates/db/src/postgresql/connection.rs`：按列类型分支读取值、格式化日期时间的模式。
+  - `crates/db/src/mssql/connection.rs`：有序降级的 `extract_value` 组织方式。
+  - `crates/db/src/sqlite/connection.rs`：二进制转十六进制字符串的展示方式。
+- 将遵循命名约定：新增 helper 使用 `snake_case`，维持 `OracleDbConnection` 现有结构和方法命名。
+- 将遵循代码风格：只修改 Oracle 取值层与列类型显示，不重构连接/执行主干。
+- 确认不重复造轮子：已检查 PostgreSQL、MSSQL、SQLite 的现有取值模式，直接复用“按数据库类型分支”的既有思路，而不是新造一套结果映射框架。
+
+## 编码后声明 - oracle-connection
+时间：2026-03-26 09:12:31 +0800
+
+### 1. 复用了以下既有组件
+- `crates/db/src/oracle/connection.rs`：保留 `connect/disconnect/execute/query/execute_streaming` 的既有流程，只调整结果值提取。
+- `crates/db/src/postgresql/connection.rs`：复用日期时间按类型格式化输出的策略。
+- `crates/db/src/mssql/connection.rs`：复用“优先精确类型，失败再降级”的提取模式。
+- `crates/db/src/sqlite/connection.rs`：复用二进制值以 `0x...` 字符串展示的约定。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `format_binary`、`format_naive_date_time`、`extract_scalar_value` 等 helper，全部使用 `snake_case`。
+- 代码风格：取值结果仍统一归一到 `Option<String>`，未改 `SqlResult::Query` 的结构与调用方契约。
+- 文件组织：所有代码改动收敛在 `crates/db/src/oracle/connection.rs`，留痕文件写入项目本地 `.claude/`。
+
+### 3. 对比了以下相似实现
+- `postgresql/connection.rs`：该实现按列类型显式分支处理 `TIMESTAMP/TIMESTAMPTZ/DATE/TIME/BYTEA`；本次 Oracle 改为按 `OracleType` 分支，理由是同类数据库驱动也需要类型驱动。
+- `mssql/connection.rs`：该实现对文本、数值、布尔和 chrono 类型做顺序尝试；本次 Oracle 保留了顺序降级，但先由 `OracleType` 缩小范围。
+- `sqlite/connection.rs`：该实现把二进制转成 `0x...`；本次 Oracle 的 `RAW/BLOB/BFILE` 采用相同展示策略，避免 UI 层看到不可显示字节。
+
+### 4. 未重复造轮子的证明
+- 未新增新的查询结果模型或通用适配层，继续复用 `QueryResult` / `QueryColumnMeta`。
+- 未修改 Oracle 连接和执行流程，只替换原本过于粗糙的 `extract_value` 实现。
+- 未新增数据库公共抽象，因为当前仓库对不同数据库仍采用各自 `extract_value` 的本地实现模式。
+
+## 验证记录 - oracle-connection
+- `rustfmt --edition 2021 crates/db/src/oracle/connection.rs`：通过。
+- `cargo check -p db`：通过。
+- 限制：当前未连接真实 Oracle 实例，无法做运行时集成验证；本次仅确认编译正确和类型映射路径完整。
+
+## 编码前检查 - typos-ci-fix
+时间：2026-03-26 10:09:42 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-typos-ci-fix.md`
+- 将使用以下可复用组件：
+  - `Cargo.toml`：现有 `workspace.metadata.typos` 配置入口。
+  - `.github/workflows/ci.yml`：当前 CI 的 `typos` 执行方式。
+  - `crates/db/src/mssql/plugin.rs` 与 `crates/db/src/sqlite/plugin.rs`：`IIF(...)` 合法 SQL 函数字面量。
+  - `crates/db_view/src/sql_inline_completion.rs`：补全前缀/后缀字面量及断言模式。
+- 将遵循命名约定：继续使用 TOML 分段配置，不引入新的文件或命名体系。
+- 将遵循代码风格：优先集中配置修复，避免修改业务逻辑与测试语义。
+- 确认不重复造轮子：已检查根 `Cargo.toml`、CI workflow、数据库插件和补全测试，确认直接扩展现有 typos 配置即可，无需新建 `_typos.toml` 或重构补全实现。
+
+## 需求变更记录 - typos-ci-fix
+时间：2026-03-26 10:11:45 +0800
+
+- 用户将需求从“修复 `typos` 误报”改为“去掉这个检查”。
+- 因此实施方案从扩展白名单切换为删除 `typos` 检查链路。
+- 受影响范围重新确认如下：
+  - `.github/workflows/ci.yml`：删除 `Typo check` 步骤。
+  - `Cargo.toml`：删除 `workspace.metadata.typos` 配置段。
+  - `README.md`、`README_CN.md`、`CLAUDE.md`：删除开发命令中的 `typos` 说明。
+
+## 编码后声明 - typos-ci-fix
+时间：2026-03-26 10:12:34 +0800
+
+### 1. 复用了以下既有组件
+- `.github/workflows/ci.yml`：沿用现有 CI 结构，仅删除 `Typo check` 单一步骤，不改其余 job 顺序。
+- `Cargo.toml`：直接清理原有 `workspace.metadata.typos` 配置入口，不新增替代配置文件。
+- `README.md`、`README_CN.md`、`CLAUDE.md`：沿用现有开发命令展示结构，仅删除 `typos` 一项。
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增任何代码标识符，保持现有文件命名和配置分段方式不变。
+- 代码风格：采用最小改动策略，只移除检查链路本身，不碰数据库插件与 SQL 补全逻辑。
+- 文件组织：变更集中在 CI、根配置和开发文档，没有扩散到业务 crate。
+
+### 3. 对比了以下相似实现
+- `.github/workflows/ci.yml`：原先的 `Typo check` 与 `Lint`/`Test` 同级串联；本次只移除 `Typo check`，保留其它检查链路。
+- `Cargo.toml`：原先工具配置直接挂在 `workspace.metadata`；本次按同一入口直接删除，不改用 `_typos.toml` 等替代方案。
+- `README.md` / `README_CN.md` / `CLAUDE.md`：原先都把 `typos` 列为开发命令；本次同步删除，保证文档与 CI 一致。
+
+### 4. 未重复造轮子的证明
+- 未继续维护刚才尝试过的白名单方案，避免在检查被整体移除后留下无用途配置。
+- 未新建额外脚本或条件开关，直接删除原有入口，符合“去掉这个检查”的用户意图。
+- 未修改 `crates/db` 与 `crates/db_view` 中的 SQL 字符串和测试字面量，避免无关变更。
+
+## 验证记录 - typos-ci-fix
+- `cargo metadata --format-version 1 --no-deps >/dev/null`：通过，确认移除 `workspace.metadata.typos` 后根 `Cargo.toml` 仍然有效。
+- 使用搜索验证 `Cargo.toml|README.md|README_CN.md|CLAUDE.md|*.yml` 中的 `typos`：无匹配，说明 CI、根配置和开发文档中的 `typos` 入口已全部移除。
+- `git diff -- .github/workflows/ci.yml Cargo.toml README.md README_CN.md CLAUDE.md`：确认差异仅包含删除 `typos` 检查步骤、配置和文档说明。
+
+## 编码前检查 - encourage-unused-imports
+时间：2026-03-26 10:18:25 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-encourage-unused-imports.md`
+- 将使用以下可复用组件：
+  - `main/src/encourage.rs`：当前纯渲染实现，作为直接修复目标。
+  - `main/src/setting_tab.rs`：`SettingsPanel` 的 `TabContent` / `TabContentEvent` 正常使用模式。
+  - `main/src/home_tab.rs`：`HomePage` 的 `TabContent` / 交互 trait 正常使用模式。
+- 将遵循命名约定：不新增命名，只清理实际未使用导入。
+- 将遵循代码风格：采用最小修改原则，不调整渲染逻辑和页签行为。
+- 确认不重复造轮子：这是现有文件的遗留导入问题，只需对齐当前职责并删除无用项，无需引入额外封装。
+
+## 编码后声明 - encourage-unused-imports
+时间：2026-03-26 10:19:36 +0800
+
+### 1. 复用了以下既有组件
+- `main/src/encourage.rs`：保留现有支持内容渲染结构，只调整文件顶部导入列表。
+- `main/src/setting_tab.rs`：作为真正实现 `TabContent`/`TabContentEvent` 的参考，确认当前文件不再需要这些导入。
+- `main/src/home_tab.rs`：作为真正依赖 `InteractiveElement`/`StatefulInteractiveElement`/`Window` 的参考，确认当前文件导入应与职责一致。
+
+### 2. 遵循了以下项目约定
+- 命名约定：未引入新标识符，仅清理导入。
+- 代码风格：保持 Rust 导入分组和多行格式，与仓库现有写法一致。
+- 文件组织：改动收敛在 `main/src/encourage.rs` 和 `.claude` 留痕文件，没有扩散到其他模块。
+
+### 3. 对比了以下相似实现
+- `setting_tab.rs`：该文件确实实现了 `impl EventEmitter<TabContentEvent>` 和 `impl TabContent`，因此保留相关导入；`encourage.rs` 没有这些实现，所以不应照搬。
+- `home_tab.rs`：该文件的交互 trait 导入服务于真实方法调用和页签实体实现；`encourage.rs` 已退化为纯渲染模块，不再需要这些 trait。
+- `encourage.rs` 当前正文：全文只有渲染辅助函数和数据加载结构，没有使用 `Window` 或 `TabContentEvent` 的签名或类型位点。
+
+### 4. 未重复造轮子的证明
+- 未为 unused import 问题增加 `#[allow(unused_imports)]` 之类的规避性属性。
+- 未修改任何 UI 结构、页签注册或渲染逻辑，只做真正必要的导入清理。
+
+## 验证记录 - encourage-unused-imports
+- `cargo check -p main --all-targets`：通过，确认 `main/src/encourage.rs` 的 unused imports 已消失，且 `main` crate 全 targets 仍可编译。
+
+## 编码前检查 - ci-followup-build-ssh
+时间：2026-03-26 10:36:52 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-ci-followup-build-ssh.md`
+- 将使用以下可复用组件：
+  - `crates/core/build.rs`：当前触发 `collapsible_if` 的 build script。
+  - `main/build.rs`：相同环境变量导出模式，适合一并统一。
+  - `crates/ssh/src/ssh.rs`：Windows 测试下出现 unused/dead code 的测试模块。
+- 将遵循命名约定：不新增业务命名，只做条件编译和 let-chain 收敛。
+- 将遵循代码风格：优先语义等价修复，不使用 `#[allow(...)]` 绕过。
+- 确认不重复造轮子：这是现有实现的 lint/条件编译收尾问题，只需直接修正原代码。
+
+## 编码后声明 - ci-followup-build-ssh
+时间：2026-03-26 10:40:21 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/build.rs`：沿用现有环境变量导出逻辑，仅把嵌套 `if` 改成 let-chain。
+- `main/build.rs`：对齐同样的 build script 写法，避免同类 Clippy 问题后续继续冒出。
+- `crates/ssh/src/ssh.rs`：保留现有测试逻辑，仅把 Unix 专用 helper 与同步原语导入收紧到 `#[cfg(unix)]`。
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增业务标识符，只调整条件编译和局部参数传递。
+- 代码风格：不用 `allow` 压警告，直接按 Clippy 建议修正源码。
+- 文件组织：改动收敛在两个 build script 和一个 ssh 测试模块。
+
+### 3. 对比了以下相似实现
+- `crates/core/build.rs` 与 `main/build.rs`：两者本来就是同一模式，本次统一为 let-chain，避免只修一处。
+- `ssh.rs` 测试模块：`test_auth_failure_messages` 与 `Mutex/OnceLock` 只被 `#[cfg(unix)]` 测试使用，因此改为同样受 `#[cfg(unix)]` 约束。
+- `ssh.rs` 公钥认证逻辑：`hash_alg` 是 `Option<HashAlg>`，属于 `Copy`，直接传值即可，不需要 `clone()`。
+
+### 4. 未重复造轮子的证明
+- 未引入新的测试辅助结构，只收紧现有 helper 的平台作用域。
+- 未改动任何认证行为、错误消息内容或 build script 的环境变量清单。
+
+## 验证记录 - ci-followup-build-ssh
+- `cargo test -p ssh --lib`：通过，当前平台下 ssh 单元测试通过。
+- `cargo clippy -p one-core -p main --all-targets -- -D warnings`：本次修复的 `crates/core/build.rs`、`main/build.rs` 与 `crates/ssh/src/ssh.rs` 问题已不再出现；但命令继续暴露出 `crates/one_ui` 与 `crates/core` 中大量既有 Clippy 报错，暂未完成全量清理。
+
+## 编码前检查 - superpowers-install
+时间：2026-03-26 11:00:09 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-superpowers-install.md`
+- 已分析相似实现：
+  - `.claude/context-summary-terminal-scroll.md`
+  - `.claude/context-summary-release-workflow-migration.md`
+  - `.claude/context-summary-ssh-agent-auth.md`
+- 将使用以下可复用组件：
+  - `obra/superpowers` 的 `.codex/INSTALL.md`：作为安装、迁移与验证步骤的唯一外部依据。
+  - `.claude/operations-log.md`：沿用“编码前检查 / 编码后声明 / 验证记录”写法。
+  - `.claude/verification-report.md`：沿用本地审查报告结构。
+- 将遵循命名约定：任务名使用 `superpowers-install`，文档和日志文件继续使用项目既有命名。
+- 将遵循代码风格：只记录事实，不引入与安装无关的仓库代码改动；所有说明保持简体中文。
+- 确认不重复造轮子，证明：官方文档已给出标准安装路径和验证方式，本次只按文档落地并复用仓库现有留痕模板，不新增自定义脚本或额外安装机制。
+
+## 编码后声明 - superpowers-install
+时间：2026-03-26 11:05:28 +0800
+
+### 1. 复用了以下既有组件
+- `obra/superpowers` 的 `.codex/INSTALL.md`：直接复用官方“clone + symlink + restart + verify”流程。
+- `.claude/context-summary-superpowers-install.md`：作为本次环境安装的事实与风险基线。
+- `.claude/verification-report.md`：沿用既有评分和结论格式，记录本地验证结果。
+
+### 2. 遵循了以下项目约定
+- 命名约定：文档继续使用 `superpowers-install` 任务名，实际安装路径完全遵循官方命名。
+- 代码风格：未修改 onetcli 源码，只在 `.claude/` 目录追加留痕文档。
+- 文件组织：安装资产放在用户主目录 `/Users/hufei/.codex` 与 `/Users/hufei/.agents`，项目内只保留上下文、日志和审查报告。
+
+### 3. 对比了以下相似实现
+- `.claude/context-summary-terminal-scroll.md`：复用了固定七段结构的上下文摘要写法。
+- `.claude/context-summary-release-workflow-migration.md`：参考了“环境/流程类任务也要落本地验证与风险说明”的模式。
+- `.claude/context-summary-ssh-agent-auth.md`：复用了“外部来源 + 本地核验”双证据链写法。
+
+### 4. 未重复造轮子的证明
+- 没有新增安装脚本、复制技能目录或修改 Codex 全局配置，而是直接使用官方建议的仓库 clone 与软链接机制。
+- 已检查 `/Users/hufei/.codex/AGENTS.md`，文件为空，不存在 `superpowers-codex bootstrap` 旧块，因此无需额外迁移操作。
+
+## 实施与验证记录 - superpowers-install
+时间：2026-03-26 11:05:28 +0800
 
 ### 已完成修改
-- `crates/ui/src/text/inline.rs`
-  - 选区背景改为先画后文字再画，避免半透明遮罩盖在字上
-- `crates/ui/src/input/element.rs`
-  - 新增 `selection_bg_segments(...)`
-  - 将 selection 区间接入 `split_runs_by_bg_segments(...)`，让输入框选中文字自动切换高对比前景色
-- `crates/ui/src/theme/schema.rs`
-  - 删除对 `selection` / `list_active` / `table_active` 的强制 alpha 压低逻辑
-- `crates/ui/src/theme/default-theme.json`
-  - 提升 light/dark 默认 `list.active.background`
-  - 新增 light/dark 默认 `table.active.background`
-  - 为 light 主题补齐 `selection.background`
+- 执行 `git clone https://github.com/obra/superpowers.git /Users/hufei/.codex/superpowers`，完成官方仓库克隆。
+- 执行 `mkdir -p /Users/hufei/.agents/skills && ln -s /Users/hufei/.codex/superpowers/skills /Users/hufei/.agents/skills/superpowers`，完成原生技能发现软链接创建。
+- 检查 `/Users/hufei/.codex/AGENTS.md`，确认为空文件，无旧 bootstrap 配置需要删除。
 
 ### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p gpui-component input::element::tests --lib`
-  - 结果：通过
+- `ls -la /Users/hufei/.agents/skills/superpowers`
+  - 结果：通过，输出为 `lrwxr-xr-x ... /Users/hufei/.agents/skills/superpowers -> /Users/hufei/.codex/superpowers/skills`，说明软链接存在且目标正确。
+- `ls -la /Users/hufei/.codex/superpowers/skills`
+  - 结果：通过，目录存在，已包含 `brainstorming`、`using-superpowers`、`writing-plans` 等技能子目录。
+- `read_file /Users/hufei/.codex/AGENTS.md`
+  - 结果：通过，文件共 0 行，不存在 `superpowers-codex bootstrap` 迁移残留。
 
 ### 当前限制
-- 当前没有桌面 GUI 自动化测试，仍建议你手动确认 AI 消息、输入框和数据表中实际选中效果
-- 这次没有为列表/表格单独切换前景色，而是通过更强的背景对比度解决；如果你还觉得不够明显，可以再继续把行/单元格前景色也纳入主题 token
+- 按官方文档要求，仍需重启 Codex CLI 才会在当前环境中发现新技能；这一步无法在本会话内自动验证。
 
-## 编码前检查 - sync-item-name-placeholder-backfill
-时间：2026-03-25 17:06:47 +0800
+## 编码前检查 - window-not-found-fix
+时间：2026-03-26 11:31:00 +0800
 
-- 已查阅上下文摘要文件：`.claude/context-summary-sync-item-name-placeholder-backfill.md`
+- 已查阅上下文摘要文件：`.claude/context-summary-window-not-found-fix.md`
 - 已分析相似实现：
-  - `crates/core/src/cloud_sync/service.rs`
-  - `crates/core/src/cloud_sync/generic_sync.rs`
-  - `crates/core/src/cloud_sync/connection_sync.rs`
-  - `sync_server/server/migrations/003_add_sync_item_name.sql`
-- 将使用以下可复用组件：
-  - `CloudSyncData`：承载统一名称判定，避免客户端两套同步逻辑继续分叉
-  - `build_name_map` / `build_cloud_name_map`：继续作为名称解析入口，只替换判定条件
-  - `sync_server/server/migrations`：通过独立 migration 规范化旧占位值
-- 将遵循命名约定：统一使用“resolved name / backfill name”语义，不再散落写空串判断
-- 将遵循代码风格：最小化补丁，不改现有同步协议和 Web 展示层
-- 确认不重复造轮子，证明：名称明文上传链路已经存在，本次只修旧数据占位值识别
-- 工具说明：仓库要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`，但当前会话未提供这些工具；已改用本地源码检索与构建验证作为替代并留痕
-
-## 编码后声明 - sync-item-name-placeholder-backfill
-时间：2026-03-25 17:06:47 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/cloud_sync/models.rs::CloudSyncData`：新增统一名称判定方法，避免同步逻辑分叉
-- `crates/core/src/cloud_sync/generic_sync.rs::build_name_map`：继续承担通用同步名称映射
-- `crates/core/src/cloud_sync/connection_sync.rs::build_cloud_name_map`：继续承担连接同步名称映射
-- `sync_server/server/migrations`：沿用既有数据库迁移机制修正服务端旧数据
-
-### 2. 遵循了以下项目约定
-- 命名约定：模型层方法命名为 `has_resolved_name` / `needs_name_backfill`
-- 代码风格：客户端兼容判断收敛到模型方法，服务端旧数据修复通过独立 `004` migration 处理
-- 文件组织：Rust 逻辑只改 `cloud_sync` 模块，服务端只新增一个 migration 文件
-
-### 3. 对比了以下相似实现
-- `service.rs`：明文名称上传链路已经正确，因此未改上传构造
-- `generic_sync.rs`：通用同步原先只把空名称视为缺失名称，本次扩展为“空名称或占位名称”
-- `connection_sync.rs`：连接同步原先复制了同样的空名称判断，本次同步收敛到同一模型方法
-
-### 4. 未重复造轮子的证明
-- 已检查 `CloudSyncData`、通用同步、连接同步和服务端迁移
-- 结论：当前问题是旧占位值识别错误，不需要新增新的同步字段、接口或展示逻辑
-
-## 实施与验证记录 - sync-item-name-placeholder-backfill
-时间：2026-03-25 17:06:47 +0800
-
-### 已完成修改
-- `crates/core/src/cloud_sync/models.rs`
-  - 新增 `has_resolved_name` / `needs_name_backfill`
-  - 补充占位名称判定单元测试
-- `crates/core/src/cloud_sync/generic_sync.rs`
-  - 名称映射不再把 `name == id` 当成真实名称
-  - 同步计划会把占位名称记录加入云端回填
-- `crates/core/src/cloud_sync/connection_sync.rs`
-  - 连接同步使用同一套占位名称判定
-- `sync_server/server/migrations/004_normalize_sync_item_placeholder_name.sql`
-  - 将历史 `name = id` 的占位值规范化为空串，等待下一次同步自动补写真实名称
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p one-core cloud_sync::models::tests --lib`
-  - 结果：通过
-- `npm --prefix sync_server/server run check`
-  - 结果：通过
-- `npm --prefix sync_server/web run build`
-  - 结果：通过
-
-### 当前限制
-- 历史已删除且本地已不存在源对象的记录，客户端无法回填真实名称
-- 极少数真实名称刚好等于云端 `id` 的记录，会被当作占位值重新回填
-
-## 编码前检查 - sync-server-sync-item-local-decrypt
-时间：2026-03-25 16:06:01 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-item-local-decrypt.md`
-□ 将使用以下可复用组件：
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`：复用详情页加载与展示结构
-- `sync_server/web/src/views/user/ProfileView.vue`：复用密码表单和消息提示交互模式
-- `sync_server/web/src/views/user/DashboardView.vue`：复用同步配置读取能力与 keyVerification 语义
-- `sync_server/web/src/services/api.ts`：复用 `getSyncItem()` 和 `getSyncConfig()` 接口
-- `crates/core/src/crypto.rs`：复用实际加解密算法约束
-□ 将遵循命名约定：新增 `masterKey`、`decrypting`、`decryptedPlaintext`、`configLoadFailed` 等语义化命名
-□ 将遵循代码风格：继续使用 `script setup + Composition API`，把通用解密逻辑下沉到 `src/utils/`
-□ 确认不重复造轮子，证明：已检查 `SyncItemDetailView.vue`、`ProfileView.vue`、`DashboardView.vue`、`api.ts`，当前没有现成的前端解密工具可直接复用
-
-## 执行记录 - sync-server-sync-item-local-decrypt
-时间：2026-03-25 16:06:01 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-- `sync_server/web/src/views/user/ProfileView.vue`
-- `sync_server/web/src/views/user/DashboardView.vue`
-- `sync_server/web/src/services/api.ts`
-- `sync_server/web/src/types/api.ts`
-- `crates/core/src/crypto.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `main/locales/main.yml`
-
-### 2. 对比的相似实现
-- `sync_server/web/src/views/user/SyncItemDetailView.vue:1`：详情页基础结构和加载模式
-- `sync_server/web/src/views/user/ProfileView.vue:12`：密码输入表单和提示块模式
-- `sync_server/web/src/views/user/DashboardView.vue:65`：同步配置读取与说明文案模式
-- `crates/core/src/crypto.rs:356`：需要前端严格对齐的加解密算法入口
-
-### 3. 当前发现
-- `sync_server` 服务端按设计只存储和返回密文，本身没有解密能力
-- `keyVerification` 可以用于校验主密钥是否正确，但无法从中反推出主密钥
-- 云同步 `encryptedData` 实际是整段 JSON 明文整体加密，解密后适合直接格式化为 JSON 展示
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Node 构建命令完成检索与验证
-
-## 编码后声明 - sync-server-sync-item-local-decrypt
-时间：2026-03-25 16:11:59 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`：继续作为同步项详情唯一页面
-- `sync_server/web/src/services/api.ts`：继续复用 `getSyncItem()` 与 `getSyncConfig()` 接口
-- `sync_server/web/src/views/user/ProfileView.vue`：沿用密码输入表单和消息提示交互样式
-- `crates/core/src/crypto.rs`：前端按同一算法复刻主密钥校验和解密
-- `crates/core/src/cloud_sync/service.rs`：沿用“整段 JSON 明文整体加密”的数据约束
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `masterKey`、`decrypting`、`decryptedPlaintext`、`configLoadFailed`、`formattedDecryptedPayload`
-- 代码风格：继续使用 `script setup + Composition API`，把通用逻辑放到 `src/utils/syncCrypto.ts`
-- 文件组织：详情页只负责交互与展示，算法和字节处理沉到工具文件
-
-### 3. 对比了以下相似实现
-- `sync_server/web/src/views/user/SyncItemDetailView.vue:1`：保留原有详情页布局，只在右侧信息区新增本地解密卡片
-- `sync_server/web/src/views/user/ProfileView.vue:10`：沿用密码表单和提示块模式
-- `sync_server/web/src/views/user/DashboardView.vue:65`：沿用同步配置读取与 keyVerification 的前端使用方式
-- `crates/core/src/crypto.rs:356`：严格对齐 `ENC:` 前缀、固定 salt 和 `AES-256-GCM` 解密流程
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/web/src/views/user/SyncItemDetailView.vue`、`sync_server/web/src/views/user/ProfileView.vue`、`sync_server/web/src/views/user/DashboardView.vue`、`sync_server/web/src/services/api.ts`
-- 最终没有改后端接口，也没有把主密钥发送到服务端，而是在现有详情页上新增浏览器本地解密能力
-
-### 5. 本地验证结果
-- `npm --prefix sync_server/web run build`：通过
-- `npm --prefix sync_server/web run build`（补空输入提示后复验）：通过
-
-### 6. 风险与限制
-- 当前仓库没有浏览器级自动化测试，本次只能验证构建通过，仍建议你实际输入一次主密钥确认明文展示效果
-- 如果浏览器环境不支持 `Web Crypto API`，页面会提示无法本地解密
-
-## 编码前检查 - remove-team-ui-from-desktop-forms
-时间：2026-03-25 13:45:14 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-remove-team-ui-from-desktop-forms.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs`：桌面端连接窗口配置汇总与连接卡片展示
-- `crates/db_view/src/common/db_connection_form.rs`：数据库连接表单的保存归一模式
-- `crates/terminal_view/src/ssh_form_window.rs`：已移除团队 UI 的参考实现
-- `crates/redis_view/src/redis_form_window.rs`：已移除团队 UI 的参考实现
-- `crates/core/src/certificate_manager.rs`：凭证管理编辑窗口
-□ 将遵循命名约定：继续使用 `*FormWindowConfig`、`team_id`、`owner_id` 等既有命名，不引入新概念
-□ 将遵循代码风格：仅删除桌面端团队 UI、配置透传和保存透传，不顺手改造底层同步/存储结构
-□ 确认不重复造轮子，证明：已检查 `db_connection_form.rs`、`ssh_form_window.rs`、`redis_form_window.rs`、`mongo_form_window.rs`、`serial_form_window.rs`、`certificate_manager.rs`、`home_tab.rs`
-
-## 执行记录 - remove-team-ui-from-desktop-forms
-时间：2026-03-25 13:45:14 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `crates/db_view/src/connection_form_window.rs`
-- `crates/db_view/src/common/db_connection_form.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/mongodb_view/src/mongo_form_window.rs`
-- `crates/terminal_view/src/serial_form_window.rs`
-- `crates/core/src/certificate_manager.rs`
-- `crates/core/src/cloud_sync/sync_server.rs`
-
-### 2. 对比的相似实现
-- `crates/db_view/src/common/db_connection_form.rs`：数据库连接表单保存时统一 `team_id = None`
-- `crates/terminal_view/src/ssh_form_window.rs`：SSH 表单已完成的无团队 UI 模式
-- `crates/redis_view/src/redis_form_window.rs`：Redis 表单已完成的无团队 UI 模式
-- `main/src/home_tab.rs`：桌面端所有连接窗口配置与卡片展示总入口
-
-### 3. 关键决策
-- 本轮只移除桌面端窗口中的团队概念，不删除底层 `team_id/owner_id` 字段
-- 不仅隐藏 UI，还在保存时统一将连接和凭证写为 `team_id = None`
-- 这样可以避免历史编辑后的数据继续命中 sync server 对团队数据的不支持路径
-
-### 4. 完成的修改
-- `main/src/home_tab.rs`：移除各连接窗口配置中的 `teams` 透传，删除连接卡片“团队”徽标
-- `crates/db_view/src/connection_form_window.rs`：删除 `teams` 配置字段与下发表单的调用
-- `crates/db_view/src/common/db_connection_form.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
-- `crates/terminal_view/src/ssh_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
-- `crates/redis_view/src/redis_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
-- `crates/mongodb_view/src/mongo_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
-- `crates/terminal_view/src/serial_form_window.rs`：删除团队选择状态和渲染，保存时统一 `team_id = None`
-- `crates/core/src/certificate_manager.rs`：删除凭证范围选择，保存时统一 `team_id = None`
-
-## 编码后声明 - remove-team-ui-from-desktop-forms
-时间：2026-03-25 13:45:14 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/home_tab.rs`：复用既有窗口打开入口，仅调整配置字段与卡片展示
-- `crates/db_view/src/common/db_connection_form.rs`：沿用统一构建 `StoredConnection` 的保存模式
-- `crates/terminal_view/src/ssh_form_window.rs`：沿用已处理完成的“个人范围”保存语义
-- `crates/core/src/certificate_manager.rs`：沿用既有凭证编辑与保存链路，仅删除团队范围输入
-
-### 2. 遵循了以下项目约定
-- 命名约定：保持 `team_id` / `owner_id` / `sync_enabled` 等既有字段命名
-- 代码风格：采用小范围删除和字段归一，不新增中间适配层
-- 文件组织：主页只负责配置与展示，表单逻辑仍保留在各自 crate 内
-
-### 3. 对比了以下相似实现
-- `crates/terminal_view/src/ssh_form_window.rs`：我的 Mongo/串口处理方式与其一致，都是移除团队 UI 后保存时清空 `team_id`
-- `crates/redis_view/src/redis_form_window.rs`：我的凭证管理和主页清理方式与其一致，都是同时删除状态字段与渲染
-- `crates/db_view/src/common/db_connection_form.rs`：继续把最终归一逻辑收口在保存阶段，而不是只做展示层隐藏
-
-### 4. 未重复造轮子的证明
-- 已检查 `home_tab.rs`、`connection_form_window.rs`、`db_connection_form.rs`、`ssh_form_window.rs`、`redis_form_window.rs`、`mongo_form_window.rs`、`serial_form_window.rs`、`certificate_manager.rs`
-- 最终没有新增新的“个人范围”组件或兼容层，只是删除桌面端团队入口并复用既有保存链路
-
-### 5. 本地验证结果
-- `rg -n "TeamSelectItem|team_select|get_team_id|pub teams: Vec<TeamOption>|get_cached_team_options|TeamSync\\.team_label|selected_team_id" crates main -g '*.rs'`：桌面端表单残余引用已清空，仅剩底层缓存函数
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 6. 风险与限制
-- 本次没有数据迁移，历史未编辑过的团队数据仍会留在本地存储中
-- 本次没有 GUI 自动化验证，仍建议手动打开数据库/SSH/Redis/Mongo/串口/凭证窗口确认团队项已消失
-- 编译过程中保留既有 `crates/ui/src/title_bar.rs` 未使用函数警告，与本次改动无关
-
-## 编码前检查 - sync-server-soft-delete-visibility
-时间：2026-03-25 16:06:27 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-soft-delete-visibility.md`
-□ 将使用以下可复用组件：
-- `sync_server/web/src/services/api.ts`：同步项列表 API 封装
-- `sync_server/web/src/views/user/DashboardView.vue`：概览统计与最近同步项
-- `sync_server/web/src/views/user/SyncItemsView.vue`：完整列表筛选与状态展示
-- `sync_server/server/src/http/routes/sync.ts`：确认删除和列表查询的真实语义
-□ 将遵循命名约定：沿用 `deletedAt`、`includeDeleted`、`SyncItem` 等既有命名
-□ 将遵循代码风格：使用 Composition API 和 `computed/ref` 做无副作用派生，不新增额外状态管理
-□ 确认不重复造轮子，证明：已检查 `api.ts`、`DashboardView.vue`、`SyncItemsView.vue`、`sync.ts`、`database.ts`
-
-## 执行记录 - sync-server-soft-delete-visibility
-时间：2026-03-25 16:06:27 +0800
-
-### 1. 根因确认
-- `sync_server/server/src/http/routes/sync.ts` 的删除接口调用的是 `softDeleteSyncItem(...)`
-- `sync_server/server/src/db/database.ts` 的实现只写入 `deleted_at`
-- `sync_server/web` 当前统计与默认列表展示没有把软删除和有效数据分开，导致“看起来没删”
-
-### 2. 已完成修改
-- `sync_server/web/src/services/api.ts`：`listSyncItems(...)` 支持显式传 `includeDeleted`
-- `sync_server/web/src/views/user/DashboardView.vue`：概览统计改为只统计有效项，并单独展示已软删除数量
-- `sync_server/web/src/views/user/SyncItemsView.vue`：新增状态筛选，默认仅显示有效项，同时保留查看软删除记录能力
-
-## 编码后声明 - sync-server-soft-delete-visibility
-时间：2026-03-25 16:06:27 +0800
-
-### 1. 复用了以下既有组件
-- `api.listSyncItems(...)`：继续作为同步项读取入口，仅扩展查询参数
-- `DashboardView.vue`：沿用既有概览结构，仅调整统计口径
-- `SyncItemsView.vue`：沿用现有筛选区和分页结构，新增状态筛选而不重做页面
-
-### 2. 遵循了以下项目约定
-- 命名约定：保持 `deletedAt` / `includeDeleted` / `SyncItem` 原有术语
-- 代码风格：派生数据使用 `computed`，筛选状态使用 `ref`
-- 文件组织：只改动 Web 展示层，不动服务端删除语义
-
-### 3. 本地验证结果
-- `npm --prefix sync_server/web run build`：通过
-
-### 4. 风险与限制
-- 当前仍保留软删除记录，这是同步服务设计的一部分，不是物理删除
-- 本次没有浏览器自动化验证，建议手动确认概览统计和列表默认筛选是否符合预期
-
-## 编码前检查 - workspace-delete-sync-semantics
-时间：2026-03-25 16:17:25 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-workspace-delete-sync-semantics.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs::delete_connection`：连接删除入口
-- `main/src/home_tab.rs::handle_delete_workspace`：工作区删除入口
-- `crates/core/src/certificate_manager.rs::delete_certificate`：待删除队列模式参考
-- `crates/core/src/cloud_sync/generic_sync.rs::process_pending_deletions`：统一远端删除入口
-□ 将遵循命名约定：沿用 `PendingCloudDeletionRepository`、`deleted_at`、`WorkspaceDeleted`、`ConnectionDeleted`
-□ 将遵循代码风格：不新增本地软删除字段，只统一删除调度路径
-□ 确认不重复造轮子，证明：已检查 `home_tab.rs`、`certificate_manager.rs`、`generic_sync.rs`、`workspace_sync.rs`、`sync.ts`
-
-## 执行记录 - workspace-delete-sync-semantics
-时间：2026-03-25 16:17:25 +0800
-
-### 1. 根因判断
-- 本地工作区/连接删除与证书删除使用了两套不同语义
-- 工作区/连接此前由 UI 直接调云端删除，证书则通过待删除队列交给同步引擎处理
-- 这会导致删除语义分散，难以保证 `deleted_at`、同步重试和状态识别全部走同一条链路
-
-### 2. 已完成修改
-- `main/src/home_tab.rs`：新增 `queue_pending_cloud_deletion(...)` 统一登记待删除云端记录
-- `main/src/home_tab.rs::delete_connection`：改为本地删除成功后登记 `connection` 待删除
-- `main/src/home_tab.rs::handle_delete_workspace`：改为本地删除工作区和其下连接成功后分别登记 `workspace` / `connection` 待删除
-- 保留删除后自动触发同步，确保在线情况下会尽快把待删除记录同步到远端 tombstone
-
-## 编码后声明 - workspace-delete-sync-semantics
-时间：2026-03-25 16:17:25 +0800
-
-### 1. 复用了以下既有组件
-- `PendingCloudDeletionRepository`：作为本地删除意图的唯一持久化入口
-- `generic_sync::process_pending_deletions(...)`：作为远端软删除执行入口
-- `ConnectionDataEvent::{ConnectionDeleted, WorkspaceDeleted}`：继续作为 UI 刷新与自动同步触发器
-
-### 2. 遵循了以下项目约定
-- 命名约定：沿用现有 `workspace` / `connection` 实体类型标识
-- 代码风格：删除语义集中在辅助函数与现有删除入口，不扩散到更多模块
-- 文件组织：只修改 `main/src/home_tab.rs`，不改底层数据模型
-
-### 3. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 4. 风险与限制
-- 当前本地仍然不是软删除模型，而是物理删除 + 远端 soft delete tombstone
-- 没有桌面 GUI 自动化验证，建议手动确认删除工作区后下一次自动同步能让远端列表只在“已软删除”视图中看到该项
-
-## 编码前检查 - sync-server-delete-empty-body
-时间：2026-03-25 16:26:06 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-delete-empty-body.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/sync_server.rs::common_headers`
-- `crates/core/src/cloud_sync/sync_server.rs::build_request`
-- `crates/core/src/cloud_sync/sync_server.rs::delete_json_with_retry`
-□ 将遵循命名约定：沿用 `common_headers` / `build_request` / `delete_json_with_retry`
-□ 将遵循代码风格：仅修复请求头与 body 的契约，不改业务接口签名
-□ 确认不重复造轮子，证明：已检查 `sync_server.rs` 中 GET/POST/PUT/DELETE 的统一请求构造
-
-## 执行记录 - sync-server-delete-empty-body
-时间：2026-03-25 16:26:06 +0800
-
-### 1. 根因确认
-- `DELETE /api/v1/sync/items/:id` 请求没有 body，但客户端公共头却总是带 `Content-Type: application/json`
-- Fastify 因此返回 `FST_ERR_CTP_EMPTY_JSON_BODY`
-
-### 2. 已完成修改
-- `crates/core/src/cloud_sync/sync_server.rs`：公共头改为 `Accept: application/json`
-- `crates/core/src/cloud_sync/sync_server.rs`：仅在 `body.is_some()` 时自动补 `Content-Type: application/json`
-
-## 编码后声明 - sync-server-delete-empty-body
-时间：2026-03-25 16:26:06 +0800
-
-### 1. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 2. 风险与限制
-- 本次没有实际起一个 sync_server 做端到端联调，但客户端构造已经与 Fastify 的约束一致
-- 之前积压在 `pending_cloud_deletions` 里的删除记录需要再触发一次同步才会被消费
-
-## 编码前检查 - sync-item-plaintext-name
-时间：2026-03-25 16:46:58 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-item-plaintext-name.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/service.rs`：统一构造同步上传 payload
-- `crates/core/src/cloud_sync/generic_sync.rs`：工作区/凭证的名称映射与同步计划
-- `crates/core/src/cloud_sync/connection_sync.rs`：连接的名称映射与同步计划
-- `sync_server/server/src/db/database.ts`：服务端 `sync_data` 持久化
-- `sync_server/web/src/views/user/*`：同步项概览、列表、详情展示
-□ 将遵循命名约定：统一使用 `name` 表示同步项明文名称，不额外引入 `display_name` / `plain_name`
-□ 将遵循代码风格：兼容旧数据时使用默认值和兜底逻辑，不破坏既有接口
-□ 确认不重复造轮子，证明：已检查 `CloudSyncData`、服务端 `sync_data`、Web `SyncItem` 三层现有字段结构
-
-## 执行记录 - sync-item-plaintext-name
-时间：2026-03-25 16:46:58 +0800
-
-### 1. 已完成修改
-- `crates/core/src/cloud_sync/models.rs`：为 `CloudSyncData` 增加 `name`
-- `crates/core/src/cloud_sync/service.rs`：连接、工作区、凭证上传与重加密时都保留 `name`
-- `crates/core/src/cloud_sync/generic_sync.rs` 与 `connection_sync.rs`：名称映射优先用明文字段，旧数据为空时再解密兜底；云端 `name` 为空的旧记录会在下一次同步自动回填
-- `crates/core/src/cloud_sync/sync_server.rs`：请求/响应 payload 增加 `name`
-- `sync_server/server/migrations/003_add_sync_item_name.sql`：为 `sync_data` 表增加 `name`
-- `sync_server/server/src/db/database.ts` 与 `http/routes/sync.ts`：服务端存储与 API 打通 `name`
-- `sync_server/web/src/types/api.ts` 与 `views/user/*`：Web 概览、列表、详情直接展示云端明文名称
-
-### 2. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `npm --prefix sync_server/server run check`：通过
-- `npm --prefix sync_server/web run build`：通过
-
-### 3. 风险与限制
-- 历史未删除记录会在下一次同步自动补写 `name`
-- 历史上已经只剩远端 tombstone、而本地原对象已不存在的记录，服务端迁移只能把 `name` 初始化为 `id`
-
-## 追加编码前检查 - popup-window-close-window-not-found
-时间：2026-03-25 13:09:37 +0800
-
-- 已复查相关实现：
-  - `crates/core/src/popup_window.rs`
-  - `crates/core/src/certificate_manager.rs`
-  - `crates/ui/src/dialog.rs`
-  - `crates/ui/src/sheet.rs`
-  - `/Users/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/window.rs`
-- 已分析 3 个可复用模式：
-  - `dialog/sheet` 在当前事件内只做状态切换，不直接销毁独立窗口
-  - `gpui::Window::defer(...)` 会把窗口操作推迟到当前 effect cycle 末尾，并在窗口不存在时静默忽略
-  - `gpui::Window::on_window_should_close(...)` 可以拦截系统关闭请求
-- 将使用以下可复用组件：
-  - `popup_window::open_popup_window(...)` 作为所有独立弹窗的统一入口
-  - `window.on_window_should_close(...)` 统一拦截系统关闭
-  - `window.defer(...)` 统一延迟执行 `remove_window()`
-- 将遵循代码风格：继续在 popup 基础设施层统一修复，不把关闭保护散落到每个业务窗口
-- 确认不重复造轮子，证明：当前问题属于独立窗口销毁时机不稳定，不需要新增第二套窗口组件
-
-## 编码后声明 - popup-window-close-window-not-found
-时间：2026-03-25 13:09:37 +0800
-
-### 1. 根因结论
-- `gpui::window: window not found` 的触发条件是：某个延迟到当前 effect cycle 末尾或系统关闭回调后的窗口更新，在执行时窗口已经被立即移除
-- 当前 popup 的 `Esc` 关闭和凭证编辑窗口保存/取消关闭都直接调用 `window.remove_window()`，系统关闭按钮也没有经过 popup 自己的统一保护
-
-### 2. 已完成修复
-- `crates/core/src/popup_window.rs`
-  - 新增 `request_popup_window_close(...)`，把 `remove_window()` 统一改为延迟执行
-  - `CancelPopup` 动作改走统一延迟关闭
-  - `open_popup_window(...)` 创建窗口时注册 `on_window_should_close(...)`，系统关闭请求也改走统一延迟关闭
-- `crates/core/src/certificate_manager.rs`
-  - 凭证编辑窗口保存成功后的关闭改走统一延迟关闭
-  - 凭证编辑窗口取消按钮关闭改走统一延迟关闭
-
-### 3. 未重复造轮子的证明
-- 没有在凭证管理窗口里做特判，而是把关闭时机收口到 popup 基础设施
-- 没有改动证书/凭证数据模型、通知协议或窗口布局，只修复窗口销毁时机
-
-## 实施与验证记录 - popup-window-close-window-not-found
-时间：2026-03-25 13:09:37 +0800
-
-### 已完成修改
-- `crates/core/src/popup_window.rs`
-  - popup 独立窗口统一改为延迟关闭，并拦截系统关闭请求
-- `crates/core/src/certificate_manager.rs`
-  - 凭证编辑窗口保存/取消统一改走 popup 关闭助手
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-
-## 追加编码前检查 - popup-escape-and-core-common-translation
-时间：2026-03-25 12:59:24 +0800
-
-- 已复查相关实现：
-  - `crates/core/src/certificate_manager.rs`
-  - `crates/core/src/popup_window.rs`
-  - `crates/core/src/lib.rs`
-  - `crates/core/locales/core.yml`
-  - `crates/ui/src/dialog.rs`
-  - `crates/ui/src/sheet.rs`
-- 已分析 3 个可复用模式：
-  - `dialog` 通过本地 `KeyBinding + key_context + on_action` 处理 `Escape`
-  - `sheet` 通过 `track_focus + focus_trap` 保证容器级键盘动作生效
-  - `one_core::init(...)` 负责注册 core 级全局初始化能力
-- 将使用以下可复用组件：
-  - `gpui::actions!` 与 `KeyBinding::new("escape", ...)`
-  - `gpui_component::FocusTrapElement`
-  - `popup_window::open_popup_window(...)` 作为所有独立弹窗的统一入口
-- 将遵循代码风格：不在各业务弹窗里重复加 `Esc` 逻辑，而是在 popup 基础设施层统一处理
-- 确认不重复造轮子，证明：当前问题属于基础设施能力缺失和 core 本地化缺词，不需要新增第二套弹窗组件
-
-## 编码后声明 - popup-escape-and-core-common-translation
-时间：2026-03-25 12:59:24 +0800
-
-### 1. 根因结论
-- 凭证管理弹窗中的 `Common.edit` / `Common.delete` 未翻译，是因为 `crates/core/locales/core.yml` 只定义了 `save/cancel/search`，没有定义 `edit/delete`
-- 独立 popup 窗口不支持 `Esc` 关闭，是因为 `open_popup_window(...)` 之前只负责开新窗口，没有像 `dialog/sheet` 那样建立自己的键盘上下文和取消动作
-
-### 2. 已完成修复
-- `crates/core/locales/core.yml`
-  - 补充 `Common.edit`
-  - 补充 `Common.delete`
-- `crates/core/src/popup_window.rs`
-  - 新增 popup 专用 `CancelPopup` 动作和 `Escape` 键绑定
-  - 增加 `PopupWindowView` 包装层，统一处理焦点、`focus_trap` 和 `Esc` 关闭
-- `crates/core/src/lib.rs`
-  - 在 `one_core::init(...)` 中注册 `popup_window::init(cx)`
-
-### 3. 未重复造轮子的证明
-- `Esc` 关闭逻辑没有散落到各个弹窗窗口，而是统一收敛到 `open_popup_window(...)`
-- 共用翻译也没有回退到业务层硬编码文案，而是补回 `core.yml` 的 `Common` 命名空间
-
-## 实施与验证记录 - popup-escape-and-core-common-translation
-时间：2026-03-25 12:59:24 +0800
-
-### 已完成修改
-- `crates/core/locales/core.yml`
-  - 补齐 `Common.edit` / `Common.delete`
-- `crates/core/src/popup_window.rs`
-  - popup 窗口统一支持按 `Esc` 关闭
-- `crates/core/src/lib.rs`
-  - 注册 popup 键盘上下文初始化
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-
-## 编码前检查 - sync-server-credential-sync-type
-时间：2026-03-25 12:46:46 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-sync-server-credential-sync-type.md`
-- 已分析相似实现：
-  - `sync_server/web/src/utils/syncItemType.ts`
-  - `sync_server/web/src/views/user/DashboardView.vue`
-  - `sync_server/web/src/views/user/SyncItemsView.vue`
-  - `sync_server/web/src/views/user/SyncItemDetailView.vue`
-  - `sync_server/server/src/http/routes/sync.ts`
-  - `sync_server/server/src/db/database.ts`
-- 将使用以下可复用组件：
-  - `getSyncItemTypeLabel(...)`：继续作为同步项类型展示的唯一出口
-  - `DashboardView.vue` 的 `stats` 计算属性：继续承载概览统计
-  - `SyncItemsView.vue` 的动态类型筛选：继续承载类型选项和前端分页
-- 将遵循命名约定：前端继续使用 `dataType`，工具函数命名为 `normalizeSyncItemType` / `isSyncItemType`
-- 将遵循代码风格：只加前端兼容层，不改 `sync_server` 后端协议和数据库结构
-- 确认不重复造轮子，证明：服务端 `dataType` 已经是字符串透传，当前只需要把前端展示和统计接入新增类型
-- 工具说明：仓库规范要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但当前会话未提供这些工具；本次改用本地源码检索和前端构建命令替代并留痕
-
-## 编码后声明 - sync-server-credential-sync-type
-时间：2026-03-25 12:46:46 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/utils/syncItemType.ts`：继续作为同步项类型展示的统一映射层
-- `sync_server/web/src/views/user/DashboardView.vue::stats`：继续作为概览页统计的唯一收敛点
-- `sync_server/web/src/views/user/SyncItemsView.vue::itemTypeOptions / filteredItems`：继续作为列表页类型筛选和分页的核心派生逻辑
-
-### 2. 遵循了以下项目约定
-- 命名约定：使用 `normalizeSyncItemType` 统一别名归一化，`isSyncItemType` 用于页面分类判断
-- 代码风格：维持 Vue 3 `<script setup lang="ts">` + `computed` 派生模式，不引入额外 store
-- 文件组织：展示层兼容逻辑继续集中在 `sync_server/web/src/utils`
-
-### 3. 本轮兼容内容
-- `certificate` 和 `credential` 都会被前端统一视为“凭证”
-- 最近同步项、完整列表、详情页都会显示正确类型文案，不再落入“未识别类型”
-- 仪表盘新增“凭证”统计卡片
-- 列表页类型筛选改为按归一化后的类型去重和过滤，避免别名类型出现重复语义选项
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/server/src/http/routes/sync.ts` 和 `sync_server/server/src/db/database.ts`
-- 结论：后端已经支持任意 `dataType` 透传和筛选，不需要再新增服务端枚举或映射层
-
-## 实施与验证记录 - sync-server-credential-sync-type
-时间：2026-03-25 12:46:46 +0800
-
-### 已完成修改
-- `sync_server/web/src/utils/syncItemType.ts`
-  - 新增类型别名归一化，兼容 `certificate` / `credential`
-  - 新增 `isSyncItemType(...)` 统一分类判断
-- `sync_server/web/src/views/user/DashboardView.vue`
-  - 新增“凭证”统计卡片
-  - 统计逻辑改为走统一类型判断
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-  - 类型筛选改为按归一化后的类型生成选项
-  - 筛选命中判断改为兼容别名类型
-
-### 本地验证
-- `npm --prefix sync_server/web run build`
-  - 结果：通过
-  - 说明：`vue-tsc -b` 与 `vite build` 均通过
-
-## 追加编码前检查 - certificate-management-window-followup
-时间：2026-03-25 12:31:29 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-certificate-management.md`
-- 已复查相关实现：
-  - `crates/core/src/certificate_manager.rs`
-  - `main/src/home_tab.rs`
-  - `main/src/home/home_workspace_filter.rs`
-  - `main/locales/main.yml`
-  - `crates/core/locales/core.yml`
-- 将使用以下可复用组件：
-  - `crates/core/src/popup_window.rs::open_popup_window`：证书编辑继续复用现有独立窗口模式
-  - `crates/core/src/connection_notifier.rs::emit_connection_event`：复用连接刷新广播
-  - `main/src/home/home_workspace_filter.rs::WorkspaceFilterDelegate`：复用工作区筛选弹层已有编辑/删除入口
-- 将遵循命名约定：继续使用 `CertificateManager`、`WorkspaceDeleteMode` 等现有语义化命名
-- 将遵循代码风格：只修正桌面端交互路径和入口位置，不新增第二套管理页面
-- 确认不重复造轮子，证明：证书管理、工作区弹层和主页侧栏都已有承载位置，本轮只补齐交互闭环
-- 工具说明：仓库规范要求优先使用 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，但当前会话未提供这些工具；本次继续使用本地源码检索和 Rust 构建命令替代并留痕
-
-## 编码后声明 - certificate-management-window-followup
-时间：2026-03-25 12:31:29 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/popup_window.rs::open_popup_window`：证书新增/编辑统一改为独立 popup，而不是在管理窗口里再套一层 dialog
-- `crates/core/src/connection_notifier.rs::emit_connection_event`：证书保存后继续广播连接变更，保证引用快照同步刷新
-- `main/src/home/home_workspace_filter.rs`：工作区筛选弹层保留所有工作区的编辑/删除入口，补上主内容区非空工作区的快捷按钮
-
-### 2. 遵循了以下项目约定
-- 命名约定：延续 `open_*_popup`、`handle_delete_*`、`WorkspaceDeleteMode` 的现有命名模式
-- 代码风格：桌面端管理能力继续走 popup/dialog，不新增额外状态层
-- 文件组织：证书管理逻辑仍集中在 `crates/core/src/certificate_manager.rs`，主页交互仍集中在 `main/src/home_tab.rs`
-
-### 3. 本轮补齐的交互
-- `新增证书`/编辑证书：从管理窗口里直接打开独立证书编辑 popup，修复原先点击无响应的问题
-- 证书管理入口：从“新建连接”菜单移除，改到左侧栏连接类型列表下方，位于 `串口` 下方
-- 工作区删除：当工作区下仍有连接时，删除前支持二选一
-  - 删除全部连接
-  - 移动到未分区
-- 工作区保护：若工作区内存在正在使用中的连接，则禁用“删除全部连接”并显示提示
-- 工作区编辑/删除入口：主内容区非空工作区标题栏支持快捷操作；空工作区和全部工作区仍可通过工作区筛选弹层管理
-
-### 4. 未重复造轮子的证明
-- 已检查 `certificate_manager.rs`、`home_tab.rs`、`home_workspace_filter.rs`
-- 结论：现有 popup、侧栏和工作区筛选弹层已经覆盖所需承载点，本轮只做入口迁移和删除流程增强，没有新增重复页面或重复状态
-
-## 实施与验证记录 - certificate-management-window-followup
-时间：2026-03-25 12:31:29 +0800
-
-### 已完成修改
-- `crates/core/src/certificate_manager.rs`
-  - 证书新增/编辑改为独立 popup 编辑窗口
-  - 保存后发出证书/连接更新事件并关闭窗口
-- `main/src/home_tab.rs`
-  - 左侧栏新增“证书管理”入口，位置在连接类型列表下方
-  - 工作区标题栏新增编辑/删除按钮
-  - 删除工作区时增加“移到未分区 / 删除全部连接”的分支处理
-- `main/locales/main.yml`
-  - 新增工作区删除确认相关文案
-- `crates/core/locales/core.yml`
-  - 新增证书编辑校验和保存失败相关文案
-
-### 本地验证
-- `cargo check -p main`
-  - 结果：通过
-
-## 追加编码前检查 - certificate-save-window-error
-时间：2026-03-25 12:46:46 +0800
-
-- 已复查相关实现：
-  - `crates/core/src/certificate_manager.rs`
-  - `crates/terminal_view/src/ssh_form_window.rs`
-  - `crates/redis_view/src/redis_form_window.rs`
-  - `crates/mongodb_view/src/mongo_form_window.rs`
-  - `crates/db_view/src/common/db_connection_form.rs`
-  - `crates/gpui/src/subscription.rs`
-- 已确认 3 类可复用/对照模式：
-  - 连接表单保存普遍采用异步保存后关闭窗口
-  - `CertificateManagerView` 已使用 `_subscriptions: Vec<Subscription>` 持有订阅
-  - `gpui::Subscription::detach()` 的语义是“保持订阅直到被订阅实体销毁”，不适合窗口生命周期敏感的证书事件订阅
-- 将使用以下可复用组件：
-  - `window.spawn(...)`：把证书保存和连接快照回写移出 UI 线程
-  - `Tokio::spawn_result(...)`：复用现有后台任务执行模式
-  - `_subscriptions: Vec<Subscription>`：让证书事件订阅跟随窗口实体一起释放
-- 将遵循代码风格：不改证书/连接事件协议，只修正执行线程和订阅生命周期
-- 确认不重复造轮子，证明：现有 popup、后台任务和订阅持有模式足以覆盖本次问题
-
-## 编码后声明 - certificate-save-window-error
-时间：2026-03-25 12:46:46 +0800
-
-### 1. 根因结论
-- 保存卡顿：`CertificateEditorView::on_save` 之前在 UI 线程里同步执行证书写入和 `sync_connections_for_certificate(...)`，连接多时会直接阻塞窗口
-- `window not found`：SSH / Redis / MongoDB / 数据库通用表单对 `CertificateDataEvent` 使用了 `subscribe_in(...).detach()`，窗口关闭后订阅仍可能继续收到事件并访问失效窗口
-
-### 2. 已完成修复
-- `crates/core/src/certificate_manager.rs`
-  - 证书保存改为 `window.spawn + Tokio::spawn_result` 异步执行
-  - 保存期间通过 `is_saving` 禁用按钮，避免重复提交
-  - 成功后再回到窗口上下文中广播事件并关闭窗口
-- `crates/terminal_view/src/ssh_form_window.rs`
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/mongodb_view/src/mongo_form_window.rs`
-- `crates/db_view/src/common/db_connection_form.rs`
-  - 证书事件订阅不再 `detach()`，改为由 `_subscriptions: Vec<Subscription>` 持有，随窗口实体释放
-
-### 3. 未重复造轮子的证明
-- 后台执行沿用现有 `Tokio::spawn_result` 方案
-- 订阅管理沿用 `CertificateManagerView` 已有 `_subscriptions` 模式
-- 结论：没有新增新通知器或新窗口模型，只是把原有能力放到正确生命周期里
-
-## 实施与验证记录 - certificate-save-window-error
-时间：2026-03-25 12:46:46 +0800
-
-### 已完成修改
-- 异步化证书保存与连接快照回写，减少保存时主线程阻塞
-- 修正四个连接表单的证书订阅生命周期，避免向已关闭窗口派发事件
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-
-### 当前限制
-- 本次未做桌面 GUI 手点验证，仍需实际确认“保存证书后无明显卡顿、终端不再出现 `window not found`”
-
-## 编码后声明 - certificate-management
-时间：2026-03-25 12:08:00 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/storage/models.rs::apply_certificate_to_connection_snapshot`：沿用“引用 + 快照”回写策略，避免重写连接运行链路
-- `crates/core/src/storage/repository.rs::sync_connections_for_certificate`：继续作为证书变更后批量回写连接快照的唯一入口
-- `crates/core/src/certificate_manager.rs::open_certificate_manager_popup`：复用统一证书管理弹窗，所有表单只提供入口，不重复实现管理界面
-- `crates/core/src/certificate_notifier.rs`：复用证书变更通知，驱动 SSH/Redis/Mongo/数据库表单的证书列表热刷新
-
-### 2. 遵循了以下项目约定
-- 命名约定：代码层统一使用 `Certificate`、`CertificateReference`、`credential_ref`、`ssh_tunnel_credential_ref`
-- 代码风格：继续沿用现有窗口表单结构，只在既有字段、Select 和底部按钮区域增量扩展
-- 文件组织：同步逻辑留在 `crates/core/src/cloud_sync`，表单接入分别留在各自 view crate，没有引入新的跨模块 UI 层
-
-### 3. 对比了以下相似实现
-- `crates/terminal_view/src/ssh_form_window.rs`：沿用现有窗口态输入框与 Select 订阅模式，补证书选择与禁用手工输入
-- `crates/redis_view/src/redis_form_window.rs`：沿用现有连接参数构建方式，将证书选择折叠为参数生成前的覆盖逻辑
-- `crates/mongodb_view/src/mongo_form_window.rs`：沿用 Mongo 现有表单结构，按 Redis 同模式接入账号密码证书
-- `crates/db_view/src/common/db_connection_form.rs`：沿用数据库通用表单字段系统，在通用字段模型内注入证书 Select，而不是分叉新表单
-
-### 4. 未重复造轮子的证明
-- 已检查 `crates/core/src/storage/models.rs`、`crates/core/src/storage/repository.rs`、`crates/core/src/certificate_manager.rs`、`crates/core/src/certificate_notifier.rs`
-- 已检查 `crates/terminal_view/src/ssh_form_window.rs`、`crates/redis_view/src/redis_form_window.rs`、`crates/mongodb_view/src/mongo_form_window.rs`、`crates/db_view/src/common/db_connection_form.rs`
-- 最终没有新增第二套凭据模型或单独的窗口状态管理，所有连接类型都复用统一证书实体和通知机制
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main --no-run`：通过
-
-### 6. 风险与限制
-- 本次验证覆盖了 Rust 编译和测试目标编译，但没有自动化 GUI 交互测试，仍建议你手动点一次各表单中的证书选择与“管理证书”按钮
-- 验证过程中曾出现 Cargo 包缓存锁等待，原因是先后启动了两个 Cargo 命令；最终已顺序完成验证，不影响结果
-- 构建过程中的 `crates/ui/src/title_bar.rs` 未使用函数警告，以及 `num-bigint-dig v0.8.4` future incompatibility 提示，均为仓库既有问题，与本次改动无关
-
-## 编码前检查 - sync-server-sync-items-filter-pagination
-时间：2026-03-25 11:51:05 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sync-items-filter-pagination.md`
-□ 将使用以下可复用组件：
-- `sync_server/web/src/views/user/SyncItemsView.vue`：复用现有列表页结构、表格列和刷新逻辑
-- `sync_server/web/src/views/admin/AdminOverviewView.vue`：复用列表页头部统计和按钮布局风格
-- `sync_server/web/src/views/user/DashboardView.vue`：复用 `computed` 派生列表展示数据的组织方式
-- `sync_server/web/src/utils/syncItemType.ts`：复用类型中文标签映射
-□ 将遵循命名约定：新增 `selectedType`、`pageSize`、`currentPage`、`filteredItems`、`paginatedItems` 等语义化命名
-□ 将遵循代码风格：继续使用 `script setup + Composition API` 和内联 Tailwind 样式，不新增抽象组件
-□ 确认不重复造轮子，证明：已检查 `SyncItemsView.vue`、`AdminOverviewView.vue`、`DashboardView.vue`、`SyncItemDetailView.vue`，确认当前没有现成的筛选/分页组件可直接复用
-
-## 执行记录 - sync-server-sync-items-filter-pagination
-时间：2026-03-25 11:51:05 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-- `sync_server/web/src/views/admin/AdminOverviewView.vue`
-- `sync_server/web/src/views/user/DashboardView.vue`
-- `sync_server/web/src/views/user/SyncItemDetailView.vue`
-- `sync_server/web/src/types/api.ts`
-- `sync_server/web/src/utils/syncItemType.ts`
-
-### 2. 对比的相似实现
-- `sync_server/web/src/views/user/SyncItemsView.vue:21`：当前同步项表格页主体结构
-- `sync_server/web/src/views/admin/AdminOverviewView.vue:21`：另一张管理表格的头部统计布局
-- `sync_server/web/src/views/user/DashboardView.vue:109`：`computed` 派生展示列表的模式
-- `sync_server/web/src/views/user/SyncItemDetailView.vue:116`：`ref + computed + watch` 维护页面交互状态的模式
-
-### 3. 当前发现
-- `sync_server/web` 没有现成的 `<select>` 或分页组件，本次更适合在 `SyncItemsView` 内做轻量自包含实现
-- 当前 `SyncItem.dataType` 是字符串，筛选项应从实际数据集中动态提取，避免写死后与后端类型脱节
-- 页面已经一次性拿到完整列表，因此本地筛选 + 本地分页是当前风险最低的方案
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Node 构建命令完成检索与验证
-
-## 编码后声明 - sync-server-sync-items-filter-pagination
-时间：2026-03-25 11:54:06 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/views/user/SyncItemsView.vue`：继续作为同步项列表唯一页面，不新增第二套列表页
-- `sync_server/web/src/utils/syncItemType.ts`：继续作为类型展示的唯一中文标签映射
-- `sync_server/web/src/utils/syncItemVersion.ts`：继续负责密钥版本和记录版本格式化
-- `sync_server/web/src/views/admin/AdminOverviewView.vue`：沿用同类表格页的头部统计和按钮布局风格
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `selectedType`、`pageSize`、`currentPage`、`filteredItems`、`paginatedItems` 等语义化状态名
-- 代码风格：继续使用 `script setup + Composition API`，通过 `computed` 组织派生视图状态
-- 文件组织：筛选和分页逻辑集中在 `SyncItemsView.vue`，没有扩散到接口层和工具层
-
-### 3. 对比了以下相似实现
-- `sync_server/web/src/views/user/SyncItemsView.vue:21`：保留原有表格页结构，只在中间插入筛选和分页控制区
-- `sync_server/web/src/views/admin/AdminOverviewView.vue:21`：沿用列表卡片头部信息布局
-- `sync_server/web/src/views/user/DashboardView.vue:109`：沿用 `computed` 派生展示子集的写法
-- `sync_server/web/src/views/user/SyncItemDetailView.vue:116`：沿用 `watch` 维护页面交互状态的模式
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/web/src/views/user/SyncItemsView.vue`、`sync_server/web/src/views/admin/AdminOverviewView.vue`、`sync_server/web/src/views/user/DashboardView.vue`、`sync_server/web/src/views/user/SyncItemDetailView.vue`
-- 最终没有新增抽象分页组件或改后端接口，而是在已有页面内基于完整数据列表做本地筛选和本地分页
-
-### 5. 本地验证结果
-- `npm --prefix sync_server/web run build`：通过
-
-### 6. 风险与限制
-- 当前仓库没有前端自动化测试，本次只能验证构建通过，仍建议你在浏览器里点一下筛选切换和翻页交互
-- 本次分页是前端本地分页，若未来数据量明显增长，再考虑后端分页接口更合适
-
-## 编码前检查 - sync-server-sidebar-scroll
-时间：2026-03-25 11:45:07 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-sync-server-sidebar-scroll.md`
-□ 将使用以下可复用组件：
-- `sync_server/web/src/layouts/AppLayout.vue`：复用现有双栏布局和侧栏导航结构
-- `sync_server/web/src/router/index.ts`：确认 `/app` 子路由共享同一布局壳层
-- `sync_server/web/src/style.css`：沿用现有 `min-h-screen` / 面板视觉体系
-□ 将遵循命名约定：新增滚动容器引用使用语义化英文命名，保持 `script setup` 风格
-□ 将遵循代码风格：继续使用内联 Tailwind 类，不新增额外样式文件或 Options API
-□ 确认不重复造轮子，证明：已检查 `src/layouts/AppLayout.vue`、`src/router/index.ts`、`src/views/auth/LoginView.vue`、`src/views/user/ProfileView.vue`，确认当前没有现成的独立主内容滚动壳层
-
-## 执行记录 - sync-server-sidebar-scroll
-时间：2026-03-25 11:45:07 +0800
-
-### 1. 已检索并阅读的关键实现
-- `sync_server/web/src/layouts/AppLayout.vue`
-- `sync_server/web/src/router/index.ts`
-- `sync_server/web/src/style.css`
-- `sync_server/web/src/views/auth/LoginView.vue`
-- `sync_server/web/src/views/auth/RegisterView.vue`
-- `sync_server/web/src/views/user/DashboardView.vue`
-- `sync_server/web/src/views/user/SyncItemsView.vue`
-- `sync_server/web/src/views/user/ProfileView.vue`
-- `sync_server/web/src/views/admin/AdminOverviewView.vue`
-- `sync_server/web/package.json`
-
-### 2. 对比的相似实现
-- `sync_server/web/src/layouts/AppLayout.vue:2`：当前双栏壳层的入口位置
-- `sync_server/web/src/views/auth/LoginView.vue:2`：页面级高度由顶层容器控制的模式
-- `sync_server/web/src/views/user/ProfileView.vue:2`：业务页只输出内容块、不管理外层滚动
-- `sync_server/web/src/router/index.ts:25`：`/app` 子路由统一复用布局，适合集中改造
-
-### 3. 当前发现
-- 左侧栏内容量明显少于右侧业务页，当前自然流布局会让右侧内容高度主导整页滚动
-- 仅给侧栏加 `sticky` 不能彻底切断整页滚动；更符合需求的方案是桌面端把主内容改为独立滚动容器
-- `sync_server/web` 当前没有测试文件，验证只能依赖 `vue-tsc + vite build`
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Node 构建命令完成检索与验证
-
-## 编码后声明 - sync-server-sidebar-scroll
-时间：2026-03-25 11:46:59 +0800
-
-### 1. 复用了以下既有组件
-- `sync_server/web/src/layouts/AppLayout.vue`：继续作为 `/app` 认证区唯一布局壳层
-- `sync_server/web/src/router/index.ts`：继续复用子路由共享布局的组织方式，不新增新页面壳层
-- `sync_server/web/src/style.css`：继续沿用全局 `min-h-screen` 与 `panel` 视觉体系
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `mainScrollContainer`，与现有 `displayName`、`showEmail` 一样保持语义化英文命名
-- 代码风格：继续使用 `script setup + Composition API` 和内联 Tailwind 原子类
-- 文件组织：滚动行为集中在 `src/layouts/AppLayout.vue`，没有把外层布局逻辑分散到各个业务页
-
-### 3. 对比了以下相似实现
-- `sync_server/web/src/layouts/AppLayout.vue:2`：沿用原有双栏布局，只在桌面端增加视口高度与内部滚动约束
-- `sync_server/web/src/views/auth/LoginView.vue:2`：保留登录/注册页的 `min-h-screen` 自然布局，不扩大影响面
-- `sync_server/web/src/views/user/ProfileView.vue:2`：保持业务页继续只负责内容卡片，外层滚动由布局统一承担
-- `sync_server/web/src/router/index.ts:25`：依赖共享布局壳层，一次改动即可覆盖全部 `/app` 子页面
-
-### 4. 未重复造轮子的证明
-- 已检查 `sync_server/web/src/layouts/AppLayout.vue`、`sync_server/web/src/router/index.ts`、`sync_server/web/src/style.css`、`sync_server/web/src/views/auth/LoginView.vue`、`sync_server/web/src/views/user/ProfileView.vue`
-- 最终没有新增第二套布局组件，也没有在每个页面重复写滚动容器，而是在现有 `AppLayout` 上集中实现
-
-### 5. 本地验证结果
-- `npm --prefix sync_server/web run build`：通过
-- `npm --prefix sync_server/web run build`（补 `min-h-0` 后复验）：通过
-
-### 6. 风险与限制
-- 当前仓库没有前端自动化测试，本次只能验证类型检查和生产构建，仍建议你在浏览器里实际滚动确认桌面端表现
-- 主内容改为内部滚动后，浏览器原生“页面总滚动条”在桌面端会弱化，这是按需求做的结构调整
-
-## 编码后声明 - desktop-account-entry
-时间：2026-03-25 11:06:26 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/home/home_tabs.rs::add_settings_tab`：继续复用原有设置标签打开和激活逻辑
-- `gpui_component::setting::Settings::default_selected_index`：用于账户页默认定位
-- `main/src/user_avatar.rs::render_user_avatar`：继续作为主页左下角账号入口的唯一渲染点
-- `crates/core/src/cloud_sync/sync_server.rs::map_user_info`：继续作为 sync server 用户信息进入桌面端的唯一映射点
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `SettingsPanelPage`、`PendingSettingsPanelPage`、`display_name`、`secondary_identity` 等语义化命名
-- 代码风格：采用小范围增量修改，未新增第二套设置页或账号入口组件
-- 文件组织：导航状态收敛在 `main/src/setting_tab.rs`，展示逻辑收敛在 `main/src/user_avatar.rs`，数据映射收敛在 `crates/core/src/cloud_sync`
-
-### 3. 对比了以下相似实现
-- `main/src/home_tab.rs:2413`：沿用侧栏底部账号入口结构，仅修改点击行为
-- `main/src/setting_tab.rs:747`：沿用既有账户设置页，不新增新路由或窗口
-- `crates/ui/src/setting/settings.rs:86`：复用默认选中页能力，通过 `state_version` 触发已打开设置页重新定位
-- `crates/core/src/cloud_sync/sync_server.rs:604`：沿用既有用户映射入口补 `nickname`
-
-### 4. 未重复造轮子的证明
-- 已检查 `main/src/home_tab.rs`、`main/src/home/home_tabs.rs`、`main/src/setting_tab.rs`、`main/src/user_avatar.rs`、`crates/core/src/cloud_sync/client.rs`、`crates/core/src/cloud_sync/sync_server.rs`
-- 最终没有新增新的设置窗口、账号弹窗或独立导航系统，只是在现有设置标签基础上增加“待打开页面”请求状态
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main --no-run`：通过
-
-### 6. 风险与限制
-- 本次没有自动化 GUI 点击测试，左下角账号入口跳转到账户页的最终交互仍建议你本地点一次确认
-- 构建过程中保留了既有 `crates/ui/src/title_bar.rs` 未使用函数警告，与本次改动无关
-- Rust 依赖里仍有既有 `num-bigint-dig v0.8.4` future incompatibility 提示，与本次任务无关
-
-## 编码前检查 - certificate-management
-时间：2026-03-25 13:05:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-certificate-management.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/storage/repository.rs::ConnectionRepository`：复用连接仓储和更新时间语义
-- `crates/core/src/cloud_sync/workspace_sync.rs::WorkspaceSyncType`：复用简单同步类型桥接方式
-- `crates/core/src/cloud_sync/generic_sync.rs::generic_sync`：复用通用同步流程
-- `crates/core/src/popup_window.rs::open_popup_window`：复用桌面弹窗能力
-- `crates/core/src/connection_notifier.rs::emit_connection_event`：复用连接更新广播
-□ 将遵循命名约定：代码层使用 `Certificate` / `CertificateRepository` / `CertificateSyncType`，UI 统一展示为“证书”
-□ 将遵循代码风格：优先增量扩展现有仓储、同步和 popup 模式，不引入新的状态管理框架
-□ 确认不重复造轮子，证明：已检查 `storage/models.rs`、`storage/repository.rs`、`cloud_sync/workspace_sync.rs`、`cloud_sync/generic_sync.rs`、`db_connection_form.rs`、`ssh_form_window.rs`、`home_tab.rs`
-
-## 执行记录 - certificate-management
-时间：2026-03-25 13:05:00 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/storage/models.rs`
-- `crates/core/src/storage/repository.rs`
-- `crates/core/src/storage/migration.rs`
-- `crates/core/src/cloud_sync/models.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/cloud_sync/workspace_sync.rs`
-- `crates/core/src/cloud_sync/generic_sync.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/db_view/src/common/db_connection_form.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/mongodb_view/src/mongo_form_window.rs`
-- `main/src/home_tab.rs`
-
-### 2. 对比的相似实现
-- `crates/core/src/storage/repository.rs:117`：连接实体的仓储实现模式
-- `crates/core/src/cloud_sync/workspace_sync.rs:13`：独立数据类型接入通用同步模式
-- `crates/db_view/src/common/db_connection_form.rs:1142`：数据库连接保存统一汇聚点
-- `crates/terminal_view/src/ssh_form_window.rs:479`：SSH 凭据构建与测试链路
-
-### 3. 当前发现
-- 当前没有统一凭据实体，所有密码/私钥都直接保存在连接参数 JSON 中
-- 若采用纯运行时解引用，需要改造大量 `StoredConnection::to_*` 调用点，代价较高
-- “引用 + 快照”更适合当前仓库：既能统一管理，又不破坏已有连接执行链路
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次改为基于仓库源码、`rg` 和本地 Rust 构建命令完成检索与验证
-
-## 编码前检查 - app-settings-sync
-时间：2026-03-26 01:53:48 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-app-settings-sync.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/generic_sync.rs::generic_sync`：复用通用同步流程
-- `crates/core/src/cloud_sync/workspace_sync.rs::WorkspaceSyncType`：复用类型化同步接入模式
-- `crates/core/src/cloud_sync/certificate_sync.rs::CertificateSyncType`：复用上传后回写同步元数据模式
-- `main/src/home_tab.rs::trigger_sync`：复用主界面同步入口
-- `main/src/home/home_tabs.rs::apply_terminal_settings_to_all`：复用终端设置批量应用能力
-□ 将遵循命名约定：设置文件内新增稳定 `local_id` 和 `remote_id`，并在同步层映射为 `cloud_id`
-□ 将遵循代码风格：优先扩展现有 `AppSettings`、`SyncEngine` 和设置保存链路，不新增独立状态容器
-□ 确认不重复造轮子，证明：已检查 `main/src/setting_tab.rs`、`main/src/home/home_tabs.rs`、`main/src/home_tab.rs`、`crates/core/src/cloud_sync/engine.rs`、`crates/core/src/cloud_sync/generic_sync.rs`、`crates/core/src/cloud_sync/service.rs`
-
-## 执行记录 - app-settings-sync
-时间：2026-03-26 01:53:48 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/setting_tab.rs`
-- `main/src/home/home_tabs.rs`
-- `main/src/home_tab.rs`
-- `main/src/onetcli_app.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/generic_sync.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/cloud_sync/workspace_sync.rs`
-- `crates/core/src/cloud_sync/certificate_sync.rs`
-- `crates/core/src/cloud_sync/models.rs`
-
-### 2. 对比的相似实现
-- `crates/core/src/cloud_sync/workspace_sync.rs:13`：简单数据类型接入通用同步
-- `crates/core/src/cloud_sync/certificate_sync.rs:14`：同步元数据回写与本地更新模式
-- `main/src/setting_tab.rs:270`：应用设置本地 JSON 读写入口
-- `main/src/home/home_tabs.rs:73`：终端设置保存后的本地应用链路
-
-### 3. 当前发现
-- `AppSettings` 只有本地 `settings.json` 持久化，还没有远端同步元数据
-- `SyncEngine` 当前默认只注册工作区、证书、连接三类处理器
-- 服务端管理页已经把 `app_settings` 作为合法同步类型统计，但桌面端不会上传该类型
-- 设置下载后的运行时刷新能力缺失，需要显式重载全局设置并更新现有终端视图
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地补充文档完成实现和验证
-
-## 编码后声明 - app-settings-sync
-时间：2026-03-26 02:01:25 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/cloud_sync/generic_sync.rs::generic_sync`：应用设置复用通用同步执行框架
-- `crates/core/src/cloud_sync/engine.rs::SyncEngine::register_type`：通过注册类型化处理器接入同步引擎
-- `main/src/home_tab.rs::trigger_sync`：继续作为统一的桌面端同步入口
-- `main/src/home/home_tabs.rs::apply_terminal_settings_to_all`：继续作为终端设置批量应用基础能力
-- `main/src/setting_tab.rs::AppSettings::load/save`：继续作为本地 JSON 单一数据源，只补同步元数据
-
-### 2. 遵循了以下项目约定
-- 命名约定：远端记录继续沿用 `cloud_id` 语义，本地设置文件内新增 `local_id` 和 `remote_id` 建立稳定映射
-- 代码风格：未新增第二套同步框架，而是在既有 `SyncTypeHandler` 体系上增量扩展
-- 文件组织：`one_core` 只补通用常量与泛型加解密能力，主应用特有的设置同步处理器放在 `main/src/app_settings_sync.rs`
-
-### 3. 对比了以下相似实现
-- `crates/core/src/cloud_sync/workspace_sync.rs`：沿用简单数据类型接入通用同步模式
-- `crates/core/src/cloud_sync/certificate_sync.rs`：沿用上传成功后回写同步元数据模式
-- `main/src/setting_tab.rs`：沿用本地 JSON 配置模型，不改存储介质
-- `main/src/home/home_tabs.rs`：沿用终端设置变更后即时应用的运行时刷新模式
-
-### 4. 未重复造轮子的证明
-- 已检查 `crates/core/src/cloud_sync/engine.rs`、`generic_sync.rs`、`service.rs`、`workspace_sync.rs`、`certificate_sync.rs`
-- 最终没有新建独立同步服务、设置数据库表或额外状态管理层，而是把应用设置接入现有框架
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main app_settings_sync`：通过
-
-### 6. 风险与限制
-- 当前只补了“应用设置”这一类云同步，未扩展额外的设备专属配置类型
-- `sync_server_url` 按设计保留为本地字段，不参与云端同步，避免跨设备错误改写同步服务地址
-- 仍缺少真实双设备往返自动化测试；本次通过编译、单元测试和运行时刷新链路完成本地验证
-
-## 编码前检查 - app-style-theme-switch
-时间：2026-03-26 02:15:50 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-app-style-theme-switch.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/app_style.rs`：统一样式入口，直接修根因
-- `crates/ui/src/theme/mod.rs::Theme::change`：主题切换唯一入口
-- `crates/terminal_view/src/sidebar/settings_panel.rs`：现成的 `cx.theme()` 语义色用法
-- `main/src/encourage.rs`：主题语义色与强调色混用的卡片样式参考
-□ 将遵循命名约定：继续沿用 `page/panel/control/sidebar/title_bar/text_*` 语义样式命名
-□ 将遵循代码风格：优先复用 `ThemeColor` 语义色，不在业务页面散落追加写死颜色
-□ 确认不重复造轮子，证明：已检查 `crates/ui/src/app_style.rs`、`crates/ui/src/theme/mod.rs`、`crates/ui/src/theme/theme_color.rs`、`crates/terminal_view/src/sidebar/settings_panel.rs`、`main/src/encourage.rs`
-
-## 执行记录 - app-style-theme-switch
-时间：2026-03-26 02:15:50 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/ui/src/app_style.rs`
-- `crates/ui/src/theme/mod.rs`
-- `crates/ui/src/theme/theme_color.rs`
-- `crates/ui/src/theme/default-theme.json`
-- `crates/ui/src/theme/schema.rs`
-- `crates/ui/src/dialog.rs`
-- `crates/db_view/src/connection_form_window.rs`
-- `main/src/setting_tab.rs`
-- `main/src/auth.rs`
-- `crates/terminal_view/src/sidebar/settings_panel.rs`
-- `main/src/encourage.rs`
-
-### 2. 对比的相似实现
-- `crates/terminal_view/src/sidebar/settings_panel.rs:297`：直接读取 `cx.theme()` 的主题分层模式
-- `main/src/encourage.rs:52`：主题边框与轻量卡片背景的组合模式
-- `crates/ui/src/dialog.rs:505`：弹窗外壳统一依赖 `app_style`，适合作为集中修复入口
-
-### 3. 当前发现
-- `app_style` 之前把页面、卡片、标题栏、输入区、边框全部写死为深色
-- `sync_server_theme` 只是对 `app_style` 的重导出，因此设置页、账号页、弹窗和连接窗口都会被一起锁死在深色
-- 项目原生主题系统本身工作正常，问题只在于 `app_style` 绕过了 `ThemeColor`
-- 与其逐页补丁，不如在 `Theme::change` 时同步 `app_style` 当前主题快照，直接覆盖全部既有调用点
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码前检查 - workspace-sync-upload
-时间：2026-03-26 09:54:59 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-workspace-sync-upload.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/connection_sync.rs`：复用 `last_synced_at` 判定思路
-- `crates/core/src/cloud_sync/certificate_sync.rs`：复用同步成功后的 `update_sync_status(...)` 回写模式
-- `crates/core/src/cloud_sync/generic_sync.rs`：继续作为工作区同步主流程，只补充状态判定和回调
-- `crates/core/src/storage/repository.rs`：复用仓储层集中维护同步字段的模式
-□ 将遵循命名约定：继续使用 `cloud_id / updated_at / last_synced_at` 的同步状态命名
-□ 将遵循代码风格：只在模型、仓储、同步流程和迁移层补齐行为，不在 UI 侧添加补丁逻辑
-□ 确认不重复造轮子，证明：已检查连接同步、证书同步、工作区仓储和通用同步计划，确认当前缺口是工作区同步状态未落库且未参与计划判定
-
-## 执行记录 - workspace-sync-upload
-时间：2026-03-26 09:54:59 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/cloud_sync/workspace_sync.rs`
-- `crates/core/src/cloud_sync/generic_sync.rs`
-- `crates/core/src/cloud_sync/connection_sync.rs`
-- `crates/core/src/cloud_sync/certificate_sync.rs`
-- `crates/core/src/storage/models.rs`
-- `crates/core/src/storage/repository.rs`
-- `crates/core/src/storage/migration.rs`
-- `crates/core/migrations/20260225000001_init.sql`
-
-### 2. 对比的相似实现
-- `connection_sync.rs`：通过 `last_synced_at` 区分本地改动与云端改动
-- `certificate_sync.rs`：上传成功后统一回写同步状态
-- `repository.rs` 中证书/连接仓储：同步状态字段统一放在仓储层持久化
-
-### 3. 当前发现
-- 工作区模型和表结构没有 `last_synced_at`，只能靠 `updated_at` 和云端时间直接比较
-- `generic_sync` 在“更新云端成功”后没有回调同步状态，导致即使补字段也会重复判脏
-- 工作区本地编辑后原先不会显式进入“待同步”状态
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - workspace-sync-upload
-时间：2026-03-26 09:54:59 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/cloud_sync/generic_sync.rs`：继续承担工作区同步计划与执行，只补了状态判定函数和云端更新后的回调
-- `crates/core/src/cloud_sync/certificate_sync.rs`：沿用上传成功后回写 `cloud_id + last_synced_at` 的模式
-- `crates/core/src/storage/repository.rs`：继续作为工作区同步状态的唯一持久化入口
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增字段与方法统一使用 `last_synced_at`、`update_sync_status`
-- 代码风格：状态变更集中在模型/仓储/同步层，没有在业务页面埋额外同步判断
-- 文件组织：迁移仍放在 `crates/core/migrations`，注册仍走 `storage/migration.rs`
-
-### 3. 对比了以下相似实现
-- `connection_sync.rs`：我的方案没有引入完整冲突系统，只借用了“晚于上次同步才算变更”的判定方式
-- `certificate_sync.rs`：工作区同步回写现在与证书同步保持一致，差异仅在工作区仍走通用同步流程
-- `repository.rs` 中本地更新逻辑：工作区本地编辑会清空 `last_synced_at`，而云端回写则保留/更新它
-
-### 4. 未重复造轮子的证明
-- 没有新增独立的工作区同步引擎
-- 没有在 `home_tab.rs` 或其它 UI 调用点写死“修改后强制上传”逻辑
-- 仅在既有通用同步和工作区仓储中补齐缺失的同步状态链路
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo test -p one-core workspace_repository --lib`：通过
-- `cargo test -p one-core generic_sync --lib`：通过
-- `cargo check -p one-core -p main`：通过
-
-### 6. 风险与限制
-- 已绑定云端但历史上没有 `last_synced_at` 的工作区，升级后首次同步可能会补传一次
-- 当前只为工作区启用了基于同步状态的通用判定，应用设置仍保留原有比较方式
-- 现有 `gpui-component` 未使用函数告警和 `num-bigint-dig` 的 future incompatibility 提示均为仓库既有问题，与本次改动无关
-
-## 编码后声明 - certificate-settings-navigation
-时间：2026-03-26 03:34:20 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/home/home_tabs.rs::add_settings_tab`：继续作为设置标签页唯一打开入口
-- `main/src/home/home_tabs.rs::open_account_settings_tab`：直接复用其“先 request_page，再 add_settings_tab”的导航模式
-- `main/src/setting_tab.rs::SettingsPanel::setting_pages`：继续通过 `SettingItem::render(...)` 嵌入自定义 `Entity`
-- `crates/core/src/certificate_manager.rs::CertificateManagerView`：直接复用现有凭证管理视图
-- `crates/core/src/certificate_manager.rs::open_certificate_manager_popup`：保留现有对外 API，不改各表单调用点
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增 `SettingsPanelPage::Certificate`、`open_certificate_settings_tab(...)`、`GlobalMainWindowHandle`
-- 代码风格：导航桥集中在 `one_core + main` 的通用层，不向 SSH/MySQL/Redis/Mongo 等表单散落特判
-- 文件组织：凭证数据和通用入口继续留在 `crates/core`，主窗口与设置页逻辑继续留在 `main`
-
-### 3. 对比了以下相似实现
-- `main/src/home/home_tabs.rs::open_account_settings_tab`：本次新入口与其保持完全一致的调用结构
-- `main/src/setting_tab.rs::LlmProvidersView`：凭证管理页采用同样的设置页内嵌视图方式
-- `main/src/onetcli_app.rs::GlobalHomePage`：沿用现有全局桥接模式，再补主窗口句柄以避开弹窗 `active_window()` 歧义
-
-### 4. 未重复造轮子的证明
-- 没有重写新的“凭证设置页专用视图”，而是直接复用 `CertificateManagerView`
-- 没有改动任一连接表单里的 `open_certificate_manager_popup(cx)` 调用点
-- 最终只把原本“总是开 popup”的通用入口升级为“优先导航主窗口设置页，失败回退 popup”
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p one-core -p main -p db_view -p terminal_view -p redis_view -p mongodb_view`：通过
-
-### 6. 风险与限制
-- 当前以编译验证为主，仍建议你手工再看一次从“新建连接弹窗”点击“管理凭证”时，主窗口是否能准确切到设置页中的“凭证管理”
-- 若未来支持多个主应用窗口，`GlobalMainWindowHandle` 需要升级为“当前主窗口选择策略”；当前单主窗口场景可用
-- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次实现无关
-
-## 编码后声明 - popup-window-style
-时间：2026-03-26 03:04:38 +0800
-
-### 1. 复用了以下既有组件
-- `crates/core/src/popup_window.rs`：继续复用独立窗口打开、焦点陷阱和 Esc 关闭逻辑
-- `crates/ui/src/app_style.rs`：复用 `page_bg / page_header_style / footer_style / border_strong`
-- `crates/core/src/certificate_manager.rs`：保留现有凭证管理数据与操作逻辑，只补视觉结构
-
-### 2. 遵循了以下项目约定
-- 命名约定：沿用 `PopupWindowView / CertificateManagerView / CertificateEditorView`
-- 代码风格：优先在通用 `PopupWindow` 层增强窗口壳体，再对凭证管理窗口做最小结构补强
-- 文件组织：仅修改 `popup_window.rs` 与 `certificate_manager.rs`，没有改动连接表单业务逻辑
-
-### 3. 对比了以下相似实现
-- `connection_form_window.rs`：保持其已有标题栏与底部操作区实现不变，只让外层窗口框体更清晰
-- `dialog.rs`：沿用“增强边框、区块分层”的思路，但没有把大表单窗口强行迁回 `Dialog`
-- `certificate_manager.rs`：补上页头、正文、页脚三段式结构，使其与其它弹出窗口更一致
-
-### 4. 未重复造轮子的证明
-- 没有为 SSH/MySQL/Redis/Mongo 等每个连接窗口分别加边框特判
-- 最终通过 `PopupWindowView` 统一增强了独立窗口外壳，让所有 `open_popup_window(...)` 调用自动继承
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p one-core -p gpui-component -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p sftp_view`：通过
-
-### 6. 风险与限制
-- 当前仍缺少桌面端自动截图或交互测试，建议重点手看连接表单窗口与凭证管理/编辑窗口
-- `crates/ui/src/window_ext.rs` 的既有未使用代码告警仍存在，与本次 PopupWindow 样式修复无关
-
-## 编码后声明 - dialog-visual-structure
-时间：2026-03-26 02:57:42 +0800
-
-### 1. 复用了以下既有组件
-- `crates/ui/src/dialog.rs`：继续复用原有拖拽、动画、焦点陷阱、关闭逻辑
-- `crates/ui/src/app_style.rs`：直接复用 `title_bar_style`、`footer_style`、`border_strong`
-- `crates/db_view/src/connection_form_window.rs`：借鉴标题栏和底部操作区的分隔方式
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增变量沿用 `has_footer / title_bar_padding_y / body_top_padding` 这类布局语义命名
-- 代码风格：所有改动都留在通用 UI 层，没有向业务页面扩散特判
-- 文件组织：仅修改 `crates/ui/src/dialog.rs` 与相关语义样式入口 `crates/ui/src/app_style.rs`
-
-### 3. 对比了以下相似实现
-- `connection_form_window`：沿用“标题栏独立背景 + 底部操作区顶部分隔线”的结构
-- `redis_form_window`：沿用“容器边框与背景分层”思路，但没有把弹窗再次做成重卡片
-- `ssh_form_window`：沿用统一 `app_style` 语义，避免写死颜色
-
-### 4. 未重复造轮子的证明
-- 没有在具体弹窗调用点补样式，也没有新增新的弹窗组件
-- 最终只增强了通用 `Dialog` 的默认渲染结构，让 `open_dialog / confirm / alert` 自动继承修复
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p sftp_view`：通过
-
-### 6. 风险与限制
-- 当前仍缺少桌面端自动截图或交互测试，标题栏高度和底部层级建议你手动看一眼典型弹窗
-- 既有 `window_ext.rs` 未使用代码告警仍存在，与本次弹窗样式修复无关
-
-## 编码前检查 - popup-window-style
-时间：2026-03-26 03:04:38 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-popup-window-style.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/popup_window.rs`：连接表单与凭证管理的统一弹出窗口入口
-- `crates/ui/src/app_style.rs`：统一边框、页头和页脚语义样式
-- `crates/db_view/src/connection_form_window.rs`：已有弹出窗口内容层的结构参考
-- `crates/core/src/certificate_manager.rs`：凭证管理与编辑窗口本体
-□ 将遵循命名约定：延续 `PopupWindow* / Certificate*View` 现有命名，不新增冗余抽象
-□ 将遵循代码风格：优先改通用 `PopupWindow` 壳体，对明显缺结构的凭证管理视图做最小补强
-□ 确认不重复造轮子，证明：已核对 `open_popup_window`、连接表单窗口、凭证管理窗口与 `Dialog` 路径差异
-
-## 执行记录 - popup-window-style
-时间：2026-03-26 03:04:38 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/popup_window.rs`
-- `main/src/home_tab.rs`
-- `crates/core/src/certificate_manager.rs`
-- `crates/db_view/src/connection_form_window.rs`
-- `crates/ui/src/app_style.rs`
-
-### 2. 对比的相似实现
-- `connection_form_window.rs`：独立窗口内部已有标题栏和底部操作区
-- `dialog.rs`：页内模态已增强边框和结构分层，但不适合直接替换大表单窗口
-- `popup_window.rs`：当前只负责窗口打开和焦点陷阱，窗口壳体样式偏弱
-
-### 3. 当前发现
-- “新建连接 -> 选择类型后出现的窗口”与“凭证管理窗口”都走 `open_popup_window(...)`
-- 连接表单类窗口本身已有清晰头尾结构，主要缺的是独立窗口壳体边界
-- 凭证管理与凭证编辑窗口内部还缺少明确的页头/页脚分层，需要一起补
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - app-style-theme-switch
-时间：2026-03-26 02:15:50 +0800
-
-### 1. 复用了以下既有组件
-- `crates/ui/src/app_style.rs`：继续作为统一样式入口，只把取色来源改为当前主题快照
-- `crates/ui/src/theme/mod.rs::Theme::change`：继续作为主题切换唯一入口，并新增样式快照同步
-- `ThemeColor` 语义色：复用 `background/group_box/secondary/sidebar/title_bar/danger` 等字段，不再维护第二套深色背景常量
-
-### 2. 遵循了以下项目约定
-- 命名约定：没有新增新的业务样式体系，仍沿用 `page_bg/panel_bg/control_style/...`
-- 代码风格：把变更集中在通用层，避免去 `setting_tab/auth/dialog/连接窗口` 分别散改
-- 文件组织：主题同步逻辑留在 `crates/ui` 内部，业务模块不感知实现细节
-
-### 3. 对比了以下相似实现
-- `crates/terminal_view/src/sidebar/settings_panel.rs`：沿用 `cx.theme()` 语义色分层思路
-- `main/src/encourage.rs`：沿用卡片背景与强调色分离思路
-- `crates/ui/src/dialog.rs`：验证通过统一入口修复可以自然覆盖所有现有弹窗
-
-### 4. 未重复造轮子的证明
-- 已检查所有 `app_style::` / `sync_server_theme::` 调用点
-- 最终没有新增第二套亮色样式文件，也没有在每个窗口局部复制主题判断逻辑
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component`：通过
-
-### 6. 风险与限制
-- 当前验证以编译与调用链检查为主，缺少自动化 GUI 截图回归
-- `app_style` 现在依赖 `Theme::change` 同步主题快照；如果未来出现绕过该入口的主题改写路径，需要同步补上快照刷新
-- `crates/ui/src/window_ext.rs` 的未使用代码告警仍存在，与本次修复无关
-
-## 编码前检查 - form-focus-border
-时间：2026-03-26 02:22:37 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-form-focus-border.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/input/input.rs`：统一输入框渲染与焦点边框逻辑
-- `crates/ui/src/select.rs`：作为正确的焦点边框顺序参考
-- `crates/ui/src/button/button.rs`：覆盖设置页这类按钮式下拉
-- `crates/ui/src/setting/fields/dropdown.rs`：确认设置下拉不是 `Select`
-□ 将遵循命名约定：焦点态统一使用主题 `ring` 语义色，不新增页面级特例颜色
-□ 将遵循代码风格：优先修通用组件，不在业务页面重复追加焦点边框逻辑
-□ 确认不重复造轮子，证明：已检查 `input/input.rs`、`select.rs`、`button/button.rs`、`setting/fields/dropdown.rs`
-
-## 执行记录 - form-focus-border
-时间：2026-03-26 02:22:37 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/ui/src/input/input.rs`
-- `crates/ui/src/select.rs`
-- `crates/ui/src/button/button.rs`
-- `crates/ui/src/styled.rs`
-- `crates/ui/src/setting/fields/string.rs`
-- `crates/ui/src/setting/fields/dropdown.rs`
-- `crates/ui/src/setting/fields/number.rs`
-- `crates/db_view/src/common/db_connection_form.rs`
-- `main/src/setting_tab.rs`
-- `main/src/auth.rs`
-
-### 2. 对比的相似实现
-- `crates/ui/src/select.rs:821`：下拉框在 `refine_style` 之后再叠加焦点边框，效果正确
-- `crates/ui/src/input/input.rs:375`：输入框在 `refine_style` 之前叠加焦点边框，导致被覆盖
-- `crates/ui/src/setting/fields/dropdown.rs:50`：设置页下拉是 `outline Button`，不走 `Select`
-
-### 3. 当前发现
-- 新建连接窗口下拉框焦点边框正常，是因为 `Select` 的叠加顺序正确
-- 其它输入框焦点边框不明显，根因是 `Input` 把 `focused_border` 放在 `refine_style` 之前
-- 设置页等按钮式下拉虽然有 focus ring，但边框色不会跟随焦点切换，需要在 `outline Button` 层补齐
-- 通过修 `Input` 和 `Button` 通用组件，可以自动覆盖主应用、数据库、终端、Redis、Mongo、SFTP 等页面
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - form-focus-border
-时间：2026-03-26 02:22:37 +0800
-
-### 1. 复用了以下既有组件
-- `crates/ui/src/input/input.rs`：通过调整既有渲染顺序恢复所有输入框焦点边框
-- `crates/ui/src/button/button.rs`：通过扩展既有 `outline` 焦点态覆盖按钮式下拉
-- `crates/ui/src/styled.rs::focused_border`：继续复用主题 `ring` 作为统一焦点边框色
-
-### 2. 遵循了以下项目约定
-- 命名约定：没有引入新的页面级焦点颜色入口，仍沿用 `ring/focused_border`
-- 代码风格：修复集中在通用组件层，业务模块零散调用无需改签名
-- 文件组织：设置页、连接页、账号页等页面继续只消费通用组件
-
-### 3. 对比了以下相似实现
-- `Select`：沿用“最后再叠加焦点边框”的顺序
-- `Button`：沿用现有 focus ring 机制，并补实际边框色切换
-- `SettingField Dropdown`：确认需要通过 `Button` 层覆盖，而不是误改 `Select`
-
-### 4. 未重复造轮子的证明
-- 没有在 `db_connection_form/ssh_form_window/redis_form_window/mongo_form_window/setting_tab/auth` 等页面分别打补丁
-- 最终只改了 `Input` 与 `Button` 两个通用组件，让现有全部调用点自动继承
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component -p sftp_view`：通过
-
-### 6. 风险与限制
-- 缺少自动化 GUI 回归，最终焦点观感仍需本地手动确认
-- `outline Button` 的焦点边框现在会一并作用于设置类按钮式下拉和其他 outline 按钮，这是有意统一，但仍建议顺手看一遍观感
-- `crates/ui/src/window_ext.rs` 的既有未使用代码告警仍存在，与本次修复无关
-
-## 补充修复 - settings-dropdown-open-border
-时间：2026-03-26 02:32:37 +0800
-
-### 1. 发现
-- 设置页下拉字段不是 `Select`，而是 `setting/fields/dropdown.rs` 里的 `outline Button + dropdown_menu_with_anchor`
-- 鼠标点击打开菜单时，按钮本身不会进入 `is_focused`，但会因为 `Popover::trigger` 机制进入 `selected/open` 状态
-- 之前只在 `is_focused && outline` 时把边框切到 `ring`，所以设置页下拉不会命中
-
-### 2. 修复
-- 在 `crates/ui/src/button/button.rs` 中把后置边框切换条件改为：
-- `(is_focused || self.selected) && self.outline && !self.disabled`
-- 这样设置页下拉在“键盘聚焦”或“鼠标点开菜单”时都会显示主题 `ring` 边框
-
-### 3. 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main -p gpui-component`：通过
-
-## 编码前检查 - chatdb-completion-menu-height
-时间：2026-03-26 02:42:16 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-chatdb-completion-menu-height.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/input/popovers/completion_menu.rs`：ChatDb `@` 提示实际走这里
-- `crates/ui/src/input/popovers/code_action_menu.rs`：同类输入弹层一起修复
-- `crates/ui/src/input/popovers/hover_popover.rs`：窗口剩余空间计算参考
-- `crates/ui/src/menu/popup_menu.rs`：超高弹层滚动与高度限制参考
-□ 将遵循命名约定：继续沿用 `MAX_MENU_* / edge padding / max_h` 这一类布局语义
-□ 将遵循代码风格：优先在通用 popover 层修复，不在 ChatDb 页面加特判
-□ 确认不重复造轮子，证明：已检查 `completion_menu.rs`、`code_action_menu.rs`、`hover_popover.rs`、`popup_menu.rs`
-
-## 执行记录 - chatdb-completion-menu-height
-时间：2026-03-26 02:42:16 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/db_view/src/chatdb/ai_input.rs`
-- `crates/ui/src/input/popovers/completion_menu.rs`
-- `crates/ui/src/input/popovers/code_action_menu.rs`
-- `crates/ui/src/input/popovers/hover_popover.rs`
-- `crates/ui/src/menu/popup_menu.rs`
-- `crates/ui/src/input/state.rs`
-
-### 2. 对比的相似实现
-- `hover_popover.rs:188`：按窗口剩余高度限制弹层
-- `popup_menu.rs:1269`：超高菜单自动滚动
-- `completion_menu.rs:441`：原本只算宽度、不算高度
-
-### 3. 当前发现
-- ChatDb SQL 助手里的 `@` 表名提示最终走的是通用 `CompletionMenu`
-- `CompletionMenu` 和 `CodeActionMenu` 都是固定高度、固定向下展开
-- 当光标靠近窗口底部时，面板不会根据可用空间收缩，也不会改为向上展开，所以会超出窗口范围
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - chatdb-completion-menu-height
-时间：2026-03-26 02:42:16 +0800
-
-### 1. 复用了以下既有组件
-- `completion_menu.rs`：继续作为补全列表统一入口，只补窗口边界计算
-- `code_action_menu.rs`：沿用同一套位置与高度约束策略
-- `editor_popover`：继续作为通用浮层外壳
-- `List::max_h`：继续作为列表最大高度限制入口
-
-### 2. 遵循了以下项目约定
-- 命名约定：保留 `MAX_MENU_WIDTH / MAX_MENU_HEIGHT`，只新增最小切换阈值和边缘留白
-- 代码风格：在通用 UI 层修复，ChatDb、SQL 编辑器、其它补全调用方都无需改动
-- 文件组织：只修改 `crates/ui/src/input/popovers` 下的相关弹层实现
-
-### 3. 对比了以下相似实现
-- `hover_popover`：沿用“计算顶部/底部空间，再决定展开方向”的思路
-- `popup_menu`：沿用“面板超高则滚动”的处理方式
-- `code_action_menu`：同步补上相同边界约束，避免同类问题残留
-
-### 4. 未重复造轮子的证明
-- 没有在 `chatdb/ai_input.rs` 或 SQL 助手页面写死窗口高度判断
-- 最终只改了两个通用输入弹层组件，让所有相关调用自动继承修复
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p db_view -p main`：通过
-
-### 6. 风险与限制
-- 当前阈值 `MIN_MENU_HEIGHT` 是经验值，最终观感仍建议在小窗口里手动验证一次
-- 文档侧栏也会受相同高度限制影响，空间不足时会更早进入滚动，这是预期行为
-- `crates/ui/src/window_ext.rs` 的既有未使用代码告警仍存在，与本次修复无关
-
-## 编码前检查 - dialog-visual-structure
-时间：2026-03-26 02:57:42 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-dialog-visual-structure.md`
-□ 将使用以下可复用组件：
-- `crates/ui/src/dialog.rs`：统一简单弹窗默认结构
-- `crates/ui/src/app_style.rs`：复用标题栏、页脚、边框与主题颜色语义
-- `crates/db_view/src/connection_form_window.rs`：参考标题栏与底部操作区的分层方式
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-□ 将遵循命名约定：继续使用 `has_* / *_padding / *_offset` 这类布局语义命名
-□ 将遵循代码风格：只修通用 `Dialog`，不在业务页面做弹窗特判
-□ 确认不重复造轮子，证明：已检查 `dialog.rs` 与多个表单窗口的现有标题栏/底部样式模式
-
-## 执行记录 - dialog-visual-structure
-时间：2026-03-26 02:57:42 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/ui/src/dialog.rs`
-- `crates/ui/src/app_style.rs`
-- `crates/db_view/src/connection_form_window.rs`
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-
-### 2. 对比的相似实现
-- `connection_form_window.rs`：标题栏使用 `title_bar_style`，底部按钮区使用顶部分隔线
-- `redis_form_window.rs`：主体卡片与背景通过边框和圆角分层
-- `ssh_form_window.rs`：沿用与连接窗口一致的标题/主体结构
-
-### 3. 当前发现
-- 简单弹窗并非完全没有边框，而是默认外框强度偏弱，在部分背景下识别度不够
-- 现有 `Dialog` 标题区只是很小的拖拽行，正文和底部操作区缺少独立背景与分隔线
-- 只要增强 `Dialog` 默认外框，并为标题栏和底部操作区增加明确层级，就能覆盖大多数简单弹窗
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码前检查 - remove-app-settings-sync
-时间：2026-03-26 10:05:22 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-remove-app-settings-sync.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs`：移除应用设置同步注册点
-- `main/src/setting_tab.rs`：保留本地设置保存，只删除同步触发与同步元数据
-- `main/src/home/home_tabs.rs`：保留终端设置广播，只删除同步触发
-- `main/src/main.rs`：移除应用设置同步模块声明
-□ 将遵循命名约定：不新增新抽象，只删除 `AppSettingsSyncType` 及相关触发符号
-□ 将遵循代码风格：直接清理整条链路，不保留空函数或无效条件分支
-□ 确认不重复造轮子，证明：已检查应用设置同步模块、首页同步入口、设置页触发点和终端事件触发点，确认是单独链路
-
-## 执行记录 - remove-app-settings-sync
-时间：2026-03-26 10:05:22 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/app_settings_sync.rs`
-- `main/src/home_tab.rs`
-- `main/src/setting_tab.rs`
-- `main/src/home/home_tabs.rs`
-- `main/src/main.rs`
-- `crates/core/src/cloud_sync/models.rs`
-
-### 2. 对比的相似实现
-- `main/src/home_tab.rs`：应用层通过 `register_type(...)` 追加额外同步类型
-- `main/src/home/home_tabs.rs`：终端设置变更的本地广播与云同步触发是分离的
-- `main/src/setting_tab.rs`：设置保存和同步 URL 生效本身不依赖应用设置云同步
-
-### 3. 当前发现
-- 应用设置同步不是核心引擎默认行为，而是桌面端额外加上的类型
-- 设置页与终端设置变更会频繁触发整轮云同步
-- `AppSettings` 中的 `local_id / remote_id / last_synced_at / updated_at` 都只服务于这一条同步链路
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修改
-
-## 编码后声明 - remove-app-settings-sync
-时间：2026-03-26 10:05:22 +0800
-
-### 1. 复用了以下既有组件
-- `AppSettings::save()`：继续作为所有应用设置的本地持久化入口
-- `sync_terminal_settings_to_all(...)` 与 `apply_terminal_settings_to_all(...)`：继续负责本地终端设置广播
-- `SyncEngine::new(...)`：回退到默认同步处理器，不再追加应用设置类型
-
-### 2. 遵循了以下项目约定
-- 命名约定：直接删除 `AppSettingsSyncType` 相关命名，不额外保留兼容层
-- 代码风格：只删应用设置同步链路，不改连接、工作区、凭证同步行为
-- 文件组织：同步实现文件删除，接入点和触发点同步收口
-
-### 3. 对比了以下相似实现
-- `home_tab.rs` 常规同步与冲突解决：两处都统一去掉了额外的 `register_type(...)`
-- `setting_tab.rs` 设置保存回调：保留 `save()`，删除紧随其后的同步触发
-- `home/home_tabs.rs` 终端事件处理：保留本地广播，删除云同步调用
-
-### 4. 未重复造轮子的证明
-- 没有新增“禁用应用设置同步”的配置开关
-- 没有保留空的 `AppSettingsSyncType` 实现
-- 直接删除同步模块、触发函数和同步元数据，行为更清晰
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p one-core -p main`：通过
-- `cargo test -p one-core --lib`：通过
-- `cargo test -p main --lib`：失败，原因是包 `main` 不存在 `lib` target，不属于代码错误
-
-### 6. 风险与限制
-- 旧 `settings.json` 若含历史同步字段，当前版本读取时会忽略，下一次保存后会自动移除
-- 现有 `gpui-component` 未使用函数告警和 `num-bigint-dig` 的 future incompatibility 提示仍为仓库既有问题，与本次修改无关
-
-## 编码前检查 - conflict-resolution-persist
-时间：2026-03-26 10:37:22 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-conflict-resolution-persist.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/connection_sync.rs`：对齐正常更新云端后的 `update_sync_status(...)` 模式
-- `crates/core/src/cloud_sync/engine.rs`：继续作为手动冲突解决的唯一执行入口
-- `main/src/home_tab.rs`：继续负责冲突解决反馈与待处理冲突列表
-□ 将遵循命名约定：继续使用 `last_synced_at`、`update_sync_status`、`pending_conflicts`
-□ 将遵循代码风格：优先在引擎层修正状态推进，不在 UI 层伪造“已解决”
-□ 确认不重复造轮子，证明：已检查正常连接同步、冲突解决引擎和首页冲突处理，确认问题是手动冲突解决缺少同步状态回写且 UI 无条件清空
-
-## 执行记录 - conflict-resolution-persist
-时间：2026-03-26 10:37:22 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/connection_sync.rs`
-- `crates/core/src/storage/repository.rs`
-- `main/src/home_tab.rs`
-
-### 2. 对比的相似实现
-- `connection_sync.rs`：正常“更新云端”完成后会推进本地同步状态
-- `engine.rs`：手动冲突解决原先只更新云端，不推进本地状态
-- `home_tab.rs`：收到 `Ok(stats)` 后原先直接清空待处理冲突并输出完成日志
-
-### 3. 当前发现
-- “使用本地版本”冲突解决后，本地连接的 `last_synced_at` 没有更新
-- `apply_conflict_resolutions(...)` 原先把输入冲突直接复制到 `result.conflicts`，无法区分真正未解决的项
-- 首页原先即使有残余错误，也会打印“冲突解决完成”
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - conflict-resolution-persist
-时间：2026-03-26 10:37:22 +0800
-
-### 1. 复用了以下既有组件
-- `ConnectionRepository::update_sync_status(...)`：用于在冲突解决后推进本地连接同步状态
-- `SyncEngine::current_timestamp()`：继续作为同步状态时间戳来源
-- `build_conflict_resolution_feedback(...)`：保留原有反馈文案，只修正其前置状态判断
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增辅助方法继续使用同步状态现有命名，不引入新的状态概念
-- 代码风格：只修冲突解决引擎与首页处理，不影响常规同步和其它数据类型
-- 文件组织：测试直接放在 `engine.rs` 内，与修复点同文件维护
-
-### 3. 对比了以下相似实现
-- `connection_sync.rs` 正常同步：现在手动冲突解决的 `UseLocal` 分支也会像它一样回写同步状态
-- `home_tab.rs` 常规同步：现在冲突解决只有在确实无错误、无残余冲突时才清空列表
-- `conflict.rs` 冲突副本：`KeepBoth` 分支也同步清理了副本的 `last_synced_at`
-
-### 4. 未重复造轮子的证明
-- 没有新增独立“冲突解决后再同步”状态表
-- 没有在 UI 层写死“解决后强制忽略冲突”
-- 直接复用了现有连接同步状态更新能力
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
-- `cargo check -p one-core -p main`：通过
-- `cargo test -p one-core --lib`：通过
-
-### 6. 风险与限制
-- 当前 UI 仍然不会把“部分成功、部分失败”的冲突按粒度拆分展示，只会保留未解决列表并给出警告
-- 现有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍为仓库既有问题，与本次修复无关
-
-## 编码前检查 - login-translation-audit
-时间：2026-03-26 10:55:31 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-login-translation-audit.md`
-□ 将使用以下可复用组件：
-- `main/src/setting_tab.rs`：复用 `Settings.General.Sync.*` 的正确翻译命名空间
-- `main/src/home_tab.rs`：复用 `Home.sync_conflict_*` 的冲突操作命名组
-- `crates/terminal_view/src/ssh_form_window.rs` 与 `crates/terminal_view/src/serial_form_window.rs`：确认 SSH/串口窗口标题和表单字段的翻译引用点
-□ 将遵循命名约定：继续沿用 `Home.*`、`Settings.General.Sync.*`、`SSH.*`、`Serial.*`
-□ 将遵循代码风格：UI 继续使用 `t!(...)` 取翻译，不在组件里保留裸字符串
-□ 确认不重复造轮子，证明：已检查登录窗、设置页和表单窗口的既有翻译模式，直接补齐语言键并修正错误引用，不新增自定义翻译层
-
-## 执行记录 - login-translation-audit
-时间：2026-03-26 10:55:31 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/auth.rs`
-- `main/src/setting_tab.rs`
-- `main/src/home_tab.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-- `crates/terminal_view/src/serial_form_window.rs`
-- `main/locales/main.yml`
-
-### 2. 对比的相似实现
-- `setting_tab.rs`：同步设置页已正确使用 `Settings.General.Sync.server_url_desc`
-- `home_tab.rs`：冲突解决按钮已有 `use_cloud` / `use_local` 键，缺少 `keep_both`
-- `ssh_form_window.rs` / `serial_form_window.rs`：窗口和字段广泛依赖 `SSH.*` / `Serial.*`，语言文件此前缺整组键
-
-### 3. 当前发现
-- 登录窗把 `"sync_server"` 直接作为可见文本渲染
-- 登录窗错误引用 `Settings.General.Account.sync_server_url_desc`，语言树中不存在该键
-- 设置页账号卡片同样直接渲染 `"sync_server"`
-- SSH/串口窗口中存在一批历史缺失键，会直接显示原始 key
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`python3`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - login-translation-audit
-时间：2026-03-26 10:55:31 +0800
-
-### 1. 复用了以下既有组件
-- `Settings.General.Sync.server_url_desc`：作为登录窗同步地址说明的唯一来源
-- `Home.sync_conflict_*`：沿用首页冲突解决现有命名组补齐 `keep_both`
-- `t!(...)`：继续作为所有 UI 翻译入口，不新增包装层
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增键继续归入 `Common`、`ConnectionForm`、`Settings.General.Sync`、`SSH`、`Serial`
-- 代码风格：只修用户可见文案和缺失键，不改业务逻辑
-- 文件组织：代码引用修正在 `main/src`，语言补齐统一落在 `main/locales/main.yml`
-
-### 3. 对比了以下相似实现
-- `auth.rs` 与 `setting_tab.rs`：现在都统一显示 `Settings.General.Sync.server_name`
-- `home_tab.rs` 冲突按钮：现在三种策略键都完整存在
-- `ssh_form_window.rs` 与 `serial_form_window.rs`：窗口标题、字段标签、提示文案不再依赖缺失键
-
-### 4. 未重复造轮子的证明
-- 没有新增第二份语言文件
-- 没有在组件里硬编码中文替代翻译系统
-- 直接补齐现有 `main.yml` 的缺失叶子节点并修正错误引用
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main -p terminal_view`：通过
-- 定向翻译键扫描：`main/src/auth.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`crates/terminal_view/src/ssh_form_window.rs`、`crates/terminal_view/src/serial_form_window.rs` 均为 `MISSING 0`
-
-### 6. 风险与限制
-- 全仓仍可能存在本次范围之外的历史翻译缺口，但当前用户反馈涉及的登录窗、同步设置、冲突对话框、SSH/串口窗口已完成定向清理
-- 编译仍存在仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示，与本次修改无关
-
-## 编码前检查 - conflict-resolution-deleted-cloud
-时间：2026-03-26 11:14:46 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-conflict-resolution-deleted-cloud.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/conflict.rs`：复用 `LocalModifiedCloudDeleted` 冲突类型作为语义分支
-- `crates/core/src/cloud_sync/engine.rs`：继续在引擎层处理冲突，不把语义泄漏到 UI
-- `crates/core/src/cloud_sync/connection_sync.rs`：复用正常上传与同步状态回写思路
-□ 将遵循命名约定：继续使用 `mark_connection_synced`、`apply_conflict_resolutions`、`ConflictType::*`
-□ 将遵循代码风格：只修冲突解决语义和验证，不改 UI 流程
-□ 确认不重复造轮子，证明：已检查连接同步正常上传/更新流程与冲突占位模型，确认问题是占位云端数据被误用，而不是缺少新的同步层
-
-## 执行记录 - conflict-resolution-deleted-cloud
-时间：2026-03-26 11:14:46 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/conflict.rs`
-- `crates/core/src/cloud_sync/connection_sync.rs`
-- `main/src/home_tab.rs`
-- `crates/core/src/cloud_sync/service.rs`
-- `sync_server/server/src/http/routes/sync.ts`
-
-### 2. 对比的相似实现
-- `connection_sync.rs` 正常上传：本地版本可通过 `create_sync_data(...)` 重建云端，并在成功后回写同步状态
-- `conflict.rs` 删除冲突检测：`LocalModifiedCloudDeleted` 仅提供占位 `cloud`
-- `engine.rs` 旧实现：无论何种冲突都把 `cloud` 当成真实云端记录处理
-
-### 3. 当前发现
-- `LocalModifiedCloudDeleted` 的占位 `cloud` 带有 `encrypted_data=""`、`version=0`
-- 旧的 `UseCloud` 分支会尝试解密占位数据，因此出现 `EOF while parsing a value at line 1 column 0`
-- 旧的 `UseLocal` 分支会把 `version=0` 送到 `/api/v1/sync/items/:id`，因此 sync_server 返回 `Too small: expected number to be >=1`
-- 手动冲突解决原先不会补做 `ensure_personal_key_config()`，理论上也存在 `key_version=0` 风险
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`sed`、`cargo` 与本地验证完成修复
-
-## 编码后声明 - conflict-resolution-deleted-cloud
-时间：2026-03-26 11:14:46 +0800
-
-### 1. 复用了以下既有组件
-- `SyncEngine::ensure_personal_key_config(...)`：让手动冲突解决先恢复 `key_version`
-- `SyncEngine::mark_connection_synced(...)`：重建云端后继续复用同步状态回写
-- `ConnectionRepository::delete(...)`：接受云端删除时直接删本地
-
-### 2. 遵循了以下项目约定
-- 命名约定：继续沿用 `ConflictType::LocalModifiedCloudDeleted`
-- 代码风格：按冲突类型分支，不在 UI 层补丁式规避
-- 文件组织：修复与测试都收敛在 `crates/core/src/cloud_sync/engine.rs`
-
-### 3. 对比了以下相似实现
-- `connection_sync.rs` 的正常上传：现在删除冲突的 `UseLocal` 也改为“创建云端 + 回写状态”
-- `engine.rs` 的正常本地更新：现在删除冲突的 `UseCloud` 改为“删除本地”，不再尝试解密占位数据
-- 旧回归测试 `use_local_conflict_resolution_updates_local_sync_status`：继续保留，确保 `BothModified` 旧路径不回退
-
-### 4. 未重复造轮子的证明
-- 没有新增新的冲突状态表或“手动解决专用同步器”
-- 没有在 UI 层特殊判断错误文案
-- 直接复用现有上传、删除、本地同步状态回写能力
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item --lib`：通过
-- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection --lib`：通过
-- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
-- `cargo check -p one-core`：通过
-- `cargo check -p one-core -p main`：通过
-
-### 6. 风险与限制
-- 当前 UI 仍允许在“云端已删除”冲突上选择 `KeepBoth`，本次将其语义收敛为“保留本地并重建云端”，未另外改单独按钮文案
-- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
-
-## 编码前检查 - remove-team-support
-时间：2026-03-26 13:18:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-remove-team-support.md`
-□ 将使用以下可复用组件：
-- `crates/core/src/cloud_sync/service.rs`：统一收敛同步数据的加解密入口
-- `crates/core/src/cloud_sync/sync_type.rs`：统一删除 `team_id` 相关 trait 契约
-- `crates/core/src/storage/repository.rs`：统一删除连接与凭证的团队列映射
-□ 将遵循命名约定：保留既有 `owner_id`、`cloud_id`、`last_synced_at` 命名，删除 `team_id` 相关命名
-□ 将遵循代码风格：只做团队能力移除，不顺带重构无关模块
-□ 确认不重复造轮子，证明：已检查同步模型、同步引擎、SQLite 仓库和各表单窗口，当前团队逻辑为历史残留分支，不需要新增替代层
-
-## 执行记录 - remove-team-support
-时间：2026-03-26 13:18:00 +0800
-
-### 1. 已检索并阅读的关键实现
-- `crates/core/src/cloud_sync/service.rs`
-- `crates/core/src/cloud_sync/engine.rs`
-- `crates/core/src/cloud_sync/client.rs`
-- `crates/core/src/cloud_sync/mod.rs`
-- `crates/core/src/cloud_sync/sync_type.rs`
-- `crates/core/src/storage/models.rs`
-- `crates/core/src/storage/repository.rs`
-- `crates/core/src/storage/migration.rs`
-
-### 2. 对比的相似实现
-- `generic_sync.rs` 与 `connection_sync.rs`：两条同步链路都在云端拉取后再做团队过滤
-- `storage/models.rs` 与 `storage/repository.rs`：连接和凭证都把 `team_id` 当成持久化字段
-- `sync_server.rs` 与 `client.rs`：客户端 trait 仍保留完整团队接口，但 `sync_server` 实现只返回空数据或不支持
-
-### 3. 当前发现
-- “团队”当前没有实际产品能力，但仍残留在日志、同步模型、数据库字段、客户端 trait 和多处窗口保存逻辑里
-- `sync_server` 并不支持团队同步，因此这些代码大多只会制造误导日志或空分支
-- 若只删 UI，不删 `CloudSyncData.team_id` 与 migration，后续编译和运行时都仍会携带残留
-
-### 4. 工具限制留痕
-- 规范要求优先使用 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
-- 当前执行环境未提供这些工具，本次继续基于仓库源码、`rg`、`nl`、`cargo` 与本地验证完成清理
-
-## 编码前检查 - duplicate-connection
-时间：2026-03-26 13:47:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-duplicate-connection.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs`：复用连接卡片按钮区和各类表单打开入口
-- `ConnectionRepository::insert(...)`：直接落一条新记录
-- 各连接表单 `*FormWindowConfig.editing_connection`：直接打开新记录的编辑窗
-□ 将遵循命名约定：沿用 `show_*` / `confirm_*` / `*_connection_*`
-□ 将遵循代码风格：用户文案放到 `main/locales/main.yml`
-□ 确认不重复造轮子，证明：不新增新窗口或表单模式，直接复用现有编辑窗
-
-## 执行记录 - duplicate-connection
-时间：2026-03-26 13:47:00 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `crates/db_view/src/connection_form_window.rs`
-- `crates/terminal_view/src/ssh_form_window.rs`
-- `crates/terminal_view/src/serial_form_window.rs`
-- `crates/redis_view/src/redis_form_window.rs`
-- `crates/mongodb_view/src/mongo_form_window.rs`
-
-### 2. 对比的相似实现
-- 现有编辑按钮：通过连接类型分发到不同编辑窗
-- 现有新建流程：新建连接保存后由连接事件刷新列表并触发同步
-- 现有窗口配置：传 `editing_connection` 即可直接加载现有记录
-
-### 3. 当前发现
-- 复制连接如果走“模板新建”模式，需要改动所有表单窗口的编辑态判定
-- 用户已明确接受更简单方案：先插入新记录，再打开该记录的编辑窗
-- 若复制动作直接发 `ConnectionCreated` 事件，会过早触发自动同步，因此本次刻意避免
-
-## 编码后声明 - duplicate-connection
-时间：2026-03-26 13:47:00 +0800
-
-### 1. 复用了以下既有组件
-- `ConnectionRepository::insert(...)`：生成新副本记录
-- `open_popup_window(...)`：复用现有编辑窗弹出方式
-- `*FormWindowConfig.editing_connection`：直接让新副本进入编辑态
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增方法为 `duplicate_connection_and_open_editor(...)` 与 `open_existing_connection_editor(...)`
-- 代码风格：新按钮提示文案已放入 `main/locales/main.yml`
-- 文件组织：改动仅落在 `main/src/home_tab.rs` 与 `main/locales/main.yml`
-
-### 3. 未重复造轮子的证明
-- 没有新增独立的“复制连接窗口”
-- 没有改造全部表单为“复制模式”
-- 直接复用现有编辑窗和仓库插入能力
-
-### 4. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-## 编码前检查 - workspace-delete-update-wins
-时间：2026-03-26 15:05:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-workspace-delete-update-wins.md`
-□ 将使用以下可复用组件：
-- `main/src/home_tab.rs::queue_pending_cloud_deletion(...)`：登记工作空间待删除记录
-- `WorkspaceRepository::delete(...)`：删除工作空间并解绑子连接
-- `generic_sync(...)`：复用工作空间现有通用同步流程
-- `ConnectionRepository::list_by_workspace(...)`：收集待恢复的连接
-□ 将遵循命名约定：沿用 `handle_*`、`process_*`、`restore_*`
-□ 将遵循代码风格：同步语义和日志文案继续使用简体中文
-□ 确认不重复造轮子，证明：不新增独立删除同步框架，只扩展既有待删除记录和工作空间同步逻辑
-
-## 执行记录 - workspace-delete-update-wins
-时间：2026-03-26 15:05:00 +0800
-
-### 1. 已检索并阅读的关键实现
-- `main/src/home_tab.rs`
-- `crates/core/src/storage/repository.rs`
-- `crates/core/src/cloud_sync/generic_sync.rs`
-- `crates/core/src/cloud_sync/workspace_sync.rs`
-- `crates/core/src/cloud_sync/connection_sync.rs`
-
-### 2. 对比的相似实现
-- 连接删除：本地删除后只登记待删除，由同步引擎处理云端删除
-- 证书删除：删除证书前先解绑连接，再进入统一删除链路
-- 工作空间删除：本地仓库层已经具备解绑连接后删除父对象的能力
-
-### 3. 当前发现
-- 现有 UI 删除工作空间仍保留“删除全部连接”分支，需要移除
-- 现有待删除表缺少删除基线和恢复上下文，无法表达“更新优先于删除”
-- 现有云端软删除回放会直接删本地工作空间，不会检查本地是否已有未同步更新
-
-## 编码后声明 - workspace-delete-update-wins
-时间：2026-03-26 16:05:00 +0800
-
-### 1. 复用了以下既有组件
-- `PendingCloudDeletionRepository`：继续沿用既有待删除表，只扩展基线和元数据字段
-- `WorkspaceRepository::delete(...)`：保留“删除工作空间时解绑子连接”的仓库层职责
-- `generic_sync(...)`：继续复用通用同步主流程，只补待删除决策和软删除优先级判断
-- `ConnectionRepository::update(...)`：用于删除撤销时恢复连接归属
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增方法沿用 `queue_pending_*`、`restore_*`、`decide_*`
-- 代码风格：文案仍在 `main/locales/main.yml`，同步日志保持 `[同步]` / `[删除]` 前缀
-- 文件组织：UI 入口改动在 `main/src/home_tab.rs`，同步策略改动在 `crates/core/src/cloud_sync/`，持久化改动在 `crates/core/src/storage/`
-
-### 3. 对比了以下相似实现
-- 连接删除：仍然走“本地删除 + 待删除队列 + 同步引擎处理云端删除”
-- 证书删除：保持“先解绑关联对象，再处理父对象删除”的模式
-- 工作空间删除：由原来的“双分支删除”收敛为“删除工作空间 + 子连接解绑”
-
-### 4. 未重复造轮子的证明
-- 没有新增新的同步引擎或工作空间专属队列系统
-- 没有绕开 `generic_sync(...)` 另起一套工作空间同步主流程
-- 删除撤销恢复直接复用现有仓库与解密逻辑
-
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo test -p one-core workspace_repository_delete_unlinks_connections_and_refreshes_timestamp`：通过
-- `cargo test -p one-core pending_cloud_deletion_repository_persists_context_fields`：通过
-- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status`：通过
-- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item`：通过
-- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection`：通过
-- `cargo check -p main`：通过
-- `cargo test -p one-core`：存在既有顺序相关失败；3 条冲突测试在全量顺序下出现 `NotUnlocked` / 锁污染，但单独重跑均通过，说明本次改动未引入对应功能性失败
-
-## 编码前检查 - 图标透明背景
-时间：2026-03-26 19:12:00 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-图标透明背景.md`
-- 将使用以下可复用组件：
-  - `script/generate-macos-icon.sh`：复用 SVG -> 平台图标导出流程
-  - `script/package-linux-deb.sh`：复用 Linux 图标尺寸与目标路径
-  - `main/build.rs`：复用 Windows `.ico` 固定入口
-- 将遵循命名约定：脚本使用 `generate-*` / `prepare-*` 短横线命名
-- 将遵循代码风格：Shell 脚本统一 `set -euo pipefail`，错误输出使用简洁中文
-- 确认不重复造轮子：已检查 `script/`、`resources/`、`main/build.rs`，仓库内不存在现成的 Linux+Windows 透明图标重建脚本
-- 工具缺失留痕：仓库规范要求的 `desktop-commander`、`sequential-thinking`、`context7`、`github.search_code` 在当前运行环境不可用，本次改用本地 shell、代码检索与像素校验替代
-
-## 编码后声明 - 图标透明背景
-时间：2026-03-26 19:18:00 +0800
-
-### 1. 复用了以下既有组件
-- `script/generate-macos-icon.sh`：沿用现有 SVG -> 平台图标导出方式，并接入透明背景预处理
-- `script/package-linux-deb.sh`：保持 Linux 资源文件名与尺寸约定不变
-- `main/build.rs`：保持 Windows `.ico` 固定入口不变，仅重建目标文件内容
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增脚本使用 `generate-linux-windows-icons.sh`、`prepare-transparent-logo.sh`
-- 代码风格：Shell 脚本继续使用 `set -euo pipefail`，临时目录统一清理
-- 文件组织：平台资源仍放在 `resources/linux`、`resources/windows`，生成逻辑放在 `script/`
-
-### 3. 对比了以下相似实现
-- `script/generate-macos-icon.sh`：保持“先渲染主图，再输出平台资源”的模式，只新增透明预处理步骤
-- `script/package-linux-deb.sh`：保持 Linux 三个固定尺寸入口，不引入新的打包路径
-- `main/build.rs`：保持 Windows 仍然只依赖一个 `.ico` 文件，避免改动构建逻辑
-
-### 4. 未重复造轮子的证明
-- 未新增新的平台资源目录或新的构建入口
-- 未修改 Linux 打包脚本与 Windows 构建脚本的消费路径
-- Windows PNG 仅作为 `.ico` 的可追溯源文件补齐，不替代现有 `.ico` 入口
-
-### 5. 本地验证结果
-- `bash script/generate-linux-windows-icons.sh`：通过
-- `file resources/linux/*.png resources/windows/onetcli-*.png resources/windows/onetcli.ico`：通过
-- 自定义 Python 像素校验：Linux 三张 PNG、Windows 七张 PNG 与 ICO 内嵌七帧四角像素均为透明 `(0, 0, 0, 0)`
-- 约束说明：当前环境缺少 macOS 专用的 `sips` / `iconutil`，因此未在本机重建 `resources/macos/OnetCli.icns`
-
-## 编码前检查 - 终端主题切换字号保持
-时间：2026-03-26 19:31:07 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-terminal-theme-font-size-preserve.md`
-- 将使用以下可复用组件：
-  - `TerminalView::set_theme(...)`：主题切换主入口
-  - `TerminalView::apply_theme(...)`：跨 tab 主题同步入口
-  - `TerminalView::apply_terminal_settings(...)`：现有字号同步链路
-- 将遵循命名约定：沿用 `set_*` / `apply_*` 职责区分，不引入新的状态来源
-- 将遵循代码风格：优先抽纯函数复用给 `set_theme` 与 `apply_theme`
-- 确认不重复造轮子：已检查 `terminal_view` 现有主题与设置同步逻辑，不存在现成的“保留排版参数切换主题”帮助函数
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码证据和单元测试替代
-
-## 编码后声明 - 终端主题切换字号保持
-时间：2026-03-26 19:37:49 +0800
-
-### 1. 复用了以下既有组件
-- `TerminalView::set_theme(...)`：继续作为终端侧边栏主题切换的唯一入口
-- `TerminalView::apply_theme(...)`：继续作为跨 tab 主题同步入口
-- `TerminalTheme::with_font_size(...)` / `with_font_family(...)` / `with_font_fallbacks(...)` / `with_line_height_scale(...)`：复用现有主题构造接口，避免新增状态同步分支
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增帮助函数命名为 `preserve_theme_typography(...)`，语义与职责单一
-- 代码风格：用纯函数集中“保留排版参数”逻辑，避免在两个调用点复制赋值代码
-- 文件组织：修复与回归测试均留在 `crates/terminal_view/src/view.rs`，保持终端视图逻辑就近维护
-
-### 3. 对比了以下相似实现
-- `TerminalView::set_theme(...)`：原先整体覆盖 `current_theme`，现在保留当前排版参数后再切换颜色主题
-- `TerminalView::apply_theme(...)`：原先仅按 `theme.name` 早退，现改为比较合并后的完整主题，避免排版差异被忽略
-- `TerminalView::apply_terminal_settings(...)`：保持原有字号同步职责不变，本次不新增第二套字号来源
-
-### 4. 未重复造轮子的证明
-- 未新增新的终端设置状态字段
-- 未改动主题列表、首页设置或侧边栏表单结构
-- 仅在主题进入 `current_theme` 前做合并，复用现有刷新与同步链路
-
-### 5. 本地验证结果
-- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration`：通过
-- `cargo check -p terminal_view`：通过
-
-### 6. 残余风险
-- 当前仅完成代码级回归测试与编译验证，未在真实 GUI 里手工走“切换 theme”场景
-- 编译过程中仍有 `crates/ui/src/window_ext.rs` 和 `crates/ssh/src/ssh.rs` 的既有 warning，与本次修复无关
-
-## 编码前检查 - 终端侧边栏设置翻译补齐
-时间：2026-03-26 19:43:38 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-terminal-sidebar-settings-i18n.md`
-- 将使用以下可复用组件：
-  - `rust_i18n::t`：复用现有终端侧边栏与设置页文案接入方式
-  - `crates/terminal_view/locales/terminal_view.yml`：复用 `terminal_view` crate 既有词条组织结构
-  - `Common.settings`：复用全局“设置”标题文案
-- 将遵循命名约定：新增文案键统一放在 `Settings.*`
-- 将遵循代码风格：只替换可见文案来源，不改动现有事件流与状态逻辑
-- 确认不重复造轮子：已检查 `settings_panel.rs`、`file_manager_panel.rs`、`quick_command_panel.rs` 与 `main/src/setting_tab.rs`，确认当前问题是该面板残留硬编码英文
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地搜索、代码证据与编译验证替代
-
-## 编码后声明 - 终端侧边栏设置翻译补齐
-时间：2026-03-26 19:43:38 +0800
-
-### 1. 复用了以下既有组件
-- `rust_i18n::t`：将设置面板标题、区块标题、占位符和说明提示统一切到现有 i18n 机制
-- `crates/terminal_view/locales/terminal_view.yml`：在现有 `Settings` 分组下补齐缺失词条
-- `Common.settings`：复用全局“设置”标题，避免重复定义相同语义
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增键使用 `Settings.search`、`Settings.font_size`、`Settings.theme` 这类面板域前缀
-- 代码风格：组件树中不再直接写可见英文字符串，统一使用 `t!()`
-- 文件组织：代码改动只在 `settings_panel.rs` 与 `terminal_view.yml`，未扩散到其他面板
-
-### 3. 对比了以下相似实现
-- `file_manager_panel.rs`：沿用同 crate 内输入框占位符直接读取本地词条的模式
-- `setting_tab.rs`：沿用设置类界面使用明确字段键名的模式
-- `quick_command_panel.rs`：沿用终端侧边栏内部 tooltip/标题均本地化的模式
-
-### 4. 未重复造轮子的证明
-- 未新增新的翻译加载逻辑
-- 未新增新的设置状态或事件
-- 仅补齐词条并将现有硬编码英文替换为 `t!()` 调用
-
-### 5. 本地验证结果
-- `rg -n '"(Settings|SEARCH|FONT SIZE|FONT FAMILY|THEME|Search\\.\\.\\.|Select font\\.\\.\\.|Press [^"]+)"' crates/terminal_view/src/sidebar/settings_panel.rs`：未命中，说明目标面板已无这类可见英文硬编码
-- `cargo fmt --all -- /usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs`：通过
-- `cargo check -p terminal_view`：通过
-
-### 6. 残余风险
-- 当前只完成静态代码扫描与编译验证，未在 GUI 中手工切换语言检查实际显示
-- 编译过程中仍有 `crates/ui/src/window_ext.rs` 与 `crates/ssh/src/ssh.rs` 的既有 warning，与本次翻译修复无关
-
-## 编码前检查 - 终端行间距设置
-时间：2026-03-26 19:49:30 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-terminal-line-height-setting.md`
-- 将使用以下可复用组件：
-  - `TerminalView::set_line_height_scale(...)`：终端内部已有的行间距 setter
-  - `HomePage::setup_terminal_view(...)` / `apply_terminal_settings_to_all(...)`：现有全局终端设置同步链
-  - `SettingsPanel` 字体大小输入框模式：复用右侧面板数字输入与回流抑制逻辑
-- 将遵循命名约定：全局设置字段命名为 `terminal_line_height_scale`
-- 将遵循代码风格：复用既有字号同步链路，不新增独立配置通道
-- 确认不重复造轮子：已检查 `theme.rs`、`view.rs`、`sidebar/mod.rs`、`setting_tab.rs`，确认行间距逻辑已存在，只是未接入设置
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地搜索、代码证据和编译验证替代
-
-## 编码后声明 - 终端行间距设置
-时间：2026-03-26 20:16:19 +0800
-
-### 1. 复用了以下既有组件
-- `crates/terminal_view/src/view.rs::set_line_height_scale(...)`：继续作为终端实例内部唯一的行间距变更入口
-- `main/src/home/home_tabs.rs::setup_terminal_view(...)` / `apply_terminal_settings_to_all(...)`：复用现有“首页设置 <-> 终端实例”同步链路
-- `crates/terminal_view/src/sidebar/settings_panel.rs` 的字号输入框模式：复用数字输入、步进按钮与回流抑制机制
-- `crates/terminal_view/src/theme.rs::with_line_height_scale(...)`：复用主题层的统一 clamp 规则
-
-### 2. 遵循了以下项目约定
-- 命名约定：全局设置字段命名为 `terminal_line_height_scale`，事件命名为 `LineHeightScaleChanged`
-- 代码风格：继续沿用 `AppSettings -> HomePage -> TerminalView -> Sidebar` 的单向同步路径
-- 文件组织：产品级设置放在 `main/src/setting_tab.rs`，终端局部设置放在 `crates/terminal_view/src/sidebar/settings_panel.rs`，文案分别落在 `main.yml` 与 `terminal_view.yml`
-
-### 3. 对比了以下相似实现
-- `main/src/setting_tab.rs` 里既有的终端字号设置：本次按同样方式新增行间距设置项并调用 `sync_terminal_settings_to_all(...)`
-- `crates/terminal_view/src/sidebar/settings_panel.rs` 里既有的字号输入框：本次沿用同样的输入订阅与步进事件模式扩展到行间距
-- `crates/terminal_view/src/view.rs` 里的主题切换逻辑：本次保留已有 `preserve_theme_typography(...)`，确保切 theme 不覆盖字号和行间距
-
-### 4. 未重复造轮子的证明
-- 未新增新的终端配置对象或第二套状态源
-- 未新增新的主题排版模型，只把已有 `line_height_scale` 接入现有设置链路
-- 未新增新的同步广播机制，直接复用 `TerminalViewEvent` 与 `apply_terminal_settings_to_all(...)`
-
-### 5. 本地验证结果
-- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration -- --nocapture`：通过
-- `cargo check -p terminal_view -p main`：通过
-
-### 6. 残余风险
-- 尚未做 GUI 手工验证，仍建议实际确认“首页设置行间距 -> 打开终端 -> 右侧切换 theme -> 行间距保持不变”的完整路径
-- 编译过程中存在 `crates/ui/src/window_ext.rs` 与 `crates/ssh/src/ssh.rs` 的既有 warning，与本次行间距设置改动无关
-
-## 实施与验证记录 - 终端行间距设置
-时间：2026-03-26 20:16:19 +0800
-
-### 已完成修改
-- `main/src/setting_tab.rs`
-  - `AppSettings` 新增 `terminal_line_height_scale`
-  - 首页“设置 -> 终端”新增“终端行间距”数值项，并在修改后同步到所有已打开终端
-- `main/src/home/home_tabs.rs`
-  - 创建终端时会读取并应用全局行间距
-  - 终端实例发出 `LineHeightScaleChanged` 后，会回写 `AppSettings` 并广播到所有终端
-- `crates/terminal_view/src/sidebar/settings_panel.rs`
-  - 右侧设置面板新增“行间距”输入框、手动输入订阅和步进按钮处理
-  - `set_current_theme(...)` 会把当前行间距回写到侧边栏 UI，避免显示值与实际值脱节
-- `crates/terminal_view/src/sidebar/mod.rs`
-  - 新增 `TerminalSidebarEvent::LineHeightScaleChanged(f32)` 并完成面板事件转发
-- `crates/terminal_view/src/view.rs`
-  - `apply_terminal_settings(...)` 扩展为同时接收字号与行间距
-  - `set_line_height_scale(...)` 统一进行范围限制并发出 `TerminalViewEvent`
-  - `set_theme(...)` / `apply_theme(...)` 继续通过 `preserve_theme_typography(...)` 保留字号、字体和行间距
-- `crates/terminal_view/src/theme.rs` / `crates/terminal_view/src/lib.rs`
-  - 对外暴露行间距默认值与上下限常量，并统一 clamp 逻辑
-- `main/locales/main.yml` / `crates/terminal_view/locales/terminal_view.yml`
-  - 补充首页设置与终端右侧设置的“行间距”翻译词条
-
-### 本地验证
-- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration -- --nocapture`
-  - 结果：通过
-- `cargo check -p terminal_view -p main`
-  - 结果：通过
-
-### 当前限制
-- 尚未补 UI 自动化测试
-- 尚未进行 GUI 手工点验，最终体验仍建议在实际终端里确认一次
-
-## 编码前检查 - 应用窗口边框预览
-时间：2026-03-26 20:26:43 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-window-border-preview.md`
-- 已分析相似实现：
-  - `crates/ui/src/window_border.rs`
-  - `crates/ui/src/root.rs`
   - `main/src/main.rs`
-  - `crates/core/src/popup_window.rs`
-  - `crates/ui/src/title_bar.rs`
+  - `main/src/onetcli_app.rs`
+  - `crates/story/examples/dock.rs`
+  - `gpui/src/app.rs`
+  - `crates/zed/src/main.rs`
 - 将使用以下可复用组件：
-  - `window_border()`：统一窗口装饰入口
-  - `linux_prefers_system_window_controls()`：区分 Deepin 系统控件路径
-  - `cx.theme().window_border`：复用现有窗口边框主题色
-- 将遵循命名约定：不新增新的窗口配置项，只在现有 `WindowBorder` 内扩展条件渲染
-- 将遵循代码风格：修改公共窗口层一次，主窗口和弹窗自动继承
-- 确认不重复造轮子：已确认窗口边框能力已存在，本次只补“系统装饰路径下的可见内边框”
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码检索、格式化和编译验证替代
+  - `gpui::Application::with_quit_mode`：官方应用退出策略入口。
+  - `gpui::QuitMode::LastWindowClosed`：最后一个窗口关闭时自动退出。
+  - `OnetCliApp::on_app_quit`：保留现有标签状态保存收尾逻辑。
+- 将遵循命名约定：仅复用现有 `QuitMode` 枚举和 `with_quit_mode` API，不引入自定义命名。
+- 将遵循代码风格：优先删除手写生命周期逻辑，改用框架内置退出模式。
+- 确认不重复造轮子，证明：`gpui` 已内建 `QuitMode`，无需继续维护 `on_release -> cx.quit()` 这种项目级重复实现。
 
-## 编码后声明 - 应用窗口边框预览
-时间：2026-03-26 20:26:43 +0800
+## 编码后声明 - window-not-found-fix
+时间：2026-03-26 11:35:00 +0800
 
 ### 1. 复用了以下既有组件
-- `crates/ui/src/window_border.rs::WindowBorder`：继续作为窗口边框统一入口
-- `crates/ui/src/root.rs::render(...)`：所有窗口继续通过 `window_border()` 承载边框
-- `crates/ui/src/title_bar.rs::linux_prefers_system_window_controls()`：复用桌面环境判断，不重造平台分支
-- `cx.theme().window_border`：继续使用现有主题色作为边框颜色来源
+- `gpui::Application::with_quit_mode`：在应用入口复用官方退出模式配置能力。
+- `gpui::QuitMode::LastWindowClosed`：复用框架定义的“最后一个窗口关闭即退出”语义。
+- `OnetCliApp::on_app_quit`：继续保留既有标签状态保存逻辑，不新增自定义退出收尾链路。
 
 ### 2. 遵循了以下项目约定
-- 命名约定：没有新增公开 API 或设置字段，只增加局部布尔变量 `show_content_border`
-- 代码风格：改动收敛在 `crates/ui/src/window_border.rs`，不向页面层扩散
-- 文件组织：窗口基础设施仍集中在 UI 公共层
+- 命名约定：未新增业务标识符，只复用 `QuitMode` 枚举成员。
+- 代码风格：删除手写 lifecycle 监听，优先使用框架官方 API。
+- 文件组织：应用级改动仅落在 `main/src/main.rs` 与 `main/src/onetcli_app.rs`。
 
 ### 3. 对比了以下相似实现
-- `window_border.rs` 既有 Linux 客户端外框逻辑：本次不改其拖拽缩放和阴影行为
-- `root.rs` 既有统一根容器包装模式：沿用该模式让主窗口和弹窗一起生效
-- `title_bar.rs` 的 Deepin 判断：本次按其结果补“系统装饰路径”的内边框，而不是硬改系统外框
+- `main/src/onetcli_app.rs` 旧实现：原来在 `on_release` 阶段手动 `cx.quit()`，退出时机偏晚，容易与窗口释放后的平台尾随事件交错。
+- `crates/story/examples/dock.rs`：仓库示例也使用 `on_release -> quit`，但这是示例模式，不是必须沿用的生产实现。
+- `crates/zed/src/main.rs` 与 `gpui/src/app.rs`：上游入口和框架都支持 `with_quit_mode(...)`，说明入口统一声明退出模式才是官方路径。
 
 ### 4. 未重复造轮子的证明
-- 未新增第二套窗口包裹组件
-- 未在主窗口和弹窗分别写边框逻辑
-- 未新增平台特化窗口配置，仅补现有边框组件的条件渲染
+- 没有新增任何自定义窗口状态或关闭标记。
+- 没有改动 `update.rs`、`setting_tab.rs` 等业务异步链路，只把退出策略交还给 `gpui`。
 
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main`：通过
+## 验证记录 - window-not-found-fix
+- `cargo check -p main`：通过，确认 `QuitMode::LastWindowClosed` 接入后 `main` crate 可正常编译。
+- 图形界面人工冒烟：未在当前终端环境自动执行；仍需在 macOS 上手动关闭主窗口一次，确认日志不再输出 `window not found`，且标签状态保存行为保持正常。
 
-### 6. 残余风险
-- 当前仅完成编译验证，尚未实际启动 GUI 观察边框强度
-- 这是视觉内边框，不是操作系统级真实外框；如果你觉得太弱或太重，还需要继续调颜色或宽度
+## 编码前检查 - ui-main-safe-merge
+时间：2026-03-26 12:10:00 +0800
 
-## 实施与验证记录 - 应用窗口边框预览
-时间：2026-03-26 20:26:43 +0800
+- 已查阅上下文摘要文件：`.claude/context-summary-ui-main-merge-safe.md`
+- 将使用以下可复用组件：
+  - `crates/ui/src/root.rs`：作为 `sheet` 与窗口阴影修复的核心集成点。
+  - `crates/ui/src/window_border.rs`：作为 Linux resize hitbox 修复目标。
+  - `crates/ui/src/tree.rs`：作为 tree 聚焦能力的独立修复目标。
+  - `crates/ui/src/button/button.rs` 与 `crates/ui/src/notification.rs`：作为可独立回迁的局部行为修复。
+- 将遵循命名约定：直接回迁上游提交，不改现有业务命名。
+- 将遵循代码风格：优先 cherry-pick 已验证通过的上游提交，不做额外手工重构。
+- 确认不重复造轮子，证明：本次只回迁上游已存在实现，跳过 `table/time picker/dialog/WASM` 等高风险改动。
 
-### 已完成修改
-- `crates/ui/src/window_border.rs`
-  - 新增 `show_content_border` 条件
-  - 在系统装饰路径和 Deepin 系统控件优先路径下，为窗口根内容补一圈 1px 内边框
-  - Linux 既有客户端外框、阴影和缩放热区逻辑保持不变
+## 编码后声明 - ui-main-safe-merge
+时间：2026-03-26 12:12:00 +0800
 
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p gpui-component -p main`
-  - 结果：通过
+### 1. 复用了以下既有组件
+- `crates/ui/src/tree.rs`：回迁 tree 聚焦能力。
+- `crates/ui/src/root.rs`：回迁窗口阴影尺寸与 sheet 焦点恢复修复。
+- `crates/ui/src/window_border.rs`：回迁 Linux 最大化窗口 resize 区域修复。
+- `crates/ui/src/sheet.rs`：回迁抽屉拖动与重复打开焦点恢复修复。
+- `crates/ui/src/notification.rs`：回迁中键关闭通知行为。
+- `crates/ui/src/button/button.rs`：回迁按钮标签容器适配。
 
-### 当前限制
-- 未做 GUI 手工预览，边框视觉强度还需要你实际看一眼
+### 2. 遵循了以下项目约定
+- 命名约定：未新增业务标识符，只引入上游现成实现。
+- 代码风格：使用 `git cherry-pick` 保留上游补丁结构，没有手写重构。
+- 文件组织：改动严格收敛在 `crates/ui` 内部低风险文件。
 
-## 编码前检查 - 应用窗口圆角预览
-时间：2026-03-26 20:31:04 +0800
+### 3. 对比了以下相似实现
+- `main` UI 提交序列：`dialog/table/input/text/theme` 相关提交在临时 worktree 中要么直接冲突，要么会破坏现有接口，因此未纳入本次回迁。
+- `crates/one_ui/src/edit_table/delegate.rs` 与 `crates/db_view/src/table_data/results_delegate.rs`：仍依赖 `datetime_picker/time_picker`，说明对应 main 改动不能直接引入。
+- 临时 worktree `/tmp/onetcli-ui-merge-check`：已验证本次回迁的 7 个提交均可无冲突应用。
 
-- 已查阅上下文摘要文件：`.claude/context-summary-window-border-radius-preview.md`
+### 4. 未重复造轮子的证明
+- 未手工复制 main 代码片段，全部通过原始提交回迁。
+- 未尝试修改 `table`、`dialog`、`time picker` 消费方以适配高风险提交，严格遵守“不能的就不管”。
+
+## 编码前检查 - ui-main-conflict-merge
+时间：2026-03-26 13:38:12 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-ui-main-conflict-merge.md`
 - 已分析相似实现：
-  - `crates/ui/src/window_border.rs`
-  - `crates/ui/src/theme/mod.rs`
-  - `crates/ui/src/styled.rs`
+  - `crates/ui/src/input/input.rs`
+  - `crates/ui/src/input/state.rs`
+  - `crates/ui/src/highlighter/highlighter.rs`
+  - `crates/ui/src/select.rs`
+  - `crates/ui/src/time/date_picker.rs`
+  - `crates/ui/src/input/otp_input.rs`
 - 将使用以下可复用组件：
-  - `cx.theme().radius_lg`：复用项目既有大圆角半径
-  - `rounded_*` 系列方法：分别处理四个角
-  - `overflow_hidden()`：确保系统装饰路径下内容跟随圆角裁切
-- 将遵循命名约定：不新增设置项，只在现有 `WindowBorder` 内补圆角效果
-- 将遵循代码风格：圆角逻辑继续集中在公共窗口层
-- 确认不重复造轮子：项目已有主题半径和圆角 API，本次只把窗口边框接上去
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码检索、格式化和编译验证替代
+  - `input_style(disabled, cx)`：统一输入类组件背景和前景色。
+  - `Theme::input_background()`：统一输入背景回退策略。
+  - `InputState::dispatch_background_parse`：复用现有后台任务调度。
+  - `SyntaxHighlighter::apply_background_tree`：复用后台解析结果回填。
+- 将遵循命名约定：继续沿用 `input_style`、`input_background`、`dispatch_background_parse` 等现有命名。
+- 将遵循代码风格：以最小手工补丁迁移 main 的两个指定提交，不额外重构调用方。
+- 确认不重复造轮子，证明：当前仓库已经存在统一输入组件样式入口和高亮器调度能力，只补齐上游优化缺口。
 
-## 编码后声明 - 应用窗口圆角预览
-时间：2026-03-26 20:31:04 +0800
+## 编码后声明 - ui-main-conflict-merge
+时间：2026-03-26 13:38:12 +0800
 
 ### 1. 复用了以下既有组件
-- `cx.theme().radius_lg`：作为窗口圆角统一半径
-- `window_border.rs` 既有 `tiling` 判断：继续按边贴齐状态决定哪些角需要保留圆角
-- `overflow_hidden()`：让系统装饰路径下的内容和边框一起裁成圆角
+- `crates/ui/src/input/input.rs`：把 `select`、`date_picker`、`otp_input` 统一切到 `input_style`。
+- `crates/ui/src/theme/mod.rs`：复用新增的 `input_background()`，并让 `editor_background()` 回退到该颜色。
+- `crates/ui/src/input/state.rs`：复用 `Task` 和 `background_executor` 派发后台语法解析。
+- `crates/ui/src/highlighter/highlighter.rs`：复用 `compute_injection_layers` 与 `apply_background_tree` 承接后台解析结果。
 
 ### 2. 遵循了以下项目约定
-- 命名约定：新增局部变量 `border_radius`，不新增公开配置
-- 代码风格：仍只修改 `crates/ui/src/window_border.rs`
-- 文件组织：窗口视觉效果继续留在 UI 公共层
+- 命名约定：没有引入新的业务命名，沿用当前仓库的 `InputMode`、`SyntaxHighlighter`、`input_style` 命名体系。
+- 代码风格：高亮器优化采用最小 API 迁移；主题优化优先复用已有输入样式工具，不给每个组件单独写颜色逻辑。
+- 文件组织：改动严格收敛在 `crates/ui/src/highlighter`、`crates/ui/src/input`、`crates/ui/src/theme` 相关文件。
 
 ### 3. 对比了以下相似实现
-- 主题里的 `radius_lg`：本次直接复用，而不是硬写 `8px/10px`
-- `styled.rs` 的通用圆角 API：本次沿用同一套风格能力
-- `window_border.rs` 原有顶角逻辑：本次补齐底角，并让系统装饰路径也有圆角裁切
+- `crates/ui/src/input/input.rs`：已经承担统一输入外观职责，因此 `#2135` 其余输入组件全部复用这一路径，而不是各自复制颜色逻辑。
+- `crates/ui/src/input/state.rs`：现有输入更新路径集中，适合在 `replace_text_in_range`、IME 和 `_pending_update` 分支统一接入后台解析派发。
+- `crates/ui/src/highlighter/highlighter.rs`：当前分支没有上游 `wasm_stub`，因此只迁入 native 可用的性能优化，不扩展缺失模块。
 
 ### 4. 未重复造轮子的证明
-- 未新增新的圆角配置系统
-- 未在页面层逐个加圆角
-- 未新增第二套窗口容器组件
+- 没有新增新的输入背景工具函数，而是让 `select`、`date_picker`、`otp_input` 直接复用 `input_style`。
+- 没有为后台高亮解析新造线程池或执行器，而是继续使用 `cx.spawn_in` 和 `background_executor()`。
+- 没有强行引入当前分支不存在的 `wasm_stub` 文件与模块链路。
 
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main`：通过
+## 验证记录 - ui-main-conflict-merge
+- `env CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo check -p main`：通过，确认 `#2128` 与 `#2135` 手工冲突迁移后主 crate 及其依赖链可编译。
+- 编译期修正记录：
+  - `crates/ui/src/input/mode.rs`：修复手工迁移时的变量遮蔽问题，后台解析上下文改为持有 `Rc<RefCell<Option<SyntaxHighlighter>>>`，而不是错误地克隆高亮器实例。
+  - `crates/ui/src/theme/mod.rs`：由于当前分支缺少 `mix_oklab`，将上游实现兼容替换为现有 `mix`。
+- 当前限制：
+  - 未执行图形界面冒烟验证，因此深色主题输入背景与 main 的视觉细微差异仍建议在 GUI 环境人工确认一次。
 
-### 6. 残余风险
-- 目前还没有 GUI 肉眼确认，不排除你会觉得圆角偏大或偏小
+## 编码前检查 - terminal-command-scroll-bottom
+时间：2026-03-26 16:41:37 +0800
 
-## 实施与验证记录 - 应用窗口圆角预览
-时间：2026-03-26 20:31:04 +0800
-
-### 已完成修改
-- `crates/ui/src/window_border.rs`
-  - 窗口边框改为使用 `cx.theme().radius_lg`
-  - Linux 客户端边框路径补齐底部两个角的圆角
-  - 系统装饰路径下的内边框也改成圆角，并对内容启用裁切
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p gpui-component -p main`
-  - 结果：通过
-
-### 当前限制
-- 还没实际打开窗口查看最终圆角观感
-
-## 编码前检查 - 全局 UI 字体设置接通
-时间：2026-03-26 20:39:21 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-global-ui-font-settings.md`
+- 已查阅上下文摘要文件：`.claude/context-summary-terminal-command-scroll-bottom.md`
 - 已分析相似实现：
-  - `crates/ui/src/root.rs`
-  - `crates/story/src/title_bar.rs`
-  - `crates/core/src/themes.rs`
-  - `main/src/setting_tab.rs`
+  - `crates/terminal_view/src/view.rs:383`
+  - `crates/terminal_view/src/view.rs:982`
+  - `crates/terminal_view/src/view.rs:2226`
+  - `crates/core/src/ai_chat/engine.rs:232`
+  - `crates/core/src/ai_chat/panel.rs:862`
 - 将使用以下可复用组件：
-  - `Theme::global_mut(cx)`：全局字体与字号实际生效入口
-  - `cx.refresh_windows()`：全窗口立即刷新
-  - `AppSettings::apply(...)`：启动加载和重载设置统一入口
-- 将遵循命名约定：继续使用现有 `font_family` / `font_size` 字段，不新增第二套 UI 字体设置
-- 将遵循代码风格：用一个统一辅助函数覆盖 Theme，避免每个设置项各写一遍
-- 确认不重复造轮子：普通 UI 字体本来就应该走全局 Theme，本次只把已有设置字段接回去
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`，本次以本地代码检索、格式化和编译验证替代
+  - `TerminalScrollbarHandle.future_display_offset`：复用现有待提交滚动状态。
+  - `write_to_pty`：复用现有用户输入统一入口。
+  - `#[cfg(test)] mod tests`：复用当前文件已有的轻量单元测试组织方式。
+- 将遵循命名约定：Rust 私有辅助函数使用 `snake_case`，测试名描述具体行为。
+- 将遵循代码风格：在 `view.rs` 内做最小补丁，不跨模块抽象。
+- 确认不重复造轮子，证明：当前仓库已有到底部滚动语义和延迟滚动提交机制，只需要修正两者在用户输入路径下的协调。
 
-## 编码后声明 - 全局 UI 字体设置接通
-时间：2026-03-26 20:39:21 +0800
+## 编码后声明 - terminal-command-scroll-bottom
+时间：2026-03-26 17:17:11 +0800
 
 ### 1. 复用了以下既有组件
-- `crates/ui/src/root.rs`：继续作为普通 UI 消费全局 Theme 字体和字号的根入口
-- `Theme::global_mut(cx)`：继续承载应用级字体配置
-- `cx.refresh_windows()`：复用主题刷新模式，让多窗口同时生效
-- `AppSettings::apply(...)`：继续作为设置加载和重载的统一应用入口
+- `crates/terminal_view/src/view.rs`：继续使用 `write_to_pty` 作为用户输入统一入口。
+- `crates/terminal_view/src/view.rs`：继续使用 `TerminalScrollbarHandle.future_display_offset` 作为待提交滚动状态。
+- `crates/terminal_view/src/view.rs`：继续使用文件尾部 `#[cfg(test)] mod tests` 组织纯单元测试。
 
 ### 2. 遵循了以下项目约定
-- 命名约定：普通 UI 仍用 `font_family` / `font_size`，终端仍用 `terminal_*`
-- 代码风格：新增统一辅助函数 `apply_ui_font_preferences(...)`，不在多个闭包里复制 Theme 写入逻辑
-- 文件组织：只改 `main/src/setting_tab.rs`，不把全局 UI 字体逻辑扩散到各页面
+- 命名约定：新增辅助函数 `should_scroll_to_bottom_on_user_input`，保持 `snake_case`。
+- 代码风格：改动收敛在 `view.rs`，没有扩散模块接口或引入跨模块抽象。
+- 文件组织：行为修复和回归测试都放在现有终端视图文件内部，与既有测试布局一致。
 
 ### 3. 对比了以下相似实现
-- `crates/story/src/title_bar.rs`：参考其“改 Theme 后立即刷新窗口”的模式
-- `crates/core/src/themes.rs`：参考其“全局 Theme 改动后刷新所有窗口”的模式
-- `main/src/setting_tab.rs` 现有主题切换逻辑：本次在 `Theme::change(...)` 之后重新覆盖字体设置，避免被主题默认值冲掉
+- `crates/terminal_view/src/view.rs:383`：沿用滚动条延迟提交偏移的既有机制，只补上用户输入时的取消逻辑。
+- `crates/terminal_view/src/view.rs:2226`：保留 render 阶段消费 `future_display_offset` 的既有路径，不改渲染层职责。
+- `crates/core/src/ai_chat/engine.rs:232` 与 `crates/core/src/ai_chat/panel.rs:862`：参考项目内“内容更新后立刻滚到底部”的模式，保持用户输入优先级高于旧滚动状态。
 
 ### 4. 未重复造轮子的证明
-- 未新增新的 UI 字体系统
-- 未新增页面级局部字体配置
-- 只是把已有设置字段接回全局 Theme
+- 没有新增新的滚动状态容器，直接复用现有 `future_display_offset`。
+- 没有新增新的终端输入入口，而是在 `write_to_pty` 内完成协调。
+- 没有新增集成测试框架，直接复用当前文件已有的纯函数单元测试模式。
 
-### 5. 本地验证结果
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
+## 验证记录 - terminal-command-scroll-bottom
+- `cargo test -p terminal_view user_input_scroll --lib`：先失败后通过，验证新增回归测试能抓到“待提交偏移未清理”的问题。
+- `cargo test -p terminal_view --lib`：通过，`terminal_view` 现有 16 个单元测试全部成功。
+- `rustfmt crates/terminal_view/src/view.rs`：通过，确认文件格式符合 Rust 风格。
 
-### 6. 残余风险
-- 尚未做 GUI 手工验证，仍建议你实际改一下首页设置里的字体和字号看看页面变化
-- 终端和显式等宽字体区域不会跟随这组设置变化，这是预期边界
+## 编码前检查 - db-view-data-grid-multi-delete
+时间：2026-03-26 19:47:33 +0800
 
-## 实施与验证记录 - 全局 UI 字体设置接通
-时间：2026-03-26 20:39:21 +0800
-
-### 已完成修改
-- `main/src/setting_tab.rs`
-  - 新增 `clamp_ui_font_size(...)`
-  - 新增 `apply_ui_font_preferences(...)`，统一把普通 UI 字体和字号写回 `Theme` 并刷新所有窗口
-  - `AppSettings::apply(...)` 现在会在启动加载时真正应用这组设置
-  - 首页设置里的“字体 / 字号”修改后会立即作用于全局 UI
-  - 切换深浅主题后会重新应用这组设置，避免被主题配置覆盖
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-
-### 当前限制
-- 尚未做 GUI 手工点验
-
-## 编码前检查 - 移除 OnetCli AI provider 入口
-时间：2026-03-26 21:35:23 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-llm-remove-onetcli-provider.md`
+- 已查阅上下文摘要文件：`.claude/context-summary-db-view-data-grid-multi-delete.md`
 - 已分析相似实现：
-  - `main/src/settings/llm_providers_view.rs`
-  - `crates/core/src/ai_chat/panel.rs`
-  - `crates/db_view/src/chatdb/chat_panel.rs`
-  - `crates/core/src/ai_chat/components/provider_select.rs`
-  - `crates/core/src/ai_chat/engine.rs`
+  - `crates/db_view/src/table_data/data_grid.rs:1077`
+  - `crates/one_ui/src/edit_table/state.rs:532`
+  - `crates/one_ui/src/edit_table/selection.rs:94`
+  - `crates/db_view/src/table_data/results_delegate.rs:1955`
+  - `crates/db_view/src/database_objects_tab.rs:601`
 - 将使用以下可复用组件：
-  - `ProviderConfig::is_builtin()`：保留旧数据兼容语义
-  - `ProviderSelectState::set_providers(...)`：在空 provider 列表时自动清空选择
-  - `ProviderRepository::delete(...)`：继续作为删除旧 provider 记录的统一入口
-- 将遵循命名约定：继续使用 `ProviderConfig` / `ProviderType` 现有结构，不引入新 provider 类型
-- 将遵循代码风格：先抽出运行时可用判断，再让 AI Chat / ChatDB / 引擎统一复用
-- 确认不重复造轮子：不新增 provider 存储层，不新增第二套删除逻辑，只去掉 `OnetCli` 的特殊入口和保护
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`、`github.search_code`、`context7`，本次以本地代码检索、现有总结、格式化和编译/单测验证替代
+  - `EditTableState::selection().all_cells()`：复用现有多选真实状态。
+  - `EditTableState::delete_row()`：复用既有删除入口和事件流。
+  - `EditorTableDelegate::on_row_deleted()`：复用新行真实删除与旧行标记删除语义。
+- 将遵循命名约定：新增私有辅助函数使用 `snake_case`，测试名直接描述删除集合行为。
+- 将遵循代码风格：只在 `data_grid.rs` 做最小补丁，不扩散到 `one_ui` 公共接口。
+- 确认不重复造轮子，证明：现有表格状态层已暴露多选区和删除 API，缺陷只在业务入口没有正确消费这些能力。
 
-## 编码后声明 - 移除 OnetCli AI provider 入口
-时间：2026-03-26 21:40:39 +0800
+## 编码后声明 - db-view-data-grid-multi-delete
+时间：2026-03-26 19:47:33 +0800
 
 ### 1. 复用了以下既有组件
-- `crates/core/src/llm/types.rs::ProviderConfig::is_builtin()`：继续保留旧 `onet_cli` 数据兼容判断
-- `crates/core/src/ai_chat/components/provider_select.rs::set_providers(...)`：复用空列表清空选择逻辑，保证无 provider 时安全退化
-- `ProviderRepository::delete(...)`：继续作为设置页删除旧 provider 记录的统一入口
+- `crates/one_ui/src/edit_table/state.rs`：继续通过 `selection()` 读取多选真实状态，并复用 `delete_row()` 执行删除。
+- `crates/one_ui/src/edit_table/selection.rs`：继续通过 `all_cells()` 展开多选区，不新增新的选区结构。
+- `crates/db_view/src/table_data/results_delegate.rs`：继续复用现有 `on_row_deleted`，保留新行和旧行的不同删除语义。
 
 ### 2. 遵循了以下项目约定
-- 命名约定：没有新增 provider 类型，继续沿用 `ProviderConfig` / `ProviderType`
-- 代码风格：把“运行时可用”收口到 `ProviderConfig::is_runtime_available()`，避免在多个面板重复硬编码条件
-- 文件组织：设置页改动留在 `main/src/settings`，聊天面板改动留在各自 crate，底层兼容逻辑留在 `one-core`
+- 命名约定：新增辅助函数命名为 `collect_delete_row_indices`，保持 `snake_case`。
+- 代码风格：逻辑修复和回归测试都收敛在 `crates/db_view/src/table_data/data_grid.rs`，没有引入额外抽象层。
+- 文件组织：删除入口仍留在 `DataGrid`，选区模型和删除语义仍归属现有 `one_ui` / `results_delegate` 模块。
 
 ### 3. 对比了以下相似实现
-- `main/src/settings/llm_providers_view.rs`：原先把内置 provider 做特殊卡片处理，本次改成统一动作按钮，便于用户清理旧记录
-- `crates/core/src/ai_chat/panel.rs` 与 `crates/db_view/src/chatdb/chat_panel.rs`：原先都在登录态下注入 `OnetCli AI`，本次统一改为只消费运行时可用 provider
-- `crates/core/src/ai_chat/engine.rs`：补齐统一过滤，避免其他调用方重新把 `OnetCli` 放回运行时列表
+- `crates/db_view/src/database_objects_tab.rs:601`：沿用“先收集全部选中项，再排序批量处理”的仓库模式。
+- `crates/one_ui/src/edit_table/state.rs:605`：确认旧单选字段只保留活动单元格，因此不能直接作为批量删除依据。
+- `crates/db_view/src/table_data/results_delegate.rs:1955`：根据新行真实删除会重建索引这一语义，删除顺序改为降序执行。
 
 ### 4. 未重复造轮子的证明
-- 没有新增 provider 清理脚本
-- 没有新增新的“隐藏 provider”状态字段
-- 只是移除自动注入入口、统一运行时过滤条件，并开放旧记录删除
+- 没有为多选删除新造一套选区状态，而是直接消费 `selection().all_cells()`。
+- 没有新增批量删除 API，而是通过已有 `delete_row()` 循环调用进入原有删除链路。
+- 没有修改 `EditorTableDelegate` 或 `EditTableState` 公共接口，避免把业务修复扩散成框架改造。
 
-## 实施与验证记录 - 移除 OnetCli AI provider 入口
-时间：2026-03-26 21:40:39 +0800
+## 验证记录 - db-view-data-grid-multi-delete
+- `rustfmt /Users/hufei/RustroverProjects/onetcli/crates/db_view/src/table_data/data_grid.rs`：失败，原因是直接单文件格式化默认按旧 edition 解析；问题与本次补丁无关。
+- `rustfmt --edition 2024 /Users/hufei/RustroverProjects/onetcli/crates/db_view/src/table_data/data_grid.rs`：通过。
+- `cargo test -p db_view --lib`：通过，`db_view` 200 个单元测试全部成功，新增 3 个 `collect_delete_row_indices` 测试通过。
 
-### 已完成修改
-- `crates/core/src/llm/types.rs`
-  - 新增 `ProviderConfig::is_runtime_available()`
-  - 新增 2 个单测，验证 `OnetCli` 不可进入运行时、普通 provider 仍可用
-- `crates/core/src/ai_chat/engine.rs`
-  - 统一通过 `is_runtime_available()` 过滤运行时 provider
-- `crates/core/src/ai_chat/panel.rs`
-  - 移除登录态自动创建 `OnetCli AI`
-  - 运行时只加载可用 provider
-- `crates/db_view/src/chatdb/chat_panel.rs`
-  - 移除登录态自动创建 `OnetCli AI`
-  - 运行时只加载可用 provider
-- `main/src/settings/llm_providers_view.rs`
-  - 移除设置页自动创建 `OnetCli AI`
-  - 不再因登录态隐藏旧 `OnetCli` 记录
-  - 移除内置 provider 的删除/禁用保护，统一显示删除按钮
-- `.claude/context-summary-llm-remove-onetcli-provider.md`
-  - 记录本轮上下文、风险与验证依据
+## 编码前检查 - table_designer 字段排序不生成语句
+时间：2026-03-27 00:00:00
 
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p one-core runtime_available -- --nocapture`
-  - 结果：通过
-- `cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture`
-  - 结果：通过
-- `cargo check -p one-core -p db_view -p main`
-  - 结果：通过
-
-### 风险结论
-- 没有任何 AI provider 时，系统会退化到“空选择 + 发送前提示先选择 provider”，不会直接崩溃
-- 旧会话如果还绑定被删掉的 `OnetCli`，重新进入后 AI 能力不可用，但会回到重新选择 provider 的可恢复状态
-
-### 当前限制
-- 本轮仍保留 `ProviderType::OnetCli` 和 `ProviderRepository::ensure_onetcli_provider()`，这是为了兼容用户本地旧数据库记录
-- 尚未做 GUI 手工点验，建议你实际打开首页设置确认旧 `OnetCli AI` 卡片现在可以删除
-
-## 编码前检查 - chatdb-duplicate-user-message
-时间：2026-03-26 21:59:33 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-chatdb-duplicate-user-message.md`
-- 已分析相似实现：
-  - `crates/db_view/src/chatdb/chat_panel.rs`
-  - `crates/core/src/agent/builtin/general_chat.rs`
-  - `crates/db_view/src/chatdb/agents/sql_workflow.rs`
-  - `crates/db_view/src/chatdb/agents/query_workflow.rs`
-  - `crates/core/src/ai_chat/panel.rs`
-- 将使用以下可复用组件：
-  - `AgentContext::new(...)` 作为 ChatDB 到 Agent 层的唯一历史传递入口
-  - `Message::content_as_text()` 用于精确比较历史尾部文本
-  - `Role::User` 作为“当前输入去重”判定条件
-- 将遵循命名约定：新增辅助函数命名为 `build_agent_history(...)`，保持与现有 `send_to_ai` 语义一致
-- 将遵循代码风格：只在 ChatDB 入口修正历史构造，不散落到各个 Agent 内部做补丁
-- 确认不重复造轮子：不新增第二套消息结构，不改 Agent 协议，只修正传入 `AgentContext` 的历史内容
-- 工具缺失留痕：当前环境无法使用仓库要求的 `desktop-commander`、`sequential-thinking`、`github.search_code`、`context7`，本次以本地代码检索、单元测试和编译验证替代
-
-## 编码后声明 - chatdb-duplicate-user-message
-时间：2026-03-26 21:59:33 +0800
-
-### 1. 复用了以下既有组件
-- `crates/db_view/src/chatdb/chat_panel.rs::send_to_ai(...)`：继续作为 ChatDB 发往 Agent 的统一入口
-- `one_core::agent::AgentContext`：保持现有“历史 + 当前输入”协议不变
-- `one_core::llm::Message::content_as_text()`：用于比较尾部消息文本而不碰底层消息结构
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增的历史整理函数使用动宾结构 `build_agent_history`
-- 代码风格：根因修复落在入口层，不在 GeneralChat/SqlWorkflow/ChatBi 多处分别打补丁
-- 测试方式：使用纯函数单元测试验证历史去重规则，避免引入重 UI 测试
-
-### 3. 对比了以下相似实现
-- `GeneralChatAgent`：明确要求 `ctx.chat_history` 不含当前输入，因为它会再 append 一次 `ctx.user_input`
-- `SqlWorkflowAgent`：生成 SQL 时同样会在历史后再追加 `context.user_question`
-- `QueryWorkflow`：AI 选表 prompt 也是“历史 + 当前问题”结构，因此入口修复可以一次覆盖所有路径
-- `AiChatPanel`：普通聊天面板没有在入口提前把当前输入塞进 Agent 历史，印证问题仅在 ChatDB
-
-### 4. 未重复造轮子的证明
-- 没有改 Agent trait
-- 没有改路由器协议
-- 没有给消息模型新增“inflight”标记
-- 只是把 ChatDB 传入 Agent 的历史在边界处做一次尾部去重
-
-## 实施与验证记录 - chatdb-duplicate-user-message
-时间：2026-03-26 21:59:33 +0800
-
-### 已完成修改
-- `crates/db_view/src/chatdb/chat_panel.rs`
-  - 新增 `build_agent_history(...)`
-  - `send_to_ai(...)` 统一通过该函数构造传给 `AgentContext` 的历史
-  - 新增 2 条单测，验证当前用户消息不会重复进入 Agent 历史，且不会误删更早的同文案历史
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p db_view build_agent_history -- --nocapture`
-  - 结果：通过
-- `cargo check -p db_view -p main`
-  - 结果：通过
-
-### 风险结论
-- 根因是 ChatDB 在入口把当前输入先塞进 `chat_history`，而 Agent 层又默认追加一次 `ctx.user_input`
-- 修复后，传给模型的上下文中不会再出现同一轮用户输入的重复封装
-
-## 规划记录 - home-manual-sort
-时间：2026-03-26 22:13:40 +0800
-
-- 已完成上下文收集并写入：`.claude/context-summary-home-manual-sort.md`
-- 已完成设计文档：`docs/plans/2026-03-26-home-manual-sort-design.md`
-- 已完成实现计划：`docs/plans/2026-03-26-home-manual-sort.md`
-- 关键决策：
-  - 手动排序作为 `ConnectionListSortField` 的第四种模式
-  - `Workspace` / `StoredConnection` 直接新增 `sort_order`
-  - 只支持工作区之间重排、同一工作区内连接重排、未分配区内重排
-  - 不支持跨工作区拖拽改归属
-  - 顺序字段进入云同步明文数据，沿用现有实体级冲突策略
-- 会话策略：
-  - 当前未自动提交设计/计划文档
-  - 若继续实现，将直接在当前会话按计划推进，不启用子代理
-
-## 编码前检查 - home-manual-sort
-时间：2026-03-26 22:28:00 +0800
-
-- 已查阅上下文摘要文件：`.claude/context-summary-home-manual-sort.md`
-- 将使用以下可复用组件：
-  - `main/src/home_tab.rs::compare_workspaces(...)`
-  - `main/src/home_tab.rs::compare_connections(...)`
-  - `one_core::storage::ConnectionRepository`
-  - `one_core::storage::WorkspaceRepository`
-  - `one_core::cloud_sync::{ConnectionPlainData, WorkspacePlainData}`
-- 将遵循命名约定：继续沿用 `reorder_*` / `sort_order` 的直白命名，不额外引入第二套首页排序抽象
-- 将遵循代码风格：顺序字段挂在实体本身，UI 只复用现有 `ConnectionListSortField` / GPUI `on_drag + drag_over + on_drop` 模式
-- 确认不重复造轮子：不新增独立排序表，不新增自定义同步通道，直接复用现有 repository 与 cloud_sync 链路
-- 工具缺失留痕：当前环境无 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次以本地代码检索、设计文档、编译和针对性测试替代
-
-## 编码后声明 - home-manual-sort
-时间：2026-03-26 23:41:00 +0800
-
-### 1. 复用了以下既有组件
-- `main/src/home_tab.rs`：继续复用现有首页排序、设置和渲染入口，只把 `Manual` 并入同一套分发逻辑
-- `crates/core/src/storage/repository.rs`：继续作为本地持久化唯一入口，在仓库层补顺序分配和批量重排
-- `crates/core/src/cloud_sync/service.rs` 与 `crates/core/src/cloud_sync/connection_sync.rs`：继续复用现有明文打包和云端回写链路，只扩展 `sort_order`
-- `crates/ui` 现有拖拽范式：沿用 `on_drag + drag_over + on_drop`
-
-### 2. 遵循了以下项目约定
-- 命名约定：新增字段统一命名为 `sort_order`，新增仓库接口统一命名为 `reorder(...)` / `reorder_within_workspace(...)`
-- 代码风格：没有新增首页专用排序表或同步通道，而是把顺序视为实体状态的一部分
-- 测试策略：补仓库层重排测试与首页比较函数测试，避免引入重 UI 自动化
-
-### 3. 对比了以下相似实现
-- `compare_workspaces(...)` / `compare_connections(...)`：确认手动排序应作为第四个分支并入同一比较函数
-- `crates/ui/src/table/state.rs` 与 `crates/ui/src/dock/tab_panel.rs`：确认首页拖拽直接复用现有 GPUI 模式即可
-- 连接与工作区现有同步模型：确认最小改动方案是把 `sort_order` 放进 plain data，而不是额外同步排序表
-
-### 4. 未重复造轮子的证明
-- 没有创建新的首页排序配置表
-- 没有创建新的同步实体类型
-- 没有把拖拽结果只存放在 UI 内存里
-- 只是把“手动排序”接进已有的设置、仓库、同步和首页渲染链路
-
-## 实施与验证记录 - home-manual-sort
-时间：2026-03-26 23:41:00 +0800
-
-### 已完成修改
-- `main/src/setting_tab.rs`
-  - 排序字段枚举新增 `Manual`
-- `main/src/home_tab.rs`
-  - 首页排序菜单新增“手动排序”
-  - `Manual` 模式下禁用排序方向按钮
-  - 工作区、连接列表项、连接卡片接入拖拽重排
-  - 新增手动排序比较逻辑与单测
-- `main/locales/main.yml`
-  - 新增手动排序相关文案
-- `crates/core/src/storage/models.rs`
-  - `Workspace` / `StoredConnection` 增加 `sort_order`
-- `crates/core/migrations/20260326000003_home_manual_sort.sql`
-  - 新增顺序字段 migration 和旧数据回填
-- `crates/core/src/storage/repository.rs`
-  - 读写 / 云端回写接入 `sort_order`
-  - 新增工作区重排与连接组内重排接口
-  - 新增重排和改组顺序分配测试
-- `crates/core/src/cloud_sync/models.rs`
-  - 明文结构新增 `sort_order`
-- `crates/core/src/cloud_sync/service.rs`
-  - 上传 / 下载接入 `sort_order`
-- `crates/db_view/src/common/db_connection_form.rs`
-  - 编辑连接且工作区变化时，清空顺序以便仓库层重新分配目标组末尾
-- `crates/core/src/cloud_sync/conflict.rs`
-  - 冲突副本创建时清空顺序，避免组内重复顺序
-
-### 本地验证
-- `cargo check -p one-core`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p one-core storage::repository::tests::`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests`
-  - 结果：通过
-- `cargo fmt --all`
-  - 结果：通过
-
-### 额外留痕
-- `cargo test -p one-core`
-  - 结果：失败 4 条
-  - 结论：失败点落在 LLM 默认提供商和同步引擎既有测试，不属于本次手动排序新增路径；已在 `.claude/verification-report-home-manual-sort.md` 明确记录
-
-## 编码前检查 - home-manual-sort-insert-position
-时间：2026-03-26 23:55:00 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-home-manual-sort.md`
+□ 已查阅上下文摘要文件：.claude/context-summary-table-designer-column-reorder.md
 □ 将使用以下可复用组件：
-- `main/src/home_tab.rs::render_workspace_section(...)`：复用工作区 header 的拖拽挂载点
-- `main/src/home_tab.rs::render_connection_list_item(...)`：复用连接列表项的拖拽挂载点
-- `main/src/home_tab.rs::reorder_workspaces_manually(...)` / `reorder_connections_manually(...)`：复用现有内存重排、落库和同步触发链路
-- `crates/ui/src/dock/tab_panel.rs::on_panel_drag_move(...)`：复用 GPUI 基于 `DragMoveEvent` 坐标判定落点的做法
-□ 将遵循命名约定：新增状态统一使用 `*_drop_preview`，新增插入语义统一使用 `ManualInsertPosition`
-□ 将遵循代码风格：只在首页视图状态层补“插入前/后”语义，不改仓库和同步接口，不把卡片模式一起改造
-□ 确认不重复造轮子，证明：未新增第二套排序持久化逻辑，只是在现有手动排序链路前补一个目标索引计算层
+- build_alter_table_sql（crates/db/src/mysql/plugin.rs）- 复用列差异生成逻辑并扩展排序变更
+- build_alter_table_sql_with_renames（crates/db/src/plugin.rs）- 复用整体 SQL 合并策略
+  □ 将遵循命名约定：Rust snake_case / CamelCase
+  □ 将遵循代码风格：显式逻辑、最小改动
+  □ 确认不重复造轮子，证明：已检查 db 插件与 table_designer_tab 的现有实现
 
-## 编码后声明 - home-manual-sort-insert-position
-时间：2026-03-27 00:08:00 +0800
+## 编码后声明 - table_designer 字段排序不生成语句
+时间：2026-03-27 00:06:00
 
 ### 1. 复用了以下既有组件
-- `main/src/home_tab.rs::DragWorkspace` / `DragConnection`：继续作为首页拖拽 payload，不新增新的拖拽实体
-- `main/src/home_tab.rs::reorder_workspaces_manually(...)` 与连接组内重排仓库调用：继续承担持久化和同步触发
-- `crates/ui/src/dock/tab_panel.rs` 的 `DragMoveEvent` 坐标判定范式：作为首页“按鼠标上下半区判定 before/after”的直接参考
+- build_alter_table_sql（crates/db/src/mysql/plugin.rs）：沿用列差异生成逻辑并扩展排序变更
+- build_column_def（crates/db/src/mysql/plugin.rs）：复用列定义拼接
 
 ### 2. 遵循了以下项目约定
-- 命名约定：新增 `ManualInsertPosition`、`WorkspaceDropPreview`、`ConnectionDropPreview`，都沿用现有直白命名
-- 代码风格：仍然把行为改动集中在 `main/src/home_tab.rs`，没有把 UI 预览状态泄漏到存储层
-- 范围控制：只增强工作区与列表模式，卡片模式继续保留现有拖拽行为
+- 命名约定：延续 MySQL 插件内部命名与 HashMap 用法
+- 代码风格：保持局部最小改动、无额外抽象
+- 文件组织：仅修改 crates/db/src/mysql/plugin.rs
 
 ### 3. 对比了以下相似实现
-- `main/src/home_tab.rs` 现有工作区拖拽：原本只按目标项落点重排，现在改为按目标项前/后插入
-- `main/src/home_tab.rs` 现有连接列表项拖拽：原本只看目标项 ID，现在增加 `before/after` 预判
-- `crates/ui/src/dock/tab_panel.rs::on_panel_drag_move(...)`：确认 GPUI 已支持基于 `bounds + position` 的拖拽区域判定
+- MySQL build_alter_table_sql（同文件）：新增顺序差异分支，保持原有 ADD/MODIFY 结构
+- MSSQL/PostgreSQL 插件：未支持列排序，本次限定在 MySQL
 
 ### 4. 未重复造轮子的证明
-- 没有新增新的 repository 方法来表达插入前后
-- 没有新增新的同步字段
-- 只是把最终目标索引的计算从“目标项槽位”提升为“目标项前/后”
+- 已检查 db_view table_designer_tab 与各数据库插件实现，未发现现成排序差异逻辑
 
-## 实施与验证记录 - home-manual-sort-insert-position
-时间：2026-03-27 00:08:00 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 新增 `ManualInsertPosition` 与拖拽预览状态
-  - 工作区 header 使用 `DragMoveEvent` 的纵向坐标判定插入前/后
-  - 连接列表项使用 `DragMoveEvent` 的纵向坐标判定插入前/后
-  - 新增插入线预览
-  - 新增 `move_item_relative_to_target(...)` helper 和对应单测
-
-### 本地验证
-- `cargo fmt --all`
+### 5. 本地验证记录
+- 已执行：cargo test -p db mysql::plugin::tests::
   - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests`
-  - 结果：通过（6/6）
+- LSP 诊断未执行：rust-analyzer 在当前工具链不可用
 
-### 已知边界
-- 连接卡片模式仍然保留现有按目标项重排的行为，本轮没有改成坐标插入
-- 尚未补“拖到容器底部空白区域直接插到末尾”的交互
+## 追加修正记录 - 排序逻辑去冗余
+时间：2026-03-27 00:10:00
 
-## 实施与验证记录 - drag-preview-size
-时间：2026-03-27 00:20:00 +0800
+- 新增测试：test_build_alter_table_sql_add_column_no_reorder（新增列不触发多余 MODIFY）
+- 逻辑调整：仅当既有列相对顺序变化时生成排序 MODIFY
+- 验证：cargo test -p db mysql::plugin::tests:: 通过（33 passed）
 
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 为工作区 header、连接列表项、连接卡片增加最近一次渲染尺寸缓存
-  - 拖拽开始时把缓存尺寸带入 `DragWorkspace` / `DragConnection`
-  - 拖拽预览从固定小浮层改为按源元素宽高渲染的半透明幽灵框
+## 追加测试集记录 - SQL 生成覆盖
+时间：2026-03-27 00:20:00
 
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests`
-  - 结果：通过（6/6）
+- 新增测试：test_build_alter_table_sql_reorder_with_modify_column
+- 验证：cargo test -p db mysql::plugin::tests:: 通过（34 passed）
 
-### 已知边界
-- 当前拖拽预览保持的是“最近一次渲染尺寸”，因此首次渲染后的首次拖拽才会达到与源元素一致的效果
-- 本轮只调整了拖拽预览尺寸，没有新增 UI 自动化验证，仍建议做一次真实拖拽观察
+## 编码前检查 - 全数据库 SQL 生成测试集
+时间：2026-03-27 00:31:00
 
-## 实施与验证记录 - manual-sort-empty-drop-zone
-时间：2026-03-27 00:33:00 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 工作区列表末尾新增容器级 drop zone，支持拖到空地追加到工作区末尾
-  - 连接列表末尾新增容器级 drop zone，支持拖到空地追加到当前组末尾
-  - 连接卡片网格末尾新增卡片槽位式 drop zone，支持拖到空地追加到当前组末尾
-  - 修正工作区/连接列表项 `on_drag_move`：先判断鼠标是否命中当前元素 bounds，避免非悬停元素错误覆盖插入预览
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests`
-  - 结果：通过（6/6）
-
-### 已知边界
-- 当前“空地拖拽”主要覆盖“拖到列表/网格末尾空地后追加到末尾”
-- 还没有实现“拖到中间任意空隙就按最近坐标插入”的完整容器级命中算法
-
-## 实施与验证记录 - manual-sort-between-gap-zones
-时间：2026-03-27 00:45:00 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 工作区纵向列表在每两个 section 之间增加可拖拽占位区
-  - 连接纵向列表在每两个列表项之间增加可拖拽占位区
-  - 非手动排序时这些占位区仅作为普通间距，不改变原始视觉节奏
-  - 手动排序时，拖到两个目标之间会直接以 `Before` 语义插入到后一个目标之前
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests`
-  - 结果：通过（6/6）
-
-### 已知边界
-- 当前“两个目标之间的占位”已覆盖：
-  - 工作区纵向列表
-  - 连接纵向列表
-- 连接卡片网格仍然主要依赖目标卡片和末尾空槽，不是完整的“卡片之间间隔占位”
-
-## 实施与验证记录 - manual-sort-card-2d-preview
-时间：2026-03-27 00:56:00 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 卡片模式连接拖拽新增 2D 命中判定
-  - 根据鼠标在卡片内更接近左/右/上/下哪一侧，决定 `Before/After` 语义和提示边
-  - 卡片本体增加四方向插入提示，不再只支持原来的简单目标重排
-  - 清理改造后不再使用的旧重排函数和旧 helper，避免新增死代码告警
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests`
-  - 结果：通过（6/6）
-
-### 已知边界
-- 卡片模式当前是“基于目标卡片本体的四方向插入提示”，不是额外渲染独立的卡片间空隙占位块
-- 如果后续还要把卡片网格做到“每个卡片间隙都可直接命中”，需要再做容器级空间划分
-
-## 实施与验证记录 - manual-sort-card-gap-visible-scope
-时间：2026-03-27 00:02:54 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 卡片网格容器级 gap 命中改为只基于当前网格真实可见的连接卡片计算，不再从 `self.connections` 全量扫描
-  - 提取 `preview_for_connection_card_gap_from_bounds(...)` 纯函数，统一承接卡片间空隙的最近边缘预判
-  - 新增 3 条几何单测，覆盖横向空隙、纵向空隙和鼠标落在卡片本体内时不走 gap 预览
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests -- --nocapture`
-  - 结果：通过（9/9）
-
-### 已知边界
-- 当前卡片网格 gap 命中仍然采用“最近卡片边缘”策略，还没有升级成按网格行列显式分区
-- 本轮主要修正的是命中范围和回归保护，真实拖拽手感仍建议继续在界面中点验
-
-## 实施与验证记录 - manual-sort-card-gap-placeholder
-时间：2026-03-27 00:12:17 +0800
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 卡片网格新增独立的虚线占位卡片，用于表达当前插入位置
-  - 当预览位置位于目标卡片之前或之后时，会在网格流中直接插入占位块，而不是只给目标卡片加边
-  - 末尾空槽也改成与占位卡片一致的视觉风格
-  - 卡片模式下取消旧的目标卡片边线高亮，避免与新占位视觉叠加后看起来仍像旧效果
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests -- --nocapture`
-  - 结果：通过（9/9）
-
-### 已知边界
-- 当前占位卡片仍基于网格流式重排表达插入位置，不是绝对坐标浮层
-- 卡片 gap 的判定策略仍然是“最近卡片边缘”，本轮主要修正的是视觉表达
-
-## 实施与验证记录 - manual-sort-card-gap-overlay
-时间：2026-03-27 00:19:44 +0800
-
-### 根因结论
-- 卡片网格里的虚线占位块之前是直接插入 `flex-wrap` 流中渲染的
-- 一旦插入，占位块本身会参与重新排版，导致后续卡片位置变化，预览结果反过来被它自己扰动，出现“占位显示在错误位置”的错位感
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 新增工作区级 `connection_grid_bounds` 缓存，记录每个卡片网格容器的真实边界
-  - 中间插入位的预览改为绝对定位浮层，占位框只显示，不参与网格排版
-  - 新增 `connection_card_overlay_anchor_id(...)`，把 `Before/After` 预览稳定映射到目标槽位
-  - 删除上一轮已经废弃的流式占位 helper，避免本文件残留死代码告警
-
-### 本地验证
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests -- --nocapture`
-  - 结果：通过（12/12）
-
-### 已知边界
-- 中间插入位现在是浮层预览，末尾追加位仍保留真实末尾槽位样式
-- 卡片 gap 的判定策略仍然是“最近卡片边缘”，这一轮只修正了预览错位，不调整判定算法
-
-## 实施与验证记录 - manual-sort-card-gap-slot-indicator
-时间：2026-03-27 00:32:47 +0800
-
-### 根因结论
-- 浮层占位虽然已经不再扰动 `flex-wrap` 布局，但视觉上仍然贴着目标卡片边缘
-- 当用户把前面的卡片往后或往下拖时，提示依然更像“目标卡片高亮”，不像“真实插槽”，因此仍会产生跳位感
-
-### 已完成修改
-- `main/src/home_tab.rs`
-  - 将卡片插入预览归一为“插到某张卡片之前的槽位”
-  - 新增 `connection_card_slot_anchor_index(...)`，把 `Before/After` 统一映射到实际插槽锚点
-  - 新增 `connection_card_slot_indicator_bounds(...)`，优先把插入标记绘制到两张卡片之间或两行之间的真实空隙中心
-  - 保留末尾追加位的独立末尾槽位，不与中间插槽混用
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo check -p main`
-  - 结果：通过
-- `cargo test -p main connection_list_sort_tests -- --nocapture`
-  - 结果：通过（11/11）
-
-### 已知边界
-- 当前仍沿用“最近卡片边缘”来决定命中目标，优化的是插槽标记的落点，而不是命中算法本身
-- 如果用户继续感觉跳位，下一步应改为按网格插槽直接判定，而不是先命中卡片边缘再换算插槽
-
-### 2026-03-27 10:30:05 +0800
-- 开始处理“SSH 连接 loading 阶段展示当前状态”需求。
-- 已完成上下文检索：
-  - 文件名/范围扫描：`crates/ssh`、`crates/terminal`、`crates/terminal_view`、`crates/sftp_view`
-  - 内容搜索：`ssh`、`connecting`、`loading`、`connection_state`
-  - 深读实现：`crates/terminal/src/terminal.rs`、`crates/terminal_view/src/view.rs`、`crates/terminal_view/src/ssh_form_window.rs`、`main/src/update.rs`
-- 工具说明：
-  - 仓库规范中要求的 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code` 在当前执行环境不可用。
-  - 采用本地代码检索、现有测试与仓库内实现模式作为替代，并保留可追溯文件路径。
-
-## 编码前检查 - SSH 连接加载状态展示
-时间：2026-03-27 10:30:05 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-ssh-loading-status.md`
+□ 已查阅上下文摘要文件：.claude/context-summary-all-db-sql-tests.md
 □ 将使用以下可复用组件：
-- `spawn_ssh_connect`: `crates/terminal/src/terminal.rs` - 连接任务和结果回流
-- `render_connection_overlay`: `crates/terminal_view/src/view.rs` - SSH loading 遮罩展示
-- `on_test`: `crates/terminal_view/src/ssh_form_window.rs` - 测试连接异步流程
-- `status_message` 模式：`main/src/update.rs` - 动态文案刷新参考
-□ 将遵循命名约定：Rust 类型 `PascalCase`，字段/函数 `snake_case`
-□ 将遵循代码风格：小步状态更新，中文注释只解释意图，不重复代码
-□ 确认不重复造轮子，证明：已检查 `terminal`、`terminal_view`、`sftp_view` 中连接状态实现，当前不存在 SSH 阶段状态的统一抽象
+- 各插件 build_alter_table_sql 测试区（mysql/postgresql/mssql/oracle/sqlite/clickhouse）
+  □ 将遵循命名约定：Rust snake_case / CamelCase
+  □ 将遵循代码风格：断言关键SQL片段
+  □ 确认不重复造轮子，证明：已检查各插件现有测试
 
-## 编码后声明 - SSH 连接加载状态展示
-时间：2026-03-27 10:56:30 +0800
+## 编码后声明 - 全数据库 SQL 生成测试集
+时间：2026-03-27 00:46:00
 
 ### 1. 复用了以下既有组件
-- `crates/terminal/src/terminal.rs::spawn_ssh_connect`：继续作为 SSH 终端连接的异步回流入口
-- `crates/terminal_view/src/view.rs::render_connection_overlay`：继续承载 SSH loading 遮罩，只替换副标题来源
-- `crates/terminal_view/src/ssh_form_window.rs::on_test`：继续承载测试连接流程，增加阶段状态展示
-- `main/src/update.rs::status_message` 模式：作为“异步任务持续刷新文案”的参考实现
+- 各数据库插件的 ALTER TABLE 测试区与 SQL 生成行为
 
 ### 2. 遵循了以下项目约定
-- 命名约定：新增 `SshConnectionStage`、`connection_status_message`、`test_status_message`，都采用项目现有直白命名
-- 代码风格：连接阶段统一从底层 `ssh` crate 产出，不在 UI 层猜测进度
-- 文件组织：底层阶段抽象放在 `crates/ssh`，终端模型状态放在 `crates/terminal`，视图消费落在 `crates/terminal_view`
+- 命名约定：测试函数 snake_case
+- 代码风格：断言关键 SQL 片段，避免过度严格匹配
+- 文件组织：仅修改插件测试模块
 
 ### 3. 对比了以下相似实现
-- `render_connection_overlay`：原本副标题固定为“正在建立 SSH 连接”，现在改为读取模型层动态状态
-- `on_test`：原本测试连接只有按钮态变化，现在补充状态条展示当前阶段
-- `status_message` 模式：沿用项目中已有的“后台任务更新文案，UI 只负责渲染”的分层方式
+- MySQL/PostgreSQL/MSSQL/Oracle/SQLite/ClickHouse 插件测试区
 
 ### 4. 未重复造轮子的证明
-- 已检查 `terminal`、`terminal_view`、`sftp_view` 中现有连接状态模型
-- 最终没有新增第二套 SSH 连接状态机，而是扩展现有 `RusshClient` / `SshBackend` 流程向上抛阶段状态
+- 已检查各插件现有测试后在原测试区追加用例
 
-## 实施与验证记录 - SSH 连接加载状态展示
-时间：2026-03-27 10:56:30 +0800
-
-### 已完成修改
-- `crates/ssh/src/ssh.rs`
-  - 新增 `SshConnectionStage`，统一表达连接跳板机、代理、认证、打开通道等阶段
-  - `RusshClient` 新增 `connect_with_progress(...)`，在建连关键步骤回调阶段状态
-  - 新增 3 条单测，覆盖不同连接拓扑的初始阶段推导
-- `crates/terminal/src/ssh_backend.rs`
-  - 新增 `connect_with_progress(...)`，补充“打开会话通道 / 请求 PTY / 启动 Shell / 执行初始化命令”阶段
-- `crates/terminal/src/terminal.rs`
-  - 新增 `connection_status_message`
-  - 在 SSH 初次连接和重连期间接收阶段更新，并在成功/失败/断开时清理状态
-- `crates/terminal_view/src/view.rs`
-  - SSH 遮罩副标题改为展示当前阶段文案
-- `crates/terminal_view/src/ssh_form_window.rs`
-  - 测试连接时新增动态状态条，显示当前阶段而不是只显示“测试中...”
-- `crates/ssh/locales/ssh.yml`
-  - 补充各连接阶段的多语言文案
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p ssh -p terminal -p terminal_view`
-  - 结果：通过
-
-### 当前限制
-- 本次状态展示覆盖 SSH 终端连接和 SSH 测试连接；`sftp_view` / 文件管理器里的 SFTP 建连尚未接入同样的阶段提示
-- 当前阶段粒度已经能区分代理、跳板机、认证和会话建立，但不会展示更细的底层网络细节
-
-## 补充修正 - SSH 连接首阶段长期停留
-时间：2026-03-27 11:12:00 +0800
-
-### 根因
-- 用户反馈界面仍长期停留在“正在连接目标主机...”
-- 本地核查 `russh 0.57.0` 源码确认：`client::connect()` 内部会先执行 `TcpStream::connect(...)`，随后直接进入 `connect_stream(...)` 完成 SSH ID 交换和首轮 KEX，这两段都包在同一次 `await` 内
-- 结论：之前的阶段拆分只能覆盖“进入 connect 前”和“connect 返回后”，无法区分 TCP 建连与 SSH 握手
-
-### 已追加修改
-- `crates/ssh/src/ssh.rs`
-  - 直连路径改为先显式建立 `TcpStream`，再调用 `client::connect_stream(...)`
-  - 新增 `HandshakingJumpServer` / `HandshakingTarget` 两个阶段
-  - 新增 `format_connection_progress_message(...)`，统一拼接“已等待 N 秒”
-- `crates/terminal/src/terminal.rs`
-  - 新增连接等待起始时间和每秒刷新任务
-  - SSH 遮罩现在会显示“当前阶段 + 已等待秒数”
-- `crates/terminal_view/src/ssh_form_window.rs`
-  - 测试连接状态条也改为按秒刷新等待时长
-
-### 再次本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p ssh -p terminal -p terminal_view`
-  - 结果：通过
-
-## 补充修正 - 状态定时器 reactor panic
-时间：2026-03-27 11:20:00 +0800
-
-### 根因
-- 启动应用后在 `crates/terminal/src/terminal.rs:588` 触发 panic：`there is no reactor running`
-- 根因是连接状态和测试状态的每秒刷新任务运行在 `cx.spawn(...)` 上下文中，却调用了 `tokio::time::sleep(...)`
-- 该上下文可安全使用 GPUI 的 `background_executor()`，但不能假设一定处于 Tokio reactor 内
-
-### 修正
-- `crates/terminal/src/terminal.rs`
-  - `spawn_connection_status_tick(...)` 改为 `cx.background_executor().timer(...)`
-- `crates/terminal_view/src/ssh_form_window.rs`
-  - `spawn_test_status_tick(...)` 同样改为 `cx.background_executor().timer(...)`
-
-### 验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p ssh -p terminal -p terminal_view`
-  - 结果：通过
-
-## 编码前检查 - SSH 旧版 KEX 兼容开关
-时间：2026-03-27 11:46:19 +0800
-
-□ 已查阅上下文摘要文件：`.claude/context-summary-ssh-legacy-kex.md`
-□ 将使用以下可复用组件：
-- `crates/ssh/src/ssh.rs`: 统一构造 `russh::client::Config`
-- `crates/terminal_view/src/ssh_form_window.rs`: 复用 checkbox + 持久化参数模式
-- `crates/sftp/src/russh_impl.rs`: 在统一 SSH 配置基础上叠加 SFTP 专属窗口参数
-□ 将遵循命名约定：布尔开关统一使用 `enable_legacy_kex`
-□ 将遵循代码风格：不新建兼容对象，直接贯穿现有 `SshParams` / `SshConnectConfig`
-□ 确认不重复造轮子，证明：已检查 `terminal`、`terminal_view`、`sftp_view`、`sftp` 中现有 SSH 参数构造链路
-
-## 实施与验证记录 - SSH 旧版 KEX 兼容开关
-时间：2026-03-27 11:46:19 +0800
-
-### 根因判断
-- 用户提供的 OpenSSH 调试信息显示 `kex names ok: [diffie-hellman-group1-sha1]`
-- 本地核查 `russh 0.57.0` 源码确认：
-  - `Key exchange init failed` 对应早期握手错误
-  - 默认 `SAFE_KEX_ORDER` 不包含 `diffie-hellman-group1-sha1`
-- 结论：当前应用没有复用用户 `~/.ssh/config` 中可能存在的宽松 KEX 配置，因此对只支持旧版 KEX 的服务端会在认证前失败
-
-### 已完成修改
-- `crates/core/src/storage/models.rs`
-  - 为 `SshParams` 新增 `enable_legacy_kex: bool`
-  - 使用 `#[serde(default)]` 保证旧连接记录缺字段时默认为 `false`
-- `crates/ssh/src/ssh.rs`
-  - 为 `SshConnectConfig` 新增 `enable_legacy_kex`
-  - 新增统一的 `build_client_config(...)`
-  - 兼容模式开启时，在默认安全 KEX 列表末尾追加 `DH_G14_SHA1`、`DH_GEX_SHA1`、`DH_G1_SHA1`
-- `crates/sftp/src/russh_impl.rs`
-  - SFTP 改为复用 `ssh::build_client_config(...)`，再叠加 SFTP 自身窗口参数
-- `crates/terminal_view/src/ssh_form_window.rs`
-  - 高级设置页新增“旧版 KEX 兼容模式”开关与说明
-  - 测试连接与保存连接均复用该字段
-- `crates/terminal/src/terminal.rs`
-- `crates/terminal_view/src/sidebar/file_manager_panel.rs`
-- `crates/sftp_view/src/lib.rs`
-  - 三处入口同步把持久化字段透传到运行时 SSH 配置
-
-### 实施中额外修补
-- `crates/db/src/ssh_tunnel.rs`
-- `crates/db/src/mysql/connection.rs`
-- `crates/db/src/postgresql/connection.rs`
-  - 为现有测试辅助构造补上 `DbConnectionConfig` 新增字段，恢复本地验证能力
-
-### 编码后声明 - SSH 旧版 KEX 兼容开关
-时间：2026-03-27 11:46:19 +0800
-
-### 1. 复用了以下既有组件
-- `crates/ssh/src/ssh.rs`: 继续使用现有 SSH 建连入口，只扩展配置构造
-- `crates/terminal_view/src/ssh_form_window.rs`: 复用现有高级设置 checkbox 模式
-- `crates/sftp/src/russh_impl.rs`: 保留原有窗口大小和 `nodelay` 设置，只替换其基础 SSH 配置来源
-
-### 2. 遵循了以下项目约定
-- 命名约定：UI 状态、持久化字段、运行时字段全部使用 `enable_legacy_kex`
-- 代码风格：未新增兼容模式专用对象，而是在现有参数对象上扩展一个布尔字段
-- 文件组织：持久化、运行时、UI 与本地化文案分别落在原有职责文件中
-
-### 3. 对比了以下相似实现
-- `enable_proxy` / `enable_jump_server`：沿用“布尔字段 + 表单 checkbox + 参数构造透传”模式
-- `RusshClient::connect_with_progress(...)`：兼容逻辑放在统一配置构造层，而不是散落在每条连接路径里
-- `sftp` 的窗口配置：保留其特有参数，仅抽取通用 SSH 配置部分
-
-### 4. 未重复造轮子的证明
-- 已检查 `terminal`、`terminal_view`、`sftp_view`、`sftp` 的 SSH 参数构造点
-- 最终没有再造第二套 SSH 运行时配置对象，而是扩展 `SshParams` 与 `SshConnectConfig`
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`
-  - 结果：通过
-- `cargo test -p one-core ssh_params_defaults_legacy_kex_to_false_when_missing`
-  - 结果：通过
-- `cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline`
-  - 结果：通过
-
-### 验证中的已知仓库问题
-- `cargo test -p one-core`
-  - 结果：失败
-  - 失败项：
-    - `llm::storage::tests::ensure_onetcli_provider_is_not_default_when_auto_created`
-    - `cloud_sync::engine::tests::use_cloud_deleted_cloud_conflict_deletes_local_connection`
-    - `cloud_sync::engine::tests::use_local_conflict_resolution_updates_local_sync_status`
-    - `cloud_sync::engine::tests::use_local_deleted_cloud_conflict_recreates_remote_item`
-  - 说明：这些失败与本次 SSH 旧版 KEX 开关无直接代码耦合，本次未扩大修复范围
-
-## 补充修正 - 旧版兼容模式扩展到 CBC cipher
-时间：2026-03-27 12:02:00 +0800
-
-### 根因补充
-- 用户开启“旧版 KEX 兼容模式”后仍无法连接
-- 本地继续核查 `russh` 默认协商列表确认：
-  - 默认 KEX 列表外，默认 cipher 只包含 `chacha20-poly1305`、`aes*-gcm`、`aes*-ctr`
-  - 不包含许多旧 SSH 服务端常见的 `aes*-cbc`
-- 结论：仅放宽 KEX 不足以覆盖一批老设备，兼容模式需要同时放宽旧 CBC cipher
-
-### 已追加修改
-- `crates/ssh/src/ssh.rs`
-  - 兼容模式开启时，除旧版 KEX 外，再追加 `aes128-cbc`、`aes192-cbc`、`aes256-cbc`
-  - 单测同步校验 CBC cipher 追加顺序位于默认安全 cipher 之后
-- `crates/terminal_view/locales/terminal_view.yml`
-  - 界面文案从“旧版 KEX 兼容模式”调整为“旧版 SSH 协商兼容模式”
-  - 说明文案补充“CBC cipher”场景，避免继续误导为仅覆盖 KEX
-
-### 本地验证
-- `cargo fmt --all`
-  - 结果：通过
-- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`
-  - 结果：通过
+### 5. 本地验证记录
+- cargo test -p db postgresql::plugin::tests::（31 passed）
+- cargo test -p db mssql::plugin::tests::（26 passed）
+- cargo test -p db oracle::plugin::tests::（26 passed）
+- cargo test -p db sqlite::plugin::tests::（21 passed）
+- cargo test -p db clickhouse::plugin::tests::（20 passed）
+- LSP 诊断未执行：rust-analyzer 不可用

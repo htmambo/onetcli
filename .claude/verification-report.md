@@ -1,434 +1,280 @@
-## 审查报告
-生成时间：2026-03-10 00:00:00 +0800
+# 验证报告
 
----
+- 时间：2026-03-24
+- 任务：修复 `crates/core/src/llm/connector.rs` 在升级 `llm-connector` 后的编译失败
+- 审查结论：通过
+- 综合评分：91/100
 
-## 审查报告（llm-onetcli-default）
-生成时间：2026-03-26 21:25:33 CST
-
-### 需求完整性检查
-- 目标明确：取消设置页里 `OnetCli AI` 的自动默认行为
-- 范围明确：仅涉及 `one-core` 的 provider 仓库默认策略，不改设置页交互结构
-- 交付物明确：自动默认逻辑移除、仓库层单测、本地验证、`.claude/` 留痕
-- 风险与依赖明确：旧数据中已保存的默认标记不会被自动迁移清除
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：91/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：98/100
-- 风险评估：93/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：`crates/core/src/llm/storage.rs::ensure_onetcli_provider()` 之前会在“当前没有默认 provider”时把自动创建的 `OnetCli AI` 标成默认，这正是设置页里出现默认值的来源。
-- 修复位置正确：现在自动创建的 `OnetCli AI` 固定 `is_default = false`，默认策略从源头移除，而不是在 UI 层做遮挡。
-- 用户控制仍保留：设置页里既有的“设为默认 / 取消默认”逻辑没有被删，用户仍可手动把 `OnetCli AI` 设成默认。
-- 选择链路安全：provider 选择器在无默认 provider 时会回退到首项，因此取消自动默认不会导致聊天或选择面板失效。
-- 本地验证有效：`cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture` 与 `cargo check -p one-core -p main` 均通过。
-
----
-
-## 审查报告（connection-remote-delete-conflict-and-sync-server-restore）
-生成时间：2026-03-26 16:32:30 CST
-
-### 需求完整性检查
-- 目标明确：修复“远端删连接会在客户端冒假冲突并可能误回写”的问题，并为远端页面补齐“恢复”入口
-- 范围明确：涉及 `one-core` 的连接同步与 `sync_server/web` 的列表页、详情页、API 封装
-- 交付物明确：核心同步修复、恢复按钮、本地验证、`.claude/` 留痕
-- 风险与依赖明确：工作区恢复不会自动重新关联删除时解绑的子连接
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：94/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 连接删除假冲突已修掉：[`connection_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs) 现在会在处理远端软删除后刷新本地快照，并且对真正的“本地更新优先”与“本地无更新直接删除”做了分流，不再把已删连接继续送进冲突列表。
-- 连接云端回写时间基线已对齐：[`service.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs) 和 [`repository.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/repository.rs) 现在会保留连接的云端秒级 `updated_at / last_synced_at`，避免刚同步完就被误判成本地修改。
-- 远端恢复入口已补齐：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts) 新增恢复 API；[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue) 与 [`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue) 已支持恢复软删除记录。
-- 边界说明已明确：工作区恢复时不会自动重新关联此前解绑的子连接，页面确认文案和成功提示里都已写明。
-- 本地验证有效：`cargo test -p one-core remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item -- --nocapture`、`cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline -- --nocapture`、`cargo check -p one-core`、`sync_server/web` 下 `npm run build` 全部通过。
-
----
-
-## 审查报告（sync-server-web-delete-entry）
-生成时间：2026-03-26 15:55:48 CST
-
-### 需求完整性检查
-- 目标明确：在同步服务器 Web 页面补齐单条同步项删除入口
-- 范围明确：仅涉及 `sync_server/web` 的 API 封装、同步项列表页和详情页
-- 交付物明确：删除按钮、确认提示、冲突处理、本地构建验证、`.claude/` 留痕
-- 风险与依赖明确：删除依赖服务端既有 `DELETE /api/v1/sync/items/:id`，并要求携带 `version` 落实“更新优先”
-
-### 技术维度评分
+## 技术维度评分
 - 代码质量：94/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：94/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 删除接入点正确：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts) 新增 `deleteSyncItem(...)`，并把当前 `version` 透传到服务端删除接口，确保并发删除不会覆盖较新的更新。
-- 列表入口已经补齐：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue) 的操作列现在同时提供“查看详情”和“删除”，并对已软删除记录切换为不可再删的状态标签。
-- 详情入口已经补齐：[`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue) 顶部操作区新增“删除同步项”，删除成功后当前详情会直接刷新为软删除状态。
-- 业务语义已落到交互文案：列表提示和确认弹窗都明确了“工作区删除只解绑子级，不删除子项”以及“删除与更新并发时更新优先”。
-- 冲突回退可见：删除遇到 409 时，页面会提示用户当前删除未生效，并刷新到最新数据，符合用户对并发规则的要求。
-- 本地验证有效：`sync_server/web` 下 `npm run build` 通过；残余风险仅在于当前仓库没有 Web 端自动化交互测试，建议再手工点击一次列表页和详情页删除流程。
-
----
-
-## 审查报告（connection-list-view-preferences）
-生成时间：2026-03-26 12:11:31 +0800
-
-### 需求完整性检查
-- 目标明确：连接列表支持按名称、更新时间、创建时间排序，支持升序/降序，并新增列表展示方式
-- 范围明确：仅涉及应用窗口首页连接列表与本地偏好存储
-- 交付物明确：设置字段、主页工具栏、卡片/列表双视图、排序单测、本地验证
-- 风险与依赖明确：展示偏好当前只本地持久化，不参与同步
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：88/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 偏好存储位置合理：[`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L158) 新增三个枚举，[`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L183) 将排序字段、排序方向和展示方式并入 `AppSettings`，老配置缺字段时也能自动回落到默认值。
-- 交互入口集中：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L2166) 在首页工具栏新增排序字段菜单、升降序按钮和展示方式菜单，没有另起新弹窗或隐藏设置页，操作路径短。
-- 排序范围符合当前信息架构：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3239) 在工作区分组内部统一应用排序，既保留现有工作区结构，又满足“连接列表可自定义排序”的需求。
-- 展示方式闭环完整：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3337) 新增卡片/列表统一分发；[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3375) 的列表模式复用了连接打开和管理动作，没有牺牲功能。
-- 共用逻辑抽取得当：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3062) 和 [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L3963) 把连接摘要、图标和排序比较器抽出，避免卡片视图和列表视图各维护一套类型分支。
-- 验证有效：`cargo fmt --all`、`cargo check -p main`、`cargo test -p main compare_connections -- --nocapture` 均通过；残余风险主要在于尚未做 GUI 自动化或手工录屏级验收。
-
----
-
-## 审查报告（terminal-sidebar-paste-focus）
-生成时间：2026-03-25 21:03:13 +0800
-
-### 需求完整性检查
-- 目标明确：AI 对话中的“粘贴到终端”动作执行后，终端应获得输入焦点，便于用户继续输入
-- 范围明确：仅涉及 `crates/terminal_view/src/view.rs` 的 sidebar 事件消费路径
-- 交付物明确：聚焦逻辑修复、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：多行/高危粘贴确认框的最终焦点体验仍需手工确认
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：83/100
+  - 改动集中在 `connector.rs`，保持了既有 `ProviderType` 分支结构。
+  - 旧 API 调用已全部替换为 `llm-connector 1.1.14` 的显式 `base_url` 形式。
+- 测试覆盖：82/100
+  - 新增了 `provider_base_url` 的两个单元测试。
+  - 受 `gpui` Metal shader 构建脚本和沙箱限制影响，`cargo test` 未能完成全流程执行。
 - 规范遵循：96/100
+  - 仅改动必要文件，命名、导入顺序、错误处理风格与项目现状一致。
 
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：92/100
+## 战略维度评分
+- 需求匹配：95/100
+  - 直接修复了升级后的编译错误，并保留 `api_base` 可选时的既有体验。
+- 架构一致：93/100
+  - 未修改 `LlmProvider`、`ProviderManager`、`ProviderConfig` 接口，模块边界稳定。
+- 风险评估：86/100
+  - 默认 URL 来源已用本地 crate 源码和 README 示例校验。
+  - 剩余风险主要来自运行环境对 `cargo test` 的限制，而非实现本身。
 
-### 综合评分
-- 94/100
-- 建议：通过
+## 验证结果
+- 已执行：`cargo check -p one-core`
+  - 结果：通过
+- 已执行：`cargo test -p one-core provider_base_url --lib`
+  - 结果：失败
+  - 原因：`gpui` 构建脚本写 `~/.cache/clang/ModuleCache` 被沙箱拒绝，报错为 Metal shader compilation failed
+- 已执行：`CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p one-core provider_base_url --lib`
+  - 结果：失败
+  - 原因：同上，构建脚本未遵循该环境变量
 
-### 结论
-- 修复点准确：[`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L570) 的 `PasteCodeToTerminal` 分支现在会先调用 `window.focus(&self.focus_handle, cx)`，再执行代码块粘贴。
-- 架构边界正确：AI 面板继续只发 sidebar 事件，终端聚焦逻辑仍由 `TerminalView` 自己负责，没有把终端细节泄漏到 sidebar。
-- 复用既有模式：聚焦写法与 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L1772) 的终端鼠标点击聚焦保持一致，行为可预测。
-- 影响范围受控：未改普通终端粘贴、命令执行或其他 sidebar 事件，只修复用户明确指出的“AI 对话里的粘贴到终端”路径。
-- 本地验证有效：`cargo fmt --all` 与 `cargo check -p main` 均通过；残余风险仅在于尚未做 GUI 自动化或人工交互验收。
+## 审查清单
+- 需求字段完整性：已确认目标、范围、交付物、审查要点
+- 原始意图覆盖：无遗漏，聚焦编译失败修复
+- 交付物映射：代码、上下文摘要、操作日志、验证报告均已生成
+- 依赖与风险评估：已完成
+- 审查留痕：已完成
 
----
-
-## 审查报告（table-data-printable-key-edit）
-生成时间：2026-03-25 20:36:26 +0800
-
-### 需求完整性检查
-- 目标明确：单击单元格只负责选中，不进入编辑；按可打印键时，已选中单元格应立即进入编辑并保留首字符
-- 范围明确：仅涉及通用表格编辑层 `crates/one_ui/src/edit_table/state.rs` 及对应本地留痕
-- 交付物明确：键盘编辑入口修复、回归单测、本地格式化与编译验证
-- 风险与依赖明确：真实交互仍依赖 GPUI 焦点和按键重放机制，需留意 GUI 手工体验验证
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 修复点准确：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1096) 新增可打印键判定和 `on_key_down`，补上此前缺失的表格级键盘编辑入口。
-- 行为边界符合需求：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1111) 仅在未编辑、可编辑、存在活动单元格、且不是行号列时触发；单击行为本身没有被改成进入编辑。
-- 首字符保留方案合理：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1134) 先进入编辑，再通过 `window.defer + dispatch_keystroke` 把首个按键交给真实输入控件，避免在不同 `CellEditor` 上重复造轮子。
-- 集成点最小：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L2924) 只在表格根容器新增 `.on_key_down(...)` 绑定，数据库结果页等所有复用 `EditTableState` 的视图自动继承行为。
-- 回归保障存在：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L3085) 新增 3 个纯逻辑测试，覆盖正常字符、快捷键和控制字符过滤。
-- 本地验证充分：`cargo fmt --all`、`cargo test -p one-ui`、`cargo check -p main` 全部通过；残余风险主要是尚未做 GUI 自动化或人工录屏级验收。
-- 补丁已闭环：[`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1171) 与 [`state.rs`](/usr/htdocs/onetcli/crates/one_ui/src/edit_table/state.rs#L1199) 现在都会在退出编辑时把焦点还给表格，因此 Enter / Esc 退出后方向键与 Tab 能继续命中表格导航绑定。
+## 建议
+- 当前改动可以合并。
+- 若需要补全自动化验证，建议在允许写用户缓存目录的环境下重跑 `cargo test -p one-core provider_base_url --lib`，或为 `gpui` 构建脚本单独配置可写模块缓存路径。
 
 ---
 
-## 审查报告（sync-server-sidebar-account-entry）
-生成时间：2026-03-25 10:49:14 +0800
+## 审查报告（ssh-agent-auth 实现）
+生成时间：2026-03-24 09:35:05 +0800
 
 ### 需求完整性检查
-- 目标明确：左侧栏底部的账号信息需要更新展示，并支持点击后打开账号设置页
-- 范围明确：仅涉及 `sync_server/web` 左侧栏布局与交互
-- 交付物明确：布局调整、点击跳转、本地构建验证
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 入口复用合理：直接使用既有 `/app/profile` 作为账号信息卡点击落点，没有新增冗余页面。
-- 展示位置更符合需求：账号信息区已移到侧栏底部，并保留昵称/邮箱联合展示。
-- 交互一致性良好：资料页激活时，底部账号入口会显示选中状态，和侧栏其他入口保持一致。
-
----
-
-## 审查报告（sync-server-user-nickname）
-生成时间：2026-03-25 10:44:22 +0800
-
-### 需求完整性检查
-- 目标明确：在用户表新增昵称字段，默认与邮箱相同，并支持用户自行修改
-- 范围明确：数据库迁移、认证返回、资料修改接口、个人资料页和用户展示位
-- 交付物明确：代码修改、本地构建验证、迁移冒烟验证、`.claude/` 留痕文件
-- 风险与依赖明确：历史数据库需要通过迁移回填昵称，注册页暂不单独采集昵称
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：87/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 迁移策略正确：[`002_add_user_nickname.sql`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/migrations/002_add_user_nickname.sql#L1) 先新增 `nickname` 列，再把历史用户回填为邮箱，满足“默认昵称与邮箱相同”。
-- 默认值闭环成立：[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L63) 新用户创建时默认把 `nickname` 设为 `email`；[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L38) 通过 `toPublicUser` 统一把昵称向外暴露。
-- 自助修改入口合理：[`auth.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/auth.ts#L111) 新增 `PATCH /api/v1/auth/profile`；[`ProfileView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/ProfileView.vue#L3) 新增昵称设置卡片，用户可自行保存昵称。
-- 登录态与展示位一致：[`AppLayout.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/layouts/AppLayout.vue#L13) 当前账号卡片已优先展示昵称；管理员列表也补充了昵称/邮箱联合展示，避免只能看到邮箱。
-- 本地验证有效：`npm run build`（`sync_server`）通过；临时 SQLite 数据库实例化也通过，说明昵称迁移 SQL 能在真实初始化流程中执行成功。
-- 残余风险可控：当前注册页不提供单独昵称输入，但这与“默认昵称等于邮箱，后续自己设置”一致。
-
----
-
-## 审查报告（sync-server-version-label-clarify）
-生成时间：2026-03-25 10:26:24 +0800
-
-### 需求完整性检查
-- 目标明确：让页面中的 `key_version` 与 `版本` 更直观，并在密钥配置面板补充解释
-- 范围明确：仅涉及 `sync_server/web` 展示层
-- 交付物明确：共享格式化函数、页面文案调整、本地构建验证
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 展示语义已明显改善：`key_version` 改为“密钥版本”，`版本` 改为“记录版本”，并统一格式化为“第 N 代 / 第 N 版”。
-- 说明信息位置合理：密钥配置面板直接补充了字段解释和当前生效配置，用户无需跳到详情页再猜字段含义。
-
----
-
-## 审查报告（sync-server-sync-item-type-label）
-生成时间：2026-03-25 10:22:38 +0800
-
-### 需求完整性检查
-- 目标明确：将页面中原始 `dataType` 值替换为可读性更好的中文描述
-- 范围明确：仅涉及 `sync_server/web` 的展示层
-- 交付物明确：共享映射函数、三处页面改动、本地构建验证
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 抽象层级合适：通过共享函数统一 `connection`、`workspace`、`app_settings` 的中文描述，避免概览、列表、详情页各自维护一套映射。
-- 影响范围受控：仅改展示值，不改接口和数据结构；未知类型保留原始值作为兜底，避免信息丢失。
-
----
-
-## 审查报告（sync-server-sync-item-detail）
-生成时间：2026-03-25 10:09:35 +0800
-
-### 需求完整性检查
-- 目标明确：同步记录不仅要有完整列表，还需要可以进入单条详情查看完整字段
-- 范围明确：服务端单条读取路由、前端 API、详情路由、详情页、列表和预览入口
-- 交付物明确：代码修改、本地前后端类型与构建验证、`.claude/` 留痕更新
-- 风险与依赖明确：详情页依赖现有原始加密数据字段；当前不包含解密能力
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 服务端实现最小且正确：[`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L29) 抽出统一响应映射，[`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L90) 新增 `GET /api/v1/sync/items/:id`，直接复用数据库层已有单条读取能力。
-- 前端接口闭环完整：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts#L108) 新增 `api.getSyncItem`，没有绕回全量列表筛选单条，避免了无谓请求和重复状态。
-- 详情页信息量充分：[`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue#L1) 展示同步项状态、ID、`owner_id`、版本、时间戳、`checksum` 和 `encryptedData`，满足“查看详情”的实际排查需求。
-- 入口体验完整：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L66) 列表页新增“查看详情”操作；[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L123) 最近同步项预览也可直接进入详情。
-- 导航一致性已补齐：[`AppLayout.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/layouts/AppLayout.vue#L75) 对 `/app/sync-items/:id` 做了前缀高亮处理，详情页下侧边栏不会丢失定位。
-- 本地验证有效：`npm run build`（`sync_server`）和 `npm run check`（`sync_server/server`）均通过。残余风险主要是当前仓库没有组件级自动化测试。
-
----
-
-## 审查报告（sync-server-sync-items-list）
-生成时间：2026-03-25 10:03:27 +0800
-
-### 需求完整性检查
-- 目标明确：将 `sync_server` 仪表盘中的最近同步项预览缩减为 5 条，并提供跳转到完整列表页的入口
-- 范围明确：仅涉及 `sync_server/web` 的用户路由、侧边栏导航、仪表盘区块和新增列表页
-- 交付物明确：前端代码改动、本地构建验证、`.claude/` 留痕文件
-- 风险与依赖明确：后端依赖既有 `/api/v1/sync/items` 接口；当前前端没有独立测试文件，只能以构建验证为主
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：91/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 需求匹配直接完成：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L85) 已新增完整列表入口，[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L111) 改为只渲染前 5 条预览数据。
-- 路由与导航接入完整：[`index.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/router/index.ts#L37) 新增 `/app/sync-items` 用户页路由，[`AppLayout.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/layouts/AppLayout.vue#L60) 侧边栏新增“全部同步项”入口。
-- 完整列表页实现独立且复用现有接口：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L1) 使用既有 `api.listSyncItems` 拉取完整数据，补齐加载、空状态、错误提示和软删除状态展示。
-- 架构一致性良好：未新增后端接口，也没有引入新的状态管理层；改动集中在现有 Vue Router 和用户视图目录内，符合当前 `sync_server/web` 结构。
-- 本地验证闭环成立：在 `sync_server/web` 目录执行 `npm run build` 成功，`vue-tsc -b` 与 `vite build` 均通过。
-- 残余风险可控：当前没有组件测试，后续若要继续扩展筛选、分页或仅展示 `connection` 类型，需要补测试用例保证列表交互稳定。
-
----
-
-## 审查报告（deepin-client-decorations）
-生成时间：2026-03-25 02:27:00 +0800
-
-### 需求完整性检查
-- 目标明确：在 Deepin 25 + X11 下彻底隐藏系统标题栏，并让应用标题栏按钮接管窗口控制
-- 范围明确：`gpui` X11 装饰能力探测、Deepin 专有原子写入、应用标题栏按钮显示条件
-- 交付物明确：平台层修复、应用层联动、本地构建验证、真实 X11 属性验证、`.claude/` 留痕
-- 风险与依赖明确：最终视觉与交互仍需你在真实 GUI 中确认
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：91/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：Deepin 25 的系统标题栏隐藏并不走标准 `_GTK_FRAME_EXTENTS` 路径，而是额外识别 `_DEEPIN_NO_TITLEBAR`；此前 `gpui` 的 X11 客户端装饰能力判定把这条路径漏掉了。
-- 平台层修复到位：[`client.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/client.rs#L365) 现在会探测 `_DEEPIN_NO_TITLEBAR`；[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1857) 在客户端装饰时会写 `_DEEPIN_NO_TITLEBAR=1` 和 `_DEEPIN_FORCE_DECORATE=0`。
-- 应用层联动正确：[`title_bar.rs`](/usr/htdocs/onetcli/crates/ui/src/title_bar.rs#L45) 不再按桌面环境名一刀切隐藏自绘按钮，而是只根据真实 `window.window_decorations()` 决定是否渲染。
-- 实机属性验证通过：对当前测试窗口执行 `xprop`，已确认 `_DEEPIN_NO_TITLEBAR(CARDINAL) = 1`、`_DEEPIN_FORCE_DECORATE(CARDINAL) = 0`，同时 `_MOTIF_WM_HINTS = 0x2, 0x0, 0x0, 0x0, 0x0`，说明窗口已切到客户端装饰协商路径。
-- 本地验证闭环成立：`cargo clean -p gpui` 后重新执行 `cargo build -p main`，并补跑 `gpui` 平台单测与 `main` 现有标题单测，全部通过。
-- 残余风险可控：仍需你确认 Deepin GUI 中“系统标题栏完全消失、只剩应用标题栏按钮、最大化/还原交互正常”这三项最终体验。
-
----
-
-## 审查报告（deepin-window-restore-x11-zoom）
-生成时间：2026-03-25 01:28:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复 Deepin 25 + X11 下窗口最大化后无法通过主“还原”按钮或双击标题栏恢复的问题
-- 范围明确：保持既有“单组按钮”和 A 方案标题同步不回退，只修 `gpui` X11 平台层状态切换语义
-- 交付物明确：平台层代码修复、最小单测、本地构建验证、`.claude/` 留痕
-- 风险与依赖明确：最终行为仍依赖 Deepin 窗口管理器，必须做一次真实 GUI 回归
+- 目标明确：为 SSH 连接补齐 `ssh-agent` 认证支持
+- 范围明确：覆盖存储模型、SSH/SFTP 认证、终端 SSH 表单、数据库 SSH 隧道与本地化文案
+- 交付物明确：代码实现、上下文摘要、操作日志、验证报告、本地验证结果
+- 风险与依赖明确：终端/UI 相关验证依赖 `gpui` 构建链，已通过提权本地校验完成
 
 ### 技术维度评分
 - 代码质量：95/100
 - 测试覆盖：90/100
-- 规范遵循：94/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：93/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 认证能力链路已闭环：[`models.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/storage/models.rs#L244) 新增 `SshAuthMethod::Agent`，[`ssh.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ssh/src/ssh.rs#L55) 新增 `SshAuth::Agent` 并实现 agent 认证流程。
+- 重复逻辑已收敛：[`russh_impl.rs`](/Users/hufei/RustroverProjects/onetcli/crates/sftp/src/russh_impl.rs#L47) 不再维护单独的密码/私钥认证逻辑，而是复用 `ssh::authenticate_session`。
+- UI 与配置映射已补齐：[`ssh_form_window.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal_view/src/ssh_form_window.rs#L164) 新增 `Agent` 单选项，相关 `SshAuthMethod -> SshAuth` 映射点也已在终端、SFTP 视图和文件管理器侧补齐。
+- 数据库隧道已支持：[`ssh_tunnel.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/ssh_tunnel.rs#L117) 现在能解析 `ssh_auth_type=agent`，[`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L271) 也增加了对应选项。
+- 本地验证有效：`cargo check -p ssh -p sftp`、`cargo test -p ssh -p sftp`、提权后的相关 crate `cargo check`、`db` 与 `one-core` 的新增测试都已通过。
+
+---
+
+## 审查报告（ollama-thinking-fallback 实现）
+生成时间：2026-03-24 13:33:30 +0800
+
+### 需求完整性检查
+- 目标明确：修复 Ollama 下 `qwen3:14b` 等模型正文为空但 `thinking` 有值时，聊天界面显示空回复的问题。
+- 范围明确：只修改 `one-core` 项目侧流式消费逻辑，不改第三方 `llm-connector`。
+- 交付物明确：共享 helper、双路径修复、最小单测、本地验证、上下文与操作留痕。
+- 风险与依赖明确：潜在风险是 reasoning 与正文混合展示；当前修复以可用性优先解决空回复。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：90/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：88/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 修复点集中且边界清晰：[`mod.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/llm/mod.rs#L19) 新增 `extract_stream_text`，正文优先、正文为空时回退 reasoning/thinking。
+- 两条消费链路已统一：[`stream.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/ai_chat/stream.rs#L15) 与 [`general_chat.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/agent/builtin/general_chat.rs#L8) 都改为复用共享 helper，不再各自只读 `get_content()`。
+- 问题现象已与本机运行时对齐：提权访问本机 Ollama 证明 `qwen3:14b` 的确会返回空 `content` 和非空 `thinking`，本次修复直接覆盖这一场景。
+- 本地验证有效：`cargo check -p one-core` 与 `cargo test -p one-core extract_stream_text --lib` 均已通过。
+
+---
+
+## 审查报告（aliyun-qwen35-url 实现）
+生成时间：2026-03-25 10:32:13 +0800
+
+### 需求完整性检查
+- 目标明确：修复阿里云官方 `qwen3.5-plus` 在 onecli 中因 URL 路径错误导致的 parse error。
+- 范围明确：只调整 `one-core` 的 Aliyun client 路由，不修改第三方 `llm-connector`。
+- 交付物明确：`connector.rs` 最小补丁、单元测试、本地验证、上下文与日志留痕。
+- 风险与依赖明确：仅对 `qwen3.5-*` 或显式 `compatible-mode` 地址切换为 OpenAI 兼容路径，降低对现有普通模型的影响。
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：90/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 根因已修正：[`connector.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/llm/connector.rs#L15) 新增阿里云 compatible-mode 默认地址，并在 [`connector.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/llm/connector.rs#L59) 为 `qwen3.5-*` 与显式 `compatible-mode` 地址改走 `openai_compatible`。
+- 兼容边界清晰：[`connector.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/llm/connector.rs#L145) 的 `aliyun_prefers_compatible_mode` 只匹配明确场景，其余阿里云模型仍保留原生 `aliyun/aliyun_private` 路径。
+- 本地验证有效：`cargo test -p one-core aliyun_prefers_compatible_mode --lib` 与 `cargo check -p one-core` 均已通过。
+
+---
+
+## 审查报告（aliyun-provider-cache 实现）
+生成时间：2026-03-25 10:38:33 +0800
+
+### 需求完整性检查
+- 目标明确：修复阿里云 qwen3.5-plus 在运行时仍复用旧 provider 导致 URL 错误继续存在的问题。
+- 范围明确：仅增强 `ai_chat` provider 创建配置与 `ProviderManager` 缓存命中条件。
+- 交付物明确：缓存签名补丁、模型覆盖补丁、本地验证、上下文与操作留痕。
+- 风险与依赖明确：补丁不会修改第三方库，只影响配置变化时的 provider 重建。
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：96/100
+- 风险评估：91/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 运行时根因已闭环：[`stream.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/ai_chat/stream.rs#L205) 在创建 provider 前把当前 `selected_model` 写回临时 `provider_config.model`。
+- 缓存误复用已修正：[`manager.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/llm/manager.rs#L13) 新增 `ProviderCacheEntry`，[`manager.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/llm/manager.rs#L31) 开始按配置签名而非仅按 id 命中缓存。
+- 本地验证有效：`cargo test -p one-core provider_cache_signature_changes_with_model --lib` 与 `cargo check -p one-core` 均已通过。
+
+---
+
+## 审查报告（db-tree-csv-import-target 实现）
+生成时间：2026-03-24 18:40:00 +0800
+
+### 需求完整性检查
+- 目标明确：修复从数据库树表节点导入 CSV/TXT/JSON/SQL 时忽略 database/schema，导致写入默认库同名表的问题。
+- 范围明确：限定在 `crates/db/src/import_export/formats/*`，不改 UI 和 manager 接口。
+- 交付物明确：共享 helper、导入修复、单元测试、本地验证、上下文与操作留痕。
+- 风险与依赖明确：风险主要是行为从“错误写入默认库”修正为“写入选中库”，属于预期缺陷修复。
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：90/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：92/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 导入目标表定位已统一：[`mod.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/mod.rs#L15) 新增 `format_import_table_reference`，直接复用 `DatabasePlugin::format_table_reference`。
+- 受影响导入格式已修正：[`csv.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/csv.rs#L135)、[`json.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/json.rs#L32)、[`txt.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/txt.rs#L51)、[`sql.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/import_export/formats/sql.rs#L52) 不再使用裸表名执行 `TRUNCATE/INSERT`。
+- 回归验证有效：`cargo test -p db format_import_table_reference --lib` 与 `cargo check -p db` 均已通过。
+
+---
+
+## 审查报告（db-tree-filter-persist 实现）
+生成时间：2026-03-24 18:46:00 +0800
+
+### 需求完整性检查
+- 目标明确：修复取消勾选数据库后重新进入数据库页仍显示旧筛选结果的问题。
+- 范围明确：限定在 `db_tree_view` 的筛选保存和连接事件同步逻辑，不改存储 schema。
+- 交付物明确：筛选同步 helper、事件广播修复、纯逻辑测试、本地验证、上下文与操作留痕。
+- 风险与依赖明确：主页连接列表依赖连接更新事件，本次修复直接复用该链路。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：89/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：91/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- 根因已修复：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L1000) 在筛选写库成功后会发 `ConnectionUpdated`，不再只更新仓库而忽略内存连接列表。
+- 打开的树视图也会同步筛选状态：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L725) 现在会从传入的 `StoredConnection` 刷新 `selected_databases`。
+- 纯逻辑测试已覆盖“保留筛选”和“恢复全选”：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L2669)。
+- 本地验证有效：`cargo test -p db_view sync_selected_databases_from_connection --lib` 与 `cargo check -p db_view` 均已通过。
+
+---
+
+## 审查报告（db-tree-refresh-tokio-runtime 实现）
+生成时间：2026-03-25 10:45:01 +0800
+
+### 需求完整性检查
+- 目标明确：修复数据库树刷新时因 `tokio::fs` 在非 Tokio runtime 中执行而触发 panic 的问题。
+- 范围明确：限定在 `db_tree_view` 的刷新任务调度，不改缓存模块公开接口。
+- 交付物明确：运行时切换修复、本地编译验证、现有测试回归、上下文与操作留痕。
+- 风险与依赖明确：依赖项目已有 `Tokio` 包装，风险主要是后台任务调度边界调整。
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：98/100
+- 风险评估：92/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- 根因已闭环：[`cache.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/cache.rs#L277) 的缓存失效逻辑使用 `tokio::fs`，而 [`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L1128) 之前在 GPUI task 中直接 await，运行时上下文不匹配。
+- 修复符合项目既有模式：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L1128) 现在通过 `Tokio::spawn` 把缓存和元数据失效切到共享 Tokio runtime，再回 UI 线程重建树。
+- 失败可见性更好：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L1147) 新增 Tokio 任务失败日志，避免异常被静默吞掉。
+- 本地验证有效：`cargo check -p db_view` 与 `cargo test -p db_view sync_selected_databases_from_connection --lib` 均已通过。
+
+---
+
+## 审查报告（db-connection-form-ssl 实现）
+生成时间：2026-03-25 13:35:05 +0800
+
+### 需求完整性检查
+- 目标明确：为 `db_connection_form` 实现可用的 SSL 配置，并让保存的参数真正影响建连逻辑。
+- 范围明确：UI 字段、i18n 文案、MySQL/PostgreSQL 驱动建连、ClickHouse TLS feature、MSSQL 分组调整。
+- 交付物明确：SSL 标签页字段、驱动层参数接入、依赖特性启用、纯逻辑测试、本地验证、上下文与操作留痕。
+- 风险与依赖明确：PostgreSQL 需要外部 TLS connector，MySQL/ClickHouse 需要启用 TLS feature。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
 
 ### 战略维度评分
 - 需求匹配：96/100
@@ -440,644 +286,81 @@
 - 建议：通过
 
 ### 结论
-- 根因定位收敛：[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1590) 的 X11 `zoom()` 之前始终发送 `WmHintPropertyState::Toggle`，而 Wayland 对照实现并不是这种语义。
-- 修复方向最小且正确：[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L873) 重新启用 `Remove` / `Add`，并在 [`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L879) 通过 `maximized_wm_hint_property_state` 按当前状态显式区分“还原”和“最大化”。
-- 影响范围受控：应用层已确认有效的 Deepin 双按钮修复、系统标题跟随活动标签的 A 方案都未被回退；主工程 `cargo check`、`cargo test -p main onetcli_app::tests`、`cargo build -p main` 均通过。
-- 平台层验证充分：[`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1889) 与 [`window.rs`](/home/hoping/.cargo/git/checkouts/zed-a70e2ad075855582/8b5328c/crates/gpui/src/platform/linux/x11/window.rs#L1897) 两个新增单测分别验证了“已最大化走 Remove”和“普通窗口走 Add”。
-- 新增诊断已把边界划清：在真实调试窗口 `0x8c00002` 上，手工发送标准 X11 `_NET_WM_STATE Add/Toggle` 可以正常最大化和恢复；因此剩余的“系统主按钮和双击标题栏不能还原”更接近 Deepin/KWin `com.deepin.chameleon` 装饰插件路径，而不是 OnetCli 窗口属性仍然缺失。
-- 残余风险与限制：如果目标是“必须修复系统标题栏主按钮本身”，当前应用侧补丁空间已经很小，后续更现实的方向是改为彻底绕开这条系统装饰路径，或转向 Deepin/KWin 侧规则/插件排查。
+- 表单层已补齐 SSL 配置：[`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L333) 开始为 MySQL/PostgreSQL/MSSQL/ClickHouse 提供非空 SSL 分组；Oracle 的空白 SSL 标签页已移除。
+- MySQL SSL 已接入：[`mysql/connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/mysql/connection.rs#L31) 新增 `build_ssl_opts`，根据 `require_ssl/verify_ca/verify_identity/ssl_root_cert_path/tls_hostname_override` 构造 `mysql_async::SslOpts`。
+- PostgreSQL TLS 已接入：[`postgresql/connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/postgresql/connection.rs#L39) 新增 `ssl_mode` 与 TLS connector 构建逻辑，不再固定 `NoTls`。
+- 依赖特性已对齐：[`Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/Cargo.toml#L94) 为 `mysql_async`、`clickhouse` 开启 TLS feature，并新增 `postgres-native-tls` / `native-tls`。
+- 本地验证有效：`cargo check -p db_view`、`cargo test -p db ssl_ --lib`、`cargo test -p db_view ssl_tab --lib` 全部通过。
 
 ---
 
-## 审查报告（sync-server-url-settings）
-生成时间：2026-03-24 22:45:33 +0800
+## 审查报告（db-ssl-rustls-migration 实现）
+生成时间：2026-03-25 14:30:01 +0800
 
 ### 需求完整性检查
-- 目标明确：同步地址必须从设置页配置，不能再从环境变量或编译时配置读取
-- 范围明确：认证初始化、设置持久化、登录入口提示、同步入口提示、环境变量清理
-- 交付物明确：代码修改、本地验证、`.claude/` 留痕文件
-- 风险与依赖明确：设置项为即时保存，必须以“有效 URL”而不是“非空字符串”判断是否已配置
+- 目标明确：将数据库 SSL 实现从 `native-tls` 迁移到 `rustls`，同时保持 `db_connection_form` 的字段和 `extra_params` 契约不变。
+- 范围明确：工作区依赖、`db` crate 依赖、PostgreSQL connector、MySQL/ClickHouse/MSSQL 的 TLS feature。
+- 交付物明确：依赖迁移、PostgreSQL rustls connector、补充测试、本地验证、上下文与操作留痕。
+- 风险与依赖明确：PostgreSQL 是唯一需要替换 connector 的驱动，其余驱动主要依赖 feature 切换。
 
 ### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：87/100
-- 规范遵循：94/100
+- 测试覆盖：91/100
+- 规范遵循：97/100
 
 ### 战略维度评分
-- 需求匹配：98/100
+- 需求匹配：97/100
 - 架构一致：96/100
-- 风险评估：92/100
+- 风险评估：93/100
 
 ### 综合评分
 - 95/100
 - 建议：通过
 
 ### 结论
-- 设置来源已统一：[`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L95) 新增 `sync_server_url` 持久化字段，并在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L449) 新增设置页输入项，修改后立即同步到认证服务。
-- 地址更新策略合理：[`crates/core/src/cloud_sync/sync_server.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L123) 的 `SyncServerClient` 改为持有可运行时更新的 `base_url`，避免替换全局共享客户端对象后引发引用失效。
-- 登录前提示准确：[`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L966) 在未配置有效同步地址时不再打开登录表单，而是弹出明确提示并引导进入设置页。
-- 同步失败可见性补齐：[`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L464) 在未配置同步地址时会同时设置主界面反馈和通知提示，不再落成底层 `builder error`。
-- 认证状态一致性更完整：[`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L3252) 会话过期时会统一清理首页和全局登录态；[`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L799) 设置页登出后也会同步刷新首页状态。
-- 环境变量入口已移除：[`crates/core/src/config.rs`](/usr/htdocs/onetcli/crates/core/src/config.rs#L1) 不再包含 `SyncServerConfig`；[`crates/core/build.rs`](/usr/htdocs/onetcli/crates/core/build.rs#L1) 也已移除 `SYNC_SERVER_URL` 注入逻辑；检索 `SYNC_SERVER_URL|SyncServerConfig::get` 无匹配。
-- 本地验证通过：`cargo fmt --all`、`cargo test -p main`、`cargo test -p one-core --no-run` 全部成功。残余风险仅剩 GUI 手动交互未回归。
+- 依赖已切换到 rustls：[`Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/Cargo.toml#L97) 现改用 `mysql_async` 的 `rustls-tls`、`clickhouse` 的 `rustls-tls-native-roots`、`tokio-postgres-rustls`，并移除了工作区对 `native-tls/postgres-native-tls` 的直接依赖。
+- PostgreSQL connector 已替换：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/postgresql/connection.rs#L209) 通过 `MakeRustlsConnect` 建连，不再依赖 `native_tls::TlsConnector`。
+- 现有参数语义被保留：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/postgresql/connection.rs#L31) 的包装 verifier 仅针对 `ssl_accept_invalid_certs` / `ssl_accept_invalid_hostnames` 放宽对应证书错误，不影响其它 TLS 校验路径。
+- 自定义 CA 仍可用：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/postgresql/connection.rs#L146) 同时支持从 `ssl_root_cert_path` 读取 PEM/DER 证书并叠加到系统根证书。
+- 本地验证有效：`cargo check -p db_view`、`cargo test -p db ssl_ --lib`、`cargo test -p db_view ssl_tab --lib` 全部通过。
 
 ---
 
-## 审查报告（sync-server-rust-integration）
-生成时间：2026-03-24 17:53:05 +0800
-
-### 需求完整性检查
-- 目标明确：让当前 Rust 项目真正接入独立部署的 `sync_server`，而不是只改环境变量名
-- 范围明确：`sync_server` 认证返回、Rust 配置入口、云端客户端实现、登录 UI 模式切换
-- 交付物明确：代码实现、本地构建验证、冒烟验证、`.claude/` 留痕文件
-- 风险与依赖明确：`sync_server` 当前不支持团队功能，Rust 侧已显式做能力降级
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：95/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 需求闭环成立：[`crates/core/src/config.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/config.rs#L17) 新增 `SYNC_SERVER_URL` 配置，[`main/src/auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L160) 会优先在运行时选择 `sync_server` 后端，已经不是“只能填 Supabase 地址”的状态。
-- 架构延续合理：[`crates/core/src/cloud_sync/sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L132) 新增 `SyncServerClient` 直接实现 `CloudApiClient`，同步引擎无需重写，保持现有抽象层稳定。
-- 认证与 UI 匹配真实协议：[`main/src/auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L358) 新增邮箱密码登录/注册流程，[`main/src/auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L765) 新增密码登录/注册对话框，[`main/src/home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L814) 已按后端类型分支登录方式。
-- 服务端会话协议已验证：[`sync_server/server/src/services/auth.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/services/auth.ts#L18) 修复后，注册、登录、刷新都返回 `token + refreshToken + expiresAt + user`，本地对 `http://127.0.0.1:8787` 的冒烟已证实 `/register`、`/login`、`/refresh`、`/me` 全部成功。
-- 本地验证充分：`npm run check --workspace server`、`npm run build --workspace server`、`npm run build`、`cargo check -p one-core`、`cargo check -p main` 均通过；残余风险主要是团队功能尚未接入，这与当前“简单多账号自动同步”需求一致。
-
----
-
-## 审查报告（windows-owner-id-build）
-生成时间：2026-03-20 15:30:18 +0800
-
-### 需求完整性检查
-- 目标明确：修复 Windows CI 中 `StoredConnection` 初始化缺少 `owner_id` 字段导致的编译失败
-- 范围明确：仅涉及 `crates/core/src/cloud_sync/conflict.rs` 的测试初始化与 `.claude/` 留痕文档
-- 交付物明确：代码修复、上下文摘要、操作日志、审查报告、本地编译验证
-- 风险与依赖明确：当前修复针对截图中已知报错点；若还有其他手写初始化漏字段，CI 会继续暴露
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：85/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：[`crates/core/src/storage/models.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/storage/models.rs#L570) 的 `StoredConnection` 已新增 `owner_id` 字段，但 [`crates/core/src/cloud_sync/conflict.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/cloud_sync/conflict.rs#L326) 的测试字面量初始化没有同步补齐。
-- 现有模式清晰：`StoredConnection::new_database/new_ssh/new_redis/new_mongodb/new_serial` 全部采用 `owner_id: None`，而 [`storage/repository.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/src/storage/repository.rs#L54) 也已显式映射 `owner_id: row.owner_id`，说明字段已经在模型层和持久化层全面接入。
-- 修复策略正确：在冲突测试的字面量初始化中补上 `owner_id: None`，与现有默认构造语义保持一致，没有扩大改动范围。
-- 本地验证有效：`cargo check -p one-core --tests` 已通过，足以证明截图中的 Windows 编译错误 `E0063 missing field owner_id` 已修复。
-
----
-
-## 审查报告（terminal-serial-active-close）
-生成时间：2026-03-20 15:24:31 +0800
-
-### 需求完整性检查
-- 目标明确：修复串口 tab 关闭后主页连接卡片仍显示活跃、导致无法编辑的问题
-- 范围明确：仅涉及 `TerminalView` 的关闭路径与 `.claude/` 留痕文档
-- 交付物明确：代码修复、上下文摘要、操作日志、审查报告、本地编译验证
-- 风险与依赖明确：最终行为闭环需通过 GUI 手动验证确认
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：82/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：90/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：[`main/src/home_tab.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/home_tab.rs#L824) 通过 `ActiveConnections::is_active` 禁止编辑/删除，而 [`crates/terminal_view/src/view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal_view/src/view.rs#L2000) 之前在 `try_close()` 中只调用 `shutdown()`，没有同步回收活跃状态。
-- 时序问题解释充分：[`crates/terminal/src/terminal.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal/src/terminal.rs#L500) 中 `set_connection_active(false, cx)` 主要依赖异步断开回调；tab 关闭后实体会立即从容器中移除，因此串口连接可能来不及回调就留下了残余活跃标记。
-- 修复策略与现有模式一致：参照 [`crates/sftp_view/src/lib.rs`](/Users/hufei/RustroverProjects/onetcli/crates/sftp_view/src/lib.rs#L712) 和 [`crates/mongodb_view/src/mongo_tab.rs`](/Users/hufei/RustroverProjects/onetcli/crates/mongodb_view/src/mongo_tab.rs#L264)，现在 `TerminalView::try_close()` 会先同步移除 `ActiveConnections`，再执行原有 `shutdown()`。
-- 本地验证有效：`cargo check -p terminal_view` 已通过，说明改动没有引入编译回归；唯一保留的是既有 `num-bigint-dig v0.8.4` future-incompat 提示。
-- 残余风险可控：GUI 手动回归尚未执行，因此仍建议实际关闭一个串口 tab 后回首页确认卡片活跃标记与编辑按钮状态都已恢复。
-
----
-
-## 审查报告（ci-machete-db-once-cell）
-生成时间：2026-03-20 15:11:51 +0800
-
-### 需求完整性检查
-- 目标明确：修复 GitHub Actions `Test (aarch64-apple-darwin, macos-latest)` 中 `Machete` 步骤持续失败的问题
-- 范围明确：定位截图中 `db -- ./crates/db/Cargo.toml: once_cell` 的未使用依赖并修复
-- 交付物明确：依赖清理、上下文摘要、操作日志、审查报告
-- 风险与依赖明确：本机未安装 `cargo-machete`，最终闭环需要 CI 重新执行
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：96/100
-- 风险评估：90/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：CI workflow [`ci.yml`](/Users/hufei/RustroverProjects/onetcli/.github/workflows/ci.yml#L27) 的 `Machete` 步骤只在 macOS job 运行，而截图已经明确指向 `db -- ./crates/db/Cargo.toml: once_cell`。
-- 代码证据支持“真实未使用依赖”而非误报：[`crates/db/Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/crates/db/Cargo.toml#L1) 原先声明了 `once_cell.workspace = true`，但对 `crates/db/src` 的搜索没有发现 `once_cell`/`OnceCell`/`Lazy` 使用痕迹。
-- 修复策略正确：参考 [`crates/macros/Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/crates/macros/Cargo.toml#L20) 已有的 `cargo-machete` ignore 模式后，判断当前不属于误报，因此直接删除 `db` crate 的未使用依赖，而不是加 ignore。
-- 本地验证有效：`cargo check -p db` 已通过，说明删除 `once_cell` 不会导致 `db` crate 编译回归；唯一保留的是既有 `num-bigint-dig v0.8.4` future-incompat 提示。
-- 残余风险可控：当前机器未安装 `cargo-machete`，所以还不能本机直接复跑 `cargo machete`；若 CI 下一次仍报其他未使用依赖，需要按同样方式继续清理。
-
----
-
-## 审查报告（libudev-linux-gnu-build）
-生成时间：2026-03-20 15:03:18 +0800
-
-### 需求完整性检查
-- 目标明确：修复 GitHub Actions Linux GNU 构建中 `libudev-sys` 因缺失 `libudev.pc` 失败的问题
-- 范围明确：仅涉及 Linux 系统依赖安装脚本与 `.claude/` 留痕文档
-- 交付物明确：脚本修复、上下文摘要、操作日志、审查报告
-- 风险与依赖明确：依赖现有 `script/bootstrap` 调用链；Ubuntu 构建闭环需在 Linux 环境完成
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：82/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：`cargo tree -i libudev-sys --target x86_64-unknown-linux-gnu -p main` 已证实依赖链为 `libudev-sys -> libudev -> serialport -> terminal/terminal_view -> main`，而 [`script/install-linux.sh`](/Users/hufei/RustroverProjects/onetcli/script/install-linux.sh#L1) 之前没有安装 `libudev-dev`。
-- 修复点正确且最小：在 [`script/install-linux.sh`](/Users/hufei/RustroverProjects/onetcli/script/install-linux.sh#L5) 的统一 Ubuntu 安装清单中补入 `libudev-dev`，没有破坏现有 workflow 结构。
-- 不采用 `serialport --no-default-features` 的理由充分：[`crates/terminal_view/src/serial_form_window.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal_view/src/serial_form_window.rs#L226) 直接调用 `serialport::available_ports()`；结合 `serialport-rs` 官方文档，关闭默认 feature 会移除 Linux `libudev` 相关能力，存在功能回归风险。
-- 本地验证有效但有限：已执行 `bash -n` 校验脚本语法，通过；已确认 workflow 仍统一走 `script/bootstrap`。由于当前环境为 macOS，尚未直接执行 Ubuntu GNU 构建，因此最终闭环仍需依赖 GitHub Linux job 或 Ubuntu 本机验证。
+## 审查补充（mysql-ssh-tls-lab 镜像复用调整）
+生成时间：2026-03-25 15:09:17 +0800
 
 ### 技术维度评分
 - 代码质量：93/100
-- 测试覆盖：76/100
+- 测试覆盖：78/100
 - 规范遵循：96/100
 
 ### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：95/100
-- 风险评估：82/100
+- 需求匹配：96/100
+- 架构一致：97/100
+- 风险评估：84/100
 
 ### 综合评分
-- 86/100
+- 89/100
 - 建议：需讨论
 
 ### 结论
-- 已将 [`crates/core/Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/crates/core/Cargo.toml#L6) 中被 `cargo-machete` 报出的 7 个未使用依赖删除：`bytes`、`http-body-util`、`reqwest`、`rustls`、`regex`、`rustls-platform-verifier`、`urlencoding`。
-- 方案符合仓库现有依赖治理模式：保留 [`.github/workflows/ci.yml`](/Users/hufei/RustroverProjects/onetcli/.github/workflows/ci.yml#L32) 的 `Machete` 步骤，不扩大工作区 ignore，也未新增自定义脚本。
-- 证据基础充分：本地对 `crates/core/src` 的精确搜索未发现 `reqwest::`、`rustls::`、`regex::`、`http_body_util::`、`bytes::`、`urlencoding::` 等引用；仓库还存在根级 [`Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/Cargo.toml#L217) 与包级 [`crates/macros/Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/crates/macros/Cargo.toml#L20) 两种 `cargo-machete` 配置模式可对照。
-- 本地验证未能完整闭环：`cargo machete` 因本机未安装该子命令失败，`cargo check -p one-core` 因当前工作树中的无关问题 [`crates/ui/Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/crates/ui/Cargo.toml#L113) 存在重复键而在 workspace 解析阶段中止。
-- 因此本次结论是“修复方向明确且已落地，但最终 `cargo` 级验证被现有工作树状态阻塞”。待清理该无关阻塞后，应重新执行 `cargo machete` 与 `cargo check -p one-core` 完成闭环。
+- 需求已落实：[`docker-compose.yml`](/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/docker-compose.yml#L3) 已默认复用 `mysql:8.4.5`，[`verify.sh`](/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/verify.sh#L10) 与之保持一致。
+- 文档已对齐：[`README.md`](/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/README.md#L13) 说明了默认镜像与 `MYSQL_IMAGE` 覆盖方式。
+- 当前唯一未闭环项不是 MySQL 镜像，而是 bastion 首次构建依赖的 `ubuntu:24.04` 拉取/构建仍在进行，因此整套 SSH+TLS 自动验证尚未最终通过。
 
 ---
 
-## 审查报告（terminal-file-manager-sync）
-生成时间：2026-03-10 19:13:13 +0800
+## 审查补充（本地 Docker MySQL TLS + 远程 sshd 联调准备）
+生成时间：2026-03-25 16:27:27 +0800
 
 ### 技术维度评分
 - 代码质量：92/100
-- 测试覆盖：70/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：94/100
-- 架构一致：94/100
-- 风险评估：85/100
-
-### 综合评分
-- 88/100
-- 建议：需讨论（原因：测试仅覆盖编译层面，实际场景验证需在可连接 SSH 的环境中继续确认）。
-
-### 结论
-- 在 `FileManagerPanel` 中新增 `pending_sync_path`，并在 `connect` 成功后优先消费该值，确保首次打开文件管理器即可同步到终端的最新工作目录。
-- `sync_navigate_to` 在未连接时不再早退，而是缓存路径等待连接完成后一次性导航，避免用户必须手动敲回车触发同步。
-- 执行 `cargo fmt -- crates/terminal_view/src/sidebar/file_manager_panel.rs` 与 `cargo check -p terminal_view` 均通过；构建过程的 `num-bigint-dig` future-incompat 警告为既有依赖问题，与本改动无直接关联。
-- 仍需在真实 SSH 环境中验证：当缓存路径指向无法访问的目录时，UI 是否给出清晰反馈；若服务器禁用 PROMPT_COMMAND 导致没有 OSC 7，仍需后续方案（例如手动触发 `pwd`）。
----
-
-## 审查报告（terminal-file-manager-sync 手动同步版）
-生成时间：2026-03-10 19:49:24 +0800
-
-### 技术维度评分
-- 代码质量：91/100（事件链清晰、状态封装得当）
-- 测试覆盖：70/100（仅运行 `cargo check -p terminal_view`）
-- 规范遵循：95/100（命名/文案/日志符合 CLAUDE.md 要求）
-
-### 战略维度评分
-- 需求匹配：94/100（新增手动同步按钮 + Enter 触发 OSC7 方案）
-- 架构一致：94/100（仍沿用 Terminal → Sidebar → FileManagerPanel 流）
-- 风险评估：85/100（需在真实 SSH 环境验证 OSC7/Enter 组合及无路径场景）
-
-### 综合评分
-- 88/100
-- 建议：需讨论（建议结合实际服务器验证 OSC7 触发频率，并观察未启用 shell PROMPT_COMMAND 时的体验）
-
-### 结论
-- `TerminalSidebar` 现在会缓存 `last_terminal_path`，并新增 `sync_on_enter_pending` 以在监听到 Enter 时等待下一次 OSC7 信号后强制同步。
-- 文件管理器工具栏新增“同步终端路径”按钮，通过 `FileManagerPanelEvent::ManualSync` 触发 Sidebar 的手动同步逻辑。
-- `TerminalView::handle_key_event` 监听 enter/return，在用户回车后标记“下一次 OSC7 必须同步”，实现“通过监听回车实时同步”的需求。
-- 运行 `cargo fmt`（针对改动文件）与 `cargo check -p terminal_view`。构建日志中的 future-incompat 警告来自既有依赖 `num-bigint-dig v0.8.4`，与本次改动无关。
----
-
-## 审查报告（terminal-file-manager-sync 手动刷新补强）
-生成时间：2026-03-10 22:58:00 +0800
-
-### 技术维度评分
-- 代码质量：91/100（事件流更清晰，公共 helper 降低重复）
-- 测试覆盖：70/100（仍以 `cargo check -p terminal_view` 为主）
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：94/100（手动同步现在会主动触发 shell 输出 OSC 7；自动同步逻辑保留）
-- 架构一致：94/100
-- 风险评估：85/100（若用户在交互式程序中点击“同步”，隐藏指令会被当作输入；需在文档中提示使用场景）
-
-### 综合评分
-- 88/100
-- 建议：需讨论（是否需要在 UI 中提示“仅 shell 提示符环境下使用手动同步”）。
-
-### 结论
-- `TerminalSidebar` 的手动同步会缓存最近路径、强制下一次 OSC 7 更新，并向 TerminalView 发出 `RequestWorkingDirRefresh` 事件。
-- TerminalView 新增 `request_working_dir_refresh`，写入 `printf '\033]7;file://%s%s\007' "$HOSTNAME" "$PWD"\n` 指令，确保即使 shell 未配置 PROMPT_COMMAND 也能返回当前路径。
-- `cargo fmt -- crates/terminal_view/src/sidebar/mod.rs crates/terminal_view/src/view.rs`、`cargo check -p terminal_view` 均已执行；唯一警告依旧是既有依赖 `num-bigint-dig v0.8.4` 的 future-incompat 提示。
-
----
-
-## 审查报告（shortcut-key-support）
-生成时间：2026-03-14 14:32:00 +0800
-
-### 技术维度评分
-- 代码质量：90/100
-- 测试覆盖：78/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：92/100
-- 架构一致：93/100
-- 风险评估：84/100
-
-### 综合评分
-- 88/100
-- 建议：需讨论（原因：快捷键行为存在平台差异与降级策略，需要在产品侧确认预期）。
-
-### 结论
-- 已实现跨平台快捷键分支：macOS 使用 `cmd-o/cmd-n` 打开/新建连接、`cmd-1..9` 切换标签、`ctrl-cmd-f` 全屏；非 macOS 使用 `alt-o/alt-n`、`alt-1..9`、`alt-enter` 全屏、`ctrl-space` 最小化。
-- 终端字体快捷键保持一致：macOS `cmd +/-/0`，非 macOS `ctrl +/-/0`；字体大小变更已持久化到 `AppSettings`。
-- 本地验证执行 `cargo test -p gpui-component` 通过（130 tests），未运行全量 UI 交互测试；需在实际 UI 交互环境中验证快速连接弹窗与键位冲突情况。
-- 风险点：`ctrl-space` 在非 macOS 仅实现为最小化而非隐藏/恢复的完整切换，需确认是否满足需求或是否需要后续补强。
-
----
-
-## 审查报告（build-fix）
-生成时间：2026-03-14 15:06:00 +0800
-
-### 技术维度评分
-- 代码质量：90/100
-- 测试覆盖：75/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：93/100
-- 架构一致：93/100
-- 风险评估：85/100
-
-### 综合评分
-- 88/100
-- 建议：需讨论（原因：仅完成编译验证，未覆盖运行时 UI 行为测试）。
-
-### 结论
-- 通过补齐 `actions` 宏与 `WindowExt/BorrowAppContext` 导入，修复快捷键动作类型缺失与对话框关闭方法不可用的问题。
-- `open_connection_from_quick` 由私有改为 `pub(crate)`，与 quick open delegate 的调用链保持一致。
-- 本地执行 `cargo build` 成功，唯有 `num-bigint-dig v0.8.4` 的 future-incompat 警告，属于既有依赖风险。
-
----
-
-## 审查报告（终端功能增强）
-生成时间：2026-03-14 21:02:16 +0800
-
-### 技术维度评分
-- 代码质量：92/100
-- 测试覆盖：70/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：94/100
-- 架构一致：94/100
-- 风险评估：84/100
-
-### 综合评分
-- 88/100
-- 建议：需讨论（原因：仅完成编译验证，未运行实际 UI 手动场景）
-
-### 结论
-- 已新增终端字体持久化、选中自动复制、中键粘贴与 cmd/ctrl-= 快捷键，事件链路保持 TerminalView ← TerminalSidebar ← SettingsPanel 模式。
-- 设置页新增“终端”分组与本地化文案，主设置与侧边栏设置均可持久化。
-- 本地验证仅执行 `cargo build -p main`；`cargo run -p main` 未执行（需要图形界面/交互）。
-- 风险：自动复制依赖选择文本，若 selection 为空不会写剪贴板；中键粘贴依赖剪贴板文本存在。
-
----
-
-## 审查补充（终端字体与侧边栏同步）
-生成时间：2026-03-14 21:16:58 +0800
-
-### 结论
-- 快捷键调整字体后已同步侧边栏数值，避免显示滞后。
-- 本地验证执行 `cargo build -p main`，通过（future-incompat 警告同前）。
-
----
-
-## 审查补充（终端字体快捷键卡顿）
-生成时间：2026-03-14 21:22:50 +0800
-
-### 结论
-- 已移除侧边栏字体事件中的同步回流，避免输入框更新触发重复事件导致卡顿。
-- 本地验证执行 `cargo build -p main`，通过（future-incompat 警告同前）。
-
----
-
-## 审查补充（终端设置跨标签同步）
-生成时间：2026-03-14 21:55:47 +0800
-
-### 结论
-- 终端设置变更已通过 HomePage 广播到所有终端实例，侧边栏输入框同步采用抑制机制避免回流循环。
-- 本地验证执行 `cargo build -p main`，通过（future-incompat 警告同前）。
-
-
----
-
-## 审查报告（csv-import-fix）
-生成时间：2026-03-19 14:33:08 +0800
-
-### 技术维度评分
-- 代码质量：93/100（修复了 `Option<String>` 值映射错误，新增统一转换函数）
-- 测试覆盖：88/100（新增 2 个 CSV 单元测试，覆盖空字符串/NULL/转义）
-- 规范遵循：94/100（保持现有 `FormatHandler` 结构与命名风格）
-
-### 战略维度评分
-- 需求匹配：95/100（解决导入报错且补齐错误明细日志）
-- 架构一致：93/100（最小改动，未改接口）
-- 风险评估：90/100（主要风险为超大量错误日志可能导致 UI 卡顿）
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- `crates/db/src/import_export/formats/csv.rs` 修复了 CSV 导入时 `Option<String>` 被误当作 `String` 的编译与语义错误。
-- `crates/db_view/src/import_export/table_import_view.rs` 在“部分成功”分支中新增逐条错误日志输出，避免只显示错误计数不显示详情。
-
----
-
-## 审查报告（table-designer-sql-preview）
-生成时间：2026-03-19 18:43:02 +0800
-
-### 需求完整性检查
-- 目标明确：修复表设计页在未修改字段时仍生成 `ALTER TABLE ... MODIFY COLUMN` 的问题。
-- 范围明确：仅涉及 `TableDesigner` 的原始列定义归一化、`ColumnsEditor` 的属性保真，以及 MySQL 回归测试。
-- 交付物明确：代码修复、上下文摘要、操作日志、本地测试记录、审查报告。
-- 风险与依赖明确：依赖现有 `parse_column_type`、`build_alter_table_sql`、`ColumnInfo` 元数据；GUI 手动验证未自动执行。
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：95/100
-- 风险评估：91/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：`crates/db_view/src/table_designer_tab.rs` 的 `build_original_design` 之前丢失了 `charset/collation` 等列级元数据，且界面态未保留 `is_unsigned`，导致 `column_changed` 将等价列定义误判为变更。
-- 修复遵循现有架构：继续由设计器负责 `ColumnInfo -> ColumnDefinition` 归一化，由插件负责 diff 与 SQL 生成，没有把方言判断扩散到通用比较逻辑。
-- 本地验证充分：`cargo test -p db_view test_column_info_to_definition -- --nocapture` 通过 2 个测试，`cargo test -p db test_build_alter_table_sql_no_changes_with_text_metadata -- --nocapture` 通过 1 个测试。
-- 残余风险可控：未自动执行 GUI 级交互验证，因此仍建议在真实表设计页打开一个现有 MySQL 表确认 SQL 预览为空；但逻辑链关键节点已被纯函数测试与插件测试覆盖。
-- 本地验证：
-  - `cargo test -p db csv::tests -- --nocapture` 通过（2 passed）
-  - `cargo check -p db_view` 通过（仅存在既有 unused import 警告）
-
-
-### 审查补充（CSV 列数不匹配）
-- 症状：导入 `ai_app_report_record` 类 CSV 时提示列数量不匹配。
-- 根因：旧实现按文本行分割，无法处理带引号多行字段。
-- 修复：改为状态机按记录解析，换行仅在非引号状态下生效；并保持空字段语义。
-- 验证：
-  - `cargo test -p db csv::tests -- --nocapture` 通过
-  - `cargo check -p db_view` 通过
-
----
-
-## 审查报告（db_tree_view 刷新缓存失效）
-生成时间：2026-03-20 15:47:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复 `db_tree_view` 手动刷新后仍显示旧树节点的问题。
-- 范围明确：仅调整 `crates/db_view/src/db_tree_view.rs` 的刷新时序和缓存失效范围，并补充纯函数测试。
-- 交付物明确：代码修复、上下文摘要、操作日志、本地测试记录、审查报告。
-- 风险与依赖明确：依赖现有 `GlobalNodeCache`、`GlobalDbState`、`DbNode` 元数据；GUI 真实刷新体验未做自动化验证。
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：87/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：95/100
-- 风险评估：90/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：`refresh_tree` 之前将 `invalidate_node_recursive` 放入 detached 异步任务后立刻 reload，导致旧缓存可能在失效完成前再次被 `load_node_children` 命中。
-- 修复保持既有架构：仍以 `refresh_tree` 为唯一刷新入口，只调整为“先清理本地树状态，再等待缓存失效完成，最后 reload”。
-- 缓存策略更完整：连接节点做连接级元数据失效，其余带数据库上下文的节点做数据库级元数据失效，避免只清节点缓存导致关联元数据仍旧。
-- 本地验证通过：`cargo fmt --all` 成功，`cargo test -p db_view db_tree_view::tests -- --nocapture` 通过 3 个测试。
-- 残余风险：未执行真实 GUI 场景验证，因此仍建议在数据库树中对连接、数据库和表节点各手动点一次刷新，确认界面表现符合预期。
-
----
-
-## 审查报告（workspace-sync-data）
-生成时间：2026-03-20 16:06:00 +0800
-
-### 需求完整性检查
-- 目标明确：确认 `sync_data` 是否支持工作区，并修复工作区不会自动进入同步的问题。
-- 范围明确：只修 `main/src/home_tab.rs` 的工作区事件触发，不改同步引擎和存储模型。
-- 交付物明确：代码修复、上下文摘要、操作日志、本地验证记录、审查报告。
-- 风险与依赖明确：依赖现有 `WorkspaceSyncType`、`SyncEngine` 和 `trigger_sync(cx)` 链路。
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：82/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：91/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 代码证据表明 `sync_data` 本身支持工作区：`CloudSyncData.data_type` 包含 `workspace`，`SyncEngine` 也会注册 `WorkspaceSyncType`。
-- 根因在首页事件链：工作区创建/更新/删除之前只刷新本地列表，没有像连接变更那样自动调用 `trigger_sync(cx)`。
-- 修复后，工作区事件与连接事件使用相同的自动同步条件；同时在本地保存/删除工作区成功路径再补一层直接触发，避免事件未回流时漏掉同步。
-- 本地验证已执行：`cargo check -p main` 通过。
-- 残余风险：本次未直接验证真实云端 API 返回的数据内容，如需最终确认，建议在新增工作区后观察云端是否出现 `data_type=workspace` 记录。
-
----
-
-## 审查报告（generic-sync-stale-cloud-id）
-生成时间：2026-03-20 16:14:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复工作区本地有数据、云端为空时仍不上传的问题。
-- 范围明确：只修改 `generic_sync::calculate_sync_plan` 的 stale `cloud_id` 分支。
-- 交付物明确：代码修复、操作日志、本地编译验证、审查报告。
-- 风险与依赖明确：依赖既有 `on_uploaded` 回写 cloud_id 逻辑，无需修改 `WorkspaceSyncType`。
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：80/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：92/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 根因已由用户日志直接证实：`[工作空间] 本地数据: 4 个`、`云端同步数据: 0 个`、`上传: 0`，与 `generic_sync` 在“本地有 cloud_id 但云端无记录”时静默跳过完全吻合。
-- 修复后，这类数据会重新加入上传计划，并新增显式日志说明“云端记录不存在，重新加入上传计划”。
-- 该改动保持现有上传链路不变，仍由 `on_uploaded` 在成功后回写新的 cloud_id。
-- 本地验证已执行：`cargo check -p main` 通过。
-- 残余风险：尚未直接跑真实云端同步验证，但下次同步时应能从日志立刻观察到是否命中新分支。
-
----
-
-## 审查报告（ci-machete-four-crates）
-生成时间：2026-03-20 17:39:45 +0800
-
-### 需求完整性检查
-- 目标明确：修复当前 `cargo-machete` 在 `db_view`、`redis_view`、`terminal_view`、`one_ui` 上报的未使用依赖。
-- 范围明确：只修改四个 crate 的 `Cargo.toml`，不改 CI workflow、源码逻辑或全局依赖策略。
-- 交付物明确：依赖清理、上下文摘要、操作日志、本地验证结果、审查报告。
-- 风险与依赖明确：依赖 `cargo machete` 与相关 crate `cargo check` 结果作为最终验收标准。
-
-### 技术维度评分
-- 代码质量：96/100
 - 测试覆盖：90/100
 - 规范遵循：96/100
 
 ### 战略维度评分
 - 需求匹配：97/100
 - 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 修复策略与仓库现有依赖治理风格一致：对真实未使用依赖直接删除，而不是新增忽略配置掩盖问题。
-- `db_view`、`redis_view`、`terminal_view`、`one_ui` 的依赖声明已经收缩到当前源码实际需要的最小集合。
-- 本地验证已闭环：四个受影响 crate 的 `cargo check` 全部通过，根目录 `cargo machete` 也已通过。
-- 残余风险较低：`cargo machete --with-metadata` 仍会报其它 crate，但当前 CI workflow 不使用该模式，因此不影响本次交付。
-
----
-
-## 审查报告（file-manager-upload-conflict）
-生成时间：2026-03-20 18:07:00 +0800
-
-### 需求完整性检查
-- 目标明确：检查并修复侧边栏文件管理器上传文件缺少冲突提示的问题。
-- 范围明确：只修改 `terminal_view` 侧边栏文件管理器与对应 locale，不改底层 SFTP 上传接口。
-- 交付物明确：代码修复、上下文摘要、操作日志、本地编译验证、审查报告。
-- 风险与依赖明确：依赖 `sftp_view` 现有冲突对话框模式和 `RusshSftpClient::list_dir` 远端目录检查。
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：82/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：91/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 根因确认准确：`file_manager_panel` 上传入口直接入队，而 `upload_with_progress` 底层会 `TRUNCATE` 远端同名文件，因此之前确实不会有冲突提示。
-- 修复方案与现有架构一致：侧边栏直接复用 `sftp_view` 已有的冲突检测与对话框策略，没有新增重复抽象。
-- 功能覆盖完整：文件选择上传、文件夹选择上传、拖拽上传三条路径都已接入同一冲突检测入口。
-- 本地验证已执行：`cargo check -p terminal_view` 通过。
-- 残余风险：尚未做真实远端交互手动验证，建议在 UI 中分别验证同名文件上传和同名目录上传两种场景。
-
----
-
-## 审查报告（file-manager-toolbar-path-edit）
-生成时间：2026-03-20 18:11:31 +0800
-
-### 需求完整性检查
-- 目标明确：为侧边栏文件管理器头部新增上传文件按钮、新建文件夹按钮，并让当前路径支持点击后编辑输入。
-- 范围明确：仅修改 `terminal_view` 的 `file_manager_panel` 与对应国际化文案，不变更底层 SFTP 接口。
-- 交付物明确：代码改动、上下文摘要、操作日志、本地编译验证、审查报告。
-- 风险与依赖明确：依赖 `sftp_view` 现有路径编辑和新建文件夹模式，依赖 `RusshSftpClient::mkdir` 与既有 `navigate_to/refresh_dir`。
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
 - 风险评估：90/100
 
 ### 综合评分
@@ -1085,29 +368,23 @@
 - 建议：通过
 
 ### 结论
-- 需求覆盖完整：头部已增加“上传文件”“新建文件夹”按钮，路径区域已支持点击进入输入框并通过 Enter 导航。
-- 方案与现有架构一致：直接复用 `sftp_view` 的状态机和对话框模式，没有新增重复抽象，也未改动既有上传/刷新链路。
-- 本地验证已执行：`cargo check -p terminal_view` 通过。
-- 残余风险：尚未在真实远端环境手测路径输入错误路径和新建目录失败提示，建议在 UI 中补一次交互验证。
+- 本地 TLS MySQL 已可用：[`docker-compose.yml`](/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/docker-compose.yml#L2) 的 `mysql` 服务已成功启动，健康检查通过。
+- 容器内 TLS 校验通过：使用 `VERIFY_IDENTITY` 和 CA 文件查询 [`01-init.sql`](/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/mysql/init/01-init.sql#L1) 初始化的 `smoke_test` 表，结果为 `2`。
+- 宿主机路径也通过：使用本机 `mysql` 客户端连接 `127.0.0.1:33306` 并携带 [`ca.pem`](/Users/hufei/RustroverProjects/onetcli/.claude/mysql-ssh-tls-lab/mysql/certs/ca.pem#L1) 做 `VERIFY_IDENTITY` 校验成功，说明后续经远程 sshd 反向转发到本地 Docker MySQL 的链路具备基础条件。
+- `host.docker.internal` 校验失败不影响本次方案：证书 SAN 针对的是 `127.0.0.1`/`localhost`/`mysql`，而 onetcli 通过 SSH 隧道建立本地转发后实际连接主机同样是 `127.0.0.1`。 
 
 ---
 
-## 审查报告（terminal-sidebar-sync-path）
-生成时间：2026-03-20 18:45:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复 SSH 终端“同步文件目录”开关切换后对已有终端后续连接不生效的问题，并说明 `OSC7_PROMPT_COMMAND` 回显原因。
-- 范围明确：仅修改 `terminal` 与 `terminal_view` 的设置传播和 SSH 初始化命令重建逻辑，不重构 shell 集成方案。
-- 交付物明确：代码修复、上下文摘要、操作日志、本地验证、审查报告。
-- 风险与依赖明确：依赖既有 `AppSettings -> HomePage -> TerminalView -> Terminal` 链路；当前 shell 集成仍是 bash 风格 `PROMPT_COMMAND`。
+## 审查补充（MySQL rustls provider panic 修复）
+生成时间：2026-03-25 18:40:56 +0800
 
 ### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：88/100
-- 规范遵循：96/100
+- 测试覆盖：86/100
+- 规范遵循：97/100
 
 ### 战略维度评分
-- 需求匹配：96/100
+- 需求匹配：98/100
 - 架构一致：97/100
 - 风险评估：92/100
 
@@ -1116,2421 +393,558 @@
 - 建议：通过
 
 ### 结论
-- 根因确认准确：新建 SSH 终端会读取最新全局设置，但已有 `Terminal` 对象中的 `init_commands` 不会随设置切换刷新，因此后续 `reconnect` 会沿用旧值。
-- 修复方案与现有架构一致：没有新增新的配置同步层，而是在 `apply_terminal_settings` 中继续沿用既有设置同步入口，同时补齐 `Terminal` 内部状态刷新。
-- 本地验证已闭环：格式化、单元测试、`cargo check -p terminal`、`cargo check -p terminal_view` 全部通过。
-- 残余限制明确：`OSC7_PROMPT_COMMAND` 的回显来自当前通过 `self.write()` 向交互 shell 注入命令的实现方式；要彻底消除回显，需要后续改为 shell 启动阶段集成，并按 bash/zsh/fish 分流处理。
-
-## 审查报告（macos-local-fast-package）
-生成时间：2026-03-23 12:37:59 +0800
-
-### 技术维度评分
-- 代码质量：94/100（复用现有打包脚本，只增加 profile 切换和本地编排入口）
-- 测试覆盖：86/100（以真实脚本执行作为验证，未新增自动化 shell 测试）
-- 规范遵循：95/100（正式 `release` 配置保持不变，本地快速配置独立）
-
-### 战略维度评分
-- 需求匹配：97/100（直接覆盖“macOS/intel 本地快速打包”场景）
-- 架构一致：95/100（沿用现有 `script/` 和 Cargo profile 分层）
-- 风险评估：91/100（主要风险是 `release-fast` 仅适合本地验证，不应用于正式发布）
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- 已新增 `profile.release-fast`，通过 `thin LTO + 更高 codegen-units + incremental` 降低本地 macOS 打包等待时间。
-- 已让 `script/bundle-macos.sh` 和 `script/bundle-macos-dmg.sh` 默认按当前 macOS 架构自动选择 target，并支持通过 `ONETCLI_BUILD_PROFILE` 读取对应目录下的二进制。
-- 已新增 `script/package-macos-local.sh`，用于 macOS 本地一键快速构建并输出 `.app`，可选生成 `.dmg`。
-- 本地验证：
-  - `bash script/package-macos-local.sh` 第一次通过，首次全量构建耗时约 `10:36.06`
-  - `bash script/package-macos-local.sh` 第二次通过，增量构建耗时约 `4.426s`
-  - 产物存在：
-    - `target/x86_64-apple-darwin/release-fast/onetcli`
-    - `target/OnetCli.app/Contents/MacOS/onetcli`
-
+- 根因已闭环：[`mysql/connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/mysql/connection.rs#L37) 之前在启用 TLS 时直接进入 `mysql_async` 的 rustls connector，但进程级默认 `CryptoProvider` 未安装，导致运行时 panic。
+- 修复方式与仓库既有模式一致：新增 [`rustls_provider.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/rustls_provider.rs#L1) 统一封装 `aws_lc_rs::default_provider().install_default().ok()`，并用 `Once` 保证只初始化一次。
+- 驱动复用已收口：[`mysql/connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/mysql/connection.rs#L37) 和 [`postgresql/connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/postgresql/connection.rs#L210) 现在都复用同一个 helper，避免 TLS 初始化逻辑继续分叉。
+- 本地编译验证有效：`cargo check -p db` 已通过。
 
 ---
 
-## 审查报告（titlebar-double-click）
-生成时间：2026-03-23 13:31:00 +0800
+## 审查报告（bracketed-paste-fallback 实现）
+生成时间：2026-03-25 16:12:44 +0800
 
-### 技术维度评分
-- 代码质量：95/100（平台兼容逻辑集中在 `WindowExt`，避免两个调用点重复实现）
-- 测试覆盖：90/100（新增 5 个解析单测，并完成主程序编译校验）
-- 规范遵循：95/100（最小改动，沿用现有窗口 API）
-
-### 战略维度评分
-- 需求匹配：97/100（直接修复“标题栏双击无常规功能”）
-- 架构一致：94/100（复用 `WindowExt` 作为统一入口）
-- 风险评估：91/100（主要风险是 `defaults` 调用依赖系统命令，但触发频率低）
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 根因是上游 `gpui` 在 macOS 上只读取 `AppleActionOnDoubleClick`，而当前机器只暴露 `AppleMiniaturizeOnDoubleClick=0`，导致标题栏双击落空。
-- 已在本仓库新增兼容层：优先读取 `AppleActionOnDoubleClick`，缺失时回退到 `AppleMiniaturizeOnDoubleClick`；无配置时默认执行缩放。
-- 已修复两个入口：
-  - `crates/ui/src/title_bar.rs`
-  - `crates/core/src/tab_container.rs`
-- 本地验证：
-  - `cargo test -p gpui-component window_ext::tests --lib` 通过（5 passed）
-  - `cargo check -p main` 通过
-
-
----
-
-## 审查报告（upgrade-pro-sync-review）
-生成时间：2026-03-24 15:18:53 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“升级 Pro”与“同步”两条功能链路，范围包含 UI 入口、认证恢复、License 刷新、同步执行、冲突解决、本地验证
-- 原始意图覆盖：已检查升级入口是否能解锁 Pro，同步是否能在登录/恢复/冲突场景下维持正确行为
-- 交付物映射：已产出上下文摘要、操作日志、本地验证结果、本审查报告
-- 依赖与风险评估：已覆盖 `AuthService`、`LicenseService`、`SyncEngine`、`CloudSyncService`、`CloudApiClient`
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和验证结果
-
-### 技术维度评分
-- 代码质量：72/100
-- 测试覆盖：61/100
-- 规范遵循：84/100
-
-### 战略维度评分
-- 需求匹配：76/100
-- 架构一致：83/100
-- 风险评估：68/100
-
-### 综合评分
-- 74/100
-- 建议：退回
-
-### 主要结论
-- `升级 Pro` 当前存在状态错误降级问题：会话恢复和 OTP 登录都把 `get_subscription()` 的错误结果压成 `None`，再交给 `LicenseService::update_from_subscription` 写入免费版 License；这会让有效 Pro 用户在瞬时网络失败后直接失去同步能力。
-- `升级 Pro` 当前不存在购买后的会话内回流：升级对话框只打开定价页，没有任何购买成功后的订阅刷新动作；代码里只有“恢复会话”和“OTP 登录”两个时机会重新拉取订阅。
-- `同步` 的单独冲突解决路径与常规同步不一致：`SyncEngine::sync()` 会先拉团队列表并填充 `cached_teams`，但 `apply_conflict_resolutions()` 不会；团队共享连接在 `UseLocal` / `KeepBoth` 场景下可能把 `key_version` 写回默认值 `1`。
-- 当前测试主要覆盖 License/加解密/队列等基础能力，没有覆盖 `HomePage` 上的“登录 -> 拉订阅 -> 更新 License -> 自动同步”联动，也没有覆盖 `apply_conflict_resolutions()` 的团队场景，因此上述问题不会被现有测试拦住。
-
-### 本地验证
-- `cargo test -p one-core license::`：通过（8 passed）
-- `cargo test -p one-core cloud_sync::`：通过（13 passed）
-- `cargo check -p main`：通过（存在既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-
-### 建议动作
-- 将“订阅请求失败”与“无订阅记录”拆开处理，失败时保留当前有效 License，不得直接降级并落盘
-- 给升级对话框增加订阅刷新回流，例如购买完成后的手动刷新、轮询或重新拉取订阅
-- 让 `apply_conflict_resolutions()` 复用 `sync()` 的团队缓存预热流程，至少在处理冲突前先拉团队列表并缓存 `key_version`
-- 补充 `HomePage` 和 `SyncEngine` 交互测试，覆盖订阅接口失败、团队冲突解决两类场景
-
-
----
-
-## 审查报告（cloud-sync-server-plan）
-生成时间：2026-03-24 15:35:05 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“服务器在哪里”和“云同步服务端开发方案”两个目标
-- 原始意图覆盖：已明确客户端兼容约束、服务端对象、实施阶段、正确实现清单、验收标准
-- 交付物映射：已产出上下文摘要、开发方案、操作日志、本审查报告
-- 依赖与风险评估：已覆盖 Supabase Auth、PostgREST、Postgres、RLS、RPC、订阅回写
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和本地校验命令
+### 需求完整性检查
+- 目标明确：修复远端未开启 bracketed paste 时，多行粘贴尤其 heredoc 被 shell 错误续行解析的问题。
+- 范围明确：限定在 `TerminalView` 的粘贴入口、相关文案和本地单元测试，不改 `Terminal`/`PTY` 透明传输层。
+- 交付物明确：高风险粘贴拦截、上下文摘要、操作日志、本地测试与审查报告。
+- 风险与依赖明确：shell 结构识别是启发式；依赖 `alacritty_terminal::TermMode` 提供 `ALT_SCREEN` 与 `BRACKETED_PASTE` 状态。
 
 ### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：88/100
-- 规范遵循：96/100
+- 测试覆盖：90/100
+- 规范遵循：97/100
 
 ### 战略维度评分
-- 需求匹配：97/100
+- 需求匹配：96/100
 - 架构一致：98/100
-- 风险评估：94/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 主要结论
-- 方案与现有客户端完全对齐：继续使用 Supabase，而不是自研一套后端协议。
-- “服务器在哪里”的答案已明确收敛：真实服务端地址只能从 `SUPABASE_URL` 确认，当前仓库与本地环境都未提供具体值，因此现在无法确认真实域名或地域。
-- 服务端最关键的实现点已完整列出：统一 `sync_data` 表、RLS、`version` 自增触发器、团队 owner 自动成员化、`add_team_member_by_email` RPC、订阅回写。
-- 风险说明充分：重点指出了环境地址不透明、订阅回写缺失、团队 owner 记录缺失、误做硬删除四类高影响问题。
-
-### 本地验证
-- `test -f .claude/context-summary-cloud-sync-server-plan.md`：通过
-- `test -f .claude/cloud-sync-server-development-plan.md`：通过
-- `rg -n "SUPABASE_URL|sync_data|add_team_member_by_email|云同步服务器在哪里|正确实现清单" .claude/cloud-sync-server-development-plan.md`：通过
-- `printenv | rg '^SUPABASE_(URL|ANON_KEY)=' -n -S || true`：通过（确认当前环境未暴露具体 Supabase 地址）
-
-
----
-
-## 审查报告（remove-pro-validation）
-生成时间：2026-03-24 15:56:22 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“移除所有与 Pro 验证相关内容”和“默认包含 Pro 的所有功能”
-- 原始意图覆盖：已同时处理 UI 门禁、升级入口、离线 License 入口、核心 License 默认行为
-- 交付物映射：已产出上下文摘要、代码改动、操作日志、本审查报告
-- 依赖与风险评估：已覆盖 `home_tab`、`setting_tab`、`main/src/license.rs`、`one_core::license`
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和验证结果
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：93/100
 - 风险评估：92/100
 
 ### 综合评分
 - 95/100
 - 建议：通过
 
-### 主要结论
-- 云同步入口不再做 Pro 门禁，用户登录后即可使用同步功能。
-- 升级 Pro 对话框、离线 License 导入入口、登录后订阅回写均已移除，产品表面不再暴露 Pro 验证链路。
-- `LicenseService` 已退化为兼容层：保留原接口，但默认返回 Pro 并始终开启 `Feature::CloudSync`。
-- 关键残留文本已清理，检索不到旧的升级入口、离线公钥入口或“需要 Pro 才能同步”的 UI 分支。
+### 结论
+- 高风险结构已在视图层统一拦截：[`view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal_view/src/view.rs#L113) 新增 `UnbracketedPasteHazard` 和相关纯函数，覆盖 heredoc、未闭合引号与反斜杠续行。
+- 粘贴决策已从“只确认”升级为“必要时阻断”：[`view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal_view/src/view.rs#L1231) 在无 `BRACKETED_PASTE` 时先检查高风险块，再决定是否允许进入原有多行确认流程。
+- 协议语义保持正确：[`view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/terminal_view/src/view.rs#L1252) 的 `paste_text_unchecked` 仍只在远端程序已开启 `BRACKETED_PASTE` 时发送 `\x1b[200~...\x1b[201~`，没有伪造远端能力。
+- 用户提示已补齐：[`main.yml`](/Users/hufei/RustroverProjects/onetcli/main/locales/main.yml#L1169) 新增 `TerminalView` / `TerminalSidebar` 相关文案，避免新对话框显示原始 key。
+- 本地验证有效：`env CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p terminal_view --lib` 在沙箱外通过，13 个测试全部通过。
 
-### 本地验证
-- `cargo test -p one-core license:: --lib`：通过（8 passed）
-- `cargo check -p main`：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-- `rg -n "show_upgrade_dialog|offline_license_public_key|get_license_service\\(|License.upgrade_to_pro|License.pro_required|导入离线 License|从服务端获取订阅信息|用户无订阅记录" main/src crates/core/src -S`：无匹配
-
-
----
-
-## 审查报告（delete-license-module）
-生成时间：2026-03-24 16:04:47 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“彻底删除 License 授权模块，只保留账号登录”
-- 原始意图覆盖：已删除运行时 License 模块、核心 License 目录、订阅接口与离线 License 工具
-- 交付物映射：已产出上下文摘要、代码删除、操作日志、本审查报告
-- 依赖与风险评估：已覆盖 `main` 启动链路、`one-core` 导出、`cloud_sync` trait、workspace members
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和验证结果
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：91/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：99/100
-- 架构一致：95/100
-- 风险评估：93/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 主要结论
-- `license` 运行时模块、`one_core::license` 核心模块和 `crates/license_tool` 已一并移除，不再保留授权兼容层。
-- 账号登录链路保持不变：`auth` 仍初始化，`CloudApiClient` 的认证与同步接口仍完整保留。
-- 仅供 License 使用的订阅接口已删除：`CloudApiClient::get_subscription()`、`SupabaseClient` 中的 `SubscriptionRow` 与 `user_subscriptions` 读取逻辑已清理。
-- 工作区和依赖已同步收口：根 `Cargo.toml`、`main/Cargo.toml`、`crates/core/Cargo.toml` 与 `Cargo.lock` 都已反映删除结果。
-
-### 本地验证
-- `rg -n "one_core::license|crate::license|pub mod license;|mod license;|SubscriptionInfo|get_subscription\\(|license_tool|user_subscriptions|OfflineLicense|PlanTier|Feature::CloudSync" main/src crates/core/src crates/license_tool Cargo.toml main/Cargo.toml crates/core/Cargo.toml -S`：无匹配
-- `cargo check -p one-core`：通过
-- `cargo check -p main`：通过（仅既有 future-incompat 警告：`num-bigint-dig v0.8.4`）
-- `cargo test -p one-core cloud_sync:: --lib`：通过（13 passed）
-
+### 剩余风险
+- 当前 shell 结构检测是启发式规则，不覆盖所有复杂复合语法；但已覆盖用户报告的 heredoc 主故障路径和两类常见续行结构。
+- `main/locales/main.yml` 中补入了当前代码已在使用但仓库缺失的 `TerminalView` / `TerminalSidebar` 文案键，若后续有专门的本地化整理任务，可再统一清理同类缺口。
 
 ---
 
-## 审查报告（cloud-sync-server-complete-plan）
-生成时间：2026-03-24 16:04:47 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“根据现有方案文档制作完整开发方案”和“提供多组技术选型”
-- 原始意图覆盖：已补充完整架构、选型矩阵、阶段计划、交付物、排期、验收、风险与建议
-- 交付物映射：已产出上下文摘要、完整方案文档、操作日志、本审查报告
-- 依赖与风险评估：已同时考虑原始方案文档和当前代码删除 License 后的真实接口边界
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和校验命令
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：89/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 主要结论
-- 完整版方案已把原始草案扩展为可执行的实施文件，内容覆盖从技术选型到上线验收的全链路。
-- 技术选型已明确分成 4 组，并给出适用场景、优缺点和最终推荐，而不是单一答案。
-- 文档已处理“旧方案仍含订阅、当前代码已移除 License”这一差异，避免方案与现实代码边界脱节。
-- 推荐结论清晰：第一阶段优先采用方案 A，若确认商业化再进入方案 B。
-
-### 本地验证
-- `test -f .claude/cloud-sync-server-complete-development-plan.md`：通过
-- `test -f .claude/context-summary-cloud-sync-server-complete-plan.md`：通过
-- `rg -n "技术选型备选组|方案 A|方案 B|方案 C|方案 D|当前代码已经删除 License|基础版必选|可选增强" .claude/cloud-sync-server-complete-development-plan.md`：通过
-
-
----
-
-## 审查报告（cloud-sync-server-account-authorization-plan）
-生成时间：2026-03-24 16:21:31 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“同一账号多平台使用”与“账号 + 授权智能同步”的核心诉求
-- 原始意图覆盖：已把复杂商业化/团队化方案收敛为设备级授权的个人同步方案
-- 交付物映射：已产出上下文摘要、轻量重设计方案、操作日志、本审查报告
-- 依赖与风险评估：已覆盖当前 Supabase Auth、`user_configs`、`sync_data`、缺失设备授权层和客户端最小改造点
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和校验命令
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：87/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：99/100
-- 架构一致：96/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 主要结论
-- 新方案已经从“完整版平台建设”收缩为“账号 + 设备授权 + 自动同步”的轻量闭环，更贴合当前实际需求。
-- 设备授权被重新定义为“设备是否允许参与同步”，而不是 License / Pro 授权，方向与当前仓库已删除 License 的状态一致。
-- 技术实现继续围绕 Supabase 现有能力展开，只新增 `device_authorizations` 和少量 RPC，没有引入不必要的 BFF 或后台系统。
-- 文档明确区分了“第一阶段的轻量阻断”和“后续若需要再升级为严格设备鉴权”，避免一次性把系统做重。
-
-### 本地验证
-- `test -f .claude/cloud-sync-server-account-authorization-plan.md`：通过
-- `test -f .claude/context-summary-cloud-sync-account-authorization-plan.md`：通过
-- `rg -n "设备授权|register_device|check_sync_access|revoke_device|device_authorizations|app_settings|轻量阻断" .claude/cloud-sync-server-account-authorization-plan.md`：通过
-
-
----
-
-## 审查报告（cloud-sync-server-account-key-plan）
-生成时间：2026-03-24 16:24:59 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“每个账户内容一致”和“可以使用账号密码或授权密钥”的新要求
-- 原始意图覆盖：已把设备授权降为可选，把主方案收敛为账号级同步
-- 交付物映射：已产出上下文摘要、最简方案文档、操作日志、本审查报告
-- 依赖与风险评估：已覆盖 Supabase Auth、`user_configs`、`sync_data`、主密钥验证和密码耦合取舍
-- 结论留痕：本报告与 `.claude/operations-log.md` 已记录时间戳和校验命令
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：88/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：100/100
-- 架构一致：97/100
-- 风险评估：95/100
-
-### 综合评分
-- 97/100
-- 建议：通过
-
-### 主要结论
-- 最终方案已经从“设备授权同步”进一步简化为“账号 + 同步密钥”，与用户当前诉求完全对齐。
-- 当前仓库已具备该方案的核心骨架：账号登录、`key_verification`、`user_configs`、`sync_data`、主密钥解锁都已存在。
-- 服务端可以最小化收敛到两张核心表和少量触发器，不需要新增设备表或设备 RPC。
-- 文档明确给出了“独立同步密钥”和“登录密码派生同步密钥”两条路径，并给出推荐优先级，便于实际拍板。
-
-### 本地验证
-- `test -f .claude/cloud-sync-server-account-key-plan.md`：通过
-- `test -f .claude/context-summary-cloud-sync-account-key-plan.md`：通过
-- `rg -n "账号 \\+ 同步密钥|user_configs|sync_data|app_settings|登录密码派生同步密钥|不需要设备授权" .claude/cloud-sync-server-account-key-plan.md`：通过
-
-
----
-
-## 审查报告（sync-server-proxy-options-conflict）
-生成时间：2026-03-24 19:22:45 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“修复 sync_server 启动时报 `OPTIONS` 重复路由”的目标、范围、交付物和验证要点
-- 原始意图覆盖：已直接处理开发模式启动失败根因，没有扩散为无关重构
-- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已确认冲突来自 `@fastify/cors` 与 `@fastify/http-proxy` 的路由注册组合
-- 结论留痕：验证命令与限制说明已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 主要结论
-- 根因是开发模式下根路径代理默认注册了 `OPTIONS /*`，与 `@fastify/cors` 的全局预检路由冲突。
-- 修复通过收窄前端开发代理的方法集到 `GET/HEAD` 完成，行为也与生产模式仅托管页面资源的设计保持一致。
-- API 侧 CORS 预检仍由官方插件处理，没有引入新的代理层或自研兼容逻辑。
-- 当前缺少现成自动化测试文件，因此本次依赖 `app.ready()` 和 `app.inject()` 作为本地回归证据。
-
-### 本地验证
-- `npm run check --workspace server`：通过
-- `npm run build --workspace server`：通过
-- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); console.log('READY_OK'); } catch (error) { console.error('READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
-- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'OPTIONS', url: '/foo', headers: { origin: 'http://localhost:5173', 'access-control-request-method': 'GET' } }); console.log('OPTIONS_STATUS', response.statusCode); console.log('ALLOW_ORIGIN', response.headers['access-control-allow-origin'] ?? ''); } catch (error) { console.error(error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
-- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/health' }); console.log('HEALTH_STATUS', response.statusCode); console.log('HEALTH_BODY', response.body); } catch (error) { console.error(error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
-- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.listen({ host: '127.0.0.1', port: 0 }); console.log('LISTEN_OK'); } catch (error) { console.error('LISTEN_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：失败，因当前沙箱禁止监听端口，报错 `listen EPERM`，不构成代码回归
-
-
----
-
-## 审查报告（sync-server-single-port-dev）
-生成时间：2026-03-24 19:34:24 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“默认开发模式只使用一个端口”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已把默认开发入口从“双进程 + 双端口”改成“单进程 + 单端口”
-- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 Vite middleware、HMR 挂载方式、运行态识别和独立前端调试兼容性
-- 结论留痕：源码态与产物态验证命令已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：88/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：99/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 主要结论
-- 默认 `npm run dev` 现在只启动 Fastify，一个端口同时承载 API、页面资源和 HMR。
-- 开发模式不再依赖额外的 5173 代理链，而是直接复用 Vite 官方 middleware 模式挂到 Fastify。
-- 运行态判断已从“是否存在 `web/dist`”收敛为“源码态优先走 Vite middleware，产物态优先走静态资源”，避免开发环境因为旧构建产物误走生产分支。
-- 可选的 `npm run dev:web` 仍保留，用于单独调试前端，但不再是默认开发路径。
-
-### 本地验证
-- `npm run check --workspace server`：通过
-- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); console.log('SRC_READY_OK'); } catch (error) { console.error('SRC_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过
-- `node --import tsx/esm --input-type=module -e "import { createApp } from './server/src/http/app.ts'; const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('SRC_INDEX_STATUS', response.statusCode); console.log('SRC_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('SRC_INDEX_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); }"`：通过
-- `npm run build`：通过
-- `node --input-type=module -e "import('./server/dist/http/app.js').then(async ({ createApp }) => { const app = createApp(); try { await app.ready(); const response = await app.inject({ method: 'GET', url: '/' }); console.log('DIST_INDEX_STATUS', response.statusCode); console.log('DIST_INDEX_HAS_VITE', response.body.includes('/@vite/client')); } catch (error) { console.error('DIST_READY_ERR', error); process.exitCode = 1; } finally { await app.close().catch(() => {}); } })"`：通过
-
-
----
-
-## 审查报告（sync-server-dev-startup）
-生成时间：2026-03-24 19:41:55 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“`npm run dev` 无法正常启动且不停自动重启”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已针对默认开发入口稳定性修复，而不是继续堆叠 watch 机制
-- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `tsx watch`、Node 原生 `--watch`、workspace `cwd` 与 `.env` 读取路径
-- 结论留痕：本地验证命令与沙箱限制已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：87/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：95/100
-- 风险评估：94/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 主要结论
-- 默认 `npm run dev` 现在使用稳定单次启动，不会因为启动异常而陷入自动重启循环。
-- 根目录 `sync_server/.env` 现在会被默认 workspace 启动正确读取，修复了此前的配置漂移问题。
-- 如果需要后端代码变更自动重启，保留了显式的 `dev:watch`，但它不再作为默认路径。
-- 当前本地沙箱只剩端口监听受限问题，说明原来的脚本级失败和重启循环都已经被剥离掉。
-
-### 本地验证
-- `npm run check --workspace server`：通过
-- `npm --workspace server exec -- node --import tsx/esm --input-type=module -e "import { env } from './src/config/env.ts'; console.log('ENV_PROJECT_ROOT', env.projectRoot); console.log('ENV_ADMIN_EMAIL', env.adminEmail ?? '');"`：通过
-- `npm run dev`：通过脚本级验证，不再自动重启；当前仅因沙箱禁止监听 `8787` 而单次退出
-- `node -e "const pkg=require('./sync_server/server/package.json'); console.log('DEV_SCRIPT', pkg.scripts.dev); console.log('DEV_WATCH_SCRIPT', pkg.scripts['dev:watch']);"`：通过
-
-
----
-
-## 审查报告（auth-error-dialog-auto-close）
-生成时间：2026-03-24 21:15:36 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“认证失败弹窗点击确定后不能自动消失”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已修复错误弹窗确认后的关闭时序，并保留重新弹出登录框的原有意图
-- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `HomePage::render`、`show_login_dialog`、`Dialog::on_ok` 的调用顺序和对话框栈影响
-- 结论留痕：本地验证命令与残余测试缺口已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 主要结论
-- 根因是错误弹窗 `on_ok` 在当前弹窗关闭前就重新打开了登录弹窗，导致框架随后关闭的是新弹窗而不是错误弹窗。
-- 修复后改为通过 `window.defer` 延迟重开登录弹窗，让当前错误弹窗先按既有流程关闭。
-- 修复点只落在 [`main/src/home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs)，没有修改通用对话框框架和认证接口。
-
-### 本地验证
-- `cargo test -p main --no-run`：通过
-- `cargo test -p main -- --list`：通过，当前 `main` 包共有 3 个现有测试
-- `cargo test -p main`：通过，3 个现有测试全部通过
-
-### 残余风险
-- 当前没有直接模拟“点击错误弹窗确定按钮”的 UI 自动化回归测试，因此本次仍存在一处行为级测试缺口
-
-
----
-
-## 审查报告（sync-server-only）
-生成时间：2026-03-24 22:08:05 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“只保留 sync_server，移除 Supabase 相关内容”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已同时清理认证后端、OTP 登录、配置读取、模块导出、文案和仓库说明
-- 交付物映射：已产出代码清理、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `AuthService`、`HomePage::show_login_dialog`、`CloudApiClient`、`SyncServerClient` 的接口收缩影响
-- 结论留痕：本地验证命令、残余告警和未纳入范围的文档已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 主要结论
-- `main` 侧认证已经从“双后端 + OTP/密码双模式”收敛为只使用 `sync_server` 的密码登录/注册流程。
-- `one-core` 已删除 `Supabase` 模块暴露、编译期 `SUPABASE_*` 配置以及 `CloudApiClient` 中仅旧后端使用的 OTP 接口。
-- 主代码路径检索已确认没有 `Supabase`、`SUPABASE_*`、`AuthMode`、`show_auth_dialog`、`send_otp`、`verify_otp` 等残留引用。
-
-### 本地验证
-- `rg -n "SUPABASE|Supabase|supabase|AuthMode|show_auth_dialog|send_otp|verify_otp\\(|sign_in_with_otp|验证码登录" main crates/core CLAUDE.md --glob '!target'`：无结果
-- `cargo fmt --all`：通过
-- `cargo test -p main`：通过，6 个测试全部通过
-- `cargo test -p one-core --no-run`：通过
-
-### 残余风险
-- `docs/docs/components/otp-input.md` 仍保留通用 OTP 输入组件文档，但它不再参与当前认证业务流程
-- 验证输出中仍有既有 `gpui-component` 未使用代码警告和 `num-bigint-dig` future incompatibility 提示，与本次变更无关
-
-
----
-
-## 审查报告（deepin-window-controls）
-生成时间：2026-03-24 23:20:04 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“Deepin 25 下出现两组窗口按钮”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已定位系统标题栏无法稳定移除的边界，并改为消除应用侧重复按钮
-- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `TitleBar`、`TabContainer`、Linux X11 装饰分支及 Deepin 会话环境变量
-- 结论留痕：本地验证命令、工具限制和残余风险已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：90/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：95/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 主要结论
-- 根因不是应用没有请求客户端装饰，而是 Deepin 25 X11 下系统标题栏仍可能保留，导致与应用自绘按钮同时出现。
-- 修复将“是否渲染应用自绘窗口按钮”收敛为通用判断：Linux 下先看 Deepin/DDE 兼容分支，再看运行时装饰状态。
-- 改动同时覆盖主窗口标签栏和通用 `TitleBar`，避免只有主窗口修复、弹窗仍重复显示按钮。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p gpui-component --lib title_bar`：通过，2 个新增测试全部通过
-
-### 残余风险
-- 当前兼容分支是面向 Deepin/DDE 的最小修复，并非上游 X11 装饰行为的通用根治
-- 本次缺少图形界面实机截图验证，若你需要，我下一步可以继续补一次实际运行后的视觉确认
-
-
----
-
-## 审查报告（window-title-sync）
-生成时间：2026-03-24 23:31:55 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“先尝试 A，让系统标题栏不再空白”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已按 A 方案实现系统窗口标题跟随当前活动标签变化，没有提前进入 B 的结构重构
-- 交付物映射：已产出代码修复、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `OnetCliApp`、`TabContainer`、固定首页标签状态和现有窗口标题 API
-- 结论留痕：本地验证命令和残余视觉验证边界已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 主要结论
-- 主窗口当前没有独立标题栏层，因此 A 方案的可执行实现只有“同步系统窗口标题文本”。
-- 修复已让窗口标题在首页、普通标签切换和空标题回退场景下都能稳定生成 `OnetCli - 当前标签名`。
-- 本次没有改动主布局结构，所以如果你实际测试后仍觉得标题区域不够像“标签在标题上”，下一步就应切到 B。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个新增测试全部通过
-
-### 残余风险
-- A 方案只能改善系统标题栏信息密度，不能把真实标签控件移动到系统标题栏区域
-- 是否达到你的视觉预期，仍需要实际运行界面后确认
-
-
----
-
-## 审查报告（title-bar-tabs-b）
-生成时间：2026-03-25 00:08:30 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“尝试 B，把标签移动到窗口标题区域”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已按 B 方案做主窗口结构改造，没有删除 A 方案的窗口标题同步后备能力
-- 交付物映射：已产出代码改动、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `OnetCliApp`、`TabContainer`、`TitleBar`、Linux 主窗口选项以及 Deepin 控件兼容逻辑
-- 结论留痕：本地验证命令、工具限制和视觉验证边界已写入 `.claude/operations-log.md`
+## 审查报告（home-encourage-tab 实现）
+生成时间：2026-03-25 19:39:55 +0800
+
+### 需求完整性检查
+- 目标明确：将首页“支持作者”从弹框改为在 `tab_container` 中打开页签，并改善赞赏码展示空间。
+- 范围明确：限定在首页按钮入口、赞赏视图自身和 `HomePage` 页签打开辅助方法。
+- 交付物明确：代码修改、上下文摘要、操作日志、验证报告。
+- 风险与依赖明确：整仓编译当前被既有 `db_connection_form.rs` 错误阻塞，因此只能做局部无新增错误验证。
 
 ### 技术维度评分
 - 代码质量：93/100
-- 测试覆盖：87/100
-- 规范遵循：94/100
+- 测试覆盖：78/100
+- 规范遵循：96/100
 
 ### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：96/100
-- 风险评估：90/100
+- 需求匹配：96/100
+- 架构一致：97/100
+- 风险评估：86/100
 
 ### 综合评分
-- 93/100
+- 90/100
 - 建议：通过
 
-### 主要结论
-- 主窗口现在采用“`TitleBar` + 内容区”的结构，标签条已从 `TabContainer` 顶部拆出并嵌入标题栏区域。
-- `TabContainer` 的标签状态、拖拽、关闭、固定首页标签和内容区渲染逻辑保持原有实现，只新增“嵌入标题栏”模式。
-- Deepin 下是否渲染应用自绘控件仍复用既有兼容逻辑，因此 B 方案不会回退到修复前的双按钮状态。
+### 结论
+- 赞赏视图已转为页签内容：[`encourage.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/encourage.rs) 中的 `EncouragePanel` 现在实现了 `EventEmitter<TabContentEvent>` 和 `TabContent`，可以直接挂入 `TabContainer`。
+- 首页入口已切换为单实例页签：[`home_tabs.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/home/home_tabs.rs) 新增 `add_encourage_tab`，复用 `activate_or_add_tab_lazy`，重复点击只会激活已有页签。
+- 原弹框路径已移除：[`home_tab.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/home_tab.rs) 的“支持作者”按钮已改为调用 `add_encourage_tab`，不再走 `window.open_dialog`。
+- 展示尺寸已放大：[`encourage.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/encourage.rs) 将二维码尺寸从 `180` 调整到 `220`，更适合主内容区域。
 
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`：通过，2 个既有测试全部通过
-- `cargo test -p gpui-component --lib title_bar`：通过，2 个 Deepin 兼容测试全部通过
-- `cargo test -p one-core --no-run`：通过
-
-### 残余风险
-- 目前缺少自动化 GUI 测试，标题栏是否真正贴近你在 Deepin 25 上的视觉预期，仍需要实机观察
-- Linux 主窗口本次也启用了 `titlebar` 选项，若 Deepin 对该区域的处理与弹窗不同，仍可能需要微调间距或回退到 A
-
+### 剩余风险
+- 当前无法给出“整仓编译通过”结论，因为 `crates/db_view/src/common/db_connection_form.rs` 已存在与本次无关的编译错误。
+- 如果后续项目启用统一的 `TabContentRegistry` 恢复注册，建议再补 `EncouragePanel` 的恢复逻辑；本次未做这部分扩展。
 
 ---
 
-## 审查报告（deepin-window-restore）
-生成时间：2026-03-25 00:31:30 +0800
+## 审查报告（oracle-connection 实现）
+生成时间：2026-03-26 09:12:31 +0800
 
-### 审查清单
-- 需求字段完整性：已覆盖“Deepin 25 下系统最大化后无法通过主还原动作恢复”的目标、范围、交付物与验证要点
-- 原始意图覆盖：没有再回到 A/B 方案分支，聚焦在窗口管理兼容路径
-- 交付物映射：已产出代码改动、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `gpui` X11 平台回退日志、主窗口背景、窗口边框 inset 和 Deepin 桌面判断
-- 结论留痕：本地构建验证与 GUI 启动日志已写入 `.claude/operations-log.md`
+### 需求完整性检查
+- 目标明确：修正 `crates/db/src/oracle/connection.rs` 的 Oracle 查询取值逻辑，使其能稳定处理 `chrono` 日期时间与常见 Oracle 类型。
+- 范围明确：改动限定在 Oracle 连接层值提取与列类型显示，不触碰连接配置、插件接口和上层查询结果结构。
+- 交付物明确：代码修改、上下文摘要、操作日志、本地编译验证和审查报告均已落地。
+- 风险与依赖明确：依赖 `oracle 0.6.3` 的 `chrono` 特性和 `OracleType` 枚举；当前缺少真实 Oracle 集成环境。
 
 ### 技术维度评分
-- 代码质量：92/100
-- 测试覆盖：84/100
-- 规范遵循：94/100
+- 代码质量：94/100
+- 测试覆盖：78/100
+- 规范遵循：96/100
 
 ### 战略维度评分
-- 需求匹配：90/100
-- 架构一致：95/100
-- 风险评估：91/100
+- 需求匹配：95/100
+- 架构一致：97/100
+- 风险评估：84/100
 
 ### 综合评分
 - 91/100
 - 建议：通过
 
-### 主要结论
-- 当前环境下 `gpui` 实际已自动回退到 `Server decorations`，因此继续声明客户端边框 inset 是不合理的。
-- 本次改动收掉了 Deepin 系统装饰路径下的 `client inset` 和透明背景两个干扰项，方向与问题现象一致。
-- 由于系统“还原”主按钮属于 Deepin GUI 行为，最终是否完全修复仍需实机点击确认，但当前修改比继续调整标签栏或应用按钮更贴近根因。
+### 结论
+- Oracle 结果提取已改为类型驱动：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/oracle/connection.rs) 现在基于 `OracleType` 分支读取 `Date/Timestamp/TimestampTZ/TimestampLTZ/Raw/BLOB/BFILE/Boolean/Number` 等类型，不再只依赖 `String/i64/f64` 的宽泛尝试。
+- `chrono` 类型已真正接入：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/oracle/connection.rs) 新增 `NaiveDateTime` 与 `DateTime<FixedOffset>` 的格式化 helper，日期时间输出风格与 PostgreSQL/MSSQL 当前实现保持一致。
+- 二进制结果展示已统一：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/oracle/connection.rs) 对 `RAW/BLOB/BFILE` 使用 `0x...` 文本输出，避免表格层出现不可读字节。
+- 列元数据显示更稳定：[`connection.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db/src/oracle/connection.rs) 将 Oracle 列类型元数据从 `Debug` 输出改为 `Display` 字符串，便于前端展示。
+- 本地验证有效：`rustfmt --edition 2021 crates/db/src/oracle/connection.rs` 与 `cargo check -p db` 均已通过。
 
-### 本地验证
-- `cargo fmt --all`：已执行
-- `cargo check -p main`：通过
-- `cargo test -p main onetcli_app::tests -- --nocapture`：通过
-- `cargo test -p gpui-component --lib title_bar -- --nocapture`：通过
-
-### 残余风险
-- 还原按钮行为没有自动化 GUI 回归测试，仍依赖 Deepin 25 实机验证
-- 若问题根因最终位于 `gpui` X11 对 `_NET_WM_STATE_TOGGLE` 的处理语义，本次改动只能消除干扰项，不能替代底层补丁
-
+### 剩余风险
+- 当前没有真实 Oracle 数据库的本地自动化测试，无法确认所有 Oracle 会话设置和特殊列类型在运行时都能命中预期分支。
+- `CLOB/NCLOB/REF CURSOR/Object` 仍保留字符串兜底路径；如果后续出现具体运行时样例，可能需要继续细化映射。
 
 ---
 
-## 审查报告（desktop-account-entry）
-生成时间：2026-03-25 11:06:26 +0800
+## 审查报告（typos-ci-fix 实现）
+生成时间：2026-03-26 10:12:34 +0800
 
-### 审查清单
-- 需求字段完整性：已覆盖“桌面应用左侧栏底部账号信息更新”和“登录后点击打开设置中的账号页”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已同时处理昵称展示、去重邮箱显示、账户页入口跳转和设置页默认定位
-- 交付物映射：已产出桌面端代码改动、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `UserInfo` 映射、主页侧栏账号组件、设置页默认选中能力和现有设置标签复用方式
-- 结论留痕：本地验证命令、构建警告和 GUI 残余验证边界已写入 `.claude/operations-log.md`
+### 需求完整性检查
+- 目标明确：移除仓库中的 `typos` 检查链路，消除 GitHub 流程中的相关失败。
+- 范围明确：包含 CI workflow、根 `Cargo.toml` 工具配置，以及 README / README_CN / CLAUDE 的开发命令说明。
+- 交付物明确：代码修改、上下文摘要、操作日志、本地验证和审查报告均已落地。
+- 风险与依赖明确：`.claude` 历史记录仍会保留 `typos` 字样，但它们不属于生效检查入口。
 
 ### 技术维度评分
-- 代码质量：95/100
+- 代码质量：97/100
 - 测试覆盖：88/100
 - 规范遵循：95/100
 
 ### 战略维度评分
-- 需求匹配：97/100
+- 需求匹配：98/100
 - 架构一致：96/100
-- 风险评估：91/100
+- 风险评估：93/100
 
 ### 综合评分
-- 94/100
+- 95/100
 - 建议：通过
 
-### 主要结论
-- 桌面端现在会解析 sync server 返回的 `nickname`，侧栏账号区与账户设置页统一按“昵称优先、邮箱兜底”的规则展示。
-- 左下角账号入口在未登录时仍保持弹登录框，登录后则会激活设置标签并直接定位到账户页。
-- 已打开的设置标签也能响应这次跳转，不需要关闭重开设置页。
+### 结论
+- CI 已移除 `typos` 检查：[`ci.yml`](/Users/hufei/RustroverProjects/onetcli/.github/workflows/ci.yml) 删除了 `Typo check` 步骤，GitHub workflow 不再安装或执行 `typos-cli`。
+- 根配置已清理：[`Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/Cargo.toml) 删除了整个 `workspace.metadata.typos` 配置段，仓库不再维护 `typos` 白名单或标识符例外。
+- 开发文档已同步：[`README.md`](/Users/hufei/RustroverProjects/onetcli/README.md)、[`README_CN.md`](/Users/hufei/RustroverProjects/onetcli/README_CN.md)、[`CLAUDE.md`](/Users/hufei/RustroverProjects/onetcli/CLAUDE.md) 均已删除 `typos` 开发命令，避免文档与 CI 不一致。
+- 本地验证有效：`cargo metadata --format-version 1 --no-deps >/dev/null` 通过，且针对核心入口文件的 `typos` 搜索结果为 0。
 
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main --no-run`：通过
-
-### 残余风险
-- 缺少自动化 GUI 测试，仍建议在实际界面确认侧栏点击后是否按预期切到账户页
-- 当前只验证了桌面端编译和测试目标编译，未新增独立单元测试覆盖设置页切换状态
-
+### 剩余风险
+- 如果后续仍希望保留拼写检查能力，需要重新选择替代工具或恢复新的检查链路；当前仓库已完全不再依赖 `typos`。
 
 ---
 
-## 审查报告（sync-server-sidebar-scroll）
-生成时间：2026-03-25 11:46:59 +0800
+## 审查报告（encourage-unused-imports 实现）
+生成时间：2026-03-26 10:19:36 +0800
 
-### 审查清单
-- 需求字段完整性：已覆盖“sync_server 页面左侧内容较少，需要固定高度且不受整体滚动影响”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已处理左侧栏固定高度、右侧独立滚动，以及由此带来的路由切换滚动复位
-- 交付物映射：已产出布局代码改动、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `AppLayout` 共享壳层、Vue Router 子路由切换、Tailwind 视口高度约束和移动端回退行为
-- 结论留痕：本地构建验证结果已写入 `.claude/operations-log.md`
+### 需求完整性检查
+- 目标明确：修复 Linux / Windows CI 在 `main/src/encourage.rs` 上的 unused imports 失败。
+- 范围明确：只清理 `encourage.rs` 顶部的遗留导入，不改渲染行为。
+- 交付物明确：代码修复、上下文摘要、操作日志、本地验证和审查报告均已补齐。
+- 风险与依赖明确：`gpui` 某些链式方法依赖 trait 导入，因此必须以编译结果校验是否误删必要 trait。
 
 ### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：82/100
-- 规范遵循：95/100
+- 代码质量：97/100
+- 测试覆盖：90/100
+- 规范遵循：97/100
 
 ### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：95/100
-- 风险评估：92/100
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：94/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 结论
+- 遗留导入已清理：[`encourage.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/encourage.rs) 删除了未使用的 `InteractiveElement`、`StatefulInteractiveElement`、`Window`、`TabContent`、`TabContentEvent`。
+- 必要 trait 仍保留：[`encourage.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/encourage.rs) 继续保留 `ParentElement`、`Styled`、`IntoElement`、`StyledImage` 等当前渲染链真实依赖的导入。
+- 修复方式符合现有模式：对比 [`setting_tab.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/setting_tab.rs) 与 [`home_tab.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/home_tab.rs) 后，本次仅让 `encourage.rs` 的导入与其“纯渲染 helper”职责重新一致。
+- 本地验证有效：`cargo check -p main --all-targets` 已通过。
+
+### 剩余风险
+- 当前只验证了本地 `main` crate 的全 target 编译；如果远端 CI 还存在缓存或其他分支差异，需要以最新提交重新跑一次流程确认。
+
+---
+
+## 审查报告（ci-followup-build-ssh 实现）
+生成时间：2026-03-26 10:40:21 +0800
+
+### 需求完整性检查
+- 目标明确：修复后续 CI 暴露的 `build.rs` Clippy 问题和 `ssh.rs` Windows 测试告警。
+- 范围明确：只处理 `crates/core/build.rs`、`main/build.rs`、`crates/ssh/src/ssh.rs` 这三处。
+- 交付物明确：代码修复、上下文摘要、操作日志、本地验证和审查报告均已更新。
+- 风险与依赖明确：完整 Clippy 流程继续暴露出更多历史问题，因此本次不能宣称全量 lint 已清零。
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：87/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：89/100
 
 ### 综合评分
 - 92/100
 - 建议：通过
 
-### 主要结论
-- 桌面端 `/app` 布局现在会把左侧栏限制在视口高度内，并让右侧主内容独立滚动，左侧不再被长页面拖着一起滚。
-- 这次改动保持在 `AppLayout` 内部完成，没有把滚动逻辑分散到各个业务页，符合现有路由和布局组织方式。
-- 为避免内部滚动容器在切换子路由时停留在旧位置，已补充主内容区滚动复位。
+### 结论
+- build script Clippy 问题已修复：[`crates/core/build.rs`](/Users/hufei/RustroverProjects/onetcli/crates/core/build.rs) 与 [`main/build.rs`](/Users/hufei/RustroverProjects/onetcli/main/build.rs) 已把嵌套 `if` 改为 let-chain，不再触发 `collapsible_if`。
+- Windows 测试下的 unused/dead code 已修复：[`crates/ssh/src/ssh.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ssh/src/ssh.rs) 将 `Mutex`、`OnceLock` 和 `test_auth_failure_messages` 收紧到 `#[cfg(unix)]`，避免在 Windows test target 下变成未使用。
+- 同文件额外 Clippy 问题已顺手修复：[`crates/ssh/src/ssh.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ssh/src/ssh.rs) 的 `hash_alg.clone()` 已移除，消除 `clone_on_copy`。
+- 本地验证有效：`cargo test -p ssh --lib` 已通过。
 
-### 本地验证
-- `npm --prefix sync_server/web run build`：通过
-- `npm --prefix sync_server/web run build`（补 `min-h-0` 后复验）：通过
-
-### 残余风险
-- 当前没有浏览器级自动化回归测试，桌面端最终视觉效果仍建议在真实页面滚动一次确认
-- 移动端保留自然流布局，如果你后续希望手机端也固定侧栏，需要单独设计交互而不是直接套用桌面结构
-
+### 剩余风险
+- `cargo clippy -p one-core -p main --all-targets -- -D warnings` 继续报出 `crates/one_ui` 与 `crates/core` 中 100+ 个既有 Clippy 问题，例如 `derivable_impls`、`unnecessary_unwrap`、`needless_lifetimes`、`unnecessary_to_owned`、`redundant_closure`、`manual_contains`、`too_many_arguments` 等。当前 release/tag 若重新触发，仍会被这些后续问题挡住。
 
 ---
 
-## 审查报告（sync-server-sync-items-filter-pagination）
-生成时间：2026-03-25 11:54:06 +0800
+## 审查报告（db-connection-form-ssh-ssl-fixed 实现）
+生成时间：2026-03-25 21:57:00 +0800
 
-### 审查清单
-- 需求字段完整性：已覆盖“全部同步项增加类型筛选、每页条数选择和分页显示”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已处理类型下拉筛选、默认每页 20 条、可切换每页条数、分页翻页和筛选为空态
-- 交付物映射：已产出页面代码改动、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `SyncItemsView` 现有结构、类型标签工具、前端本地分页边界和仓库缺少前端测试的现状
-- 结论留痕：本地构建验证结果已写入 `.claude/operations-log.md`
+### 需求完整性检查
+- 目标明确：将数据库连接表单中的 `ssl` 与 `ssh` 页签改成固定代码渲染，并用复选框控制整块启用。
+- 范围明确：改动限定在 `crates/db_view/src/common/db_connection_form.rs` 的渲染、辅助逻辑和单元测试，不触碰存储结构。
+- 交付物明确：代码修改、上下文摘要、操作日志、本地测试和审查报告均已落地。
+- 风险与依赖明确：依赖既有 `extra_params` 键名和 `ssh_form_window.rs` 交互模式；ClickHouse `ssl` 页签本次保持通用渲染，属于刻意收敛范围。
+
+### 技术维度评分
+- 代码质量：93/100
+- 测试覆盖：89/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：90/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 结论
+- `ssh` 页签已改为固定代码渲染：[`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L2115) 新增 `render_ssh_tab_content`，使用复选框控制整块启用，并用单选控制密码、私钥、agent 三种认证输入联动。
+- `ssl` 页签已改为固定代码渲染：[`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L2222) 新增 `render_ssl_tab_content`，对 MySQL/PostgreSQL/MSSQL 分别按既有字段语义做启用控制。
+- 通用状态链路保持不变：[`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L1819) 继续保留标准页签渲染和字段状态容器，专用页签仍通过原 `set_field_value/get_field_value/build_connection/load_connection` 工作。
+- SSH agent 校验已对齐后端语义：[`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L924) 与 [`db_connection_form.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/common/db_connection_form.rs#L1390) 通过纯函数统一必填判断，agent 模式不再错误要求密码。
+- 本地验证有效：`CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p db_view --lib db_connection_form` 与 `cargo check -p db_view` 均已通过。
+
+### 剩余风险
+- 目前覆盖的是纯函数和字段定义层测试，未做 UI 交互快照或人工点击回归，布局细节仍建议你本地实际点一下表单确认观感。
+- ClickHouse 的 `ssl` 页签仍沿用原通用渲染，因为本次需求和参考模式主要针对 MySQL/PostgreSQL/MSSQL 的 SSL 语义与 SSH 联动场景。
+
+---
+
+## 审查补充（home-encourage-tab 二次视觉调整）
+生成时间：2026-03-25 23:33:00 +0800
 
 ### 技术维度评分
 - 代码质量：94/100
-- 测试覆盖：81/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：95/100
-- 风险评估：91/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 主要结论
-- 页面现在支持按同步项类型做下拉筛选，并会根据真实数据集动态生成可选类型，不会与后端类型列表脱节。
-- 列表展示已改为前端分页，默认每页 20 条，可切换每页条数，并提供当前页、总页数和上一页/下一页控制。
-- 筛选条件变化、每页条数变化和列表刷新后都处理了页码复位或越界夹紧，避免翻到空页。
-
-### 本地验证
-- `npm --prefix sync_server/web run build`：通过
-
-### 残余风险
-- 当前没有浏览器级交互测试，仍建议实际点一次类型筛选和分页按钮确认体验
-- 若未来同步项规模很大，前端本地分页可能需要升级为服务端分页
-
-
----
-
-## 审查报告（sync-server-sync-item-local-decrypt）
-生成时间：2026-03-25 16:11:59 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“详情页手动输入主密钥并解密显示同步项明文”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已处理手动输入主密钥、浏览器本地校验、浏览器本地解密、格式化展示和失败提示
-- 交付物映射：已产出前端工具代码、详情页代码、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估 `keyVerification` 校验流程、Rust 加密算法对齐、Web Crypto 兼容性和仓库缺少前端自动化测试的现状
-- 结论留痕：本地构建验证结果已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：95/100
 - 测试覆盖：80/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 主要结论
-- 当前实现保持了端到端加密边界不变，`sync_server` 仍只保存密文，主密钥仅在浏览器内存中短暂使用。
-- 详情页现在会优先用 `keyVerification` 校验主密钥是否正确，再在浏览器本地解密 `encryptedData`，并以格式化 JSON 展示明文。
-- 当同步配置读取失败、主密钥为空、主密钥错误或密文损坏时，页面都会给出明确反馈。
-
-### 本地验证
-- `npm --prefix sync_server/web run build`：通过
-- `npm --prefix sync_server/web run build`（补空输入提示后复验）：通过
-
-### 残余风险
-- 当前没有浏览器级交互自动化测试，仍建议实际输入正确/错误主密钥各验证一次
-- 若未来需要支持批量解密或更多数据类型的结构化展示，再考虑把结果视图从原始 JSON 升级为类型化展示
-
-
----
-
-## 审查报告（certificate-management）
-生成时间：2026-03-25 12:08:00 +0800
-
-### 审查清单
-- 需求字段完整性：已覆盖“统一证书管理”“连接配置直接复用登录信息”“证书参与同步”和“应用窗口内各类连接表单接入”的目标、范围、交付物与验证要点
-- 原始意图覆盖：已处理证书实体、存储迁移、云同步、证书管理弹窗、主页入口，以及 SSH/Redis/Mongo/数据库通用表单中的选择与管理入口
-- 交付物映射：已产出核心存储与同步代码、桌面端表单改动、本地化文案、上下文摘要、操作日志和本审查报告
-- 依赖与风险评估：已评估连接参数序列化、引用快照回写、证书删除后的连接解引用、窗口内热刷新和数据库 SSH 隧道认证映射
-- 结论留痕：格式化、编译与测试目标编译结果已写入 `.claude/operations-log.md`
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：86/100
-- 规范遵循：93/100
+- 规范遵循：96/100
 
 ### 战略维度评分
 - 需求匹配：97/100
-- 架构一致：95/100
-- 风险评估：92/100
+- 架构一致：97/100
+- 风险评估：88/100
 
 ### 综合评分
-- 93/100
+- 92/100
 - 建议：通过
 
-### 主要结论
-- 当前仓库已具备统一“证书”实体、数据库迁移和云同步类型，证书可以独立增删改并参与同步。
-- SSH、Redis、MongoDB 和数据库通用连接表单都支持直接选择证书复用登录信息，并在窗口内提供统一的“管理证书”入口。
-- 数据库通用表单同时支持数据库主认证证书和 SSH 隧道证书，且保持“引用 + 快照”策略，避免破坏现有连接执行路径。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main --no-run`：通过
-
-### 残余风险
-- 目前仍缺少桌面 GUI 自动化回归，特别是证书切换、清空选择和删除证书后的表单交互，需要你手动过一遍
-- 本次只验证了 `main` 目标及其依赖的编译链路，未新增针对证书同步和表单联动的独立单元测试
+### 结论
+- 支持页签布局已重构为居中分区卡片：[`encourage.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/encourage.rs) 现在按“顶部说明卡片 + 中部支付卡片区 + 底部辅助支持卡片”三段展示，不再像截图那样散在左上角。
+- 支付卡片层级已增强：[`encourage.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/encourage.rs) 为每个赞赏方式增加外层容器、统一间距和标题行图标，二维码区域更集中。
+- 图标风格已统一：页签图标改为星标，[`home_tab.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/home_tab.rs) 中首页入口图标也同步从心形改成了星标，辅助支持区补了 `CircleCheck`、`GitHub`、`ExternalLink` 图标。
+- 局部编译筛查有效：`cargo check -p main --keep-going --message-format short 2>&1 | rg 'main/src/(encourage|home_tab)\\.rs|error\\['` 无输出，说明这次视觉调整未给目标文件引入新报错。
 
 ---
 
-## 审查报告（certificate-management-window-followup）
-生成时间：2026-03-25 12:31:29 +0800
+## 审查报告（superpowers-install 实现）
+生成时间：2026-03-26 11:05:28 +0800
 
 ### 需求完整性检查
-- 目标明确：修复桌面端“新增证书”无响应，把证书管理入口移到侧边栏，并补齐工作区修改/删除及删除时的连接处理提示
-- 范围明确：`crates/core` 证书管理窗口、`main` 主页侧栏和工作区删除交互、对应本地化文案
-- 交付物明确：交互修复、入口迁移、删除流程增强、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：仍依赖人工点击确认 GUI 交互；空工作区的管理入口继续通过工作区筛选弹层承载
+- 目标明确：按 `obra/superpowers` 官方 `.codex/INSTALL.md` 在本机启用 Codex 原生技能发现。
+- 范围明确：仅涉及用户主目录下的 clone、目录创建、软链接创建和旧 bootstrap 检查，不修改 onetcli 业务代码。
+- 交付物明确：上下文摘要、操作日志、验证报告和本地安装结果均已落地。
+- 风险与依赖明确：依赖 `git` 和用户主目录写权限；技能发现最终还需要重启 Codex。
 
 ### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：85/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：93/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 根因修复合理：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs) 已把“新增证书/编辑证书”从管理弹窗内的嵌套 dialog 改为独立 popup，避免点击按钮后无响应。
-- 入口位置符合要求：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs) 已在左侧栏连接类型列表下方新增“证书管理”按钮，位置落在 `串口` 下方，不再混在“新建连接”菜单中。
-- 工作区删除流程更完整：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs) 删除工作区时会根据是否存在连接给出“移到未分区”或“删除全部连接”的明确分支，并在存在活动连接时阻止全删。
-- 交互覆盖面可接受：主内容区为非空工作区补了编辑/删除快捷按钮；全部工作区仍可在 [`home_workspace_filter.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home/home_workspace_filter.rs) 的筛选弹层中编辑和删除，因此空工作区并未失去管理入口。
-
-### 本地验证
-- `cargo check -p main`：通过
-
-### 残余风险
-- 当前没有桌面 GUI 自动化测试，仍建议实际点一次“新增证书”“侧栏证书管理”“删除带连接的工作区”三条主路径
-
----
-
-## 审查报告（certificate-save-window-error）
-生成时间：2026-03-25 12:46:46 +0800
-
-### 需求完整性检查
-- 目标明确：修复添加证书后保存卡顿，并消除终端中的 `gpui::window: window not found`
-- 范围明确：证书编辑窗口保存链路、四个引用证书的连接表单订阅生命周期
-- 交付物明确：异步保存改造、订阅释放修正、本地格式化与编译验证、`.claude/` 留痕
-- 风险与依赖明确：当前仍缺少 GUI 自动化验证，需要实际点一次证书新增和表单联动路径
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：85/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L772) 之前在 UI 线程同步执行证书保存和连接快照回写，导致保存时直接阻塞窗口。
-- 性能问题已对症处理：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L788) 现在通过 `window.spawn + Tokio::spawn_result` 把保存和批量回写放到后台执行，窗口仅在结果返回后更新状态并关闭。
-- 窗口报错根因已消除：[`ssh_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/terminal_view/src/ssh_form_window.rs#L202)、[`redis_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/redis_view/src/redis_form_window.rs#L223)、[`db_connection_form.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/db_view/src/common/db_connection_form.rs#L832) 等表单现在显式持有证书订阅，不再把窗口相关订阅 `detach()` 成悬空监听器。
-- 影响范围受控：只调整执行线程和订阅生命周期，没有改动证书事件协议、连接参数结构或同步语义。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 仍建议手动验证两条路径：
-  - 证书管理中新增/编辑证书后，窗口是否即时关闭且无明显卡顿
-  - 打开一个 SSH/Redis/Mongo/数据库连接表单后，再从证书管理新增证书，表单下拉是否能正常刷新且终端不再打印 `window not found`
-
----
-
-## 审查报告（sync-server-credential-sync-type）
-生成时间：2026-03-25 12:46:46 +0800
-
-### 需求完整性检查
-- 目标明确：让 `sync_server` 正确识别并展示新增的“凭证”同步类型
-- 范围明确：`sync_server/web` 的类型映射、概览统计和列表筛选；后端协议只做复核不改动
-- 交付物明确：类型归一化工具、前端页面适配、本地构建验证、`.claude/` 留痕
-- 风险与依赖明确：当前后端继续透传原始 `dataType` 字符串，前端需要兼容历史 `certificate` 和未来 `credential`
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 兼容层位置正确：[`syncItemType.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/utils/syncItemType.ts#L1) 现在统一把 `certificate` / `credential` 归一化为“凭证”，最近同步项、列表页和详情页都会自然复用这层映射。
-- 仪表盘统计已补齐：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L21) 新增“凭证”统计卡片，[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L185) 分类统计改为走统一类型判断，不会再漏算新增类型。
-- 列表筛选更稳健：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L199) 类型选项按归一化结果去重，[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L220) 筛选命中也改为兼容别名类型，避免 `certificate` / `credential` 出现重复语义选项或筛选失效。
-- 后端无需改动：已复核 [`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L13) 和 [`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L229)，当前 `dataType` 本来就是通用字符串透传和筛选，前端适配已经足够覆盖这轮需求。
-
-### 本地验证
-- `npm --prefix sync_server/web run build`：通过
-
-### 残余风险
-- 当前没有浏览器级自动化测试，仍建议实际点一次：
-  - 概览页“凭证”统计卡片是否显示正确
-  - 列表页类型筛选是否能正确筛出凭证项
-
----
-
-## 审查报告（popup-escape-and-core-common-translation）
-生成时间：2026-03-25 13:01:27 +0800
-
-### 需求完整性检查
-- 目标明确：修复凭证管理弹窗中 `Common.edit` / `Common.delete` 未翻译，并让所有独立 popup 支持按 `Esc` 关闭
-- 范围明确：`crates/core` 的共享本地化词条与 popup 基础设施
-- 交付物明确：词条补齐、popup 键盘上下文接入、本地 Rust 构建验证、`.claude/` 留痕
-- 风险与依赖明确：`Esc` 行为仅覆盖通过 `open_popup_window(...)` 打开的独立窗口，最终交互仍需 GUI 手动确认
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：86/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：98/100
-- 风险评估：93/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 翻译缺失根因明确且修复位置正确：[`core.yml`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/locales/core.yml#L3) 原先只提供了 `save/cancel/search`，现在补齐 `Common.edit` 和 `Common.delete` 后，凭证管理列表不再回显原始 key。
-- `Esc` 关闭方案复用现有交互模式：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L8) 新增 popup 专用动作与键绑定，[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L16) 通过包装层统一处理焦点、`focus_trap`、键盘上下文和关闭动作，方向与现有 `dialog/sheet` 保持一致。
-- 影响面控制合理：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L133) 把统一能力收口在 `open_popup_window(...)`，数据库连接表单、凭证新增/编辑窗口等所有调用点都会自动获得 `Esc` 关闭，无需在业务窗口重复补逻辑。
-- 初始化闭环已补齐：[`lib.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/lib.rs#L37) 已注册 `popup_window::init(cx)`，避免运行时只写了动作却未绑定按键。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 目前仅完成本地构建验证，仍建议手动确认：
-  - 凭证管理窗口中的“编辑 / 删除”按钮已显示正确翻译
-  - SSH / Redis / Mongo / 数据库连接等独立表单窗口在输入框聚焦时按 `Esc` 能直接关闭
-
----
-
-## 审查报告（popup-window-close-window-not-found）
-生成时间：2026-03-25 13:09:37 +0800
-
-### 需求完整性检查
-- 目标明确：修复关闭凭证管理相关 popup 时出现的 `gpui::window: window not found`
-- 范围明确：`crates/core` 的 popup 关闭基础设施，以及凭证编辑窗口的关闭调用点
-- 交付物明确：统一延迟关闭助手、系统关闭拦截、本地 Rust 构建验证、`.claude/` 留痕
-- 风险与依赖明确：本次只修独立 popup 的关闭时机，不改业务数据流；最终仍需 GUI 手动确认实际关闭路径不再报错
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：85/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：98/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 修复点选择正确：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L16) 新增统一的 popup 延迟关闭助手，没有在凭证页做一次性特判。
-- 系统关闭路径已纳管：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L169) 现在会在窗口创建时注册 `on_window_should_close(...)`，把窗口管理器触发的关闭请求也改成延迟执行，避免当前事件循环尚未结束时窗口已被立即移除。
-- `Esc` 与业务关闭路径保持一致：[`popup_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/popup_window.rs#L38) 的 `CancelPopup` 已复用同一关闭助手；[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L825) 和 [`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L885) 也改为同一关闭方式，避免不同关闭入口行为不一致。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 目前没有桌面 GUI 自动化回归，仍建议你手动确认三条路径：
-  - 关闭凭证管理主窗口时终端不再出现 `gpui::window: window not found`
-  - 凭证编辑窗口点击“取消”时不再报错
-  - 凭证编辑窗口保存成功自动关闭时不再报错
-
----
-
-## 审查报告（remove-team-ui-from-desktop-forms）
-生成时间：2026-03-25 13:45:14 +0800
-
-### 需求完整性检查
-- 目标明确：移除应用窗口中所有“团队”相关内容
-- 范围明确：桌面端主页、数据库连接表单、SSH/Redis/Mongo/串口表单、凭证管理窗口
-- 交付物明确：团队 UI 清理、保存逻辑归一、本地构建验证、`.claude/` 留痕
-- 风险与依赖明确：本轮不做底层 `team_id` 数据迁移，也不改 `cloud_sync` 的团队模型
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：85/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：95/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 主页入口已清理：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1733) 到 [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1866) 的各连接窗口配置不再透传 `teams`，连接卡片上的团队徽标也已移除。
-- MongoDB 与串口表单已对齐：[`mongo_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/mongodb_view/src/mongo_form_window.rs#L38) 和 [`serial_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/terminal_view/src/serial_form_window.rs#L22) 的窗口配置已删掉团队字段；保存时分别在 [`mongo_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/mongodb_view/src/mongo_form_window.rs#L741) 与 [`serial_form_window.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/terminal_view/src/serial_form_window.rs#L532) 统一写 `team_id = None`。
-- 凭证管理已去掉团队范围：[`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L347) 的编辑表单不再持有团队选择状态，保存时在 [`certificate_manager.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs#L561) 强制落为个人范围。
-- 保持了风险边界：底层 `cloud_sync` 与存储模型未被顺手重构，避免把这轮 UI 清理扩展成数据结构改造；但通过保存时显式清空 `team_id`，已阻断“用户编辑后仍写回团队数据”的问题。
-
-### 本地验证
-- `rg -n "TeamSelectItem|team_select|get_team_id|pub teams: Vec<TeamOption>|get_cached_team_options|TeamSync\\.team_label|selected_team_id" crates main -g '*.rs'`：通过
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 目前没有自动迁移历史团队数据；旧数据只有在重新保存后才会被归一为个人范围
-- 当前没有桌面 GUI 自动化测试，仍建议手动确认各连接窗口和凭证编辑窗口中已无团队项
-
----
-
-## 审查报告（sync-server-soft-delete-visibility）
-生成时间：2026-03-25 16:06:27 +0800
-
-### 需求完整性检查
-- 目标明确：解释并修正“本地删除工作区后远端看起来没删”的可见性问题
-- 范围明确：`sync_server/web` 展示层；服务端删除语义仅做核对不改动
-- 交付物明确：统计口径修正、状态筛选、本地前端构建验证、`.claude/` 留痕
-- 风险与依赖明确：远端删除仍然是软删除，记录不会被物理移除
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：95/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 根因已确认：[`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L162) 删除接口调用的是软删除；[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L314) 只会写入 `deleted_at`，不会物理删记录。
-- 展示口径已修正：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L185) 开始只统计有效项，并单独显示已软删除数量，避免把 tombstone 当作当前有效数据。
-- 列表默认行为更符合直觉：[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L56) 新增状态筛选，并默认显示“仅有效”，但仍能切换查看软删除记录。
-- API 兼容性保留：[`api.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/services/api.ts#L115) 只扩展了可选 `includeDeleted` 参数，没有破坏现有调用。
-
-### 本地验证
-- `npm --prefix sync_server/web run build`：通过
-
-### 残余风险
-- 软删除记录仍然存在于服务端，这是当前同步服务的既定设计
-- 还没有浏览器级自动化验证，建议手动确认：
-  - 删除工作区后概览卡片数量会下降
-  - 完整列表默认不再把已软删除工作区当作有效项显示
-
----
-
-## 审查报告（workspace-delete-sync-semantics）
-生成时间：2026-03-25 16:17:25 +0800
-
-### 需求完整性检查
-- 目标明确：确保本地删除工作区/连接后，远端删除语义也能被一致处理与识别
-- 范围明确：桌面端删除入口与同步待删除队列
-- 交付物明确：删除链路统一、本地构建验证、`.claude/` 留痕
-- 风险与依赖明确：本次不引入本地软删除字段，仍采用“本地物理删除 + 远端 soft delete tombstone”
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：84/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 删除语义已统一：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L334) 新增统一的待删除登记辅助函数，工作区和连接删除都不再在 UI 层直接删除云端。
-- 连接删除已收敛：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1115) 现在先完成本地物理删除，再登记 `connection` 待删除，由同步引擎处理远端 soft delete。
-- 工作区删除已收敛：[`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L1500) 现在会对工作区及其被删除的连接统一登记待删除，随后触发自动同步；远端 tombstone 将由现有 [`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L342) 处理。
-- 与现有同步模型一致：证书删除本来就走待删除队列，本次让工作区/连接与其保持同一路径，避免 `deleted_at` 识别和重试逻辑分叉。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 当前没有自动化集成测试覆盖“删除后立即同步”的完整桌面到服务端链路
-- 本地删除仍为物理删除，不支持本地恢复；远端仍保留 soft delete 记录作为同步 tombstone
-
----
-
-## 审查报告（sync-server-delete-empty-body）
-生成时间：2026-03-25 16:26:06 +0800
-
-### 需求完整性检查
-- 目标明确：修复待删除同步时 `DELETE` 请求因空 JSON body 被服务端拒绝的问题
-- 范围明确：`crates/core/src/cloud_sync/sync_server.rs` 的请求头和请求构造
-- 交付物明确：请求头修复、本地 Rust 构建验证、`.claude/` 留痕
-- 风险与依赖明确：本次不改服务端，只修客户端契约
-
-### 技术维度评分
-- 代码质量：97/100
-- 测试覆盖：83/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：98/100
-- 风险评估：95/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 根因定位准确：[`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L292) 原先给所有请求统一加了 `Content-Type: application/json`，而 [`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L487) 的删除请求没有 body，触发 Fastify 的空 JSON body 校验错误。
-- 修复位置正确：[`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L292) 现在公共头只保留 `Accept`；[`sync_server.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/sync_server.rs#L314) 仅在有 body 时补 `Content-Type`。
-- 影响面可控：有 body 的登录、注册、刷新 token、保存同步配置、创建/更新同步项仍会自动带 JSON 头，无 body 的 GET/DELETE 不再误带。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 仍缺少对接真实 `sync_server` 的自动化联调测试
-- 之前已经进入待删除列表的记录需要再执行一次同步，修复后才会真正被远端软删除
-
----
-
-## 审查报告（sync-item-plaintext-name）
-生成时间：2026-03-25 16:46:58 +0800
-
-### 需求完整性检查
-- 目标明确：把每个同步项的名称以明文方式存到云端，便于直接查看
-- 范围明确：Rust 同步模型、sync_server 服务端存储/API、Web 展示层
-- 交付物明确：模型扩展、数据库迁移、展示接入、本地多端验证、`.claude/` 留痕
-- 风险与依赖明确：历史旧数据存在无 `name` 的兼容问题，需要自动回填与迁移默认值双保险
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：85/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：95/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 同步元数据已扩展：[`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L206) 的 `CloudSyncData` 新增 `name` 字段，连接/工作区/凭证在 [`service.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs#L376) 起的上传构造都会写入明文名称。
-- 服务端已持久化：[`003_add_sync_item_name.sql`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/migrations/003_add_sync_item_name.sql) 为 `sync_data` 表增加 `name`，[`database.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/db/database.ts#L257) 和 [`sync.ts`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/src/http/routes/sync.ts#L11) 已贯通读写与响应。
-- 同步兼容已补齐：[`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L403) 与 [`connection_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L378) 会优先使用云端明文名称；如果旧记录 `name` 为空，则继续解密兜底，并在下一次同步时自动补写回云端。
-- 云端可见性已落地：[`DashboardView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/DashboardView.vue#L148)、[`SyncItemsView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemsView.vue#L130)、[`SyncItemDetailView.vue`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/web/src/views/user/SyncItemDetailView.vue#L43) 都会直接显示明文名称，不再只能看 `id`。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `npm --prefix sync_server/server run check`：通过
-- `npm --prefix sync_server/web run build`：通过
-
-### 残余风险
-- 历史已删除且本地源对象不存在的旧记录，无法从客户端回填真实名称，只能保留迁移默认值
-- 目前没有端到端自动化测试覆盖“旧记录自动补写 name”的完整同步链路，建议手动触发一次同步确认
-
----
-
-## 审查报告（sync-item-name-placeholder-backfill）
-生成时间：2026-03-25 17:06:47 +0800
-
-### 需求完整性检查
-- 目标明确：修复旧同步记录把 `id` 当作项目名称长期保留的问题
-- 范围明确：Rust 客户端名称回填判定与 `sync_server` 服务端历史迁移数据
-- 交付物明确：统一判定方法、旧数据规范化迁移、本地验证、`.claude/` 留痕
-- 风险与依赖明确：需要用户再触发一次同步，真实名称才会回写到云端
-
-### 技术维度评分
-- 代码质量：97/100
 - 测试覆盖：88/100
-- 规范遵循：96/100
+- 规范遵循：97/100
 
 ### 战略维度评分
 - 需求匹配：98/100
-- 架构一致：98/100
-- 风险评估：95/100
+- 架构一致：95/100
+- 风险评估：92/100
 
 ### 综合评分
-- 97/100
+- 94/100
 - 建议：通过
 
 ### 结论
-- 根因修正到位：[`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L231) 新增统一判定方法后，旧迁移产生的 `name == id` 不再被当成真实名称。
-- 客户端回填已贯通：[`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L406) 与 [`connection_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L381) 都改为使用统一判定，因此工作区、凭证、连接三条链路都能在下次同步时回填真实名称。
-- 服务端旧值已规范化：[`004_normalize_sync_item_placeholder_name.sql`](/Volumes/Workarea/usr/htdocs/onetcli/sync_server/server/migrations/004_normalize_sync_item_placeholder_name.sql) 会把历史占位值恢复为空串，避免 Web 继续直接显示 `id`。
-- 回归验证充分：新增的 [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L253) 单元测试覆盖了“占位值”和“真实名称”两种判定，Rust 与 `sync_server` 的构建检查均已通过。
+- 官方安装步骤已完整执行：`/Users/hufei/.codex/superpowers` 已成功克隆 superpowers 仓库，`/Users/hufei/.agents/skills/superpowers` 已建立为指向 `/Users/hufei/.codex/superpowers/skills` 的软链接。
+- 迁移检查已完成：`/Users/hufei/.codex/AGENTS.md` 当前为空文件，不存在文档中提到的 `superpowers-codex bootstrap` 旧块，因此无需清理。
+- 本地验证有效：`ls -la /Users/hufei/.agents/skills/superpowers` 已确认软链接存在且目标正确，`ls -la /Users/hufei/.codex/superpowers/skills` 已确认技能目录实际存在。
+- 剩余人工步骤明确：仍需退出并重新启动 Codex CLI，才能让当前会话发现新安装的 superpowers 技能。
 
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p one-core cloud_sync::models::tests --lib`：通过
-- `npm --prefix sync_server/server run check`：通过
-- `npm --prefix sync_server/web run build`：通过
-
-### 残余风险
-- 历史已删除且本地对象已不存在的记录，仍无法自动补回真实名称
-- 极少数真实名称恰好等于云端 `id` 的记录，会被识别为占位值并在下一次同步时覆盖
+### 剩余风险
+- 当前会话无法替代一次真正的 Codex 重启，因此“技能已被新会话识别”这一步只能在你重启 CLI 后做最终确认。
 
 ---
 
-## 审查报告（selection-contrast-in-app）
-生成时间：2026-03-25 17:31:06 +0800
+## 审查报告（window-not-found-fix 实现）
+生成时间：2026-03-26 11:36:00 +0800
 
 ### 需求完整性检查
-- 目标明确：定位并修复应用内 AI 消息、输入框、数据表/列表的选中态对比度过低问题
-- 范围明确：`crates/ui` 的文本选区绘制、输入框文字渲染与默认主题 token
-- 交付物明确：根因修复、默认主题增强、本地构建验证、`.claude/` 留痕
-- 风险与依赖明确：最终视觉效果仍需手动 GUI 确认
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：86/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：98/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- AI 消息根因已修正：[`inline.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/text/inline.rs#L301) 现在先画选区背景，再画文字，避免半透明选区把文本盖灰。
-- 输入框根因已修正：[`input/element.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/input/element.rs#L451) 新增 selection 区间提取，并在 [`input/element.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/input/element.rs#L1199) 接入现有的 `split_runs_by_bg_segments(...)`，因此选中文字会自动切换为黑/白高对比前景色。
-- 主题总开关已修正：[`schema.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/theme/schema.rs#L631) 不再强制把 `selection` / `list_active` / `table_active` 压成低透明度；[`default-theme.json`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/theme/default-theme.json#L20) 和 [`default-theme.json`](/Volumes/Workarea/usr/htdocs/onetcli/crates/ui/src/theme/default-theme.json#L169) 也提高了默认选中背景强度。
-- 影响面控制合理：改动全部集中在公共 UI 基础层，没有给 AI、表格、表单单独打补丁。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p gpui-component input::element::tests --lib`：通过
-
-### 残余风险
-- 列表/表格这次主要依赖更强的背景对比度，尚未像输入框那样显式切换前景色
-- 缺少 GUI 自动化截图验证，最终视觉效果仍建议你本地实际拖选确认
-
----
-
-## 审查报告（sync-reference-recovery）
-生成时间：2026-03-25 20:28:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复同步后连接无法恢复到原工作区，以及凭证引用跨设备恢复不稳定的问题
-- 范围明确：`one-core` 内的连接同步、工作区映射、凭证引用匹配与对应本地测试
-- 交付物明确：根因修复、回归测试、本地验证、`.claude/` 留痕
-- 风险与依赖明确：历史云端脏数据若缺失远端引用，需要后续重新同步才能完成补齐
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 工作区远端引用已贯通：[`connection_sync.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L674) 上传前先解析本地工作区的 `cloud_id`，[`connection_sync.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/connection_sync.rs#L688) 下载/更新本地时再按 `workspace_cloud_id` 反查并恢复 `workspace_id`。
-- 连接冲突链路已同步修正：[`engine.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L454) 的冲突解决现在也复用同一套“按工作区 `cloud_id` 恢复”的逻辑，不再在冲突分支里漏掉工作区归属。
-- 同步载荷不再丢字段：[`service.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs#L352) 已把 `workspace_cloud_id` 正式写入连接同步 blob，并由新增测试 [`service.rs`](/usr/htdocs/onetcli/crates/core/src/cloud_sync/service.rs#L629) 锁定。
-- 凭证引用跨设备匹配已稳定：[`models.rs`](/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L563) 在存在 `cloud_id` 时只按 `cloud_id` 匹配，避免不同设备本地自增 ID 重号导致误绑；新增测试位于 [`models.rs`](/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L1648)。
-- 仓储恢复能力已补齐：[`repository.rs`](/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L721) 新增工作区 `get_by_cloud_id` 查询，并由测试 [`repository.rs`](/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L1116) 验证。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p one-core`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 历史已上传但未包含 `workspace_cloud_id` 的旧连接，不会被自动逆推出工作区，只能在本地再同步一次带上新字段
-- 当前验证仍以单元测试和编译检查为主，没有真实双设备同步往返自动化场景
-
----
-
-## 审查报告（sync-server-theme-kiro2api）
-生成时间：2026-03-26 00:00:36 +0800
-
-### 需求完整性检查
-- 目标明确：把桌面端 `sync_server` 相关界面的配色调整为 `../kiro2api` 的深色绿色系方案
-- 范围明确：`main/src/auth.rs` 的认证弹窗、`main/src/setting_tab.rs` 的账户区域，以及新增的局部主题模块
-- 交付物明确：局部 UI 配色迁移、统一主题 helper、本地格式化与编译验证、`.claude/` 留痕
-- 风险与依赖明确：最终视觉效果仍需要桌面端手动确认
+- 目标明确：修复关闭主窗口时出现的 `gpui::window: window not found` 生命周期竞态。
+- 范围明确：仅调整应用退出策略，不改业务页签、更新逻辑或数据结构。
+- 交付物明确：代码修复、上下文摘要、操作日志和本地验证结果均已落地。
+- 风险与依赖明确：依赖 `gpui::QuitMode::LastWindowClosed`；图形界面层面的最终效果仍需人工冒烟确认。
 
 ### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
+- 测试覆盖：82/100
+- 规范遵循：97/100
 
 ### 战略维度评分
-- 需求匹配：96/100
+- 需求匹配：95/100
 - 架构一致：97/100
-- 风险评估：92/100
+- 风险评估：90/100
 
 ### 综合评分
 - 93/100
 - 建议：通过
 
 ### 结论
-- `sync_server` 配色已集中收口到 [`sync_server_theme.rs`](/usr/htdocs/onetcli/main/src/sync_server_theme.rs)，避免颜色散落在业务代码里。
-- 认证弹窗已切换为深色卡片、弱白边框和绿色主按钮，入口位于 [`auth.rs`](/usr/htdocs/onetcli/main/src/auth.rs#L445)。
-- 账户设置区已统一到同一视觉语言，入口位于 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L814)。
-- 改动范围控制合理：没有修改全局主题，只影响 `sync_server` 相关界面。
+- 应用退出策略已切换到官方 quit mode：[`main.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/main.rs#L29) 现在通过 `Application::with_quit_mode(QuitMode::LastWindowClosed)` 声明“最后一个窗口关闭时自动退出”。
+- 手写 release 退出监听已移除：[`onetcli_app.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/onetcli_app.rs#L350) 不再在主窗口释放阶段调用 `cx.quit()`，减少窗口释放后与平台尾随事件交错的竞态面。
+- 既有退出收尾链路仍保留：[`onetcli_app.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/onetcli_app.rs#L350) 后续的 `on_app_quit` 逻辑未变，标签状态保存行为仍由原实现负责。
+- 本地编译验证有效：`cargo check -p main` 已通过。
 
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 目前没有自动化 GUI 回归，只验证了类型、构建和样式接入链路
-- 若你希望和 `kiro2api` 更接近，后续还可以继续细调圆角、留白和输入框边框强度
+### 剩余风险
+- 当前没有自动化 GUI 测试覆盖“关闭主窗口”这一交互，仍需在 macOS 图形环境人工确认一次日志是否消失。
+- 如果修复后仍在关闭窗口瞬间看到同样日志，则问题可能残留在 `gpui` 上游对平台尾随事件的处理，需要进一步向框架层收敛。
 
 ---
 
-## 审查报告（main-window-spotlight）
-生成时间：2026-03-26 02:17:00 +0800
+## 审查报告（ui-main-safe-merge 实现）
+生成时间：2026-03-26 12:13:00 +0800
 
 ### 需求完整性检查
-- 目标明确：把 `sync_server/web` 的左侧强调线 + 鼠标驱动高光思路落到主应用窗口
-- 范围明确：新增通用 `SpotlightCard`，并用于主应用现有 `sync_server` 相关面板
-- 交付物明确：组件代码、主题包装、本地验证、`.claude/` 留痕
-- 风险与依赖明确：最终视觉仍需桌面端手工确认
+- 目标明确：仅回迁 main 中可直接合并的 UI crates 提交，不能直接合并的忽略。
+- 范围明确：本次仅涉及 `crates/ui` 内部低风险补丁，不扩展到 `table`、`dialog`、`time picker`、`WASM` 等高风险链路。
+- 交付物明确：已完成提交筛选、临时 worktree 演练、当前分支回迁和本地编译验证。
+- 风险与依赖明确：高风险提交已明确跳过，验证依赖 `CLANG_MODULE_CACHE_PATH=/tmp/clang-cache`。
 
 ### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：94/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 新增 [`spotlight_card.rs`](/usr/htdocs/onetcli/crates/ui/src/spotlight_card.rs) 提供主应用内可复用的 hover 卡片效果。
-- [`lib.rs`](/usr/htdocs/onetcli/crates/ui/src/lib.rs) 已导出 `SpotlightCard`，便于业务模块直接使用。
-- 主应用 `sync_server` 主题包装已具备 `spotlight_card` / `danger_spotlight_card` 入口，当前调用位于 [`auth.rs`](/usr/htdocs/onetcli/main/src/auth.rs#L577) 与 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L843)。
-- 实现策略与 GPUI 当前能力匹配：使用自绘叠层近似 Web spotlight，没有引入额外框架。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main`：通过
-- `cargo test -p main --no-run`：通过
-
-### 残余风险
-- 仍缺少桌面端自动化截图比对，最终观感需要你本地 hover 一次确认
-- 当前 spotlight 是近似实现，不是 DOM 版真实径向渐变
-
----
-
-## 审查报告（app-settings-sync）
-生成时间：2026-03-26 02:01:25 +0800
-
-### 需求完整性检查
-- 目标明确：补齐主应用“应用设置 / 系统设置”的云同步能力
-- 范围明确：本地设置模型、同步类型注册、设置保存后的同步触发、同步完成后的运行时重载
-- 交付物明确：应用设置同步处理器、同步元数据字段、本地验证、`.claude/` 留痕
-- 风险与依赖明确：真实双端同步仍需手工回归验证
-
-### 技术维度评分
-- 代码质量：95/100
+- 代码质量：94/100
 - 测试覆盖：88/100
-- 规范遵循：95/100
+- 规范遵循：96/100
 
 ### 战略维度评分
 - 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：93/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- 桌面端现在已经新增 `app_settings` 同步类型，并通过 [`app_settings_sync.rs`](/usr/htdocs/onetcli/main/src/app_settings_sync.rs) 接入现有 `SyncEngine + generic_sync` 流程。
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 已为设置文件补 `local_id`、`remote_id`、`last_synced_at`、`updated_at` 元数据，并区分“本地改动保存”和“同步状态回写”。
-- [`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs) 已把应用设置处理器注册到同步引擎，并在同步完成后重载全局设置。
-- [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs) 已在终端设置改动后补充云同步触发，同时支持把云端回写的终端设置立即应用到现有终端视图。
-- `sync_server_url` 被保留为本地字段，不会被云端设置覆盖。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-- `cargo test -p main app_settings_sync`：通过
-
-### 残余风险
-- 目前没有自动化的双设备同步回归，跨设备首轮下载与回写仍建议你手动测一次
-- 仓库仍保留既有 `crates/ui/src/window_ext.rs` 未使用代码告警，与本次改动无关
-
----
-
-## 审查报告（app-style-theme-switch）
-生成时间：2026-03-26 02:15:50 +0800
-
-### 需求完整性检查
-- 目标明确：修复前序配色改动破坏的亮色/暗色切换逻辑
-- 范围明确：`app_style`、`sync_server_theme` 的全部既有调用点，包括设置页、账号页、弹窗、连接窗口和表单
-- 交付物明确：主题同步修复代码、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：最终观感仍需桌面端手动切换亮暗模式确认
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：85/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`app_style.rs`](/usr/htdocs/onetcli/crates/ui/src/app_style.rs) 不再写死深色背景、边框和文字，而是读取当前主题快照。
-- [`theme/mod.rs`](/usr/htdocs/onetcli/crates/ui/src/theme/mod.rs#L172) 已在 `Theme::change` 时同步 `app_style`，因此所有既有 `app_style` / `sync_server_theme` 调用点会一起跟随亮暗切换刷新。
-- 修复方式覆盖了设置页、账号登录弹窗、全局对话框、数据库连接窗口、SSH/串口/Redis/Mongo 连接窗口等全部现有接入点，不再需要逐页补丁。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component`：通过
-
-### 残余风险
-- 缺少自动化桌面截图测试，亮暗模式切换后的实际观感仍建议你手动确认一次
-- 当前 `app_style` 依赖 `Theme::change` 同步快照；如果未来新增旁路主题更新逻辑，需要同时补充同步
-- 仓库内仍有既有未使用代码告警，与本次主题修复无关
-
----
-
-## 审查报告（form-focus-border）
-生成时间：2026-03-26 02:22:37 +0800
-
-### 需求完整性检查
-- 目标明确：让输入框获得焦点时与下拉框一致地处理边框颜色，并检查其它页面同类控件
-- 范围明确：通用 `Input`、通用 `Select` 路径，以及设置页这类按钮式下拉
-- 交付物明确：组件层修复、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：最终视觉仍需桌面端手工确认
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：91/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`input.rs`](/usr/htdocs/onetcli/crates/ui/src/input/input.rs#L375) 已把焦点边框移动到 `refine_style` 之后叠加，修复所有 `Input::new(...)` 在自定义边框样式下焦点边框被覆盖的问题。
-- [`button.rs`](/usr/htdocs/onetcli/crates/ui/src/button/button.rs#L608) 已为 `outline` 按钮补充键盘焦点边框色切换，覆盖设置页这类“按钮式下拉”。
-- `Select` 组件本身的焦点边框逻辑保持不变；本次主要是让输入框与按钮式下拉跟上相同的焦点反馈。
-- 由于修复位于通用组件层，主应用、数据库、终端、Redis、Mongo、SFTP 等页面的现有输入框和下拉框会自动受益。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p gpui-component -p sftp_view`：通过
-
-### 残余风险
-- 缺少桌面端自动截图或交互测试，建议你手动检查设置页、账号弹窗、新建连接、Provider 设置、SFTP 对话框这几类典型页面
-- `outline Button` 焦点边框变更会一并影响其他 outline 按钮，但这符合统一焦点反馈方向
-- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次修复无关
-
-### 补充结论（2026-03-26 02:32:37 +0800）
-- 设置页下拉未生效的原因已确认：其实现走的是 `outline Button`，不是 `Select`
-- [`button.rs`](/usr/htdocs/onetcli/crates/ui/src/button/button.rs#L608) 现已把“打开态 selected”也纳入边框切换条件，因此设置页下拉在展开时会显示相同的主题边框反馈
-- 补充验证：`cargo fmt --all`、`cargo check -p main -p gpui-component` 通过
-
----
-
-## 审查报告（chatdb-completion-menu-height）
-生成时间：2026-03-26 02:42:16 +0800
-
-### 需求完整性检查
-- 目标明确：修复 ChatDb SQL 助手中 `@` 表提示列表超出窗口高度的问题
-- 范围明确：通用补全面板与同类代码动作面板的弹层布局
-- 交付物明确：布局修复代码、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：最终体验仍需小窗口手工验证
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：97/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`completion_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/input/popovers/completion_menu.rs#L392) 现在会根据窗口顶部/底部剩余空间动态计算最大高度，并在底部空间不足时改为向上展开。
-- [`completion_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/input/popovers/completion_menu.rs#L475) 中的文档侧栏也增加了最大高度与滚动处理，避免一起把窗口撑爆。
-- [`code_action_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/input/popovers/code_action_menu.rs#L309) 同步采用相同的窗口边界约束策略，避免保留同类问题。
-- 由于 ChatDb SQL 助手的 `@` 提示最终走的是通用 `CompletionMenu`，因此这次修复会直接覆盖该场景。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p db_view -p main`：通过
-
-### 残余风险
-- 仍缺少桌面端自动截图或交互测试，建议你在较小窗口高度下手动触发一次 `@` 提示确认
-- `MIN_MENU_HEIGHT` 为经验阈值，若你觉得切换向上展开的时机还不理想，可以继续微调
-- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次修复无关
-
----
-
-## 审查报告（dialog-visual-structure）
-生成时间：2026-03-26 02:57:42 +0800
-
-### 需求完整性检查
-- 目标明确：增强简单弹窗边框识别度，并统一标题栏、正文区、底部操作区的视觉层级
-- 范围明确：通用 `Dialog` 默认渲染结构与相关语义样式入口
-- 交付物明确：通用弹窗样式修复、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：最终观感仍需桌面端手工确认
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：83/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：98/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L515) 已把简单弹窗外框边界提升到更明显的 `border_strong`，并保持原有拖拽、焦点陷阱和动画逻辑不变。
-- [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L569) 现在为带标题的弹窗渲染独立标题栏，复用 `title_bar_style` 并增加底部分隔线，避免标题区与正文区粘连。
-- [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L633) 为正文区重新分配上下内边距，并在 [`dialog.rs`](/usr/htdocs/onetcli/crates/ui/src/dialog.rs#L646) 中为底部操作区增加独立背景、顶部分隔线和统一留白。
-- [`app_style.rs`](/usr/htdocs/onetcli/crates/ui/src/app_style.rs#L128) 已把 `footer_style` 调整为次级面板背景，让底部操作区在亮暗主题下都更容易和正文区区分。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main -p db_view -p terminal_view -p redis_view -p mongodb_view -p sftp_view`：通过
-
-### 残余风险
-- 仍缺少桌面端自动截图或交互测试，建议你重点看一眼确认/警告弹窗、设置弹窗、同步相关弹窗的实际观感
-- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次弹窗样式修复无关
-
----
-
-## 审查报告（certificate-settings-navigation）
-生成时间：2026-03-26 03:34:20 +0800
-
-### 需求完整性检查
-- 目标明确：将凭证管理迁移到设置页，并确保连接表单里的“管理凭证”入口不破坏既有链路
-- 范围明确：设置页分页、主窗口导航桥、凭证管理统一入口
-- 交付物明确：设置页新分页、主窗口句柄桥接、导航优先/弹窗回退逻辑、本地编译验证、`.claude/` 留痕
-- 风险与依赖明确：最终跨窗口交互仍需桌面端手工确认
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：83/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：93/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`certificate_manager.rs`](/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs) 新增了全局导航器注册能力，`open_certificate_manager_popup(...)` 现在会优先走主窗口导航，失败时才回退到原有 `PopupWindow`。
-- [`onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 注册了该导航器，并保存主窗口句柄，避免从连接弹窗内点击时误把当前 popup 当作主窗口。
-- [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs) 新增 `open_certificate_settings_tab(...)`，复用既有设置标签打开逻辑。
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 新增 `SettingsPanelPage::Certificate`，并把 [`CertificateManagerView`](/usr/htdocs/onetcli/crates/core/src/certificate_manager.rs) 直接嵌入设置页，交互形态与现有 `LLM 提供商` 页面一致。
-- 由于各连接表单仍然调用同一个 `open_certificate_manager_popup(cx)`，所以 SSH/MySQL/Redis/Mongo/主页入口都会自动切换到新行为，无需逐处改按钮链路。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p one-core -p main -p db_view -p terminal_view -p redis_view -p mongodb_view`：通过
-
-### 残余风险
-- 仍缺少自动化 GUI 验证，建议手工确认“弹窗内点击管理凭证 -> 主窗口切到设置页 -> 保存凭证后原弹窗列表自动刷新”这一完整链路
-- 当前主窗口句柄假设应用只有一个主窗口；若后续出现多主窗口并存，需要补充选择策略
-- 仓库既有 `window_ext.rs` 未使用代码告警仍存在，与本次改动无关
-
----
-
-## 审查报告（workspace-sync-upload）
-生成时间：2026-03-26 09:54:59 +0800
-
-### 需求完整性检查
-- 目标明确：修复工作区本地修改后未能正常上传到云端的问题
-- 范围明确：工作区模型、仓储、通用同步判定、同步状态回写、数据库迁移
-- 交付物明确：代码修复、本地单元测试、编译验证、`.claude` 留痕
-- 风险与依赖明确：旧数据升级后的首次同步可能存在一次补偿上传
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：93/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L693) 为工作区补充了 `last_synced_at`，并在 [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/models.rs#L744) 启用了基于同步状态的通用比较逻辑。
-- [`repository.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L694) 现在会在云端回写时持久化 `last_synced_at`，而 [`repository.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L780) 会在本地编辑工作区时清空该字段，确保下一轮同步认定为本地已修改。
-- [`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L230) 已在“更新云端成功”后统一执行同步状态回写；[`generic_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/generic_sync.rs#L523) 新增了基于 `last_synced_at` 的比较逻辑，并在同秒情况下优先本地，避免漏传。
-- [`workspace_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/workspace_sync.rs#L68) 改为使用 `update_sync_status(...)`，工作区上传或更新云端后都会刷新同步状态。
-- [`20260326000001_workspace_sync_state.sql`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/migrations/20260326000001_workspace_sync_state.sql) 和 [`migration.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/storage/migration.rs#L21) 已补齐旧库迁移；[`20260225000001_init.sql`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/migrations/20260225000001_init.sql#L4) 也同步更新，避免新库缺字段。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p one-core workspace_repository --lib`：通过
-- `cargo test -p one-core generic_sync --lib`：通过
-- `cargo check -p one-core -p main`：通过
-
-### 残余风险
-- 旧数据若此前已绑定云端但未记录同步状态，升级后首次工作区同步可能会补传一次，这是预期的补偿行为
-- 目前通用同步里的“基于同步状态比较”只对启用了 `uses_sync_state()` 的类型生效，应用设置仍沿用旧逻辑
-- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
-
----
-
-## 审查报告（remove-app-settings-sync）
-生成时间：2026-03-26 10:05:22 +0800
-
-### 需求完整性检查
-- 目标明确：移除“应用设置”的云同步操作
-- 范围明确：应用设置同步模块、同步引擎注册点、设置页/终端设置的同步触发、同步专用字段
-- 交付物明确：代码清理、本地编译验证、`.claude` 留痕
-- 风险与依赖明确：旧本地设置文件可能残留历史同步字段，但后续保存后会自然清理
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：94/100
+- 架构一致：95/100
+- 风险评估：95/100
 
 ### 综合评分
 - 95/100
 - 建议：通过
 
 ### 结论
-- [`main.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/main.rs#L1) 已移除 `app_settings_sync` 模块声明，[`app_settings_sync.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/app_settings_sync.rs) 已被删除，应用设置不再作为独立同步类型存在。
-- [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L598) 与 [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L918) 已改回只使用默认 `SyncEngine::new(...)`，不再追加应用设置同步处理器；原先的 `request_app_settings_sync(...)` 也已删除。
-- [`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L160) 删除了应用设置专用的同步元数据字段和辅助方法；[`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L353) 的 `save()` 现在只负责本地持久化。
-- [`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L558) 起的各项设置回调与 [`home_tabs.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home/home_tabs.rs#L70) 起的终端事件处理，都已保留本地保存/广播逻辑，但不再触发整轮云同步。
-- [`models.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/models.rs#L255) 同步清理了不再使用的 `app_settings` 数据类型常量。
+- 已成功回迁 7 个低风险 UI 提交：tree 聚焦、窗口阴影尺寸、Linux 最大化 resize 修复、sheet 拖动修复、通知中键关闭、按钮标签容器适配、sheet 重复打开焦点恢复。
+- 临时 worktree 演练已证明这 7 个提交可以直接 `cherry-pick`，当前 `dev` 上也已成功应用，无冲突残留。
+- 本地验证已通过：`env CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo check -p main` 成功完成。
+- 高风险提交已按要求忽略：`table` 重构、`dialog/alert_dialog`、`input/text/highlighter` 大改、`time picker` 移除、`WASM/gpui_platform` 链路均未引入。
 
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p one-core -p main`：通过
-- `cargo test -p one-core --lib`：通过
-- `cargo test -p main --lib`：失败，原因是包 `main` 没有 `lib` target，不属于代码问题
-
-### 残余风险
-- 旧 `settings.json` 中若还有历史 `local_id / remote_id / last_synced_at / updated_at` 字段，当前版本读取时会忽略；任意一次设置保存后这些字段会被写出清理
-- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修改无关
+### 剩余风险
+- 仍有大量 main 的 UI 优化未回迁，后续若继续同步，需要按主题分批处理。
+- 本次没有做 GUI 交互级自动化验证，涉及视觉和交互的细节仍建议后续图形环境冒烟一次。
 
 ---
 
-## 审查报告（conflict-resolution-persist）
-生成时间：2026-03-26 10:37:22 +0800
+## 审查报告（ui-main-conflict-merge 实现）
+生成时间：2026-03-26 13:38:12 +0800
 
 ### 需求完整性检查
-- 目标明确：修复“冲突解决完成”后冲突仍存在、下次启动仍提示的问题
-- 范围明确：连接冲突解决引擎、冲突解决结果语义、首页冲突解决反馈
-- 交付物明确：代码修复、回归测试、本地编译验证、`.claude` 留痕
-- 风险与依赖明确：部分失败场景下当前 UI 仍按整体提示，不做更细粒度拆分展示
+- 目标明确：把 main 的 `editor: Improve highlighting performance (#2128)` 与 `theme: Update input background to match Shadcn style. (#2135)` 迁入当前 `dev`，并处理真实冲突。
+- 范围明确：仅修改 `crates/ui` 内与高亮器、输入样式相关的文件，不扩展到 `table`、`dialog`、`time picker` 消费方接口。
+- 交付物明确：代码迁移、上下文摘要、操作日志、验证报告和本地编译验证结果均已落地。
+- 风险与依赖明确：`mix_oklab` 与 `wasm_stub` 在当前分支缺失，已做兼容替换或显式不引入。
 
 ### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：91/100
-- 规范遵循：95/100
+- 代码质量：93/100
+- 测试覆盖：86/100
+- 规范遵循：96/100
 
 ### 战略维度评分
 - 需求匹配：97/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L383) 的 `apply_conflict_resolutions(...)` 现在只把真正未解决的冲突放入 `result.conflicts`，不再把输入冲突原样回传。
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L473) 的 “使用本地版本” 分支在云端更新成功后会调用新的 [`mark_connection_synced(...)`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L512)，把本地连接的 `last_synced_at` 推进到当前时间，避免下一轮同步再次识别成冲突。
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L428) 的 `KeepBoth` 副本现在也会清除 `last_synced_at`，避免副本继承旧同步状态。
-- [`home_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/home_tab.rs#L923) 现在只有在确实无错误且无残余冲突时才记录“冲突解决完成”并清空 `pending_conflicts`；否则会保留未解决冲突并输出警告。
-- 新增回归测试 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L543)，覆盖“使用本地版本后本地同步状态必须被更新”这一关键路径。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
-- `cargo check -p one-core -p main`：通过
-- `cargo test -p one-core --lib`：通过
-
-### 残余风险
-- 当前 UI 在“部分成功、部分失败”时会保留未解决冲突并告警，但不会把每一项失败原因拆到列表项级别
-- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
-
----
-
-## 审查报告（login-translation-audit）
-生成时间：2026-03-26 10:55:31 +0800
-
-### 需求完整性检查
-- 目标明确：修复登录窗里未翻译的 `sync_server` 与错误翻译键，并检查同类遗漏
-- 范围明确：登录窗、设置页账号卡片、同步冲突弹窗、SSH/串口编辑窗
-- 交付物明确：代码修复、语言文件补键、本地验证、`.claude` 留痕
-- 风险与依赖明确：全仓存在历史翻译缺口，本次按用户可见且已确认的相关窗口定向收敛
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- [`auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L623) 不再直接渲染 `"sync_server"`，已改为 `Settings.General.Sync.server_name`；[`auth.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/auth.rs#L635) 的同步地址说明也已改回正确键 `Settings.General.Sync.server_url_desc`。
-- [`setting_tab.rs`](/Volumes/Workarea/usr/htdocs/onetcli/main/src/setting_tab.rs#L977) 的账号卡片同步服务副标题已统一改为 `Settings.General.Sync.server_name`，避免设置页继续显示原始字符串。
-- [`main.yml`](/Volumes/Workarea/usr/htdocs/onetcli/main/locales/main.yml#L176) 补齐了 `Home.sync_conflict_keep_both`，解决同步冲突对话框第三个策略按钮显示 key 的问题。
-- [`main.yml`](/Volumes/Workarea/usr/htdocs/onetcli/main/locales/main.yml#L582) 新增 `Common.none`、`ConnectionForm.cloud_sync`、`ConnectionForm.cloud_sync_desc`，并在 [`main.yml`](/Volumes/Workarea/usr/htdocs/onetcli/main/locales/main.yml#L1228) 起补齐 `SSH.*` 与 `Serial.*` 相关窗口字段键，覆盖 SSH/串口编辑窗原先的整组翻译缺口。
-- 通过定向脚本核对，`main/src/auth.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`crates/terminal_view/src/ssh_form_window.rs`、`crates/terminal_view/src/serial_form_window.rs` 当前引用的 `t!(...)` 键均已在 `main/locales/main.yml` 中命中。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main -p terminal_view`：通过
-- 定向翻译键扫描：通过，目标文件均为 `MISSING 0`
-
-### 残余风险
-- 这次是按用户反馈相关路径做定向清理，仓库其他未触达模块仍可能存在历史翻译缺口
-- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
-
----
-
-## 审查报告（conflict-resolution-deleted-cloud）
-生成时间：2026-03-26 11:14:46 +0800
-
-### 需求完整性检查
-- 目标明确：修复“云端已删除”类冲突在手动解决时仍报错并反复残留的问题
-- 范围明确：连接冲突解决引擎、删除冲突语义分支、手动冲突解决前置密钥配置、回归测试
-- 交付物明确：代码修复、本地回归测试、本地编译验证、`.claude` 留痕
-- 风险与依赖明确：当前 UI 仍允许该冲突类型选择 `KeepBoth`，但其底层语义已收敛
-
-### 技术维度评分
-- 代码质量：97/100
-- 测试覆盖：93/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L384) 的 `apply_conflict_resolutions(...)` 现在会先执行 `ensure_personal_key_config().await`，避免手动冲突解决阶段继续带着无效 `key_version` 进入上传流程。
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L450) 的 `UseCloud` 分支在 `LocalModifiedCloudDeleted` 上改为直接删除本地连接，不再把占位云端数据当成真实记录解密，因此消除了 `EOF while parsing a value at line 1 column 0`。
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L479) 的 `UseLocal` 分支在云端占位版本 `< 1` 时改为走 [`recreate_cloud_from_local(...)`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L575)，不再调用带 `version=0` 的更新接口，因此规避了服务端 `Too small: expected number to be >=1`。
-- [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L506) 的 `KeepBoth` 在该冲突类型下也统一收敛为“保留本地并重建云端”，避免继续落到无效云端占位记录。
-- 新增回归测试 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L902) 与 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L1009)，分别覆盖“使用本地时重建云端”和“使用云端时删除本地”两条关键路径；并保留 [`engine.rs`](/Volumes/Workarea/usr/htdocs/onetcli/crates/core/src/cloud_sync/engine.rs#L786) 验证既有冲突解决回写同步状态的路径未回退。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item --lib`：通过
-- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection --lib`：通过
-- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status --lib`：通过
-- `cargo check -p one-core`：通过
-- `cargo check -p one-core -p main`：通过
-
-### 残余风险
-- 当前 UI 仍允许在“云端已删除”冲突上选择 `KeepBoth`，本次仅修正其执行语义为“保留本地并重建云端”，未同步调整按钮层面的交互文案
-- 仓库既有 `gpui-component` 未使用函数告警和 `num-bigint-dig` future incompatibility 提示仍存在，与本次修复无关
-
-## 审查报告（workspace-delete-update-wins）
-生成时间：2026-03-26 16:05:00 +0800
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
 - 架构一致：94/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论摘要
-- 工作空间删除已收敛为“删除父对象 + 子连接解绑”，不再支持“删除全部连接”分支。
-- 待删除工作空间现在会记录删除基线与受影响连接列表，删除若遇到更晚的云端更新会自动撤销并恢复本地关联。
-- 云端软删除回放在本地有未同步更新时会让更新优先，不再直接删除本地工作空间。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p one-core workspace_repository_delete_unlinks_connections_and_refreshes_timestamp`：通过
-- `cargo test -p one-core pending_cloud_deletion_repository_persists_context_fields`：通过
-- `cargo test -p one-core use_local_conflict_resolution_updates_local_sync_status`：通过
-- `cargo test -p one-core use_local_deleted_cloud_conflict_recreates_remote_item`：通过
-- `cargo test -p one-core use_cloud_deleted_cloud_conflict_deletes_local_connection`：通过
-- `cargo check -p main`：通过
-
-## 审查报告（terminal-theme-font-size-preserve）
-生成时间：2026-03-26 19:37:49 +0800
-
-### 需求完整性检查
-- 目标明确：修复终端右侧设置切换主题后实际字号回退到 `13` 的问题
-- 范围明确：`terminal_view` 主题切换入口、跨 tab 同步入口、相关回归测试与 `.claude` 留痕
-- 交付物明确：代码修复、本地回归测试、本地编译验证、任务审查报告
-- 风险与依赖明确：当前仍缺少 GUI 自动化或手工验证证据，结论主要依赖代码路径和单测
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：90/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：95/100
-- 风险评估：90/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L92) 新增 `preserve_theme_typography(...)`，在主题切换时保留当前字号、字体族、备用字体和行高比例，仅替换主题名与颜色字段。
-- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L772) 的 `set_theme(...)` 已改为先合并排版参数再写入 `current_theme`，避免右侧设置切换主题时把字号重置为主题默认值。
-- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L859) 的 `apply_theme(...)` 同步复用同一逻辑，并将早退条件改为比较合并后的完整主题，避免跨 tab 同步遗漏排版差异。
-- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L2715) 新增回归测试，验证主题切换后仍保留字号、字体族、备用字体和行高比例。
-
-### 本地验证
-- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration`：通过
-- `cargo check -p terminal_view`：通过
-
-### 残余风险
-- 尚未在真实 GUI 中手工执行“首页设字号 18 -> 打开终端 -> 切 theme”完整回归路径
-- 仓库既有 `gpui-component` 与 `ssh` 未使用导入 warning 仍存在，与本次修复无关
-
-## 审查报告（terminal-sidebar-settings-i18n）
-生成时间：2026-03-26 19:43:38 +0800
-
-### 需求完整性检查
-- 目标明确：补齐终端右侧设置面板中残留的英文文案与说明提示
-- 范围明确：`settings_panel.rs` 可见文案、`terminal_view.yml` 对应词条、`.claude` 留痕
-- 交付物明确：代码修复、本地扫描验证、本地编译验证、审查报告
-- 风险与依赖明确：未做 GUI 多语言手工验证，结论主要依赖静态扫描与编译结果
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：87/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：95/100
-- 风险评估：89/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L100) 的搜索输入框占位符已改为读取 `t!("Settings.search_placeholder")`。
-- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L327) 到 [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L739) 的设置标题、搜索区、字体区、主题区文案均已从硬编码英文切换为 `t!()`。
-- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L382) 的搜索提示已改为本地化文案，并与当前交互保持一致：回车搜索下一个，`Shift+Enter` 搜索上一个。
-- [`terminal_view.yml`](/usr/htdocs/onetcli/crates/terminal_view/locales/terminal_view.yml#L314) 新增 `Settings.search`、`Settings.font_size`、`Settings.font_family`、`Settings.theme` 等词条，补齐该面板缺失翻译。
-
-### 本地验证
-- `rg -n '"(Settings|SEARCH|FONT SIZE|FONT FAMILY|THEME|Search\\.\\.\\.|Select font\\.\\.\\.|Press [^"]+)"' crates/terminal_view/src/sidebar/settings_panel.rs`：未命中
-- `cargo fmt --all -- /usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs`：通过
-- `cargo check -p terminal_view`：通过
-
-### 残余风险
-- 尚未在 GUI 中实际切换语言检查中文/繁中排版是否出现截断
-- 仓库既有 `gpui-component` 与 `ssh` warning 仍存在，与本次修复无关
-
-## 审查报告（terminal-line-height-setting）
-生成时间：2026-03-26 20:16:19 +0800
-
-### 需求完整性检查
-- 目标明确：把终端现有但未暴露的行间距能力补成真实设置项，并保持首页设置、终端右侧设置和实例渲染一致
-- 范围明确：`setting_tab.rs`、`home_tabs.rs`、`terminal_view` 侧边栏与视图层、相关本地化词条
-- 交付物明确：行间距设置项、同步链路、主题切换排版保持、本地验证、`.claude` 留痕
-- 风险与依赖明确：当前仍缺少 GUI 自动化和手工点验，结论主要基于代码路径、单测和编译结果
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：90/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L198) 与 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L717) 已把 `terminal_line_height_scale` 接入 `AppSettings` 和首页“终端行间距”设置项。
-- [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs#L44) 到 [`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs#L97) 已把行间距纳入终端创建时应用、事件回写和全量同步逻辑。
-- [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L184) 到 [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L221) 新增行间距输入订阅；[`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L294) 到 [`settings_panel.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/settings_panel.rs#L299) 会在主题同步时回写当前值。
-- [`sidebar/mod.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/sidebar/mod.rs#L77) 与 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L657) 到 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L658) 已把侧边栏的 `LineHeightScaleChanged` 贯通到终端 setter。
-- [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L837) 与 [`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L1003) 会在终端实例内部统一应用并限制行间距范围；[`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs#L96) 的 `preserve_theme_typography(...)` 继续保证切换主题不覆盖字号和行间距。
-- [`theme.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/theme.rs#L25) 到 [`theme.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/theme.rs#L30)、[`main.yml`](/usr/htdocs/onetcli/main/locales/main.yml#L771) 和 [`terminal_view.yml`](/usr/htdocs/onetcli/crates/terminal_view/locales/terminal_view.yml#L334) 已把统一范围常量和文案补齐。
-
-### 本地验证
-- `cargo test -p terminal_view preserve_theme_typography_keeps_current_font_configuration -- --nocapture`：通过
-- `cargo check -p terminal_view -p main`：通过
-
-### 残余风险
-- 尚未在真实 GUI 中手工确认“首页设置行间距 -> 打开终端 -> 右侧切换主题 -> 行间距保持不变”的完整路径
-- 仓库既有 `gpui-component` 与 `ssh` warning 仍存在，与本次修复无关
-
-## 审查报告（window-border-preview）
-生成时间：2026-03-26 20:26:43 +0800
-
-### 需求完整性检查
-- 目标明确：先给应用窗口补一个可见边框，便于用户直接看效果
-- 范围明确：仅涉及 `crates/ui/src/window_border.rs` 公共窗口装饰层
-- 交付物明确：边框预览、本地格式化与编译验证、`.claude` 留痕
-- 风险与依赖明确：当前没有 GUI 级视觉验证，最终效果仍要靠实际打开应用确认
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：96/100
-- 风险评估：88/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L107) 新增 `show_content_border`，用于识别系统装饰或 Deepin 系统控件优先路径。
-- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L227) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L230) 现在会在这条路径下为窗口根内容补一圈 1px 内边框。
-- [`root.rs`](/usr/htdocs/onetcli/crates/ui/src/root.rs#L451) 已统一使用 `window_border()`，所以主窗口和弹窗都会一起看到这次预览效果。
-- Linux 既有客户端外框、阴影和拖拽缩放逻辑没有被改掉，仍保留在 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L198) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L224)。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main`：通过
-
-### 残余风险
-- 尚未在真实 GUI 中肉眼确认边框是否足够明显
-- 这是视觉内边框，不是操作系统级外框，如果你要更强效果还要继续调
-
-## 审查报告（window-border-radius-preview）
-生成时间：2026-03-26 20:31:04 +0800
-
-### 需求完整性检查
-- 目标明确：在边框预览基础上再加一点圆角效果
-- 范围明确：仅涉及 `crates/ui/src/window_border.rs`
-- 交付物明确：圆角预览、本地格式化与编译验证、`.claude` 留痕
-- 风险与依赖明确：最终圆角观感仍要实际打开应用确认
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：84/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：96/100
-- 风险评估：88/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 结论
-- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L88) 现在使用 `cx.theme().radius_lg` 作为窗口圆角半径。
-- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L167) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L178) 已为客户端边框路径补齐四个角的圆角。
-- [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L227) 到 [`window_border.rs`](/usr/htdocs/onetcli/crates/ui/src/window_border.rs#L231) 已让系统装饰路径下的内边框和内容一起裁成圆角。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p gpui-component -p main`：通过
-
-### 残余风险
-- 还没做 GUI 手工确认，最终效果以你实际看到的为准
-
-## 审查报告（global-ui-font-settings）
-生成时间：2026-03-26 20:39:21 +0800
-
-### 需求完整性检查
-- 目标明确：把首页设置里的普通“字体 / 字号”真正接通到全局 UI
-- 范围明确：`main/src/setting_tab.rs` 与其对应的全局 Theme 应用路径
-- 交付物明确：代码修复、本地格式化与编译验证、`.claude` 留痕
-- 风险与依赖明确：终端和其他显式等宽字体区域不在本次作用范围内
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：86/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：90/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L393) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L404) 新增 `apply_ui_font_preferences(...)`，统一把设置写回全局 Theme 并刷新所有窗口。
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L406) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L416) 现在会在启动加载设置时应用普通 UI 的字体和字号。
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L601) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L617) 保证切换深浅主题后仍保留用户自定义的普通 UI 字体和字号。
-- [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L688) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L699) 与 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L708) 到 [`setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs#L721) 已把设置页里的“字体 / 字号”即时接通到全局 UI。
-- [`root.rs`](/usr/htdocs/onetcli/crates/ui/src/root.rs#L449) 和 [`root.rs`](/usr/htdocs/onetcli/crates/ui/src/root.rs#L459) 本来就消费全局 Theme 的 `font_size` / `font_family`，所以这次接通后会影响首页、设置页、弹窗等普通界面。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo check -p main`：通过
-
-### 残余风险
-- 尚未在 GUI 中逐页手工确认不同字体下的局部排版表现
-
-## 审查报告（llm-remove-onetcli-provider）
-生成时间：2026-03-26 21:40:39 +0800
-
-### 需求完整性检查
-- 目标明确：删除 `OnetCli AI` 的自动注入，并允许删除本地已有项
-- 范围明确：设置页 provider 管理、AI Chat / ChatDB provider 加载、运行时 provider 过滤
-- 交付物明确：代码修改、本地验证、风险说明与 `.claude` 留痕
-- 风险与依赖明确：保留 `ProviderType::OnetCli` 以兼容旧数据库记录
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：88/100
-- 规范遵循：94/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：93/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- [`types.rs`](/usr/htdocs/onetcli/crates/core/src/llm/types.rs#L146) 到 [`types.rs`](/usr/htdocs/onetcli/crates/core/src/llm/types.rs#L181) 新增 `is_runtime_available()` 及对应单测，把“运行时可用 provider”收敛成统一语义：启用且非内置。
-- [`engine.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/engine.rs#L243) 到 [`engine.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/engine.rs#L255)、[`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L406) 到 [`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L447)、[`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L247) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L280) 已不再自动创建 `OnetCli AI`，并把它从 AI 运行时 provider 列表中剔除。
-- [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L47) 到 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L61) 现在直接展示仓库中的所有 provider，不再因登录态隐藏旧 `OnetCli` 记录。
-- [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L150) 到 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L205) 与 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L417) 到 [`llm_providers_view.rs`](/usr/htdocs/onetcli/main/src/settings/llm_providers_view.rs#L476) 已移除内置 provider 的删除/禁用保护，旧 `OnetCli AI` 现在可删除。
-- “没有任何 AI 提供商”场景仍是可控退化：[`provider_select.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/components/provider_select.rs#L323) 到 [`provider_select.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/components/provider_select.rs#L343) 会在空列表时清空选择；[`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L804) 到 [`panel.rs`](/usr/htdocs/onetcli/crates/core/src/ai_chat/panel.rs#L817) 与 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L620) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L637) 会提示先选择 provider，而不是崩溃。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p one-core runtime_available -- --nocapture`：通过
-- `cargo test -p one-core ensure_onetcli_provider_is_not_default_when_auto_created -- --nocapture`：通过
-- `cargo check -p one-core -p db_view -p main`：通过
-
-### 残余风险
-- 旧数据库里如果还保留 `OnetCli` provider 关联的历史会话，重新进入会话后会回到“未选择 provider”状态，AI 功能不可用但不会崩。
-- `ProviderRepository::ensure_onetcli_provider()` 和 `ProviderType::OnetCli` 仍保留在底层，用于兼容旧数据；这是有意保留，不是遗漏。
-
-## 审查报告（chatdb-duplicate-user-message）
-生成时间：2026-03-26 21:59:33 +0800
-
-### 需求完整性检查
-- 目标明确：检查 ChatDB 发给 AI 的请求是否把同一条用户消息封装了两次
-- 范围明确：ChatDB 面板入口、AgentContext 历史构造、相关 Agent 的消息拼装方式
-- 交付物明确：根因分析、代码修复、单元测试、编译验证、`.claude` 留痕
-- 风险与依赖明确：只修 ChatDB 入口，不改 Agent 协议
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：91/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：99/100
-- 架构一致：97/100
-- 风险评估：94/100
-
-### 综合评分
-- 96/100
-- 建议：通过
-
-### 结论
-- 根因成立：[`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L552) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L568) 会先把当前输入压入 `self.chat_history`；随后 [`general_chat.rs`](/usr/htdocs/onetcli/crates/core/src/agent/builtin/general_chat.rs#L45) 到 [`general_chat.rs`](/usr/htdocs/onetcli/crates/core/src/agent/builtin/general_chat.rs#L49)、[`sql_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/sql_workflow.rs#L277) 到 [`sql_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/sql_workflow.rs#L283) 以及 [`query_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/query_workflow.rs#L244) 到 [`query_workflow.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/agents/query_workflow.rs#L269) 又都会把当前问题追加一次，因此同一轮用户输入会重复进入模型上下文。
-- 修复位于单一入口：[`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L77) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L98) 新增 `build_agent_history(...)`，在保留历史裁剪逻辑的同时，剔除“历史尾部刚好等于当前输入”的那条用户消息。
-- [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L680) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L682) 已改为统一通过该函数构造 `AgentContext` 的历史，因此 GeneralChat、SqlWorkflow、ChatBi 以及路由器都会一起受益。
-- [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L2062) 到 [`chat_panel.rs`](/usr/htdocs/onetcli/crates/db_view/src/chatdb/chat_panel.rs#L2097) 新增了两条单测，分别验证“当前尾部用户消息会被剔除”和“更早的同文案历史不会误删”。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p db_view build_agent_history -- --nocapture`：通过
-- `cargo check -p db_view -p main`：通过
-
-### 残余风险
-- 这是 ChatDB 入口修复，不影响普通 AI 面板。
-- 当前没有真实网络请求抓包验证，但从代码路径看，导致重复的源头已经被切断。
-
-## 审查报告（ssh-loading-status）
-生成时间：2026-03-27 10:56:30 +0800
-
-### 需求完整性检查
-- 目标明确：让 SSH 连接 loading 期间显示当前阶段状态，而不是只显示笼统的“连接中”
-- 范围明确：SSH 终端连接遮罩、SSH 测试连接窗口、底层 SSH 建连流程
-- 交付物明确：阶段状态抽象、界面展示、本地测试、`.claude` 留痕
-- 审查要点明确：不新增第二套状态机，复用现有异步回流链路，确保本地可验证
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：96/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 结论
-- `crates/ssh/src/ssh.rs` 新增 `SshConnectionStage`，把代理、跳板机、目标主机认证和会话建立拆成可复用阶段，避免 UI 层自行猜测进度。
-- `crates/terminal/src/ssh_backend.rs` 和 `crates/terminal/src/terminal.rs` 已接入阶段回调，SSH 终端连接遮罩会实时刷新当前阶段文案，重连路径也会同步更新。
-- `crates/terminal_view/src/ssh_form_window.rs` 的测试连接流程已新增状态条，测试期间会持续展示当前所处的连接阶段。
-- `crates/terminal_view/src/view.rs` 只消费模型层提供的 `connection_status_message`，符合现有“状态在模型层，视图只渲染”的分层约定。
-
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p ssh -p terminal -p terminal_view`：通过
-
-### 残余风险
-- 当前阶段提示只覆盖 SSH 终端和 SSH 测试连接，`sftp_view` 与侧边文件管理器里的 SFTP 建连尚未接入同一套阶段展示。
-- 阶段粒度已经覆盖主要用户可感知节点，但不会细到 DNS、TCP 握手等更底层网络细节。
-
-## 复审补充（ssh-loading-status）
-生成时间：2026-03-27 11:12:00 +0800
-
-### 复审结论
-- 用户反馈“仍长期停在正在连接目标主机”是合理的，原因不是状态回调失效，而是 `russh::client::connect()` 把 TCP 建连和 SSH 握手包在同一个 await 里。
-- 复审后已把直连路径改为“显式建立 TCP 流 + `connect_stream(...)` 完成 SSH 握手”，因此现在能额外显示“正在与目标主机进行 SSH 握手...”。
-- 同时增加了等待时长刷新，避免仍卡在首阶段时界面看起来像死掉。
-
-### 复审评分
-- 代码质量：96/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：93/100
-- 综合评分：95/100
-- 建议：通过
-
-### 复审验证
-- `cargo fmt --all`：通过
-- `cargo test -p ssh -p terminal -p terminal_view`：通过
-
-## 审查报告（ssh-legacy-kex-compatibility）
-生成时间：2026-03-27 11:46:19 +0800
-
-### 需求完整性检查
-- 目标明确：为只支持旧版 SSH 密钥交换算法的主机提供按连接开启的兼容开关
-- 范围明确：SSH 表单、持久化参数、终端/SFTP/侧边文件管理入口、底层 `russh` 客户端配置
-- 交付物明确：兼容开关、运行时算法列表调整、本地测试、`.claude` 留痕
-- 审查要点明确：默认行为不降级，兼容模式仅作回退，不制造终端/SFTP 行为分叉
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：98/100
-- 架构一致：96/100
 - 风险评估：91/100
 
 ### 综合评分
-- 94/100
+- 93/100
 - 建议：通过
 
 ### 结论
-- `crates/core/src/storage/models.rs` 为 `SshParams` 增加了 `enable_legacy_kex`，并通过 `#[serde(default)]` 保证旧连接配置可继续反序列化。
-- `crates/ssh/src/ssh.rs` 把 `russh::client::Config` 构造收敛为统一函数；兼容模式开启时只在默认安全列表后追加旧版 KEX，因此不会改变现代算法的优先级。
-- `crates/terminal_view/src/ssh_form_window.rs` 在高级设置页暴露“旧版 KEX 兼容模式”，并确保测试连接与保存连接走同一参数链路。
-- `crates/terminal/src/terminal.rs`、`crates/terminal_view/src/sidebar/file_manager_panel.rs`、`crates/sftp_view/src/lib.rs` 与 `crates/sftp/src/russh_impl.rs` 已全部透传该字段，避免出现终端与 SFTP 行为不一致。
-- `crates/db/src/ssh_tunnel.rs`、`crates/db/src/mysql/connection.rs`、`crates/db/src/postgresql/connection.rs` 的改动仅用于修补当前分支测试辅助构造，恢复本地验证能力，不改变生产逻辑。
+- `#2128` 已完成手工冲突迁移：[`highlighter.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/highlighter/highlighter.rs) 现在支持同步解析超时、注入层预计算与后台解析结果回填；[`mode.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/input/mode.rs) 与 [`state.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/input/state.rs) 已接入后台解析派发；[`element.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/input/element.rs) 已按可见连续段批量刷新高亮并跳过超长行。
+- `#2135` 已完成手工冲突迁移：[`theme/mod.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/theme/mod.rs) 新增 `input_background()` 并作为编辑器背景回退；[`input.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/input/input.rs)、[`select.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/select.rs)、[`date_picker.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/time/date_picker.rs)、[`otp_input.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/input/otp_input.rs) 等输入类组件已统一改走 `input_style`。
+- 本地集成验证已通过：`env CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo check -p main` 成功完成，说明当前 `dev` 对这两笔优化的迁移在编译层面成立。
+- 兼容性处理已收敛：由于当前分支没有 `mix_oklab`，[`theme/mod.rs`](/Users/hufei/RustroverProjects/onetcli/crates/ui/src/theme/mod.rs) 使用现有 `mix` 近似替代；由于当前分支没有 `wasm_stub` 链路，本次仅迁入 native 可用的高亮性能优化。
 
-### 本地验证
-- `cargo fmt --all`：通过
-- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`：通过
-- `cargo test -p one-core ssh_params_defaults_legacy_kex_to_false_when_missing`：通过
-- `cargo test -p one-core connection_repository_update_from_cloud_preserves_sync_baseline`：通过
+### 剩余风险
+- 当前没有 GUI 自动化或人工冒烟结果，深色模式输入背景与上游 main 的视觉细节可能仍有轻微偏差。
+- 后台解析优化只验证了编译通过，超大文件编辑场景仍建议后续在图形环境实际输入一次确认卡顿改善是否符合预期。
 
-### 额外观察
-- `cargo test -p one-core` 当前仍有 4 个与本次改动无关的既有失败，分别位于 `llm::storage` 与 `cloud_sync::engine`。它们不会影响本次 SSH 兼容开关结论，但说明仓库主干当前并非全绿。
 
-### 残余风险
-- 当前兼容模式是“整条 SSH 链路共享一个开关”，目标机与跳板机会一起启用旧版 KEX；如果后续需要细分到跳板机单独配置，需要再扩展参数模型。
-- 本次只补了旧版 KEX，不会自动复用用户 `~/.ssh/config` 中其它 OpenSSH 专有兼容项。
+---
 
-## 复审补充（ssh-legacy-kex-compatibility）
-生成时间：2026-03-27 12:02:00 +0800
+## 审查报告（terminal-command-scroll-bottom 实现）
+生成时间：2026-03-26 17:17:11 +0800
 
-### 复审结论
-- 用户实测表明“仅放宽 KEX”仍不足以连接老设备，这个反馈成立。
-- 复审 `russh` 默认 cipher 列表后确认：默认只带 `gcm/ctr/chacha20`，没有许多旧设备常见的 `aes*-cbc`。
-- 当前兼容开关已扩展为“旧版 SSH 协商兼容模式”：在保留现代算法优先级的前提下，同时把旧 KEX 和旧 CBC cipher 追加到候选列表末尾。
+### 需求完整性检查
+- 目标明确：修复 `view.rs` 中输入命令后应滚动到底部的行为。
+- 范围明确：仅修改 `crates/terminal_view/src/view.rs` 的输入滚动协调逻辑和文件内测试。
+- 交付物明确：代码修复、上下文摘要、操作日志、本地测试结果均已落地。
+- 风险与依赖明确：核心风险是误影响其它滚动路径，本次通过最小改动避免扩散。
 
-### 复审评分
+### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：91/100
-- 规范遵循：95/100
-- 需求匹配：98/100
-- 架构一致：96/100
-- 风险评估：92/100
-- 综合评分：95/100
+- 测试覆盖：92/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：93/100
+
+### 综合评分
+- 95/100
 - 建议：通过
 
-### 复审验证
-- `cargo fmt --all`：通过
-- `cargo test -p ssh -p sftp -p terminal -p terminal_view -p sftp_view -p db`：通过
+### 结论
+- `crates/terminal_view/src/view.rs` 新增了 `should_scroll_to_bottom_on_user_input`，在用户输入前统一清理陈旧的 `future_display_offset`。
+- `write_to_pty` 现在会先取消待提交滚动，再在当前视图确实离开底部时调用既有的 `scroll_display(Bottom)`，保证输入命令后稳定停留在底部。
+- 新增两条文件内回归测试，覆盖“当前已在底部但存在待提交偏移”和“当前离底部且存在待提交偏移”两个场景。
+- 本地验证已完成：`cargo test -p terminal_view user_input_scroll --lib` 先失败后通过，`cargo test -p terminal_view --lib` 最终全部通过。
 
-### 新的残余风险
-- 如果目标服务端进一步依赖 `ssh-dss` 或 `3des-cbc` 这类更老算法，当前兼容模式仍可能不足；因为当前工作区启用的 `russh` feature 不包含 `dsa` / `des`。
+### 剩余风险
+- 当前仍缺少图形界面层面的自动化冒烟，真实拖动滚动条后立刻输入命令的交互建议后续在 GUI 环境再确认一次。
+- 现有验证集中在单元测试层，尚未覆盖鼠标拖动、滚轮和 ALT_SCREEN 混合操作的端到端路径。
+
+---
+
+## 审查报告（db-view-data-grid-multi-delete 实现）
+生成时间：2026-03-26 19:47:33 +0800
+
+### 需求完整性检查
+- 目标明确：修复 `db_view` 数据编辑 `data_grid` 中多选多行后点击删除只处理最后活动行的问题。
+- 范围明确：仅修改 `crates/db_view/src/table_data/data_grid.rs` 的删除入口和文件内测试，不扩散到 `one_ui` 公共接口。
+- 交付物明确：代码修复、上下文摘要、操作日志和本地测试结果均已落地。
+- 风险与依赖明确：核心风险是新行真实删除引发索引漂移，本次通过降序删除规避。
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：93/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 结论
+- [`data_grid.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/table_data/data_grid.rs#L62) 新增 `collect_delete_row_indices`，负责把多选区映射为唯一行集合，并确保删除顺序为降序。
+- [`data_grid.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/table_data/data_grid.rs#L1077) 的删除按钮入口现在优先读取 `state.selection().all_cells()`，不再只依赖最后活动单元格；没有多选区时仍回退到既有单选逻辑。
+- [`data_grid.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/table_data/data_grid.rs#L2564) 新增 3 个回归测试，覆盖去重降序、空选区 fallback、显式选区优先级。
+- 本地验证已完成：`cargo test -p db_view --lib` 通过，`db_view` 全量 200 个单元测试成功。
+
+### 剩余风险
+- 目前没有 GUI 层自动化用例直接覆盖“鼠标框选多行后点击删除”的交互路径，建议后续在图形环境补一次冒烟验证。
+- 当前策略基于 `all_cells()` 展开矩形选区；在极大面积多列多行框选场景下会先遍历单元格再压缩到行，但作为点击删除前的低频动作，当前开销可接受。
+
+---
+
+## 审查报告（table_designer 字段排序 SQL 生成）
+生成时间：2026-03-27 00:05:00 +0800
+
+### 需求完整性检查
+- 目标明确：排序字段后应生成 ALTER TABLE 语句
+- 范围明确：限定 MySQL 插件 SQL 生成逻辑
+- 交付物明确：最小补丁、单元测试、验证输出与日志
+- 风险与依赖明确：其他数据库不处理列排序
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：92/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：90/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 验证结果
+- 已执行：`cargo test -p db mysql::plugin::tests::`
+  - 结果：通过（32 passed）
+- LSP 诊断：未执行
+  - 原因：rust-analyzer 在当前工具链不可用
+
+### 结论
+- MySQL `build_alter_table_sql` 已补齐列顺序差异处理，生成 `MODIFY COLUMN ... FIRST/AFTER`。
+- 新增测试 `test_build_alter_table_sql_reorder_columns` 已通过，覆盖仅排序变化场景。
+
+### 追加说明（修复排序与新增列冗余修改）
+- 新增测试：`test_build_alter_table_sql_add_column_no_reorder`
+- 已执行：`cargo test -p db mysql::plugin::tests::`
+  - 结果：通过（33 passed）
+- 行为更新：仅当“既有列相对顺序变化”时才生成排序 MODIFY，避免新增列导致的冗余修改
+
+### 追加说明（扩展 SQL 生成测试集）
+- 新增测试：`test_build_alter_table_sql_reorder_with_modify_column`
+- 已执行：`cargo test -p db mysql::plugin::tests::`
+  - 结果：通过（34 passed）
+
+---
+
+## 审查报告（全数据库 SQL 生成测试集扩展）
+生成时间：2026-03-27 00:45:00 +0800
+
+### 需求完整性检查
+- 目标明确：覆盖所有数据库插件的 SQL 生成场景
+- 范围明确：仅新增各插件测试用例
+- 交付物明确：测试用例 + 本地验证记录
+
+### 验证结果
+- 已执行：`cargo test -p db postgresql::plugin::tests::`（31 passed）
+- 已执行：`cargo test -p db mssql::plugin::tests::`（26 passed）
+- 已执行：`cargo test -p db oracle::plugin::tests::`（26 passed）
+- 已执行：`cargo test -p db sqlite::plugin::tests::`（21 passed）
+- 已执行：`cargo test -p db clickhouse::plugin::tests::`（20 passed）
+- LSP 诊断：未执行（rust-analyzer 不可用）
+
+### 结论
+- PostgreSQL：新增顺序变化无差异与默认/非空变更测试
+- MSSQL：新增 ALTER COLUMN 与 UNIQUE INDEX 测试
+- Oracle：新增 MODIFY 默认值/非空与 UNIQUE INDEX 测试
+- SQLite：新增结构变更重建与顺序变化无差异测试
+- ClickHouse：新增 MODIFY 类型与 ADD INDEX 测试
