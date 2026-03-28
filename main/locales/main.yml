@@ -57,6 +57,18 @@ Home:
     en: "Search connections..."
     zh-CN: 搜索连接...
     zh-HK: 搜尋連線...
+  saved_connection_picker_trigger:
+    en: Open Saved Connection
+    zh-CN: 打开已保存连接
+    zh-HK: 打開已保存連線
+  saved_connection_picker_search_placeholder:
+    en: "Search saved connections..."
+    zh-CN: 搜索已保存连接...
+    zh-HK: 搜尋已保存連線...
+  saved_connection_picker_empty:
+    en: No saved connections found
+    zh-CN: 没有找到已保存连接
+    zh-HK: 找不到已保存連線
   new_connection:
     en: New Connection
     zh-CN: 新建连接

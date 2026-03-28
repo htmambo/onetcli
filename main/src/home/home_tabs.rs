@@ -29,6 +29,134 @@ impl HomePage {
         }
     }
 
+    fn find_workspace_for_connection(&self, connection: &StoredConnection) -> Option<Workspace> {
+        connection
+            .workspace_id
+            .and_then(|id| {
+                self.workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == Some(id))
+            })
+            .cloned()
+    }
+
+    fn find_existing_tab_index_for_connection(
+        &self,
+        connection: &StoredConnection,
+        cx: &App,
+    ) -> Option<usize> {
+        let connection_id = connection.id?;
+        let tabs = self.tab_container.read(cx);
+
+        match connection.connection_type {
+            ConnectionType::Database => tabs.tabs().iter().enumerate().find_map(|(index, tab)| {
+                let view = tab.content().view();
+                let database_tab = view.downcast::<DatabaseTabView>().ok()?;
+                database_tab
+                    .read(cx)
+                    .contains_connection_id(connection_id)
+                    .then_some(index)
+            }),
+            ConnectionType::Redis => tabs.tabs().iter().enumerate().find_map(|(index, tab)| {
+                let view = tab.content().view();
+                let redis_tab = view.downcast::<RedisTabView>().ok()?;
+                redis_tab
+                    .read(cx)
+                    .contains_connection_id(connection_id)
+                    .then_some(index)
+            }),
+            ConnectionType::MongoDB => tabs.tabs().iter().enumerate().find_map(|(index, tab)| {
+                let view = tab.content().view();
+                let mongo_tab = view.downcast::<MongoTabView>().ok()?;
+                mongo_tab
+                    .read(cx)
+                    .contains_connection_id(connection_id)
+                    .then_some(index)
+            }),
+            ConnectionType::Serial => tabs.tabs().iter().enumerate().find_map(|(index, tab)| {
+                let view = tab.content().view();
+                let terminal = view.downcast::<TerminalView>().ok()?;
+                let terminal = terminal.read(cx);
+
+                (terminal.connection_kind(cx) == TerminalConnectionKind::Serial
+                    && terminal.connection_id(cx) == Some(connection_id))
+                .then_some(index)
+            }),
+            ConnectionType::SshSftp => {
+                let mut sftp_fallback_index = None;
+
+                for (index, tab) in tabs.tabs().iter().enumerate() {
+                    if let Ok(terminal) = tab.content().view().downcast::<TerminalView>() {
+                        let terminal = terminal.read(cx);
+                        if terminal.connection_kind(cx) == TerminalConnectionKind::Ssh
+                            && terminal.connection_id(cx) == Some(connection_id)
+                        {
+                            return Some(index);
+                        }
+                    }
+
+                    if let Ok(sftp) = tab.content().view().downcast::<SftpView>() {
+                        if sftp.read(cx).connection_id() == Some(connection_id)
+                            && sftp_fallback_index.is_none()
+                        {
+                            sftp_fallback_index = Some(index);
+                        }
+                    }
+                }
+
+                sftp_fallback_index
+            }
+            _ => None,
+        }
+    }
+
+    fn activate_existing_tab_for_connection(
+        &mut self,
+        connection: &StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self.find_existing_tab_index_for_connection(connection, cx) else {
+            return false;
+        };
+
+        self.tab_container.update(cx, |tab_container, cx| {
+            tab_container.set_active_index(index, window, cx);
+        });
+        true
+    }
+
+    pub(crate) fn open_connection_from_saved_picker(
+        &mut self,
+        connection: &StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.activate_existing_tab_for_connection(connection, window, cx) {
+            return;
+        }
+
+        let workspace = self.find_workspace_for_connection(connection);
+        match connection.connection_type {
+            ConnectionType::Database => {
+                self.add_item_to_tab(connection, workspace, window, cx);
+            }
+            ConnectionType::Redis => {
+                self.open_redis_tab(connection.clone(), workspace, window, cx);
+            }
+            ConnectionType::MongoDB => {
+                self.open_mongodb_tab(connection.clone(), workspace, window, cx);
+            }
+            ConnectionType::SshSftp => {
+                self.open_ssh_terminal(connection.clone(), window, cx);
+            }
+            ConnectionType::Serial => {
+                self.open_serial_terminal(connection.clone(), window, cx);
+            }
+            _ => {}
+        }
+    }
+
     fn register_terminal_view(&mut self, terminal_view: &Entity<TerminalView>) {
         self.terminal_views.retain(|view| view.upgrade().is_some());
         self.terminal_views.push(terminal_view.downgrade());

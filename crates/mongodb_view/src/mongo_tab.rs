@@ -52,6 +52,12 @@ pub struct MongoTabView {
 }
 
 impl MongoTabView {
+    pub fn contains_connection_id(&self, connection_id: i64) -> bool {
+        self.connections
+            .iter()
+            .any(|connection| connection.id == Some(connection_id))
+    }
+
     pub fn new_with_active_conn(
         workspace: Option<Workspace>,
         connections: Vec<StoredConnection>,

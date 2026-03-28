@@ -2,7 +2,8 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Render, RenderOnce, SharedString, Styled, Task, Window, WindowControlArea, div, px,
+    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Task, Window, WindowControlArea,
+    div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -39,6 +40,8 @@ pub enum TabContainerEvent {
     TabActivated { index: usize, id: String },
     /// A tab was closed
     TabClosed { id: String },
+    /// Request the owner to trigger the trailing tab-bar action.
+    TabBarTrailingActionRequested,
 }
 
 // ============================================================================
@@ -446,6 +449,95 @@ pub struct TabListItem {
     container: Entity<TabContainer>,
 }
 
+#[derive(IntoElement)]
+pub struct TabListActionItem {
+    label: SharedString,
+    selected: bool,
+}
+
+impl TabListActionItem {
+    pub fn new(label: SharedString) -> Self {
+        Self {
+            label,
+            selected: false,
+        }
+    }
+}
+
+impl Selectable for TabListActionItem {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+impl RenderOnce for TabListActionItem {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        h_flex()
+            .id("tab-list-action-item")
+            .w_full()
+            .px_2()
+            .py_1()
+            .rounded(px(4.0))
+            .items_center()
+            .gap_2()
+            .cursor_pointer()
+            .when(self.selected, |el| el.bg(cx.theme().list_active))
+            .when(!self.selected, |el| {
+                el.hover(|style| style.bg(cx.theme().list_hover))
+            })
+            .child(
+                Icon::new(IconName::Plus)
+                    .size_4()
+                    .text_color(cx.theme().muted_foreground),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(self.label),
+            )
+    }
+}
+
+#[derive(IntoElement)]
+pub enum TabListPopoverItem {
+    Action(TabListActionItem),
+    Tab(TabListItem),
+}
+
+impl Selectable for TabListPopoverItem {
+    fn selected(mut self, selected: bool) -> Self {
+        match &mut self {
+            Self::Action(item) => item.selected = selected,
+            Self::Tab(item) => item.selected = selected,
+        }
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        match self {
+            Self::Action(item) => item.selected,
+            Self::Tab(item) => item.selected,
+        }
+    }
+}
+
+impl RenderOnce for TabListPopoverItem {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        match self {
+            Self::Action(item) => item.render(window, cx).into_any_element(),
+            Self::Tab(item) => item.render(window, cx).into_any_element(),
+        }
+    }
+}
+
 impl TabListItem {
     pub fn new(
         tab_index: usize,
@@ -589,11 +681,12 @@ pub struct TabListDelegate {
     container: Entity<TabContainer>,
     tabs: Vec<(usize, SharedString, Option<Icon>, bool)>,
     filtered_tabs: Vec<(usize, SharedString, Option<Icon>, bool)>,
+    header_action_label: Option<SharedString>,
     selected_index: Option<IndexPath>,
 }
 
 impl ListDelegate for TabListDelegate {
-    type Item = TabListItem;
+    type Item = TabListPopoverItem;
 
     fn perform_search(
         &mut self,
@@ -616,8 +709,21 @@ impl ListDelegate for TabListDelegate {
         Task::ready(())
     }
 
+    fn sections_count(&self, _cx: &App) -> usize {
+        if self.header_action_label.is_some() {
+            2
+        } else {
+            1
+        }
+    }
+
     fn items_count(&self, _section: usize, _cx: &App) -> usize {
-        self.filtered_tabs.len()
+        match (self.header_action_label.is_some(), _section) {
+            (true, 0) => 1,
+            (true, 1) => self.filtered_tabs.len(),
+            (false, 0) => self.filtered_tabs.len(),
+            _ => 0,
+        }
     }
 
     fn render_item(
@@ -626,18 +732,52 @@ impl ListDelegate for TabListDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let (tab_index, title, icon, closeable) = self.filtered_tabs.get(ix.row)?.clone();
+        if ix.section == 0 {
+            if let Some(label) = self.header_action_label.clone() {
+                return Some(TabListPopoverItem::Action(TabListActionItem::new(label)));
+            }
+        }
+
+        let tab_row = if self.header_action_label.is_some() {
+            if ix.section != 1 {
+                return None;
+            }
+            ix.row
+        } else {
+            ix.row
+        };
+        let (tab_index, title, icon, closeable) = self.filtered_tabs.get(tab_row)?.clone();
         let active_index = self.container.read(cx).active_index();
         let is_active = tab_index == active_index;
 
-        Some(TabListItem::new(
+        Some(TabListPopoverItem::Tab(TabListItem::new(
             tab_index,
             title,
             icon,
             closeable,
             is_active,
             self.container.clone(),
-        ))
+        )))
+    }
+
+    fn render_section_footer(
+        &mut self,
+        section: usize,
+        _window: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> Option<impl IntoElement> {
+        if self.header_action_label.is_some() && section == 0 {
+            Some(
+                div()
+                    .w_full()
+                    .h(px(1.0))
+                    .mx_2()
+                    .bg(cx.theme().border)
+                    .into_any_element(),
+            )
+        } else {
+            None::<gpui::AnyElement>
+        }
     }
 
     fn set_selected_index(
@@ -656,6 +796,14 @@ impl ListDelegate for TabListDelegate {
         cx: &mut Context<ListState<Self>>,
     ) {
         if let Some(ix) = self.selected_index {
+            if self.header_action_label.is_some() && ix.section == 0 {
+                self.container.update(cx, |this, cx| {
+                    this.set_tab_list_popover_open(false, window, cx);
+                    this.request_tab_bar_trailing_action(cx);
+                });
+                return;
+            }
+
             if let Some((tab_index, _, _, _)) = self.filtered_tabs.get(ix.row) {
                 let tab_index = *tab_index;
                 self.container.update(cx, |this, cx| {
@@ -698,6 +846,8 @@ pub struct TabContainer {
     tab_list: Option<Entity<ListState<TabListDelegate>>>,
     closing_tabs: HashSet<SharedString>,
     show_window_controls: bool,
+    tab_bar_trailing_view: Option<AnyView>,
+    tab_list_header_action_label: Option<SharedString>,
     /// Pinned tab that stays fixed before the scrollable tab list
     pinned_tab: Option<TabItem>,
     /// Whether the pinned tab is currently active (showing its content)
@@ -729,6 +879,8 @@ impl TabContainer {
             tab_list: None,
             closing_tabs: HashSet::new(),
             show_window_controls: false,
+            tab_bar_trailing_view: None,
+            tab_list_header_action_label: None,
             pinned_tab: None,
             pinned_tab_active: false,
         }
@@ -782,6 +934,20 @@ impl TabContainer {
     pub fn with_window_controls(mut self, show: bool) -> Self {
         self.show_window_controls = show;
         self
+    }
+
+    pub fn set_tab_bar_trailing_view<V>(&mut self, view: V)
+    where
+        V: Into<AnyView>,
+    {
+        self.tab_bar_trailing_view = Some(view.into());
+    }
+
+    pub fn set_tab_list_header_action_label(
+        &mut self,
+        label: impl Into<SharedString>,
+    ) {
+        self.tab_list_header_action_label = Some(label.into());
     }
 
     /// Set a pinned tab that stays fixed before the scrollable tab list.
@@ -863,7 +1029,7 @@ impl TabContainer {
         self.active_index = self.tabs.len() - 1;
         self.pinned_tab_active = false;
         self.tab_bar_scroll_handle
-            .scroll_to_item(self.tabs.len() - 1);
+            .scroll_to_item(self.tab_bar_scroll_target_index(self.tabs.len() - 1));
         cx.emit(TabContainerEvent::TabActivated {
             index: self.active_index,
             id,
@@ -907,7 +1073,7 @@ impl TabContainer {
         self.active_index = self.tabs.len() - 1;
         self.pinned_tab_active = false;
         self.tab_bar_scroll_handle
-            .scroll_to_item(self.tabs.len() - 1);
+            .scroll_to_item(self.tab_bar_scroll_target_index(self.tabs.len() - 1));
 
         // 激活新 tab 的 content
         if let Some(new_tab) = self.tabs.get(self.active_index) {
@@ -1305,7 +1471,8 @@ impl TabContainer {
                 old_tab.content().on_deactivate(window, cx);
             }
 
-            self.tab_bar_scroll_handle.scroll_to_item(index);
+            self.tab_bar_scroll_handle
+                .scroll_to_item(self.tab_bar_scroll_target_index(index));
             self.active_index = index;
 
             let tab_id = if let Some(new_tab) = self.tabs.get(self.active_index) {
@@ -1349,6 +1516,129 @@ impl TabContainer {
 
     pub fn set_show_menu(&mut self, show: bool, cx: &mut Context<Self>) {
         self.show_menu = show;
+        cx.notify();
+    }
+
+    fn tab_bar_scroll_target_index(&self, tab_index: usize) -> usize {
+        let is_last_tab = !self.tabs.is_empty() && tab_index + 1 == self.tabs.len();
+        if is_last_tab && self.tab_bar_trailing_view.is_some() {
+            self.tabs.len()
+        } else {
+            tab_index
+        }
+    }
+
+    fn handle_tab_bar_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bounds = self.tab_bar_scroll_handle.bounds();
+        if !bounds.contains(&event.position) {
+            return;
+        }
+
+        let mut delta = event.delta.pixel_delta(window.line_height());
+        if delta.x != px(0.0) && delta.y != px(0.0) {
+            if delta.x.abs() > delta.y.abs() {
+                delta.y = px(0.0);
+            } else {
+                delta.x = px(0.0);
+            }
+        }
+
+        let horizontal_delta = if delta.x != px(0.0) {
+            delta.x
+        } else {
+            delta.y
+        };
+        if horizontal_delta == px(0.0) {
+            return;
+        }
+
+        let old_offset = self.tab_bar_scroll_handle.offset();
+        let mut offset = old_offset;
+        offset.x += horizontal_delta;
+        offset.x = offset
+            .x
+            .clamp(-self.tab_bar_scroll_handle.max_offset().width, px(0.0));
+
+        if offset != old_offset {
+            self.tab_bar_scroll_handle.set_offset(offset);
+            cx.stop_propagation();
+            cx.notify();
+        }
+    }
+
+    pub fn scroll_to_tab_bar_trailing_view(&mut self, cx: &mut Context<Self>) {
+        if self.tab_bar_trailing_view.is_some() {
+            self.tab_bar_scroll_handle.scroll_to_item(self.tabs.len());
+            cx.notify();
+        }
+    }
+
+    fn request_tab_bar_trailing_action(&mut self, cx: &mut Context<Self>) {
+        if self.tab_bar_trailing_view.is_some() {
+            cx.emit(TabContainerEvent::TabBarTrailingActionRequested);
+        }
+    }
+
+    fn refresh_tab_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tabs_data: Vec<(usize, SharedString, Option<Icon>, bool)> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(idx, tab)| {
+                (
+                    idx,
+                    tab.content().title(cx),
+                    tab.content().icon(cx),
+                    tab.content().closeable(cx),
+                )
+            })
+            .collect();
+        let container = cx.entity();
+        let header_action_label = self.tab_list_header_action_label.clone();
+
+        if let Some(tab_list) = &self.tab_list {
+            tab_list.update(cx, |state, _| {
+                let delegate = state.delegate_mut();
+                delegate.tabs = tabs_data.clone();
+                delegate.filtered_tabs = tabs_data;
+                delegate.header_action_label = header_action_label.clone();
+            });
+        } else {
+            self.tab_list = Some(cx.new(|cx| {
+                ListState::new(
+                    TabListDelegate {
+                        container,
+                        tabs: tabs_data.clone(),
+                        filtered_tabs: tabs_data,
+                        header_action_label: header_action_label.clone(),
+                        selected_index: None,
+                    },
+                    window,
+                    cx,
+                )
+                .searchable(true)
+            }));
+        }
+    }
+
+    fn set_tab_list_popover_open(
+        &mut self,
+        open: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.list_popover_open = open;
+        if open {
+            self.refresh_tab_list(window, cx);
+            if let Some(tab_list) = &self.tab_list {
+                tab_list.focus_handle(cx).focus(window, cx);
+            }
+        }
         cx.notify();
     }
 
@@ -1537,6 +1827,7 @@ impl TabContainer {
         let left_padding = self.left_padding.unwrap_or(px(8.0));
 
         let tab_list = self.tab_list.clone();
+        let tab_list_popover_open = self.list_popover_open;
 
         // 窗口拖动状态管理（仅在 Windows/Linux 上需要，且启用窗口控件时）
         let is_linux = cfg!(target_os = "linux");
@@ -1563,6 +1854,7 @@ impl TabContainer {
             .items_center()
             .border_b_1()
             .border_color(border_color)
+            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
             .when(show_windows_drag_spacer, |this| {
                 this.window_control_area(WindowControlArea::Drag)
             })
@@ -1668,9 +1960,12 @@ impl TabContainer {
             })
             .child(
                 h_flex()
-                    .id("tabs")
+                    .id("tabs-scroll-region")
                     .flex_1()
-                    // `overflow_x_scroll()` 容器在 Linux/macOS 仍需保留手动拖窗事件链。
+                    .min_w(px(0.0))
+                    .relative()
+                    // `overflow_hidden()` + `track_scroll()` 保留横向滚动能力，
+                    // 同时隐藏系统滚动条；滚轮事件只作用于 tab 列表本身。
                     // Windows 不在这里声明 Drag 区域，避免整块 tab 容器吞掉 tab 自身拖拽排序。
                     .when(manual_window_move, |this| {
                         this.on_mouse_down_out(window.listener_for(
@@ -1698,6 +1993,7 @@ impl TabContainer {
                             }
                         }))
                     })
+                    .overflow_hidden()
                     .overflow_x_scroll()
                     .when(!is_macos && self.pinned_tab.is_none(), |this| {
                         this.pl(left_padding)
@@ -1706,23 +2002,6 @@ impl TabContainer {
                     .pr_2()
                     .gap_1()
                     .track_scroll(&self.tab_bar_scroll_handle)
-                    // Linux 客户端装饰模式下，右键显示窗口菜单
-                    .when(
-                        is_linux && is_client_decorated && show_window_controls,
-                        |this| {
-                            this.child(
-                                div()
-                                    .top_0()
-                                    .left_0()
-                                    .absolute()
-                                    .size_full()
-                                    .h_full()
-                                    .on_mouse_down(MouseButton::Right, move |ev, window, _| {
-                                        window.show_window_menu(ev.position)
-                                    }),
-                            )
-                        },
-                    )
                     .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                         let title = tab.content().title(cx);
                         let icon = tab.content().icon(cx);
@@ -1735,7 +2014,9 @@ impl TabContainer {
                         div()
                             .id(idx)
                             .flex()
-                            .occlude()
+                            // Tab 自身仍要拦住点击/悬停等交互，但不能挡住后方
+                            // 滚动容器的滚轮命中，否则鼠标压在 Tab 上时无法横向滚动。
+                            .block_mouse_except_scroll()
                             .flex_shrink_0()
                             .overflow_hidden()
                             .items_center()
@@ -1895,6 +2176,15 @@ impl TabContainer {
                                 )
                             })
                     }))
+                    .when_some(self.tab_bar_trailing_view.clone(), |this, view| {
+                        this.child(
+                            h_flex()
+                                .id("tab-bar-trailing-controls")
+                                .flex_shrink_0()
+                                .items_center()
+                                .child(view),
+                        )
+                    })
                     .when(show_windows_drag_spacer, |this| {
                         this.child(
                             div()
@@ -1905,7 +2195,26 @@ impl TabContainer {
                                 .occlude()
                                 .window_control_area(WindowControlArea::Drag),
                         )
-                    }),
+                    })
+                    // Linux 客户端装饰模式下，右键显示窗口菜单。
+                    // 这个覆盖层必须放在 tabs 之后，避免被 ScrollHandle
+                    // 计入前置 child 索引，导致 scroll_to_item(index) 对错目标。
+                    .when(
+                        is_linux && is_client_decorated && show_window_controls,
+                        |this| {
+                            this.child(
+                                div()
+                                    .top_0()
+                                    .left_0()
+                                    .absolute()
+                                    .size_full()
+                                    .h_full()
+                                    .on_mouse_down(MouseButton::Right, move |ev, window, _| {
+                                        window.show_window_menu(ev.position)
+                                    }),
+                            )
+                        },
+                    ),
             )
             .when(show_windows_drag_spacer, |el| {
                 el.child(
@@ -1920,50 +2229,12 @@ impl TabContainer {
             })
             .child(
                 Popover::new("tab-list-popover")
+                    .mouse_button(MouseButton::Right)
                     .anchor(Corner::TopRight)
                     .p_0()
                     .open(self.list_popover_open)
                     .on_open_change(cx.listener(move |this, open, window, cx| {
-                        this.list_popover_open = *open;
-                        if *open {
-                            let tabs_data: Vec<(usize, SharedString, Option<Icon>, bool)> = this
-                                .tabs
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, tab)| {
-                                    (
-                                        idx,
-                                        tab.content().title(cx),
-                                        tab.content().icon(cx),
-                                        tab.content().closeable(cx),
-                                    )
-                                })
-                                .collect();
-                            let container = cx.entity();
-
-                            if let Some(tab_list) = &this.tab_list {
-                                tab_list.update(cx, |state, _| {
-                                    let delegate = state.delegate_mut();
-                                    delegate.tabs = tabs_data.clone();
-                                    delegate.filtered_tabs = tabs_data;
-                                });
-                            } else {
-                                this.tab_list = Some(cx.new(|cx| {
-                                    ListState::new(
-                                        TabListDelegate {
-                                            container,
-                                            tabs: tabs_data.clone(),
-                                            filtered_tabs: tabs_data,
-                                            selected_index: None,
-                                        },
-                                        window,
-                                        cx,
-                                    )
-                                    .searchable(true)
-                                }));
-                            }
-                        }
-                        cx.notify();
+                        this.set_tab_list_popover_open(*open, window, cx);
                     }))
                     .when_some(tab_list.as_ref(), |popover, list| {
                         popover.track_focus(&list.focus_handle(cx))
@@ -1973,7 +2244,21 @@ impl TabContainer {
                             .icon(IconName::ChevronDown)
                             .ghost()
                             .compact()
-                            .occlude(),
+                            .occlude()
+                            .selected(tab_list_popover_open)
+                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            })
+                            .on_click({
+                                let view = view.clone();
+                                move |_, window, cx| {
+                                    view.update(cx, |this, cx| {
+                                        let next_open = !this.list_popover_open;
+                                        this.set_tab_list_popover_open(next_open, window, cx);
+                                    });
+                                }
+                            }),
                     )
                     .when_some(tab_list, |popover, list| {
                         popover.child(

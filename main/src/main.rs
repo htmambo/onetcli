@@ -9,6 +9,7 @@ mod encourage;
 mod home;
 mod home_tab;
 mod onetcli_app;
+mod saved_connection_picker;
 mod setting_tab;
 mod settings;
 mod sync_server_theme;

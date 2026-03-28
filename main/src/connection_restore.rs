@@ -1,12 +1,11 @@
 use std::collections::HashSet;
 
 use gpui::{
-    App, AppContext, Context, Entity, FontWeight, IntoElement, ParentElement, Render, Styled,
-    Window, div, px,
+    App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, WindowExt, checkbox::Checkbox, dialog::DialogButtonProps, h_flex,
-    scroll::ScrollableElement as _, v_flex,
+    ActiveTheme, WindowExt, checkbox::Checkbox, dialog::DialogButtonProps, h_flex, v_flex,
 };
 use one_core::connection_restore::{
     ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
@@ -251,12 +250,14 @@ impl Render for ConnectionRestoreDialogView {
                     .gap_3()
                     .items_start()
                     .p_3()
+                    .block_mouse_except_scroll()
                     .bg(cx.theme().background)
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded_md()
                     .child(
                         Checkbox::new(format!("restore-connection-{}", snapshot_id))
+                            .block_mouse_except_scroll()
                             .checked(checked)
                             .on_click(move |_, _, cx| {
                                 view_for_toggle.update(cx, |view, cx| {
@@ -329,12 +330,12 @@ impl Render for ConnectionRestoreDialogView {
                     ),
             )
             .child(
-                v_flex()
+                div()
+                    .id("connection-restore-list-scroll")
                     .w_full()
                     .max_h(px(360.0))
-                    .overflow_y_scrollbar()
-                    .gap_2()
-                    .children(item_views),
+                    .overflow_y_scroll()
+                    .child(v_flex().w_full().gap_2().children(item_views)),
             )
             .child(
                 h_flex().w_full().justify_end().child(

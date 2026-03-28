@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
+use crate::saved_connection_picker::TabBarSavedConnectionPicker;
 use crate::setting_tab::{AppSettings, SavedWindowBounds};
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement,
@@ -60,6 +61,7 @@ use one_core::tab_container::{
 use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save};
 use one_core::utils::debouncer::Debouncer;
 use reqwest_client::ReqwestClient;
+use rust_i18n::t;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -384,25 +386,53 @@ impl OnetCliApp {
         }
 
         // Set HomePage as the pinned tab (always visible, not scrollable)
-        {
+        let saved_connection_picker = {
             let tab_container_clone = tab_container.clone();
             tab_container.update(cx, |tc, cx| {
                 let home_page = cx.new(|cx| HomePage::new(tab_container_clone, window, cx));
                 cx.set_global(GlobalHomePage {
                     home_page: home_page.clone(),
                 });
+                let saved_connection_picker =
+                    cx.new(|cx| TabBarSavedConnectionPicker::new(window, cx));
                 let home_tab = TabItem::new("home", "app", home_page);
                 tc.set_pinned_tab(home_tab, cx);
+                tc.set_tab_bar_trailing_view(saved_connection_picker.clone());
+                tc.set_tab_list_header_action_label(t!("Home.new_connection").to_string());
                 tc.activate_pinned_tab(window, cx);
-            });
-        }
+                saved_connection_picker
+            })
+        };
 
+        let tab_container_for_events = tab_container.clone();
+        let saved_connection_picker_for_events = saved_connection_picker.clone();
         cx.subscribe_in(
             &tab_container,
             window,
-            |this, _tc, ev: &TabContainerEvent, _window, cx| {
-                if matches!(ev, TabContainerEvent::LayoutChanged) {
-                    this.save_layout(cx);
+            move |this, _tc, ev: &TabContainerEvent, _window, cx| {
+                match ev {
+                    TabContainerEvent::LayoutChanged => {
+                        this.save_layout(cx);
+                    }
+                    TabContainerEvent::TabBarTrailingActionRequested => {
+                        tab_container_for_events.update(cx, |tc, cx| {
+                            tc.scroll_to_tab_bar_trailing_view(cx);
+                        });
+
+                        let saved_connection_picker = saved_connection_picker_for_events.clone();
+                        cx.defer(move |cx| {
+                            let Some(window_id) = cx.active_window() else {
+                                return;
+                            };
+
+                            let _ = cx.update_window(window_id, |_entity, window, cx| {
+                                saved_connection_picker.update(cx, |picker, cx| {
+                                    picker.open(window, cx);
+                                });
+                            });
+                        });
+                    }
+                    _ => {}
                 }
             },
         )

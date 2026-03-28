@@ -532,6 +532,10 @@ pub struct SftpView {
 }
 
 impl SftpView {
+    pub fn connection_id(&self) -> Option<i64> {
+        self.stored_connection.id
+    }
+
     pub fn new(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_index(conn, None, window, cx)
     }
