@@ -96,6 +96,14 @@ File:
 
 # 占位符
 Placeholder:
+  path:
+    en: Enter path...
+    zh-CN: 输入路径...
+    zh-HK: 輸入路徑...
+  search:
+    en: Search...
+    zh-CN: 搜索...
+    zh-HK: 搜尋...
   filename:
     en: Filename
     zh-CN: 文件名
@@ -308,6 +316,40 @@ FilePicker:
     en: Select folder to upload
     zh-CN: 选择要上传的文件夹
     zh-HK: 選擇要上傳的文件夾
+
+FileList:
+  header_name:
+    en: Name
+    zh-CN: 名称
+    zh-HK: 名稱
+  header_modified:
+    en: Date Modified
+    zh-CN: 修改日期
+    zh-HK: 修改日期
+  header_size:
+    en: Size
+    zh-CN: 大小
+    zh-HK: 大小
+  header_kind:
+    en: Kind
+    zh-CN: 类型
+    zh-HK: 類型
+  header_permissions:
+    en: Permissions
+    zh-CN: 权限
+    zh-HK: 權限
+  kind_file:
+    en: file
+    zh-CN: 文件
+    zh-HK: 文件
+  kind_folder:
+    en: folder
+    zh-CN: 文件夹
+    zh-HK: 文件夾
+  bytes:
+    en: Bytes
+    zh-CN: 字节
+    zh-HK: 位元組
 
 # 传输相关
 Transfer:

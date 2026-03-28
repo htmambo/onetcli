@@ -9,12 +9,11 @@ pub use file_list_panel::{
 };
 
 use gpui::{
-    App, AsyncApp, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
-    FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
-    actions, div, prelude::*, px,
+    actions, div, prelude::*, px, App, AsyncApp, Context, Entity, EventEmitter, ExternalPaths,
+    FocusHandle, Focusable, FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString,
+    Styled, WeakEntity, Window,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowExt,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
@@ -24,7 +23,7 @@ use gpui_component::{
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
-    v_flex,
+    v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowExt,
 };
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
@@ -37,9 +36,13 @@ use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};
 use std::collections::VecDeque;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 
@@ -165,6 +168,7 @@ struct LocalFileEntry {
     size: u64,
     modified: SystemTime,
     is_dir: bool,
+    permissions: String,
 }
 
 impl TransferClientPool {
@@ -292,6 +296,82 @@ fn format_permissions(mode: u32, is_dir: bool) -> String {
     result.push(if mode & 0o004 != 0 { 'r' } else { '-' });
     result.push(if mode & 0o002 != 0 { 'w' } else { '-' });
     result.push(if mode & 0o001 != 0 { 'x' } else { '-' });
+
+    result
+}
+
+fn format_local_permissions(metadata: &std::fs::Metadata, is_dir: bool) -> String {
+    #[cfg(unix)]
+    {
+        format_permissions(metadata.permissions().mode(), is_dir)
+    }
+
+    #[cfg(windows)]
+    {
+        format_windows_permissions(metadata, is_dir)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let mut result = String::with_capacity(10);
+        result.push(if is_dir { 'd' } else { '-' });
+        if metadata.permissions().readonly() {
+            result.push_str("r--r--r--");
+        } else {
+            result.push_str("rw-rw-rw-");
+        }
+        result
+    }
+}
+
+#[cfg(windows)]
+fn format_windows_permissions(metadata: &std::fs::Metadata, is_dir: bool) -> String {
+    const FILE_ATTRIBUTE_READONLY: u32 = 0x0000_0001;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0000_0002;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
+    const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x0000_0020;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0000_0800;
+    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x0000_4000;
+
+    let attributes = metadata.file_attributes();
+    let readonly = attributes & FILE_ATTRIBUTE_READONLY != 0 || metadata.permissions().readonly();
+
+    let mut result = String::with_capacity(10);
+    result.push(if is_dir { 'd' } else { '-' });
+    result.push('r');
+    result.push(if readonly { '-' } else { 'w' });
+    result.push(if is_dir { 'x' } else { '-' });
+    result.push(if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+        'h'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+        's'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_ARCHIVE != 0 {
+        'a'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        'l'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_COMPRESSED != 0 {
+        'c'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_ENCRYPTED != 0 {
+        'e'
+    } else {
+        '-'
+    });
 
     result
 }
@@ -539,9 +619,9 @@ impl SftpView {
         let remote_panel = cx.new(|cx| FileListPanel::new("/root".to_string(), true, window, cx));
 
         let local_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
         let remote_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
 
         let mut subscriptions = Vec::new();
 
@@ -758,12 +838,13 @@ impl SftpView {
             Ok(dir_entries) => {
                 for entry in dir_entries.flatten() {
                     if let Ok(metadata) = entry.metadata() {
+                        let is_dir = metadata.is_dir();
                         entries.push(FileItem {
                             name: entry.file_name().to_string_lossy().to_string(),
                             size: metadata.len(),
                             modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                            is_dir: metadata.is_dir(),
-                            permissions: String::new(),
+                            is_dir,
+                            permissions: format_local_permissions(&metadata, is_dir),
                         });
                     }
                 }
@@ -1758,11 +1839,13 @@ impl SftpView {
                     let mut entries = Vec::new();
                     for entry in dir_entries.flatten() {
                         if let Ok(metadata) = entry.metadata() {
+                            let is_dir = metadata.is_dir();
                             entries.push(LocalFileEntry {
                                 name: entry.file_name().to_string_lossy().to_string(),
                                 size: metadata.len(),
                                 modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                                is_dir: metadata.is_dir(),
+                                is_dir,
+                                permissions: format_local_permissions(&metadata, is_dir),
                             });
                         }
                     }
@@ -1782,7 +1865,7 @@ impl SftpView {
                             size: e.size,
                             modified: e.modified,
                             is_dir: e.is_dir,
-                            permissions: String::new(),
+                            permissions: e.permissions,
                         })
                         .collect();
                     let _ = local_panel.update(cx, |panel, cx| {

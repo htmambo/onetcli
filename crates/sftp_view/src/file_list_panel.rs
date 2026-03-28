@@ -1,15 +1,15 @@
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, IntoElement, ListSizingBehavior, MouseButton,
-    MouseDownEvent, ParentElement, Render, SharedString, Styled, UniformListScrollHandle, Window,
-    div, prelude::*, px, uniform_list,
+    div, prelude::*, px, uniform_list, App, Bounds, Context, DragMoveEvent, Empty, Entity,
+    EntityId, FocusHandle, Focusable, IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent,
+    ParentElement, Pixels, Render, SharedString, Styled, UniformListScrollHandle, Window,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, InteractiveElementExt, Sizable, Size, h_flex,
+    h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
-    scroll::Scrollbar,
+    scroll::{Scrollbar, ScrollbarShow},
     tooltip::Tooltip,
-    v_flex,
+    v_flex, ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable,
 };
 use rust_i18n::t;
 use std::collections::HashSet;
@@ -39,6 +39,120 @@ pub enum SortOrder {
     Descending,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum FileListColumn {
+    Name,
+    Modified,
+    Size,
+    Kind,
+    Permissions,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FileListColumnWidths {
+    name: Pixels,
+    modified: Pixels,
+    size: Pixels,
+    kind: Pixels,
+    permissions: Pixels,
+}
+
+impl Default for FileListColumnWidths {
+    fn default() -> Self {
+        Self {
+            name: px(220.),
+            modified: px(160.),
+            size: px(96.),
+            kind: px(88.),
+            permissions: px(120.),
+        }
+    }
+}
+
+impl FileListColumnWidths {
+    fn get(&self, column: FileListColumn) -> Pixels {
+        match column {
+            FileListColumn::Name => self.name,
+            FileListColumn::Modified => self.modified,
+            FileListColumn::Size => self.size,
+            FileListColumn::Kind => self.kind,
+            FileListColumn::Permissions => self.permissions,
+        }
+    }
+
+    fn set(&mut self, column: FileListColumn, width: Pixels) {
+        match column {
+            FileListColumn::Name => self.name = width,
+            FileListColumn::Modified => self.modified = width,
+            FileListColumn::Size => self.size = width,
+            FileListColumn::Kind => self.kind = width,
+            FileListColumn::Permissions => self.permissions = width,
+        }
+    }
+
+    fn min_width(column: FileListColumn) -> Pixels {
+        match column {
+            FileListColumn::Name => px(160.),
+            FileListColumn::Modified => px(140.),
+            FileListColumn::Size => px(80.),
+            FileListColumn::Kind => px(80.),
+            FileListColumn::Permissions => px(100.),
+        }
+    }
+
+    fn max_width(column: FileListColumn) -> Pixels {
+        match column {
+            FileListColumn::Name => px(480.),
+            FileListColumn::Modified => px(280.),
+            FileListColumn::Size => px(180.),
+            FileListColumn::Kind => px(180.),
+            FileListColumn::Permissions => px(240.),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FileListColumnBounds {
+    name: Bounds<Pixels>,
+    modified: Bounds<Pixels>,
+    size: Bounds<Pixels>,
+    kind: Bounds<Pixels>,
+    permissions: Bounds<Pixels>,
+}
+
+impl FileListColumnBounds {
+    fn get(&self, column: FileListColumn) -> Bounds<Pixels> {
+        match column {
+            FileListColumn::Name => self.name,
+            FileListColumn::Modified => self.modified,
+            FileListColumn::Size => self.size,
+            FileListColumn::Kind => self.kind,
+            FileListColumn::Permissions => self.permissions,
+        }
+    }
+
+    fn set(&mut self, column: FileListColumn, bounds: Bounds<Pixels>) {
+        match column {
+            FileListColumn::Name => self.name = bounds,
+            FileListColumn::Modified => self.modified = bounds,
+            FileListColumn::Size => self.size = bounds,
+            FileListColumn::Kind => self.kind = bounds,
+            FileListColumn::Permissions => self.permissions = bounds,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ResizeColumn(pub (EntityId, FileListColumn));
+
+impl Render for ResizeColumn {
+    fn render(&mut self, _window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
+const FILE_ROW_HEIGHT: Pixels = px(28.);
+
 fn format_file_size(size: u64) -> String {
     if size == 0 {
         return "- -".to_string();
@@ -54,7 +168,7 @@ fn format_file_size(size: u64) -> String {
     } else if size >= KB {
         format!("{:.2} kB", size as f64 / KB as f64)
     } else {
-        format!("{} Bytes", size)
+        format!("{} {}", size, t!("FileList.bytes"))
     }
 }
 
@@ -69,7 +183,7 @@ fn get_file_kind(name: &str) -> String {
             return ext.to_lowercase();
         }
     }
-    "file".to_string()
+    t!("FileList.kind_file").to_string()
 }
 
 pub struct FileListPanel {
@@ -90,6 +204,9 @@ pub struct FileListPanel {
     path_input: Entity<InputState>,
 
     scroll_handle: UniformListScrollHandle,
+    column_widths: FileListColumnWidths,
+    column_bounds: FileListColumnBounds,
+    resizing_column: Option<FileListColumn>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<gpui::Subscription>,
 }
@@ -102,8 +219,10 @@ impl FileListPanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
-        let path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
-        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search..."));
+        let path_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
+        let search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.search")));
 
         let mut subscriptions = Vec::new();
         subscriptions.push(cx.subscribe(
@@ -142,6 +261,9 @@ impl FileListPanel {
             path_editing: false,
             path_input,
             scroll_handle: UniformListScrollHandle::new(),
+            column_widths: FileListColumnWidths::default(),
+            column_bounds: FileListColumnBounds::default(),
+            resizing_column: None,
             focus_handle,
             _subscriptions: subscriptions,
         }
@@ -406,33 +528,41 @@ impl FileListPanel {
             .border_color(cx.theme().border)
             .bg(cx.theme().title_bar)
             .child(self.render_header_cell(
-                "Name",
-                SortColumn::Name,
-                px(250.),
+                t!("FileList.header_name").into(),
+                FileListColumn::Name,
+                Some(SortColumn::Name),
                 sort_column,
                 sort_order,
                 cx,
             ))
             .child(self.render_header_cell(
-                "Date Modified",
-                SortColumn::Modified,
-                px(180.),
+                t!("FileList.header_modified").into(),
+                FileListColumn::Modified,
+                Some(SortColumn::Modified),
                 sort_column,
                 sort_order,
                 cx,
             ))
             .child(self.render_header_cell(
-                "Size",
-                SortColumn::Size,
-                px(100.),
+                t!("FileList.header_size").into(),
+                FileListColumn::Size,
+                Some(SortColumn::Size),
                 sort_column,
                 sort_order,
                 cx,
             ))
             .child(self.render_header_cell(
-                "Kind",
-                SortColumn::Kind,
-                px(80.),
+                t!("FileList.header_kind").into(),
+                FileListColumn::Kind,
+                Some(SortColumn::Kind),
+                sort_column,
+                sort_order,
+                cx,
+            ))
+            .child(self.render_header_cell(
+                t!("FileList.header_permissions").into(),
+                FileListColumn::Permissions,
+                None,
                 sort_column,
                 sort_order,
                 cx,
@@ -441,46 +571,69 @@ impl FileListPanel {
 
     fn render_header_cell(
         &self,
-        label: &str,
-        column: SortColumn,
-        width: gpui::Pixels,
+        label: SharedString,
+        file_column: FileListColumn,
+        sort_column: Option<SortColumn>,
         current_sort: SortColumn,
         sort_order: SortOrder,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let is_sorted = current_sort == column;
-        let label = label.to_string();
+        let width = self.column_width(file_column);
+        let is_sorted = sort_column.is_some_and(|column| current_sort == column);
+        let view = cx.entity();
 
         h_flex()
+            .relative()
             .w(width)
+            .min_w(width)
+            .max_w(width)
+            .flex_shrink_0()
             .h_full()
-            .px_2()
-            .items_center()
-            .gap_1()
-            .cursor_pointer()
-            .hover(|s| s.bg(cx.theme().list_active))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _window, cx| {
-                    this.set_sort(column, cx);
-                }),
-            )
             .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(label),
-            )
-            .when(is_sorted, |el| {
-                el.child(
-                    Icon::new(if sort_order == SortOrder::Ascending {
-                        IconName::ChevronUp
-                    } else {
-                        IconName::ChevronDown
+                h_flex()
+                    .size_full()
+                    .px_2()
+                    .items_center()
+                    .gap_1()
+                    .when(sort_column.is_some(), |this| {
+                        this.cursor_pointer()
+                            .hover(|style| style.bg(cx.theme().list_active))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _window, cx| {
+                                    if let Some(column) = sort_column {
+                                        this.set_sort(column, cx);
+                                    }
+                                }),
+                            )
                     })
-                    .xsmall()
-                    .text_color(cx.theme().muted_foreground),
-                )
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(label),
+                    )
+                    .when(is_sorted, |el| {
+                        el.child(
+                            Icon::new(if sort_order == SortOrder::Ascending {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .xsmall()
+                            .text_color(cx.theme().muted_foreground),
+                        )
+                    }),
+            )
+            .child(self.render_column_resize_handle(file_column, cx))
+            .on_prepaint(move |bounds, _, cx| {
+                view.update(cx, |this, _| {
+                    this.column_bounds.set(file_column, bounds);
+                });
             })
     }
 
@@ -495,16 +648,20 @@ impl FileListPanel {
         let is_dir = item.is_dir;
         let size = item.size;
         let modified = item.modified;
+        let permissions = item.permissions.clone();
 
         h_flex()
             .w_full()
-            .h(px(44.))
+            .h(FILE_ROW_HEIGHT)
             .px_2()
             .items_center()
             .when(is_selected, |el| el.bg(cx.theme().selection))
             .child(
                 h_flex()
-                    .w(px(250.))
+                    .w(self.column_width(FileListColumn::Name))
+                    .min_w(self.column_width(FileListColumn::Name))
+                    .max_w(self.column_width(FileListColumn::Name))
+                    .flex_shrink_0()
                     .gap_2()
                     .items_center()
                     .child(
@@ -513,87 +670,221 @@ impl FileListPanel {
                         } else {
                             IconName::File
                         })
-                        .with_size(Size::Large)
+                        .small()
                         .color(),
                     )
                     .child({
                         let tooltip_name = name.clone();
-                        v_flex()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(
-                                div()
-                                    .id(SharedString::from(name.clone()))
-                                    .text_base()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .whitespace_nowrap()
-                                    .child(name.clone())
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new(tooltip_name.clone()).build(window, cx)
-                                    }),
-                            )
-                            .when(!item.permissions.is_empty(), |el| {
-                                el.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(item.permissions.clone()),
-                                )
-                            })
+                        div().flex_1().overflow_hidden().child(
+                            div()
+                                .id(SharedString::from(name.clone()))
+                                .w_full()
+                                .text_base()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .child(name.clone())
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(tooltip_name.clone()).build(window, cx)
+                                }),
+                        )
                     }),
             )
-            .child(
-                div()
-                    .w(px(180.))
-                    .px_2()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format_modified_time(modified)),
-            )
-            .child(
-                div()
-                    .w(px(100.))
-                    .px_2()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if is_dir {
-                        "- -".to_string()
-                    } else {
-                        format_file_size(size)
-                    }),
-            )
-            .child(
-                div()
-                    .w(px(80.))
-                    .px_2()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if is_dir {
-                        "folder".to_string()
-                    } else {
-                        get_file_kind(&name)
-                    }),
-            )
+            .child(self.render_body_text_cell(
+                FileListColumn::Modified,
+                format_modified_time(modified),
+                cx,
+            ))
+            .child(self.render_body_text_cell(
+                FileListColumn::Size,
+                if is_dir {
+                    "- -".to_string()
+                } else {
+                    format_file_size(size)
+                },
+                cx,
+            ))
+            .child(self.render_body_text_cell(
+                FileListColumn::Kind,
+                if is_dir {
+                    t!("FileList.kind_folder").to_string()
+                } else {
+                    get_file_kind(&name)
+                },
+                cx,
+            ))
+            .child(self.render_body_text_cell(FileListColumn::Permissions, permissions, cx))
     }
 
     fn render_parent_row(&self, _cx: &App) -> impl IntoElement {
         h_flex()
             .w_full()
-            .h(px(44.))
+            .h(FILE_ROW_HEIGHT)
             .px_2()
             .items_center()
             .child(
                 h_flex()
-                    .w(px(250.))
+                    .w(self.column_width(FileListColumn::Name))
+                    .min_w(self.column_width(FileListColumn::Name))
+                    .max_w(self.column_width(FileListColumn::Name))
+                    .flex_shrink_0()
                     .gap_2()
                     .items_center()
-                    .child(Icon::new(IconName::Folder1).with_size(Size::Large).color())
-                    .child(div().text_base().child("..")),
+                    .child(Icon::new(IconName::Folder1).small().color())
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .text_base()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(".."),
+                    ),
             )
-            .child(div().w(px(180.)).px_2())
-            .child(div().w(px(100.)).px_2())
-            .child(div().w(px(80.)).px_2())
+            .child(self.render_empty_body_cell(FileListColumn::Modified))
+            .child(self.render_empty_body_cell(FileListColumn::Size))
+            .child(self.render_empty_body_cell(FileListColumn::Kind))
+            .child(self.render_empty_body_cell(FileListColumn::Permissions))
+    }
+
+    fn column_width(&self, column: FileListColumn) -> Pixels {
+        self.column_widths.get(column)
+    }
+
+    fn set_column_width(&mut self, column: FileListColumn, width: Pixels) {
+        let width = width.clamp(
+            FileListColumnWidths::min_width(column),
+            FileListColumnWidths::max_width(column),
+        );
+        self.column_widths.set(column, width);
+    }
+
+    fn render_body_text_cell(
+        &self,
+        column: FileListColumn,
+        text: String,
+        cx: &App,
+    ) -> impl IntoElement {
+        let width = self.column_width(column);
+
+        div()
+            .w(width)
+            .min_w(width)
+            .max_w(width)
+            .flex_shrink_0()
+            .px_2()
+            .overflow_hidden()
+            .child(
+                div()
+                    .w_full()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .child(text),
+            )
+    }
+
+    fn render_empty_body_cell(&self, column: FileListColumn) -> impl IntoElement {
+        let width = self.column_width(column);
+
+        div()
+            .w(width)
+            .min_w(width)
+            .max_w(width)
+            .flex_shrink_0()
+            .px_2()
+    }
+
+    fn render_column_resize_handle(
+        &self,
+        column: FileListColumn,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        const HANDLE_SIZE: Pixels = px(2.);
+
+        let group_id = SharedString::from(format!("file-list-resize-handle:{column:?}"));
+        let is_active = self.resizing_column == Some(column);
+
+        h_flex()
+            .id(SharedString::from(format!(
+                "file-list-resize-handle-{column:?}"
+            )))
+            .group(group_id.clone())
+            .occlude()
+            .cursor_col_resize()
+            .h_full()
+            .w(HANDLE_SIZE)
+            .ml(-HANDLE_SIZE)
+            .justify_end()
+            .items_center()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    this.resizing_column = Some(column);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_drag_move(
+                cx.listener(move |this, e: &DragMoveEvent<ResizeColumn>, _window, cx| {
+                    match e.drag(cx) {
+                        ResizeColumn((entity_id, drag_column)) => {
+                            if cx.entity_id() != *entity_id || *drag_column != column {
+                                return;
+                            }
+
+                            let bounds = this.column_bounds.get(column);
+                            let new_width = (e.event.position.x - HANDLE_SIZE - bounds.left())
+                                .clamp(
+                                    FileListColumnWidths::min_width(column),
+                                    FileListColumnWidths::max_width(column),
+                                );
+
+                            this.set_column_width(column, new_width);
+                            this.resizing_column = Some(column);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                    }
+                }),
+            )
+            .on_drag(ResizeColumn((cx.entity_id(), column)), |drag, _, _, cx| {
+                cx.stop_propagation();
+                cx.new(|_| drag.clone())
+            })
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    if this.resizing_column == Some(column) {
+                        this.resizing_column = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    if this.resizing_column == Some(column) {
+                        this.resizing_column = None;
+                        cx.notify();
+                    }
+                }),
+            )
+            .child(
+                div()
+                    .h_full()
+                    .justify_center()
+                    .bg(if is_active {
+                        cx.theme().drag_border
+                    } else {
+                        cx.theme().border
+                    })
+                    .group_hover(&group_id, |this| this.bg(cx.theme().drag_border))
+                    .w(px(1.)),
+            )
     }
 
     fn parent_path(current_path: &str, is_remote: bool) -> String {
@@ -1388,7 +1679,18 @@ impl Render for FileListPanel {
                         .track_scroll(&self.scroll_handle)
                         .with_sizing_behavior(ListSizingBehavior::Auto),
                     )
-                    .child(Scrollbar::vertical(&self.scroll_handle)),
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(12.0))
+                            .child(
+                                Scrollbar::vertical(&self.scroll_handle)
+                                    .scrollbar_show(ScrollbarShow::Always),
+                            ),
+                    ),
             )
     }
 }
