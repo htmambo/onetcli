@@ -8,9 +8,13 @@ use schemars::{JsonSchema, json_schema};
 pub struct FontFeatures(pub Arc<Vec<(String, u32)>>);
 
 impl FontFeatures {
-    /// Disables `calt`.
+    /// Disables common ligature-related OpenType features.
     pub fn disable_ligatures() -> Self {
-        Self(Arc::new(vec![("calt".into(), 0)]))
+        Self(Arc::new(vec![
+            ("liga".into(), 0),
+            ("clig".into(), 0),
+            ("calt".into(), 0),
+        ]))
     }
 
     /// Get the tag name list of the font OpenType features
@@ -151,4 +155,21 @@ impl JsonSchema for FontFeatures {
 
 fn is_valid_feature_tag(tag: &str) -> bool {
     tag.len() == 4 && tag.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FontFeatures;
+
+    #[test]
+    fn disable_ligatures_disables_common_ligature_tags() {
+        assert_eq!(
+            FontFeatures::disable_ligatures().tag_value_list(),
+            &[
+                ("liga".to_string(), 0),
+                ("clig".to_string(), 0),
+                ("calt".to_string(), 0),
+            ]
+        );
+    }
 }

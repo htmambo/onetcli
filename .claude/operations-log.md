@@ -1,5 +1,151 @@
 ## 操作日志
 
+## 编码前检查 - windows-terminal-ligatures
+时间：2026-03-28 23:44:07 +08:00
+
+- 已查阅上下文摘要文件：`.claude/context-summary-windows-terminal-ligatures.md`
+- 工具说明：仓库要求中的 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander` 在当前会话不可用，本次改用本地源码检索与已有 `.claude` 留痕完成上下文收集。
+- 已分析相似实现：
+  - `crates/terminal_view/src/terminal_element.rs`
+  - `crates/terminal_view/src/view.rs`
+  - `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs`
+  - `crates/terminal_view/src/theme.rs`
+- 将使用以下可复用组件：
+  - `terminal_font_features(...)`：终端字体特性唯一入口
+  - `FontVariants::new(...)`：终端真实绘制字体构造
+  - `TerminalView::render(...)`：终端字宽测量路径
+  - `apply_font_features(...)`：Windows DirectWrite 特性注入实现
+- 将遵循命名约定：继续沿用 `terminal_*` helper 与行为描述式测试命名
+- 将遵循代码风格：仅调整终端字体特性 helper，不改设置同步链路，不新增平台分支配置
+- 确认不重复造轮子，证明：已检查终端设置同步、终端渲染、字宽测量与 Windows 文本系统，确认现有基础能力完整，缺的是 helper 对连字特性的显式表达
+
+## 编码后声明 - windows-terminal-ligatures
+时间：2026-03-28 23:46:28 +08:00
+
+### 1. 复用了以下既有组件
+- `crates/terminal_view/src/terminal_element.rs::terminal_font_features`：继续作为终端字体特性唯一入口
+- `crates/terminal_view/src/terminal_element.rs::FontVariants::new`：保持真实绘制仍从同一 helper 取字体特性
+- `crates/terminal_view/src/view.rs::render`：保持字宽测量继续复用同一 helper
+- `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs::apply_font_features`：沿用现有 DirectWrite 注入逻辑，不新增平台分支
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `TERMINAL_LIGATURE_FEATURE_TAGS` 常量，测试名采用行为描述式命名
+- 代码风格：改动集中在 `terminal_element.rs`，不扩散到设置层或平台层
+- 文件组织：上下文与验证留痕写入项目本地 `.claude/` 目录
+
+### 3. 对比了以下相似实现
+- `crates/terminal_view/src/terminal_element.rs`：原先开启连字返回空列表、关闭只关 `calt`；现在统一显式控制 `liga/clig/calt`
+- `crates/terminal_view/src/view.rs`：保持测量链路不变，通过复用 helper 自动获得同样修复
+- `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs`：确认 Windows 在 `FontFeatures` 为空时不会补建有效 typography，因此必须在上层显式声明标签
+- `crates/terminal_view/src/theme.rs`：确认 Windows 默认字体仍为 `Consolas`，本次不修改默认字体策略
+
+### 4. 未重复造轮子的证明
+- 已检查终端设置同步、终端绘制、字宽测量和 Windows 文本平台实现
+- 结论：现有链路完整，本次只需修正字体特性 helper 的输入，不需要新建终端字体配置系统
+
+## 实施与验证记录 - windows-terminal-ligatures
+时间：2026-03-28 23:46:28 +08:00
+
+### 已完成修改
+- 在 `crates/terminal_view/src/terminal_element.rs` 中新增 `TERMINAL_LIGATURE_FEATURE_TAGS`
+- 将 `terminal_font_features(...)` 改为始终显式输出 `liga`、`clig`、`calt` 三项特性：
+  - 开启时全部设为 `1`
+  - 关闭时全部设为 `0`
+- 为该 helper 补充 2 个单元测试，覆盖开启与关闭两种输出
+
+### 本地验证
+- `C:\Users\hoping\.cargo\bin\rustfmt.exe --edition 2024 crates/terminal_view/src/terminal_element.rs`
+  - 结果：通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe test -p terminal_view --lib -- --nocapture`
+  - 结果：失败
+  - 原因：环境缺少 `nasm` 与 `cmake`，阻塞在 `aws-lc-sys` 自定义构建脚本，尚未进入本次终端改动的测试执行阶段
+- 静态复核：
+  - `terminal_font_features(true)` 现在会稳定输出 `liga/clig/calt = 1`
+  - `terminal_font_features(false)` 现在会稳定输出 `liga/clig/calt = 0`
+  - `TerminalView::render(...)` 与 `FontVariants::new(...)` 继续共用同一 helper，因此测量与渲染路径保持一致
+
+### 当前限制
+- 由于本机缺少 `nasm` 与 `cmake`，当前无法在本地完成 `terminal_view` crate 的编译级自动验证
+- 由于当前会话不能直接启动 GUI 做实机点测，本次仍需要在 Windows 桌面上确认：
+  - 使用支持连字的字体时，终端内 `=>`、`!=`、`===` 等组合是否恢复连字
+  - 关闭开关后，连字是否稳定消失
+  - 光标、选区与点击定位是否仍保持对齐
+
+## 编码前检查 - windows-ssh-ligatures
+时间：2026-03-28 23:56:47 +08:00
+
+- 已查阅上下文摘要文件：`.claude/context-summary-windows-ssh-ligatures.md`
+- 工具说明：仓库要求中的 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander` 在当前会话不可用，本次继续使用本地源码检索与已有 `.claude` 留痕完成上下文收集。
+- 已分析相似实现：
+  - `main/src/home/home_tabs.rs`
+  - `main/src/home_tab.rs`
+  - `crates/terminal_view/src/view.rs`
+  - `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs`
+  - `vendor/zed/crates/gpui/src/text_system/font_features.rs`
+- 将使用以下可复用组件：
+  - `setup_terminal_view(...)`：确认恢复 SSH 终端同样走全局设置同步链路
+  - `restore_saved_connection_sessions(...)`：确认恢复入口不会绕过 SSH 终端创建逻辑
+  - `apply_font_features(...)`：Windows 字体特性平台统一入口
+  - `FontFeatures::disable_ligatures()`：通用关闭连字语义
+- 将遵循命名约定：新增 helper 与测试继续使用 `snake_case` 和行为描述式命名
+- 将遵循代码风格：优先修平台层公共入口，不新增业务层 SSH 特判
+- 确认不重复造轮子，证明：已核对 SSH 终端恢复链路与普通打开链路，确认二者共用同一终端视图和设置同步入口，缺的是 Windows 平台对默认字体特性的处理
+
+## 编码后声明 - windows-ssh-ligatures
+时间：2026-03-29 00:02:30 +08:00
+
+### 1. 复用了以下既有组件
+- `main/src/home/home_tabs.rs::open_ssh_terminal`：确认恢复 SSH 与手动打开 SSH 共用同一入口
+- `main/src/home/home_tabs.rs::setup_terminal_view`：确认恢复 SSH 仍会应用全局终端设置
+- `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs::apply_font_features`：继续作为 Windows 字体特性的唯一平台入口
+- `vendor/zed/crates/gpui/src/text_system/font_features.rs::disable_ligatures`：继续作为通用关闭连字语义
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `resolve_direct_write_font_features`，测试名采用行为描述式命名
+- 代码风格：改动集中在 `vendor/zed` 平台层和字体特性语义文件，不扩散到 SSH 业务层
+- 文件组织：上下文与验证留痕继续写入项目本地 `.claude/` 目录
+
+### 3. 对比了以下相似实现
+- `main/src/home_tab.rs`：恢复对话框最终仍调用 `open_ssh_terminal(...)`，没有单独恢复版 SSH 终端实现
+- `main/src/home/home_tabs.rs`：恢复 SSH 与手动新建 SSH 共用同一 `setup_terminal_view(...)`，说明业务层设置链路本身没有恢复分支缺口
+- `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs`：原实现对空 `FontFeatures` 直接返回，导致空 Typography 落到 `SetTypography(...)`
+- `vendor/zed/crates/gpui/src/text_system/font_features.rs`：原实现只关闭 `calt`，不足以保证 Windows 下完全关闭连字
+
+### 4. 未重复造轮子的证明
+- 已检查 SSH 终端恢复链路、终端设置同步链路、Windows 文本平台实现和通用字体特性语义
+- 结论：恢复 SSH 的业务链路已经复用现有终端视图，本次只需修补 Windows 平台和字体特性公共入口，不需要新建恢复专用逻辑
+
+## 实施与验证记录 - windows-ssh-ligatures
+时间：2026-03-29 00:02:30 +08:00
+
+### 已完成修改
+- 在 `vendor/zed/crates/gpui/src/platform/windows/direct_write.rs` 中新增 `resolve_direct_write_font_features(...)`
+- 将 `apply_font_features(...)` 改为始终显式解析并注入默认 `liga/clig/calt` 三项特性，不再让空 `FontFeatures` 直接产生空 Typography
+- 在 `vendor/zed/crates/gpui/src/text_system/font_features.rs` 中把 `disable_ligatures()` 统一为同时关闭 `liga/clig/calt`
+- 为上述两处分别补充单元测试，覆盖：
+  - 空 `FontFeatures` 时默认三项连字特性
+  - 显式覆盖默认值
+  - `disable_ligatures()` 的三标签关闭语义
+
+### 本地验证
+- `C:\Users\hoping\.cargo\bin\rustfmt.exe --edition 2024 crates/terminal_view/src/terminal_element.rs vendor/zed/crates/gpui/src/platform/windows/direct_write.rs vendor/zed/crates/gpui/src/text_system/font_features.rs`
+  - 结果：通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe test -p gpui --lib direct_write::tests -- --nocapture`
+  - 结果：失败
+  - 原因：当前会话无法访问 `https://static.crates.io`，下载依赖时被网络沙箱阻塞，不是本次代码编译错误
+- 静态复核：
+  - 恢复 SSH 会话最终仍会调用 `setup_terminal_view(...)`
+  - 终端层显式三标签开关仍保留
+  - Windows 平台层现在会为默认字体特性显式补建 `liga/clig/calt = 1`
+  - 通用 `disable_ligatures()` 现在会同时关闭 `liga/clig/calt`
+
+### 当前限制
+- 当前环境缺少外网访问，无法完成 `gpui` crate 的自动化测试执行
+- 当前会话不能直接启动 GUI 做恢复 SSH 的实机点测，仍需要在 Windows 桌面上确认：
+  - 从恢复对话框恢复出来的 SSH 终端是否出现编程连字
+  - 新开的 SSH 终端与恢复 SSH 终端是否表现一致
+  - 关闭终端连字开关后，恢复 SSH 终端中的连字是否稳定消失
+
 ## 追加修正记录 - window-drag-followup-round3
 时间：2026-03-29 00:08:00 +0800
 

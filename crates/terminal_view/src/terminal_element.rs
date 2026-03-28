@@ -6,8 +6,8 @@
 //! - Selection and search highlighting
 //! - Theme colors support
 
-use crate::addon::{AddonManager, CellDecoration, DecorationSpan};
 use crate::TerminalTheme;
+use crate::addon::{AddonManager, CellDecoration, DecorationSpan};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::selection::SelectionRange;
 use alacritty_terminal::term::cell::Flags;
@@ -83,13 +83,17 @@ impl FontVariants {
     }
 }
 
+const TERMINAL_LIGATURE_FEATURE_TAGS: [&str; 3] = ["liga", "clig", "calt"];
+
 pub(crate) fn terminal_font_features(ligatures_enabled: bool) -> FontFeatures {
-    if ligatures_enabled {
-        FontFeatures(Arc::new(Vec::new()))
-    } else {
-        // 关闭上下文替代，避免编程连字破坏终端的等宽栅格对齐。
-        FontFeatures(Arc::new(vec![("calt".to_string(), 0)]))
-    }
+    let value = u32::from(ligatures_enabled);
+    // 始终显式声明终端连字标签，避免 Windows DirectWrite 在空 Typography 上出现平台差异。
+    FontFeatures(Arc::new(
+        TERMINAL_LIGATURE_FEATURE_TAGS
+            .into_iter()
+            .map(|tag| (tag.to_string(), value))
+            .collect(),
+    ))
 }
 
 /// 检查是否为装饰字符（边框、块元素、Powerline 等）
@@ -1281,5 +1285,38 @@ fn indexed_color_to_hsla(idx: u8) -> Hsla {
             }
             .into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::terminal_font_features;
+
+    #[test]
+    fn terminal_font_features_explicitly_enable_all_ligature_tags() {
+        let features = terminal_font_features(true);
+
+        assert_eq!(
+            features.tag_value_list(),
+            &[
+                ("liga".to_string(), 1),
+                ("clig".to_string(), 1),
+                ("calt".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn terminal_font_features_explicitly_disable_all_ligature_tags() {
+        let features = terminal_font_features(false);
+
+        assert_eq!(
+            features.tag_value_list(),
+            &[
+                ("liga".to_string(), 0),
+                ("clig".to_string(), 0),
+                ("calt".to_string(), 0),
+            ]
+        );
     }
 }

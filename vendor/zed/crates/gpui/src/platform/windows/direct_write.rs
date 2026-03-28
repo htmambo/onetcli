@@ -1718,42 +1718,36 @@ fn apply_font_features(
     direct_write_features: &IDWriteTypography,
     features: &FontFeatures,
 ) -> Result<()> {
-    let tag_values = features.tag_value_list();
-    if tag_values.is_empty() {
-        return Ok(());
-    }
-
-    // All of these features are enabled by default by DirectWrite.
-    // If you want to (and can) peek into the source of DirectWrite
-    let mut feature_liga = make_direct_write_feature("liga", 1);
-    let mut feature_clig = make_direct_write_feature("clig", 1);
-    let mut feature_calt = make_direct_write_feature("calt", 1);
-
-    for (tag, value) in tag_values {
-        if tag.as_str() == "liga" && *value == 0 {
-            feature_liga.parameter = 0;
-            continue;
-        }
-        if tag.as_str() == "clig" && *value == 0 {
-            feature_clig.parameter = 0;
-            continue;
-        }
-        if tag.as_str() == "calt" && *value == 0 {
-            feature_calt.parameter = 0;
-            continue;
-        }
-
+    // 空 Typography 在 DirectWrite 下不会稳定继承默认连字能力，
+    // 因此这里始终把默认 liga/clig/calt 解析成显式特性。
+    for (tag, value) in resolve_direct_write_font_features(features) {
         unsafe {
-            direct_write_features.AddFontFeature(make_direct_write_feature(tag, *value))?;
+            direct_write_features.AddFontFeature(make_direct_write_feature(&tag, value))?;
         }
-    }
-    unsafe {
-        direct_write_features.AddFontFeature(feature_liga)?;
-        direct_write_features.AddFontFeature(feature_clig)?;
-        direct_write_features.AddFontFeature(feature_calt)?;
     }
 
     Ok(())
+}
+
+fn resolve_direct_write_font_features(features: &FontFeatures) -> Vec<(String, u32)> {
+    let mut resolved = vec![
+        ("liga".to_string(), 1),
+        ("clig".to_string(), 1),
+        ("calt".to_string(), 1),
+    ];
+
+    for (tag, value) in features.tag_value_list() {
+        if let Some((_, resolved_value)) = resolved
+            .iter_mut()
+            .find(|(resolved_tag, _)| resolved_tag == tag)
+        {
+            *resolved_value = *value;
+        } else {
+            resolved.push((tag.clone(), *value));
+        }
+    }
+
+    resolved
 }
 
 #[inline]
@@ -1885,7 +1879,11 @@ const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 
 #[cfg(test)]
 mod tests {
-    use crate::platform::windows::direct_write::ClusterAnalyzer;
+    use crate::platform::windows::direct_write::{
+        ClusterAnalyzer, resolve_direct_write_font_features,
+    };
+    use crate::text_system::FontFeatures;
+    use std::sync::Arc;
 
     #[test]
     fn test_cluster_map() {
@@ -1922,5 +1920,35 @@ mod tests {
         assert_eq!(next, Some((5, 1)));
         let next = analyzer.next();
         assert_eq!(next, None);
+    }
+
+    #[test]
+    fn empty_font_features_still_resolve_default_ligature_tags() {
+        assert_eq!(
+            resolve_direct_write_font_features(&FontFeatures::default()),
+            vec![
+                ("liga".to_string(), 1),
+                ("clig".to_string(), 1),
+                ("calt".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_font_feature_overrides_replace_default_ligature_values() {
+        let features = FontFeatures(Arc::new(vec![
+            ("calt".to_string(), 0),
+            ("ss01".to_string(), 1),
+        ]));
+
+        assert_eq!(
+            resolve_direct_write_font_features(&features),
+            vec![
+                ("liga".to_string(), 1),
+                ("clig".to_string(), 1),
+                ("calt".to_string(), 0),
+                ("ss01".to_string(), 1),
+            ]
+        );
     }
 }
