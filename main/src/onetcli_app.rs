@@ -409,31 +409,29 @@ impl OnetCliApp {
         cx.subscribe_in(
             &tab_container,
             window,
-            move |this, _tc, ev: &TabContainerEvent, _window, cx| {
-                match ev {
-                    TabContainerEvent::LayoutChanged => {
-                        this.save_layout(cx);
-                    }
-                    TabContainerEvent::TabBarTrailingActionRequested => {
-                        tab_container_for_events.update(cx, |tc, cx| {
-                            tc.scroll_to_tab_bar_trailing_view(cx);
-                        });
+            move |this, _tc, ev: &TabContainerEvent, _window, cx| match ev {
+                TabContainerEvent::LayoutChanged => {
+                    this.save_layout(cx);
+                }
+                TabContainerEvent::TabBarTrailingActionRequested => {
+                    tab_container_for_events.update(cx, |tc, cx| {
+                        tc.scroll_to_tab_bar_trailing_view(cx);
+                    });
 
-                        let saved_connection_picker = saved_connection_picker_for_events.clone();
-                        cx.defer(move |cx| {
-                            let Some(window_id) = cx.active_window() else {
-                                return;
-                            };
+                    let saved_connection_picker = saved_connection_picker_for_events.clone();
+                    cx.defer(move |cx| {
+                        let Some(window_id) = cx.active_window() else {
+                            return;
+                        };
 
-                            let _ = cx.update_window(window_id, |_entity, window, cx| {
-                                saved_connection_picker.update(cx, |picker, cx| {
-                                    picker.open(window, cx);
-                                });
+                        let _ = cx.update_window(window_id, |_entity, window, cx| {
+                            saved_connection_picker.update(cx, |picker, cx| {
+                                picker.open(window, cx);
                             });
                         });
-                    }
-                    _ => {}
+                    });
                 }
+                _ => {}
             },
         )
         .detach();

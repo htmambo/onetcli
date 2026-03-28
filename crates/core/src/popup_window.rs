@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::{
     AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable, InteractiveElement,
     IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Window,
@@ -17,6 +19,19 @@ pub fn request_popup_window_close(window: &mut Window, cx: &mut App) {
     window.defer(cx, |window, _| {
         window.remove_window();
     });
+}
+
+fn centered_popup_bounds(requested_size: Size<gpui::Pixels>, cx: &App) -> Bounds<gpui::Pixels> {
+    if let Some(display) = cx.primary_display() {
+        let visible_bounds = display.visible_bounds();
+        let clamped_size = size(
+            requested_size.width.min(visible_bounds.size.width * 0.85),
+            requested_size.height.min(visible_bounds.size.height * 0.85),
+        );
+        return Bounds::centered_at(visible_bounds.center(), clamped_size);
+    }
+
+    Bounds::centered(None, requested_size, cx)
 }
 
 struct PopupWindowView {
@@ -150,16 +165,33 @@ where
     E: Into<AnyView>,
     F: FnOnce(&mut Window, &mut App) -> E + Send + 'static,
 {
-    let mut window_size = size(px(options.width), px(options.height));
-    if let Some(display) = cx.primary_display() {
-        let display_size = display.bounds().size;
-        window_size.width = window_size.width.min(display_size.width * 0.85);
-        window_size.height = window_size.height.min(display_size.height * 0.85);
-    }
-    let window_bounds = Bounds::centered(None, window_size, cx);
+    open_popup_window_with_should_close(
+        options,
+        create_view_fn,
+        |window, cx| {
+            request_popup_window_close(window, cx);
+            false
+        },
+        cx,
+    );
+}
+
+pub fn open_popup_window_with_should_close<F, E, H>(
+    options: PopupWindowOptions,
+    create_view_fn: F,
+    on_should_close: H,
+    cx: &mut App,
+) where
+    E: Into<AnyView>,
+    F: FnOnce(&mut Window, &mut App) -> E + Send + 'static,
+    H: Fn(&mut Window, &mut App) -> bool + Send + Sync + 'static,
+{
+    let window_bounds = centered_popup_bounds(size(px(options.width), px(options.height)), cx);
     let title = options.title.clone();
+    let on_should_close = Arc::new(on_should_close);
 
     cx.spawn(async move |cx| {
+        let on_should_close = Arc::clone(&on_should_close);
         let window_opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(window_bounds)),
             titlebar: Some(TitleBar::title_bar_options()),
@@ -175,11 +207,9 @@ where
             ..Default::default()
         };
 
-        let window = cx.open_window(window_opts, |window, cx| {
-            window.on_window_should_close(cx, |window, cx| {
-                request_popup_window_close(window, cx);
-                false
-            });
+        let window = cx.open_window(window_opts, move |window, cx| {
+            let on_should_close = Arc::clone(&on_should_close);
+            window.on_window_should_close(cx, move |window, cx| on_should_close(window, cx));
             let view = create_view_fn(window, cx).into();
             let popup_view = cx.new(|cx| PopupWindowView::new(view, window, cx));
             cx.new(|cx| Root::new(popup_view, window, cx))

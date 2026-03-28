@@ -207,6 +207,30 @@ pub struct SavedWindowBounds {
     pub height: f32,
 }
 
+fn centered_bounds_in_visible_area(
+    requested_size: gpui::Size<Pixels>,
+    visible_bounds: Bounds<Pixels>,
+) -> Bounds<Pixels> {
+    let centered_size = size(
+        requested_size.width.min(visible_bounds.size.width),
+        requested_size.height.min(visible_bounds.size.height),
+    );
+    Bounds::centered_at(visible_bounds.center(), centered_size)
+}
+
+fn centered_window_bounds_within_visible_area(
+    requested_size: gpui::Size<Pixels>,
+    visible_bounds: Option<Bounds<Pixels>>,
+) -> WindowBounds {
+    let bounds = visible_bounds
+        .map(|visible_bounds| centered_bounds_in_visible_area(requested_size, visible_bounds))
+        .unwrap_or_else(|| Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: requested_size,
+        });
+    WindowBounds::Windowed(bounds)
+}
+
 impl SavedWindowBounds {
     fn from_bounds(state: SavedWindowDisplayState, bounds: Bounds<Pixels>) -> Option<Self> {
         let saved = Self {
@@ -243,6 +267,14 @@ impl SavedWindowBounds {
             && self.height > 0.0
     }
 
+    fn build_window_bounds(state: SavedWindowDisplayState, bounds: Bounds<Pixels>) -> WindowBounds {
+        match state {
+            SavedWindowDisplayState::Windowed => WindowBounds::Windowed(bounds),
+            SavedWindowDisplayState::Maximized => WindowBounds::Maximized(bounds),
+            SavedWindowDisplayState::Fullscreen => WindowBounds::Fullscreen(bounds),
+        }
+    }
+
     fn to_window_bounds(self) -> Option<WindowBounds> {
         if !self.is_valid() {
             return None;
@@ -253,11 +285,37 @@ impl SavedWindowBounds {
             size: size(px(self.width), px(self.height)),
         };
 
-        Some(match self.state {
-            SavedWindowDisplayState::Windowed => WindowBounds::Windowed(bounds),
-            SavedWindowDisplayState::Maximized => WindowBounds::Maximized(bounds),
-            SavedWindowDisplayState::Fullscreen => WindowBounds::Fullscreen(bounds),
-        })
+        Some(Self::build_window_bounds(self.state, bounds))
+    }
+
+    fn fit_in_visible_bounds(self, visible_bounds: Bounds<Pixels>) -> Option<WindowBounds> {
+        let restored_window_bounds = self.to_window_bounds()?;
+        let restored_bounds = restored_window_bounds.get_bounds();
+
+        if restored_bounds.is_contained_within(&visible_bounds) {
+            return Some(restored_window_bounds);
+        }
+
+        let centered_bounds = centered_bounds_in_visible_area(restored_bounds.size, visible_bounds);
+        Some(Self::build_window_bounds(self.state, centered_bounds))
+    }
+
+    fn to_restored_window_bounds(self, cx: &App) -> Option<WindowBounds> {
+        let restored_window_bounds = self.to_window_bounds()?;
+        let restored_bounds = restored_window_bounds.get_bounds();
+
+        if cx
+            .displays()
+            .into_iter()
+            .any(|display| restored_bounds.is_contained_within(&display.visible_bounds()))
+        {
+            return Some(restored_window_bounds);
+        }
+
+        cx.primary_display()
+            .map(|display| display.visible_bounds())
+            .and_then(|visible_bounds| self.fit_in_visible_bounds(visible_bounds))
+            .or(Some(restored_window_bounds))
     }
 }
 
@@ -608,8 +666,13 @@ impl AppSettings {
         cx: &App,
     ) -> WindowBounds {
         self.main_window_bounds
-            .and_then(SavedWindowBounds::to_window_bounds)
-            .unwrap_or_else(|| WindowBounds::centered(default_size, cx))
+            .and_then(|saved_window_bounds| saved_window_bounds.to_restored_window_bounds(cx))
+            .unwrap_or_else(|| {
+                centered_window_bounds_within_visible_area(
+                    default_size,
+                    cx.primary_display().map(|display| display.visible_bounds()),
+                )
+            })
     }
 
     pub fn save_global(cx: &mut App) {
@@ -1260,7 +1323,10 @@ impl SettingsPanel {
 mod tests {
     #[cfg(target_os = "linux")]
     use super::parse_deepin_theme_appearance;
-    use super::{AppSettings, SavedWindowBounds, SavedWindowDisplayState};
+    use super::{
+        AppSettings, SavedWindowBounds, SavedWindowDisplayState,
+        centered_window_bounds_within_visible_area,
+    };
     use gpui::{Bounds, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
     use gpui_component::ThemeMode;
@@ -1352,6 +1418,71 @@ mod tests {
         };
 
         assert_eq!(saved.to_window_bounds(), None);
+    }
+
+    #[test]
+    fn 越界主窗口状态恢复时会回到主屏中间() {
+        let visible_bounds = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(1920.0), px(1040.0)),
+        };
+        let saved = SavedWindowBounds {
+            state: SavedWindowDisplayState::Windowed,
+            x: 2600.0,
+            y: 120.0,
+            width: 900.0,
+            height: 700.0,
+        };
+
+        assert_eq!(
+            saved.fit_in_visible_bounds(visible_bounds),
+            Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(510.0), px(170.0)),
+                size: size(px(900.0), px(700.0)),
+            }))
+        );
+    }
+
+    #[test]
+    fn 超出可见区域的主窗口尺寸会先裁剪再居中恢复() {
+        let visible_bounds = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(1920.0), px(1040.0)),
+        };
+        let saved = SavedWindowBounds {
+            state: SavedWindowDisplayState::Maximized,
+            x: -400.0,
+            y: -300.0,
+            width: 2600.0,
+            height: 1600.0,
+        };
+
+        assert_eq!(
+            saved.fit_in_visible_bounds(visible_bounds),
+            Some(WindowBounds::Maximized(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(1920.0), px(1040.0)),
+            }))
+        );
+    }
+
+    #[test]
+    fn 默认主窗口居中会避开底部不可见区域() {
+        let visible_bounds = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(1920.0), px(1040.0)),
+        };
+
+        assert_eq!(
+            centered_window_bounds_within_visible_area(
+                size(px(1600.0), px(1200.0)),
+                Some(visible_bounds),
+            ),
+            WindowBounds::Windowed(Bounds {
+                origin: point(px(160.0), px(0.0)),
+                size: size(px(1600.0), px(1040.0)),
+            })
+        );
     }
 
     #[cfg(target_os = "linux")]

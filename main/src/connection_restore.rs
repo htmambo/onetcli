@@ -1,19 +1,28 @@
 use std::collections::HashSet;
 
 use gpui::{
-    App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, StatefulInteractiveElement as _, Styled, Window, div, px,
+    App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, WindowExt, checkbox::Checkbox, dialog::DialogButtonProps, h_flex, v_flex,
+    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
+    button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
+    h_flex, v_flex,
 };
-use one_core::connection_restore::{
-    ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
-    clear_connection_restore_snapshot, load_connection_restore_snapshot,
+use one_core::{
+    connection_restore::{
+        ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
+        clear_connection_restore_snapshot, load_connection_restore_snapshot,
+    },
+    popup_window::{
+        CancelPopup, PopupWindowOptions, open_popup_window_with_should_close,
+        request_popup_window_close,
+    },
+    storage::{ConnectionType, StoredConnection, Workspace},
 };
-use one_core::storage::{ConnectionType, StoredConnection, Workspace};
 
-use crate::home_tab::HomePage;
+use crate::{home_tab::HomePage, onetcli_app::GlobalMainWindowHandle};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConnectionRestoreItem {
@@ -154,58 +163,52 @@ pub fn open_connection_restore_dialog(
         return;
     }
 
-    let dialog_view = cx.new(|_| ConnectionRestoreDialogView::new(items));
+    let layout = compute_connection_restore_popup_layout(window.viewport_size());
+    let popup_items = items.clone();
+    let home_for_close = home_page.clone();
 
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let home_for_ok = home_page.clone();
-        let home_for_cancel = home_page.clone();
-        let dialog_view_for_ok = dialog_view.clone();
-
-        dialog
-            .title("恢复连接".to_string())
-            .w(px(620.0))
-            .child(dialog_view.clone())
-            .confirm()
-            .button_props(
-                DialogButtonProps::default()
-                    .ok_text("恢复所选")
-                    .cancel_text("跳过"),
-            )
-            .on_ok(move |_, window, cx| {
-                let selected_snapshot_ids = dialog_view_for_ok.read(cx).selected_snapshot_ids();
-                let _ = home_for_ok.update(cx, |home, cx| {
-                    home.restore_saved_connection_sessions(&selected_snapshot_ids, window, cx);
-                });
-                true
-            })
-            .on_cancel(move |_, _window, cx| {
-                let _ = home_for_cancel.update(cx, |home, cx| {
-                    home.skip_pending_connection_restore(cx);
-                });
-                true
-            })
-    });
+    open_popup_window_with_should_close(
+        PopupWindowOptions::new("恢复连接")
+            .size(f32::from(layout.width), f32::from(layout.height))
+            .min_width(520.0)
+            .min_height(420.0),
+        move |_window, cx| {
+            let home_page = home_page.clone();
+            let items = popup_items.clone();
+            cx.new(|_| ConnectionRestorePopupView::new(home_page, items))
+        },
+        move |window, cx| {
+            let _ = home_for_close.update(cx, |home, cx| {
+                home.skip_pending_connection_restore(cx);
+            });
+            request_popup_window_close(window, cx);
+            false
+        },
+        cx,
+    );
 }
 
-pub struct ConnectionRestoreDialogView {
+pub struct ConnectionRestorePopupView {
+    home_page: Entity<HomePage>,
     items: Vec<ResolvedConnectionRestoreItem>,
     selected_snapshot_ids: HashSet<String>,
 }
 
-impl ConnectionRestoreDialogView {
-    fn new(items: Vec<ResolvedConnectionRestoreItem>) -> Self {
+impl ConnectionRestorePopupView {
+    fn new(home_page: Entity<HomePage>, items: Vec<ResolvedConnectionRestoreItem>) -> Self {
         let selected_snapshot_ids = items
             .iter()
             .map(|item| item.snapshot_id.clone())
             .collect::<HashSet<_>>();
 
         Self {
+            home_page,
             items,
             selected_snapshot_ids,
         }
     }
 
-    pub fn selected_snapshot_ids(&self) -> Vec<String> {
+    fn selected_snapshot_ids(&self) -> Vec<String> {
         self.items
             .iter()
             .filter(|item| self.selected_snapshot_ids.contains(&item.snapshot_id))
@@ -220,9 +223,45 @@ impl ConnectionRestoreDialogView {
                 .iter()
                 .all(|item| self.selected_snapshot_ids.contains(&item.snapshot_id))
     }
+
+    fn on_skip(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let _ = self.home_page.update(cx, |home, cx| {
+            home.skip_pending_connection_restore(cx);
+        });
+        request_popup_window_close(window, cx);
+    }
+
+    fn on_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
+            tracing::warn!("恢复连接弹窗未找到主窗口句柄，无法执行恢复操作");
+            return;
+        };
+
+        let selected_snapshot_ids = self.selected_snapshot_ids();
+        let home_page = self.home_page.clone();
+        let restore_result = cx.update_window(
+            main_window_handle.window_handle,
+            move |_, main_window, cx| {
+                home_page.update(cx, |home, cx| {
+                    home.restore_saved_connection_sessions(&selected_snapshot_ids, main_window, cx);
+                });
+            },
+        );
+
+        if let Err(error) = restore_result {
+            tracing::warn!("恢复连接弹窗调用主窗口恢复逻辑失败：{}", error);
+            return;
+        }
+
+        request_popup_window_close(window, cx);
+    }
+
+    fn on_cancel_popup(&mut self, _: &CancelPopup, window: &mut Window, cx: &mut Context<Self>) {
+        self.on_skip(window, cx);
+    }
 }
 
-impl Render for ConnectionRestoreDialogView {
+impl Render for ConnectionRestorePopupView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
         let all_selected = self.all_selected();
@@ -284,66 +323,184 @@ impl Render for ConnectionRestoreDialogView {
             .collect::<Vec<_>>();
 
         v_flex()
-            .w_full()
-            .gap_3()
+            .id("connection-restore-popup")
+            .size_full()
+            .bg(app_style::page_bg())
+            .key_context("PopupWindow")
+            .on_action(cx.listener(Self::on_cancel_popup))
             .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("检测到上次退出前仍有打开的连接页，请选择要恢复的项。"),
-            )
-            .child(
-                h_flex()
+                v_flex()
                     .w_full()
-                    .justify_between()
-                    .items_center()
+                    .gap_4()
+                    .flex_1()
+                    .min_h_0()
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child({
-                                let view_for_select_all = view.clone();
-                                Checkbox::new("restore-select-all")
-                                    .checked(all_selected)
-                                    .on_click(move |_, _, cx| {
-                                        view_for_select_all.update(cx, |view, cx| {
-                                            if view.all_selected() {
-                                                view.selected_snapshot_ids.clear();
-                                            } else {
-                                                view.selected_snapshot_ids = view
-                                                    .items
-                                                    .iter()
-                                                    .map(|item| item.snapshot_id.clone())
-                                                    .collect();
-                                            }
-                                            cx.notify();
-                                        });
-                                    })
-                            })
-                            .child(div().text_sm().child("全选")),
+                        TitleBar::new()
+                            .refine_style(&app_style::title_bar_style())
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .flex_1()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child("恢复连接"),
+                            ),
                     )
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("已选择 {selected_count} / {total_count}")),
+                        v_flex().w_full().gap_2().px_6().pt_4().pb_1().child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("检测到上次退出前仍有打开的连接页，请选择要恢复的项。"),
+                        ),
+                    )
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .flex_1()
+                            .min_h_0()
+                            .gap_3()
+                            .px_6()
+                            .pb_4()
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child({
+                                                let view_for_select_all = view.clone();
+                                                Checkbox::new("restore-select-all")
+                                                    .checked(all_selected)
+                                                    .on_click(move |_, _, cx| {
+                                                        view_for_select_all.update(
+                                                            cx,
+                                                            |view, cx| {
+                                                                if view.all_selected() {
+                                                                    view.selected_snapshot_ids
+                                                                        .clear();
+                                                                } else {
+                                                                    view.selected_snapshot_ids =
+                                                                        view.items
+                                                                            .iter()
+                                                                            .map(|item| {
+                                                                                item.snapshot_id
+                                                                                    .clone()
+                                                                            })
+                                                                            .collect();
+                                                                }
+                                                                cx.notify();
+                                                            },
+                                                        );
+                                                    })
+                                            })
+                                            .child(div().text_sm().child("全选")),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!(
+                                                "已选择 {selected_count} / {total_count}"
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("connection-restore-list-scroll")
+                                    .w_full()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .child(v_flex().w_full().gap_2().children(item_views)),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_between()
+                            .items_center()
+                            .px_6()
+                            .py_4()
+                            .border_t_1()
+                            .border_color(app_style::border())
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("可取消勾选后仅恢复部分连接"),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        Button::new("connection-restore-skip")
+                                            .small()
+                                            .with_variant(app_style::secondary_button_variant(cx))
+                                            .label("跳过")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.on_skip(window, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("connection-restore-apply")
+                                            .small()
+                                            .with_variant(app_style::primary_button_variant(cx))
+                                            .label("恢复所选")
+                                            .disabled(selected_count == 0)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.on_restore(window, cx);
+                                            })),
+                                    ),
+                            ),
                     ),
             )
-            .child(
-                div()
-                    .id("connection-restore-list-scroll")
-                    .w_full()
-                    .max_h(px(360.0))
-                    .overflow_y_scroll()
-                    .child(v_flex().w_full().gap_2().children(item_views)),
-            )
-            .child(
-                h_flex().w_full().justify_end().child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("可取消勾选后仅恢复部分连接"),
-                ),
-            )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ConnectionRestorePopupLayout {
+    width: Pixels,
+    height: Pixels,
+}
+
+fn compute_connection_restore_popup_layout(
+    viewport_size: Size<Pixels>,
+) -> ConnectionRestorePopupLayout {
+    ConnectionRestorePopupLayout {
+        width: (viewport_size.width - px(48.0))
+            .max(px(520.0))
+            .min(px(760.0)),
+        height: (viewport_size.height - px(72.0))
+            .max(px(420.0))
+            .min(px(680.0)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_connection_restore_popup_layout;
+    use gpui::{px, size};
+
+    #[test]
+    fn 恢复弹窗在较小主窗口中会收敛_popup_尺寸() {
+        let layout = compute_connection_restore_popup_layout(size(px(640.0), px(600.0)));
+
+        assert_eq!(layout.width, px(592.0));
+        assert_eq!(layout.height, px(528.0));
+    }
+
+    #[test]
+    fn 恢复弹窗在较大主窗口中保持_popup_上限尺寸() {
+        let layout = compute_connection_restore_popup_layout(size(px(1280.0), px(900.0)));
+
+        assert_eq!(layout.width, px(760.0));
+        assert_eq!(layout.height, px(680.0));
     }
 }

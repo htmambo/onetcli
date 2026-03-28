@@ -3561,3 +3561,231 @@
 - 静态审查结果：
   - 窗口移动过程中不再调用 `AppSettings::global_mut(...)`
   - 全局设置写回只发生在防抖到期或实体释放时
+
+## 编码前检查 - 启动恢复窗口居中修复
+时间：2026-03-29 04:24:08 +08:00
+
+### 上下文与工具记录
+- 已查阅上下文摘要文件：`.claude/context-summary-window-restore-center.md`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用仓库内源码检索与 `vendor/zed` 文档源码进行等效分析。
+
+### 将使用以下可复用组件
+- `SavedWindowBounds::to_window_bounds`：`main/src/setting_tab.rs`
+  - 用途：继续复用配置到 `WindowBounds` 的基础转换。
+- `AppSettings::restored_main_window_bounds`：`main/src/setting_tab.rs`
+  - 用途：作为唯一恢复入口接入越界检测与居中回退。
+- `PlatformDisplay::visible_bounds`：`vendor/zed/crates/gpui/src/platform.rs`
+  - 用途：用显示器可见区域判断恢复位置是否合法。
+- `Bounds::centered_at` / `Bounds::is_contained_within`：`vendor/zed/crates/gpui/src/geometry.rs`
+  - 用途：执行“完整包含判断 + 居中回退”。
+
+### 约定确认
+- 将遵循命名约定：Rust 类型 `PascalCase`，函数与局部变量 `snake_case`。
+- 将遵循代码风格：只改 `main/src/setting_tab.rs` 的恢复逻辑与同文件测试，不把显示器修正逻辑扩散到启动入口。
+- 确认不重复造轮子，证明：已检查 `main/src/main.rs`、`main/src/setting_tab.rs`、`crates/core/src/popup_window.rs`、`vendor/zed/crates/gpui/src/platform.rs`、`vendor/zed/crates/gpui/src/geometry.rs`，仓库已具备显示器可见区域与居中能力，本次只做接线与组合。
+
+## 启动恢复窗口居中修复
+时间：2026-03-29 04:32:25 +08:00
+
+### 实施记录
+- 在 `main/src/setting_tab.rs`：
+  - 新增 `centered_bounds_in_visible_area(...)` 与 `centered_window_bounds_within_visible_area(...)`，统一处理“按可见区域裁剪后再居中”。
+  - 为 `SavedWindowBounds` 增加 `fit_in_visible_bounds(...)` 与 `to_restored_window_bounds(...)`，恢复前先检查是否完整落在任一显示器 `visible_bounds()` 内。
+  - 当保存位置越界或尺寸大于当前屏幕可见区域时，改为按主屏可见区域重新裁剪并居中，同时保留 `Windowed/Maximized/Fullscreen` 状态语义。
+- 在 `main/src/main.rs`：
+  - 默认窗口大小计算由 `display.bounds()` 改为 `display.visible_bounds()`，避免底部任务栏导致的默认高度误判。
+- 调整测试策略：
+  - 放弃依赖 `TestAppContext` 的方案，改成对纯逻辑 helper 做单元测试，避免测试环境缺少 `gpui` test support 导致编译失败。
+
+### 编码中修正
+- 首轮实现只覆盖了“已保存窗口越界”的分支，用户反馈仍然超出屏幕底部后，继续排查到“默认尺寸与默认居中仍基于整块屏幕 bounds”的遗漏路径。
+- 随后把默认尺寸和默认居中一并切换到 `visible_bounds()`，补齐底部任务栏场景。
+- 单元测试首轮有一条期望值按整屏高度误算为 `190px`；复核可见区域高度后修正为 `170px`，并重新通过验证。
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `main/src/setting_tab.rs`：继续使用 `SavedWindowBounds` 与 `AppSettings::restored_main_window_bounds(...)` 作为唯一恢复链路。
+- `vendor/zed/crates/gpui/src/platform.rs`：复用 `PlatformDisplay::visible_bounds()`，没有自造任务栏高度计算。
+- `vendor/zed/crates/gpui/src/geometry.rs`：复用 `Bounds::centered_at(...)` 与 `is_contained_within(...)` 完成裁剪和定位。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 helper 均使用 `snake_case`，继续沿用 `SavedWindowBounds` / `WindowBounds` 现有命名体系。
+- 代码风格：恢复逻辑留在设置层，默认尺寸计算留在启动入口，职责边界未被打破。
+- 文件组织：仅改动 `main/src/main.rs` 与 `main/src/setting_tab.rs`，没有扩散到窗口监听或其他 crate。
+
+### 3. 对比了以下相似实现
+- `crates/core/src/popup_window.rs`：沿用了“先按屏幕可见尺寸收敛，再居中”的弹窗模式。
+- `vendor/zed/crates/gpui/src/platform.rs`：沿用了平台层 `visible_bounds()` 作为可用显示区域来源。
+- `vendor/zed/crates/gpui/src/geometry.rs`：沿用了原生 `Bounds` 几何能力，没有手写坐标公式分支。
+
+### 4. 未重复造轮子的证明
+- 检查了 `main/src/main.rs`、`main/src/setting_tab.rs`、`crates/core/src/popup_window.rs`、`vendor/zed/crates/gpui/src/platform.rs`、`vendor/zed/crates/gpui/src/geometry.rs`。
+- 仓库已具备显示器可见区域、窗口 bounds 与几何居中能力；本次只把这些既有能力组合到主窗口恢复链路中。
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/main.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p main 主窗口 -- --nocapture`
+  - 结果：通过，5 个主窗口相关测试全部通过
+- 编译与测试过程中的额外信息：
+  - 存在若干仓库既有 warning（如 `crates/ui/src/window_ext.rs` 未使用导入），与本次改动无关
+  - 首轮测试曾因 `gpui::TestAppContext` 在当前依赖配置下不可用而失败，已改为纯逻辑测试并复测通过
+
+## 编码前检查 - 恢复连接弹窗布局修复
+时间：2026-03-29 04:44:42 +08:00
+
+### 上下文与工具记录
+- 已查阅上下文摘要文件：`.claude/context-summary-connection-restore-dialog-layout.md`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用仓库源码检索与现有实现对照分析。
+- 用户二次反馈后确认：此前修的是主窗口恢复链路，但当前问题对象是启动时的“恢复连接”对话框。
+
+### 将使用以下可复用组件
+- `main/src/connection_restore.rs`：恢复连接对话框入口与列表视图
+- `crates/ui/src/dialog.rs`：`margin_top(...)` 与标题栏拖动能力
+- `main/src/home_tab.rs`：滚动列表对话框的 `max_h(...).overflow_y_scroll()` 模式
+- `main/src/update.rs`：标准 `window.open_dialog(...)` builder 结构
+
+### 约定确认
+- 将遵循命名约定：Rust 类型 `PascalCase`，函数与局部变量 `snake_case`。
+- 将遵循代码风格：优先在业务层新增纯逻辑布局 helper，不直接改全局 `Dialog` 默认行为。
+- 确认不重复造轮子，证明：已检查 `main/src/connection_restore.rs`、`crates/ui/src/dialog.rs`、`main/src/update.rs`、`main/src/home_tab.rs`，仓库已有对话框拖动与滚动列表能力，本次只补布局参数计算。
+
+## 恢复连接弹窗布局修复
+时间：2026-03-29 04:44:42 +08:00
+
+### 根因定位
+- 启动提示真正使用的是 `main/src/connection_restore.rs` 中的 `window.open_dialog(...)`，不是主窗口恢复逻辑。
+- 通用 `Dialog` 在 `crates/ui/src/dialog.rs` 中默认按固定 `360px` 高度估算垂直中心；而恢复连接弹窗的真实高度明显大于 `360px`，所以在小窗口下会被放得过低，底部超出主窗口可见区域。
+- 该弹窗虽然支持标题栏拖动，但标题区视觉上只有一行文本，不像项目中原生 popup window 那样显眼，因此用户主观感受为“很难拖动”。
+
+### 实施记录
+- 在 `main/src/connection_restore.rs`：
+  - 新增 `compute_connection_restore_dialog_layout(...)`，按当前 `window.viewport_size()` 动态计算对话框宽度、列表最大高度和顶部偏移。
+  - `open_connection_restore_dialog(...)` 改为在打开前计算布局，使用 `.w(layout.dialog_width)` 和 `.margin_top(layout.margin_top)` 覆盖通用 `Dialog` 默认定位。
+  - `ConnectionRestoreDialogView` 新增 `list_max_height` 字段，使恢复项滚动区高度随主窗口尺寸收敛，不再固定 `360px`。
+  - 标题改为两行，增加“拖动顶部可移动”提示，让实际可拖动区域更容易被感知。
+- 保持现有恢复逻辑和确认/跳过回调不变，没有改动 `HomePage` 的恢复行为。
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `main/src/connection_restore.rs`：继续沿用现有恢复项勾选与确认流程。
+- `crates/ui/src/dialog.rs`：复用已有 `margin_top(...)` 和标题栏拖动能力。
+- `main/src/home_tab.rs`：沿用滚动列表对话框的 `max_h(...).overflow_y_scroll()` 模式。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `ConnectionRestoreDialogLayout`、`compute_connection_restore_dialog_layout(...)` 均符合现有 Rust 命名风格。
+- 代码风格：布局逻辑集中在 `connection_restore.rs`，没有把恢复提示的特殊需求硬编码进全局 `Dialog`。
+- 文件组织：仅改动恢复连接模块本身，并补同文件测试。
+
+### 3. 对比了以下相似实现
+- `main/src/update.rs`：继续沿用标准对话框 builder 结构和确认按钮模式。
+- `main/src/home_tab.rs:1188-1215`：复用滚动列表对话框的高度收敛思路。
+- `crates/ui/src/dialog.rs`：复用标题栏拖动与 `margin_top` 覆盖能力，而不是重写拖动状态机。
+
+### 4. 未重复造轮子的证明
+- 检查了 `main/src/connection_restore.rs`、`crates/ui/src/dialog.rs`、`main/src/update.rs`、`main/src/home_tab.rs`。
+- 仓库已具备对话框拖动、标题栏和滚动区能力；本次只按恢复提示的内容高度补布局计算。
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/connection_restore.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复弹窗布局测试全部通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p main 主窗口 -- --nocapture`
+  - 结果：通过，包含主窗口与恢复弹窗在内的 7 个相关测试全部通过
+- 编译与测试过程中的额外信息：
+  - 仍存在仓库既有 warning（如 `crates/ui/src/window_ext.rs` 未使用导入），与本次修复无关
+
+## 编码前检查 - 恢复连接弹窗 popup 窗口迁移
+时间：2026-03-29 05:04:03 +08:00
+
+### 上下文与工具记录
+- 已查阅上下文摘要文件：`.claude/context-summary-connection-restore-popup-window.md`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用仓库源码检索与现有实现对照分析。
+- 用户新增反馈已确认：当前主要问题不是“弹窗仍略有越界”，而是“恢复列表弹窗作为应用内 `Dialog` 很难拖动，且拖动明显卡顿”。
+
+### 将使用以下可复用组件
+- `crates/core/src/popup_window.rs`：独立 popup window 创建与关闭链路
+- `main/src/onetcli_app.rs`：`GlobalMainWindowHandle` 主窗口句柄
+- `main/src/home_tab.rs`：恢复连接的跳过与恢复实现
+- `main/src/connection_restore.rs`：恢复连接弹窗视图与勾选逻辑
+
+### 约定确认
+- 将遵循命名约定：Rust 类型 `PascalCase`，函数与局部变量 `snake_case`。
+- 将遵循代码风格：优先复用现有 popup window 机制，不继续在 `Dialog` 层追加拖动补丁。
+- 确认不重复造轮子，证明：已检查 `main/src/connection_restore.rs`、`crates/core/src/popup_window.rs`、`main/src/onetcli_app.rs`、`main/src/home_tab.rs`、`crates/core/src/certificate_manager.rs`，仓库已有成熟 popup 模式与主窗口上下文切换能力，本次只补齐接线。
+
+## 恢复连接弹窗 popup 窗口迁移
+时间：2026-03-29 05:04:03 +08:00
+
+### 根因定位
+- 之前把恢复连接提示继续保留在应用内 `Dialog` 体系里，即使补了布局和拖动提示，用户依然感受到“难拖动、不跟手、卡顿”。
+- 仓库中其它拖动正常的复杂弹窗基本都走 `open_popup_window(...)` 独立窗口链路，说明问题更可能出在弹窗形态而非单个标题栏样式。
+- popup 迁移已做了一半，但恢复按钮误用了 `Entity::update_in(cx, ...)`；而当前 `cx` 是 `Context<ConnectionRestorePopupView>`，不满足 `VisualContext`，导致无法编译，也无法把恢复动作落回主窗口。
+
+### 实施记录
+- 在 `crates/core/src/popup_window.rs`：
+  - 新增 `centered_popup_bounds(...)`，统一基于 `primary_display().visible_bounds()` 计算 popup 居中位置，并在屏幕较小时按 85% 收敛尺寸。
+  - 将 `open_popup_window(...)` 改为复用新的 `open_popup_window_with_should_close(...)`，为业务弹窗提供自定义关闭前逻辑。
+- 在 `main/src/connection_restore.rs`：
+  - 恢复连接提示从 `window.open_dialog(...)` 切换为独立 `popup window`。
+  - 保留恢复项列表、全选、跳过、恢复所选等原有业务行为，但重构为 popup 视图布局。
+  - 恢复按钮改为先通过 `GlobalMainWindowHandle` 获取主窗口句柄，再用 `cx.update_window(...)` 回到主窗口上下文调用 `HomePage::restore_saved_connection_sessions(...)`。
+  - 右上角关闭与底部“跳过”统一映射到 `skip_pending_connection_restore(...)`，确保快照被清理，不会反复提示。
+
+### 编码中修正
+- 首次复测前，`rustfmt` 因默认 edition 不是 2024 而报 `async move` 语法错误；随后改为 `rustfmt --edition 2024 ...` 完成格式化。
+- popup 内部保留了 `CancelPopup` 处理，使 `Esc` 走“跳过恢复 + 关窗”语义，而不是只把窗口硬关掉。
+- 恢复按钮在拿不到主窗口句柄或 `update_window(...)` 失败时改为保留弹窗并记录 warning，避免静默失败后直接关窗。
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `crates/core/src/popup_window.rs`：用于统一 popup 居中、窗口创建和关闭。
+- `main/src/onetcli_app.rs`：用于获取 `GlobalMainWindowHandle` 回到主窗口上下文。
+- `main/src/home_tab.rs`：继续复用恢复连接和跳过恢复的核心业务逻辑。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `ConnectionRestorePopupView`、`ConnectionRestorePopupLayout`、`centered_popup_bounds(...)` 均符合现有 Rust 风格。
+- 代码风格：popup 基础设施留在 `crates/core`，恢复业务留在 `main/src/connection_restore.rs`，未把业务语义塞进通用层。
+- 文件组织：仅扩展 popup helper 和恢复连接模块，没有扩散到其它功能模块。
+
+### 3. 对比了以下相似实现
+- `crates/core/src/certificate_manager.rs`：沿用独立 popup 的底部按钮栏和关闭方式。
+- `main/src/onetcli_app.rs`：沿用通过 `GlobalMainWindowHandle + cx.update_window(...)` 调度主窗口操作的模式。
+- `main/src/home_tab.rs`：沿用恢复连接提示与真正恢复逻辑的既有职责划分。
+
+### 4. 未重复造轮子的证明
+- 检查了 `main/src/connection_restore.rs`、`crates/core/src/popup_window.rs`、`main/src/onetcli_app.rs`、`main/src/home_tab.rs`、`crates/core/src/certificate_manager.rs`。
+- 仓库已具备 popup 独立窗口、主窗口句柄全局访问和恢复业务逻辑；本次只把这些既有能力重新接到恢复连接弹窗上。
+
+### 本地验证
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\main\src\connection_restore.rs D:\usr\htdocs\onetcli\crates\core\src\popup_window.rs`
+  - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复弹窗相关测试全部通过
+- `cargo test -p main 主窗口 -- --nocapture`
+  - 结果：通过，7 个主窗口与恢复弹窗相关测试全部通过
+- 编译与测试过程中的额外信息：
+  - 仍存在仓库既有 warning（如 `crates/ui/src/window_ext.rs` 未使用导入、`main/src/home_tab.rs` 未使用函数），与本次修复无关
+
+## 恢复连接弹窗拖拽命中区补齐
+时间：2026-03-29 05:18:00 +08:00
+
+### 根因补充
+- 用户实测反馈“仍然不能拖拽，但可以调整尺寸”，说明 popup 的尺寸和边框已生效，但顶部没有可用的拖拽命中区。
+- 继续对比仓库中其它拖动正常的 popup 后确认：`connection_form_window`、`ssh_form_window`、`redis_form_window` 等都在内容顶部显式渲染了 `TitleBar::new()`，而恢复弹窗没有。
+- 在 Windows 上，主窗口和自定义标题栏都依赖 `WindowControlArea::Drag` 暴露拖拽区域；恢复弹窗缺这层时，就会出现“能缩放、不能拖”的现象。
+
+### 实施记录
+- 在 `main/src/connection_restore.rs`：
+  - 引入 `TitleBar` 与 `StyledExt`。
+  - 将原先普通 `v_flex` 头部替换为 `TitleBar::new().refine_style(&app_style::title_bar_style())`，把“恢复连接”标题放进标准 popup 标题栏。
+  - 将说明文字下移到标题栏下方的独立说明区，避免继续占用拖拽命中区。
+
+### 本地验证
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\main\src\connection_restore.rs`
+  - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复弹窗相关测试全部通过
+- `cargo test -p main 主窗口 -- --nocapture`
+  - 结果：通过，7 个主窗口与恢复弹窗相关测试全部通过

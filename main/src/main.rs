@@ -52,7 +52,7 @@ fn main() {
         cx.set_global(view_registry);
         let mut window_size = size(px(1600.0), px(1200.0));
         if let Some(display) = cx.primary_display() {
-            let display_size = display.bounds().size;
+            let display_size = display.visible_bounds().size;
             window_size.width = window_size.width.min(display_size.width * 0.85);
             window_size.height = window_size.height.min(display_size.height * 0.85);
         }
