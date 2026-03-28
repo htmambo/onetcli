@@ -4,9 +4,10 @@ use std::process::Command;
 use std::sync::{Arc, RwLock};
 
 use gpui::{
-    App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Render, SharedString,
-    StyleRefinement, Styled, Window, WindowAppearance, div, prelude::FluentBuilder, px,
+    App, AppContext, AsyncApp, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Pixels,
+    Render, SharedString, StyleRefinement, Styled, Window, WindowAppearance, WindowBounds, div,
+    point, prelude::FluentBuilder, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
@@ -188,6 +189,78 @@ pub enum ConnectionListViewMode {
     List,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SavedWindowDisplayState {
+    #[default]
+    Windowed,
+    Maximized,
+    Fullscreen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SavedWindowBounds {
+    pub state: SavedWindowDisplayState,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl SavedWindowBounds {
+    fn from_bounds(state: SavedWindowDisplayState, bounds: Bounds<Pixels>) -> Option<Self> {
+        let saved = Self {
+            state,
+            x: f32::from(bounds.origin.x),
+            y: f32::from(bounds.origin.y),
+            width: f32::from(bounds.size.width),
+            height: f32::from(bounds.size.height),
+        };
+
+        saved.is_valid().then_some(saved)
+    }
+
+    fn from_window_bounds(window_bounds: WindowBounds) -> Option<Self> {
+        match window_bounds {
+            WindowBounds::Windowed(bounds) => {
+                Self::from_bounds(SavedWindowDisplayState::Windowed, bounds)
+            }
+            WindowBounds::Maximized(bounds) => {
+                Self::from_bounds(SavedWindowDisplayState::Maximized, bounds)
+            }
+            WindowBounds::Fullscreen(bounds) => {
+                Self::from_bounds(SavedWindowDisplayState::Fullscreen, bounds)
+            }
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+            && self.width > 0.0
+            && self.height > 0.0
+    }
+
+    fn to_window_bounds(self) -> Option<WindowBounds> {
+        if !self.is_valid() {
+            return None;
+        }
+
+        let bounds = Bounds {
+            origin: point(px(self.x), px(self.y)),
+            size: size(px(self.width), px(self.height)),
+        };
+
+        Some(match self.state {
+            SavedWindowDisplayState::Windowed => WindowBounds::Windowed(bounds),
+            SavedWindowDisplayState::Maximized => WindowBounds::Maximized(bounds),
+            SavedWindowDisplayState::Fullscreen => WindowBounds::Fullscreen(bounds),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
@@ -234,6 +307,8 @@ pub struct AppSettings {
     pub connection_list_sort_order: ConnectionListSortOrder,
     #[serde(default)]
     pub connection_list_view_mode: ConnectionListViewMode,
+    #[serde(default)]
+    pub main_window_bounds: Option<SavedWindowBounds>,
     /// 是否启用SQL查询的自动保存功能
     #[serde(default = "default_true")]
     pub enable_sql_auto_save: bool,
@@ -417,6 +492,7 @@ impl Default for AppSettings {
             connection_list_sort_field: ConnectionListSortField::default(),
             connection_list_sort_order: ConnectionListSortOrder::default(),
             connection_list_view_mode: ConnectionListViewMode::default(),
+            main_window_bounds: None,
             enable_sql_auto_save: true,
             sql_auto_save_interval: default_auto_save_interval(),
         }
@@ -494,6 +570,80 @@ impl AppSettings {
 
     pub fn save(&mut self) {
         self.write_to_disk();
+    }
+
+    fn set_main_window_bounds(&mut self, window_bounds: WindowBounds) -> bool {
+        let Some(next_bounds) = SavedWindowBounds::from_window_bounds(window_bounds) else {
+            return false;
+        };
+
+        if self.main_window_bounds == Some(next_bounds) {
+            return false;
+        }
+
+        self.main_window_bounds = Some(next_bounds);
+        true
+    }
+
+    pub fn snapshot_main_window_bounds(window: &Window) -> Option<SavedWindowBounds> {
+        SavedWindowBounds::from_window_bounds(window.window_bounds())
+    }
+
+    pub fn set_global_main_window_bounds(
+        saved_window_bounds: SavedWindowBounds,
+        cx: &mut App,
+    ) -> bool {
+        let settings = Self::global_mut(cx);
+        if settings.main_window_bounds == Some(saved_window_bounds) {
+            return false;
+        }
+
+        settings.main_window_bounds = Some(saved_window_bounds);
+        true
+    }
+
+    pub fn restored_main_window_bounds(
+        &self,
+        default_size: gpui::Size<Pixels>,
+        cx: &App,
+    ) -> WindowBounds {
+        self.main_window_bounds
+            .and_then(SavedWindowBounds::to_window_bounds)
+            .unwrap_or_else(|| WindowBounds::centered(default_size, cx))
+    }
+
+    pub fn save_global(cx: &mut App) {
+        if !cx.has_global::<AppSettings>() {
+            return;
+        }
+
+        Self::global_mut(cx).save();
+    }
+
+    fn theme_preference_value(&self) -> String {
+        if self.auto_switch_theme {
+            "auto".to_string()
+        } else if self.theme_mode == "dark" {
+            "dark".to_string()
+        } else {
+            "light".to_string()
+        }
+    }
+
+    fn set_theme_preference(&mut self, value: &str) {
+        match value {
+            "auto" => {
+                self.auto_switch_theme = true;
+            }
+            "dark" => {
+                self.auto_switch_theme = false;
+                self.theme_mode = "dark".to_string();
+            }
+            _ => {
+                self.auto_switch_theme = false;
+                self.theme_mode = "light".to_string();
+            }
+        }
     }
 
     fn apply_ui_font_preferences(
@@ -717,7 +867,7 @@ impl SettingsPanel {
                                         settings.save();
                                     },
                                 ))
-                                .default_value(SharedString::from(default_settings.locale)),
+                                .default_value(SharedString::from(default_settings.locale.clone())),
                             )
                             .description(
                                 t!("Settings.General.Language.ui_language_desc").to_string(),
@@ -727,73 +877,45 @@ impl SettingsPanel {
                         .title(t!("Settings.General.Appearance.group_title"))
                         .items(vec![
                             SettingItem::new(
-                                t!("Settings.General.Appearance.dark_mode"),
-                                SettingField::switch(
-                                    |cx: &App| cx.theme().mode.is_dark(),
-                                    |val: bool, cx: &mut App| {
-                                        let settings_snapshot = {
-                                            let settings = AppSettings::global_mut(cx);
-                                            settings.theme_mode = if val {
-                                                "dark".to_string()
-                                            } else {
-                                                "light".to_string()
-                                            };
-                                            settings.save();
-                                            settings.clone()
-                                        };
-                                        settings_snapshot.apply_theme_preferences(None, cx);
-                                    },
-                                )
-                                .default_value(false),
-                            )
-                            .description(
-                                t!("Settings.General.Appearance.dark_mode_desc").to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Appearance.auto_switch_theme"),
-                                SettingField::checkbox(
-                                    |cx: &App| AppSettings::global(cx).auto_switch_theme,
-                                    |val: bool, cx: &mut App| {
-                                        let settings_snapshot = {
-                                            let settings = AppSettings::global_mut(cx);
-                                            settings.auto_switch_theme = val;
-                                            settings.save();
-                                            settings.clone()
-                                        };
-                                        settings_snapshot.apply_theme_preferences(None, cx);
-                                    },
-                                )
-                                .default_value(default_settings.auto_switch_theme),
-                            )
-                            .description(
-                                t!("Settings.General.Appearance.auto_switch_theme_desc")
-                                    .to_string(),
-                            ),
-                        ]),
-                    themed_setting_group(SettingGroup::new())
-                        .title(t!("Settings.General.Sync.group_title"))
-                        .item(
-                            SettingItem::new(
-                                t!("Settings.General.Sync.server_url"),
-                                themed_setting_field(SettingField::input(
+                                t!("Settings.General.Appearance.theme_mode"),
+                                themed_setting_field(SettingField::dropdown(
+                                    vec![
+                                        (
+                                            "auto".into(),
+                                            t!("Settings.General.Appearance.theme_mode_auto")
+                                                .into(),
+                                        ),
+                                        (
+                                            "light".into(),
+                                            t!("Settings.General.Appearance.theme_mode_light")
+                                                .into(),
+                                        ),
+                                        (
+                                            "dark".into(),
+                                            t!("Settings.General.Appearance.theme_mode_dark")
+                                                .into(),
+                                        ),
+                                    ],
                                     |cx: &App| {
                                         SharedString::from(
-                                            AppSettings::global(cx).sync_server_url.clone(),
+                                            AppSettings::global(cx).theme_preference_value(),
                                         )
                                     },
                                     |val: SharedString, cx: &mut App| {
-                                        apply_sync_server_url_setting(val, cx);
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.set_theme_preference(val.as_ref());
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
                                     },
                                 ))
-                                .default_value(
-                                    SharedString::from(default_settings.sync_server_url),
-                                ),
+                                .default_value(default_settings.theme_preference_value()),
                             )
-                            .description(t!("Settings.General.Sync.server_url_desc").to_string()),
-                        ),
-                    themed_setting_group(SettingGroup::new())
-                        .title(t!("Settings.General.Font.group_title"))
-                        .item(
+                            .description(
+                                t!("Settings.General.Appearance.theme_mode_desc").to_string(),
+                            ),
                             SettingItem::new(
                                 t!("Settings.General.Font.font_family"),
                                 themed_setting_field(SettingField::dropdown(
@@ -823,11 +945,11 @@ impl SettingsPanel {
                                         );
                                     },
                                 ))
-                                .default_value(SharedString::from(default_settings.font_family)),
+                                .default_value(
+                                    SharedString::from(default_settings.font_family.clone()),
+                                ),
                             )
                             .description(t!("Settings.General.Font.font_family_desc").to_string()),
-                        )
-                        .item(
                             SettingItem::new(
                                 t!("Settings.General.Font.font_size"),
                                 themed_setting_field(SettingField::number_input(
@@ -854,6 +976,27 @@ impl SettingsPanel {
                                 .default_value(default_settings.font_size),
                             )
                             .description(t!("Settings.General.Font.font_size_desc").to_string()),
+                        ]),
+                    themed_setting_group(SettingGroup::new())
+                        .title(t!("Settings.General.Sync.group_title"))
+                        .item(
+                            SettingItem::new(
+                                t!("Settings.General.Sync.server_url"),
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).sync_server_url.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        apply_sync_server_url_setting(val, cx);
+                                    },
+                                ))
+                                .default_value(
+                                    SharedString::from(default_settings.sync_server_url.clone()),
+                                ),
+                            )
+                            .description(t!("Settings.General.Sync.server_url_desc").to_string()),
                         ),
                     themed_setting_group(SettingGroup::new())
                         .title(t!("Settings.General.Terminal.group_title"))
@@ -1115,9 +1258,10 @@ impl SettingsPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::AppSettings;
     #[cfg(target_os = "linux")]
     use super::parse_deepin_theme_appearance;
+    use super::{AppSettings, SavedWindowBounds, SavedWindowDisplayState};
+    use gpui::{Bounds, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
     use gpui_component::ThemeMode;
 
@@ -1149,6 +1293,65 @@ mod tests {
             settings.effective_theme_mode(WindowAppearance::VibrantDark),
             ThemeMode::Dark
         );
+    }
+
+    #[test]
+    fn 主题模式下拉值可映射到当前设置() {
+        let mut settings = AppSettings::default();
+
+        assert_eq!(settings.theme_preference_value(), "light");
+
+        settings.theme_mode = "dark".to_string();
+        assert_eq!(settings.theme_preference_value(), "dark");
+
+        settings.auto_switch_theme = true;
+        assert_eq!(settings.theme_preference_value(), "auto");
+    }
+
+    #[test]
+    fn 主题模式下拉值可写回亮暗和自动设置() {
+        let mut settings = AppSettings::default();
+
+        settings.set_theme_preference("dark");
+        assert_eq!(settings.theme_mode, "dark");
+        assert!(!settings.auto_switch_theme);
+
+        settings.set_theme_preference("auto");
+        assert!(settings.auto_switch_theme);
+        assert_eq!(settings.theme_mode, "dark");
+
+        settings.set_theme_preference("light");
+        assert_eq!(settings.theme_mode, "light");
+        assert!(!settings.auto_switch_theme);
+    }
+
+    #[test]
+    fn 主窗口状态可在窗口边界之间往返转换() {
+        let bounds = Bounds {
+            origin: point(px(120.0), px(80.0)),
+            size: size(px(1440.0), px(900.0)),
+        };
+
+        let saved = SavedWindowBounds::from_window_bounds(WindowBounds::Maximized(bounds)).unwrap();
+
+        assert_eq!(saved.state, SavedWindowDisplayState::Maximized);
+        assert_eq!(
+            saved.to_window_bounds(),
+            Some(WindowBounds::Maximized(bounds))
+        );
+    }
+
+    #[test]
+    fn 非法主窗口状态不会参与恢复() {
+        let saved = SavedWindowBounds {
+            state: SavedWindowDisplayState::Windowed,
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 800.0,
+        };
+
+        assert_eq!(saved.to_window_bounds(), None);
     }
 
     #[cfg(target_os = "linux")]

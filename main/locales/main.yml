@@ -704,22 +704,26 @@ Settings:
         en: Appearance
         zh-CN: 外观
         zh-HK: 外觀
-      dark_mode:
-        en: Dark Mode
-        zh-CN: 深色模式
-        zh-HK: 深色模式
-      dark_mode_desc:
-        en: Switch between light and dark themes
-        zh-CN: 在浅色和深色主题之间切换
-        zh-HK: 在淺色和深色主題之間切換
-      auto_switch_theme:
-        en: Auto Switch Theme
-        zh-CN: 自动切换主题
-        zh-HK: 自動切換主題
-      auto_switch_theme_desc:
-        en: Automatically switch theme based on system settings
-        zh-CN: 根据系统设置自动切换主题
-        zh-HK: 根據系統設定自動切換主題
+      theme_mode:
+        en: Theme Mode
+        zh-CN: 主题模式
+        zh-HK: 主題模式
+      theme_mode_desc:
+        en: Automatically follow the system theme, or force light or dark mode
+        zh-CN: 可自动跟随系统主题，或固定使用亮色 / 暗色主题
+        zh-HK: 可自動跟隨系統主題，或固定使用亮色 / 暗色主題
+      theme_mode_auto:
+        en: Auto
+        zh-CN: 自动
+        zh-HK: 自動
+      theme_mode_light:
+        en: Light
+        zh-CN: 亮色
+        zh-HK: 亮色
+      theme_mode_dark:
+        en: Dark
+        zh-CN: 暗色
+        zh-HK: 暗色
 
     Sync:
       group_title:

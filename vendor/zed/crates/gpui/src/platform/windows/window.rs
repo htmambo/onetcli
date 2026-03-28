@@ -354,6 +354,20 @@ pub(crate) struct Callbacks {
     pub(crate) appearance_changed: Cell<Option<Box<dyn FnMut()>>>,
 }
 
+impl Callbacks {
+    pub(crate) fn clear_after_destroy(&self) {
+        self.request_frame.take();
+        self.input.take();
+        self.active_status_change.take();
+        self.hovered_status_change.take();
+        self.resize.take();
+        self.moved.take();
+        self.should_close.take();
+        self.hit_test_window_control.take();
+        self.appearance_changed.take();
+    }
+}
+
 struct WindowCreateContext {
     inner: Option<Result<Rc<WindowsWindowInner>>>,
     handle: AnyWindowHandle,
@@ -548,8 +562,19 @@ impl Drop for WindowsWindow {
             .spawn(async move {
                 let handle = this.hwnd;
                 unsafe {
-                    RevokeDragDrop(handle).log_err();
-                    DestroyWindow(handle).log_err();
+                    if hwnd_is_valid(handle)
+                        && let Err(error) = RevokeDragDrop(handle)
+                        && !is_invalid_window_handle_error(&error)
+                    {
+                        log::error!("撤销窗口拖放注册失败: {error:?}");
+                    }
+
+                    if hwnd_is_valid(handle)
+                        && let Err(error) = DestroyWindow(handle)
+                        && !is_invalid_window_handle_error(&error)
+                    {
+                        log::error!("销毁窗口失败: {error:?}");
+                    }
                 }
             })
             .detach();

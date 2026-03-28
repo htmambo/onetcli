@@ -271,6 +271,9 @@ impl WindowsWindowInner {
 
     fn handle_destroy_msg(&self, handle: HWND) -> Option<isize> {
         let callback = { self.state.callbacks.close.take() };
+        self.state.callbacks.clear_after_destroy();
+        self.state.restore_from_minimized.take();
+        self.state.input_handler.take();
         // Re-enable parent window if this was a modal dialog
         if let Some(parent_hwnd) = self.parent_hwnd {
             unsafe {
@@ -854,6 +857,10 @@ impl WindowsWindowInner {
             return None;
         }
 
+        if !hwnd_is_valid(handle) {
+            return None;
+        }
+
         let callback = self.state.callbacks.hit_test_window_control.take();
         let drag_area = if let Some(mut callback) = callback {
             let area = callback();
@@ -913,6 +920,10 @@ impl WindowsWindowInner {
     }
 
     fn handle_nc_mouse_move_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
+        if !hwnd_is_valid(handle) {
+            return None;
+        }
+
         self.start_tracking_mouse(handle, TME_LEAVE | TME_NONCLIENT);
 
         let mut func = self.state.callbacks.input.take()?;
@@ -1218,6 +1229,10 @@ impl WindowsWindowInner {
     }
 
     fn start_tracking_mouse(&self, handle: HWND, flags: TRACKMOUSEEVENT_FLAGS) {
+        if !hwnd_is_valid(handle) {
+            return;
+        }
+
         if !self.state.hovered.get() {
             self.state.hovered.set(true);
             unsafe {

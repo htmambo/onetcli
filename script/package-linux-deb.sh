@@ -29,6 +29,7 @@ usage() {
   ONETCLI_SKIP_BUILD       为 true 时跳过 cargo build，默认 false
   ONETCLI_VERSION          覆盖 deb 版本号，默认读取 main/Cargo.toml
   ONETCLI_DEB_OUTPUT_DIR   deb 输出目录，默认 target/dist
+  ONETCLI_DEB_STAGING_DIR  deb 暂存目录，默认使用 /tmp，避免 NTFS/exFAT 权限问题
   ONETCLI_DEB_DEPENDS      手动覆盖 Depends 字段
   ONETCLI_DEB_MAINTAINER   覆盖 Maintainer 字段
 EOF
@@ -123,7 +124,7 @@ detect_depends() {
         local output=""
         local depends=""
 
-        temp_dir="$(mktemp -d "${PROJECT_DIR}/target/dpkg-shlibdeps.XXXXXX")"
+        temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/${PACKAGE_NAME}-dpkg-shlibdeps.XXXXXX")"
         mkdir -p "${temp_dir}/debian"
         cat > "${temp_dir}/debian/control" <<EOF
 Source: ${PACKAGE_NAME}
@@ -152,6 +153,22 @@ EOF
     fi
 
     echo "libc6, libstdc++6"
+}
+
+setup_staging_dir() {
+    if [[ -n "${ONETCLI_DEB_STAGING_DIR:-}" ]]; then
+        STAGING_DIR="${ONETCLI_DEB_STAGING_DIR}"
+        return
+    fi
+
+    TEMP_STAGING_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/${PACKAGE_NAME}-deb.XXXXXX")"
+    STAGING_DIR="${TEMP_STAGING_ROOT}/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}"
+}
+
+cleanup_staging_dir() {
+    if [[ -n "${TEMP_STAGING_ROOT:-}" && -d "${TEMP_STAGING_ROOT}" ]]; then
+        rm -rf "${TEMP_STAGING_ROOT}"
+    fi
 }
 
 write_control_file() {
@@ -200,6 +217,34 @@ EOF
     chmod 755 "${STAGING_DIR}/DEBIAN/postinst" "${STAGING_DIR}/DEBIAN/postrm"
 }
 
+normalize_package_permissions() {
+    # dpkg-deb 对控制目录权限要求严格，不能依赖调用环境的 umask。
+    find "${STAGING_DIR}" -type d -exec chmod 755 {} +
+
+    chmod 755 "${STAGING_DIR}/DEBIAN"
+    chmod 644 "${STAGING_DIR}/DEBIAN/control"
+
+    for script_name in preinst postinst prerm postrm; do
+        if [[ -f "${STAGING_DIR}/DEBIAN/${script_name}" ]]; then
+            chmod 755 "${STAGING_DIR}/DEBIAN/${script_name}"
+        fi
+    done
+}
+
+assert_package_permissions() {
+    local debian_dir_mode control_mode
+
+    debian_dir_mode="$(stat -c '%a' "${STAGING_DIR}/DEBIAN")"
+    control_mode="$(stat -c '%a' "${STAGING_DIR}/DEBIAN/control")"
+
+    if [[ "${debian_dir_mode}" != "755" || "${control_mode}" != "644" ]]; then
+        echo "错误：deb 暂存目录不支持所需的 Unix 权限。" >&2
+        echo "当前权限：DEBIAN=${debian_dir_mode}, control=${control_mode}" >&2
+        echo "请将 ONETCLI_DEB_STAGING_DIR 指向支持 chmod 的本地文件系统（例如 /tmp）。" >&2
+        exit 1
+    fi
+}
+
 copy_package_files() {
     mkdir -p \
         "${STAGING_DIR}/DEBIAN" \
@@ -236,16 +281,20 @@ TARGET="${1:-${ONETCLI_TARGET:-$(detect_linux_target)}}"
 VERSION="$(resolve_version)"
 DEB_ARCH="$(target_to_deb_arch "${TARGET}")"
 OUTPUT_DIR="${ONETCLI_DEB_OUTPUT_DIR:-${PROJECT_DIR}/target/dist}"
-STAGING_DIR="${PROJECT_DIR}/target/linux-deb/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}"
 DEB_PATH="${OUTPUT_DIR}/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.deb"
 PROFILE_DIR="$(profile_output_dir)"
 BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/${PROFILE_DIR}/${BINARY_NAME}"
+TEMP_STAGING_ROOT=""
+
+setup_staging_dir
+trap cleanup_staging_dir EXIT
 
 echo "开始打包 Linux deb"
 echo "目标架构：${TARGET} -> ${DEB_ARCH}"
 echo "构建 Profile：${PROFILE_NAME}"
 echo "版本：${VERSION}"
 echo "输出目录：${OUTPUT_DIR}"
+echo "暂存目录：${STAGING_DIR}"
 
 cd "${PROJECT_DIR}"
 build_binary
@@ -263,6 +312,8 @@ mkdir -p "${OUTPUT_DIR}"
 copy_package_files
 write_control_file
 write_maintainer_scripts
+normalize_package_permissions
+assert_package_permissions
 
 rm -f "${DEB_PATH}"
 dpkg-deb --root-owner-group --build "${STAGING_DIR}" "${DEB_PATH}"

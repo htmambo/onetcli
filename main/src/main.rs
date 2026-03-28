@@ -16,6 +16,7 @@ mod update;
 mod user_avatar;
 
 use crate::onetcli_app::OnetCliApp;
+use crate::setting_tab::AppSettings;
 use db::GlobalDbState;
 use db_view::database_view_plugin::DatabaseViewPluginRegistry;
 use gpui::*;
@@ -55,7 +56,7 @@ fn main() {
             window_size.height = window_size.height.min(display_size.height * 0.85);
         }
 
-        let window_bounds = Bounds::centered(None, window_size, cx);
+        let window_bounds = AppSettings::global(cx).restored_main_window_bounds(window_size, cx);
         #[cfg(target_os = "linux")]
         let window_background = if linux_prefers_system_window_controls() {
             gpui::WindowBackgroundAppearance::Opaque
@@ -64,7 +65,7 @@ fn main() {
         };
 
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(window_bounds)),
+            window_bounds: Some(window_bounds),
             #[cfg(not(target_os = "linux"))]
             titlebar: Some(gpui_component::TitleBar::title_bar_options()),
             window_min_size: Some(Size {

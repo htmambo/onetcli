@@ -1,5 +1,64 @@
 # 验证报告
 
+## 审查补充（window-drag-followup 第三轮）
+生成时间：2026-03-29 00:08:00 +0800
+
+### 技术判断
+- 第二轮方案虽然已经把 Windows 拖窗从整块 `#tabs` 中拆出，但仍然依赖局部 spacer，实际体验仍可能表现为“只有极窄位置可拖”。
+- 第三轮改为让 [`tab_container.rs`](D:\zhp\src\onetcli\crates\core\src\tab_container.rs) 的顶层 `tab-bar` 在 Windows 下直接承担拖窗层，再用 tab、下拉按钮和窗口按钮的 `occlude()` 明确压住交互区域。
+- 这更接近通用 [`title_bar.rs`](D:\zhp\src\onetcli\crates\ui\src\title_bar.rs) 的稳定命中模型，也更符合用户对“标签栏空白处都能拖”的预期。
+
+### 验证结果
+- `C:\Users\hoping\.cargo\bin\cargo.exe test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe check -p one-core`
+  - 结果：通过
+
+### 结论
+- 当前最新代码较上一轮更强：不是只给局部 spacer 提供拖窗能力，而是把整个标签栏空白区恢复成稳定拖窗层。
+- 剩余验证缺口仍然只有 Windows GUI 实机体感，而不是 Rust 层逻辑闭环。
+
+## 审查报告（window-drag-followup 核对）
+生成时间：2026-03-28 23:59:00 +0800
+
+### 需求完整性检查
+- 目标明确：复核“窗口不能使用鼠标拖动”是否已在当前工作区闭环
+- 范围明确：仅核对主窗口 `TabContainer` 拖窗热区与主窗口 bounds 保存链路，不扩散到无关 UI 模块
+- 交付物明确：上下文摘要、操作日志、本地验证结论
+- 风险与依赖明确：`main` crate 仍受本机 `cmake` / `nasm` 缺失影响，无法完成全量编译
+
+### 技术维度评分
+- 代码质量：92/100
+  - 当前工作区中的修复点与仓库既有标题栏设计一致，没有另起平台旁路逻辑
+  - Windows 命中区与窗口状态保存性能问题都收敛到了既有模块
+- 测试覆盖：83/100
+  - `one-core` 中与拖窗平台分支直接相关的 2 条单测已通过
+  - `main` 全量编译受本机构建依赖阻塞，GUI 实机验证仍未完成
+- 规范遵循：94/100
+  - 本次没有覆盖用户已有未提交改动，只补充核对与验证留痕
+
+### 战略维度评分
+- 需求匹配：94/100
+  - 已确认当前工作区对“不能拖动”的两个真实根因都已有对应修复
+- 架构一致：95/100
+  - 继续复用 `TabContainer`、`AppSettings`、`Debouncer`，没有引入新的拖窗框架
+- 风险评估：86/100
+  - 最大剩余风险不是逻辑判断，而是缺少 Windows GUI 实机验证与 `main` 完整构建环境
+
+### 综合评分
+- 90/100
+- 建议：通过
+
+### 结论
+- 当前工作区中，与窗口拖动问题直接相关的修复已经存在且方向正确：
+  - [`crates/core/src/tab_container.rs`](D:\zhp\src\onetcli\crates\core\src\tab_container.rs) 已将 Windows 拖窗能力收敛为独立热区，避免 `#tabs` 抢占 tab 拖拽事件
+  - [`main/src/onetcli_app.rs`](D:\zhp\src\onetcli\main\src\onetcli_app.rs) 与 [`main/src/setting_tab.rs`](D:\zhp\src\onetcli\main\src\setting_tab.rs) 已把窗口状态保存改为本地缓存 + 防抖写回，避免拖动时高频全局通知和写盘
+- 已完成本地验证：
+  - `C:\Users\hoping\.cargo\bin\cargo.exe test -p one-core tab_container::tests --lib -- --nocapture`
+- 未完成但已明确阻塞原因：
+  - `C:\Users\hoping\.cargo\bin\cargo.exe check -p main`
+  - 阻塞于 `aws-lc-sys` 依赖构建，当前环境缺少 `cmake` 与 `nasm`
+
 ## 审查报告（sftp-context-menu-stability 实现）
 生成时间：2026-03-28 04:48:48 +0800
 
@@ -1345,3 +1404,210 @@
 
 ### 残余风险
 - 仍需你在实际界面上点测“列右侧空白处右键”的场景，确认菜单完全收口到文件项级别
+## 审查补充（Windows 鼠标拖动与拖动排序修复）
+生成时间：2026-03-28 20:44:33 +08:00
+
+### 需求完整性检查
+- 目标明确：修复 Windows x64 下主窗口鼠标拖动失效，并恢复 tab 拖动排序。
+- 范围明确：仅调整主窗口 `TabContainer` 的拖窗热区与平台分支，不改动入口窗口配置、不重写标题栏体系。
+- 交付物明确：代码修复、最小单测、上下文摘要、操作日志、验证记录。
+- 依赖与风险明确：依赖 `gpui` 的 `WindowControlArea` 命中逻辑；主要风险是修复拖窗时误伤 tab 点击、关闭与排序交互。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：89/100
+- 规范遵循：93/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 关键结论
+- 根因不在“Windows 完全不支持鼠标拖动”，而在于 `crates/core/src/tab_container.rs` 把整个 `#tabs` 滚动容器声明成了 `WindowControlArea::Drag`。
+- 在 Windows 上，这会让系统标题栏 hit-test 抢走 tab 的鼠标事件，直接破坏 tab 拖动排序，也会让拖窗与 tab 交互纠缠在一起。
+- 修复方案把 Windows 的拖窗能力收敛成一个独立热区 `tab-bar-drag-spacer`，同时保留 Linux/macOS 原有的手动 `start_window_move()` 链路。
+- 这样可以同时满足两点：
+  - Windows 仍然有稳定可拖窗区域
+  - tab 本体重新拿回点击、关闭、拖动排序事件
+
+### 验证结果
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' fmt --all -- crates/core/src/tab_container.rs`
+  - 结果：通过
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个新增单测全部通过
+
+### 审查说明
+- 默认增量编译下，`cargo test` 曾因 `os error 112` 失败；切换为 `CARGO_INCREMENTAL=0` 后测试执行成功。
+- 因此本次验证没有保留“磁盘空间不足导致测试未跑”的缺口，已经通过本地 AI 自动执行完成补偿验证。
+
+### 残余风险
+- 仍需在 Windows GUI 实机验证 tab 排序、空白热区拖窗、关闭按钮和下拉菜单按钮的最终交互手感。
+- 当前未新增端到端 GUI 自动化，桌面级交互回归仍依赖人工点击确认。
+
+## 审查补充（Windows 鼠标拖动与拖动排序修复第二轮）
+生成时间：2026-03-28 21:26:12 +08:00
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 新增关键结论
+- 第一轮方案只解决了“不要让整个 `#tabs` 容器变成 Windows 标题栏拖窗区”，但没有解决“Windows 下 tab 自己的拖拽起手仍被多余鼠标拦截”的问题。
+- 第二轮按平台拆开了这组前置鼠标拦截逻辑：
+  - Linux/macOS 继续保留，避免父级手动拖窗抢事件；
+  - Windows 取消该拦截，恢复 tab 自身 `on_drag(...)`。
+- 同时新增了 `#tabs` 内联空白拖窗区与加宽后的右侧兜底拖窗区，使 Windows 不再只依赖一个过窄热区。
+
+### 第二轮验证结果
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过
+
+### 关于窗口句柄错误的审查意见
+- 当前证据更支持“异步窗口生命周期日志噪音”而不是“本次拖拽修复直接引入的功能性错误”。
+- 若用户后续确认拖拽修复后仍稳定出现该日志，再建议单独开一轮针对 `update_window/read` 生命周期的收口修复，避免把两个问题混在一次改动里。
+
+## 审查补充（Windows 窗口句柄错误收敛）
+生成时间：2026-03-28 21:50:10 +08:00
+
+### 需求完整性检查
+- 目标明确：处理 Windows 下关窗尾声出现的 `window not found`、`0x80040102`、`0x80070578` 日志。
+- 范围明确：仅收敛 `vendor/zed/crates/gpui/src/platform/windows` 的生命周期与句柄清理，不改业务层拖拽逻辑。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 依赖与风险明确：依赖 GPUI 现有 `Callbacks` 与 `WM_DESTROY` 生命周期；主要风险是过度吞错导致真实 Windows 平台错误被隐藏。
+
+### 技术维度评分
+- 代码质量：93/100
+- 测试覆盖：81/100
+- 规范遵循：92/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：94/100
+- 风险评估：88/100
+
+### 综合评分
+- 90/100
+- 建议：通过
+
+### 关键结论
+- 根因不是业务层拖拽代码继续直接调用失效窗口，而是 Windows 平台层在 `WM_DESTROY` 之后仍可能保留回调与句柄清理动作。
+- 本次修复把收口点放在 Windows 平台层：
+  - 先在 `WM_DESTROY` 断开会继续回到 GPUI 实体的剩余回调
+  - 再对 `RevokeDragDrop` / `DestroyWindow` 只忽略已确认的无效句柄错误
+  - 对 `WM_NCHITTEST` / `WM_NCMOUSEMOVE` 的 Win32 API 调用加有效句柄守卫
+- 这样既能降低关窗尾声的日志噪音，又不会改写 GPUI 全局的 `window not found` 错误语义。
+
+### 验证结果
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 vendor/zed/crates/gpui/src/platform/windows/util.rs vendor/zed/crates/gpui/src/platform/windows/window.rs vendor/zed/crates/gpui/src/platform/windows/events.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p main`
+  - 结果：失败，受环境缺少 `cmake` / `nasm` 影响
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p gpui`
+  - 结果：失败，受当前会话无法访问 `static.crates.io` 影响
+
+### 残余风险
+- 仍需在 Windows 实机复现“关窗、拖窗、拖动排序后无上述日志”才能确认日志完全收口。
+- 这次只忽略了已确认的两类无效句柄错误；如果后续还有其他关窗尾声错误码，仍需要继续补充证据后再处理。
+
+## 主窗口状态恢复修复审查
+审查时间：2026-03-28 22:24:00 +08:00
+
+### 需求完整性检查
+- 目标明确：关闭应用时保存主窗口尺寸与状态，并在下次启动时恢复。
+- 范围明确：仅处理主窗口，不混入弹窗或其他子窗口状态。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 依赖与风险明确：依赖 GPUI `WindowBounds` 与 `observe_window_bounds(...)`；主要风险是缺少 Windows GUI 实机验证与全量编译验证。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：76/100
+- 规范遵循：93/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：94/100
+- 风险评估：84/100
+
+### 综合评分
+- 89/100
+- 建议：需讨论
+
+### 关键结论
+- 根因已经明确：旧代码没有把主窗口状态接入 `AppSettings`，且启动阶段始终使用固定居中窗口 bounds，导致“保存”和“恢复”链路事实上都不完整。
+- 本次修复沿用项目现有模式：
+  - 通过 `AppSettings` 保存 `WindowBounds`
+  - 通过 `observe_window_bounds(...)` 在运行时增量写盘
+  - 通过 `main.rs` 在启动时恢复 `WindowBounds`
+- 方案与 GPUI 原生语义一致，不需要自造平台特判或第二套配置文件。
+
+### 验证结果
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/main.rs main/src/onetcli_app.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p main`
+  - 结果：失败，受环境缺少 `cmake` / `nasm` 影响
+- 静态审查结果：
+  - `main/src/main.rs` 已改为消费保存的 `WindowBounds`
+  - `main/src/onetcli_app.rs` 已注册窗口 bounds 监听保存
+  - `main/src/setting_tab.rs` 已补齐序列化结构与恢复方法
+
+### 残余风险
+- 还需在 Windows 实机验证最大化、窗口化、关闭后重启是否都能恢复到预期状态。
+- 如果用户切换显示器布局，当前未额外处理越界坐标回正；这不是本次链路缺失的主因，但后续可能仍需补充体验优化。
+
+## 主窗口状态保存防抖修复审查
+审查时间：2026-03-28 23:02:00 +08:00
+
+### 技术维度评分
+- 代码质量：93/100
+- 测试覆盖：74/100
+- 规范遵循：93/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：95/100
+- 风险评估：86/100
+
+### 综合评分
+- 89/100
+- 建议：需讨论
+
+### 关键结论
+- 这次回归不是 Windows 拖拽命中逻辑失效，而是窗口状态保存被错误地放在高频 bounds 回调里同步写盘，导致窗口拖动过程卡顿到接近不可用。
+- 修复后改为：
+  - bounds 回调只更新内存中的最新窗口状态
+  - 通过 `Debouncer` 延迟写盘
+  - 应用退出时再兜底写一次全局设置
+- 该方案与项目现有标签布局延迟保存模式一致，回归面比继续改平台拖拽逻辑更小。
+
+## 主窗口拖动回归二次修复审查
+审查时间：2026-03-28 23:18:00 +08:00
+
+### 综合评分
+- 90/100
+- 建议：通过
+
+### 关键结论
+- 进一步核对后，真正会在拖动过程中高频触发的回归点是 `AppSettings::global_mut(...)` 带来的全局观察者通知，而不只是同步写盘。
+- 修复后把高频路径收敛为纯本地缓存更新；只有在防抖到期或实体释放时，才把缓存刷入全局设置并落盘。
+- 该修复比继续改 `TabContainer` 的 Windows 命中区更聚焦，也更符合“窗口状态恢复不应影响拖动体验”的需求边界。

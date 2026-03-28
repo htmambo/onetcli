@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    RenderOnce, SharedString, Styled, Task, Window, WindowControlArea, div, px,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    Render, RenderOnce, SharedString, Styled, Task, Window, WindowControlArea, div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -371,7 +371,9 @@ impl gpui::Global for TabContentRegistry {}
 // TabBarDragState - Window drag state management
 // ============================================================================
 
-/// 窗口拖动状态，用于在 Windows 和 Linux 上支持拖动窗口
+const WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH: Pixels = px(72.0);
+
+/// 窗口拖动状态，用于在非 Windows 平台支持手动拖动窗口
 struct TabBarDragState {
     should_move: bool,
 }
@@ -380,6 +382,14 @@ impl Render for TabBarDragState {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
     }
+}
+
+fn uses_manual_window_move(show_window_controls: bool, is_windows: bool) -> bool {
+    show_window_controls && !is_windows
+}
+
+fn should_render_windows_drag_spacer(show_window_controls: bool, is_windows: bool) -> bool {
+    show_window_controls && is_windows
 }
 
 // ============================================================================
@@ -1531,13 +1541,18 @@ impl TabContainer {
         // 窗口拖动状态管理（仅在 Windows/Linux 上需要，且启用窗口控件时）
         let is_linux = cfg!(target_os = "linux");
         let is_macos = cfg!(target_os = "macos");
+        let is_windows = cfg!(target_os = "windows");
         let is_client_decorated = matches!(window.window_decorations(), Decorations::Client { .. });
         let show_window_controls = self.show_window_controls;
         let show_custom_window_controls =
             show_window_controls && should_render_custom_window_controls(window);
+        let manual_window_move = uses_manual_window_move(show_window_controls, is_windows);
+        let show_windows_drag_spacer =
+            should_render_windows_drag_spacer(show_window_controls, is_windows);
+        let should_block_tab_mouse_for_window_move = manual_window_move;
         let allow_tab_drag = !is_macos;
 
-        // 使用状态管理窗口拖动
+        // 非 Windows 平台使用状态管理窗口拖动；Windows 依赖 WindowControlArea 命中测试。
         let drag_state = window.use_state(cx, |_, _| TabBarDragState { should_move: false });
 
         h_flex()
@@ -1548,12 +1563,15 @@ impl TabContainer {
             .items_center()
             .border_b_1()
             .border_color(border_color)
+            .when(show_windows_drag_spacer, |this| {
+                this.window_control_area(WindowControlArea::Drag)
+            })
             // macOS 双击标签栏触发系统偏好设置的标题栏双击行为（zoom/minimize）
             .when(is_macos, |this| {
                 this.on_double_click(|_, window, _| window.handle_titlebar_double_click())
             })
             // 窗口拖动支持：仅在非 macOS 且启用窗口控件时生效
-            .when(show_window_controls, |this| {
+            .when(manual_window_move, |this| {
                 this.when(is_linux, |this| {
                     this.on_double_click(|_, window, _| window.zoom_window())
                 })
@@ -1603,6 +1621,7 @@ impl TabContainer {
                     div()
                         .id("pinned-tab")
                         .flex()
+                        .occlude()
                         .flex_shrink_0()
                         .overflow_hidden()
                         .items_center()
@@ -1651,36 +1670,33 @@ impl TabContainer {
                 h_flex()
                     .id("tabs")
                     .flex_1()
-                    // 仅在启用窗口控件时设置拖动区域（用于 Windows 原生拖动）
-                    .when(show_window_controls, |this| {
-                        this.window_control_area(WindowControlArea::Drag)
-                            .on_mouse_down_out(window.listener_for(
-                                &drag_state,
-                                |state, _, _, _| {
-                                    state.should_move = false;
-                                },
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                window.listener_for(&drag_state, |state, _, _, _| {
-                                    state.should_move = true;
-                                }),
-                            )
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                window.listener_for(&drag_state, |state, _, _, _| {
-                                    state.should_move = false;
-                                }),
-                            )
-                            .on_mouse_move(window.listener_for(
-                                &drag_state,
-                                |state, _, window, _| {
-                                    if state.should_move {
-                                        state.should_move = false;
-                                        window.start_window_move();
-                                    }
-                                },
-                            ))
+                    // `overflow_x_scroll()` 容器在 Linux/macOS 仍需保留手动拖窗事件链。
+                    // Windows 不在这里声明 Drag 区域，避免整块 tab 容器吞掉 tab 自身拖拽排序。
+                    .when(manual_window_move, |this| {
+                        this.on_mouse_down_out(window.listener_for(
+                            &drag_state,
+                            |state, _, _, _| {
+                                state.should_move = false;
+                            },
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            window.listener_for(&drag_state, |state, _, _, _| {
+                                state.should_move = true;
+                            }),
+                        )
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            window.listener_for(&drag_state, |state, _, _, _| {
+                                state.should_move = false;
+                            }),
+                        )
+                        .on_mouse_move(window.listener_for(&drag_state, |state, _, window, _| {
+                            if state.should_move {
+                                state.should_move = false;
+                                window.start_window_move();
+                            }
+                        }))
                     })
                     .overflow_x_scroll()
                     .when(!is_macos && self.pinned_tab.is_none(), |this| {
@@ -1719,6 +1735,7 @@ impl TabContainer {
                         div()
                             .id(idx)
                             .flex()
+                            .occlude()
                             .flex_shrink_0()
                             .overflow_hidden()
                             .items_center()
@@ -1734,39 +1751,42 @@ impl TabContainer {
                                     .bg(inactive_tab_color)
                             })
                             .when(allow_tab_drag, |el| {
-                                el.cursor_grab()
-                                    .on_mouse_down(
+                                let el = el.cursor_grab();
+                                let el = if should_block_tab_mouse_for_window_move {
+                                    el.on_mouse_down(
                                         MouseButton::Left,
                                         move |_evt, window: &mut Window, cx| {
                                             window.prevent_default();
                                             cx.stop_propagation();
                                         },
                                     )
-                                    .on_mouse_move(move |_evt, window: &mut Window, cx| {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                    })
-                                    .on_drag(
-                                        DragTab::new(idx, title.clone()),
-                                        |drag, _, window, cx| {
+                                    .on_mouse_move(
+                                        move |_evt, window: &mut Window, cx| {
                                             window.prevent_default();
                                             cx.stop_propagation();
-                                            cx.new(|_| drag.clone())
                                         },
                                     )
-                                    .drag_over::<DragTab>(move |el, _, _, _cx| {
-                                        el.border_l_2().border_color(drag_border_color)
-                                    })
-                                    .on_drop(cx.listener(
-                                        move |this, drag: &DragTab, window, cx| {
-                                            let from_idx = drag.tab_index;
-                                            let to_idx = idx;
-                                            if from_idx != to_idx {
-                                                this.move_tab(from_idx, to_idx, cx);
-                                            }
-                                            this.set_active_index(to_idx, window, cx);
-                                        },
-                                    ))
+                                } else {
+                                    el
+                                };
+
+                                el.on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
+                                    cx.stop_propagation();
+                                    cx.new(|_| drag.clone())
+                                })
+                                .drag_over::<DragTab>(move |el, _, _, _cx| {
+                                    el.border_l_2().border_color(drag_border_color)
+                                })
+                                .on_drop(cx.listener(
+                                    move |this, drag: &DragTab, window, cx| {
+                                        let from_idx = drag.tab_index;
+                                        let to_idx = idx;
+                                        if from_idx != to_idx {
+                                            this.move_tab(from_idx, to_idx, cx);
+                                        }
+                                        this.set_active_index(to_idx, window, cx);
+                                    },
+                                ))
                             })
                             .on_click(cx.listener(move |this, _event, window, cx| {
                                 window.prevent_default();
@@ -1874,8 +1894,30 @@ impl TabContainer {
                                         )),
                                 )
                             })
-                    })),
+                    }))
+                    .when(show_windows_drag_spacer, |this| {
+                        this.child(
+                            div()
+                                .id("tab-bar-inline-drag-spacer")
+                                .flex_grow()
+                                .min_w(WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH)
+                                .h_full()
+                                .occlude()
+                                .window_control_area(WindowControlArea::Drag),
+                        )
+                    }),
             )
+            .when(show_windows_drag_spacer, |el| {
+                el.child(
+                    div()
+                        .id("tab-bar-drag-spacer")
+                        .flex_shrink_0()
+                        .h_full()
+                        .w(WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH)
+                        .occlude()
+                        .window_control_area(WindowControlArea::Drag),
+                )
+            })
             .child(
                 Popover::new("tab-list-popover")
                     .anchor(Corner::TopRight)
@@ -1930,7 +1972,8 @@ impl TabContainer {
                         Button::new("tab-dropdown-btn")
                             .icon(IconName::ChevronDown)
                             .ghost()
-                            .compact(),
+                            .compact()
+                            .occlude(),
                     )
                     .when_some(tab_list, |popover, list| {
                         popover.child(
@@ -2009,6 +2052,7 @@ impl TabContainer {
         div()
             .id(id)
             .flex()
+            .when(is_windows, |this| this.occlude())
             .w(px(34.0))
             .h_full()
             .flex_shrink_0()
@@ -2087,5 +2131,24 @@ impl Render for TabContainer {
                     .child(self.render_tab_bar(window, cx))
                     .child(self.render_tab_content(window, cx)),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_render_windows_drag_spacer, uses_manual_window_move};
+
+    #[test]
+    fn windows_仅渲染独立拖窗热区() {
+        assert!(should_render_windows_drag_spacer(true, true));
+        assert!(!should_render_windows_drag_spacer(true, false));
+        assert!(!should_render_windows_drag_spacer(false, true));
+    }
+
+    #[test]
+    fn 非_windows_保留手动拖窗链路() {
+        assert!(uses_manual_window_move(true, false));
+        assert!(!uses_manual_window_move(true, true));
+        assert!(!uses_manual_window_move(false, false));
     }
 }

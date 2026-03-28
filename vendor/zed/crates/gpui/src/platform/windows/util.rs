@@ -12,7 +12,7 @@ use windows::{
         Foundation::*, Graphics::Dwm::*, System::LibraryLoader::LoadLibraryA,
         UI::WindowsAndMessaging::*,
     },
-    core::{BOOL, HSTRING, PCSTR},
+    core::{BOOL, Error, HRESULT, HSTRING, PCSTR},
 };
 
 use crate::*;
@@ -104,6 +104,18 @@ pub(crate) unsafe fn set_window_long(
     unsafe {
         SetWindowLongW(hwnd, nindex, dwnewlong as i32) as isize
     }
+}
+
+const DRAGDROP_E_INVALID_HWND: HRESULT = HRESULT(0x80040102u32 as i32);
+const ERROR_INVALID_WINDOW_HANDLE_HRESULT: HRESULT = HRESULT(0x80070578u32 as i32);
+
+pub(crate) fn hwnd_is_valid(hwnd: HWND) -> bool {
+    !hwnd.is_invalid() && unsafe { IsWindow(Some(hwnd)).as_bool() }
+}
+
+pub(crate) fn is_invalid_window_handle_error(error: &Error) -> bool {
+    let code = error.code();
+    code == DRAGDROP_E_INVALID_HWND || code == ERROR_INVALID_WINDOW_HANDLE_HRESULT
 }
 
 pub(crate) fn windows_credentials_target_name(url: &str) -> String {

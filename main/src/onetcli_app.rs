@@ -1,7 +1,8 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
-use crate::setting_tab::AppSettings;
+use crate::setting_tab::{AppSettings, SavedWindowBounds};
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement,
     Render, Styled, Task, Window, actions, div,
@@ -57,6 +58,7 @@ use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
 use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save};
+use one_core::utils::debouncer::Debouncer;
 use reqwest_client::ReqwestClient;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -319,8 +321,13 @@ pub struct OnetCliApp {
     tab_container: Entity<TabContainer>,
     last_layout_state: Option<TabContainerState>,
     _save_layout_task: Option<Task<()>>,
+    pending_window_bounds: Option<SavedWindowBounds>,
+    window_bounds_save_debouncer: Arc<Debouncer>,
+    _save_window_bounds_task: Option<Task<()>>,
     window_title: String,
 }
+
+const WINDOW_BOUNDS_SAVE_DEBOUNCE_MS: u64 = 300;
 
 impl OnetCliApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -409,6 +416,15 @@ impl OnetCliApp {
         })
         .detach();
 
+        cx.observe_window_bounds(window, |this, window, cx| {
+            if let Some(next_bounds) = AppSettings::snapshot_main_window_bounds(window) {
+                if this.stage_window_bounds(next_bounds) {
+                    this.schedule_window_bounds_save(cx);
+                }
+            }
+        })
+        .detach();
+
         cx.observe_window_activation(window, |_this, window, cx| {
             if !window.is_window_active() {
                 return;
@@ -421,6 +437,11 @@ impl OnetCliApp {
         })
         .detach();
 
+        cx.on_release(|this, cx| {
+            this.flush_pending_window_bounds(cx);
+        })
+        .detach();
+
         cx.on_app_quit({
             let tab_container = tab_container.clone();
             move |_, cx| {
@@ -428,6 +449,7 @@ impl OnetCliApp {
                 if let Err(err) = save_tab_state(&state) {
                     tracing::error!("退出时保存标签状态失败：{:?}", err);
                 }
+                AppSettings::save_global(cx);
                 Task::ready(())
             }
         })
@@ -437,6 +459,11 @@ impl OnetCliApp {
             tab_container,
             last_layout_state: None,
             _save_layout_task: None,
+            pending_window_bounds: AppSettings::snapshot_main_window_bounds(window),
+            window_bounds_save_debouncer: Arc::new(Debouncer::new(Duration::from_millis(
+                WINDOW_BOUNDS_SAVE_DEBOUNCE_MS,
+            ))),
+            _save_window_bounds_task: None,
             window_title: String::new(),
         }
     }
@@ -447,6 +474,33 @@ impl OnetCliApp {
             &mut self.last_layout_state,
             cx,
         ));
+    }
+
+    fn stage_window_bounds(&mut self, next_bounds: SavedWindowBounds) -> bool {
+        if self.pending_window_bounds == Some(next_bounds) {
+            return false;
+        }
+
+        self.pending_window_bounds = Some(next_bounds);
+        true
+    }
+
+    fn flush_pending_window_bounds(&mut self, cx: &mut App) {
+        if let Some(main_window_bounds) = self.pending_window_bounds {
+            AppSettings::set_global_main_window_bounds(main_window_bounds, cx);
+        }
+    }
+
+    fn schedule_window_bounds_save(&mut self, cx: &mut Context<Self>) {
+        let debouncer = Arc::clone(&self.window_bounds_save_debouncer);
+        self._save_window_bounds_task = Some(cx.spawn(async move |this, cx| {
+            if debouncer.debounce(cx).await {
+                let _ = this.update(cx, |this, cx| {
+                    this.flush_pending_window_bounds(cx);
+                    AppSettings::save_global(cx);
+                });
+            }
+        }));
     }
 }
 

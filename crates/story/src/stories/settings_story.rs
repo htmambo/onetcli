@@ -18,6 +18,7 @@ use gpui_component::{
 };
 
 struct AppSettings {
+    theme_mode: SharedString,
     auto_switch_theme: bool,
     cli_path: SharedString,
     font_family: SharedString,
@@ -31,6 +32,7 @@ struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            theme_mode: "light".into(),
             auto_switch_theme: false,
             cli_path: "/usr/local/bin/bash".into(),
             font_family: "Arial".into(),
@@ -52,6 +54,40 @@ impl AppSettings {
 
     pub fn global_mut(cx: &mut App) -> &mut AppSettings {
         cx.global_mut::<AppSettings>()
+    }
+
+    fn theme_preference_value(&self) -> SharedString {
+        if self.auto_switch_theme {
+            "auto".into()
+        } else if self.theme_mode.as_ref() == "dark" {
+            "dark".into()
+        } else {
+            "light".into()
+        }
+    }
+
+    fn manual_theme_mode(&self) -> ThemeMode {
+        if self.theme_mode.as_ref() == "dark" {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        }
+    }
+
+    fn set_theme_preference(&mut self, value: &str) {
+        match value {
+            "auto" => {
+                self.auto_switch_theme = true;
+            }
+            "dark" => {
+                self.auto_switch_theme = false;
+                self.theme_mode = "dark".into();
+            }
+            _ => {
+                self.auto_switch_theme = false;
+                self.theme_mode = "light".into();
+            }
+        }
     }
 }
 
@@ -134,33 +170,34 @@ impl SettingsStory {
                 .groups(vec![
                     SettingGroup::new().title("Appearance").items(vec![
                         SettingItem::new(
-                            "Dark Mode",
-                            SettingField::switch(
-                                |cx: &App| cx.theme().mode.is_dark(),
-                                |val: bool, cx: &mut App| {
-                                    let mode = if val {
-                                        ThemeMode::Dark
-                                    } else {
-                                        ThemeMode::Light
+                            "Theme Mode",
+                            SettingField::dropdown(
+                                vec![
+                                    ("auto".into(), "Auto".into()),
+                                    ("light".into(), "Light".into()),
+                                    ("dark".into(), "Dark".into()),
+                                ],
+                                |cx: &App| AppSettings::global(cx).theme_preference_value(),
+                                |val: SharedString, cx: &mut App| {
+                                    let mode = {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.set_theme_preference(val.as_ref());
+                                        if settings.auto_switch_theme {
+                                            cx.window_appearance().into()
+                                        } else {
+                                            settings.manual_theme_mode()
+                                        }
                                     };
+
                                     Theme::global_mut(cx).mode = mode;
                                     Theme::change(mode, None, cx);
                                 },
                             )
-                            .default_value(false),
+                            .default_value(default_settings.theme_preference_value()),
                         )
-                        .description("Switch between light and dark themes."),
-                        SettingItem::new(
-                            "Auto Switch Theme",
-                            SettingField::checkbox(
-                                |cx: &App| AppSettings::global(cx).auto_switch_theme,
-                                |val: bool, cx: &mut App| {
-                                    AppSettings::global_mut(cx).auto_switch_theme = val;
-                                },
-                            )
-                            .default_value(default_settings.auto_switch_theme),
-                        )
-                        .description("Automatically switch theme based on system settings."),
+                        .description(
+                            "Automatically follow the system theme, or force light or dark mode.",
+                        ),
                         SettingItem::new(
                             "resettable",
                             SettingField::switch(

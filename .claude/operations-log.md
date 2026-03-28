@@ -1,5 +1,77 @@
 ## 操作日志
 
+## 追加修正记录 - window-drag-followup-round3
+时间：2026-03-29 00:08:00 +0800
+
+### 根因判断
+- 之前的 Windows 修复主要依赖两个独立 spacer 作为拖窗热区。
+- 用户继续反馈“还是无法拖动”，说明问题更可能不是“有无热区”，而是可拖区域仍然过窄，或者空白区域之外仍没有稳定的 `WindowControlArea::Drag` 命中层。
+- `crates/ui/src/title_bar.rs` 的稳定模式是：整个标题栏主体作为拖窗层，交互子元素再通过自己的 hitbox 把拖窗层压住。
+
+### 调整内容
+- 在 `crates/core/src/tab_container.rs` 中把顶层 `#tab-bar` 在 Windows 下声明为 `WindowControlArea::Drag`
+- 为以下真实交互元素补充 `.occlude()`，让它们阻断父级拖窗层命中：
+  - 固定首页 tab `pinned-tab`
+  - 普通 tab 项
+  - tab 下拉按钮 `tab-dropdown-btn`
+  - Windows 窗口控制按钮
+- 保留原有 `tab-bar-inline-drag-spacer` 与 `tab-bar-drag-spacer`，作为显式兜底热区，不回退前两轮修复
+
+### 本地验证
+- `C:\Users\hoping\.cargo\bin\rustfmt.exe --edition 2024 crates/core/src/tab_container.rs`
+  - 结果：通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe check -p one-core`
+  - 结果：通过
+
+## 编码前检查 - window-drag-followup
+时间：2026-03-28 23:59:00 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-window-drag-followup.md`
+- 已分析相似实现：
+  - `crates/ui/src/title_bar.rs`
+  - `crates/core/src/tab_container.rs`
+  - `main/src/onetcli_app.rs`
+  - `main/src/setting_tab.rs`
+- 将使用以下可复用组件：
+  - `uses_manual_window_move(...)`：区分 Windows 命中区和非 Windows 手动拖窗
+  - `should_render_windows_drag_spacer(...)`：收敛 Windows 可拖区域
+  - `pending_window_bounds` + `Debouncer`：隔离拖动过程中的高频状态写回
+  - `SavedWindowBounds`：统一窗口状态快照与恢复
+- 将遵循命名约定：继续沿用 `stage_*`、`flush_*`、`snapshot_*` 的状态流命名
+- 将遵循代码风格：只核对现有未提交修复，不覆盖用户已有改动，不另起一套拖窗实现
+- 确认不重复造轮子，证明：已对照通用 `TitleBar`、主窗口 `TabContainer` 和现有窗口状态保存链路，确认问题都应在现有组件上闭环
+
+## 实施与验证记录 - window-drag-followup
+时间：2026-03-28 23:59:00 +0800
+
+### 根因复核
+- 当前工作区中，和“窗口不能使用鼠标拖动”直接相关的修复已经存在于未提交改动中，涉及两条链路：
+  - `crates/core/src/tab_container.rs`：Windows 拖窗热区从 `#tabs` 整块容器收敛为独立热区 `tab-bar-inline-drag-spacer` 与 `tab-bar-drag-spacer`
+  - `main/src/onetcli_app.rs` / `main/src/setting_tab.rs`：窗口 bounds 变化改为本地缓存 + 防抖写回，避免拖动时高频全局通知与写盘
+- 结合仓库既有验证报告再次确认：用户感知到的“无法拖动”不仅可能是拖窗热区问题，也可能是拖动过程中主线程被状态保存拖慢到近似卡死
+
+### 本次操作
+- 未覆盖 `crates/core/src/tab_container.rs`、`main/src/onetcli_app.rs`、`main/src/setting_tab.rs` 中现有未提交改动
+- 仅对现有修复进行再次核对与本地验证，避免破坏你当前工作区中的拖窗修复链路
+
+### 本地验证
+- `C:\Users\hoping\.cargo\bin\cargo.exe test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过
+  - 细节：
+    - `windows_仅渲染独立拖窗热区` 通过
+    - `非_windows_保留手动拖窗链路` 通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe check -p main`
+  - 结果：失败
+  - 原因：环境缺少 `cmake` 与 `nasm`，阻塞在 `aws-lc-sys` 自定义构建脚本，不是当前拖窗修复代码本身的 Rust 编译错误
+
+### 结论
+- 当前工作区里的相关源代码已经覆盖了两个真实回归点：
+  - Windows 拖窗命中区错误
+  - 窗口移动过程中的高频状态保存卡顿
+- 在当前环境下，单测已经证明 `TabContainer` 平台分支逻辑正确；`main` 的全量编译仍需要先补齐本机构建依赖后才能继续做 GUI 级验证
+
 ## 编码前检查 - sftp-context-menu-stability
 时间：2026-03-28 04:48:48 +0800
 
@@ -3070,3 +3142,276 @@
   - 结果：通过
 - `cargo check -p sftp_view -p terminal_view`
   - 结果：通过
+## Windows 鼠标拖动与拖动排序修复
+时间：2026-03-28 20:44:33 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-windows-mouse-drag.md`
+- 工具说明：当前运行环境未提供 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander`，本次改用仓库源码、`vendor/zed` 依赖源码与 `git show` 历史提交完成检索。
+- 将使用以下可复用组件：
+  - `TabBarDragState`：`crates/core/src/tab_container.rs`，沿用既有非 Windows 手动拖窗状态机。
+  - `WindowControlArea::Drag`：`vendor/zed/crates/gpui/src/window.rs`，沿用 Windows 标题栏命中测试机制。
+  - `render_window_controls(...)`：`crates/core/src/tab_container.rs`，保持现有窗口控件渲染结构不变。
+- 将遵循命名约定：新增函数使用 `snake_case`，未引入新的命名风格。
+- 将遵循代码风格：继续使用 GPUI builder 链式写法与 `.when(...)` 条件分支。
+- 确认不重复造轮子，证明：已对照 `crates/ui/src/title_bar.rs` 的拖窗实现与 `vendor/zed` 的 hit-test 机制，确认问题应在现有 `TabContainer` 上修正，而不是新增一套 Windows 拖拽框架。
+
+### 根因定位
+- `crates/core/src/tab_container.rs` 之前把 `#tabs` 整个滚动容器声明成 `window_control_area(WindowControlArea::Drag)`。
+- 在 Windows 上，`vendor/zed/crates/gpui/src/window.rs` 会按命中顺序直接返回对应 `WindowControlArea`，导致 tab 自身的鼠标拖拽排序交互被系统拖窗 hit-test 抢走。
+- 同时，`start_window_move()` 在依赖注释里明确面向 Linux/macOS，不能作为 Windows 主拖窗方案的唯一依赖。
+
+### 实施记录
+- 新增 `WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH`、`uses_manual_window_move(...)`、`should_render_windows_drag_spacer(...)`，把平台差异收口成显式判定。
+- 将 tab bar 顶层与 `#tabs` 容器上的手动拖窗链路从“所有启用窗口控件的平台”改成“仅非 Windows 平台”。
+- 移除 Windows 下 `#tabs` 滚动容器的 `WindowControlArea::Drag` 声明，避免吞掉 tab 点击与拖动排序。
+- 在 tab 列表与右侧控件之间新增独立 `tab-bar-drag-spacer` 热区，仅在 Windows 且启用窗口控件时渲染，用作稳定拖窗区域。
+- 为新增平台判定函数补充 2 个最小单测，防止未来回归。
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `crates/core/src/tab_container.rs`：继续复用 `TabBarDragState` 管理 Linux/macOS 的手动拖窗状态。
+- `crates/ui/src/title_bar.rs`：沿用“独立拖窗热区 + 交互区域分离”的既有标题栏模式。
+- `vendor/zed/crates/gpui/src/window.rs`：遵循 `WindowControlArea` 的命中规则，不新增自研 Windows hit-test 逻辑。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增的 `uses_manual_window_move`、`should_render_windows_drag_spacer` 保持 `snake_case`。
+- 代码风格：改动集中在 `render_tab_bar(...)` 内部，继续沿用 `.when(...)` 和链式布局拼装。
+- 文件组织：仅修改 `crates/core/src/tab_container.rs` 的主窗口 tab bar 逻辑，并把上下文/验证留痕写入 `.claude/`。
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/title_bar.rs`：保留“稳定拖窗容器与交互控件拆分”的思想，但没有把主窗口 tab bar 生硬改造成通用标题栏结构。
+- `main/src/main.rs` + `main/src/onetcli_app.rs`：保持主窗口启用 `TitleBar::title_bar_options()` 与 `.with_window_controls(true)` 的现状不变，避免入口层回归。
+- `vendor/zed/crates/gpui/src/window.rs`：按照框架既有 Windows hit-test 行为修正，不绕开框架实现自定义拖窗。
+
+### 4. 未重复造轮子的证明
+- 检查了 `crates/core/src/tab_container.rs`、`crates/ui/src/title_bar.rs`、`crates/core/src/popup_window.rs`、`vendor/zed/crates/gpui/src/window.rs`。
+- 确认仓库已经具备标题栏拖窗与窗口控件框架，本次仅修正主窗口 tab bar 在 Windows 下的拖窗热区划分，不新增重复组件。
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' fmt --all -- crates/core/src/tab_container.rs`
+  - 结果：通过
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个新增单测全部通过
+
+### 验证过程中的额外情况
+- 默认增量编译下，`cargo test` 曾因 `target/debug/incremental` 写入过大触发 `os error 112`（磁盘空间不足）。
+- 通过关闭增量编译后，测试已成功执行；说明本次失败属于环境磁盘空间问题，不是代码编译或测试逻辑错误。
+
+### 当前限制
+- 尚未执行 GUI 手工回归；仍需在 Windows 桌面实际确认：
+  - tab 拖动排序恢复可用
+  - tab 右侧独立空白热区可以拖动整个窗口
+  - tab 点击激活、关闭按钮、下拉列表按钮行为未回归
+- `crates/ui/src/window_ext.rs` 与 `crates/ui/src/title_bar.rs` 的若干 warning 为仓库既有问题，本次未处理
+
+## Windows 鼠标拖动与拖动排序修复（第二轮）
+时间：2026-03-28 21:26:12 +08:00
+
+### 分支留痕
+- 已按要求将当前所有未提交改动切换到新分支：`fix/windows-drag-followup`
+- 后续 Windows 拖拽修复均在该分支继续进行，未再停留在原分支 `merge-upstream-dev-test`
+
+### 二次定位结论
+- 第一轮修复后，Windows 拖窗热区虽然从 `#tabs` 容器拆出，但用户反馈“窗口和排序仍然不能拖动”，说明根因不止一个。
+- 进一步对比仓库中正常工作的拖拽实现（如 `crates/ui/src/dock/tab_panel.rs`、`main/src/home_tab.rs`）后确认：
+  - 它们不会在拖拽源元素上额外绑定“鼠标按下/移动即拦截”的通用处理；
+  - `tab_container.rs` 的 tab 元素却在拖拽前就通过 `on_mouse_down/on_mouse_move` 拦截鼠标事件。
+- 该拦截逻辑对 Linux 的手动窗口拖动链路是必要的，但对 Windows 属于多余干扰，因此需要按平台拆分。
+- 同时，第一轮只提供了右侧固定宽度热区，Windows 实际可拖区域过窄；需要在 tab 条带的剩余空白区域也提供拖窗命中区。
+
+### 第二轮实施记录
+- 保留 Linux/macOS 的 `manual_window_move` 逻辑不变，但新增 `should_block_tab_mouse_for_window_move = manual_window_move`，只在非 Windows 平台继续让 tab 阻断父级手动拖窗事件。
+- Windows 下，tab 本体不再绑定那组 `on_mouse_down/on_mouse_move -> prevent_default/stop_propagation` 的前置拦截，避免影响 `on_drag(...)` 起手。
+- 将 tab 的 `on_drag(...)` 回调调整为与仓库其他拖拽实现一致，只保留 `cx.stop_propagation()` 和拖拽预览构造。
+- 新增位于 `#tabs` 容器内部的 `tab-bar-inline-drag-spacer`，作为“tab 条带剩余空白区”的 Windows 拖窗热区。
+- 保留并加宽右侧固定热区 `tab-bar-drag-spacer`（56px -> 72px），同时补 `occlude()`，让其作为 tab 填满时的兜底拖窗区域。
+
+### 第二轮本地验证
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' fmt --all -- crates/core/src/tab_container.rs`
+  - 结果：通过
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个单测全部通过
+
+### 关于测试日志中的窗口句柄错误
+- 用户反馈的日志：
+  - `gpui::window: window not found`
+  - `gpui::platform::windows::window: Error { code: HRESULT(0x80040102), ... }`
+  - `gpui::platform::windows::window: Error { code: HRESULT(0x80070578), ... }`
+- 结合源码排查，这类日志更像“窗口销毁后仍有异步窗口读取/平台句柄调用”导致的窗口生命周期问题，当前未发现它与 `tab_container` 的拖拽起手逻辑存在直接调用链。
+- 已初步定位到多处后台 `cx.update_window(...)` / `WindowHandle::read(...)` 路径可能在窗口关闭后触发，但本轮未直接改动这些异步窗口生命周期逻辑，避免扩大回归面。
+
+## Windows 窗口句柄错误收敛
+时间：2026-03-28 21:50:10 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-windows-window-handle.md`
+- 工具说明：当前运行环境未提供 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander`，本次改用仓库源码、`vendor/zed` 依赖源码与本地编译结果完成检索。
+- 将使用以下可复用组件：
+  - `Callbacks`：`vendor/zed/crates/gpui/src/platform/windows/window.rs`，沿用既有回调存储结构收口销毁阶段事件。
+  - `handle_destroy_msg(...)`：`vendor/zed/crates/gpui/src/platform/windows/events.rs`，作为窗口销毁切点。
+  - `update_window_id(...)`：`vendor/zed/crates/gpui/src/app.rs`，确认 `window not found` 的真实来源。
+- 将遵循命名约定：新增辅助函数使用 `snake_case`，新增常量使用全大写下划线。
+- 将遵循代码风格：继续沿用 GPUI 现有 `Result`/平台 helper 风格，不改全局错误语义。
+- 确认不重复造轮子，证明：已对照 `vendor/zed/crates/gpui/src/window.rs`、`vendor/zed/crates/gpui/src/app.rs`、`vendor/zed/crates/gpui/src/platform/windows/events.rs`、`vendor/zed/crates/gpui/src/platform/windows/window.rs`，确认问题应在 Windows 平台生命周期边界收口，而不是重写业务层拖拽逻辑。
+
+### 根因定位
+- `gpui::window: window not found` 来自 `vendor/zed/crates/gpui/src/app.rs` 中 `update_window_id(...)` / `read_window(...)` 的 `context("window not found")`，说明窗口实体已经从 GPUI 的 `windows` 表移除。
+- Windows 平台层在 `WM_DESTROY` 时只取走了 `close` 回调，但没有清空 `request_frame`、`input`、`hit_test_window_control`、`resize`、`moved` 等其他回调；关窗尾声如果还有晚到消息，这些闭包仍会回到已移除窗口。
+- 用户日志中的 `HRESULT(0x80040102)` 与 `HRESULT(0x80070578)` 分别对应拖放/Win32 的无效窗口句柄，命中点主要在：
+  - `vendor/zed/crates/gpui/src/platform/windows/window.rs` 的 `RevokeDragDrop(handle)` / `DestroyWindow(handle)`
+  - `vendor/zed/crates/gpui/src/platform/windows/events.rs` 的 `ScreenToClient(...)` / `GetWindowRect(...)`
+
+### 实施记录
+- 在 `vendor/zed/crates/gpui/src/platform/windows/util.rs` 新增：
+  - `hwnd_is_valid(...)`，统一封装 `IsWindow(Some(hwnd))`
+  - `is_invalid_window_handle_error(...)`，只识别已确认的两类无效句柄错误码
+- 在 `vendor/zed/crates/gpui/src/platform/windows/window.rs`：
+  - 为 `Callbacks` 新增 `clear_after_destroy(...)`
+  - 将 `WindowsWindow::drop` 改成“先检查句柄是否仍有效，再只忽略无效句柄错误，其它错误继续记录”
+- 在 `vendor/zed/crates/gpui/src/platform/windows/events.rs`：
+  - `handle_destroy_msg(...)` 中在执行上层 `close` 回调前清空剩余平台回调与相关状态
+  - 在 `handle_hit_test_msg(...)`、`handle_nc_mouse_move_msg(...)`、`start_tracking_mouse(...)` 增加有效句柄守卫
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `vendor/zed/crates/gpui/src/platform/windows/window.rs`：继续使用 `Callbacks` 作为所有平台回调的唯一存储点。
+- `vendor/zed/crates/gpui/src/platform/windows/events.rs`：继续以 `handle_destroy_msg(...)` 作为关窗收口点，没有另造一条销毁路径。
+- `vendor/zed/crates/gpui/src/app.rs`：保留 `window not found` 的全局错误语义不变，仅在 Windows 平台减少晚到调用。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `hwnd_is_valid`、`is_invalid_window_handle_error`、`clear_after_destroy` 均为 `snake_case`。
+- 代码风格：改动集中在 Windows 平台文件，继续沿用小型 helper + 事件处理函数的拆分方式。
+- 文件组织：没有跨到业务 crate 修改，仅在 `vendor/zed/crates/gpui/src/platform/windows/` 内收口问题。
+
+### 3. 对比了以下相似实现
+- `vendor/zed/crates/gpui/src/window.rs`：没有在通用窗口层全局吞掉 `window not found`，避免影响其他平台和真实错误排查。
+- `vendor/zed/crates/gpui/src/app.rs`：保持 `update_window_id(...)` 的错误语义不变，只从调用源头减少晚到回调。
+- `vendor/zed/crates/gpui/src/platform/windows/events.rs`：沿用既有 `WM_DESTROY` 处理链路，仅在此处补充清理动作。
+
+### 4. 未重复造轮子的证明
+- 检查了 `vendor/zed/crates/gpui/src/window.rs`、`vendor/zed/crates/gpui/src/app.rs`、`vendor/zed/crates/gpui/src/platform/windows/events.rs`、`vendor/zed/crates/gpui/src/platform/windows/window.rs`。
+- 确认仓库已有完整 Windows 生命周期与回调存储框架，本次只是把已有回调存储点与销毁入口补齐，不新增并行生命周期机制。
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 vendor/zed/crates/gpui/src/platform/windows/util.rs vendor/zed/crates/gpui/src/platform/windows/window.rs vendor/zed/crates/gpui/src/platform/windows/events.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p main`
+  - 结果：失败，原因是环境缺少 `cmake` 与 `nasm`，失败点在 `aws-lc-sys` 构建阶段，不是本次句柄修复代码本身。
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p gpui`
+  - 结果：失败，原因是当前会话无法访问 `https://static.crates.io` 下载缺失依赖，属于网络沙箱限制。
+
+### 当前限制
+- 尚未在真实 Windows GUI 上复现一次“关闭窗口/拖拽窗口后不再打印上述三条日志”。
+- 当前没有新增自动化 GUI 测试；本次只能通过平台源码审查与下游编译验证证明改动收敛。
+
+## 主窗口状态恢复修复
+时间：2026-03-28 22:24:00 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-window-state-restore.md`
+- 工具说明：当前运行环境未提供 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander`，本次改用仓库源码、`vendor/zed` 依赖源码与本地命令完成检索。
+- 将使用以下可复用组件：
+  - `AppSettings`：`main/src/setting_tab.rs`，复用既有 `settings.json` 持久化链路。
+  - `observe_window_bounds(...)`：`vendor/zed/crates/gpui/src/app/context.rs`，复用窗口 bounds 变化监听。
+  - `WindowBounds`：`vendor/zed/crates/gpui/src/platform.rs`，复用窗口态与恢复尺寸语义。
+- 将遵循命名约定：新增类型使用 `PascalCase`，新增辅助函数使用 `snake_case`。
+- 将遵循代码风格：继续沿用“全局设置结构 + 监听器增量落盘”的项目模式，不新增独立窗口状态文件。
+- 确认不重复造轮子，证明：已对照 `main/src/main.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`vendor/zed/crates/gpui/src/window.rs`、`vendor/zed/crates/gpui/src/platform/windows/window.rs`，确认仓库已有完整启动、监听和持久化基础设施。
+
+### 根因定位
+- `main/src/main.rs` 仍然固定使用 `Bounds::centered(...)` 打开主窗口，所以启动时根本没有消费任何已保存窗口状态。
+- `main/src/setting_tab.rs` 之前没有主窗口尺寸/状态字段，`settings.json` 无法保存这类信息。
+- 只在退出时一次性读取窗口状态并不稳，因为 Windows 关窗阶段可能已经进入句柄销毁边界；运行时保存更适合当前项目。
+
+### 实施记录
+- 在 `main/src/setting_tab.rs` 新增：
+  - `SavedWindowDisplayState` 与 `SavedWindowBounds`，用于把 `WindowBounds` 序列化进 `settings.json`
+  - `AppSettings.main_window_bounds`
+  - `set_main_window_bounds(...)`、`persist_main_window_bounds(...)`、`restored_main_window_bounds(...)`
+  - 两个纯逻辑单测，覆盖窗口状态转换与非法数据过滤
+- 在 `main/src/main.rs`：
+  - 主窗口启动时改为优先读取 `AppSettings` 中已保存的 `WindowBounds`
+- 在 `main/src/onetcli_app.rs`：
+  - 通过 `observe_window_bounds(...)` 监听窗口移动/缩放/最大化切换，实时保存窗口状态
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `main/src/setting_tab.rs`：继续使用 `AppSettings` 作为唯一配置持久化入口。
+- `main/src/home_tab.rs`：沿用了偏好项变更后立即 `settings.save()` 的保存模式。
+- `vendor/zed/crates/gpui/src/app/context.rs`：直接复用 `observe_window_bounds(...)`，没有自造窗口事件桥接层。
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增 `SavedWindowDisplayState`、`SavedWindowBounds`、`persist_main_window_bounds` 等命名均符合项目风格。
+- 代码风格：启动恢复、运行时保存、配置序列化分别放回原有模块，没有横向扩散到无关 crate。
+- 文件组织：仅改动 `main/src/main.rs`、`main/src/onetcli_app.rs`、`main/src/setting_tab.rs` 三处主链路文件。
+
+### 3. 对比了以下相似实现
+- `main/src/home_tab.rs`：同样采用“设置变更即写盘”而不是退出时统一落盘。
+- `vendor/zed/crates/gpui/src/window.rs`：直接复用 `WindowOptions.window_bounds` 的恢复入口，没有自己拼平台窗口恢复逻辑。
+- `vendor/zed/crates/gpui/src/platform/windows/window.rs`：直接使用平台层已有的 `window.window_bounds()` 作为状态来源。
+
+### 4. 未重复造轮子的证明
+- 检查了 `main/src/main.rs`、`main/src/setting_tab.rs`、`main/src/home_tab.rs`、`vendor/zed/crates/gpui/src/app/context.rs`、`vendor/zed/crates/gpui/src/platform/windows/window.rs`。
+- 确认现有仓库已经具备窗口态监听、恢复和配置写盘能力，本次只是把这三条链路接起来，没有新建第二套窗口状态系统。
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/main.rs main/src/onetcli_app.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p main`
+  - 结果：失败，原因仍是环境缺少 `cmake` 与 `nasm`，失败点在 `aws-lc-sys` 构建阶段，尚未进入本次业务代码的最终编译验证
+
+### 当前限制
+- 还没有在 Windows GUI 上完成“修改尺寸/最大化/关闭/重启”的实机闭环验证。
+- 因环境缺少 `cmake` / `nasm`，暂时无法用 `cargo check -p main` 证明主应用全量编译通过。
+
+## 主窗口状态保存防抖修复
+时间：2026-03-28 23:02:00 +08:00
+
+### 根因定位
+- `observe_window_bounds(...)` 在窗口拖动/缩放过程中会连续触发。
+- 上一版实现把这个回调直接连到了 `AppSettings::save()`，每次 bounds 变化都会同步写 `settings.json`。
+- 结果是窗口拖动过程中主线程持续做磁盘 I/O，表现为“窗口无法正常鼠标拖动”，同时如果用户在防抖前立即关闭，最后一次状态也可能没被写盘。
+
+### 实施记录
+- 在 `main/src/setting_tab.rs`：
+  - 将 `persist_main_window_bounds(...)` 调整为仅更新内存态的 `capture_main_window_bounds(...)`
+  - 新增 `save_global(...)`，统一在需要时把全局设置落盘
+- 在 `main/src/onetcli_app.rs`：
+  - 复用 `one_core::utils::debouncer::Debouncer`
+  - 为窗口状态保存增加 300ms 防抖
+  - 在 `on_app_quit` 中补一次 `AppSettings::save_global(cx)` 兜底保存
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/onetcli_app.rs`
+  - 结果：通过
+- 静态审查结果：
+  - 窗口 bounds 变化时不再同步写盘
+  - 退出时会把内存中的最新窗口状态写回 `settings.json`
+
+## 主窗口拖动回归二次修复
+时间：2026-03-28 23:18:00 +08:00
+
+### 根因定位
+- 上一版虽然把同步写盘改成了防抖写盘，但仍在每次窗口移动时调用 `AppSettings::global_mut(...)` 更新全局设置。
+- `gpui::App::global_mut(...)` 会推送 `NotifyGlobalObservers` 效果，这意味着拖动窗口过程中仍会不断触发全局观察者通知。
+- 因此，拖动回归的真正高频路径不是磁盘写入本身，而是“窗口移动 -> 全局设置变更 -> 全局观察者通知”。
+
+### 实施记录
+- 将窗口移动过程中的状态暂存从 `AppSettings` 全局挪到 `OnetCliApp.pending_window_bounds` 本地字段。
+- `observe_window_bounds(...)` 现在只更新本地缓存并调度防抖任务，不再直接修改全局设置。
+- 防抖任务触发后，才把本地缓存刷入 `AppSettings` 并写盘。
+- `cx.on_release(...)` 增加兜底：在 `OnetCliApp` 释放前把本地缓存刷回全局设置。
+
+### 本地验证
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/onetcli_app.rs`
+  - 结果：通过
+- 静态审查结果：
+  - 窗口移动过程中不再调用 `AppSettings::global_mut(...)`
+  - 全局设置写回只发生在防抖到期或实体释放时
