@@ -2209,6 +2209,7 @@ impl FileManagerPanel {
         let is_dir = item.is_dir;
 
         h_flex()
+            .w_full()
             .h(px(36.))
             .px_2()
             .items_center()
@@ -2272,6 +2273,7 @@ impl FileManagerPanel {
     /// 渲染上级目录行（..）
     fn render_parent_row(&self, _cx: &App) -> impl IntoElement {
         h_flex()
+            .w_full()
             .h(px(36.))
             .px_2()
             .items_center()
@@ -2842,15 +2844,20 @@ impl FileManagerPanel {
                                 this.prepare_uploads(file_paths, &remote_dir, window, cx);
                             }
                         }))
-                        .context_menu(move |menu, window, cx| {
-                            Self::build_panel_context_menu(
-                                menu,
-                                &current_path_for_menu,
-                                &view_for_menu,
-                                window,
-                                cx,
-                            )
-                        })
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .context_menu(move |menu, window, cx| {
+                                    Self::build_panel_context_menu(
+                                        menu,
+                                        &current_path_for_menu,
+                                        &view_for_menu,
+                                        window,
+                                        cx,
+                                    )
+                                }),
+                        )
                         .child(
                             uniform_list("fm-file-list", total_count, {
                                 cx.processor(
@@ -2868,8 +2875,9 @@ impl FileManagerPanel {
                                                     let parent_view = view.clone();
                                                     return div()
                                                         .id(list_ix)
+                                                        .w_full()
                                                         .cursor_pointer()
-                                                        .occlude()
+                                                        .block_mouse_except_scroll()
                                                         .hover(|s| s.bg(cx.theme().list_hover))
                                                         .on_double_click(cx.listener(
                                                             move |this, _, _window, cx| {
@@ -2911,8 +2919,9 @@ impl FileManagerPanel {
 
                                                 div()
                                                     .id(list_ix)
+                                                    .w_full()
                                                     .cursor_pointer()
-                                                    .occlude()
+                                                    .block_mouse_except_scroll()
                                                     .hover(|s| s.bg(cx.theme().list_hover))
                                                     .on_mouse_down(
                                                         MouseButton::Left,

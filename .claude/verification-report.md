@@ -1,5 +1,51 @@
 # 验证报告
 
+## 审查报告（sftp-context-menu-stability 实现）
+生成时间：2026-03-28 04:48:48 +0800
+
+### 需求完整性检查
+- 目标明确：修复 SFTP 文件列表右键菜单首次显示错误、条目丢失和按场景删项导致的不稳定问题
+- 范围明确：聚焦 `crates/sftp_view/src/file_list_panel.rs` 的菜单构造，复用现有 `context_menu_handler.rs` 动作分发
+- 交付物明确：代码修复、本地编译验证、单测验证、操作留痕与审查报告
+- 风险与依赖明确：GUI 层的最终弹出效果仍需桌面实测确认
+
+### 技术维度评分
+- 代码质量：94/100
+  - 修复集中在 `file_list_panel.rs`，没有继续扩散到通用 `context_menu` 底层。
+  - 通过“稳定菜单结构 + `.disabled(...)`”表达可用态，避免了继续按条件删项带来的结构漂移。
+- 测试覆盖：89/100
+  - `cargo check -p sftp_view`、`cargo test -p sftp_view --lib`、`cargo check -p terminal_view` 均已通过。
+  - 现有单测覆盖了右键选区同步，但没有自动化覆盖 GUI 弹出菜单的实际视觉内容。
+- 规范遵循：95/100
+  - 沿用既有 `FileListPanelEvent`、菜单 builder 模式和本地化 key，没有新增临时事件或旁路逻辑。
+
+### 战略维度评分
+- 需求匹配：95/100
+  - 已将用户明确要求恢复的目录级菜单项补回文件项菜单，并把跨侧动作改为禁用态而非删除。
+- 架构一致：93/100
+  - 上传/下载仍走 `SftpView` 既有业务链路，本次只修 UI 菜单表达层，没有改动作执行层。
+- 风险评估：88/100
+  - 主要剩余风险是 `gpui` 运行时的上下文菜单命中细节只能靠界面点测确认，但编译面和逻辑面已闭合。
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 根因已确认并修复：
+  - `crates/sftp_view/src/file_list_panel.rs` 的 `build_panel_context_menu(...)` 存在破坏性的 builder 链错误，直接导致当前代码不可稳定维护。
+  - 文件项菜单此前通过 `is_remote` / `is_dir` 直接删项，导致菜单结构不稳定，容易出现“第一次缺项、后续条目变化”的体验问题。
+- 修复方式：
+  - [`crates/sftp_view/src/file_list_panel.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/file_list_panel.rs) 中重写文件项与空白区菜单结构，改为稳定菜单 + 禁用态控制。
+  - 继续复用 [`crates/sftp_view/src/context_menu_handler.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/context_menu_handler.rs) 中现有 `UploadSelected` / `Download` 分发，不重写业务逻辑。
+- 本地验证通过：
+  - `cargo check -p sftp_view`
+  - `cargo test -p sftp_view --lib`
+  - `cargo check -p terminal_view`
+- 下一步应以 GUI 点测为准，重点确认第一次右键即出现正确菜单，且菜单点击后不再发生条目突变。
+
+---
+
 - 时间：2026-03-24
 - 任务：修复 `crates/core/src/llm/connector.rs` 在升级 `llm-connector` 后的编译失败
 - 审查结论：通过
@@ -1216,3 +1262,86 @@
 ### 残余风险
 - 当前仍未做“应用持续前台时系统切换后秒级自动刷新”的额外增强；这是按当前需求刻意不实现
 - 运行期依赖系统存在 `gdbus` 命令；若极端环境缺失，则会回退到原有 `gsettings` / GPUI 外观判断
+
+---
+
+## 审查补充（SFTP 上传下载模式收口）
+生成时间：2026-03-28 03:32:30 +0800
+
+### 需求完整性检查
+- 目标明确：区分面板模式与独立页面模式的上传下载入口
+- 范围明确：仅调整 `sftp_view` 的右键菜单、事件语义与右键选区行为，不改终端侧边栏面板
+- 交付物明确：代码修改、上下文摘要、操作日志、本地验证结果
+- 风险与依赖明确：主要风险是右键命中项与当前选区错位导致误操作
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- 独立页面远程侧右键已不再保留系统选择器上传入口，上传职责收口到本地侧
+- 独立页面本地侧继续复用 `upload_selected`，上传目标仍是远程当前路径
+- 远程侧下载逻辑未被重写，仍保持下载到本地当前目录
+- 右键命中项现在会同步选区，可避免下载/删除等动作作用到旧选区
+
+### 验证结果
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/sftp_view/src/context_menu_handler.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view context_selection_ --lib -- --nocapture`
+  - 结果：通过
+- `cargo test -p sftp_view parent_path_ --lib -- --nocapture`
+  - 结果：通过
+
+### 残余风险
+- 右键同步选区的体验已通过单测覆盖核心规则，但仍需要桌面实测确认和多选习惯一致
+- 目前没有新增 GUI 自动化测试，实际菜单可发现性仍需人工回归
+
+---
+
+## 审查补充（SFTP 右键菜单竞争修复）
+生成时间：2026-03-28 03:43:00 +0800
+
+### 关键结论
+- 问题根因不在上传/下载业务逻辑，而在通用 `context_menu` 组件未阻断父级菜单传播
+- 已在组件层加入 `cx.stop_propagation()`，避免文件项菜单与空白区菜单竞争同一次右键事件
+- 该修复对独立页面 `sftp_view` 和终端右侧 `file_manager_panel` 同时生效
+
+### 验证结果
+- `cargo fmt --all -- crates/ui/src/menu/context_menu.rs`
+  - 结果：通过
+- `cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+
+### 残余风险
+- 仍需桌面手工确认不同区域嵌套右键菜单的最终体验，但编译链路已验证通过
+
+---
+
+## 审查补充（SFTP 文件行命中区域修正）
+生成时间：2026-03-28 03:49:00 +0800
+
+### 关键结论
+- 菜单错位的真实根因是文件行点击热区太窄，而不是上传下载业务逻辑本身
+- 通过把文件行与 `..` 行的外层容器和行内容都扩展到整行宽度，远程文件项菜单会稳定显示“下载”，本地文件项菜单也会稳定显示并执行“上传”
+- 通用 `context_menu` 组件已恢复原状，避免对其他模块产生额外副作用
+
+### 验证结果
+- `cargo fmt --all -- crates/ui/src/menu/context_menu.rs crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+
+### 残余风险
+- 仍需你在实际界面上点测“列右侧空白处右键”的场景，确认菜单完全收口到文件项级别

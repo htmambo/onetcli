@@ -1,5 +1,192 @@
 ## 操作日志
 
+## 编码前检查 - sftp-context-menu-stability
+时间：2026-03-28 04:48:48 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-sftp-upload-download-mode.md`
+- 已分析相似实现：
+  - `crates/sftp_view/src/file_list_panel.rs`
+  - `crates/sftp_view/src/context_menu_handler.rs`
+  - `crates/terminal_view/src/sidebar/file_manager_panel.rs`
+- 将使用以下可复用组件：
+  - `FileListPanel::apply_context_selection`：右键前同步选区，保证动作目标与命中项一致
+  - `FileListPanel::build_file_context_menu` / `build_panel_context_menu`：菜单结构唯一入口
+  - `SftpView::upload_selected` / `download_selected`：保持上传下载动作仍走现有业务实现
+- 将遵循命名约定：继续沿用 `build_*_context_menu`、`can_*` 的布尔命名
+- 将遵循代码风格：只在 `file_list_panel.rs` 收口菜单结构，不再扩散修改通用菜单底层
+- 确认不重复造轮子，证明：已检查 `sftp_view` 与 `terminal_view` 现有菜单模式，本次问题属于菜单结构和启用态表达错误，不需要新增新的菜单系统
+
+## 编码后声明 - sftp-context-menu-stability
+时间：2026-03-28 04:48:48 +0800
+
+### 1. 复用了以下既有组件
+- `FileListPanel::apply_context_selection`：继续作为右键同步选区的唯一入口
+- `FileListPanelEvent`：保留现有事件总线，不新增新的菜单动作类型
+- `context_menu_handler.rs` 中的 `upload_selected` / `download_selected` 分发：保持上传下载仍走现有业务链路
+- `terminal_view` 侧边栏文件管理器的“空白区菜单 + 文件项菜单”双层结构：作为本次 SFTP 菜单收口的参考实现
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增状态仅使用局部 `can_download`、`can_upload`、`can_change_permissions`、`can_open_here`
+- 代码风格：把“展示哪些项”和“项是否可用”拆开，用 `.disabled(...)` 表达状态，而不是继续用条件删项
+- 文件组织：菜单结构修复仍集中在 `crates/sftp_view/src/file_list_panel.rs`，业务动作保留在 `context_menu_handler.rs`
+
+### 3. 对比了以下相似实现
+- `crates/sftp_view/src/file_list_panel.rs`：原先文件项菜单按条件删项，导致菜单结构不稳定；本次改为稳定菜单 + 禁用态
+- `crates/sftp_view/src/context_menu_handler.rs`：原先已完成 `UploadSelected` / `Download` 收口，本次保持这条分发链不变
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：侧边栏菜单本身就是稳定结构，本次参考其做法，不去继续修改通用 `context_menu` 底层
+
+### 4. 未重复造轮子的证明
+- 已检查 `sftp_view` 文件列表菜单、事件分发和 `terminal_view` 侧边栏菜单
+- 结论：现有组件已经足够，缺的是 SFTP 菜单结构收口和可用态表达，因此只修正现有 builder 链和禁用逻辑，不新增抽象
+
+## 实施与验证记录 - sftp-context-menu-stability
+时间：2026-03-28 04:48:48 +0800
+
+### 已完成修改
+- 修复了 `crates/sftp_view/src/file_list_panel.rs` 中 `build_panel_context_menu(...)` 被破坏的 builder 链，恢复 `sftp_view` 可编译状态
+- 将文件项右键菜单改为稳定菜单结构，保留：
+  - `新建文件`
+  - `新建文件夹`
+  - `重命名`
+  - `下载`
+  - `上传`
+  - `修改权限`
+  - `在此处打开终端`
+  - `在当前目录打开终端`
+  - `复制文件名`
+  - `复制绝对路径`
+  - `删除`
+  - `刷新`
+  - `显示/隐藏隐藏文件`
+- 对文件项菜单中的跨侧动作改为禁用态表达：
+  - 本地列表中 `下载`、`修改权限` 置灰
+  - 远程列表中 `上传` 置灰
+  - 非文件夹项中的 `在此处打开终端` 置灰
+- 将空白区菜单也改为稳定结构，`下载` / `上传` 根据当前面板与是否有选区决定启用态，不再直接删项
+- 保留并继续使用右键命中项选区同步逻辑，避免动作目标回退到旧选区
+
+### 本地验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/sftp_view/src/context_menu_handler.rs crates/terminal_view/src/sidebar/file_manager_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view --lib`
+  - 结果：通过，6 个单测全部通过
+- `cargo check -p terminal_view`
+  - 结果：通过
+
+### 当前限制
+- 当前验证仍以编译和单测为主，无法自动确认 GUI 弹出菜单的实际命中层级与首屏显示内容
+- 仍需你在界面中重点点测：
+  - 文件/文件夹第一次右键时就直接出现正确文件项菜单
+  - 菜单点击一次后不再发生条目突变
+  - 本地文件项右键 `上传` 可用
+  - 远程文件项右键 `下载` 可用
+  - 不适用的项显示为禁用态，而不是直接消失
+
+## 追加修正记录 - sftp-context-menu-panel-split
+时间：2026-03-28 05:02:00 +0800
+
+### 调整内容
+- 根据最新约束重新收口了 SFTP 右键菜单：
+  - `上传` 只保留在本地文件列表右键菜单
+  - `下载` 只保留在远程文件列表右键菜单
+- 同时保持同一侧面板内“空地菜单”和“文件项菜单”的条目数量一致：
+  - 空地菜单补齐了 `重命名`、`在此处打开终端`、`复制文件名`、`删除` 等条目
+  - 对空地缺少上下文的条目使用禁用态，而不是缺失
+
+### 追加验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view --lib`
+  - 结果：通过，6 个单测全部通过
+
+## 追加修正记录 - sftp-explicit-vertical-scrollbar
+时间：2026-03-28 05:29:00 +0800
+
+### 根因判断
+- 继续对照仓库内已稳定工作的树视图后，确认 SFTP 文件列表缺少项目标准的显式垂直滚动条层。
+- 仓库内的稳定模式是：
+  - 列表元素 `track_scroll(&handle)`
+  - 容器额外 `child(Scrollbar::vertical(&handle))`
+- SFTP 之前只有第一段，没有第二段。
+
+### 调整内容
+- 在 `crates/sftp_view/src/file_list_panel.rs` 中引入 `gpui_component::scroll::Scrollbar`
+- 在文件列表容器末尾追加 `Scrollbar::vertical(&self.scroll_handle)`，让滚动条显示与拖拽逻辑按项目标准接线
+
+### 追加验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view --lib`
+  - 结果：通过，6 个单测全部通过
+
+## 追加修正记录 - sftp-list-container-height-constraint
+时间：2026-03-28 05:22:00 +0800
+
+### 根因判断
+- 继续对比 `terminal_view` 侧边栏文件管理器后，发现 SFTP 列表外层容器比终端侧多了一个 `.size_full()`。
+- 这会让文件列表区域按整个父容器高度参与布局，而不是按“搜索栏 + 表头之外的剩余高度”计算。
+- 结果就是：
+  - 列表下部会被裁掉
+  - 列表自身却认为还没溢出
+  - 因此不会建立滚动，也不会出现滚动条
+
+### 调整内容
+- 删除 `crates/sftp_view/src/file_list_panel.rs` 中文件列表外层容器的 `.size_full()`，让其布局与终端侧文件面板保持一致，只保留 `.flex_1().relative()`
+
+### 追加验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view --lib`
+  - 结果：通过，6 个单测全部通过
+
+## 追加修正记录 - sftp-list-flex-scroll-layout
+时间：2026-03-28 05:16:00 +0800
+
+### 根因判断
+- 对比 `terminal_view` 侧边栏文件管理器后，发现 SFTP 的 `uniform_list(...)` 缺少 `.flex_1()`。
+- 这意味着列表本身没有被稳定约束在剩余高度内，列表项数量变化后容易出现内容变长但滚动区域未正确建立的问题。
+
+### 调整内容
+- 在 `crates/sftp_view/src/file_list_panel.rs` 的 `uniform_list("file-list", ...)` 上补充 `.flex_1()`，让列表和终端侧文件面板保持同样的布局约束。
+- 与前一轮的 `scroll_handle` 重建一起生效：
+  - 数据长度变化时刷新滚动句柄
+  - 列表本身保持可滚动的高度约束
+
+### 追加验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view --lib`
+  - 结果：通过，6 个单测全部通过
+
+## 追加修正记录 - sftp-hidden-toggle-scroll-refresh
+时间：2026-03-28 05:10:00 +0800
+
+### 调整内容
+- 在 `crates/sftp_view/src/file_list_panel.rs` 中为以下场景补充 `UniformListScrollHandle::new()` 重建：
+  - `set_items(...)`
+  - `set_path(...)`
+  - `set_current_path(...)`
+  - `apply_filter(...)` 结果数量变化时
+- 目的：当切换 `显示/隐藏隐藏文件` 或切换路径后列表长度发生变化时，强制刷新滚动状态，避免列表变长但滚动条未出现
+
+### 追加验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view --lib`
+  - 结果：通过，6 个单测全部通过
+
 ## 编码前检查 - auto-switch-theme
 时间：2026-03-28 02:35:25 +0800
 
@@ -2779,4 +2966,107 @@
 - `cargo test -p main deepin_主题名可映射为亮暗模式 --bin onetcli -- --nocapture`
   - 结果：通过
 - `cargo check -p main`
+  - 结果：通过
+
+## SFTP 上传下载模式收口
+时间：2026-03-28 03:32:30 +0800
+
+### 编码前检查
+- □ 已查阅上下文摘要文件：`.claude/context-summary-sftp-upload-download-mode.md`
+- □ 将使用以下可复用组件：
+  - `crates/sftp_view/src/lib.rs` 的 `upload_selected` / `download_selected`
+  - `crates/sftp_view/src/file_list_panel.rs` 的文件项与空白区右键菜单构建
+  - `crates/sftp_view/src/context_menu_handler.rs` 的本地/远程菜单事件分发
+- □ 将遵循命名约定：沿用 `snake_case` 辅助方法与 `FileListPanelEvent` 事件分发
+- □ 将遵循代码风格：仅在 `sftp_view` 内小步收口菜单和选区逻辑，不改终端侧边栏模式
+- □ 确认不重复造轮子，证明：已核对 `FileManagerPanel`、`SftpView`、`FileListPanel` 三处现有上传下载实现，复用既有动作入口，不新增并行传输逻辑
+
+### 实施记录
+- [`crates/sftp_view/src/file_list_panel.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/file_list_panel.rs)
+  - 将独立页面本地侧上传菜单事件收口为 `UploadSelected`
+  - 为本地侧空白区域菜单新增“上传”入口，并按当前选区决定是否禁用
+  - 删除独立页面远程侧空白区域里的“上传文件 / 上传文件夹”菜单
+  - 新增右键命中项同步选区逻辑，避免上下文菜单继续作用于旧选区
+  - 补充 `apply_context_selection` 纯单测
+- [`crates/sftp_view/src/context_menu_handler.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/context_menu_handler.rs)
+  - 本地侧仅保留 `UploadSelected -> upload_selected`
+  - 移除独立页面远程侧系统路径选择器上传分支与对应辅助方法
+
+### 编码后声明
+### 1. 复用了以下既有组件
+- `crates/sftp_view/src/lib.rs`：继续复用 `upload_selected` 与 `download_selected`，未改传输队列和冲突处理
+- `crates/sftp_view/src/file_list_panel.rs`：沿用现有 `PopupMenu`、`FileListPanelEvent` 和行级 `.context_menu(...)` 结构
+- `crates/sftp_view/src/context_menu_handler.rs`：沿用本地/远程菜单事件分发框架，仅删去不再需要的远程上传分支
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增方法 `apply_context_selection`、`select_for_context_menu` 保持 `snake_case`
+- 代码风格：没有引入新的状态对象，仍在原文件内小步改动 builder 链和事件枚举
+- 文件组织：列表交互留在 `file_list_panel.rs`，业务动作仍由 `context_menu_handler.rs` / `lib.rs` 承接
+
+### 3. 对比了以下相似实现
+- `crates/terminal_view/src/sidebar/file_manager_panel.rs`：继续保留面板模式“系统选择器上传 + 选择目录下载”的模型，不把双栏页面逻辑混入侧边栏
+- `crates/sftp_view/src/lib.rs`：保留双栏页面“本地当前选择上传 / 远程当前选择下载”的主体模型，只统一入口
+- `crates/sftp_view/src/file_list_panel.rs` 既有右键菜单实现：在不重写菜单框架的前提下补足空白区菜单归属和右键选区同步
+
+### 4. 未重复造轮子的证明
+- 检查了 `FileManagerPanel`、`SftpView`、`FileListPanel`、`ContextMenuHandler`
+- 确认现有 `upload_selected` / `download_selected` 已满足核心需求，因此本次没有新增任何上传下载底层实现
+
+### 本地验证
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/sftp_view/src/context_menu_handler.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view context_selection_ --lib -- --nocapture`
+  - 结果：通过，2 个右键选区相关测试全部通过
+- `cargo test -p sftp_view parent_path_ --lib -- --nocapture`
+  - 结果：通过，4 个既有父目录相关测试全部通过
+
+### 当前限制
+- 尚未执行 GUI 手动回归；仍需你在独立 SFTP 页面里实际点测本地右键上传、远程右键下载和未选中项右键行为
+- `cargo` 输出中的 `gpui-component` 未使用导入告警与 `num-bigint-dig` future incompatibility 提示均为仓库既有问题，本次未处理
+
+## SFTP 右键菜单竞争修复
+时间：2026-03-28 03:43:00 +0800
+
+### 根因定位
+- `crates/ui/src/menu/context_menu.rs` 中的通用右键菜单实现，会在命中元素时于 `phase.bubble()` 阶段响应右键
+- 文件列表和外层空白区都挂了 `.context_menu(...)`，右键文件项时父级与子级菜单会竞争同一次事件
+- 结果就是会先出现空白区菜单，再被文件项菜单替换，表现为“上传菜单先出现，随后又切成下载菜单”
+
+### 修复策略
+- 在 [`crates/ui/src/menu/context_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/menu/context_menu.rs) 中，当当前元素已接管右键菜单后立即 `cx.stop_propagation()`
+- 让更具体的子级菜单吃掉本次右键事件，避免父级空白区菜单继续抢同一次事件
+- 该修复同时覆盖独立 SFTP 页面与终端侧边栏文件管理器
+
+### 本地验证
+- `cargo fmt --all -- crates/ui/src/menu/context_menu.rs`
+  - 结果：通过
+- `cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+
+## SFTP 文件行命中区域修正
+时间：2026-03-28 03:49:00 +0800
+
+### 根因定位
+- 之前的问题并不适合在通用 `context_menu` 组件层统一拦截
+- 真正的局部根因是 [`crates/sftp_view/src/file_list_panel.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/file_list_panel.rs) 中，文件行与 `..` 行的交互容器没有铺满整行宽度
+- 用户在列右侧空白区域右键时，命中的其实是外层列表空白区菜单，而不是文件项菜单
+- 这会直接导致：
+  - 远程文件项右键看不到“下载”
+  - 本地文件项右键时“上传”可能退化成空白区菜单，表现为不生效或被禁用
+
+### 修复策略
+- 撤回 [`crates/ui/src/menu/context_menu.rs`](/usr/htdocs/onetcli/crates/ui/src/menu/context_menu.rs) 中的全局 `stop_propagation` 改动
+- 在 [`crates/sftp_view/src/file_list_panel.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/file_list_panel.rs) 中将：
+  - `render_file_row`
+  - `render_parent_row`
+  - 文件项外层 `div`
+  - `..` 行外层 `div`
+  全部改为 `w_full()`，保证整行区域都命中文件项菜单
+
+### 本地验证
+- `cargo fmt --all -- crates/ui/src/menu/context_menu.rs crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view -p terminal_view`
   - 结果：通过

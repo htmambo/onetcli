@@ -3,7 +3,7 @@
 //! 本模块实现 FileListPanel 右键菜单的所有功能
 
 use crate::{FileListPanelEvent, PanelSide, SftpView, SftpViewEvent, join_remote_path};
-use gpui::{AppContext, ClipboardItem, Context, ParentElement, PathPromptOptions, Styled, Window};
+use gpui::{AppContext, ClipboardItem, Context, ParentElement, Styled, Window};
 use gpui_component::{
     WindowExt,
     dialog::DialogButtonProps,
@@ -101,16 +101,6 @@ pub trait ContextMenuHandler {
     fn toggle_hidden_files(&mut self, side: PanelSide, cx: &mut Context<Self>)
     where
         Self: Sized;
-
-    /// 选择本地文件并上传到远程
-    fn select_and_upload_files(&mut self, window: &mut Window, cx: &mut Context<Self>)
-    where
-        Self: Sized;
-
-    /// 选择本地文件夹并上传到远程
-    fn select_and_upload_folder(&mut self, window: &mut Window, cx: &mut Context<Self>)
-    where
-        Self: Sized;
 }
 
 impl ContextMenuHandler for SftpView {
@@ -157,10 +147,7 @@ impl ContextMenuHandler for SftpView {
             } => {
                 self.delete_local_selected(window, cx);
             }
-            FileListPanelEvent::UploadFile => {
-                self.upload_selected(window, cx);
-            }
-            FileListPanelEvent::UploadFolder => {
+            FileListPanelEvent::UploadSelected => {
                 self.upload_selected(window, cx);
             }
             FileListPanelEvent::Refresh => {
@@ -215,12 +202,6 @@ impl ContextMenuHandler for SftpView {
                 full_path: _,
             } => {
                 self.delete_remote_selected(window, cx);
-            }
-            FileListPanelEvent::UploadFile => {
-                self.select_and_upload_files(window, cx);
-            }
-            FileListPanelEvent::UploadFolder => {
-                self.select_and_upload_folder(window, cx);
             }
             FileListPanelEvent::Refresh => {
                 self.refresh_remote_dir_with_window(window, cx);
@@ -674,69 +655,5 @@ impl ContextMenuHandler for SftpView {
                 });
             }
         }
-    }
-
-    fn select_and_upload_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(client) = self.sftp_client.clone() else {
-            return;
-        };
-
-        let remote_path = self.remote_current_path.clone();
-        let view = cx.entity().clone();
-
-        // 打开文件选择对话框
-        let future = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            multiple: true,
-            directories: false,
-            prompt: Some(t!("FilePicker.select_upload_files").to_string().into()),
-        });
-
-        window
-            .spawn(cx, async move |cx| {
-                if let Ok(Ok(Some(paths))) = future.await {
-                    if paths.is_empty() {
-                        return;
-                    }
-
-                    // 上传选中的文件
-                    let _ = view.update_in(cx, |this, window, cx| {
-                        this.upload_paths_to_remote(paths, remote_path, client, window, cx);
-                    });
-                }
-            })
-            .detach();
-    }
-
-    fn select_and_upload_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(client) = self.sftp_client.clone() else {
-            return;
-        };
-
-        let remote_path = self.remote_current_path.clone();
-        let view = cx.entity().clone();
-
-        // 打开文件夹选择对话框
-        let future = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            multiple: true,
-            directories: true,
-            prompt: Some(t!("FilePicker.select_upload_folder").to_string().into()),
-        });
-
-        window
-            .spawn(cx, async move |cx| {
-                if let Ok(Ok(Some(paths))) = future.await {
-                    if paths.is_empty() {
-                        return;
-                    }
-
-                    // 上传选中的文件夹
-                    let _ = view.update_in(cx, |this, window, cx| {
-                        this.upload_paths_to_remote(paths, remote_path, client, window, cx);
-                    });
-                }
-            })
-            .detach();
     }
 }

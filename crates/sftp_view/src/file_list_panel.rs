@@ -7,6 +7,7 @@ use gpui_component::{
     ActiveTheme, Icon, IconName, InteractiveElementExt, Sizable, Size, h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
+    scroll::Scrollbar,
     tooltip::Tooltip,
     v_flex,
 };
@@ -157,11 +158,13 @@ impl FileListPanel {
     pub fn set_path(&mut self, path: String, _window: &mut Window, cx: &mut Context<Self>) {
         self.current_path = path;
         self.path_editing = false;
+        self.scroll_handle = UniformListScrollHandle::new();
         cx.notify();
     }
 
     pub fn set_current_path(&mut self, path: String, cx: &mut Context<Self>) {
         self.current_path = path;
+        self.scroll_handle = UniformListScrollHandle::new();
         cx.notify();
     }
 
@@ -295,6 +298,20 @@ impl FileListPanel {
                 self.selected_indices.insert(row_ix);
             }
         }
+    }
+
+    fn apply_context_selection(selected_indices: &mut HashSet<usize>, row_ix: usize) -> bool {
+        if selected_indices.contains(&row_ix) {
+            return false;
+        }
+
+        selected_indices.clear();
+        selected_indices.insert(row_ix);
+        true
+    }
+
+    fn select_for_context_menu(&mut self, row_ix: usize) -> bool {
+        Self::apply_context_selection(&mut self.selected_indices, row_ix)
     }
 
     fn set_sort(&mut self, column: SortColumn, cx: &mut Context<Self>) {
@@ -480,6 +497,7 @@ impl FileListPanel {
         let modified = item.modified;
 
         h_flex()
+            .w_full()
             .h(px(44.))
             .px_2()
             .items_center()
@@ -561,6 +579,7 @@ impl FileListPanel {
 
     fn render_parent_row(&self, _cx: &App) -> impl IntoElement {
         h_flex()
+            .w_full()
             .h(px(44.))
             .px_2()
             .items_center()
@@ -609,6 +628,8 @@ impl FileListPanel {
         window: &mut Window,
         _cx: &mut Context<PopupMenu>,
     ) -> PopupMenu {
+        let view_new_file = view.clone();
+        let view_new_folder = view.clone();
         let name_for_rename = name.to_string();
         let path_for_rename = full_path.to_string();
         let name_for_download = name.to_string();
@@ -620,38 +641,37 @@ impl FileListPanel {
         let path_for_copy = full_path.to_string();
         let name_for_delete = name.to_string();
         let path_for_delete = full_path.to_string();
+        let view_toggle_hidden = view.clone();
+        let view_refresh = view.clone();
+        let view_terminal_current = view.clone();
+        let view_rename = view.clone();
+        let view_download = view.clone();
+        let view_upload = view.clone();
+        let view_permissions = view.clone();
+        let view_terminal_at = view.clone();
+        let view_copy_name = view.clone();
+        let view_copy_path = view.clone();
+        let view_delete = view.clone();
 
-        let view_ref = view.clone();
+        let mut menu = menu
+            .item(
+                PopupMenuItem::new(t!("File.new_file").to_string())
+                    .icon(IconName::File)
+                    .on_click(window.listener_for(&view_new_file, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::NewFile);
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("File.new_folder").to_string())
+                    .icon(IconName::NewFolder)
+                    .on_click(
+                        window.listener_for(&view_new_folder, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::NewFolder);
+                        }),
+                    ),
+            )
+            .separator();
 
-        let mut menu = menu;
-
-        // 文件夹专属操作：新建文件、新建文件夹
-        if is_dir {
-            let view_new_file = view_ref.clone();
-            let view_new_folder = view_ref.clone();
-
-            menu = menu
-                .item(
-                    PopupMenuItem::new(t!("File.new_file").to_string())
-                        .icon(IconName::File)
-                        .on_click(window.listener_for(&view_new_file, move |_this, _, _, cx| {
-                            cx.emit(FileListPanelEvent::NewFile);
-                        })),
-                )
-                .item(
-                    PopupMenuItem::new(t!("File.new_folder").to_string())
-                        .icon(IconName::NewFolder)
-                        .on_click(
-                            window.listener_for(&view_new_folder, move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::NewFolder);
-                            }),
-                        ),
-                )
-                .separator();
-        }
-
-        // 重命名（通用）
-        let view_rename = view_ref.clone();
         menu = menu.item(
             PopupMenuItem::new(t!("File.rename").to_string())
                 .icon(IconName::Edit)
@@ -663,81 +683,67 @@ impl FileListPanel {
                 })),
         );
 
-        // 远程面板：下载
         if is_remote {
-            let view_download = view_ref.clone();
-            menu = menu.item(
-                PopupMenuItem::new(t!("Common.download").to_string())
-                    .icon(IconName::ArrowDown)
-                    .on_click(window.listener_for(&view_download, move |_this, _, _, cx| {
-                        cx.emit(FileListPanelEvent::Download {
-                            name: name_for_download.clone(),
-                            full_path: path_for_download.clone(),
-                        });
-                    })),
-            );
-        }
-
-        // 本地面板：上传
-        if !is_remote {
-            let view_upload = view_ref.clone();
+            menu = menu
+                .item(
+                    PopupMenuItem::new(t!("Common.download").to_string())
+                        .icon(IconName::ArrowDown)
+                        .on_click(window.listener_for(&view_download, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::Download {
+                                name: name_for_download.clone(),
+                                full_path: path_for_download.clone(),
+                            });
+                        })),
+                )
+                .item(
+                    PopupMenuItem::new(t!("File.change_permission").to_string())
+                        .icon(IconName::Key)
+                        .on_click(window.listener_for(
+                            &view_permissions,
+                            move |_this, _, _, cx| {
+                                cx.emit(FileListPanelEvent::ChangePermissions {
+                                    name: name_for_permissions.clone(),
+                                    full_path: path_for_permissions.clone(),
+                                });
+                            },
+                        )),
+                );
+        } else {
             menu = menu.item(
                 PopupMenuItem::new(t!("Common.upload").to_string())
                     .icon(IconName::Upload)
                     .on_click(window.listener_for(&view_upload, move |_this, _, _, cx| {
-                        cx.emit(FileListPanelEvent::UploadFile);
+                        cx.emit(FileListPanelEvent::UploadSelected);
                     })),
             );
         }
 
-        // 远程面板：修改权限
-        if is_remote {
-            let view_permissions = view_ref.clone();
+        menu = menu.separator();
+
+        if is_dir {
             menu = menu.item(
-                PopupMenuItem::new(t!("File.change_permission").to_string())
-                    .icon(IconName::Key)
+                PopupMenuItem::new(t!("Terminal.open_here").to_string())
+                    .icon(IconName::Terminal)
                     .on_click(
-                        window.listener_for(&view_permissions, move |_this, _, _, cx| {
-                            cx.emit(FileListPanelEvent::ChangePermissions {
-                                name: name_for_permissions.clone(),
-                                full_path: path_for_permissions.clone(),
+                        window.listener_for(&view_terminal_at, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::OpenInTerminalAt {
+                                full_path: path_for_terminal.clone(),
                             });
                         }),
                     ),
             );
         }
 
-        // 文件夹专属：终端操作
-        if is_dir {
-            let view_terminal_at = view_ref.clone();
-            let view_terminal = view_ref.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t!("Terminal.open_in_current").to_string())
+                .icon(IconName::SquareTerminal)
+                .on_click(
+                    window.listener_for(&view_terminal_current, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::OpenInTerminal);
+                    }),
+                ),
+        );
 
-            menu = menu
-                .separator()
-                .item(
-                    PopupMenuItem::new(t!("Terminal.open_here").to_string())
-                        .icon(IconName::Terminal)
-                        .on_click(window.listener_for(
-                            &view_terminal_at,
-                            move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::OpenInTerminalAt {
-                                    full_path: path_for_terminal.clone(),
-                                });
-                            },
-                        )),
-                )
-                .item(
-                    PopupMenuItem::new(t!("Terminal.open_in_current").to_string())
-                        .icon(IconName::SquareTerminal)
-                        .on_click(window.listener_for(&view_terminal, move |_this, _, _, cx| {
-                            cx.emit(FileListPanelEvent::OpenInTerminal);
-                        })),
-                );
-        }
-
-        // 复制操作（通用）
-        let view_copy_name = view_ref.clone();
-        let view_copy_path = view_ref.clone();
         menu = menu
             .separator()
             .item(
@@ -763,8 +769,6 @@ impl FileListPanel {
                     ),
             );
 
-        // 删除（通用）
-        let view_delete = view_ref.clone();
         menu = menu.separator().item(
             PopupMenuItem::new(t!("Common.delete").to_string())
                 .icon(IconName::Remove)
@@ -776,38 +780,6 @@ impl FileListPanel {
                 })),
         );
 
-        // 远程面板文件夹：上传文件、上传文件夹
-        if is_remote && is_dir {
-            let view_upload_file = view_ref.clone();
-            let view_upload_folder = view_ref.clone();
-
-            menu = menu
-                .separator()
-                .item(
-                    PopupMenuItem::new(t!("File.upload_file").to_string())
-                        .icon(IconName::Upload)
-                        .on_click(window.listener_for(
-                            &view_upload_file,
-                            move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::UploadFile);
-                            },
-                        )),
-                )
-                .item(
-                    PopupMenuItem::new(t!("File.upload_folder").to_string())
-                        .icon(IconName::Upload)
-                        .on_click(window.listener_for(
-                            &view_upload_folder,
-                            move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::UploadFolder);
-                            },
-                        )),
-                );
-        }
-
-        // 刷新和显示隐藏文件（通用）
-        let view_refresh = view_ref.clone();
-        let view_toggle_hidden = view_ref.clone();
         menu = menu
             .separator()
             .item(
@@ -835,6 +807,7 @@ impl FileListPanel {
         mut menu: PopupMenu,
         current_path: &str,
         is_remote: bool,
+        has_selection: bool,
         view: &Entity<Self>,
         window: &mut Window,
         _cx: &mut Context<PopupMenu>,
@@ -845,8 +818,14 @@ impl FileListPanel {
         let view_new_folder = view.clone();
         let view_terminal = view.clone();
         let view_copy_path = view.clone();
+        let view_delete = view.clone();
         let view_refresh = view.clone();
         let view_toggle_hidden = view.clone();
+        let view_upload = view.clone();
+        let view_download = view.clone();
+        let can_upload = !is_remote && has_selection;
+        let can_download = is_remote && has_selection;
+        let can_delete = has_selection;
 
         menu = menu
             .item(
@@ -867,29 +846,28 @@ impl FileListPanel {
             );
 
         if is_remote {
-            let view_upload_file = view.clone();
-            let view_upload_folder = view.clone();
-            menu = menu
-                .item(
-                    PopupMenuItem::new(t!("File.upload_file").to_string())
-                        .icon(IconName::Upload)
-                        .on_click(window.listener_for(
-                            &view_upload_file,
-                            move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::UploadFile);
-                            },
-                        )),
-                )
-                .item(
-                    PopupMenuItem::new(t!("File.upload_folder").to_string())
-                        .icon(IconName::Upload)
-                        .on_click(window.listener_for(
-                            &view_upload_folder,
-                            move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::UploadFolder);
-                            },
-                        )),
+            if can_download {
+                menu = menu.separator().item(
+                    PopupMenuItem::new(t!("Common.download").to_string())
+                        .icon(IconName::ArrowDown)
+                        .on_click(window.listener_for(&view_download, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::Download {
+                                name: String::new(),
+                                full_path: String::new(),
+                            });
+                        })),
                 );
+            }
+        } else {
+            if can_upload {
+                menu = menu.separator().item(
+                    PopupMenuItem::new(t!("Common.upload").to_string())
+                        .icon(IconName::Upload)
+                        .on_click(window.listener_for(&view_upload, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::UploadSelected);
+                        })),
+                );
+            }
         }
 
         menu = menu
@@ -901,6 +879,7 @@ impl FileListPanel {
                         cx.emit(FileListPanelEvent::OpenInTerminal);
                     })),
             )
+            .separator()
             .item(
                 PopupMenuItem::new(t!("File.copy_path").to_string())
                     .icon(IconName::Copy)
@@ -911,7 +890,22 @@ impl FileListPanel {
                             });
                         }),
                     ),
-            )
+            );
+
+        if can_delete {
+            menu = menu.separator().item(
+                PopupMenuItem::new(t!("Common.delete").to_string())
+                    .icon(IconName::Remove)
+                    .on_click(window.listener_for(&view_delete, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::Delete {
+                            name: String::new(),
+                            full_path: String::new(),
+                        });
+                    })),
+            );
+        }
+
+        menu = menu
             .separator()
             .item(
                 PopupMenuItem::new(t!("Common.refresh").to_string())
@@ -1036,10 +1030,8 @@ pub enum FileListPanelEvent {
         name: String,
         full_path: String,
     },
-    /// 上传文件
-    UploadFile,
-    /// 上传文件夹
-    UploadFolder,
+    /// 上传当前选择的文件或文件夹
+    UploadSelected,
     /// 刷新列表
     Refresh,
     /// 显示隐藏文件
@@ -1188,6 +1180,7 @@ impl Render for FileListPanel {
         } else {
             filtered_count
         };
+        let has_selection_for_menu = !self.selected_indices.is_empty();
         let current_path_for_menu = self.current_path.clone();
         let is_remote_for_menu = self.is_remote;
         let view_for_menu = cx.entity();
@@ -1199,17 +1192,23 @@ impl Render for FileListPanel {
             .child(
                 div()
                     .flex_1()
-                    .size_full()
-                    .context_menu(move |menu, window, cx| {
-                        Self::build_panel_context_menu(
-                            menu,
-                            &current_path_for_menu,
-                            is_remote_for_menu,
-                            &view_for_menu,
-                            window,
-                            cx,
-                        )
-                    })
+                    .relative()
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .context_menu(move |menu, window, cx| {
+                                Self::build_panel_context_menu(
+                                    menu,
+                                    &current_path_for_menu,
+                                    is_remote_for_menu,
+                                    has_selection_for_menu,
+                                    &view_for_menu,
+                                    window,
+                                    cx,
+                                )
+                            }),
+                    )
                     .child(
                         uniform_list("file-list", total_count, {
                             cx.processor(move |state: &mut Self, range: Range<usize>, _window, cx| {
@@ -1225,8 +1224,9 @@ impl Render for FileListPanel {
                                             let parent_view = view.clone();
                                             return div()
                                                 .id(list_ix)
+                                                .w_full()
                                                 .cursor_pointer()
-                                                .occlude()
+                                                .block_mouse_except_scroll()
                                                 .hover(|style| style.bg(cx.theme().list_hover))
                                                 .on_double_click(cx.listener(
                                                     move |_this, _, _window, cx| {
@@ -1325,8 +1325,9 @@ impl Render for FileListPanel {
 
                                         div()
                                             .id(list_ix)
+                                            .w_full()
                                             .cursor_pointer()
-                                            .occlude()
+                                            .block_mouse_except_scroll()
                                             .when(!is_selected, |el| {
                                                 el.hover(|style| style.bg(cx.theme().list_hover))
                                             })
@@ -1340,6 +1341,14 @@ impl Render for FileListPanel {
                                                         cx.notify();
                                                     },
                                                 ),
+                                            )
+                                            .on_mouse_down(
+                                                MouseButton::Right,
+                                                cx.listener(move |this, _, _window, cx| {
+                                                    if this.select_for_context_menu(filtered_ix) {
+                                                        cx.notify();
+                                                    }
+                                                }),
                                             )
                                             .on_double_click(cx.listener({
                                                 let name = item_name.clone();
@@ -1374,10 +1383,12 @@ impl Render for FileListPanel {
                                     .collect()
                             })
                         })
+                        .flex_1()
                         .size_full()
                         .track_scroll(&self.scroll_handle)
                         .with_sizing_behavior(ListSizingBehavior::Auto),
-                    ),
+                    )
+                    .child(Scrollbar::vertical(&self.scroll_handle)),
             )
     }
 }
@@ -1385,6 +1396,7 @@ impl Render for FileListPanel {
 #[cfg(test)]
 mod tests {
     use super::FileListPanel;
+    use std::collections::HashSet;
 
     #[test]
     fn parent_path_returns_remote_parent_directory() {
@@ -1416,5 +1428,25 @@ mod tests {
     #[test]
     fn parent_path_keeps_local_rootless_path_stable() {
         assert_eq!(FileListPanel::parent_path("workspace", false), "workspace");
+    }
+
+    #[test]
+    fn context_selection_keeps_existing_multi_selection_when_row_already_selected() {
+        let mut selected = HashSet::from([1usize, 3usize]);
+
+        let changed = FileListPanel::apply_context_selection(&mut selected, 3);
+
+        assert!(!changed);
+        assert_eq!(selected, HashSet::from([1usize, 3usize]));
+    }
+
+    #[test]
+    fn context_selection_replaces_old_selection_when_row_was_not_selected() {
+        let mut selected = HashSet::from([1usize, 3usize]);
+
+        let changed = FileListPanel::apply_context_selection(&mut selected, 2);
+
+        assert!(changed);
+        assert_eq!(selected, HashSet::from([2usize]));
     }
 }
