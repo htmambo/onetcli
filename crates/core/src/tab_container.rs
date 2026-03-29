@@ -2228,7 +2228,7 @@ impl TabContainer {
                 Popover::new("tab-list-popover")
                     .mouse_button(MouseButton::Right)
                     .anchor(Corner::TopRight)
-                    .p_0()
+                    // .p_0()
                     .open(self.list_popover_open)
                     .on_open_change(cx.listener(move |this, open, window, cx| {
                         this.set_tab_list_popover_open(*open, window, cx);
@@ -2239,6 +2239,7 @@ impl TabContainer {
                     .trigger(
                         Button::new("tab-dropdown-btn")
                             .icon(IconName::ChevronDown)
+                            .cursor_pointer()
                             .ghost()
                             .compact()
                             .occlude()

@@ -2466,6 +2466,7 @@ impl HomePage {
                             .label(t!("Home.new_connection"))
                             .text_color(cx.theme().primary_foreground)
                             .bg(cx.theme().primary)
+                            .cursor_pointer()
                             .with_variant(ButtonVariant::Custom(
                                 ButtonCustomVariant::new(cx).hover(cx.theme().primary),
                             ))
@@ -2584,6 +2585,7 @@ impl HomePage {
                             } else {
                                 t!("Home.sync").to_string()
                             })
+                            .cursor_pointer()
                             .ghost()
                             .disabled(!is_logged_in || is_syncing)
                             .tooltip(if !is_logged_in {
@@ -2618,6 +2620,7 @@ impl HomePage {
                             } else {
                                 t!("Encryption.edit_repo_password").to_string()
                             })
+                            .cursor_pointer()
                             .ghost()
                             .when(has_master_key, |btn| btn.text_color(cx.theme().success))
                             .when(!has_master_key, |btn| {
@@ -2734,6 +2737,7 @@ impl HomePage {
                                 ConnectionListViewMode::Card => IconName::Apps,
                                 ConnectionListViewMode::List => IconName::Menu,
                             })
+                            .cursor_pointer()
                             // .label(Self::connection_list_view_mode_label(view_mode))
                             .ghost()
                             .tooltip(t!("Home.view_mode"))
@@ -2773,6 +2777,7 @@ impl HomePage {
                     .child(
                         Button::new("refresh-button")
                             .icon(IconName::Refresh)
+                            .cursor_pointer()
                             .ghost()
                             .tooltip(t!("Home.refresh"))
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2958,7 +2963,7 @@ impl HomePage {
                 v_flex()
                     .flex_1()
                     .w_full()
-                    // .p_2()
+                    .p_1()
                     // .gap_2()
                     .children(filter_types.into_iter().map(|filter_type| {
                         let is_selected = self.selected_filter == filter_type;
@@ -2971,7 +2976,7 @@ impl HomePage {
                             .gap_3()
                             .w_full()
                             .px_3()
-                            .py_2()
+                            .py_1()
                             .cursor_pointer()
                             .rounded_lg()
                             .overflow_hidden()
@@ -3014,6 +3019,7 @@ impl HomePage {
                         Button::new("open_settings")
                             .icon(IconName::Settings)
                             .label(t!("Common.settings"))
+                            .cursor_pointer()
                             .w_full()
                             .justify_start()
                             .on_click(cx.listener(|this: &mut HomePage, _, window, cx| {
