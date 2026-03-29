@@ -4063,3 +4063,96 @@
 - `cargo check -p gpui-component --lib --offline`
   - 结果：失败
   - 原因：本地缓存缺少 `git2 v0.20.2`，离线模式无法补齐依赖
+
+## 编码前检查 - unused-warning-audit
+时间：2026-03-29 13:40:48 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-unused-warning-audit.md`
+- 工具说明：仓库要求中的 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander` 在当前会话不可用，本次改用本地源码检索、调用链回溯和 `cargo check` 留痕完成审计。
+- 已分析相似实现：
+  - `crates/ui/src/title_bar.rs`
+  - `main/src/update.rs`
+  - `crates/sftp_view/src/lib.rs`
+- 将使用以下可复用模式：
+  - 平台双实现：目标平台真实实现 + 非目标平台稳定空实现
+  - 公共入口分派：入口函数保留，平台 helper 带 `#[cfg(...)]`
+  - 平台 helper 下沉：仅让共享函数暴露在公共模块
+- 将遵循命名约定：沿用仓库现有 `target_os` / `cfg(not(...))` 条件编译写法
+- 将遵循代码风格：只做审计梳理，不在未确认产品意图前直接删业务分支
+- 确认不重复造轮子，证明：已检查 `title_bar`、`update`、`sftp_view` 中既有平台隔离方式，当前 warning 已能由现有模式覆盖，无需新抽象
+
+## 编码后声明 - unused-warning-audit
+时间：2026-03-29 13:40:48 +0800
+
+### 1. 复用了以下既有组件 / 模式
+- `crates/ui/src/title_bar.rs::linux_prefers_system_window_controls`：作为“平台双实现”对照样例
+- `main/src/update.rs::start_install_update`：作为“公共入口 + 平台 helper”对照样例
+- `crates/sftp_view/src/lib.rs::format_local_permissions`：作为“共享入口保留，平台 helper 下沉”对照样例
+
+### 2. 遵循了以下项目约定
+- 命名约定：保持 `target_os = "macos"` / `target_os = "linux"` / `cfg(not(...))` 的既有写法
+- 代码风格：本轮只输出梳理结论和后续建议，不提前做行为性修改
+- 文件组织：上下文和审计留痕写入项目本地 `.claude/` 目录
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/window_ext.rs` 与 `crates/ui/src/title_bar.rs`：前者把 macOS 私有解析逻辑留在公共模块；后者把 Linux 差异收敛在定义层，后者更干净
+- `main/src/setting_tab.rs` 与 `main/src/update.rs`：前者存在悬空 helper / 枚举分支；后者的平台入口和实现边界更清晰
+- `main/src/home_tab.rs` 与 `crates/sftp_view/src/lib.rs`：前者是调用点被注释后遗留 helper；后者共享入口仍有真实调用，因此不会产生相同 warning
+
+### 4. 未重复造轮子的证明
+- 已检查 `main/src/home_tab.rs`、`main/src/setting_tab.rs`、`main/src/home/home_tabs.rs`、`main/src/onetcli_app.rs`、`crates/ui/src/window_ext.rs`
+- 结论：当前问题不需要新增 lint 基础设施或包装层，只需要按既有条件编译模式收敛平台符号，并清理已失联的通用残留代码
+
+### 5. 本地验证
+- `cargo check -p main --message-format short`
+  - 结果：通过
+  - 确认 warning 共 6 条：
+    - `crates/ui/src/window_ext.rs` 3 条
+    - `main/src/home_tab.rs` 1 条
+    - `main/src/setting_tab.rs` 2 条
+
+## 编码前检查 - tab-bar-tab-pointer-cursor
+时间：2026-03-29 13:40:48 +0800
+
+- 已查阅上下文摘要文件：`.claude/context-summary-tab-bar-tab-pointer-cursor.md`
+- 工具说明：仓库要求中的 `sequential-thinking`、`context7`、`github.search_code`、`desktop-commander` 在当前会话不可用，本次改用本地源码检索和最小编译验证完成实现。
+- 已分析相似实现：
+  - `crates/core/src/tab_container.rs::TabListActionItem::render`
+  - `crates/core/src/tab_container.rs::TabListItem::render`
+  - `crates/core/src/tab_container.rs::pinned-tab` 渲染链
+- 将使用以下可复用模式：
+  - 可点击根节点直接声明 `.cursor_pointer()`
+  - 子节点在需要时继续覆盖自己的 cursor
+  - 激活 tab 的拖拽反馈仍由 `.cursor_grab()` 提供
+- 将遵循命名约定：不新增 helper，不修改现有 tab 交互事件命名
+- 将遵循代码风格：只在 tab 根节点追加一条样式链，不改事件和布局顺序
+- 确认不重复造轮子，证明：固定 tab 与 tab 列表项已经使用相同 cursor 模式，本次只补齐滚动 tab 的缺口
+
+## 编码后声明 - tab-bar-tab-pointer-cursor
+时间：2026-03-29 13:40:48 +0800
+
+### 1. 复用了以下既有组件 / 模式
+- `crates/core/src/tab_container.rs::TabListActionItem::render`：根节点 pointer 写法
+- `crates/core/src/tab_container.rs::TabListItem::render`：tab 列表项 pointer 写法
+- `crates/core/src/tab_container.rs::pinned-tab`：固定 tab 已有 pointer，作为交互一致性参照
+
+### 2. 遵循了以下项目约定
+- 命名约定：未新增命名，只复用链式样式 API
+- 代码风格：改动集中在 `tab_container.rs` 单一位置
+- 文件组织：上下文与验证继续写入项目本地 `.claude/`
+
+### 3. 对比了以下相似实现
+- 滚动 tab 与 `pinned-tab`：现在二者都会在 hover 时提供 pointer 反馈
+- 滚动 tab 与 `TabListItem`：两者都把 pointer 放在根点击区域，而不是内部标题文本
+- 滚动 tab 与激活 tab 拖拽分支：默认 pointer 只提供基础 hover 提示，激活且可拖拽时仍由 `cursor_grab()` 覆盖
+
+### 4. 未重复造轮子的证明
+- 已检查 `tab_container.rs` 中 tab 列表项、固定 tab、关闭按钮的现有 cursor 方案
+- 结论：无需新增样式 helper，只补一处缺失的 `.cursor_pointer()`
+
+### 5. 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p one-core`
+  - 结果：通过
+  - 备注：构建过程中仍出现 `crates/ui/src/window_ext.rs` 的 3 条已知历史 warning，与本次改动无关

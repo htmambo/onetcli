@@ -1968,3 +1968,92 @@
   - 单击未激活 tab 只激活，不进入拖拽
   - 已激活 tab 仍可正常拖拽重排
   - 鼠标悬停在 tab 上滚轮仍能横向滚动标签栏
+
+## 审查报告（unused-warning-audit）
+生成时间：2026-03-29 13:40:48 +0800
+
+### 需求完整性检查
+- 目标明确：梳理当前项目中 `unused` / `dead_code` warning，区分平台专用代码与通用残留代码
+- 范围明确：以 `cargo check -p main --message-format short` 实际输出为准，覆盖 `main` 和其参与构建的依赖 crate
+- 交付物明确：上下文摘要、操作日志、本地验证结果、分类建议
+- 风险与依赖明确：本轮仅做审计，不改业务代码，因此 warning 现状不会自动消失
+
+### 技术维度评分
+- 代码质量：88/100
+  - `crates/ui/src/window_ext.rs` 存在明确的平台逻辑泄漏到公共模块的问题
+  - `main` 中其余 3 条 warning 属于失联 helper / 未接入分支，说明存在一定残留代码堆积
+- 测试覆盖：86/100
+  - 使用 `cargo check -p main --message-format short` 完成了本地可重复验证
+  - 本轮未改代码，因此不涉及新增单测
+- 规范遵循：93/100
+  - 已基于现有实现模式做对照，不依赖猜测；未覆盖用户已有修改
+
+### 战略维度评分
+- 需求匹配：95/100
+  - 已把“平台专用逻辑导致的 warning”与“普通残留 warning”拆开，避免后续误治
+- 架构一致：92/100
+  - 整理建议完全复用仓库现有 `#[cfg(...)]` 模式，不引入新抽象
+- 风险评估：90/100
+  - 最大风险不在技术实现，而在 `Certificate` 页到底是待接入功能还是应删除残留，需要产品意图确认
+
+### 综合评分
+- 91/100
+- 建议：通过
+
+### 结论
+- **确认属于平台专用逻辑位置不当**
+  - `crates/ui/src/window_ext.rs:5`
+  - `crates/ui/src/window_ext.rs:8`
+  - `crates/ui/src/window_ext.rs:14`
+- **确认属于通用残留代码**
+  - `main/src/home_tab.rs:3218`
+  - `main/src/setting_tab.rs:87`
+  - `main/src/setting_tab.rs:633`
+- **建议优先级**
+  - P1：先收敛 `crates/ui/src/window_ext.rs` 的 macOS 私有符号
+  - P2：删除或恢复 `set_main_window_bounds(...)`
+  - P3：明确 `Certificate` 页去留
+  - P4：删除或恢复 `connection_list_view_mode_label(...)`
+
+### 验证结果
+- `cargo check -p main --message-format short`
+  - 结果：通过
+  - 发现 warning：
+    - `gpui-component` 3 条
+    - `main` 3 条
+
+## 审查报告（tab-bar-tab-pointer-cursor）
+生成时间：2026-03-29 13:40:48 +0800
+
+### 需求完整性检查
+- 目标明确：为 tab-bar 中的 tab 增加 hover 为 pointer 的鼠标样式
+- 范围明确：仅调整 `crates/core/src/tab_container.rs` 中滚动 tab 的根节点样式
+- 交付物明确：代码修改、本地格式化与编译验证、操作留痕
+- 风险与依赖明确：构建链会顺带暴露 `crates/ui/src/window_ext.rs` 的既有 warning，但不属于本次改动
+
+### 技术维度评分
+- 代码质量：96/100
+  - 只改一处样式链，未触碰事件、布局和拖拽逻辑
+- 测试覆盖：90/100
+  - `cargo check -p one-core` 已通过，足以覆盖本次 Rust 层改动
+  - 本次属于 hover 样式调整，未新增自动化 UI 截图验证
+- 规范遵循：95/100
+  - 复用了同文件内已有的 pointer 模式，没有引入新的抽象或分支
+
+### 战略维度评分
+- 需求匹配：97/100
+  - 滚动 tab 现在会在 hover 时提供明确可点击反馈
+- 架构一致：96/100
+  - 保持 `pinned-tab`、tab 列表项、滚动 tab 的交互语义一致
+- 风险评估：93/100
+  - 唯一需要关注的是激活 tab 的 `cursor_grab()` 覆盖是否符合预期；从链式顺序看是安全的
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 验证结果
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo check -p one-core`
+  - 结果：通过

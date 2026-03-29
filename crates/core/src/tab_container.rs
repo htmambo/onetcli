@@ -2025,6 +2025,7 @@ impl TabContainer {
                             .text_ellipsis()
                             .w(tab_width)
                             .px_3()
+                            .cursor_pointer()
                             .rounded(px(6.0))
                             .when(is_active, |el| el.bg(active_tab_color))
                             .when(!is_active, |el| {
