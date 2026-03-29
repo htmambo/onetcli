@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
+use tokio::sync::oneshot;
 
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
@@ -107,7 +108,7 @@ impl SshBackend {
         event_proxy: GpuiEventProxy,
         event_tx: UnboundedSender<TerminalEvent>,
         notify_tx: UnboundedSender<()>,
-        on_disconnect: Option<UnboundedSender<()>>,
+        on_disconnect: Option<oneshot::Sender<()>>,
         init_commands: Option<String>,
     ) -> anyhow::Result<Self> {
         Self::connect_with_progress(
@@ -131,7 +132,7 @@ impl SshBackend {
         event_proxy: GpuiEventProxy,
         event_tx: UnboundedSender<TerminalEvent>,
         notify_tx: UnboundedSender<()>,
-        on_disconnect: Option<UnboundedSender<()>>,
+        on_disconnect: Option<oneshot::Sender<()>>,
         init_commands: Option<String>,
         mut progress: F,
     ) -> anyhow::Result<Self>

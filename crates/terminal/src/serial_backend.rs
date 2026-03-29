@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::oneshot;
 
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
@@ -25,7 +26,7 @@ impl SerialBackend {
         params: SerialParams,
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_tx: UnboundedSender<TerminalEvent>,
-        on_disconnect: Option<UnboundedSender<()>>,
+        on_disconnect: Option<oneshot::Sender<()>>,
     ) -> anyhow::Result<Self> {
         let data_bits = match params.data_bits {
             5 => serialport::DataBits::Five,

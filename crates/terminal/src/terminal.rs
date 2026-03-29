@@ -615,7 +615,7 @@ impl Terminal {
         init_commands: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        // 创建 SSH 后端需要的通知通道（UnboundedSender<()>）
+        // 创建 SSH 后端需要的通知通道
         let (notify_tx, mut notify_rx) = unbounded_channel::<()>();
         let (progress_tx, mut progress_rx) = unbounded_channel::<SshConnectionStage>();
 
@@ -629,9 +629,9 @@ impl Terminal {
             });
 
             let disconnect_tx = on_disconnect.map(|tx| {
-                let (sender, mut receiver) = unbounded_channel::<()>();
+                let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
                 tokio::spawn(async move {
-                    if receiver.recv().await.is_some() {
+                    if receiver.await.is_ok() {
                         let _ = tx.send(());
                     }
                 });
@@ -739,9 +739,9 @@ impl Terminal {
         cx: &mut Context<Self>,
     ) {
         let disconnect_tx = on_disconnect.map(|tx| {
-            let (sender, mut receiver) = unbounded_channel::<()>();
+            let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
             Tokio::spawn(cx, async move {
-                if receiver.recv().await.is_some() {
+                if receiver.await.is_ok() {
                     let _ = tx.send(());
                 }
             })
