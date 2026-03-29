@@ -698,13 +698,15 @@ impl GlobalDbState {
         C: AppContext,
     {
         let manager = Arc::new(self.connection_manager.clone());
-        let _ = Tokio::spawn(cx, async move {
+        // 使用 .detach() 保持任务运行，避免 Task 被 drop 时立即 abort
+        Tokio::spawn(cx, async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
             loop {
                 interval.tick().await;
                 manager.cleanup_expired_sessions().await;
             }
-        });
+        })
+        .detach();
     }
 
     /// Internal method for get_config

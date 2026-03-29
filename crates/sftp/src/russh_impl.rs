@@ -1401,6 +1401,20 @@ impl SftpClient for RusshSftpClient {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
+        // 先关闭流水线 raw session
+        self.raw_sftp.take();
+        // 关闭主 SFTP 会话
+        if let Err(e) = self.sftp.close().await {
+            tracing::warn!("SFTP session close error: {}", e);
+        }
+        // 断开 SSH session
+        if let Err(e) = self
+            .session
+            .disconnect(russh::Disconnect::ByApplication, "", "en")
+            .await
+        {
+            tracing::warn!("SSH session disconnect error: {}", e);
+        }
         Ok(())
     }
 
