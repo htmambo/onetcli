@@ -563,6 +563,14 @@ impl Interactivity {
         ));
     }
 
+    /// Set a custom drag threshold for this element.
+    ///
+    /// The default threshold is 2px. Increase it for elements that should
+    /// prefer click activation over drag initiation.
+    pub fn drag_threshold(&mut self, threshold: f64) {
+        self.drag_threshold = Some(threshold.max(0.0));
+    }
+
     /// Bind the given callback on the hover start and end events of this element. Note that the boolean
     /// passed to the callback is true when the hover starts and false when it ends.
     /// The imperative API equivalent to [`StatefulInteractiveElement::on_hover`].
@@ -1240,6 +1248,18 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
+    /// Set a custom drag threshold for this element.
+    ///
+    /// The default threshold is 2px. Increase it for elements that should
+    /// prefer click activation over drag initiation.
+    fn drag_threshold(mut self, threshold: f64) -> Self
+    where
+        Self: Sized,
+    {
+        self.interactivity().drag_threshold(threshold);
+        self
+    }
+
     /// Bind the given callback on the hover start and end events of this element. Note that the boolean
     /// passed to the callback is true when the hover starts and false when it ends.
     /// The fluent API equivalent to [`Interactivity::on_hover`].
@@ -1653,6 +1673,7 @@ pub struct Interactivity {
     pub(crate) click_listeners: Vec<ClickListener>,
     pub(crate) aux_click_listeners: Vec<ClickListener>,
     pub(crate) drag_listener: Option<(Arc<dyn Any>, DragListener)>,
+    pub(crate) drag_threshold: Option<f64>,
     pub(crate) hover_listener: Option<Box<dyn Fn(&bool, &mut Window, &mut App)>>,
     pub(crate) tooltip_builder: Option<TooltipBuilder>,
     pub(crate) window_control: Option<WindowControlArea>,
@@ -2266,6 +2287,7 @@ impl Interactivity {
         let drag_cursor_style = self.base_style.as_ref().mouse_cursor;
 
         let mut drag_listener = mem::take(&mut self.drag_listener);
+        let drag_threshold = self.drag_threshold.unwrap_or(DRAG_THRESHOLD);
         let drop_listeners = mem::take(&mut self.drop_listeners);
         let click_listeners = mem::take(&mut self.click_listeners);
         let aux_click_listeners = mem::take(&mut self.aux_click_listeners);
@@ -2345,7 +2367,7 @@ impl Interactivity {
                         let mut pending_mouse_down = pending_mouse_down.borrow_mut();
                         if let Some(mouse_down) = pending_mouse_down.clone()
                             && !cx.has_active_drag()
-                            && (event.position - mouse_down.position).magnitude() > DRAG_THRESHOLD
+                            && (event.position - mouse_down.position).magnitude() > drag_threshold
                             && let Some((drag_value, drag_listener)) = drag_listener.take()
                             && mouse_down.button == MouseButton::Left
                         {
@@ -3541,5 +3563,18 @@ mod tests {
         handle.scroll_to_active_item();
 
         assert_eq!(handle.offset().y, px(-25.));
+    }
+
+    #[test]
+    fn interactivity_uses_default_drag_threshold_when_not_overridden() {
+        let interactivity = Interactivity::default();
+        assert_eq!(interactivity.drag_threshold, None);
+    }
+
+    #[test]
+    fn interactivity_can_override_drag_threshold() {
+        let mut interactivity = Interactivity::default();
+        interactivity.drag_threshold(6.0);
+        assert_eq!(interactivity.drag_threshold, Some(6.0));
     }
 }

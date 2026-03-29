@@ -3909,3 +3909,157 @@
   - 结果：通过，`main` 及其依赖 crate 完整编译通过
 - `cargo fmt --all`
   - 结果：通过
+
+## tab-bar 单击误判拖拽修复
+时间：2026-03-29 11:57:22 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-tab-bar-click-drag-threshold.md`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用仓库源码检索、`vendor/zed` 阅读与既有 `.claude` 留痕分析。
+- 将使用以下可复用组件：
+  - `DragTab`：`crates/core/src/tab_container.rs`，复用既有 tab 排序数据结构
+  - `move_tab(...)` / `set_active_index(...)`：`crates/core/src/tab_container.rs`，复用既有排序和激活逻辑
+  - `Tab` / `TabBar`：`crates/ui/src/tab`，维持通用 dock tab 的既有组件边界
+  - `Interactivity::on_drag(...)`：`vendor/zed/crates/gpui/src/elements/div.rs`，在底层补充阈值扩展
+- 将遵循命名约定：Rust 常量使用 `SCREAMING_SNAKE_CASE`，函数和变量使用 `snake_case`
+- 将遵循代码风格：继续使用 GPUI builder 链和局部常量，小范围增量修改，不重写 tab 排序结构
+- 确认不重复造轮子，证明：已检查 `crates/core/src/tab_container.rs`、`crates/ui/src/dock/tab_panel.rs`、`crates/ui/src/tab/tab.rs`、`vendor/zed/crates/gpui/src/elements/div.rs`，仓库内不存在现成的元素级拖拽阈值配置能力
+
+### 根因定位
+- `vendor/zed/crates/gpui/src/elements/div.rs` 当前把 `on_drag(...)` 的启动阈值写死为 `2px`。
+- `crates/core/src/tab_container.rs` 的 tab 节点同时绑定了 `on_drag(...)` 和 `on_click(...)`，命中区完全重叠。
+- 在这种组合下，用户正常单击时的轻微手抖很容易超过 `2px`，点击事件会在鼠标抬起前被拖拽状态吞掉，表现成“单击 tab 变成拖动标签”。
+
+### 实施记录
+- 在 `vendor/zed/crates/gpui/src/elements/div.rs`：
+  - 为 `Interactivity` 增加 `drag_threshold: Option<f64>`
+  - 新增 `Interactivity::drag_threshold(...)` 和 fluent `drag_threshold(...)`
+  - 保持默认阈值仍为 `2px`，仅在元素显式覆盖时使用自定义阈值
+  - 新增 2 个单元测试，覆盖默认值和覆盖值
+- 在 `crates/core/src/tab_container.rs`：
+  - 新增 `TAB_REORDER_DRAG_THRESHOLD = 6.0`
+  - 对主 tab-bar 的 tab 节点和 tab 下拉列表项统一设置 `drag_threshold(6.0)`
+- 在 `crates/ui/src/dock/tab_panel.rs`：
+  - 新增 `TAB_DRAG_THRESHOLD = 6.0`
+  - 对 dock tab 的 `on_drag(...)` 调用统一设置 `drag_threshold(6.0)`
+
+### 编码后声明
+#### 1. 复用了以下既有组件
+- `DragTab`：用于 tab 重排拖拽数据承载，位于 `crates/core/src/tab_container.rs`
+- `move_tab(...)`：用于拖拽落点后的顺序调整，位于 `crates/core/src/tab_container.rs`
+- `set_active_index(...)`：用于单击和拖拽后的激活同步，位于 `crates/core/src/tab_container.rs`
+- `Tab`：用于通用 dock tab 渲染和点击逻辑，位于 `crates/ui/src/tab/tab.rs`
+
+#### 2. 遵循了以下项目约定
+- 命名约定：新增常量使用 `TAB_REORDER_DRAG_THRESHOLD`、`TAB_DRAG_THRESHOLD`，与现有常量风格一致
+- 代码风格：继续沿用 `.when(...).on_drag(...).on_drop(...)` 的 builder 链，没有引入额外状态对象或分支层级
+- 文件组织：底层能力放在 `vendor/zed/crates/gpui/src/elements/div.rs`，业务使用点分别留在 `one-core` 和 `gpui-component` 内，职责边界清晰
+
+#### 3. 对比了以下相似实现
+- `crates/core/src/tab_container.rs:2027-2068`：我的方案没有重写 tab 排序，只是在现有 `on_drag(...)` 上增加阈值，差异最小
+- `crates/ui/src/dock/tab_panel.rs:728-778`：主 tab-bar 和 dock tab 都是“点击激活 + 拖拽排序”模式，因此同步应用阈值，避免交互体验割裂
+- `crates/ui/src/tab/tab.rs:611-690`：继续沿用通用 `Tab` 组件，不把阈值逻辑塞进 tab 视觉组件内部，保持框架层和业务层职责分离
+- `vendor/zed/crates/gpui/src/elements/div.rs:2345-2364`：仅把硬编码阈值改为“默认值 + 可覆盖”，避免影响非 tab 拖拽交互
+
+#### 4. 未重复造轮子的证明
+- 已检查 `crates/core/src/tab_container.rs`、`crates/ui/src/dock/tab_panel.rs`、`crates/ui/src/tab/tab.rs`、`vendor/zed/crates/gpui/src/elements/div.rs`
+- 仓库内不存在现成的元素级拖拽阈值 API，因此本次扩展复用了既有拖拽链路，而不是新增第二套拖拽实现
+
+### 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `rustfmt --edition 2024 vendor/zed/crates/gpui/src/elements/div.rs`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+  - 补充：该命令执行过程中实际重新编译了 `gpui` 和 `gpui-component`，说明新的 `drag_threshold(...)` API 和 `dock/tab_panel.rs` 调用点都已通过编译
+- `cargo test --manifest-path vendor/zed/crates/gpui/Cargo.toml interactivity_can_override_drag_threshold --lib -- --nocapture`
+  - 结果：失败
+  - 原因：Cargo 试图写入 `C:\Users\hoping\.cargo\git\db\...` 时被系统拒绝访问
+- `cargo test -p gpui interactivity_can_override_drag_threshold --lib -- --nocapture`
+  - 结果：失败
+  - 原因：当前环境网络受限，无法连接 `static.crates.io` 下载缺失测试依赖
+
+### 结论
+- 根因已经定位为“tab 点击区与拖拽区重叠 + 底层默认拖拽阈值过低”
+- 修复方案为“保持全局默认值不动，只给 tab 场景设置更高阈值”
+- 本地可执行验证已证明主问题路径可编译、主 tab_container 测试通过；直接框架单测因环境权限和网络限制未能补跑
+
+### 追加修正
+- 用户反馈“单击 tab 仍然不能激活”，说明仅放宽拖拽阈值还不够稳。
+- 进一步对照浏览器/编辑器常见交互后，确认对“可拖拽 tab”更可靠的行为应为：
+  - 左键按下立即激活目标 tab
+  - 如果后续继续移动，再进入拖拽排序
+- 因此追加修改：
+  - `crates/core/src/tab_container.rs`
+    - 给主 tab-bar 每个 tab 增加 `on_mouse_down(MouseButton::Left, ...)`
+    - 在拖拽判定前先执行 `set_active_index(idx, window, cx)`
+  - `crates/ui/src/dock/tab_panel.rs`
+    - 给 dock tab 增加 `on_mouse_down(MouseButton::Left, ...)`
+    - 在拖拽判定前先执行 `set_active_ix(ix, window, cx)`
+- 这层修复与 `drag_threshold(6.0)` 叠加后，单击不再依赖 `click` 必须完整走到 `mouse_up` 才能完成激活。
+
+### 追加验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：再次通过，2 个 `tab_container` 相关测试全部通过
+  - 补充：该命令再次重新编译了 `gpui-component` 和 `one-core`，说明新增的 `on_mouse_down(...)` 激活路径已通过编译
+
+### 再次追加修正
+- 用户继续反馈“能激活，但仍会同时进入拖拽”，说明“按下即激活 + 提高阈值”仍无法阻止同一次按压中的拖拽升级。
+- 因此在 tab 本地再加一层手势约束：
+  - 如果这次按压开始时 tab 不是激活态，则记录 `suppress_drag_for_pressed_tab = Some(idx)`
+  - 在这次按压持续期间，tab 上的 `on_mouse_move(...)` 会吞掉左键按住状态下的 move 事件，阻止同一次手势进入拖拽
+  - 在 `mouse_up` / `mouse_up_out` 时清理该状态
+- 结果是：
+  - 第一次点一个未激活 tab：只激活，不拖拽
+  - 第二次在已激活 tab 上拖动：允许拖拽排序
+- 该策略已同时应用到：
+  - `crates/core/src/tab_container.rs`
+  - `crates/ui/src/dock/tab_panel.rs`
+
+### 再次追加验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+  - 补充：过程中再次重新编译 `gpui-component` 与 `one-core`，新增的 `MouseMoveEvent` 屏蔽路径已通过编译
+
+## Windows 专项复查 - tab-bar 滚轮支持与标题栏拖动命中冲突
+时间：2026-03-29 12:48:02 +08:00
+
+### 1. 复查结论
+- 用户补充说明问题只在 Windows 出现，并怀疑与 tab-bar 鼠标滚轮支持改动相关。
+- 复查 `crates/core/src/tab_container.rs`、`vendor/zed/crates/gpui/src/window.rs`、`vendor/zed/crates/gpui/src/elements/div.rs` 后，确认这个判断成立。
+- 根因不是 tab 自身拖拽阈值，而是常规 tab 在滚轮支持改动后使用了 `block_mouse_except_scroll()`：
+  - 该命中行为会让背后的 hitbox 继续留在 `mouse_hit_test.ids` 中。
+  - Windows 的 `WindowControlArea::Drag` 命中测试正是基于 `mouse_hit_test.ids` 判断。
+  - 因此鼠标压在 tab 上时，父级标题栏拖动区仍可能被系统视为命中，导致 Windows 专属异常。
+
+### 2. 本次修正
+- `crates/core/src/tab_container.rs`
+  - 常规 tab：
+    - Windows 下改为 `.occlude()`，彻底遮住父级 `WindowControlArea::Drag`
+    - 非 Windows 继续保留 `.block_mouse_except_scroll()`
+    - 同时给 tab 自身补上 `.on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))`，保证滚轮横向滚动能力不丢
+  - 固定 tab（`pinned-tab`）：
+    - 保持 `.occlude()`
+    - 补上同一套 `.on_scroll_wheel(...)`，保证鼠标压在固定 tab 上时也能滚动标签栏
+
+### 3. 未重复造轮子的证明
+- 已检查 `vendor/zed/crates/gpui/src/window.rs` 的 hit test 与 `WindowControlArea` 逻辑，确认问题来自现有命中模型的组合效果，而不是缺少新的底层能力。
+- 本次没有再扩展 `gpui` 新 API，而是回到既有的 `occlude()` / `block_mouse_except_scroll()` 语义边界内修复。
+
+### 4. 本地验证
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+  - 补充：该命令重新编译了 `one-core`，确认 `tab_container.rs` 最新 Windows 分支逻辑可编译
+- `cargo test -p gpui-component --lib -- --nocapture`
+  - 结果：失败
+  - 原因：当前环境无法连接 `static.crates.io`
+- `cargo check -p gpui-component --lib --offline`
+  - 结果：失败
+  - 原因：本地缓存缺少 `git2 v0.20.2`，离线模式无法补齐依赖

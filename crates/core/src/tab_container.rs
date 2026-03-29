@@ -395,6 +395,8 @@ fn should_render_windows_drag_spacer(show_window_controls: bool, is_windows: boo
     show_window_controls && is_windows
 }
 
+const TAB_REORDER_DRAG_THRESHOLD: f64 = 6.0;
+
 // ============================================================================
 // DragTab - Visual representation during drag
 // ============================================================================
@@ -590,6 +592,7 @@ impl RenderOnce for TabListItem {
             .when(!selected, |el| {
                 el.hover(|style| style.bg(cx.theme().list_hover))
             })
+            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
             .on_drag(
                 DragTab::new(tab_index, drag_title),
                 |drag, _, window, cx| {
@@ -1907,6 +1910,7 @@ impl TabContainer {
                         .id("pinned-tab")
                         .flex()
                         .occlude()
+                        .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
                         .flex_shrink_0()
                         .overflow_hidden()
                         .items_center()
@@ -2007,9 +2011,12 @@ impl TabContainer {
                         div()
                             .id(idx)
                             .flex()
-                            // Tab 自身仍要拦住点击/悬停等交互，但不能挡住后方
-                            // 滚动容器的滚轮命中，否则鼠标压在 Tab 上时无法横向滚动。
-                            .block_mouse_except_scroll()
+                            // Windows 需要彻底遮住父级标题栏拖动区，避免 tab 命中
+                            // 被系统当成 WindowControlArea::Drag。
+                            // 其它平台仍允许滚轮穿透到底层滚动容器。
+                            .when(is_windows, |el| el.occlude())
+                            .when(!is_windows, |el| el.block_mouse_except_scroll())
+                            .on_scroll_wheel(cx.listener(Self::handle_tab_bar_scroll_wheel))
                             .flex_shrink_0()
                             .overflow_hidden()
                             .items_center()
@@ -2024,7 +2031,13 @@ impl TabContainer {
                                 el.hover(move |style| style.bg(hover_tab_color))
                                     .bg(inactive_tab_color)
                             })
-                            .when(allow_tab_drag, |el| {
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.set_active_index(idx, window, cx);
+                                }),
+                            )
+                            .when(allow_tab_drag && is_active, |el| {
                                 let el = el.cursor_grab();
                                 let el = if should_block_tab_mouse_for_window_move {
                                     el.on_mouse_down(
@@ -2044,11 +2057,16 @@ impl TabContainer {
                                     el
                                 };
 
-                                el.on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
-                                    cx.stop_propagation();
-                                    cx.new(|_| drag.clone())
-                                })
-                                .drag_over::<DragTab>(move |el, _, _, _cx| {
+                                el.drag_threshold(TAB_REORDER_DRAG_THRESHOLD).on_drag(
+                                    DragTab::new(idx, title.clone()),
+                                    |drag, _, _, cx| {
+                                        cx.stop_propagation();
+                                        cx.new(|_| drag.clone())
+                                    },
+                                )
+                            })
+                            .when(allow_tab_drag, |el| {
+                                el.drag_over::<DragTab>(move |el, _, _, _cx| {
                                     el.border_l_2().border_color(drag_border_color)
                                 })
                                 .on_drop(cx.listener(
@@ -2062,10 +2080,6 @@ impl TabContainer {
                                     },
                                 ))
                             })
-                            .on_click(cx.listener(move |this, _event, window, cx| {
-                                window.prevent_default();
-                                this.set_active_index(idx, window, cx);
-                            }))
                             .when_some(icon, |el, icon| {
                                 el.child(div().flex_shrink_0().flex().items_center().child(icon))
                             })

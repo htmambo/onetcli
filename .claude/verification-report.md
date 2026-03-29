@@ -1875,3 +1875,96 @@
   - 连接编辑窗口
   - 证书管理/证书编辑窗口
 - 由于底层 `Dialog` 会建立父子模态链，嵌套打开二级子窗口时的体感交互仍建议手动走查一次。
+
+## tab-bar 单击误判拖拽修复审查
+审查时间：2026-03-29 11:57:22 +08:00
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- 这次问题的直接根因不是 tab 激活逻辑本身，而是底层拖拽启动阈值对 tab 这种“优先点击”的控件过低。
+- 把全局默认阈值直接调大风险过高，因为会波及滑块、分栏拖拽、表格列宽等所有 `on_drag(...)` 交互。
+- 本次新增“元素级拖拽阈值覆盖”能力后，只在 tab 场景设置 `6px` 阈值，既保留拖拽重排，也把单击激活恢复为主导行为。
+- 主窗口 tab-bar 与通用 dock tab 已同步采用同一阈值策略，避免项目内同类交互体验不一致。
+
+### 验证结果
+- `cargo fmt --all`
+  - 结果：通过
+- `rustfmt --edition 2024 vendor/zed/crates/gpui/src/elements/div.rs`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+  - 补充：该命令执行过程中已实际编译 `gpui` 与 `gpui-component`
+- `cargo test --manifest-path vendor/zed/crates/gpui/Cargo.toml interactivity_can_override_drag_threshold --lib -- --nocapture`
+  - 结果：失败，原因是 Cargo git 目录写入被拒绝访问
+- `cargo test -p gpui interactivity_can_override_drag_threshold --lib -- --nocapture`
+  - 结果：失败，原因是当前环境无法访问 `static.crates.io`
+
+### 残余风险
+- 当前缺少可自动化复现“单击被误判为拖拽”的 UI 级测试，真实手感仍建议在用户环境里手动确认一次。
+- `gpui` 直接单测因环境权限和网络限制未能补跑，所以底层新 API 目前主要依赖编译通过和逻辑审查来兜底。
+
+### 审查补充
+- 用户在第一轮修复后反馈“单击 tab 仍然不能激活”，说明问题不能只从拖拽阈值一侧解决。
+- 追加修正把 tab 激活时机前移到 `mouse_down`，这比单纯依赖 `click` 更符合“可拖拽 tab”交互的常见实现，也更能覆盖轻微位移场景。
+- 追加修正后的 `cargo test -p one-core tab_container::tests --lib -- --nocapture` 已再次通过，因此当前建议维持“通过”。
+
+### 二次审查补充
+- 用户随后继续反馈“能激活，但仍会同时进入拖拽”，说明问题还存在“同一次按压既切换又拖拽”的冲突。
+- 最新修正没有继续扩大底层全局逻辑，而是在 tab 本地增加“从非激活态开始的这次按压禁止拖拽”的约束，这样影响面更小，也更贴近用户预期。
+- 最新修正后的 `cargo test -p one-core tab_container::tests --lib -- --nocapture` 仍然通过，因此综合建议继续保持“通过”。
+
+## tab-bar Windows 命中冲突复审
+审查时间：2026-03-29 12:48:02 +08:00
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：89/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 关键结论
+- 用户新增线索“只在 Windows 出现，且与 tab-bar 鼠标滚轮支持改动相关”后，问题根因变得更明确：
+  - 常规 tab 使用 `block_mouse_except_scroll()` 后，背后的父级 hitbox 仍会留在 `mouse_hit_test.ids`
+  - Windows 的 `WindowControlArea::Drag` 命中测试正是基于这个集合判断
+  - 因此 tab 区域会错误泄漏给标题栏拖动命中，这是一个 Windows 专属路径
+- 本次修正没有再叠加新的手势状态，而是直接收紧命中行为：
+  - Windows 下 tab 改回 `occlude()`
+  - 滚轮滚动改为由 tab 自己处理，避免再依赖“滚轮穿透到背后的滚动容器”
+- 这个方案与现有 `gpui` 命中模型一致，影响面也明显小于继续改底层事件分发。
+
+### 验证结果
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+- `cargo test -p gpui-component --lib -- --nocapture`
+  - 结果：失败，原因是当前环境无法连接 `static.crates.io`
+- `cargo check -p gpui-component --lib --offline`
+  - 结果：失败，原因是本地缓存缺少 `git2 v0.20.2`
+
+### 残余风险
+- 当前仍缺少可以直接模拟 Windows 原生 `WindowControlArea` 命中的自动化测试，因此最终仍建议在 Windows 实机再确认一次：
+  - 单击未激活 tab 只激活，不进入拖拽
+  - 已激活 tab 仍可正常拖拽重排
+  - 鼠标悬停在 tab 上滚轮仍能横向滚动标签栏

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use gpui::{
     App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
-    Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
+    StyleRefinement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
 };
 use rust_i18n::t;
 
@@ -22,6 +22,8 @@ use super::{
     ClosePanel, DockArea, DockPlacement, Panel, PanelControl, PanelEvent, PanelState, PanelStyle,
     PanelView, StackPanel, ToggleZoom,
 };
+
+const TAB_DRAG_THRESHOLD: f64 = 6.0;
 
 #[derive(Clone)]
 struct TabState {
@@ -725,6 +727,9 @@ impl TabPanel {
                     active = false;
                 }
 
+                let is_collapsed = self.collapsed;
+                let dock_area = self.dock_area.clone();
+
                 Some(
                     Tab::new()
                         .ix(ix)
@@ -737,23 +742,21 @@ impl TabPanel {
                             }
                         })
                         .selected(active)
-                        .on_click(cx.listener({
-                            let is_collapsed = self.collapsed;
-                            let dock_area = self.dock_area.clone();
-                            move |view, _, window, cx| {
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |view, _, window, cx| {
                                 view.set_active_ix(ix, window, cx);
 
-                                // Open dock if clicked on the collapsed bottom dock
                                 if is_bottom_dock && is_collapsed {
                                     _ = dock_area.update(cx, |dock_area, cx| {
                                         dock_area.toggle_dock(DockPlacement::Bottom, window, cx);
                                     });
                                 }
-                            }
-                        }))
+                            }),
+                        )
                         .when(!droppable, |this| {
-                            this.when(state.draggable, |this| {
-                                this.on_drag(
+                            this.when(state.draggable && active, |this| {
+                                this.drag_threshold(TAB_DRAG_THRESHOLD).on_drag(
                                     DragPanel::new(panel.clone(), view.clone()),
                                     |drag, _, _, cx| {
                                         cx.stop_propagation();
