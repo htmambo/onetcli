@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
@@ -50,31 +48,6 @@ impl SelectItem for CertificateKindItem {
     fn value(&self) -> &Self::Value {
         &self.kind
     }
-}
-
-#[derive(Clone)]
-struct GlobalCertificateManagerNavigator {
-    navigate: Arc<dyn Fn(&mut App) -> bool + Send + Sync>,
-}
-
-impl gpui::Global for GlobalCertificateManagerNavigator {}
-
-pub fn set_certificate_manager_navigator(
-    navigate: Arc<dyn Fn(&mut App) -> bool + Send + Sync>,
-    cx: &mut App,
-) {
-    cx.set_global(GlobalCertificateManagerNavigator { navigate });
-}
-
-fn try_open_certificate_manager_via_navigator(cx: &mut App) -> bool {
-    let Some(navigator) = cx
-        .try_global::<GlobalCertificateManagerNavigator>()
-        .cloned()
-    else {
-        return false;
-    };
-
-    (navigator.navigate)(cx)
 }
 
 pub struct CertificateManagerView {
@@ -285,9 +258,10 @@ impl Render for CertificateManagerView {
                                             .small()
                                             .with_variant(app_style::secondary_button_variant(cx))
                                             .label(t!("Common.edit").to_string())
-                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                            .on_click(cx.listener(move |_, _, window, cx| {
                                                 open_certificate_editor_popup(
                                                     Some(edit_certificate.clone()),
+                                                    window,
                                                     cx,
                                                 );
                                             })),
@@ -347,8 +321,8 @@ impl Render for CertificateManagerView {
                                 Button::new("add-certificate")
                                     .with_variant(app_style::primary_button_variant(cx))
                                     .label(t!("CertificateManager.add").to_string())
-                                    .on_click(cx.listener(|_, _, _, cx| {
-                                        open_certificate_editor_popup(None, cx);
+                                    .on_click(cx.listener(|_, _, window, cx| {
+                                        open_certificate_editor_popup(None, window, cx);
                                     })),
                             ),
                     ),
@@ -882,7 +856,11 @@ impl Render for CertificateEditorView {
     }
 }
 
-fn open_certificate_editor_popup(certificate: Option<Certificate>, cx: &mut App) {
+fn open_certificate_editor_popup(
+    certificate: Option<Certificate>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let title = if certificate.is_some() {
         t!("CertificateManager.edit_title").to_string()
     } else {
@@ -890,6 +868,7 @@ fn open_certificate_editor_popup(certificate: Option<Certificate>, cx: &mut App)
     };
 
     open_popup_window(
+        window,
         PopupWindowOptions::new(title).size(560.0, 640.0),
         move |window, cx| {
             let certificate = certificate.clone();
@@ -899,12 +878,9 @@ fn open_certificate_editor_popup(certificate: Option<Certificate>, cx: &mut App)
     );
 }
 
-pub fn open_certificate_manager_popup(cx: &mut App) {
-    if try_open_certificate_manager_via_navigator(cx) {
-        return;
-    }
-
+pub fn open_certificate_manager_popup(window: &mut Window, cx: &mut App) {
     open_popup_window(
+        window,
         PopupWindowOptions::new(t!("CertificateManager.window_title").to_string())
             .size(760.0, 620.0),
         |_window, cx| cx.new(|cx| CertificateManagerView::new(cx)),

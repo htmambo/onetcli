@@ -805,15 +805,6 @@ impl HomePage {
         self.add_settings_tab(window, cx);
     }
 
-    pub(crate) fn open_certificate_settings_tab(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        SettingsPanel::request_page(SettingsPanelPage::Certificate, cx);
-        self.add_settings_tab(window, cx);
-    }
-
     pub(crate) fn add_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // 使用时间戳生成唯一 tab_id，支持打开多个本地终端
         let timestamp = std::time::SystemTime::now()

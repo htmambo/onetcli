@@ -4004,7 +4004,7 @@ impl TabContent for SftpView {
                         true
                     })
                     .overlay_closable(false)
-                    .close_button(false)
+                    .close_button(true)
             });
 
             let client = self.sftp_client.take();

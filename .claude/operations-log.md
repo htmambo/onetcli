@@ -3789,3 +3789,123 @@
   - 结果：通过，2 个恢复弹窗相关测试全部通过
 - `cargo test -p main 主窗口 -- --nocapture`
   - 结果：通过，7 个主窗口与恢复弹窗相关测试全部通过
+
+## Windows tab-bar 可视宽度修正
+时间：2026-03-29 05:55:00 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-tab-bar-windows-visible-width.md`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用仓库源码检索与既有 `.claude` 留痕分析。
+- 用户补充判断“偏差大概等于三个窗口控制按钮总宽度”后，确认问题更像右侧固定功能区重复压缩 tab 可视区域，而不是 tab 本身宽度计算错误。
+
+### 实施记录
+- 在 `crates/core/src/tab_container.rs`：
+  - 保留 Windows 右侧固定拖拽热区 `tab-bar-drag-spacer`，但把它从“滚动区后、下拉前”移动到“下拉后、窗口控件前”。
+  - 这样 tab 滚动区的可视宽度可以一直延伸到下拉按钮，不再被兜底热区提前截断。
+- 没有调整 `WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH`、tab 项宽度算法或窗口控件渲染逻辑，避免扩大交互回归面。
+
+### 根因结论
+- 前两轮 Windows 拖拽修复为了解决 tab 排序与窗口拖拽冲突，引入了右侧兜底热区 `tab-bar-drag-spacer`。
+- 这段热区原来位于 `tabs-scroll-region` 和 `tab-list-popover` 之间，会直接减少 tab 区域的可视宽度。
+- 用户观察到的“缩短量接近三个窗口控制按钮宽度”，本质上是“固定拖拽热区 + 下拉按钮”这段区域放得过早，视觉上像 tab 条带被右侧功能区多吃掉一截。
+
+### 本地验证
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\crates\core\src\tab_container.rs`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 tab_container 相关测试全部通过
+- `cargo check -p main`
+  - 结果：失败，但阻塞点是环境级依赖问题，不是本次改动引起：
+    - `aws-lc-sys` 依赖构建中出现 `C atomics require C11 or later`
+    - 同时对 Cargo registry 内源码执行 `configure_file` 时出现 `Permission denied`
+  - 结论：当前无法用 `main` 全量编译作为通过条件，但 `one-core` 已完成实际代码路径验证
+
+### 追加修正
+- 用户明确反馈“不该把 tab 列表下拉按钮往左移动”，说明上一版虽然回收了宽度，但破坏了既有按钮位置认知。
+- 因此撤销“把 `tab-bar-drag-spacer` 挪到下拉按钮后方”的方案，改为直接移除这段右侧固定布局占位。
+- 保留下拉按钮与窗口控制按钮的原有顺序和相对位置，只让 tab 条带重新拿回这段被热区吃掉的宽度。
+
+## 恢复连接窗口排它性修复
+时间：2026-03-29 06:18:00 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-connection-restore-modal-window.md`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用仓库源码与 `vendor/zed` 平台实现分析。
+- 用户明确要求：恢复窗口必须是排它性的，未确认/未关闭前主窗口其它功能不能响应，也不能出现主窗口关掉后恢复窗口单独残留。
+
+### 根因定位
+- 当前恢复窗口虽然视觉上是 popup，但底层仍按 `WindowKind::Normal` 打开，因此它只是普通独立窗口。
+- 普通窗口不会禁用主窗口，也不会建立更强的父子模态关系，所以主窗口仍可交互；如果主窗口先关，恢复窗口还可能暂时独立存活。
+- `vendor/zed` 已对 `WindowKind::Dialog` 实现了系统级模态行为：
+  - Windows 下会禁用父窗口；
+  - 销毁时会恢复父窗口；
+  - Linux 下会设置 dialog/modal 父子关系。
+
+### 实施记录
+- 在 `crates/core/src/popup_window.rs`：
+  - 为 `PopupWindowOptions` 新增 `kind: WindowKind`，默认保持 `WindowKind::Normal`。
+  - 新增 `.kind(...)` builder，使特定 popup 可以覆写窗口类型。
+- 在 `main/src/connection_restore.rs`：
+  - 将恢复连接窗口显式设置为 `.kind(WindowKind::Dialog)`，让它走底层模态对话框语义。
+- 保持现有恢复列表 UI、跳过/恢复动作和关闭前清理逻辑不变。
+
+### 本地验证
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\crates\core\src\popup_window.rs D:\usr\htdocs\onetcli\main\src\connection_restore.rs`
+  - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复弹窗相关测试全部通过
+- `cargo test -p main 主窗口 -- --nocapture`
+  - 结果：通过，7 个主窗口与恢复弹窗相关测试全部通过
+
+## 统一子窗口 Dialog 化与尺寸兜底
+时间：2026-03-29 06:42:47 +08:00
+
+### 编码前检查
+- 已查阅上下文摘要文件：`.claude/context-summary-popup-dialog-size-guard.md`
+- 已分析既有实现：
+  - `crates/core/src/popup_window.rs`
+  - `main/src/connection_restore.rs`
+  - `main/src/setting_tab.rs`
+  - `vendor/zed/crates/gpui/src/platform/windows/window.rs`
+- 当前会话未提供 `desktop-commander`、`context7`、`github.search_code`、`sequential-thinking`，本次改用本地源码检索与现有测试验证。
+- 用户明确要求：
+  - 所有子窗口统一改成 `Dialog`
+  - 所有子窗口补一层“不超出主窗口尺寸”的兜底检测
+
+### 实施记录
+- 在 `crates/core/src/popup_window.rs`：
+  - 将 `PopupWindowOptions` 默认 `kind` 从 `WindowKind::Normal` 改为 `WindowKind::Dialog`
+  - 为 popup 统一入口新增显式父窗口参数，避免尺寸裁剪依赖当前活跃窗口
+  - 打开子窗口前，按父窗口内容区尺寸裁剪 popup 请求尺寸
+  - 初始位置改为按父窗口边界居中，而不是只按主屏幕居中
+  - 为 popup 根视图增加窗口 bounds 监听；当用户手动把子窗口拉得比父窗口更大时，会自动收敛回允许范围
+- 在以下业务调用点补齐父窗口参数：
+  - `main/src/connection_restore.rs`
+  - `main/src/home_tab.rs`
+  - `crates/db_view/src/db_tree_event.rs`
+  - `crates/db_view/src/table_data/data_grid.rs`
+  - `crates/core/src/certificate_manager.rs`
+  - `crates/db_view/src/connection_form_window.rs`
+  - `crates/terminal_view/src/ssh_form_window.rs`
+  - `crates/redis_view/src/redis_form_window.rs`
+  - `crates/mongodb_view/src/mongo_form_window.rs`
+- 在 `crates/core/src/popup_window.rs` 新增单测：
+  - 默认窗口类型为 `Dialog`
+  - popup 内容尺寸会被裁剪到父窗口内容区以内
+  - popup 初始 bounds 会按父窗口居中
+
+### 编码后声明
+- 复用了既有统一子窗口入口 `crates/core/src/popup_window.rs`，没有引入新的并行弹窗体系。
+- 沿用了 `main/src/setting_tab.rs` 的“先裁剪、后居中”思路，只是目标区域从显示器可见范围换成父窗口范围。
+- 沿用了 `vendor/zed` 已有的 `WindowKind::Dialog` 模态能力，没有新增自研排它状态机。
+- 已检查全仓 `open_popup_window(...)` / `open_popup_window_with_should_close(...)` 调用点并完成签名对齐，避免重复造轮子或局部漏改。
+
+### 本地验证
+- `cargo test -p one-core popup_window --lib -- --nocapture`
+  - 结果：通过，3 个 popup 统一入口单测全部通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复窗口相关测试全部通过
+- `cargo test -p main --no-run`
+  - 结果：通过，`main` 及其依赖 crate 完整编译通过
+- `cargo fmt --all`
+  - 结果：通过

@@ -1270,7 +1270,7 @@ impl TabContent for TableDesigner {
             dialog
                 .title(format!("{} {}", t!("Common.close"), title))
                 .overlay_closable(false)
-                .close_button(false)
+                .close_button(true)
                 .footer(move |_ok, _cancel, _window, _cx| {
                     let tx_save = tx_save.clone();
                     let tx_discard = tx_discard.clone();

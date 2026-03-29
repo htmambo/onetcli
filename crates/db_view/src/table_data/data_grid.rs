@@ -658,6 +658,7 @@ impl DataGrid {
         }
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(t!("TableDataGrid.export_table").to_string())
                 .size(800.0, 600.0),
             move |_window, _cx| export_view.clone(),

@@ -1118,8 +1118,8 @@ impl Render for RedisFormWindow {
                             .small()
                             .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Redis.manage_certificates").to_string())
-                            .on_click(cx.listener(|_, _, _window, cx| {
-                                open_certificate_manager_popup(cx);
+                            .on_click(cx.listener(|_, _, window, cx| {
+                                open_certificate_manager_popup(window, cx);
                             })),
                     )
                     .child(

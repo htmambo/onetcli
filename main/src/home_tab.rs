@@ -1557,6 +1557,7 @@ impl HomePage {
                 };
 
                 open_popup_window(
+                    window,
                     PopupWindowOptions::new(t!("SSH.edit").to_string()).size(700.0, 650.0),
                     move |window, cx| cx.new(|cx| SshFormWindow::new(config, window, cx)),
                     cx,
@@ -1588,6 +1589,7 @@ impl HomePage {
                 };
 
                 open_popup_window(
+                    window,
                     PopupWindowOptions::new(
                         t!("Connection.edit", db_type = db_type.as_str()).to_string(),
                     )
@@ -1603,6 +1605,7 @@ impl HomePage {
                 };
 
                 open_popup_window(
+                    window,
                     PopupWindowOptions::new(t!("Connection.edit", db_type = "Redis").to_string())
                         .size(700.0, 650.0),
                     move |window, cx| cx.new(|cx| RedisFormWindow::new(config, window, cx)),
@@ -1616,6 +1619,7 @@ impl HomePage {
                 };
 
                 open_popup_window(
+                    window,
                     PopupWindowOptions::new(t!("Connection.edit", db_type = "MongoDB").to_string())
                         .size(700.0, 520.0),
                     move |window, cx| cx.new(|cx| MongoFormWindow::new(config, window, cx)),
@@ -1629,6 +1633,7 @@ impl HomePage {
                 };
 
                 open_popup_window(
+                    window,
                     PopupWindowOptions::new(t!("Serial.edit").to_string()).size(700.0, 650.0),
                     move |window, cx| cx.new(|cx| SerialFormWindow::new(config, window, cx)),
                     cx,
@@ -1984,7 +1989,7 @@ impl HomePage {
                     ]
                 })
                 .overlay_closable(false)
-                .close_button(false)
+                .close_button(true)
         });
     }
 
@@ -2089,6 +2094,7 @@ impl HomePage {
         self.editing_connection_id = None;
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(if config.editing_connection.is_some() {
                 t!("Connection.edit", db_type = db_type.as_str()).to_string()
             } else {
@@ -2122,6 +2128,7 @@ impl HomePage {
         self.editing_connection_id = None;
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(if config.editing_connection.is_some() {
                 t!("SSH.edit").to_string()
             } else {
@@ -2155,6 +2162,7 @@ impl HomePage {
         self.editing_connection_id = None;
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(if config.editing_connection.is_some() {
                 t!("Connection.edit", db_type = "Redis").to_string()
             } else {
@@ -2188,6 +2196,7 @@ impl HomePage {
         self.editing_connection_id = None;
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(if config.editing_connection.is_some() {
                 t!("Connection.edit", db_type = "MongoDB").to_string()
             } else {
@@ -2221,6 +2230,7 @@ impl HomePage {
         self.editing_connection_id = None;
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(if config.editing_connection.is_some() {
                 t!("Serial.edit").to_string()
             } else {

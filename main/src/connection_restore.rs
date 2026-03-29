@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use gpui::{
     App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window, div, px,
+    Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window, WindowKind, div, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
@@ -168,10 +168,12 @@ pub fn open_connection_restore_dialog(
     let home_for_close = home_page.clone();
 
     open_popup_window_with_should_close(
+        window,
         PopupWindowOptions::new("恢复连接")
             .size(f32::from(layout.width), f32::from(layout.height))
             .min_width(520.0)
-            .min_height(420.0),
+            .min_height(420.0)
+            .kind(WindowKind::Dialog),
         move |_window, cx| {
             let home_page = home_page.clone();
             let items = popup_items.clone();

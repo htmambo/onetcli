@@ -943,10 +943,7 @@ impl TabContainer {
         self.tab_bar_trailing_view = Some(view.into());
     }
 
-    pub fn set_tab_list_header_action_label(
-        &mut self,
-        label: impl Into<SharedString>,
-    ) {
+    pub fn set_tab_list_header_action_label(&mut self, label: impl Into<SharedString>) {
         self.tab_list_header_action_label = Some(label.into());
     }
 
@@ -1548,11 +1545,7 @@ impl TabContainer {
             }
         }
 
-        let horizontal_delta = if delta.x != px(0.0) {
-            delta.x
-        } else {
-            delta.y
-        };
+        let horizontal_delta = if delta.x != px(0.0) { delta.x } else { delta.y };
         if horizontal_delta == px(0.0) {
             return;
         }
@@ -2216,17 +2209,6 @@ impl TabContainer {
                         },
                     ),
             )
-            .when(show_windows_drag_spacer, |el| {
-                el.child(
-                    div()
-                        .id("tab-bar-drag-spacer")
-                        .flex_shrink_0()
-                        .h_full()
-                        .w(WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH)
-                        .occlude()
-                        .window_control_area(WindowControlArea::Drag),
-                )
-            })
             .child(
                 Popover::new("tab-list-popover")
                     .mouse_button(MouseButton::Right)

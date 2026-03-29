@@ -180,7 +180,7 @@ impl Dialog {
     pub fn confirm(self) -> Self {
         self.footer(|ok, cancel, window, cx| vec![cancel(window, cx), ok(window, cx)])
             .overlay_closable(false)
-            .close_button(false)
+            .close_button(true)
     }
 
     /// Set to as a alter dialog, with OK button.
@@ -189,7 +189,7 @@ impl Dialog {
     pub fn alert(self) -> Self {
         self.footer(|ok, _, window, cx| vec![ok(window, cx)])
             .overlay_closable(false)
-            .close_button(false)
+            .close_button(true)
     }
 
     /// Set the button props of the dialog.

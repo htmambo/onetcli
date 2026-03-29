@@ -153,24 +153,6 @@ fn duplicate_tab(cx: &mut App) {
     });
 }
 
-fn open_certificate_settings_tab(cx: &mut App) -> bool {
-    let Some(main_window) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
-        return false;
-    };
-    let Some(home) = cx.try_global::<GlobalHomePage>() else {
-        return false;
-    };
-    let home_page = home.home_page.clone();
-
-    cx.update_window(main_window.window_handle, move |_, window, cx| {
-        window.activate_window();
-        home_page.update(cx, |hp, cx| {
-            hp.open_certificate_settings_tab(window, cx);
-        });
-    })
-    .is_ok()
-}
-
 fn quit_app(cx: &mut App) {
     cx.quit();
 }
@@ -311,11 +293,6 @@ pub fn init(cx: &mut App) {
 
     let registry = TabContentRegistry::new();
     cx.set_global(registry);
-    one_core::certificate_manager::set_certificate_manager_navigator(
-        Arc::new(|cx| open_certificate_settings_tab(cx)),
-        cx,
-    );
-
     cx.activate(true);
 }
 

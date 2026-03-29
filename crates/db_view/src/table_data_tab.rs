@@ -110,7 +110,7 @@ impl TabContent for TableDataTabContent {
             dialog
                 .title(format!("{} {}", t!("Common.close"), table_name))
                 .overlay_closable(false)
-                .close_button(false)
+                .close_button(true)
                 .footer(move |_ok, _cancel, _window, _cx| {
                     let data_grid = data_grid.clone();
                     let tx_save = tx_save.clone();
