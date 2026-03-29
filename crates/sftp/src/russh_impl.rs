@@ -224,7 +224,7 @@ impl RusshSftpClient {
         remote_path: &str,
         local_path: &str,
         total_size: u64,
-        cancelled: &AtomicBool,
+        cancelled: Arc<AtomicBool>,
         progress: &(dyn Fn(TransferProgress) + Send + Sync),
     ) -> Result<()> {
         // 打开远程文件
@@ -248,8 +248,14 @@ impl RusshSftpClient {
         // 生产者：发起所有并发读请求
         let raw_for_producer = Arc::clone(&raw_session);
         let handle_for_producer = file_handle.clone();
+        let cancelled_for_producer = Arc::clone(&cancelled);
         let producer = tokio::spawn(async move {
             for i in 0..total_chunks {
+                // 检查取消状态，提前退出
+                if cancelled_for_producer.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 let offset = i * chunk_size;
                 let len = std::cmp::min(PIPELINE_CHUNK_SIZE, (total_size - offset) as u32);
 
@@ -294,7 +300,7 @@ impl RusshSftpClient {
         let start_time = Instant::now();
 
         while let Some((offset, data)) = rx.recv().await {
-            ensure_not_cancelled(cancelled)?;
+            ensure_not_cancelled(&cancelled)?;
 
             if !data.is_empty() {
                 pending.insert(offset, data);
@@ -380,7 +386,7 @@ impl RusshSftpClient {
         dir_transferred: &mut u64,
         dir_total: u64,
         start_time: Instant,
-        cancelled: &AtomicBool,
+        cancelled: Arc<AtomicBool>,
         progress: &(dyn Fn(TransferProgress) + Send + Sync),
     ) -> Result<()> {
         let handle_result = raw_session
@@ -403,8 +409,14 @@ impl RusshSftpClient {
         let raw_for_producer = Arc::clone(&raw_session);
         let handle_for_producer = file_handle.clone();
 
+        let cancelled_for_producer = Arc::clone(&cancelled);
         let producer = tokio::spawn(async move {
             for i in 0..total_chunks {
+                // 检查取消状态，提前退出
+                if cancelled_for_producer.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 let offset = i * chunk_size;
                 let len = std::cmp::min(PIPELINE_CHUNK_SIZE, (total_size - offset) as u32);
 
@@ -443,7 +455,7 @@ impl RusshSftpClient {
         let mut current_file_transferred: u64 = 0;
 
         while let Some((offset, data)) = rx.recv().await {
-            ensure_not_cancelled(cancelled)?;
+            ensure_not_cancelled(&cancelled)?;
 
             if !data.is_empty() {
                 pending.insert(offset, data);
@@ -758,7 +770,7 @@ impl SftpClient for RusshSftpClient {
                 remote_path,
                 local_path,
                 total_size,
-                &cancelled,
+                Arc::clone(&cancelled),
                 &progress,
             )
             .await;
@@ -1160,7 +1172,7 @@ impl SftpClient for RusshSftpClient {
                         &mut transferred,
                         total_size,
                         start_time,
-                        &cancelled,
+                        Arc::clone(&cancelled),
                         &progress,
                     )
                     .await;

@@ -455,7 +455,20 @@ impl OnetCliApp {
                     tracing::error!("退出时保存标签状态失败：{:?}", err);
                 }
                 AppSettings::save_global(cx);
-                Task::ready(())
+                let redis_state = cx
+                    .try_global::<redis_view::manager::GlobalRedisState>()
+                    .cloned();
+                let mongo_state = cx
+                    .try_global::<mongodb_view::manager::GlobalMongoState>()
+                    .cloned();
+                cx.background_executor().spawn(async move {
+                    if let Some(state) = redis_state {
+                        state.close_all().await;
+                    }
+                    if let Some(state) = mongo_state {
+                        state.close_all().await;
+                    }
+                })
             }
         })
         .detach();
