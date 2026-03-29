@@ -570,6 +570,15 @@ impl ConnectionManager {
 
         // Remove empty config entries
         sessions.retain(|_, list| !list.is_empty());
+
+        // 记录当前剩余会话数，便于监控资源占用
+        let total: usize = sessions.values().map(|l| l.len()).sum();
+        let in_use: usize = sessions
+            .values()
+            .flat_map(|l| l.iter())
+            .filter(|s| s.in_use)
+            .count();
+        tracing::debug!("连接池清理完成：剩余会话 {}（其中使用中 {}）", total, in_use);
     }
 
     /// Get connection statistics
