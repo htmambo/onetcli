@@ -1117,7 +1117,22 @@ impl TabContainer {
         let close_task = content.try_close(&tab_id_string, window, cx);
 
         cx.spawn(async move |_handle, cx| {
-            let can_close = close_task.await;
+            // 超时保护：30 秒后若 try_close 仍未返回，强制移除 closing_tabs 标记
+            let can_close = match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                close_task,
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::warn!("close_tab: try_close timeout for tab '{}', forcing removal from closing_tabs", tab_id_string);
+                    let _ = entity.update(cx, |this, _cx| {
+                        this.closing_tabs.remove(&tab_id);
+                    });
+                    return false;
+                }
+            };
             if can_close {
                 let _ = entity.update(cx, |this, cx| {
                     this.do_remove_tab_by_id(&tab_id_string, cx);

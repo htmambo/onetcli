@@ -11,6 +11,7 @@ use rust_i18n::t;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, oneshot};
+use tokio::task::JoinSet;
 
 #[derive(Clone)]
 pub struct SshConnectConfig {
@@ -1028,11 +1029,17 @@ pub async fn start_local_port_forward(
     let target_host_for_task = target_host.clone();
 
     let accept_task = tokio::spawn(async move {
+        let mut conn_tasks: JoinSet<()> = JoinSet::new();
         loop {
             tokio::select! {
                 _ = &mut shutdown_rx => {
+                    // 等待所有活跃连接子任务结束
+                    conn_tasks.abort_all();
+                    conn_tasks.join_all().await;
                     break;
                 }
+                // 清理已完成的连接任务
+                Some(_) = conn_tasks.join_next(), if !conn_tasks.is_empty() => {}
                 accept_result = listener.accept() => {
                     let (mut inbound, inbound_addr) = match accept_result {
                         Ok(result) => result,
@@ -1044,7 +1051,7 @@ pub async fn start_local_port_forward(
 
                     let client_for_conn = Arc::clone(&client_for_task);
                     let target_host_for_conn = target_host_for_task.clone();
-                    tokio::spawn(async move {
+                    conn_tasks.spawn(async move {
                         let origin_host = match inbound_addr {
                             SocketAddr::V4(v4) => v4.ip().to_string(),
                             SocketAddr::V6(v6) => v6.ip().to_string(),
