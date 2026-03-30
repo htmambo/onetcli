@@ -1,3 +1,4 @@
+use futures::future::{Either, select};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
@@ -1117,15 +1118,15 @@ impl TabContainer {
         let close_task = content.try_close(&tab_id_string, window, cx);
 
         cx.spawn(async move |_handle, cx| {
-            // 超时保护：30 秒后若 try_close 仍未返回，强制移除 closing_tabs 标记
-            let can_close = match tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                close_task,
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => {
+            // 超时保护：30 秒后若 try_close 仍未返回，强制移除 closing_tabs 标记。
+            // 这里运行在 GPUI 的异步上下文中，不能直接依赖 Tokio reactor。
+            let timeout_task = cx.background_executor().timer(std::time::Duration::from_secs(30));
+            futures::pin_mut!(close_task);
+            futures::pin_mut!(timeout_task);
+
+            let can_close = match select(close_task, timeout_task).await {
+                Either::Left((result, _)) => result,
+                Either::Right(((), _)) => {
                     tracing::warn!("close_tab: try_close timeout for tab '{}', forcing removal from closing_tabs", tab_id_string);
                     let _ = entity.update(cx, |this, _cx| {
                         this.closing_tabs.remove(&tab_id);

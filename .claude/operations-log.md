@@ -4156,3 +4156,46 @@
 - `cargo check -p one-core`
   - 结果：通过
   - 备注：构建过程中仍出现 `crates/ui/src/window_ext.rs` 的 3 条已知历史 warning，与本次改动无关
+
+## 编码前检查 - tab-container-close-timeout
+时间：2026-03-30 10:01:15 +0800
+
+□ 已查阅上下文摘要文件：`.claude/context-summary-tab-container-close-timeout.md`
+□ 将使用以下可复用组件：
+- `crates/core/src/tab_container.rs::do_remove_tab_by_id`：复用既有标签移除路径
+- `crates/ui/src/hover_card.rs` 的 `cx.background_executor().timer(...)` 模式：复用 GPUI 原生计时器
+- `crates/core/src/gpui_tokio.rs::Tokio::spawn`：作为“Tokio 只能在桥接层使用”的参照
+□ 将遵循命名约定：保持 `close_task` / `timeout_task` 形式，不新增抽象层
+□ 将遵循代码风格：只修改 `close_tab` 一处超时实现，不改批量关闭流程
+□ 确认不重复造轮子，证明：项目已提供 GPUI timer 和 Tokio 桥接层，本次不新增自研 runtime 包装
+
+## 编码后声明 - tab-container-close-timeout
+时间：2026-03-30 10:01:15 +0800
+
+### 1. 复用了以下既有组件
+- `crates/core/src/tab_container.rs::do_remove_tab_by_id`：成功关闭后沿用原有移除流程
+- `crates/ui/src/hover_card.rs::schedule_open/schedule_close`：参考其 `cx.background_executor().timer(...)` 用法
+- `crates/core/src/gpui_tokio.rs::Tokio::spawn`：作为 Tokio 运行时边界参照，避免在普通 `cx.spawn(...)` 中直接用 Tokio timer
+
+### 2. 遵循了以下项目约定
+- 命名约定：新增变量使用 `timeout_task`
+- 代码风格：改动集中在 `crates/core/src/tab_container.rs`
+- 文件组织：上下文、操作日志、验证报告都写入项目本地 `.claude/`
+
+### 3. 对比了以下相似实现
+- `crates/ui/src/hover_card.rs:167-185`：同样在 GPUI 异步上下文里等待 `background_executor().timer(...)`
+- `crates/core/src/gpui_tokio.rs:56-95`：需要 Tokio reactor 的任务必须经过桥接层
+- `crates/core/src/tab_container.rs:1203-1457`：批量关闭路径保持直接等待 `Task<bool>` 的既有模式
+
+### 4. 未重复造轮子的证明
+- 已检查 `gpui` 的 `BackgroundExecutor::timer` 和项目内 `Tokio` 包装
+- 结论：无需新增超时工具函数，只替换错误的 runtime 依赖
+
+### 5. 工具与限制记录
+- 当前环境未提供 `sequential-thinking`、`desktop-commander`、`context7`、`github.search_code`
+- 已用本地 `rg` / `sed` / `cargo` 完成等效检索、分析与验证
+
+### 6. 本地验证
+- `cargo check -p main`
+  - 结果：通过
+  - 备注：存在既有 warning，但本次改动未引入新的编译错误

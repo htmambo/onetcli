@@ -462,6 +462,11 @@ impl MacWindowState {
                     standardWindowButton: NSWindowButton::NSWindowZoomButton
                 ];
 
+                // 非标准容器是没有这些控制按钮的，所以需要直接返回，否则可能会导致 EXC_BAD_ACCESS 崩溃
+                if close_button.is_null() || min_button.is_null() || zoom_button.is_null() {
+                    return;
+                }
+
                 let mut close_button_frame: CGRect = msg_send![close_button, frame];
                 let mut min_button_frame: CGRect = msg_send![min_button, frame];
                 let mut zoom_button_frame: CGRect = msg_send![zoom_button, frame];
