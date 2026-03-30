@@ -21,7 +21,9 @@ use one_core::layout::{
 };
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
-use one_core::tab_container::{TabContainer, TabContent, TabContentEvent, TabItem};
+use one_core::tab_container::{
+    TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem,
+};
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use tracing::warn;
 
@@ -125,6 +127,19 @@ impl RedisTabView {
                 },
             ),
         );
+        subscriptions.push(cx.subscribe(
+            &tab_container,
+            |_this, _, event: &TabContainerEvent, cx| match event {
+                TabContainerEvent::LayoutChanged
+                | TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.emit(TabContentEvent::StateChanged);
+                    cx.notify();
+                }
+                TabContainerEvent::TabBarTrailingActionRequested => {}
+            },
+        ));
 
         if let Some(active_connection_id) = active_connection_id {
             tree_view.update(cx, |tree_view, cx| {
@@ -277,6 +292,13 @@ impl TabContent for RedisTabView {
         } else {
             Some(Icon::new(IconName::Redis).color().with_size(Size::Medium))
         }
+    }
+
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .current_status_summary(cx)
+            .or_else(|| tab_container.current_title(cx))
     }
 
     fn closeable(&self, _cx: &App) -> bool {

@@ -117,6 +117,14 @@ impl Root {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<impl IntoElement + use<>> {
+        Self::render_notification_layer_with_offset(window, cx, None)
+    }
+
+    pub fn render_notification_layer_with_offset(
+        window: &mut Window,
+        cx: &mut App,
+        bottom_offset: Option<Pixels>,
+    ) -> Option<impl IntoElement + use<>> {
         let root = window.root::<Root>()??;
 
         let active_sheet_placement = root.read(cx).active_sheet.clone().map(|d| d.placement);
@@ -131,6 +139,7 @@ impl Root {
         };
 
         let placement = cx.theme().notification.placement;
+        let bottom_offset = bottom_offset.filter(|_| placement.is_bottom());
 
         Some(
             div()
@@ -157,6 +166,7 @@ impl Root {
                 .when_some(mr, |this, offset| this.mr(offset))
                 .when_some(mb, |this, offset| this.mb(offset))
                 .when_some(ml, |this, offset| this.ml(offset))
+                .when_some(bottom_offset, |this, offset| this.mb(offset))
                 .child(root.read(cx).notification.clone()),
         )
     }

@@ -1,12 +1,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use ::sysinfo::{Pid, System};
+use smol::Timer;
+
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
 use crate::saved_connection_picker::TabBarSavedConnectionPicker;
 use crate::setting_tab::{AppSettings, SavedWindowBounds};
+use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyWindowHandle, App, AppContext, Context, Entity, IntoElement, KeyBinding, ParentElement,
-    Render, Styled, Task, Window, actions, div,
+    AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    KeyBinding, ParentElement, Render, Styled, Task, Window, actions, div, px,
 };
 
 actions!(
@@ -49,12 +53,85 @@ pub struct GlobalMainWindowHandle {
 
 impl gpui::Global for GlobalMainWindowHandle {}
 
-#[cfg(target_os = "macos")]
-use gpui::px;
+/// 系统监控全局状态 - CPU、内存、系统资源监控
+#[derive(Clone)]
+pub struct GlobalSystemMonitor {
+    /// 系统总内存 (字节)
+    pub total_memory: u64,
+    /// 系统已用内存 (字节)
+    pub used_memory: u64,
+    /// 当前进程内存 (字节)
+    pub app_memory: u64,
+    /// 全局 CPU 使用率 (0-100)
+    pub cpu_usage: f32,
+}
+
+impl gpui::Global for GlobalSystemMonitor {}
+
+impl Default for GlobalSystemMonitor {
+    fn default() -> Self {
+        Self {
+            total_memory: 0,
+            used_memory: 0,
+            app_memory: 0,
+            cpu_usage: 0.0,
+        }
+    }
+}
+
+/// 初始化系统监控 - 创建全局状态并启动定时刷新任务
+fn init_system_monitor(cx: &mut App) {
+    let monitor = GlobalSystemMonitor::default();
+    cx.set_global(monitor);
+
+    // 启动后台定时刷新任务
+    cx.spawn(async move |cx| {
+        loop {
+            Timer::after(Duration::from_secs(2)).await;
+
+            let mut sys = System::new_all();
+            sys.refresh_all();
+
+            // 获取当前进程内存
+            let pid = Pid::from_u32(std::process::id());
+            let app_mem = sys.process(pid).map(|p| p.memory()).unwrap_or(0);
+
+            let new_monitor = GlobalSystemMonitor {
+                total_memory: sys.total_memory(),
+                used_memory: sys.used_memory(),
+                app_memory: app_mem,
+                cpu_usage: sys.global_cpu_usage(),
+            };
+
+            cx.update_global::<GlobalSystemMonitor, _>(|m, _| {
+                *m = new_monitor.clone();
+            });
+        }
+    })
+    .detach();
+}
+
+/// 格式化字节数为人类可读格式
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.1}G", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.0}M", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0}K", bytes as f64 / KB as f64)
+    } else {
+        format!("{}B", bytes)
+    }
+}
 
 use gpui_component::dock::{ClosePanel, ToggleZoom};
-use gpui_component::{ActiveTheme, Root};
+use gpui_component::{ActiveTheme, Icon, IconName, Root, Sizable, h_flex, v_flex};
 use one_core::llm::manager::GlobalProviderState;
+use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
@@ -66,6 +143,58 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const APP_WINDOW_TITLE: &str = "OnetCli";
+const GLOBAL_STATUS_BAR_HEIGHT: f32 = 28.0;
+
+/// 连接类型统计
+#[derive(Default, Clone)]
+pub struct ConnectionStats {
+    /// 数据库连接数
+    pub db: usize,
+    /// Redis 连接数
+    pub redis: usize,
+    /// MongoDB 连接数
+    pub mongo: usize,
+    /// SSH 终端连接数
+    pub ssh: usize,
+    /// SFTP 连接数
+    pub sftp: usize,
+    /// SQL Chat 连接数
+    pub sql_chat: usize,
+}
+
+impl ConnectionStats {}
+
+/// 从 TabContainer 统计各类型连接数
+fn count_connection_stats(tab_container: &TabContainer, cx: &App) -> ConnectionStats {
+    let mut stats = ConnectionStats::default();
+
+    for tab in tab_container.tabs() {
+        let key = tab.content().content_key(cx);
+        match key {
+            "Database" | "SqlEditor" | "TableData" | "TableDesigner" | "DatabaseObjects" => {
+                stats.db += 1;
+            }
+            "Redis" | "RedisCli" | "KeyValue" => {
+                stats.redis += 1;
+            }
+            "MongoDB" | "MongoCollection" => {
+                stats.mongo += 1;
+            }
+            "Terminal" => {
+                stats.ssh += 1;
+            }
+            "SFTP" => {
+                stats.sftp += 1;
+            }
+            "SQL-Chat" => {
+                stats.sql_chat += 1;
+            }
+            _ => {}
+        }
+    }
+
+    stats
+}
 
 fn build_window_title(active_tab_title: Option<&str>) -> String {
     let title = active_tab_title
@@ -76,6 +205,14 @@ fn build_window_title(active_tab_title: Option<&str>) -> String {
         Some(title) => format!("{APP_WINDOW_TITLE} - {title}"),
         None => APP_WINDOW_TITLE.to_string(),
     }
+}
+
+fn build_status_bar_title(active_tab_title: Option<&str>) -> String {
+    active_tab_title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or(APP_WINDOW_TITLE)
+        .to_string()
 }
 
 fn activate_tab_by_number(number: usize, cx: &mut App) {
@@ -188,6 +325,9 @@ pub fn init(cx: &mut App) {
     redis_view::init(cx);
     mongodb_view::init(cx);
     crate::home_tab::init(cx);
+
+    // 初始化系统监控全局状态
+    init_system_monitor(cx);
     cx.bind_keys(vec![
         KeyBinding::new("shift-escape", ToggleZoom, None),
         KeyBinding::new("ctrl-w", ClosePanel, None),
@@ -389,6 +529,12 @@ impl OnetCliApp {
             move |this, _tc, ev: &TabContainerEvent, _window, cx| match ev {
                 TabContainerEvent::LayoutChanged => {
                     this.save_layout(cx);
+                    cx.notify();
+                }
+                TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.notify();
                 }
                 TabContainerEvent::TabBarTrailingActionRequested => {
                     tab_container_for_events.update(cx, |tc, cx| {
@@ -408,9 +554,13 @@ impl OnetCliApp {
                         });
                     });
                 }
-                _ => {}
             },
         )
+        .detach();
+
+        cx.observe_global::<ActiveConnections>(|_, cx| {
+            cx.notify();
+        })
         .detach();
 
         cx.observe_window_appearance(window, |_this, window, cx| {
@@ -520,6 +670,219 @@ impl OnetCliApp {
             }
         }));
     }
+
+    /// 渲染状态栏连接统计：总数(终端:数量/Redis:数量/Mongo:数量/HardDrive:数量)
+    fn render_connection_stats(
+        total: usize,
+        ssh: usize,
+        db: usize,
+        redis: usize,
+        mongo: usize,
+        sftp: usize,
+        sql_chat: usize,
+        cx: &App,
+    ) -> impl IntoElement {
+        use gpui_component::h_flex;
+        h_flex()
+            .items_center()
+            .gap_1()
+            .flex_shrink_0()
+            // 总数
+            .child(div().text_sm().text_color(cx.theme().foreground).child(total.to_string()))
+            // 左括号
+            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("("))
+            // 分组内容：只显示数量>0的，用/分隔
+            .when(ssh > 0, |this| {
+                this.child(
+                    Icon::new(IconName::TerminalColor).xsmall().text_color(cx.theme().muted_foreground),
+                )
+                .child(div().text_xs().text_color(cx.theme().foreground).child(ssh.to_string()))
+            })
+            .when(ssh > 0 && (db > 0 || redis > 0 || mongo > 0 || sftp > 0 || sql_chat > 0), |this| {
+                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+            })
+            .when(db > 0, |this| {
+                this.child(
+                    Icon::new(IconName::Database).xsmall().text_color(cx.theme().muted_foreground),
+                )
+                .child(div().text_xs().text_color(cx.theme().foreground).child(db.to_string()))
+            })
+            .when(db > 0 && (redis > 0 || mongo > 0 || sftp > 0 || sql_chat > 0), |this| {
+                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+            })
+            .when(redis > 0, |this| {
+                this.child(
+                    Icon::new(IconName::Redis).xsmall().text_color(cx.theme().muted_foreground),
+                )
+                .child(div().text_xs().text_color(cx.theme().foreground).child(redis.to_string()))
+            })
+            .when(redis > 0 && (mongo > 0 || sftp > 0 || sql_chat > 0), |this| {
+                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+            })
+            .when(mongo > 0, |this| {
+                this.child(
+                    Icon::new(IconName::MongoDB).xsmall().text_color(cx.theme().muted_foreground),
+                )
+                .child(div().text_xs().text_color(cx.theme().foreground).child(mongo.to_string()))
+            })
+            .when(mongo > 0 && (sftp > 0 || sql_chat > 0), |this| {
+                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+            })
+            .when(sftp > 0 && sql_chat > 0, |this| {
+                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+            })
+            .when(sftp > 0, |this| {
+                this.child(
+                    Icon::new(IconName::FolderOpen).xsmall().text_color(cx.theme().muted_foreground),
+                )
+                .child(div().text_xs().text_color(cx.theme().foreground).child(sftp.to_string()))
+            })
+            .when(sql_chat > 0, |this| {
+                this.child(
+                    Icon::new(IconName::Bot).xsmall().text_color(cx.theme().muted_foreground),
+                )
+                .child(div().text_xs().text_color(cx.theme().foreground).child(sql_chat.to_string()))
+            })
+            // 右括号
+            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(")"))
+    }
+
+    fn render_global_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let (active_title, status_summary) = {
+            let tab_container = self.tab_container.read(cx);
+            (
+                build_status_bar_title(
+                    tab_container
+                        .current_title(cx)
+                        .as_ref()
+                        .map(|title| title.as_ref()),
+                ),
+                tab_container
+                    .current_status_summary(cx)
+                    .map(|summary| summary.to_string()),
+            )
+        };
+
+        // 获取系统监控数据（复制字段以避免借用冲突）
+        let sys_used_mem = cx.global::<GlobalSystemMonitor>().used_memory;
+        let sys_total_mem = cx.global::<GlobalSystemMonitor>().total_memory;
+        let app_mem = cx.global::<GlobalSystemMonitor>().app_memory;
+        let cpu_usage = cx.global::<GlobalSystemMonitor>().cpu_usage;
+
+        // 获取各类型连接统计
+        let tab_container = self.tab_container.read(cx);
+        let conn_stats = count_connection_stats(&tab_container, cx);
+
+        h_flex()
+            .id("global-status-bar")
+            .w_full()
+            .h(px(GLOBAL_STATUS_BAR_HEIGHT))
+            .px_3()
+            .gap_4()
+            .items_center()
+            .justify_between()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().muted)
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().muted_foreground)
+                            .child("活动"),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(260.0))
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .truncate()
+                            .child(active_title),
+                    )
+                    .when_some(status_summary, |this, summary| {
+                        this.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .truncate()
+                                .child(summary),
+                        )
+                    }),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_4()
+                    // 连接统计：总数(Terminal:数量/Redis:数量/Mongo:数量/HardDrive:数量)
+                    .child(Self::render_connection_stats(
+                        conn_stats.ssh + conn_stats.db + conn_stats.redis + conn_stats.mongo + conn_stats.sftp + conn_stats.sql_chat,
+                        conn_stats.ssh,
+                        conn_stats.db,
+                        conn_stats.redis,
+                        conn_stats.mongo,
+                        conn_stats.sftp,
+                        conn_stats.sql_chat,
+                        cx,
+                    ))
+                    // 分隔
+                    .child(div().h(px(12.0)).w(px(1.0)).bg(cx.theme().border))
+                    // 内存: 图标 + 已用/总量(应用)
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .flex_shrink_0()
+                            .child(
+                                Icon::new(IconName::MemoryStick)
+                                    .xsmall()
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().foreground)
+                                    .child(format!(
+                                        "{}/{}",
+                                        format_bytes(sys_used_mem),
+                                        format_bytes(sys_total_mem),
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("({})", format_bytes(app_mem))),
+                            ),
+                    )
+                    // CPU: 图标 + 百分比
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .flex_shrink_0()
+                            .child(
+                                Icon::new(IconName::Cpu)
+                                    .xsmall()
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().foreground)
+                                    .child(format!("{:.0}%", cpu_usage)),
+                            ),
+                    ),
+            )
+    }
 }
 
 impl Render for OnetCliApp {
@@ -541,13 +904,22 @@ impl Render for OnetCliApp {
 
         let sheet_layer = Root::render_sheet_layer(window, cx);
         let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
+        let notification_layer = Root::render_notification_layer_with_offset(
+            window,
+            cx,
+            Some(px(GLOBAL_STATUS_BAR_HEIGHT)),
+        );
 
         div()
             .size_full()
             .relative()
             .bg(cx.theme().background)
-            .child(div().size_full().child(self.tab_container.clone()))
+            .child(
+                v_flex()
+                    .size_full()
+                    .child(div().flex_1().min_h_0().child(self.tab_container.clone()))
+                    .child(self.render_global_status_bar(cx)),
+            )
             .children(sheet_layer)
             .children(dialog_layer)
             .children(notification_layer)
@@ -556,7 +928,7 @@ impl Render for OnetCliApp {
 
 #[cfg(test)]
 mod tests {
-    use super::build_window_title;
+    use super::{build_status_bar_title, build_window_title};
 
     #[test]
     fn 活动标签存在时拼接应用名和标签名() {
@@ -567,5 +939,11 @@ mod tests {
     fn 空标题时回退到应用名() {
         assert_eq!(build_window_title(Some("   ")), "OnetCli");
         assert_eq!(build_window_title(None), "OnetCli");
+    }
+
+    #[test]
+    fn 状态栏标题在空值时回退到应用名() {
+        assert_eq!(build_status_bar_title(Some("  ")), "OnetCli");
+        assert_eq!(build_status_bar_title(None), "OnetCli");
     }
 }

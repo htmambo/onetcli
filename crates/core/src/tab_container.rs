@@ -3,8 +3,8 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Task, Window, WindowControlArea,
-    div, px,
+    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Subscription, Task, Window,
+    WindowControlArea, div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -37,6 +37,8 @@ pub enum TabContentEvent {
 pub enum TabContainerEvent {
     /// Layout has changed (tabs added, removed, reordered, or active index changed)
     LayoutChanged,
+    /// Active content state has changed and may affect title or status summaries.
+    ActiveContentChanged,
     /// A tab was activated
     TabActivated { index: usize, id: String },
     /// A tab was closed
@@ -123,6 +125,16 @@ pub trait TabContent: EventEmitter<TabContentEvent> + Render + Focusable {
         None
     }
 
+    /// Get optional status summary for global status bars.
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        None
+    }
+
+    /// Get optional subtitle shown below tab title (e.g., current path for terminals)
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        None
+    }
+
     /// Check if tab can be closed
     fn closeable(&self, cx: &App) -> bool {
         true
@@ -167,6 +179,8 @@ pub trait TabContentView: 'static + Send + Sync {
     fn content_id(&self, cx: &App) -> EntityId;
     fn title(&self, cx: &App) -> SharedString;
     fn icon(&self, cx: &App) -> Option<Icon>;
+    fn status_summary(&self, cx: &App) -> Option<SharedString>;
+    fn subtitle(&self, cx: &App) -> Option<SharedString>;
     fn closeable(&self, cx: &App) -> bool;
     fn on_activate(&self, window: &mut Window, cx: &mut App);
     fn on_deactivate(&self, window: &mut Window, cx: &mut App);
@@ -175,6 +189,7 @@ pub trait TabContentView: 'static + Send + Sync {
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn view(&self) -> AnyView;
     fn dump(&self, cx: &App) -> serde_json::Value;
+    fn subscribe_state(&self, cx: &mut Context<TabContainer>) -> Subscription;
 }
 
 /// Blanket implementation: Entity<T: TabContent> automatically implements TabContentView
@@ -193,6 +208,14 @@ impl<T: TabContent> TabContentView for Entity<T> {
 
     fn icon(&self, cx: &App) -> Option<Icon> {
         self.read(cx).icon(cx)
+    }
+
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        self.read(cx).status_summary(cx)
+    }
+
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        self.read(cx).subtitle(cx)
     }
 
     fn closeable(&self, cx: &App) -> bool {
@@ -226,6 +249,15 @@ impl<T: TabContent> TabContentView for Entity<T> {
 
     fn dump(&self, cx: &App) -> serde_json::Value {
         self.read(cx).dump(cx)
+    }
+
+    fn subscribe_state(&self, cx: &mut Context<TabContainer>) -> Subscription {
+        cx.subscribe(self, |this, entity, _: &TabContentEvent, cx| {
+            if this.active_content_id(cx) == Some(entity.entity_id()) {
+                cx.emit(TabContainerEvent::ActiveContentChanged);
+            }
+            cx.notify();
+        })
     }
 }
 
@@ -856,6 +888,7 @@ pub struct TabContainer {
     pinned_tab: Option<TabItem>,
     /// Whether the pinned tab is currently active (showing its content)
     pinned_tab_active: bool,
+    content_subscriptions: HashMap<EntityId, Subscription>,
 }
 
 impl EventEmitter<TabContainerEvent> for TabContainer {}
@@ -887,6 +920,7 @@ impl TabContainer {
             tab_list_header_action_label: None,
             pinned_tab: None,
             pinned_tab_active: false,
+            content_subscriptions: HashMap::new(),
         }
     }
 
@@ -956,6 +990,7 @@ impl TabContainer {
     pub fn set_pinned_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
         self.pinned_tab = Some(tab);
         self.pinned_tab_active = self.tabs.is_empty();
+        self.reset_content_state_subscriptions(cx);
         cx.notify();
     }
 
@@ -1019,6 +1054,7 @@ impl TabContainer {
     /// Add a new tab
     pub fn add_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
         self.tabs.push(tab);
+        self.reset_content_state_subscriptions(cx);
         cx.emit(TabContainerEvent::LayoutChanged);
         cx.notify();
     }
@@ -1027,6 +1063,7 @@ impl TabContainer {
     pub fn add_and_activate_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
         let id = tab.id().to_string();
         self.tabs.push(tab);
+        self.reset_content_state_subscriptions(cx);
         self.active_index = self.tabs.len() - 1;
         self.pinned_tab_active = false;
         self.tab_bar_scroll_handle
@@ -1071,6 +1108,7 @@ impl TabContainer {
         let id = tab.id().to_string();
         let focus_handle = tab.content.focus_handle(cx);
         self.tabs.push(tab);
+        self.reset_content_state_subscriptions(cx);
         self.active_index = self.tabs.len() - 1;
         self.pinned_tab_active = false;
         self.tab_bar_scroll_handle
@@ -1152,6 +1190,7 @@ impl TabContainer {
             let removed_tab_id = self.tabs[index].id();
             self.tabs.remove(index);
             self.closing_tabs.remove(&removed_tab_id);
+            self.reset_content_state_subscriptions(cx);
 
             if self.tabs.is_empty() {
                 // All regular tabs closed, activate pinned tab if present
@@ -1525,6 +1564,35 @@ impl TabContainer {
         }
     }
 
+    pub fn current_status_summary(&self, cx: &App) -> Option<SharedString> {
+        let current_title = self.current_title(cx);
+        let summary = if self.pinned_tab_active {
+            self.pinned_tab
+                .as_ref()
+                .and_then(|tab| tab.content().status_summary(cx))
+        } else {
+            self.active_tab()
+                .and_then(|tab| tab.content().status_summary(cx))
+        }?;
+
+        let summary_text = summary.to_string();
+        let normalized_summary = summary_text.trim();
+        if normalized_summary.is_empty() {
+            return None;
+        }
+
+        if current_title
+            .as_ref()
+            .map(|title| title.to_string())
+            .map(|title| title.trim().eq(normalized_summary))
+            .unwrap_or(false)
+        {
+            return None;
+        }
+
+        Some(normalized_summary.to_string().into())
+    }
+
     pub fn set_size(&mut self, size: Size, cx: &mut Context<Self>) {
         self.size = size;
         cx.notify();
@@ -1720,9 +1788,10 @@ impl TabContainer {
         state: TabContainerState,
         registry: &TabContentRegistry,
         window: &mut Window,
-        cx: &mut App,
+        cx: &mut Context<Self>,
     ) {
         self.tabs.clear();
+        self.content_subscriptions.clear();
 
         for tab_state in &state.tabs {
             if let Some(content) = registry.build(tab_state, window, cx) {
@@ -1741,6 +1810,34 @@ impl TabContainer {
         };
 
         self.load_config(&state.config);
+        self.reset_content_state_subscriptions(cx);
+    }
+
+    fn active_content_id(&self, cx: &App) -> Option<EntityId> {
+        if self.pinned_tab_active {
+            self.pinned_tab
+                .as_ref()
+                .map(|tab| tab.content().content_id(cx))
+        } else {
+            self.active_tab().map(|tab| tab.content().content_id(cx))
+        }
+    }
+
+    fn reset_content_state_subscriptions(&mut self, cx: &mut Context<Self>) {
+        self.content_subscriptions.clear();
+
+        let mut contents: Vec<Arc<dyn TabContentView>> =
+            self.tabs.iter().map(|tab| tab.content().clone()).collect();
+
+        if let Some(pinned_tab) = &self.pinned_tab {
+            contents.push(pinned_tab.content().clone());
+        }
+
+        for content in contents {
+            let content_id = content.content_id(cx);
+            self.content_subscriptions
+                .insert(content_id, content.subscribe_state(cx));
+        }
     }
 
     fn load_config(&mut self, config: &TabContainerConfig) {
@@ -2018,6 +2115,7 @@ impl TabContainer {
                     .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                         let title = tab.content().title(cx);
                         let icon = tab.content().icon(cx);
+                        let subtitle = tab.content().subtitle(cx);
                         let closeable = tab.content().closeable(cx);
                         let is_active = idx == active_index;
                         let view_clone = view.clone();
@@ -2104,11 +2202,32 @@ impl TabContainer {
                                 div()
                                     .flex_1()
                                     .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_sm()
-                                    .text_color(text_color)
-                                    .text_ellipsis()
-                                    .child(title_clone.to_string()),
+                                    .flex()
+                                    .flex_col()
+                                    .justify_center()
+                                    .gap_px()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_sm()
+                                            .text_color(text_color)
+                                            .text_ellipsis()
+                                            .child(title_clone.to_string()),
+                                    )
+                                    .when_some(subtitle, |el, sub| {
+                                        el.child(
+                                            div()
+                                                .flex_1()
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .text_ellipsis()
+                                                .child(sub.to_string()),
+                                        )
+                                    }),
                             )
                             .when(closeable, |el| {
                                 let view_clone = view_clone.clone();

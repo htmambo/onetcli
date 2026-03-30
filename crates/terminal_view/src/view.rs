@@ -2243,6 +2243,19 @@ impl TabContent for TerminalView {
         }
     }
 
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        let terminal = self.terminal.read(cx);
+        terminal.current_working_dir().map(|dir| {
+            // 简化路径：只显示最后两段
+            let parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+            if parts.len() > 2 {
+                format!(".../{}", parts[parts.len() - 2..].join("/")).into()
+            } else {
+                dir.to_string().into()
+            }
+        })
+    }
+
     fn closeable(&self, _cx: &App) -> bool {
         true
     }

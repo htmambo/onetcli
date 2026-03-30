@@ -13,7 +13,9 @@ use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePaylo
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
-use one_core::tab_container::{TabContainer, TabContent, TabContentEvent, TabItem};
+use one_core::tab_container::{
+    TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem,
+};
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use tracing::warn;
 
@@ -97,6 +99,19 @@ impl MongoTabView {
                 },
             ),
         );
+        subscriptions.push(cx.subscribe(
+            &tab_container,
+            |_this, _, event: &TabContainerEvent, cx| match event {
+                TabContainerEvent::LayoutChanged
+                | TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.emit(TabContentEvent::StateChanged);
+                    cx.notify();
+                }
+                TabContainerEvent::TabBarTrailingActionRequested => {}
+            },
+        ));
 
         let active_connection = connections
             .iter()
@@ -251,6 +266,13 @@ impl TabContent for MongoTabView {
         } else {
             Some(Icon::new(IconName::MongoDB).color().with_size(Size::Medium))
         }
+    }
+
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .current_status_summary(cx)
+            .or_else(|| tab_container.current_title(cx))
     }
 
     fn closeable(&self, _cx: &App) -> bool {

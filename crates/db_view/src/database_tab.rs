@@ -23,7 +23,7 @@ use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, Workspace};
 use one_core::{
     storage::StoredConnection,
-    tab_container::{TabContainer, TabContent, TabContentEvent, TabItem},
+    tab_container::{TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem},
 };
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
@@ -125,6 +125,19 @@ impl DatabaseTabView {
                 },
             ),
         );
+        subscriptions.push(cx.subscribe(
+            &tab_container,
+            |_this, _, event: &TabContainerEvent, cx| match event {
+                TabContainerEvent::LayoutChanged
+                | TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.emit(TabContentEvent::StateChanged);
+                    cx.notify();
+                }
+                TabContainerEvent::TabBarTrailingActionRequested => {}
+            },
+        ));
 
         let mut global_state = cx.global::<GlobalDbState>().clone();
 
@@ -489,6 +502,18 @@ impl TabContent for DatabaseTabView {
                 },
             }
         }
+    }
+
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .current_status_summary(cx)
+            .or_else(|| tab_container.current_title(cx))
+    }
+
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container.current_title(cx)
     }
 
     fn closeable(&self, _cx: &App) -> bool {
