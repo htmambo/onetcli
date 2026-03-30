@@ -269,6 +269,7 @@ impl Terminal {
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
 
+        let working_dir = config.working_dir.clone();
         let pty_options = PtyOptions {
             shell: config.shell.map(|s| tty::Shell::new(s, vec![])),
             working_directory: config.working_dir.map(|s| s.into()),
@@ -285,7 +286,7 @@ impl Terminal {
             term,
             backend: Some(Box::new(local_backend)),
             title: String::new(),
-            current_working_dir: None,
+            current_working_dir: working_dir,
             child_exited: None,
             connection_state: ConnectionState::Connected,
             connection_status_message: None,

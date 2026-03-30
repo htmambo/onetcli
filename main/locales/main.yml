@@ -73,6 +73,10 @@ Home:
     en: New Connection
     zh-CN: 新建连接
     zh-HK: 新建連線
+  terminal:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
   connection_count:
     en: "%{count} connections"
     zh-CN: "%{count} 个连接"

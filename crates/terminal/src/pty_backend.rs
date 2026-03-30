@@ -11,6 +11,68 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{TerminalBackend, TerminalSize};
 
+/// 从 PowerShell/pwsh 窗口标题中提取工作目录
+///
+/// PowerShell 格式: "PS C:\path\to\dir" 或 "PS ~/path"
+/// pwsh 格式: "pwsh in D:\path" 或 "pwsh in C:/path"
+fn extract_path_from_powershell_title(title: &str) -> Option<String> {
+    // 去掉 ANSI 颜色序列
+    let title = strip_ansi(title);
+
+    // pwsh: "pwsh in D:\path" 或 "pwsh in C:/path" 或 "pwsh in /home/user" 或 "pwsh in hoping"（Windows 短路径）
+    if let Some(pos) = title.strip_prefix("pwsh in ") {
+        let path = pos.trim();
+        // pwsh 格式的路径即使没有分隔符也可能是有效路径（如 "pwsh in hoping" = C:\Users\hoping）
+        if !path.is_empty() && path.len() < 256 {
+            // 验证是路径：包含分隔符 或 : 或以 ~ 开头，或全由合法路径字符组成
+            if path.contains('\\')
+                || path.contains('/')
+                || path.contains(':')
+                || path.starts_with('~')
+                || (path
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.'))
+            {
+                return Some(path.to_string());
+            }
+        }
+    }
+
+    // PowerShell: "PS C:\path" 或 "PS C:/path"
+    if let Some(pos) = title.strip_prefix("PS ") {
+        let path = pos.trim();
+        if !path.is_empty() && path.len() < 256 {
+            // 验证是路径：包含 \ 或 / 或 :
+            if path.contains('\\') || path.contains('/') || path.contains(':') {
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 去掉 ANSI 转义序列
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&ch) = chars.peek() {
+                    chars.next();
+                    if ch.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// 终端事件类型
 #[derive(Debug, Clone)]
 pub enum TerminalEvent {
@@ -233,7 +295,15 @@ impl EventListener for GpuiEventProxy {
                 return;
             }
             AlacTermEvent::Wakeup => TerminalEvent::Wakeup,
-            AlacTermEvent::Title(title) => TerminalEvent::TitleChanged(title),
+            AlacTermEvent::Title(title) => {
+                // 尝试从标题中提取工作目录
+                // PowerShell 格式: "PS C:\path\to\dir" 或 "PS ~/path"
+                // pwsh 格式: "pwsh in D:\path"
+                if let Some(cwd) = extract_path_from_powershell_title(&title) {
+                    let _ = self.event_tx.send(TerminalEvent::WorkingDirChanged(cwd));
+                }
+                TerminalEvent::TitleChanged(title)
+            }
             AlacTermEvent::Bell => TerminalEvent::Bell,
             AlacTermEvent::ClipboardStore(ty, data) => TerminalEvent::ClipboardStore(ty, data),
             AlacTermEvent::ClipboardLoad(ty, _) => TerminalEvent::ClipboardLoad(ty),

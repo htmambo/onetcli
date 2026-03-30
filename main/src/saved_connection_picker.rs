@@ -4,17 +4,16 @@ use std::collections::HashSet;
 use crate::onetcli_app::GlobalHomePage;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, StyledExt,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     popover::Popover,
-    v_flex,
+    v_flex, ActiveTheme, Icon, IconName, Sizable, Size, StyledExt,
 };
 use one_core::storage::{ActiveConnections, ConnectionType, StoredConnection, Workspace};
 use rust_i18n::t;
@@ -22,6 +21,7 @@ use rust_i18n::t;
 #[derive(Clone)]
 pub(crate) enum SavedConnectionPickerEvent {
     ConnectionSelected(StoredConnection),
+    NewTerminalRequested,
 }
 
 #[derive(Clone)]
@@ -191,6 +191,10 @@ impl SavedConnectionPickerList {
 
     fn select_connection(&mut self, connection: StoredConnection, cx: &mut Context<Self>) {
         cx.emit(SavedConnectionPickerEvent::ConnectionSelected(connection));
+    }
+
+    fn emit_new_terminal(&mut self, cx: &mut Context<Self>) {
+        cx.emit(SavedConnectionPickerEvent::NewTerminalRequested);
     }
 
     fn open_first_visible_connection(&mut self, cx: &mut Context<Self>) {
@@ -406,6 +410,34 @@ impl Render for SavedConnectionPickerList {
             .child(Input::new(&self.search_input).small().w_full())
             .child(
                 div()
+                    .id("new-terminal-btn")
+                    .w_full()
+                    .px_2()
+                    .py_1p5()
+                    .rounded(px(6.0))
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_2p5()
+                    .hover(|style| style.bg(cx.theme().list_hover))
+                    .on_click(window.listener_for(&cx.entity(), |this, _, _, cx| {
+                        this.emit_new_terminal(cx);
+                    }))
+                    .child(
+                        Icon::new(IconName::Terminal)
+                            .size_5()
+                            .text_color(gpui::rgb(0x8b5cf6)),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(gpui::rgb(0x8b5cf6))
+                            .child(t!("Home.terminal")),
+                    ),
+            )
+            .child(
+                div()
                     .id("saved-connection-picker-scroll")
                     .w_full()
                     .max_h(px(360.0))
@@ -429,17 +461,28 @@ impl TabBarSavedConnectionPicker {
             &picker,
             window,
             |this, _, event: &SavedConnectionPickerEvent, window, cx| {
-                let SavedConnectionPickerEvent::ConnectionSelected(connection) = event;
-
-                if let Some(home_page) = cx
-                    .try_global::<GlobalHomePage>()
-                    .map(|global| global.home_page.clone())
-                {
-                    home_page.update(cx, |home, cx| {
-                        home.open_connection_from_saved_picker(connection, window, cx);
-                    });
+                match event {
+                    SavedConnectionPickerEvent::ConnectionSelected(connection) => {
+                        if let Some(home_page) = cx
+                            .try_global::<GlobalHomePage>()
+                            .map(|global| global.home_page.clone())
+                        {
+                            home_page.update(cx, |home, cx| {
+                                home.open_connection_from_saved_picker(connection, window, cx);
+                            });
+                        }
+                    }
+                    SavedConnectionPickerEvent::NewTerminalRequested => {
+                        if let Some(home_page) = cx
+                            .try_global::<GlobalHomePage>()
+                            .map(|global| global.home_page.clone())
+                        {
+                            home_page.update(cx, |home, cx| {
+                                home.add_terminal_tab(window, cx);
+                            });
+                        }
+                    }
                 }
-
                 this.popover_open = false;
                 cx.notify();
             },

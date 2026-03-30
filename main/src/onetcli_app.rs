@@ -694,7 +694,7 @@ impl OnetCliApp {
             // 分组内容：只显示数量>0的，用/分隔
             .when(ssh > 0, |this| {
                 this.child(
-                    Icon::new(IconName::TerminalColor).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::Terminal).xsmall().text_color(cx.theme().muted_foreground),
                 )
                 .child(div().text_xs().text_color(cx.theme().foreground).child(ssh.to_string()))
             })
