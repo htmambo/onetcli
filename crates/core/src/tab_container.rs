@@ -2115,7 +2115,6 @@ impl TabContainer {
                     .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                         let title = tab.content().title(cx);
                         let icon = tab.content().icon(cx);
-                        let subtitle = tab.content().subtitle(cx);
                         let closeable = tab.content().closeable(cx);
                         let is_active = idx == active_index;
                         let view_clone = view.clone();
@@ -2202,32 +2201,11 @@ impl TabContainer {
                                 div()
                                     .flex_1()
                                     .overflow_hidden()
-                                    .flex()
-                                    .flex_col()
-                                    .justify_center()
-                                    .gap_px()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .overflow_hidden()
-                                            .whitespace_nowrap()
-                                            .text_sm()
-                                            .text_color(text_color)
-                                            .text_ellipsis()
-                                            .child(title_clone.to_string()),
-                                    )
-                                    .when_some(subtitle, |el, sub| {
-                                        el.child(
-                                            div()
-                                                .flex_1()
-                                                .overflow_hidden()
-                                                .whitespace_nowrap()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .text_ellipsis()
-                                                .child(sub.to_string()),
-                                        )
-                                    }),
+                                    .whitespace_nowrap()
+                                    .text_sm()
+                                    .text_color(text_color)
+                                    .text_ellipsis()
+                                    .child(title_clone.to_string()),
                             )
                             .when(closeable, |el| {
                                 let view_clone = view_clone.clone();

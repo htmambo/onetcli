@@ -2243,7 +2243,7 @@ impl TabContent for TerminalView {
         }
     }
 
-    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
         let terminal = self.terminal.read(cx);
         terminal.current_working_dir().map(|dir| {
             // 简化路径：只显示最后两段
@@ -2254,6 +2254,10 @@ impl TabContent for TerminalView {
                 dir.to_string().into()
             }
         })
+    }
+
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        self.status_summary(cx)
     }
 
     fn closeable(&self, _cx: &App) -> bool {
