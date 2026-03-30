@@ -15,51 +15,74 @@ use ssh::{
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
 use crate::{TerminalBackend, TerminalSize};
 
-/// 从原始数据中提取 OSC 7 路径
+/// 从终端数据中提取当前工作目录
 ///
-/// OSC 7 格式: `\x1b]7;file://hostname/path\x07` 或 `\x1b]7;file://hostname/path\x1b\\`
-/// 提取 `file://` URI 中的路径部分（跳过 hostname），并对 %XX 编码进行解码。
-fn extract_osc7_path(data: &[u8]) -> Option<String> {
-    // 在数据中查找 OSC 7 序列起始标记 "\x1b]7;"
-    let start_marker = b"\x1b]7;";
-    let start_pos = data
-        .windows(start_marker.len())
-        .position(|w| w == start_marker)?;
-    let uri_start = start_pos + start_marker.len();
-
-    if uri_start >= data.len() {
-        return None;
-    }
-
-    // 查找终止符: BEL (\x07) 或 ST (\x1b\\)
-    let remaining = &data[uri_start..];
-    let uri_end = remaining
-        .iter()
-        .position(|&b| b == 0x07)
-        .or_else(|| remaining.windows(2).position(|w| w == b"\x1b\\"))?;
-
-    let uri_bytes = &remaining[..uri_end];
-    let uri = std::str::from_utf8(uri_bytes).ok()?;
-
-    // 解析 file:// URI，提取路径部分（跳过 hostname）
-    let path = if let Some(rest) = uri.strip_prefix("file://") {
-        // file://hostname/path → 找到第一个 '/' 即路径开始
-        if let Some(slash_pos) = rest.find('/') {
-            &rest[slash_pos..]
-        } else {
-            return None;
+/// 支持多种协议:
+/// - OSC 7: `\x1b]7;file://hostname/path\x07`
+/// - OSC 1337: `\x1b]1337;CurrentDir=/path\x07`（可能无 \x07）
+/// - OSC 2/1332: `\x1b]2;user@host:/path\x07`
+/// - OSC 1: `\x1b]1;/path\x07`
+fn extract_cwd(data: &[u8]) -> Option<String> {
+    if let Ok(text) = std::str::from_utf8(data) {
+        // OSC 1337: CurrentDir 属性（可能没有 \x07 终止符）
+        if let Some(pos) = text.find("\x1b]1337;CurrentDir=") {
+            let after = &text[pos + 17..];
+            let end_pos = after
+                .find('\x07')
+                .or_else(|| after.find('\r'))
+                .or_else(|| after.find('\n'))
+                .unwrap_or(after.len());
+            let path = after[..end_pos].trim();
+            if !path.is_empty() {
+                return Some(path.to_string());
+            }
         }
-    } else {
-        // 不是 file:// URI，忽略
-        return None;
-    };
 
-    // URL decode: 将 %XX 编码转为实际字符
-    let decoded = percent_decode(path)?;
-    if decoded.is_empty() || !decoded.starts_with('/') {
-        return None;
+        // OSC 7: file:// URI
+        if let Some(pos) = text.find("\x1b]7;") {
+            let after = &text[pos + 5..];
+            if let Some(end) = after.find('\x07') {
+                let uri = &after[..end];
+                if let Some(rest) = uri.strip_prefix("file://") {
+                    if let Some(slash_pos) = rest.find('/') {
+                        let path = &rest[slash_pos..];
+                        if !path.is_empty() && path.starts_with('/') {
+                            return percent_decode(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        // OSC 2/1332: 标题中带路径（user@host:/path 或 user@host:~ 格式）
+        if let Some(pos) = text.find("\x1b]2;") {
+            let after = &text[pos + 4..];
+            let end_pos = after.find('\x07').unwrap_or(after.len());
+            let title = &after[..end_pos];
+            if let Some(at) = title.find('@') {
+                if let Some(colon) = title[at..].find(':') {
+                    let path_start = at + colon + 1;
+                    if path_start < title.len() {
+                        let path = &title[path_start..];
+                        if path.starts_with('/') || path.starts_with('~') {
+                            return Some(path.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // OSC 1: 简单路径
+        if let Some(pos) = text.find("\x1b]1;") {
+            let after = &text[pos + 4..];
+            let end_pos = after.find('\x07').unwrap_or(after.len());
+            let path = after[..end_pos].trim();
+            if path.starts_with('/') || path.starts_with('~') {
+                return Some(path.to_string());
+            }
+        }
     }
-    Some(decoded)
+    None
 }
 
 /// 简单的 percent-decode 实现，将 %XX 编码转为实际字节
@@ -210,14 +233,14 @@ impl SshBackend {
                     event = channel.recv() => {
                         match event {
                             Some(ChannelEvent::Data(data)) => {
-                                if let Some(path) = extract_osc7_path(&data) {
+                                if let Some(path) = extract_cwd(&data) {
                                     let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
                                 }
                                 processor.advance(&mut *term.lock(), &data);
                                 let _ = notify_tx.send(());
                             }
                             Some(ChannelEvent::ExtendedData { data, .. }) => {
-                                if let Some(path) = extract_osc7_path(&data) {
+                                if let Some(path) = extract_cwd(&data) {
                                     let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
                                 }
                                 processor.advance(&mut *term.lock(), &data);

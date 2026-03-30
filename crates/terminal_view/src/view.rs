@@ -779,6 +779,7 @@ impl TerminalView {
                     sidebar.set_file_manager_initial_dir(path.clone(), cx);
                     sidebar.sync_file_manager_path(path, cx);
                 });
+                cx.notify();
             }
         }
     }
@@ -2245,15 +2246,7 @@ impl TabContent for TerminalView {
 
     fn status_summary(&self, cx: &App) -> Option<SharedString> {
         let terminal = self.terminal.read(cx);
-        terminal.current_working_dir().map(|dir| {
-            // 简化路径：只显示最后两段
-            let parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
-            if parts.len() > 2 {
-                format!(".../{}", parts[parts.len() - 2..].join("/")).into()
-            } else {
-                dir.to_string().into()
-            }
-        })
+        terminal.current_working_dir().map(|dir| dir.to_string().into())
     }
 
     fn subtitle(&self, cx: &App) -> Option<SharedString> {

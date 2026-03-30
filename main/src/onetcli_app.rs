@@ -748,19 +748,11 @@ impl OnetCliApp {
     }
 
     fn render_global_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (active_title, status_summary) = {
+        let status_summary = {
             let tab_container = self.tab_container.read(cx);
-            (
-                build_status_bar_title(
-                    tab_container
-                        .current_title(cx)
-                        .as_ref()
-                        .map(|title| title.as_ref()),
-                ),
-                tab_container
-                    .current_status_summary(cx)
-                    .map(|summary| summary.to_string()),
-            )
+            tab_container
+                .current_status_summary(cx)
+                .map(|summary| summary.to_string())
         };
 
         // 获取系统监控数据（复制字段以避免借用冲突）
@@ -790,22 +782,6 @@ impl OnetCliApp {
                     .min_w_0()
                     .items_center()
                     .gap_3()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().muted_foreground)
-                            .child("活动"),
-                    )
-                    .child(
-                        div()
-                            .max_w(px(260.0))
-                            .min_w_0()
-                            .text_sm()
-                            .text_color(cx.theme().foreground)
-                            .truncate()
-                            .child(active_title),
-                    )
                     .when_some(status_summary, |this, summary| {
                         this.child(
                             div()
