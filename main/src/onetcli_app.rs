@@ -257,21 +257,6 @@ fn toggle_fullscreen(cx: &mut App) {
     });
 }
 
-fn minimize_window(cx: &mut App) {
-    let Some(active_window) = cx.active_window() else {
-        return;
-    };
-    cx.defer(move |cx| {
-        _ = active_window.update(cx, |_, window, _| {
-            if window.is_window_active() {
-                window.minimize_window();
-            } else {
-                window.activate_window();
-            }
-        });
-    });
-}
-
 fn duplicate_tab(cx: &mut App) {
     let Some(active_window) = cx.active_window() else {
         return;
@@ -328,7 +313,7 @@ pub fn init(cx: &mut App) {
 
     // 初始化系统监控全局状态
     init_system_monitor(cx);
-    cx.bind_keys(vec![
+    let keybindings = vec![
         KeyBinding::new("shift-escape", ToggleZoom, None),
         KeyBinding::new("ctrl-w", ClosePanel, None),
         #[cfg(target_os = "macos")]
@@ -372,10 +357,6 @@ pub fn init(cx: &mut App) {
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("alt-enter", ToggleFullscreen, None),
         #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-m", MinimizeWindow, None),
-        #[cfg(not(target_os = "macos"))]
-        KeyBinding::new("ctrl-space", MinimizeWindow, None),
-        #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-shift-t", DuplicateTab, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("alt-shift-t", DuplicateTab, None),
@@ -383,7 +364,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-q", QuitApp, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("alt-f4", QuitApp, None),
-    ]);
+    ];
+
+    cx.bind_keys(keybindings);
 
     cx.on_action(|_: &ActivateTab1, cx| activate_tab_by_number(1, cx));
     cx.on_action(|_: &ActivateTab2, cx| activate_tab_by_number(2, cx));
@@ -395,7 +378,6 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &ActivateTab8, cx| activate_tab_by_number(8, cx));
     cx.on_action(|_: &ActivateTab9, cx| activate_tab_by_number(9, cx));
     cx.on_action(|_: &ToggleFullscreen, cx| toggle_fullscreen(cx));
-    cx.on_action(|_: &MinimizeWindow, cx| minimize_window(cx));
     cx.on_action(|_: &DuplicateTab, cx| duplicate_tab(cx));
     cx.on_action(|_: &QuitApp, cx| quit_app(cx));
     cx.on_action(|_: &OpenConnectionQuickOpen, cx| {

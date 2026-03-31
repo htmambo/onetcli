@@ -3,6 +3,8 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod auth;
+
+mod app_init;
 mod connection_restore;
 mod encourage;
 
@@ -21,6 +23,7 @@ use crate::setting_tab::AppSettings;
 use db::GlobalDbState;
 use db_view::database_view_plugin::DatabaseViewPluginRegistry;
 use gpui::*;
+
 use gpui_component::Root;
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
@@ -37,17 +40,14 @@ fn main() {
 
     app.run(move |cx| {
         onetcli_app::init(cx);
+
         setting_tab::init_settings(cx);
-        // Initialize global database state
         let db_state = GlobalDbState::new();
-        // Start cleanup task
         db_state.start_cleanup_task(cx);
         cx.set_global(db_state);
 
-        // Initialize Ask AI notifier
         db_view::init_ask_ai_notifier(cx);
 
-        // Initialize database view plugin registry
         let view_registry = DatabaseViewPluginRegistry::new();
         cx.set_global(view_registry);
         let mut window_size = size(px(1600.0), px(1200.0));
@@ -86,6 +86,7 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
                 window.activate_window();
+                app_init::init_window_systems(window, cx);
                 update::schedule_update_check(window, cx);
                 let view = cx.new(|cx| OnetCliApp::new(window, cx));
                 cx.new(|cx| Root::new(view, window, cx))

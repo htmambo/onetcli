@@ -414,6 +414,30 @@ struct TabBarDragState {
     should_move: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TabBarDragPlan {
+    enable_scroll_area_drag: bool,
+    enable_single_pinned_tab_drag: bool,
+}
+
+fn build_tab_bar_drag_plan(
+    show_window_controls: bool,
+    has_pinned_tab: bool,
+    has_scrollable_tabs: bool,
+) -> TabBarDragPlan {
+    if !show_window_controls {
+        return TabBarDragPlan {
+            enable_scroll_area_drag: false,
+            enable_single_pinned_tab_drag: false,
+        };
+    }
+
+    TabBarDragPlan {
+        enable_scroll_area_drag: true,
+        enable_single_pinned_tab_drag: has_pinned_tab && !has_scrollable_tabs,
+    }
+}
+
 impl Render for TabBarDragState {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -1949,8 +1973,14 @@ impl TabContainer {
         let manual_window_move = uses_manual_window_move(show_window_controls, is_windows);
         let show_windows_drag_spacer =
             should_render_windows_drag_spacer(show_window_controls, is_windows);
-        let should_block_tab_mouse_for_window_move = manual_window_move;
-        let allow_tab_drag = !is_macos;
+        // Windows 下 tab 重排拖拽会与窗口拖动区域冲突，可能导致白屏/崩溃。
+        // 先禁用 Windows 的 tab 重排拖拽，保证标题栏拖动稳定性。
+        let allow_tab_drag = !is_macos && !is_windows;
+        let drag_plan = build_tab_bar_drag_plan(
+            show_window_controls,
+            self.pinned_tab.is_some(),
+            !self.tabs.is_empty(),
+        );
 
         // 非 Windows 平台使用状态管理窗口拖动；Windows 依赖 WindowControlArea 命中测试。
         let drag_state = window.use_state(cx, |_, _| TabBarDragState { should_move: false });
@@ -2038,11 +2068,53 @@ impl TabContainer {
                             el.hover(move |style| style.bg(hover_tab_color))
                                 .bg(inactive_tab_color)
                         })
-                        .cursor_pointer()
-                        .on_click(move |_, window, cx| {
-                            view_for_pinned.update(cx, |this, cx| {
-                                this.activate_pinned_tab(window, cx);
-                            });
+                        .when(drag_plan.enable_single_pinned_tab_drag, |el| {
+                            el.window_control_area(WindowControlArea::Drag)
+                                .on_mouse_down_out(window.listener_for(
+                                    &drag_state,
+                                    |state, _, _, _| {
+                                        state.should_move = false;
+                                    },
+                                ))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    window.listener_for(&drag_state, |state, _, _, _| {
+                                        state.should_move = true;
+                                    }),
+                                )
+                                .on_mouse_up(
+                                    MouseButton::Left,
+                                    window.listener_for(&drag_state, |state, _, _, _| {
+                                        state.should_move = false;
+                                    }),
+                                )
+                                .on_mouse_move(window.listener_for(
+                                    &drag_state,
+                                    |state, _, window, _| {
+                                        if state.should_move {
+                                            state.should_move = false;
+                                            window.start_window_move();
+                                        }
+                                    },
+                                ))
+                        })
+                        .when(!drag_plan.enable_single_pinned_tab_drag, |el| {
+                            el.cursor_pointer()
+                                // pinned tab 在存在普通 tab 时只是一个普通可点击页签，
+                                // 需要阻止事件冒泡到标题栏拖动区域。
+                                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                })
+                                .on_mouse_move(|_, window, cx| {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                })
+                                .on_click(move |_, window, cx| {
+                                    view_for_pinned.update(cx, |this, cx| {
+                                        this.activate_pinned_tab(window, cx);
+                                    });
+                                })
                         })
                         .when_some(pinned_icon, |el, icon| {
                             el.child(div().flex_shrink_0().flex().items_center().child(icon))
@@ -2076,7 +2148,7 @@ impl TabContainer {
                     .relative()
                     // `overflow_hidden()` + `track_scroll()` 保留横向滚动能力，
                     // 同时隐藏系统滚动条；滚轮事件只作用于 tab 列表本身。
-                    // Windows 不在这里声明 Drag 区域，避免整块 tab 容器吞掉 tab 自身拖拽排序。
+                    // Windows 使用 window_control_area(WindowControlArea::Drag) 提供原生拖动。
                     .when(manual_window_move, |this| {
                         this.on_mouse_down_out(window.listener_for(
                             &drag_state,
@@ -2102,6 +2174,10 @@ impl TabContainer {
                                 window.start_window_move();
                             }
                         }))
+                    })
+                    // 仅在启用窗口控件且无 manual_window_move 时使用原生拖动区域
+                    .when(!manual_window_move && drag_plan.enable_scroll_area_drag, |this| {
+                        this.window_control_area(WindowControlArea::Drag)
                     })
                     .overflow_hidden()
                     .overflow_x_scroll()
@@ -2145,39 +2221,34 @@ impl TabContainer {
                                 el.hover(move |style| style.bg(hover_tab_color))
                                     .bg(inactive_tab_color)
                             })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.set_active_index(idx, window, cx);
-                                }),
-                            )
+                            // 普通 tab 不应把拖动/按下事件冒泡为窗口拖动。
+                            .on_mouse_down(MouseButton::Left, move |_evt, window: &mut Window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            })
+                            .on_mouse_move(move |_evt, window: &mut Window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            })
+                            // 点击激活 tab（仅在允许拖拽且当前 tab 激活时生效）
                             .when(allow_tab_drag && is_active, |el| {
-                                let el = el.cursor_grab();
-                                let el = if should_block_tab_mouse_for_window_move {
-                                    el.on_mouse_down(
-                                        MouseButton::Left,
-                                        move |_evt, window: &mut Window, cx| {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                        },
-                                    )
-                                    .on_mouse_move(
-                                        move |_evt, window: &mut Window, cx| {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                        },
-                                    )
-                                } else {
-                                    el
-                                };
-
-                                el.drag_threshold(TAB_REORDER_DRAG_THRESHOLD).on_drag(
-                                    DragTab::new(idx, title.clone()),
-                                    |drag, _, _, cx| {
-                                        cx.stop_propagation();
-                                        cx.new(|_| drag.clone())
-                                    },
+                                el.on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, window, cx| {
+                                        this.set_active_index(idx, window, cx);
+                                    }),
                                 )
+                            })
+                            .when(allow_tab_drag, |el| {
+                                el.cursor_grab()
+                                    .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
+                                    .on_drag(
+                                        DragTab::new(idx, title.clone()),
+                                        |drag, _, _, cx| {
+                                            cx.stop_propagation();
+                                            cx.new(|_| drag.clone())
+                                        },
+                                    )
                             })
                             .when(allow_tab_drag, |el| {
                                 el.drag_over::<DragTab>(move |el, _, _, _cx| {
@@ -2532,7 +2603,7 @@ impl Render for TabContainer {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_render_windows_drag_spacer, uses_manual_window_move};
+    use super::{should_render_windows_drag_spacer, uses_manual_window_move, TabBarDragPlan, build_tab_bar_drag_plan};
 
     #[test]
     fn windows_仅渲染独立拖窗热区() {
@@ -2546,5 +2617,44 @@ mod tests {
         assert!(uses_manual_window_move(true, false));
         assert!(!uses_manual_window_move(true, true));
         assert!(!uses_manual_window_move(false, false));
+    }
+
+    #[test]
+    fn build_tab_bar_drag_plan_enables_pinned_drag_for_single_home_tab() {
+        let plan = build_tab_bar_drag_plan(true, true, false);
+
+        assert_eq!(
+            plan,
+            TabBarDragPlan {
+                enable_scroll_area_drag: true,
+                enable_single_pinned_tab_drag: true,
+            }
+        );
+    }
+
+    #[test]
+    fn build_tab_bar_drag_plan_keeps_pinned_drag_disabled_when_other_tabs_exist() {
+        let plan = build_tab_bar_drag_plan(true, true, true);
+
+        assert_eq!(
+            plan,
+            TabBarDragPlan {
+                enable_scroll_area_drag: true,
+                enable_single_pinned_tab_drag: false,
+            }
+        );
+    }
+
+    #[test]
+    fn build_tab_bar_drag_plan_disables_all_drag_without_window_controls() {
+        let plan = build_tab_bar_drag_plan(false, true, false);
+
+        assert_eq!(
+            plan,
+            TabBarDragPlan {
+                enable_scroll_area_drag: false,
+                enable_single_pinned_tab_drag: false,
+            }
+        );
     }
 }
