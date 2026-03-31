@@ -54,3 +54,4 @@ resources/macos/OnetCli.icns
 
 # vibe coding
 .omc/
+.ace-tool/
