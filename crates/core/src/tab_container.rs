@@ -2230,15 +2230,9 @@ impl TabContainer {
                                 window.prevent_default();
                                 cx.stop_propagation();
                             })
-                            // 点击激活 tab（仅在允许拖拽且当前 tab 激活时生效）
-                            .when(allow_tab_drag && is_active, |el| {
-                                el.on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, window, cx| {
-                                        this.set_active_index(idx, window, cx);
-                                    }),
-                                )
-                            })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.set_active_index(idx, window, cx);
+                            }))
                             .when(allow_tab_drag, |el| {
                                 el.cursor_grab()
                                     .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
