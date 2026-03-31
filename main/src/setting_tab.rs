@@ -1551,7 +1551,7 @@ impl Render for SettingsPanel {
             .size_full()
             .bg(sync_server_theme::page_bg())
             .child(
-                Settings::new(format!("main-app-settings-{}", self.state_version))
+                Settings::new("main-app-settings")
                     .with_size(self.size)
                     .with_group_variant(self.group_variant)
                     .sidebar_style(&sync_server_theme::sidebar_style())

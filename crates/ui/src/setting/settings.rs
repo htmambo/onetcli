@@ -1,8 +1,7 @@
 use crate::{
-    IconName, Sizable, Size, StyledExt,
+    h_flex, IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     input::{Input, InputState},
-    resizable::{h_resizable, resizable_panel},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
@@ -279,18 +278,34 @@ impl RenderOnce for Settings {
             layout: Axis::Horizontal,
         };
 
-        h_resizable(self.id.clone())
+        div()
+            .flex_1()
+            .size_full()
+            .overflow_hidden()
             .child(
-                resizable_panel()
-                    .size(self.sidebar_width)
-                    .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                h_flex()
+                    .size_full()
+                    .child(
+                        div()
+                            .w(self.sidebar_width)
+                            .h_full()
+                            .flex_shrink_0()
+                            .overflow_hidden()
+                            .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .size_full()
+                            .overflow_hidden()
+                            .child(self.render_active_page(
+                                &state,
+                                &filtered_pages,
+                                &options,
+                                window,
+                                cx,
+                            )),
+                    ),
             )
-            .child(resizable_panel().child(self.render_active_page(
-                &state,
-                &filtered_pages,
-                &options,
-                window,
-                cx,
-            )))
     }
 }
