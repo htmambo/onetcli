@@ -620,14 +620,15 @@ impl Terminal {
         let (notify_tx, mut notify_rx) = unbounded_channel::<()>();
         let (progress_tx, mut progress_rx) = unbounded_channel::<SshConnectionStage>();
 
+        // 使用 tokio::spawn 处理通知转发，并保存 JoinHandle 以便手动取消（虽然此处通道关闭即退出）
+        let event_tx_clone = event_tx.clone();
+        tokio::spawn(async move {
+            while notify_rx.recv().await.is_some() {
+                let _ = event_tx_clone.send(TerminalEvent::Wakeup);
+            }
+        });
+
         let task = Tokio::spawn(cx, async move {
-            // 转发 SSH 通知到事件通道（必须在 tokio runtime 内部）
-            let event_tx_clone = event_tx.clone();
-            tokio::spawn(async move {
-                while notify_rx.recv().await.is_some() {
-                    let _ = event_tx_clone.send(TerminalEvent::Wakeup);
-                }
-            });
 
             let disconnect_tx = on_disconnect.map(|tx| {
                 let (sender, receiver) = tokio::sync::oneshot::channel::<()>();

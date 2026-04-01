@@ -12,7 +12,7 @@
 
 ## 待完成项
 
-- ⏳ **T1**: tokio::spawn 缺少取消机制（CRITICAL）
+- ✅ **T1**: tokio::spawn 缺少取消机制（已在 Agent, AI Stream, Terminal, SFTP 模块添加取消监听或生命周期绑定）
 - ⏳ **T2**: key_storage 硬编码 AES 密钥（CRITICAL）
 **创建时间**: 2026-03-31
 **创建人**: Claude Code 分析

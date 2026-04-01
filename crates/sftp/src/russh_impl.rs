@@ -269,7 +269,13 @@ impl RusshSftpClient {
                 let handle = handle_for_producer.clone();
                 let tx = tx.clone();
 
+                let cancelled_clone = Arc::clone(&cancelled_for_producer);
                 tokio::spawn(async move {
+                    // 内部读取请求也应检查取消状态
+                    if cancelled_clone.load(Ordering::Relaxed) {
+                        return;
+                    }
+
                     let result = raw.read(handle, offset, len).await;
                     drop(permit);
 
@@ -278,11 +284,9 @@ impl RusshSftpClient {
                             let _ = tx.send((offset, data.data)).await;
                         }
                         Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => {
-                            // EOF 表示文件读完，发送空数据标记此 offset
                             let _ = tx.send((offset, Vec::new())).await;
                         }
                         Err(_e) => {
-                            // 读取错误，发送空数据让 writer 侧处理
                             let _ = tx.send((offset, Vec::new())).await;
                         }
                     }
