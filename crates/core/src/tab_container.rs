@@ -1976,9 +1976,10 @@ impl TabContainer {
         let manual_window_move = uses_manual_window_move(show_window_controls, is_windows);
         let show_windows_drag_spacer =
             should_render_windows_drag_spacer(show_window_controls, is_windows);
-        // Windows 下 tab 重排拖拽会与窗口拖动区域冲突，可能导致白屏/崩溃。
-        // 先禁用 Windows 的 tab 重排拖拽，保证标题栏拖动稳定性。
-        let allow_tab_drag = !is_macos && !is_windows;
+        // 所有非 macOS 平台都启用 tab 拖拽重排。Windows 上的窗口拖动由
+        // WindowControlArea::Drag 独立热区（tab-bar-drag-spacer）处理，
+        // 与 tab 自身的 on_drag 互不影响。
+        let allow_tab_drag = !is_macos;
         let drag_plan = build_tab_bar_drag_plan(
             show_window_controls,
             self.pinned_tab.is_some(),
