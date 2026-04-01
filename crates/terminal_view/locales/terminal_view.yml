@@ -419,6 +419,22 @@ Settings:
     en: Enable
     zh-CN: 开启
     zh-HK: 開啟
+  session_section:
+    en: SESSION
+    zh-CN: 会话
+    zh-HK: 工作階段
+  exit_behavior_desc:
+    en: "When shell exits with 'exit' command"
+    zh-CN: 当 Shell 通过 exit 命令退出时
+    zh-HK: 當 Shell 通過 exit 命令退出時
+  exit_behavior_prompt:
+    en: Show confirmation dialog
+    zh-CN: 显示确认弹窗
+    zh-HK: 顯示確認彈窗
+  exit_behavior_close:
+    en: Close tab directly
+    zh-CN: 直接关闭标签
+    zh-HK: 直接關閉標籤
 
 # 右键菜单
 ContextMenu:
@@ -696,6 +712,21 @@ Serial:
     zh-HK: macOS 不支持虛擬串口(pty)，請使用真實串口設備。
 
 # SSH 会话状态
+# 终端
+Terminal:
+  shell_still_running_title:
+    en: Shell Still Running
+    zh-CN: Shell 仍在运行
+    zh-HK: Shell 仍在運行
+  shell_still_running_message:
+    en: There's a process still running in this terminal. Do you want to force close it?
+    zh-CN: 终端中仍有任务正在执行。确定要强制关闭吗？
+    zh-HK: 終端中仍有任務正在執行。確定要強制關閉嗎？
+  force_close:
+    en: Force Close
+    zh-CN: 强制关闭
+    zh-HK: 強制關閉
+
 SshSession:
   connecting:
     en: Connecting...
@@ -713,6 +744,14 @@ SshSession:
     en: The SSH session has been disconnected.
     zh-CN: SSH 会话已断开连接。
     zh-HK: SSH 工作階段已斷開連接。
+  session_ended:
+    en: Session ended.
+    zh-CN: 会话已结束。
+    zh-HK: 工作階段已結束。
+  will_close_hint:
+    en: "Click 'Close' to exit."
+    zh-CN: 点击"关闭"退出。
+    zh-HK: 點擊"關閉"退出。
   reconnect:
     en: Reconnect
     zh-CN: 重新连接

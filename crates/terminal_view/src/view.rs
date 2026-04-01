@@ -68,6 +68,7 @@ pub enum TerminalViewEvent {
     CursorBlinkChanged { enabled: bool },
     ConfirmMultilinePasteChanged { enabled: bool },
     ConfirmHighRiskCommandChanged { enabled: bool },
+    Close,
 }
 
 const TERMINAL_CONTEXT: &str = "TerminalView";
@@ -336,6 +337,8 @@ pub struct TerminalView {
     middle_click_paste: bool,
     /// 是否启用字体连字
     font_ligatures_enabled: bool,
+    /// 终端退出行为: "prompt" 显示弹窗, "close" 直接关闭
+    exit_behavior: String,
 
     /// 侧边栏面板大小
     sidebar_panel_size: Pixels,
@@ -627,6 +630,7 @@ impl TerminalView {
             auto_copy_on_select: true,
             middle_click_paste: true,
             font_ligatures_enabled: false,
+            exit_behavior: "prompt".to_string(),
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
             view_bounds: Bounds::default(),
@@ -768,6 +772,10 @@ impl TerminalView {
                 // 可选：播放声音或闪烁标签
             }
             TerminalModelEvent::ChildExit(_) => {
+                // 用户通过 exit 命令退出时，如果设置了直接关闭行为，则自动关闭 tab
+                if self.exit_behavior == "close" {
+                    self.request_close(cx);
+                }
                 cx.notify();
             }
             TerminalModelEvent::ClipboardStore(data) => {
@@ -850,6 +858,7 @@ impl TerminalView {
         auto_copy: bool,
         middle_click_paste: bool,
         sync_path: bool,
+        exit_behavior: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -877,6 +886,7 @@ impl TerminalView {
 
         self.auto_copy_on_select = auto_copy;
         self.middle_click_paste = middle_click_paste;
+        self.exit_behavior = exit_behavior.to_string();
 
         self.terminal.update(cx, |terminal, _cx| {
             terminal.set_sync_path_with_terminal(sync_path);
@@ -947,6 +957,11 @@ impl TerminalView {
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.set_confirm_high_risk_command(enabled, cx);
         });
+        cx.notify();
+    }
+
+    pub fn apply_exit_behavior(&mut self, behavior: &str, cx: &mut Context<Self>) {
+        self.exit_behavior = behavior.to_string();
         cx.notify();
     }
 
@@ -1056,6 +1071,10 @@ impl TerminalView {
         self.terminal.update(cx, |terminal, cx| {
             terminal.reconnect(cx);
         });
+    }
+
+    fn request_close(&self, cx: &mut Context<Self>) {
+        cx.emit(TerminalViewEvent::Close);
     }
 
     fn write_to_pty(&mut self, data: Vec<u8>, cx: &mut Context<Self>) {
@@ -1367,12 +1386,17 @@ impl TerminalView {
     fn paste_text_unchecked(&mut self, text: &str, cx: &mut Context<Self>) {
         // 仅在应用请求 bracketed paste 模式时才包装，避免把控制序列
         // 原样送进不支持的程序（例如 Vim 未开启时可能导致光标/位置异常）。
+        //
+        // 规范化行尾符：移除 \r 避免 macOS 剪贴板 CRLF 转换导致每行多出一个空行。
+        // 场景：外部复制 "line1\nline2\n" → macOS 粘贴时可能变成 "line1\r\nline2\r\n"，
+        // 直接发送会导致 \r 回车回到行首，覆盖上一行内容，视觉上呈现为空行。
+        let normalized = text.replace("\r\n", "\n").replace('\r', "");
         let mode = self.terminal.read(cx).mode();
         if mode.contains(TermMode::BRACKETED_PASTE) {
-            let paste_text = format!("\x1b[200~{}\x1b[201~", text.replace('\x1b', ""));
+            let paste_text = format!("\x1b[200~{}\x1b[201~", normalized.replace('\x1b', ""));
             self.write_to_pty(paste_text.into_bytes(), cx);
         } else {
-            self.write_to_pty(text.as_bytes().to_vec(), cx);
+            self.write_to_pty(normalized.into_bytes(), cx);
         }
     }
 
@@ -1800,7 +1824,7 @@ impl TerminalView {
         &self,
         can_reconnect: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let terminal = self.terminal.read(cx);
         let connection_state = terminal.connection_state().clone();
         let connection_status_message = terminal.connection_status_label();
@@ -1809,6 +1833,10 @@ impl TerminalView {
             ConnectionState::Disconnected { error } => error.clone(),
             _ => None,
         };
+
+        // 区分用户 exit 和网络故障：child_exited 有值表示子进程已退出（用户 exit）
+        let child_exited = terminal.child_exited();
+        let is_user_exit = child_exited.is_some();
 
         div()
             .absolute()
@@ -1882,21 +1910,67 @@ impl TerminalView {
                             .child(if is_connecting {
                                 connection_status_message
                                     .unwrap_or_else(|| t!("SshSession.establishing").to_string())
+                            } else if is_user_exit {
+                                t!("SshSession.session_ended").to_string()
                             } else {
                                 t!("SshSession.disconnected").to_string()
                             }),
                     )
-                    .when(can_reconnect && !is_connecting, |this| {
-                        this.child(
-                            Button::new("reconnect-btn")
-                                .label(t!("SshSession.reconnect"))
-                                .primary()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.reconnect(window, cx);
-                                })),
-                        )
-                    }),
+                    .when(!is_connecting, |this| {
+                        if is_user_exit {
+                            // 用户通过 exit 命令退出：显示关闭和重新连接按钮
+                            this.child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("close-tab-btn")
+                                            .label(t!("Common.close"))
+                                            .warning()
+                                            .on_click(cx.listener(|this, _, _window, cx| {
+                                                this.request_close(cx);
+                                            })),
+                                    )
+                                    .when(can_reconnect, |el| {
+                                        el.child(
+                                            Button::new("reconnect-btn")
+                                                .label(t!("SshSession.reconnect"))
+                                                .primary()
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.reconnect(window, cx);
+                                                })),
+                                        )
+                                    }),
+                            )
+                        } else {
+                            // 网络/远程故障：显示关闭和重连按钮
+                            this.child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("close-tab-btn")
+                                            .label(t!("Common.close"))
+                                            .warning()
+                                            .on_click(cx.listener(|this, _, _window, cx| {
+                                                this.request_close(cx);
+                                            })),
+                                    )
+                                    .when(can_reconnect, |el| {
+                                        el.child(
+                                            Button::new("reconnect-btn")
+                                                .label(t!("SshSession.reconnect"))
+                                                .primary()
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.reconnect(window, cx);
+                                                })),
+                                        )
+                                    }),
+                            )
+                        }
+                    })
             )
+            .into_any_element()
     }
 
     fn handle_scroll(
@@ -2292,7 +2366,7 @@ impl TabContent for TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<bool> {
-        // tab 会立即从容器中移除，先同步回收活跃状态，避免主页残留“连接使用中”标记。
+        // tab 会立即从容器中移除，先同步回收活跃状态，避免主页残留"连接使用中"标记。
         self.release_active_connection(cx);
         // 关闭终端连接
         self.terminal.read(cx).shutdown();

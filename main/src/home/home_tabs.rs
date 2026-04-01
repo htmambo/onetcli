@@ -187,6 +187,7 @@ impl HomePage {
             let cursor_blink = settings.terminal_cursor_blink;
             let confirm_multiline = settings.terminal_confirm_multiline_paste;
             let confirm_high_risk = settings.terminal_confirm_high_risk_command;
+            let exit_behavior = settings.terminal_exit_behavior.clone();
             let theme = TerminalTheme::find_by_name(&settings.terminal_theme);
 
             terminal_view.update(cx, |view, cx| {
@@ -198,6 +199,7 @@ impl HomePage {
                     auto_copy,
                     middle_click_paste,
                     sync_path,
+                    &exit_behavior,
                     window,
                     cx,
                 );
@@ -309,6 +311,15 @@ impl HomePage {
                             view.apply_confirm_high_risk_command(enabled, cx);
                         });
                     }
+                    TerminalViewEvent::Close => {
+                        let view_id = _view.entity_id();
+                        let tab_container = this.tab_container.clone();
+                        tab_container.update(cx, |container, cx| {
+                            if let Some(index) = container.tabs().iter().position(|t| t.content().content_id(cx) == view_id) {
+                                container.close_tab(index, window, cx).detach();
+                            }
+                        });
+                    }
                 }
                 cx.notify();
             },
@@ -329,6 +340,7 @@ impl HomePage {
         let auto_copy = settings.terminal_auto_copy;
         let middle_click_paste = settings.terminal_middle_click_paste;
         let sync_path = settings.terminal_sync_path_with_terminal;
+        let exit_behavior = settings.terminal_exit_behavior.clone();
         self.terminal_views.retain(|weak| {
             if let Some(view) = weak.upgrade() {
                 view.update(cx, |view, cx| {
@@ -340,6 +352,7 @@ impl HomePage {
                         auto_copy,
                         middle_click_paste,
                         sync_path,
+                        &exit_behavior,
                         window,
                         cx,
                     );

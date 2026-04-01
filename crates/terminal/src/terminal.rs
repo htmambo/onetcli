@@ -577,7 +577,9 @@ impl Terminal {
                 this.connection_status_message = None;
                 this.connection_wait_started_at = None;
                 this.backend = None;
+                this.child_exited = Some(0);
                 this.set_connection_active(false, cx);
+                cx.emit(TerminalModelEvent::ChildExit(0));
                 cx.emit(TerminalModelEvent::Wakeup);
             });
         })
