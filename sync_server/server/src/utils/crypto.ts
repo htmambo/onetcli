@@ -2,7 +2,8 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
-  const derived = scryptSync(password, salt, 64).toString("hex");
+  // N=32768, r=8, p=1 -> ~32ms on modern hardware (高于默认值 16384)
+  const derived = scryptSync(password, salt, 64, { N: 32768, r: 8, p: 1 }).toString("hex");
   return `${salt}:${derived}`;
 }
 
@@ -12,7 +13,8 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     return false;
   }
 
-  const derived = scryptSync(password, salt, 64);
+  // 验证时复用写入时的参数
+  const derived = scryptSync(password, salt, 64, { N: 32768, r: 8, p: 1 });
   const expected = Buffer.from(hash, "hex");
   if (derived.length !== expected.length) {
     return false;

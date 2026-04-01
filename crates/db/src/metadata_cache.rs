@@ -516,18 +516,11 @@ impl MetadataCacheManager {
         self.memory_cache.insert(string_key.clone(), entry.clone());
         debug!("Metadata cached (memory): {}", string_key);
 
-        // 异步写入文件
+        // 同步写入文件，确保写入完成
         if self.config.enable_file_cache {
-            let cache_dir = self.cache_dir.clone();
-            let key_clone = key.clone();
-            let entry_clone = entry.clone();
-            tokio::spawn(async move {
-                if let Err(e) =
-                    Self::save_to_file_static(&cache_dir, &key_clone, &entry_clone).await
-                {
-                    warn!("Failed to save metadata cache to file: {}", e);
-                }
-            });
+            if let Err(e) = Self::save_to_file_static(&self.cache_dir, key, &entry).await {
+                warn!("Failed to save metadata cache to file: {}", e);
+            }
         }
     }
 

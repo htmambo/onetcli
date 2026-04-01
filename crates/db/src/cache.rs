@@ -287,13 +287,23 @@ impl NodeCache {
     }
 
     /// 递归使节点及其所有后代的缓存失效
+    ///
+    /// 使用迭代而非递归，避免深层树导致栈溢出。
     pub async fn invalidate_node_recursive(&self, ctx: &CacheContext, node_id: &str) {
-        if let Some(node) = self.get_node(ctx, node_id).await {
-            for child in &node.children {
-                Box::pin(self.invalidate_node_recursive(ctx, &child.id)).await;
+        use std::collections::VecDeque;
+        let mut queue = VecDeque::new();
+        queue.push_back(node_id.to_string());
+
+        while let Some(current_id) = queue.pop_front() {
+            // 先获取节点以收集子节点 ID
+            if let Some(node) = self.get_node(ctx, &current_id).await {
+                for child in &node.children {
+                    queue.push_back(child.id.clone());
+                }
             }
+            // 再失效当前节点
+            self.invalidate_node(ctx, &current_id).await;
         }
-        self.invalidate_node(ctx, node_id).await;
     }
 
     /// 清除指定连接的所有缓存

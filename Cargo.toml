@@ -125,6 +125,7 @@ aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
+argon2 = { version = "0.6.0-rc.8", features = ["password-hash"] }
 
 # Terminal emulation
 alacritty_terminal = "0.25"

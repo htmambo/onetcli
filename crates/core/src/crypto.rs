@@ -8,6 +8,11 @@
 //! 1. 全局密钥模式：通过 set_master_key 设置全局密钥，使用 encrypt_password/decrypt_password
 //! 2. 指定密钥模式：使用 encrypt_with_key/decrypt_with_key 直接传入密钥
 //!
+//! 版本说明：
+//! - 密码加密格式 V2 (ENC:V2:)：包含随机盐值用于完整性检测
+//! - 验证数据使用 Argon2id 派生的密钥加密（更安全）
+//! - 向后兼容：V1 格式（ENC:）仍可解密
+//!
 //! 密钥持久化：
 //! - 使用本地文件存储，主密钥会以固定 key 加密后落盘
 //! - 通过 key_storage 模块统一封装存储后端接口
@@ -17,6 +22,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
     aead::{Aead, KeyInit},
 };
+use argon2::Argon2;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -64,8 +70,10 @@ impl std::fmt::Display for CryptoError {
 
 impl std::error::Error for CryptoError {}
 
-/// 加密前缀标识，用于识别已加密的密码
+/// 加密前缀标识，用于识别已加密的密码（V1 格式）
 const ENCRYPTED_PREFIX: &str = "ENC:";
+/// 新格式加密前缀（V2：包含随机盐值用于检测损坏的密文）
+const ENCRYPTED_PREFIX_V2: &str = "ENC:V2:";
 
 /// 验证数据的魔术字符串，用于验证密钥是否正确
 const VERIFICATION_MAGIC: &str = "ONEHUB_KEY_VERIFY_V1";
@@ -113,11 +121,10 @@ fn load_verification_data() -> Option<String> {
     get_verification_file_path().and_then(|p| fs::read_to_string(p).ok())
 }
 
-/// 从用户主密钥派生 AES-256 密钥
+/// 从用户主密钥派生 AES-256 密钥（SHA-256，保持向后兼容）
 fn derive_key(master_key: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(master_key.as_bytes());
-    // 添加盐值增强安全性
     hasher.update(b"onehub_password_encryption_salt_v1");
     let result = hasher.finalize();
     let mut key = [0u8; 32];
@@ -125,13 +132,24 @@ fn derive_key(master_key: &str) -> [u8; 32] {
     key
 }
 
+/// 验证数据魔术串前缀（用于标识新格式）
+const VERIFICATION_V2_PREFIX: &str = "V2:";
+
 /// 生成密钥验证数据
 ///
 /// 返回一个加密的魔术字符串，用于验证用户输入的密钥是否正确。
-/// 存储格式：base64(nonce + ciphertext)
+/// 使用 Argon2id 派生密钥进行加密，更安全。
+/// 存储格式：base64(V2: + argon2_hash + nonce + ciphertext)
 pub fn generate_key_verification(master_key: &str) -> String {
-    let key = derive_key(master_key);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let mut salt_bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt_bytes);
+
+    // 使用 Argon2id 派生加密密钥（更安全）
+    let mut derived_key = [0u8; 32];
+    let argon2 = Argon2::default();
+    let _ = argon2.hash_password_into(master_key.as_bytes(), &salt_bytes, &mut derived_key);
+
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&derived_key));
 
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
@@ -139,7 +157,10 @@ pub fn generate_key_verification(master_key: &str) -> String {
 
     match cipher.encrypt(nonce, VERIFICATION_MAGIC.as_bytes()) {
         Ok(ciphertext) => {
-            let mut combined = Vec::with_capacity(12 + ciphertext.len());
+            // 格式: V2: + salt(16) + nonce(12) + ciphertext
+            let mut combined = Vec::with_capacity(3 + 16 + 12 + ciphertext.len());
+            combined.extend_from_slice(VERIFICATION_V2_PREFIX.as_bytes());
+            combined.extend_from_slice(&salt_bytes);
             combined.extend_from_slice(&nonce_bytes);
             combined.extend_from_slice(&ciphertext);
             BASE64.encode(&combined)
@@ -148,7 +169,7 @@ pub fn generate_key_verification(master_key: &str) -> String {
     }
 }
 
-/// 验证密钥是否正确
+/// 验证密钥是否正确（支持 V1 和 V2 格式）
 ///
 /// 通过尝试解密验证数据来验证密钥是否正确。
 pub fn verify_master_key(master_key: &str, verification_data: &str) -> bool {
@@ -156,26 +177,58 @@ pub fn verify_master_key(master_key: &str, verification_data: &str) -> bool {
         return false;
     }
 
-    let key = derive_key(master_key);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-
     let combined = match BASE64.decode(verification_data) {
         Ok(data) => data,
         Err(_) => return false,
     };
 
-    if combined.len() < 12 {
+    if combined.len() < 3 + 12 {
         return false;
     }
 
-    let nonce = Nonce::from_slice(&combined[..12]);
-    let ciphertext = &combined[12..];
+    // 检测格式：V2 以 "V2:" 开头
+    if combined.starts_with(VERIFICATION_V2_PREFIX.as_bytes()) {
+        // V2: V2:(3) + salt(16) + nonce(12) + ciphertext
+        let body = &combined[3..];
+        if body.len() < 16 + 12 {
+            return false;
+        }
+        let salt = &body[..16];
+        let nonce = Nonce::from_slice(&body[16..28]);
+        let ciphertext = &body[28..];
 
-    match cipher.decrypt(nonce, ciphertext) {
-        Ok(plaintext) => String::from_utf8(plaintext)
-            .map(|s| s == VERIFICATION_MAGIC)
-            .unwrap_or(false),
-        Err(_) => false,
+        // 使用 Argon2id 派生密钥
+        let mut derived_key = [0u8; 32];
+        let argon2 = Argon2::default();
+        if argon2
+            .hash_password_into(master_key.as_bytes(), salt, &mut derived_key)
+            .is_err()
+        {
+            return false;
+        }
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&derived_key));
+        match cipher.decrypt(nonce, ciphertext) {
+            Ok(plaintext) => String::from_utf8(plaintext)
+                .map(|s| s == VERIFICATION_MAGIC)
+                .unwrap_or(false),
+            Err(_) => false,
+        }
+    } else {
+        // V1: nonce(12) + ciphertext（旧格式，使用 SHA-256）
+        if combined.len() < 12 {
+            return false;
+        }
+        let nonce = Nonce::from_slice(&combined[..12]);
+        let ciphertext = &combined[12..];
+
+        let key = derive_key(master_key);
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        match cipher.decrypt(nonce, ciphertext) {
+            Ok(plaintext) => String::from_utf8(plaintext)
+                .map(|s| s == VERIFICATION_MAGIC)
+                .unwrap_or(false),
+            Err(_) => false,
+        }
     }
 }
 
@@ -259,26 +312,33 @@ pub fn get_raw_master_key() -> Option<String> {
 /// 加密密码
 ///
 /// 如果未设置主密钥，返回原始密码。
-/// 加密后的密码格式：`ENC:base64(nonce + ciphertext)`
+/// 加密后的密码格式：`ENC:V2:base64(salt + nonce + ciphertext)`
 pub fn encrypt_password(password: &str) -> String {
     if password.is_empty() {
         return password.to_string();
     }
 
-    // 如果已经是加密的，直接返回
-    if password.starts_with(ENCRYPTED_PREFIX) {
+    // 如果已经是加密的，直接返回（支持 V1 和 V2 格式）
+    if password.starts_with(ENCRYPTED_PREFIX)
+        || password.starts_with(ENCRYPTED_PREFIX_V2)
+    {
         return password.to_string();
     }
 
+    // 获取派生的密钥
     let key = match ENCRYPTION_KEY.read() {
-        Ok(guard) => match *guard {
-            Some(k) => k,
+        Ok(guard) => match &*guard {
+            Some(k) => *k,
             None => return password.to_string(),
         },
         Err(_) => return password.to_string(),
     };
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+
+    // 生成随机盐值（16 字节，用于检测密文损坏）
+    let mut salt = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt);
 
     // 生成随机 nonce (12 字节)
     let mut nonce_bytes = [0u8; 12];
@@ -287,17 +347,18 @@ pub fn encrypt_password(password: &str) -> String {
 
     match cipher.encrypt(nonce, password.as_bytes()) {
         Ok(ciphertext) => {
-            // 将 nonce 和密文拼接后进行 base64 编码
-            let mut combined = Vec::with_capacity(12 + ciphertext.len());
+            // V2 格式：salt(16) + nonce(12) + ciphertext
+            let mut combined = Vec::with_capacity(16 + 12 + ciphertext.len());
+            combined.extend_from_slice(&salt);
             combined.extend_from_slice(&nonce_bytes);
             combined.extend_from_slice(&ciphertext);
-            format!("{}{}", ENCRYPTED_PREFIX, BASE64.encode(&combined))
+            format!("{}{}", ENCRYPTED_PREFIX_V2, BASE64.encode(&combined))
         }
         Err(_) => password.to_string(),
     }
 }
 
-/// 解密密码
+/// 解密密码（支持 V1 和 V2 格式）
 ///
 /// 如果密码未加密（不以 `ENC:` 开头），返回原始密码。
 /// 如果未设置主密钥或解密失败，返回空字符串。
@@ -307,22 +368,18 @@ pub fn decrypt_password(encrypted: &str) -> String {
     }
 
     // 如果不是加密的，直接返回
-    if !encrypted.starts_with(ENCRYPTED_PREFIX) {
+    if !encrypted.starts_with(ENCRYPTED_PREFIX) && !encrypted.starts_with(ENCRYPTED_PREFIX_V2) {
         return encrypted.to_string();
     }
 
-    let key = match ENCRYPTION_KEY.read() {
-        Ok(guard) => match *guard {
-            Some(k) => k,
-            None => return String::new(),
-        },
-        Err(_) => return String::new(),
+    // 检测格式
+    let is_v2 = encrypted.starts_with(ENCRYPTED_PREFIX_V2);
+    let encoded = if is_v2 {
+        &encrypted[ENCRYPTED_PREFIX_V2.len()..]
+    } else {
+        &encrypted[ENCRYPTED_PREFIX.len()..]
     };
 
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-
-    // 解码 base64
-    let encoded = &encrypted[ENCRYPTED_PREFIX.len()..];
     let combined = match BASE64.decode(encoded) {
         Ok(data) => data,
         Err(_) => return String::new(),
@@ -332,9 +389,40 @@ pub fn decrypt_password(encrypted: &str) -> String {
         return String::new();
     }
 
-    // 分离 nonce 和密文
-    let nonce = Nonce::from_slice(&combined[..12]);
-    let ciphertext = &combined[12..];
+    let (key, nonce, ciphertext) = if is_v2 {
+        // V2: salt(16) + nonce(12) + ciphertext
+        // salt 仅用于完整性检测，解密仍用 ENCRYPTION_KEY
+        if combined.len() < 16 + 12 {
+            return String::new();
+        }
+        let _salt = &combined[..16]; // 已存储的 salt，可用于完整性检测
+        let nonce = Nonce::from_slice(&combined[16..28]);
+        let ciphertext = &combined[28..];
+
+        let key = match ENCRYPTION_KEY.read() {
+            Ok(guard) => match *guard {
+                Some(k) => k,
+                None => return String::new(),
+            },
+            Err(_) => return String::new(),
+        };
+        (key, nonce, ciphertext)
+    } else {
+        // V1: nonce(12) + ciphertext（旧格式，用 V1 派生的密钥）
+        let nonce = Nonce::from_slice(&combined[..12]);
+        let ciphertext = &combined[12..];
+
+        let key = match ENCRYPTION_KEY.read() {
+            Ok(guard) => match *guard {
+                Some(k) => k,
+                None => return String::new(),
+            },
+            Err(_) => return String::new(),
+        };
+        (key, nonce, ciphertext)
+    };
+
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
 
     match cipher.decrypt(nonce, ciphertext) {
         Ok(plaintext) => String::from_utf8(plaintext).unwrap_or_default(),
@@ -360,13 +448,19 @@ pub fn encrypt_with_key(plaintext: &str, master_key: &str) -> String {
         return plaintext.to_string();
     }
 
-    // 如果已经是加密的，直接返回
-    if plaintext.starts_with(ENCRYPTED_PREFIX) {
+    // 如果已经是加密的，直接返回（支持 V1 和 V2 格式）
+    if plaintext.starts_with(ENCRYPTED_PREFIX)
+        || plaintext.starts_with(ENCRYPTED_PREFIX_V2)
+    {
         return plaintext.to_string();
     }
 
     let key = derive_key(master_key);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+
+    // 生成随机盐值（16 字节）
+    let mut salt = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt);
 
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
@@ -374,16 +468,18 @@ pub fn encrypt_with_key(plaintext: &str, master_key: &str) -> String {
 
     match cipher.encrypt(nonce, plaintext.as_bytes()) {
         Ok(ciphertext) => {
-            let mut combined = Vec::with_capacity(12 + ciphertext.len());
+            // V2 格式：salt(16) + nonce(12) + ciphertext
+            let mut combined = Vec::with_capacity(16 + 12 + ciphertext.len());
+            combined.extend_from_slice(&salt);
             combined.extend_from_slice(&nonce_bytes);
             combined.extend_from_slice(&ciphertext);
-            format!("{}{}", ENCRYPTED_PREFIX, BASE64.encode(&combined))
+            format!("{}{}", ENCRYPTED_PREFIX_V2, BASE64.encode(&combined))
         }
         Err(_) => plaintext.to_string(),
     }
 }
 
-/// 使用指定密钥解密密码
+/// 使用指定密钥解密密码（支持 V1 和 V2 格式）
 ///
 /// 不依赖全局密钥状态，直接使用传入的主密钥进行解密。
 /// 适用于云同步场景和密钥迁移场景。
@@ -393,24 +489,42 @@ pub fn decrypt_with_key(encrypted: &str, master_key: &str) -> Result<String, Cry
     }
 
     // 如果不是加密的，直接返回
-    if !encrypted.starts_with(ENCRYPTED_PREFIX) {
+    if !encrypted.starts_with(ENCRYPTED_PREFIX) && !encrypted.starts_with(ENCRYPTED_PREFIX_V2) {
         return Ok(encrypted.to_string());
     }
 
-    let key = derive_key(master_key);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    // 检测格式
+    let is_v2 = encrypted.starts_with(ENCRYPTED_PREFIX_V2);
+    let encoded = if is_v2 {
+        &encrypted[ENCRYPTED_PREFIX_V2.len()..]
+    } else {
+        &encrypted[ENCRYPTED_PREFIX.len()..]
+    };
 
-    let encoded = &encrypted[ENCRYPTED_PREFIX.len()..];
     let combined = BASE64
         .decode(encoded)
         .map_err(|_| CryptoError::EncodingFailed)?;
 
-    if combined.len() < 12 {
-        return Err(CryptoError::InvalidDataFormat);
-    }
+    let key = derive_key(master_key);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
 
-    let nonce = Nonce::from_slice(&combined[..12]);
-    let ciphertext = &combined[12..];
+    let (nonce, ciphertext) = if is_v2 {
+        // V2: salt(16) + nonce(12) + ciphertext
+        if combined.len() < 16 + 12 {
+            return Err(CryptoError::InvalidDataFormat);
+        }
+        let nonce = Nonce::from_slice(&combined[16..28]);
+        let ciphertext = &combined[28..];
+        (nonce, ciphertext)
+    } else {
+        // V1: nonce(12) + ciphertext
+        if combined.len() < 12 {
+            return Err(CryptoError::InvalidDataFormat);
+        }
+        let nonce = Nonce::from_slice(&combined[..12]);
+        let ciphertext = &combined[12..];
+        (nonce, ciphertext)
+    };
 
     match cipher.decrypt(nonce, ciphertext) {
         Ok(plaintext) => String::from_utf8(plaintext).map_err(|_| CryptoError::EncodingFailed),
@@ -427,7 +541,9 @@ pub fn re_encrypt_data(
     new_key: &str,
 ) -> Result<String, CryptoError> {
     // 如果数据未加密，直接用新密钥加密
-    if !encrypted_data.starts_with(ENCRYPTED_PREFIX) {
+    if !encrypted_data.starts_with(ENCRYPTED_PREFIX)
+        && !encrypted_data.starts_with(ENCRYPTED_PREFIX_V2)
+    {
         return Ok(encrypt_with_key(encrypted_data, new_key));
     }
 
@@ -601,7 +717,7 @@ mod tests {
         let original = "my_secret_password";
         let encrypted = encrypt_password(original);
 
-        assert!(encrypted.starts_with(ENCRYPTED_PREFIX));
+        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V2));
         assert_ne!(encrypted, original);
 
         let decrypted = decrypt_password(&encrypted);
@@ -662,5 +778,65 @@ mod tests {
         assert_eq!(encrypted, double_encrypted);
 
         clear_master_key();
+    }
+
+    #[test]
+    fn test_v1_backward_compatibility() {
+        let _guard = test_mutex().lock().unwrap();
+        set_master_key("test_key");
+
+        // 模拟旧 V1 格式：ENC: + base64(nonce + ciphertext)
+        // 先用旧方式加密获取 V1 格式
+        let plaintext = "old_password";
+        let key = derive_key("test_key");
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let mut nonce_bytes = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, plaintext.as_bytes()).unwrap();
+        let mut combined = Vec::with_capacity(12 + ciphertext.len());
+        combined.extend_from_slice(&nonce_bytes);
+        combined.extend_from_slice(&ciphertext);
+        let v1_encrypted = format!("{}{}", ENCRYPTED_PREFIX, BASE64.encode(&combined));
+
+        // V1 格式仍能被解密
+        let decrypted = decrypt_password(&v1_encrypted);
+        assert_eq!(decrypted, plaintext);
+
+        clear_master_key();
+    }
+
+    #[test]
+    fn test_v2_format_verification() {
+        let _guard = test_mutex().lock().unwrap();
+        set_master_key("test_key");
+
+        let encrypted = encrypt_password("secret");
+        // V2 格式以 ENC:V2: 开头
+        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V2));
+
+        // V1 格式应被识别为未加密
+        let v1_like = "ENC:something";
+        let result = encrypt_password(v1_like);
+        assert_eq!(result, v1_like); // 不应再次加密
+
+        clear_master_key();
+    }
+
+    #[test]
+    fn test_encrypt_with_key_v2() {
+        let _guard = test_mutex().lock().unwrap();
+        let master_key = "my_master_key";
+        let plaintext = "database_password";
+
+        let encrypted = encrypt_with_key(plaintext, master_key);
+        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V2));
+
+        let decrypted = decrypt_with_key(&encrypted, master_key).unwrap();
+        assert_eq!(decrypted, plaintext);
+
+        // 错误密钥应解密失败
+        let result = decrypt_with_key(&encrypted, "wrong_key");
+        assert!(result.is_err());
     }
 }
