@@ -137,6 +137,7 @@ impl RedisTabView {
                     cx.emit(TabContentEvent::StateChanged);
                     cx.notify();
                 }
+                TabContainerEvent::OpenSftpRequested { .. } => {}
                 TabContainerEvent::TabBarTrailingActionRequested => {}
             },
         ));

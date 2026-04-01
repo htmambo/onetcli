@@ -16,6 +16,7 @@ use gpui_component::{
     WindowExt as _, h_flex, linux_prefers_system_window_controls,
     should_render_custom_window_controls, v_flex,
 };
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -43,6 +44,8 @@ pub enum TabContainerEvent {
     TabActivated { index: usize, id: String },
     /// A tab was closed
     TabClosed { id: String },
+    /// Request the owner to open an SFTP view for the SSH tab.
+    OpenSftpRequested { tab_id: String },
     /// Request the owner to trigger the trailing tab-bar action.
     TabBarTrailingActionRequested,
 }
@@ -2302,36 +2305,62 @@ impl TabContainer {
                             })
                             .context_menu(move |menu, window, cx| {
                                 let view_for_menu = view_clone.clone();
-                                let tab_count = view_for_menu.read(cx).tabs.len();
+                                let (tab_count, closeable, is_ssh_tab, tab_id) = {
+                                    let view = view_for_menu.read(cx);
+                                    let tab = view.tabs.get(idx);
+                                    (
+                                        view.tabs.len(),
+                                        tab.map(|tab| tab.content().closeable(cx)).unwrap_or(false),
+                                        tab.map(|tab| tab.from() == "ssh").unwrap_or(false),
+                                        tab.map(|tab| tab.id().to_string()),
+                                    )
+                                };
                                 let has_tabs_left = idx > 0;
                                 let has_tabs_right = idx < tab_count - 1;
-                                let closeable = view_for_menu
-                                    .read(cx)
-                                    .tabs
-                                    .get(idx)
-                                    .map(|tab| tab.content().closeable(cx))
-                                    .unwrap_or(false);
+                                let menu = if is_ssh_tab {
+                                    if let Some(tab_id) = tab_id {
+                                        menu.item(
+                                            PopupMenuItem::new(
+                                                t!("TabContainer.menu_open_sftp").to_string(),
+                                            )
+                                            .on_click(window.listener_for(
+                                                &view_for_menu,
+                                                move |_this, _, _window, cx| {
+                                                    cx.emit(TabContainerEvent::OpenSftpRequested {
+                                                        tab_id: tab_id.clone(),
+                                                    });
+                                                },
+                                            )),
+                                        )
+                                        .item(PopupMenuItem::separator())
+                                    } else {
+                                        menu
+                                    }
+                                } else {
+                                    menu
+                                };
 
                                 menu.item(
-                                    PopupMenuItem::new("Close").disabled(!closeable).on_click(
-                                        window.listener_for(
+                                    PopupMenuItem::new(t!("TabContainer.menu_close").to_string())
+                                        .disabled(!closeable)
+                                        .on_click(window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
                                                 this.close_tab(idx, window, cx).detach();
                                             },
-                                        ),
-                                    ),
+                                        )),
                                 )
-                                .item(PopupMenuItem::new("Close All").on_click(
-                                    window.listener_for(
-                                        &view_for_menu,
-                                        move |this, _, window, cx| {
-                                            this.close_all_tabs(window, cx).detach();
-                                        },
-                                    ),
-                                ))
                                 .item(
-                                    PopupMenuItem::new("Close Others")
+                                    PopupMenuItem::new(t!("TabContainer.menu_close_all").to_string())
+                                        .on_click(window.listener_for(
+                                            &view_for_menu,
+                                            move |this, _, window, cx| {
+                                                this.close_all_tabs(window, cx).detach();
+                                            },
+                                        )),
+                                )
+                                .item(
+                                    PopupMenuItem::new(t!("TabContainer.menu_close_others").to_string())
                                         .disabled(tab_count <= 1)
                                         .on_click(window.listener_for(
                                             &view_for_menu,
@@ -2341,7 +2370,9 @@ impl TabContainer {
                                         )),
                                 )
                                 .item(
-                                    PopupMenuItem::new("Close Tabs To The Left")
+                                    PopupMenuItem::new(
+                                        t!("TabContainer.menu_close_tabs_to_left").to_string(),
+                                    )
                                         .disabled(!has_tabs_left)
                                         .on_click(window.listener_for(
                                             &view_for_menu,
@@ -2351,7 +2382,9 @@ impl TabContainer {
                                         )),
                                 )
                                 .item(
-                                    PopupMenuItem::new("Close Tabs To The Right")
+                                    PopupMenuItem::new(
+                                        t!("TabContainer.menu_close_tabs_to_right").to_string(),
+                                    )
                                         .disabled(!has_tabs_right)
                                         .on_click(window.listener_for(
                                             &view_for_menu,

@@ -22,6 +22,32 @@ Common:
     zh-CN: "搜索..."
     zh-HK: "搜尋..."
 
+TabContainer:
+  menu_open_sftp:
+    en: "Open SFTP"
+    zh-CN: "打开 SFTP"
+    zh-HK: "打開 SFTP"
+  menu_close:
+    en: "Close"
+    zh-CN: "关闭"
+    zh-HK: "關閉"
+  menu_close_all:
+    en: "Close All"
+    zh-CN: "关闭全部"
+    zh-HK: "關閉全部"
+  menu_close_others:
+    en: "Close Others"
+    zh-CN: "关闭其他"
+    zh-HK: "關閉其他"
+  menu_close_tabs_to_left:
+    en: "Close Tabs To The Left"
+    zh-CN: "关闭左侧标签页"
+    zh-HK: "關閉左側標籤頁"
+  menu_close_tabs_to_right:
+    en: "Close Tabs To The Right"
+    zh-CN: "关闭右侧标签页"
+    zh-HK: "關閉右側標籤頁"
+
 CertificateManager:
   window_title:
     en: "Certificate Manager"

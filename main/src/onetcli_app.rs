@@ -275,6 +275,24 @@ fn duplicate_tab(cx: &mut App) {
     });
 }
 
+fn open_sftp_from_tab(tab_id: String, cx: &mut App) {
+    let Some(active_window) = cx.active_window() else {
+        return;
+    };
+    let Some(home) = cx.try_global::<GlobalHomePage>() else {
+        return;
+    };
+    let home_page = home.home_page.clone();
+
+    cx.defer(move |cx| {
+        _ = active_window.update(cx, |_, window, cx| {
+            home_page.update(cx, |hp, cx| {
+                hp.open_sftp_for_tab_id(&tab_id, window, cx);
+            });
+        });
+    });
+}
+
 fn quit_app(cx: &mut App) {
     cx.quit();
 }
@@ -517,6 +535,9 @@ impl OnetCliApp {
                 | TabContainerEvent::TabActivated { .. }
                 | TabContainerEvent::TabClosed { .. } => {
                     cx.notify();
+                }
+                TabContainerEvent::OpenSftpRequested { tab_id } => {
+                    open_sftp_from_tab(tab_id.clone(), cx);
                 }
                 TabContainerEvent::TabBarTrailingActionRequested => {
                     tab_container_for_events.update(cx, |tc, cx| {

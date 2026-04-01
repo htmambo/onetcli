@@ -972,6 +972,38 @@ impl HomePage {
         self.open_database_tab_in_mode(conn, workspace, open_mode, active_conn_id, window, cx);
     }
 
+    fn ssh_connection_for_tab_id(&self, tab_id: &str, cx: &App) -> Option<StoredConnection> {
+        let connection_id = {
+            let tab_container = self.tab_container.read(cx);
+            let tab = tab_container
+                .tabs()
+                .iter()
+                .find(|tab| tab.id().to_string() == tab_id)?;
+            let terminal = tab.content().view().downcast::<TerminalView>().ok()?;
+            let terminal = terminal.read(cx);
+
+            (terminal.connection_kind(cx) == TerminalConnectionKind::Ssh)
+                .then(|| terminal.connection_id(cx))
+                .flatten()?
+        };
+
+        self.connections
+            .iter()
+            .find(|connection| connection.id == Some(connection_id))
+            .cloned()
+    }
+
+    pub(crate) fn open_sftp_for_tab_id(
+        &mut self,
+        tab_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(connection) = self.ssh_connection_for_tab_id(tab_id, cx) {
+            self.open_sftp_view(connection, window, cx);
+        }
+    }
+
     /// 复制当前活动标签并打开
     pub(crate) fn duplicate_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let tc = self.tab_container.read(cx);
