@@ -380,7 +380,10 @@ impl Terminal {
             Ok(terminal) => (terminal, None),
             Err(error) => {
                 let message = error.to_string();
-                (Self::new_local_disconnected(message.clone(), cx), Some(message))
+                (
+                    Self::new_local_disconnected(message.clone(), cx),
+                    Some(message),
+                )
             }
         }
     }
@@ -1219,9 +1222,9 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        OSC7_PROMPT_COMMAND, build_cd_command, build_ssh_base_init_commands,
-        build_ssh_init_commands, compose_ssh_init_commands, resolve_default_windows_shell_from_env,
-        shell_escape_arg,
+        build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
+        compose_ssh_init_commands, resolve_default_windows_shell_from_env, shell_escape_arg,
+        OSC7_PROMPT_COMMAND,
     };
     use std::fs;
 
@@ -1279,10 +1282,8 @@ mod tests {
 
     #[test]
     fn resolve_default_windows_shell_prefers_pwsh_from_path() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-terminal-test-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("onetcli-terminal-test-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("应创建临时目录");
 
         let pwsh = temp_dir.join("pwsh.exe");

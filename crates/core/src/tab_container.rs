@@ -2394,7 +2394,7 @@ impl TabContainer {
                                         .on_click(window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
-                                                this.close_all_tabs(window, cx).detach();
+                                                this.close_other_tabs(idx, window, cx).detach();
                                             },
                                         )),
                                 )

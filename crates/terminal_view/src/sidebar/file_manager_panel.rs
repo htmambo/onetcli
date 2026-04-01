@@ -3121,8 +3121,8 @@ impl Render for FileManagerPanel {
 mod tests {
     use super::remote_path_parent;
     use super::{
-        ConnectionState, RetryResetPlan, build_refresh_error_plan, build_retry_reset_plan,
-        clear_remote_listing_state,
+        build_refresh_error_plan, build_retry_reset_plan, clear_remote_listing_state,
+        ConnectionState, RetryResetPlan,
     };
     use std::collections::HashSet;
 

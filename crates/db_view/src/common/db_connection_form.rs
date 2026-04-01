@@ -889,7 +889,11 @@ impl DbFormConfig {
     /// DuckDB form configuration
     pub fn duckdb() -> Self {
         let default_db_path = get_config_dir()
-            .map(|p| p.join("onetcli_default.duckdb").to_string_lossy().to_string())
+            .map(|p| {
+                p.join("onetcli_default.duckdb")
+                    .to_string_lossy()
+                    .to_string()
+            })
             .unwrap_or_else(|_| "onetcli_default.duckdb".to_string());
 
         Self {
@@ -912,15 +916,17 @@ impl DbFormConfig {
                     .placeholder("/path/to/database.duckdb")
                     .default(default_db_path),
                 ]),
-                TabGroup::new("notes", t!("ConnectionForm.notes")).fields(vec![FormField::new(
-                    "remark",
-                    t!("ConnectionForm.remark"),
-                    FormFieldType::TextArea,
-                )
-                .rows(14)
-                .optional()
-                .placeholder(t!("ConnectionForm.enter_remark"))
-                .default("")]),
+                TabGroup::new("notes", t!("ConnectionForm.notes")).fields(vec![
+                    FormField::new(
+                        "remark",
+                        t!("ConnectionForm.remark"),
+                        FormFieldType::TextArea,
+                    )
+                    .rows(14)
+                    .optional()
+                    .placeholder(t!("ConnectionForm.enter_remark"))
+                    .default(""),
+                ]),
             ],
         }
     }

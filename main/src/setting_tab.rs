@@ -1396,9 +1396,7 @@ impl SettingsPanel {
                                     settings.save();
                                 },
                             )
-                            .default_value(SharedString::from(
-                                default_system_hotkey,
-                            )),
+                            .default_value(SharedString::from(default_system_hotkey)),
                         )
                         .description(t!("Settings.Shortcuts.system_hotkey_desc").to_string()),
                     )
