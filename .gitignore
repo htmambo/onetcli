@@ -54,5 +54,6 @@ resources/macos/OnetCli.icns
 
 # vibe coding
 .omc/
+.claude/
 .ace-tool/
 .superpowers/
