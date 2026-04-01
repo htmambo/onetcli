@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Context, Corner, DismissEvent, Element, ElementId, Entity, Focusable,
-    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
+    AnyElement, App, Context, Corner, DismissEvent, Element, ElementId, Entity, FocusHandle,
+    Focusable, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement,
+    Styled, Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
 };
 
 use crate::menu::PopupMenu;
@@ -117,6 +117,9 @@ struct ContextMenuSharedState {
     open: bool,
     position: Point<Pixels>,
     _subscription: Option<Subscription>,
+    /// The focus handle to restore when the menu is dismissed.
+    /// Captured when the menu is opened to restore focus to the original element.
+    previous_focus: Option<FocusHandle>,
 }
 
 pub struct ContextMenuState {
@@ -133,6 +136,7 @@ impl Default for ContextMenuState {
                 open: false,
                 position: Default::default(),
                 _subscription: None,
+                previous_focus: None,
             })),
         }
     }
@@ -277,6 +281,9 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                         && event.button == MouseButton::Right
                         && hitbox.is_hovered(window)
                     {
+                        // Capture the current focus before opening the menu
+                        // This is the focus that should be restored when the menu closes
+                        let current_focus = window.focused(cx);
                         {
                             let mut shared_state = shared_state.borrow_mut();
                             // Clear any existing menu view to allow immediate replacement
@@ -285,6 +292,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                             shared_state._subscription = None;
                             shared_state.position = event.position;
                             shared_state.open = true;
+                            shared_state.previous_focus = current_focus;
                         }
 
                         // Use defer to build the menu in the next frame, avoiding race conditions
@@ -292,7 +300,13 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                             let shared_state = shared_state.clone();
                             let builder = builder.clone();
                             move |window, cx| {
+                                let previous_focus = shared_state.borrow().previous_focus.clone();
                                 let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
+                                    let menu = if let Some(handle) = previous_focus {
+                                        menu.action_context(handle)
+                                    } else {
+                                        menu
+                                    };
                                     let Some(build) = &builder else {
                                         return menu;
                                     };
@@ -303,7 +317,10 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                 let _subscription = window.subscribe(&menu, cx, {
                                     let shared_state = shared_state.clone();
                                     move |_, _: &DismissEvent, window, _cx| {
-                                        shared_state.borrow_mut().open = false;
+                                        let mut state = shared_state.borrow_mut();
+                                        state.open = false;
+                                        // Clear the previous focus since the menu is now closed
+                                        state.previous_focus = None;
                                         window.refresh();
                                     }
                                 });
