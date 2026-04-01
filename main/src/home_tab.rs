@@ -55,6 +55,7 @@ use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::WorkspaceFilterDelegate;
+use crate::home::workspace_form_window::{WorkspaceFormWindow, WorkspaceFormWindowConfig};
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
     GlobalCurrentUser,
@@ -212,7 +213,6 @@ pub struct HomePage {
     search_query: Entity<String>,
     pub(crate) editing_connection_id: Option<i64>,
     selected_connection_id: Option<i64>,
-    editing_workspace_id: Option<i64>,
     pub(crate) filtered_workspace_ids: HashSet<i64>,
     collapsed_workspaces: HashSet<i64>,
     pub(crate) workspace_filter_open: bool,
@@ -307,7 +307,6 @@ impl HomePage {
             search_query,
             editing_connection_id: None,
             selected_connection_id: None,
-            editing_workspace_id: None,
             filtered_workspace_ids: HashSet::new(),
             collapsed_workspaces: HashSet::new(),
             workspace_filter_open: false,
@@ -1693,54 +1692,27 @@ impl HomePage {
     ) {
         let workspace_data =
             workspace_id.and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
-        self.editing_workspace_id = workspace_id;
-        let view = cx.entity().clone();
-        let is_editing = workspace_id.is_some();
-        let form = cx.new(|cx| {
-            let mut input_state =
-                InputState::new(window, cx).placeholder(t!("Workspace.name_placeholder"));
-            if let Some(ref workspace) = workspace_data {
-                input_state.set_value(workspace.name.clone(), window, cx);
-            }
-            input_state
-        });
+        let config = WorkspaceFormWindowConfig {
+            parent: cx.entity().clone(),
+            workspace_id,
+            initial_name: workspace_data
+                .map(|workspace| workspace.name)
+                .unwrap_or_default(),
+        };
 
-        window.open_dialog(cx, move |dialog, _window, _cx| {
-            let form_clone = form.clone();
-            let view_clone = view.clone();
-            let view_clone2 = view.clone();
-            dialog
-                .title(
-                    (if is_editing {
-                        t!("Workspace.edit")
-                    } else {
-                        t!("Workspace.new")
-                    })
-                    .to_string()
-                    .into_any_element(),
-                )
-                .w(px(400.0))
-                .child(Input::new(&form).size_full())
-                .content_center()
-                .confirm()
-                .on_ok(move |_, _window, cx| {
-                    let name = form_clone.read(cx).text().to_string();
-                    if !name.is_empty() {
-                        let _ = view_clone.update(cx, |this, cx| {
-                            this.handle_save_workspace(name, cx);
-                        });
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .on_cancel(move |_, _, cx| {
-                    let _ = view_clone2.update(cx, |this, _| {
-                        this.editing_workspace_id = None;
-                    });
-                    true
-                })
-        });
+        open_popup_window(
+            window,
+            PopupWindowOptions::new(if config.workspace_id.is_some() {
+                t!("Workspace.edit").to_string()
+            } else {
+                t!("Workspace.new").to_string()
+            })
+            .size(420.0, 200.0)
+            .min_width(420.0)
+            .min_height(200.0),
+            move |window, cx| cx.new(|cx| WorkspaceFormWindow::new(config, window, cx)),
+            cx,
+        );
     }
 
     pub(crate) fn show_connection_quick_open(
@@ -1839,9 +1811,14 @@ impl HomePage {
         cx.notify();
     }
 
-    fn handle_save_workspace(&mut self, name: String, cx: &mut Context<Self>) {
+    pub(crate) fn handle_save_workspace(
+        &mut self,
+        workspace_id: Option<i64>,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
-        let editing_id = self.editing_workspace_id;
+        let editing_id = workspace_id;
 
         let mut workspace = if let Some(id) = editing_id {
             // 编辑模式：从现有工作区更新
@@ -1895,7 +1872,6 @@ impl HomePage {
                             cx,
                         );
                     }
-                    this.editing_workspace_id = None;
                     // 兜底触发一次自动同步，避免当前页对自身工作区事件未回流时漏同步。
                     if this.current_user.is_some() && crypto::has_master_key() {
                         tracing::info!("本地工作区保存成功，自动触发云同步");

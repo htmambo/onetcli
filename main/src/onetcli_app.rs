@@ -12,6 +12,7 @@ use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Render, Styled, Task, Window, actions, div, px,
 };
+use gpui_component::WindowExt;
 
 actions!(
     onetcli_app,
@@ -408,6 +409,9 @@ pub fn init(cx: &mut App) {
         let home_page = home.home_page.clone();
         cx.defer(move |cx| {
             _ = active_window.update(cx, |_, window, cx| {
+                if window.has_active_dialog(cx) {
+                    window.close_all_dialogs(cx);
+                }
                 home_page.update(cx, |hp, cx| {
                     hp.show_connection_quick_open(window, cx);
                 });
@@ -424,6 +428,9 @@ pub fn init(cx: &mut App) {
         let home_page = home.home_page.clone();
         cx.defer(move |cx| {
             _ = active_window.update(cx, |_, window, cx| {
+                if window.has_active_dialog(cx) {
+                    window.close_all_dialogs(cx);
+                }
                 home_page.update(cx, |hp, cx| {
                     hp.show_new_connection_dialog(window, cx);
                 });

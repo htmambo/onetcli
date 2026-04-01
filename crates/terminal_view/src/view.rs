@@ -7,6 +7,7 @@ use gpui::*;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, WindowExt};
 use std::borrow::Cow;
@@ -445,7 +446,7 @@ impl TerminalView {
         cx.global_mut::<ActiveConnections>().remove(connection_id);
     }
 
-    pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
+    pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_index(config, None, window, cx)
     }
 
@@ -454,12 +455,17 @@ impl TerminalView {
         tab_index: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<Self> {
+    ) -> Self {
         // 创建 Terminal Entity
         let local_working_dir = config.working_dir.clone().map(PathBuf::from);
-        let terminal =
-            cx.new(|cx| Terminal::new_local(config, cx).expect("Failed to create local terminal"));
-        Self::new_with_terminal(
+        let init_error = Rc::new(RefCell::new(None));
+        let init_error_clone = init_error.clone();
+        let terminal = cx.new(move |cx| {
+            let (terminal, error) = Terminal::new_local_or_disconnected(config, cx);
+            *init_error_clone.borrow_mut() = error;
+            terminal
+        });
+        let view = Self::new_with_terminal(
             terminal,
             None,
             None,
@@ -468,7 +474,16 @@ impl TerminalView {
             tab_index,
             window,
             cx,
-        )
+        );
+
+        if let Some(error) = init_error.borrow_mut().take() {
+            window.push_notification(
+                Notification::error(format!("创建本地终端失败: {}", error)).autohide(true),
+                cx,
+            );
+        }
+
+        view
     }
 
     pub fn new_ssh(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -498,7 +513,6 @@ impl TerminalView {
             window,
             cx,
         )
-        .expect("SSH terminal creation should not fail")
     }
 
     pub fn new_serial(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -524,7 +538,6 @@ impl TerminalView {
             window,
             cx,
         )
-        .expect("串口终端创建不应失败")
     }
 
     fn new_with_terminal(
@@ -536,7 +549,7 @@ impl TerminalView {
         tab_index: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<Self> {
+    ) -> Self {
         let blink_manager = cx.new(|_| BlinkCursor::new());
 
         // 获取初始颜色
@@ -546,12 +559,14 @@ impl TerminalView {
 
         // 创建默认主题（需要在创建侧边栏之前）
         let default_theme = TerminalTheme::ocean();
+        let ssh_config = terminal.read(cx).ssh_config().cloned();
 
         // 创建侧边栏（传递 StoredConnection 用于文件管理器）
         let sidebar = cx.new(|cx| {
             TerminalSidebar::new(
                 connection_id,
                 stored_connection,
+                ssh_config,
                 &default_theme,
                 sync_path_enabled,
                 window,
@@ -598,7 +613,7 @@ impl TerminalView {
             scrollbar_metrics.clone(),
         );
 
-        Ok(Self {
+        Self {
             terminal,
             local_working_dir: if is_local_terminal {
                 local_working_dir
@@ -636,7 +651,7 @@ impl TerminalView {
             view_bounds: Bounds::default(),
             scrollbar_metrics,
             scrollbar_handle,
-        })
+        }
     }
 
     /// 处理侧边栏事件
@@ -1067,6 +1082,7 @@ impl TerminalView {
             .map(str::to_string);
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.reconnect_file_manager(working_dir, cx);
+            sidebar.reconnect_server_monitor(cx);
         });
         self.terminal.update(cx, |terminal, cx| {
             terminal.reconnect(cx);
