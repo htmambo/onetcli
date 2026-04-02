@@ -447,6 +447,19 @@ impl Render for TabBarDragState {
     }
 }
 
+/// 协调 tab 区域和 scroll region 的鼠标交互，防止 scroll region 的窗口拖动
+/// 干扰 tab 的点击和拖动事件。
+struct TabBarInteractionState {
+    /// 标记当前是否有活跃的 tab 点击事件
+    tab_click_active: bool,
+}
+
+impl Render for TabBarInteractionState {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
 fn uses_manual_window_move(show_window_controls: bool, is_windows: bool) -> bool {
     show_window_controls && !is_windows
 }
@@ -1979,7 +1992,7 @@ impl TabContainer {
         // 所有非 macOS 平台都启用 tab 拖拽重排。Windows 上的窗口拖动由
         // WindowControlArea::Drag 独立热区（tab-bar-drag-spacer）处理，
         // 与 tab 自身的 on_drag 互不影响。
-        let allow_tab_drag = !is_macos;
+        // macOS 也启用 tab 拖拽，窗口拖动冲突由 should_block_tab_mouse_for_window_move 保护。
         let drag_plan = build_tab_bar_drag_plan(
             show_window_controls,
             self.pinned_tab.is_some(),
@@ -1988,6 +2001,8 @@ impl TabContainer {
 
         // 非 Windows 平台使用状态管理窗口拖动；Windows 依赖 WindowControlArea 命中测试。
         let drag_state = window.use_state(cx, |_, _| TabBarDragState { should_move: false });
+        let interaction_state =
+            window.use_state(cx, |_, _| TabBarInteractionState { tab_click_active: false });
 
         h_flex()
             .id("tab-bar")
@@ -2162,15 +2177,31 @@ impl TabContainer {
                         ))
                         .on_mouse_down(
                             MouseButton::Left,
-                            window.listener_for(&drag_state, |state, _, _, _| {
-                                state.should_move = true;
-                            }),
+                            {
+                                let drag_state = drag_state.clone();
+                                let interaction_state = interaction_state.clone();
+                                move |_: &gpui::MouseDownEvent, _, cx| {
+                                    // 如果当前有活跃的 tab 点击（tab 的 on_mouse_down 先执行），则不设置窗口拖动标志。
+                                    if !interaction_state.read(cx).tab_click_active {
+                                        drag_state.update(cx, |state, _| {
+                                            state.should_move = true;
+                                        });
+                                    }
+                                }
+                            },
                         )
                         .on_mouse_up(
                             MouseButton::Left,
-                            window.listener_for(&drag_state, |state, _, _, _| {
-                                state.should_move = false;
-                            }),
+                            {
+                                let drag_state = drag_state.clone();
+                                let interaction_state = interaction_state.clone();
+                                window.listener_for(&drag_state, move |state, _, _, cx| {
+                                    state.should_move = false;
+                                    interaction_state.update(cx, |s, _| {
+                                        s.tab_click_active = false;
+                                    });
+                                })
+                            },
                         )
                         .on_mouse_move(window.listener_for(&drag_state, |state, _, window, _| {
                             if state.should_move {
@@ -2200,6 +2231,7 @@ impl TabContainer {
                         let view_clone = view.clone();
                         let title_clone = title.clone();
                         let tab_width = self.get_tab_width(tab, cx);
+                        let interaction_state = interaction_state.clone();
 
                         div()
                             .id(idx)
@@ -2226,10 +2258,17 @@ impl TabContainer {
                                     .bg(inactive_tab_color)
                             })
                             // 普通 tab 不应把拖动/按下事件冒泡为窗口拖动。
-                            .on_mouse_down(MouseButton::Left, move |_evt, window: &mut Window, cx| {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                            })
+                            // 设置 tab_click_active 标志，防止 scroll region 的窗口拖动干扰。
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                move |_evt, window: &mut Window, cx| {
+                                    interaction_state.update(cx, |state, _| {
+                                        state.tab_click_active = true;
+                                    });
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                },
+                            )
                             .on_mouse_move(move |_evt, window: &mut Window, cx| {
                                 window.prevent_default();
                                 cx.stop_propagation();
@@ -2237,7 +2276,7 @@ impl TabContainer {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.set_active_index(idx, window, cx);
                             }))
-                            .when(allow_tab_drag, |el| {
+                            .when(is_active, |el| {
                                 el.cursor_grab()
                                     .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
                                     .on_drag(
@@ -2248,21 +2287,20 @@ impl TabContainer {
                                         },
                                     )
                             })
-                            .when(allow_tab_drag, |el| {
-                                el.drag_over::<DragTab>(move |el, _, _, _cx| {
-                                    el.border_l_2().border_color(drag_border_color)
-                                })
-                                .on_drop(cx.listener(
-                                    move |this, drag: &DragTab, window, cx| {
-                                        let from_idx = drag.tab_index;
-                                        let to_idx = idx;
-                                        if from_idx != to_idx {
-                                            this.move_tab(from_idx, to_idx, cx);
-                                        }
-                                        this.set_active_index(to_idx, window, cx);
-                                    },
-                                ))
+                            // on_drop 和 drag_over 在所有 tab 上注册，接收来自其他 tab 的 drop 事件
+                            .drag_over::<DragTab>(move |el, _, _, _cx| {
+                                el.border_l_2().border_color(drag_border_color)
                             })
+                            .on_drop(cx.listener(
+                                move |this, drag: &DragTab, window, cx| {
+                                    let from_idx = drag.tab_index;
+                                    let to_idx = idx;
+                                    if from_idx != to_idx {
+                                        this.move_tab(from_idx, to_idx, cx);
+                                    }
+                                    this.set_active_index(to_idx, window, cx);
+                                },
+                            ))
                             .when_some(icon, |el, icon| {
                                 el.child(div().flex_shrink_0().flex().items_center().child(icon))
                             })
