@@ -1034,7 +1034,26 @@ impl ServerMonitorPanel {
                                         format_kib(segment.value as u64)
                                     )),
                             )
-                    })),
+                    }))
+                    .when(memory.swap_total > 0, |this| {
+                        this.child(
+                            div()
+                                .mt_1()
+                                .pt_1()
+                                .border_t_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(format!(
+                                            "Swap {} / {}",
+                                            format_kib(memory.swap_used),
+                                            format_kib(memory.swap_total)
+                                        )),
+                                ),
+                        )
+                    }),
             )
             .into_any_element()
     }
