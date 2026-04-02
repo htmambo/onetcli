@@ -157,6 +157,8 @@ pub struct SshFormWindow {
     // 初始化
     init_script_input: Entity<InputState>,
     default_directory_input: Entity<InputState>,
+    sftp_local_directory_input: Entity<InputState>,
+    sftp_remote_directory_input: Entity<InputState>,
 
     // 其他设置
     remark_input: Entity<InputState>,
@@ -310,6 +312,14 @@ impl SshFormWindow {
         let default_directory_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("SSH.default_directory_placeholder"))
         });
+        let sftp_local_directory_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("SSH.sftp_local_directory_placeholder"))
+        });
+        let sftp_remote_directory_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("SSH.sftp_remote_directory_placeholder"))
+        });
 
         // 其他设置
         let remark_input = cx.new(|cx| {
@@ -395,6 +405,12 @@ impl SshFormWindow {
                 if let Some(ref script) = params.init_script {
                     init_script_input.update(cx, |s, cx| s.set_value(script, window, cx));
                 }
+                if let Some(ref dir) = params.sftp_local_directory {
+                    sftp_local_directory_input.update(cx, |s, cx| s.set_value(dir, window, cx));
+                }
+                if let Some(ref dir) = params.sftp_remote_directory {
+                    sftp_remote_directory_input.update(cx, |s, cx| s.set_value(dir, window, cx));
+                }
 
                 // 加载跳板机设置
                 if let Some(ref jump) = params.jump_server {
@@ -476,6 +492,8 @@ impl SshFormWindow {
             enable_legacy_kex,
             init_script_input,
             default_directory_input,
+            sftp_local_directory_input,
+            sftp_remote_directory_input,
             remark_input,
             last_tested_signature: None,
             sync_enabled,
@@ -713,6 +731,22 @@ impl SshFormWindow {
                 Some(s)
             }
         };
+        let sftp_local_directory = {
+            let d = self.sftp_local_directory_input.read(cx).text().to_string();
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
+            }
+        };
+        let sftp_remote_directory = {
+            let d = self.sftp_remote_directory_input.read(cx).text().to_string();
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
+            }
+        };
 
         // 跳板机配置
         let jump_server = if self.enable_jump_server {
@@ -801,6 +835,8 @@ impl SshFormWindow {
             enable_legacy_kex: self.enable_legacy_kex,
             default_directory,
             init_script,
+            sftp_local_directory,
+            sftp_remote_directory,
             jump_server,
             proxy,
         })
@@ -1220,6 +1256,14 @@ impl SshFormWindow {
             .child(self.render_form_row(
                 &t!("SSH.init_script"),
                 self.styled_input(Input::new(&self.init_script_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.sftp_local_directory"),
+                self.styled_input(Input::new(&self.sftp_local_directory_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.sftp_remote_directory"),
+                self.styled_input(Input::new(&self.sftp_remote_directory_input)),
             ))
     }
 

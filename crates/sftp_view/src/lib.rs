@@ -531,6 +531,18 @@ pub struct SftpView {
     tab_index: Option<usize>,
 }
 
+fn initial_remote_path(configured_path: Option<&str>) -> String {
+    configured_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
+        .to_string()
+}
+
+fn resolved_remote_path(requested_path: &str, real_path: Option<String>) -> String {
+    real_path.unwrap_or_else(|| requested_path.to_string())
+}
+
 impl SftpView {
     pub fn connection_id(&self) -> Option<i64> {
         self.stored_connection.id
@@ -610,7 +622,13 @@ impl SftpView {
         };
 
         let focus_handle = cx.focus_handle();
-        let local_current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let local_current_path = ssh_params
+            .sftp_local_directory
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
+        let remote_current_path =
+            initial_remote_path(ssh_params.sftp_remote_directory.as_deref());
 
         let local_panel = cx.new(|cx| {
             FileListPanel::new(
@@ -621,7 +639,9 @@ impl SftpView {
             )
         });
 
-        let remote_panel = cx.new(|cx| FileListPanel::new("/root".to_string(), true, window, cx));
+        let remote_panel_path = remote_current_path.clone();
+        let remote_panel =
+            cx.new(|cx| FileListPanel::new(remote_panel_path.clone(), true, window, cx));
 
         let local_path_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
@@ -701,10 +721,10 @@ impl SftpView {
             sftp_client: None,
             stored_connection: conn.clone(),
             local_current_path: local_current_path.clone(),
-            remote_current_path: ".".to_string(),
+            remote_current_path: remote_current_path.clone(),
             local_history: vec![local_current_path.clone()],
             local_history_index: 0,
-            remote_history: vec![".".to_string()],
+            remote_history: vec![remote_current_path],
             remote_history_index: 0,
             local_panel,
             remote_panel,
@@ -734,6 +754,7 @@ impl SftpView {
     fn connect(&mut self, cx: &mut Context<Self>) {
         self.connection_state = ConnectionState::Connecting;
         let config = self.sftp_config.clone();
+        let requested_remote_path = self.remote_current_path.clone();
 
         tracing::info!(
             "Connecting to SFTP server: {}@{}",
@@ -743,13 +764,23 @@ impl SftpView {
 
         let task = Tokio::spawn(cx, async move {
             let mut client = RusshSftpClient::connect(config).await?;
-            // 连接成功后立即获取当前工作目录的真实路径
-            let real_path = client.realpath(".").await.ok();
-            Ok::<_, anyhow::Error>((client, real_path))
+            // 优先解析用户配置的初始目录；留空时回退到服务器默认目录 `.`
+            let real_path = match client.realpath(&requested_remote_path).await {
+                Ok(path) => Some(path),
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to resolve remote path {}: {}",
+                        requested_remote_path,
+                        err
+                    );
+                    None
+                }
+            };
+            Ok::<_, anyhow::Error>((client, real_path, requested_remote_path))
         });
 
         cx.spawn(async move |this, cx| match task.await {
-            Ok(Ok((client, real_path))) => {
+            Ok(Ok((client, real_path, requested_remote_path))) => {
                 tracing::info!("SFTP connection established successfully");
                 let client = Arc::new(Mutex::new(client));
 
@@ -758,13 +789,11 @@ impl SftpView {
                     this.connection_state = ConnectionState::Connected;
                     this.set_connection_active(true, cx);
 
-                    // 如果成功获取了真实路径，更新远程路径和历史记录
-                    if let Some(path) = real_path {
-                        tracing::info!("Remote working directory: {}", path);
-                        this.remote_current_path = path.clone();
-                        this.remote_history = vec![path];
-                        this.remote_history_index = 0;
-                    }
+                    let path = resolved_remote_path(&requested_remote_path, real_path);
+                    tracing::info!("Initial remote directory: {}", path);
+                    this.remote_current_path = path.clone();
+                    this.remote_history = vec![path];
+                    this.remote_history_index = 0;
 
                     cx.notify();
                 });
@@ -3906,6 +3935,31 @@ impl SftpView {
                         el.child(self.render_drop_overlay(cx))
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{initial_remote_path, resolved_remote_path};
+
+    #[test]
+    fn initial_remote_path_prefers_configured_directory() {
+        assert_eq!(initial_remote_path(Some("/srv/www")), "/srv/www");
+    }
+
+    #[test]
+    fn initial_remote_path_defaults_to_server_directory_when_empty() {
+        assert_eq!(initial_remote_path(None), ".");
+        assert_eq!(initial_remote_path(Some("   ")), ".");
+    }
+
+    #[test]
+    fn resolved_remote_path_prefers_realpath_result() {
+        assert_eq!(
+            resolved_remote_path("logs", Some("/home/demo/logs".to_string())),
+            "/home/demo/logs"
+        );
+        assert_eq!(resolved_remote_path("logs", None), "logs");
     }
 }
 
