@@ -8,8 +8,8 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
-use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, WindowExt};
+use gpui_component::scroll::{ScrollableElement as _, Scrollbar, ScrollbarHandle, ScrollbarShow};
+use gpui_component::{app_style, kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, WindowExt};
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
 use std::path::PathBuf;
@@ -293,8 +293,6 @@ struct ImeState {
 pub struct TerminalView {
     /// Terminal model entity
     terminal: Entity<Terminal>,
-    /// 本地终端工作目录
-    local_working_dir: Option<PathBuf>,
     /// 光标闪烁管理器
     blink_manager: Entity<BlinkCursor>,
     /// 侧边栏
@@ -456,8 +454,6 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // 创建 Terminal Entity
-        let local_working_dir = config.working_dir.clone().map(PathBuf::from);
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
         let terminal = cx.new(move |cx| {
@@ -465,16 +461,7 @@ impl TerminalView {
             *init_error_clone.borrow_mut() = error;
             terminal
         });
-        let view = Self::new_with_terminal(
-            terminal,
-            None,
-            None,
-            true,
-            local_working_dir,
-            tab_index,
-            window,
-            cx,
-        );
+        let view = Self::new_with_terminal(terminal, None, None, true, tab_index, window, cx);
 
         if let Some(error) = init_error.borrow_mut().take() {
             window.push_notification(
@@ -508,7 +495,6 @@ impl TerminalView {
             connection_id,
             Some(stored_conn),
             sync_path_with_terminal,
-            None,
             tab_index,
             window,
             cx,
@@ -528,16 +514,7 @@ impl TerminalView {
         let connection_id = conn.id;
         let terminal = cx.new(|cx| Terminal::new_serial(conn, cx));
         // 串口不传 stored_connection，避免创建文件管理器面板
-        Self::new_with_terminal(
-            terminal,
-            connection_id,
-            None,
-            true,
-            None,
-            tab_index,
-            window,
-            cx,
-        )
+        Self::new_with_terminal(terminal, connection_id, None, true, tab_index, window, cx)
     }
 
     fn new_with_terminal(
@@ -545,7 +522,6 @@ impl TerminalView {
         connection_id: Option<i64>,
         stored_connection: Option<StoredConnection>,
         sync_path_enabled: bool,
-        local_working_dir: Option<PathBuf>,
         tab_index: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -554,9 +530,6 @@ impl TerminalView {
 
         // 获取初始颜色
         let colors = terminal.read(cx).term().lock().colors().clone();
-        let is_local_terminal =
-            terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
-
         // 创建默认主题（需要在创建侧边栏之前）
         let default_theme = TerminalTheme::ocean();
         let ssh_config = terminal.read(cx).ssh_config().cloned();
@@ -615,11 +588,6 @@ impl TerminalView {
 
         Self {
             terminal,
-            local_working_dir: if is_local_terminal {
-                local_working_dir
-            } else {
-                None
-            },
             blink_manager,
             sidebar,
             font_size: default_theme.font_size,
@@ -838,11 +806,6 @@ impl TerminalView {
     /// 获取 SSH 连接 ID（本地终端返回 None）
     pub fn connection_id(&self, cx: &App) -> Option<i64> {
         self.terminal.read(cx).connection_id()
-    }
-
-    /// 获取本地终端的工作目录
-    pub fn local_working_dir(&self) -> Option<&std::path::Path> {
-        self.local_working_dir.as_deref()
     }
 
     /// Get all available themes
@@ -1678,6 +1641,14 @@ impl TerminalView {
         {
             let is_local =
                 self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+            let local_working_dir = if is_local {
+                self.terminal
+                    .read(cx)
+                    .latest_working_dir()
+                    .map(PathBuf::from)
+            } else {
+                None
+            };
             let term = self.terminal.read(cx).term().lock();
             let display_offset = term.grid().display_offset();
             let visible_lines = 0..term.screen_lines();
@@ -1686,7 +1657,7 @@ impl TerminalView {
                 visible_lines,
                 display_offset,
                 is_local,
-                base_dir: self.local_working_dir.as_deref(),
+                base_dir: local_working_dir.as_deref(),
             };
             self.addon_manager.dispatch_frame(&context);
         }
@@ -1836,11 +1807,7 @@ impl TerminalView {
         menu
     }
 
-    fn render_connection_overlay(
-        &self,
-        can_reconnect: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_connection_overlay(&self, can_reconnect: bool, cx: &mut Context<Self>) -> AnyElement {
         let terminal = self.terminal.read(cx);
         let connection_state = terminal.connection_state().clone();
         let connection_status_message = terminal.connection_status_label();
@@ -1984,7 +1951,7 @@ impl TerminalView {
                                     }),
                             )
                         }
-                    })
+                    }),
             )
             .into_any_element()
     }
@@ -2093,6 +2060,14 @@ impl TerminalView {
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
         let consumed = {
             let mut open_url = |url: &str| cx.open_url(url);
             let mut context = TerminalAddonMouseContext::new(
@@ -2102,7 +2077,7 @@ impl TerminalView {
                 event.modifiers,
                 event.position,
                 is_local,
-                self.local_working_dir.as_deref(),
+                local_working_dir.as_deref(),
                 &mut open_url,
             );
             self.addon_manager.dispatch_mouse_down(&mut context)
@@ -2175,6 +2150,14 @@ impl TerminalView {
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
         let hover_changed = {
             let mut open_url = |url: &str| cx.open_url(url);
             let mut context = TerminalAddonMouseContext::new(
@@ -2184,7 +2167,7 @@ impl TerminalView {
                 event.modifiers,
                 event.position,
                 is_local,
-                self.local_working_dir.as_deref(),
+                local_working_dir.as_deref(),
                 &mut open_url,
             );
             self.addon_manager.dispatch_mouse_move(&mut context)
@@ -2221,6 +2204,14 @@ impl TerminalView {
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
         {
             let mut open_url = |url: &str| cx.open_url(url);
             let mut context = TerminalAddonMouseContext::new(
@@ -2230,7 +2221,7 @@ impl TerminalView {
                 event.modifiers,
                 event.position,
                 is_local,
-                self.local_working_dir.as_deref(),
+                local_working_dir.as_deref(),
                 &mut open_url,
             );
             let _ = self.addon_manager.dispatch_mouse_up(&mut context);
@@ -2302,6 +2293,30 @@ impl TerminalView {
     }
 }
 
+/// 从保存的标签状态构建本地终端视图（供 TabContentRegistry 使用）
+pub fn build_local_terminal(
+    state: &one_core::tab_container::TabItemState,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<std::sync::Arc<dyn one_core::tab_container::TabContentView>> {
+    let data = &state.data;
+    if data.get("kind").and_then(|v| v.as_str()) != Some("local_terminal") {
+        return None;
+    }
+
+    let working_dir = data
+        .get("working_dir")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let config = LocalConfig {
+        working_dir,
+        ..Default::default()
+    };
+    let view = cx.new(|cx| TerminalView::new(config, window, cx));
+
+    Some(std::sync::Arc::new(view))
+}
+
 impl Focusable for TerminalView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -2344,7 +2359,7 @@ impl TabContent for TerminalView {
 
     fn status_summary(&self, cx: &App) -> Option<SharedString> {
         let terminal = self.terminal.read(cx);
-        terminal.current_working_dir().map(|dir| dir.to_string().into())
+        terminal.latest_working_dir().map(Into::into)
     }
 
     fn subtitle(&self, cx: &App) -> Option<SharedString> {
@@ -2356,24 +2371,42 @@ impl TabContent for TerminalView {
     }
 
     fn dump(&self, cx: &App) -> JsonValue {
-        let kind = match self.connection_kind(cx) {
-            TerminalConnectionKind::Ssh => ConnectionRestoreKind::SshTerminal,
-            TerminalConnectionKind::Serial => ConnectionRestoreKind::SerialTerminal,
-            TerminalConnectionKind::Local => return JsonValue::Null,
-        };
-
-        let Some(connection_id) = self.connection_id(cx) else {
-            return JsonValue::Null;
-        };
-
-        ConnectionRestorePayload {
-            kind,
-            connection_id: Some(connection_id),
-            workspace_id: None,
-            active_connection_id: None,
-            title: self.title(cx).to_string(),
+        match self.connection_kind(cx) {
+            TerminalConnectionKind::Ssh => {
+                let Some(connection_id) = self.connection_id(cx) else {
+                    return JsonValue::Null;
+                };
+                ConnectionRestorePayload {
+                    kind: ConnectionRestoreKind::SshTerminal,
+                    connection_id: Some(connection_id),
+                    workspace_id: None,
+                    active_connection_id: None,
+                    title: self.title(cx).to_string(),
+                }
+                .into_tab_data()
+            }
+            TerminalConnectionKind::Serial => {
+                let Some(connection_id) = self.connection_id(cx) else {
+                    return JsonValue::Null;
+                };
+                ConnectionRestorePayload {
+                    kind: ConnectionRestoreKind::SerialTerminal,
+                    connection_id: Some(connection_id),
+                    workspace_id: None,
+                    active_connection_id: None,
+                    title: self.title(cx).to_string(),
+                }
+                .into_tab_data()
+            }
+            TerminalConnectionKind::Local => {
+                let terminal = self.terminal.read(cx);
+                serde_json::json!({
+                    "kind": "local_terminal",
+                    "working_dir": terminal.latest_working_dir(),
+                    "title": self.title(cx).to_string(),
+                })
+            }
         }
-        .into_tab_data()
     }
 
     fn try_close(

@@ -136,7 +136,7 @@ use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
-use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save};
+use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save, tab_state_exists};
 use one_core::utils::debouncer::Debouncer;
 use reqwest_client::ReqwestClient;
 use rust_i18n::t;
@@ -438,7 +438,10 @@ pub fn init(cx: &mut App) {
         });
     });
 
-    let registry = TabContentRegistry::new();
+    let mut registry = TabContentRegistry::new();
+    registry.register_fn("Terminal".into(), |state, window, cx| {
+        terminal_view::build_local_terminal(state, window, cx)
+    });
     cx.set_global(registry);
     cx.activate(true);
 }
@@ -500,6 +503,9 @@ impl OnetCliApp {
 
         let registry = cx.global::<TabContentRegistry>().clone();
 
+        // 记录是否有可恢复的标签状态
+        let has_restored_tabs = tab_state_exists();
+
         match load_tabs(&tab_container, &registry, window, cx) {
             Ok(_) => {
                 tracing::info!("Tab layout loaded successfully");
@@ -523,7 +529,10 @@ impl OnetCliApp {
                 tc.set_pinned_tab(home_tab, cx);
                 tc.set_tab_bar_trailing_view(saved_connection_picker.clone());
                 tc.set_tab_list_header_action_label(t!("Home.new_connection").to_string());
-                tc.activate_pinned_tab(window, cx);
+                // 只有在没有恢复标签时才激活 pinned tab
+                if !has_restored_tabs {
+                    tc.activate_pinned_tab(window, cx);
+                }
                 saved_connection_picker
             })
         };
@@ -698,63 +707,154 @@ impl OnetCliApp {
             .gap_1()
             .flex_shrink_0()
             // 总数
-            .child(div().text_sm().text_color(cx.theme().foreground).child(total.to_string()))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().foreground)
+                    .child(total.to_string()),
+            )
             // 左括号
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child("("))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("("),
+            )
             // 分组内容：只显示数量>0的，用/分隔
             .when(ssh > 0, |this| {
                 this.child(
-                    Icon::new(IconName::Terminal).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::Terminal)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
                 )
-                .child(div().text_xs().text_color(cx.theme().foreground).child(ssh.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(ssh.to_string()),
+                )
             })
-            .when(ssh > 0 && (db > 0 || redis > 0 || mongo > 0 || sftp > 0 || sql_chat > 0), |this| {
-                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
-            })
+            .when(
+                ssh > 0 && (db > 0 || redis > 0 || mongo > 0 || sftp > 0 || sql_chat > 0),
+                |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("/"),
+                    )
+                },
+            )
             .when(db > 0, |this| {
                 this.child(
-                    Icon::new(IconName::Database).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::Database)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
                 )
-                .child(div().text_xs().text_color(cx.theme().foreground).child(db.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(db.to_string()),
+                )
             })
-            .when(db > 0 && (redis > 0 || mongo > 0 || sftp > 0 || sql_chat > 0), |this| {
-                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
-            })
+            .when(
+                db > 0 && (redis > 0 || mongo > 0 || sftp > 0 || sql_chat > 0),
+                |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("/"),
+                    )
+                },
+            )
             .when(redis > 0, |this| {
                 this.child(
-                    Icon::new(IconName::Redis).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::Redis)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
                 )
-                .child(div().text_xs().text_color(cx.theme().foreground).child(redis.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(redis.to_string()),
+                )
             })
-            .when(redis > 0 && (mongo > 0 || sftp > 0 || sql_chat > 0), |this| {
-                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
-            })
+            .when(
+                redis > 0 && (mongo > 0 || sftp > 0 || sql_chat > 0),
+                |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("/"),
+                    )
+                },
+            )
             .when(mongo > 0, |this| {
                 this.child(
-                    Icon::new(IconName::MongoDB).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::MongoDB)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
                 )
-                .child(div().text_xs().text_color(cx.theme().foreground).child(mongo.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(mongo.to_string()),
+                )
             })
             .when(mongo > 0 && (sftp > 0 || sql_chat > 0), |this| {
-                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("/"),
+                )
             })
             .when(sftp > 0 && sql_chat > 0, |this| {
-                this.child(div().text_xs().text_color(cx.theme().muted_foreground).child("/"))
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("/"),
+                )
             })
             .when(sftp > 0, |this| {
                 this.child(
-                    Icon::new(IconName::FolderOpen).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::FolderOpen)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
                 )
-                .child(div().text_xs().text_color(cx.theme().foreground).child(sftp.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(sftp.to_string()),
+                )
             })
             .when(sql_chat > 0, |this| {
                 this.child(
-                    Icon::new(IconName::Bot).xsmall().text_color(cx.theme().muted_foreground),
+                    Icon::new(IconName::Bot)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
                 )
-                .child(div().text_xs().text_color(cx.theme().foreground).child(sql_chat.to_string()))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().foreground)
+                        .child(sql_chat.to_string()),
+                )
             })
             // 右括号
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(")"))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(")"),
+            )
     }
 
     fn render_global_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -810,7 +910,12 @@ impl OnetCliApp {
                     .gap_4()
                     // 连接统计：总数(Terminal:数量/Redis:数量/Mongo:数量/HardDrive:数量)
                     .child(Self::render_connection_stats(
-                        conn_stats.ssh + conn_stats.db + conn_stats.redis + conn_stats.mongo + conn_stats.sftp + conn_stats.sql_chat,
+                        conn_stats.ssh
+                            + conn_stats.db
+                            + conn_stats.redis
+                            + conn_stats.mongo
+                            + conn_stats.sftp
+                            + conn_stats.sql_chat,
                         conn_stats.ssh,
                         conn_stats.db,
                         conn_stats.redis,
@@ -832,16 +937,13 @@ impl OnetCliApp {
                                     .xsmall()
                                     .text_color(cx.theme().muted_foreground),
                             )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().foreground)
-                                    .child(format!(
-                                        "{}/{}",
-                                        format_bytes(sys_used_mem),
-                                        format_bytes(sys_total_mem),
-                                    )),
-                            )
+                            .child(div().text_xs().text_color(cx.theme().foreground).child(
+                                format!(
+                                    "{}/{}",
+                                    format_bytes(sys_used_mem),
+                                    format_bytes(sys_total_mem),
+                                ),
+                            ))
                             .child(
                                 div()
                                     .text_xs()

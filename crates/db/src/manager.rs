@@ -583,7 +583,11 @@ impl ConnectionManager {
             .flat_map(|l| l.iter())
             .filter(|s| s.in_use)
             .count();
-        tracing::debug!("连接池清理完成：剩余会话 {}（其中使用中 {}）", total, in_use);
+        tracing::debug!(
+            "连接池清理完成：剩余会话 {}（其中使用中 {}）",
+            total,
+            in_use
+        );
     }
 
     /// Get connection statistics

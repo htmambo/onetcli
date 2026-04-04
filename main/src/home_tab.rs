@@ -3826,7 +3826,10 @@ impl HomePage {
     fn connection_subtitle(&self, conn: &StoredConnection) -> Option<String> {
         match conn.connection_type {
             ConnectionType::Database => conn.to_db_connection().ok().map(|params| {
-                if matches!(params.database_type, DatabaseType::SQLite | DatabaseType::DuckDB) {
+                if matches!(
+                    params.database_type,
+                    DatabaseType::SQLite | DatabaseType::DuckDB
+                ) {
                     params.host
                 } else {
                     let database = match params.database {

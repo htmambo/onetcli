@@ -20,8 +20,10 @@ use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
 use std::sync::Arc;
+#[cfg(any(test, not(target_os = "linux")))]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::interval;
 
 #[cfg(any(test, target_os = "windows"))]
@@ -156,6 +158,64 @@ fn build_ssh_init_commands(
     compose_ssh_init_commands(base_init_commands.as_deref(), sync_path_with_terminal)
 }
 
+fn normalize_working_dir(path: &str) -> Option<String> {
+    let path = path.trim();
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+fn read_local_working_dir(path: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| normalize_working_dir(&contents))
+}
+
+#[cfg(target_os = "linux")]
+fn read_local_working_dir_from_pid(pid: u32) -> Option<String> {
+    let proc_cwd = std::path::PathBuf::from(format!("/proc/{pid}/cwd"));
+    std::fs::read_link(proc_cwd)
+        .ok()
+        .and_then(|path| normalize_working_dir(path.to_string_lossy().as_ref()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_local_working_dir_from_pid(_pid: u32) -> Option<String> {
+    None
+}
+
+#[cfg(any(test, not(target_os = "linux")))]
+fn next_local_cwd_file_path() -> std::path::PathBuf {
+    static NEXT_LOCAL_CWD_FILE_ID: AtomicU64 = AtomicU64::new(1);
+
+    let file_id = NEXT_LOCAL_CWD_FILE_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "onetcli-cwd-{}-{}.txt",
+        std::process::id(),
+        file_id
+    ))
+}
+
+#[cfg(any(test, not(target_os = "linux")))]
+fn build_local_cwd_tracking_init_command(cwd_file_path: &str) -> String {
+    let mut command = format!(
+        "ONETCLI_CWD_FILE={}; export ONETCLI_CWD_FILE; ",
+        shell_escape_arg(cwd_file_path)
+    );
+    command.push_str("if [ -n \"$ZSH_VERSION\" ]; then ");
+    command.push_str("onetcli_cwd_write() { pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null; }; ");
+    command.push_str("typeset -ga precmd_functions; ");
+    command.push_str(
+        "case \" ${precmd_functions[*]} \" in *\" onetcli_cwd_write \"*) ;; *) precmd_functions+=(onetcli_cwd_write) ;; esac; ",
+    );
+    command.push_str("else ");
+    command.push_str(
+        "PROMPT_COMMAND='pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null'${PROMPT_COMMAND:+\";$PROMPT_COMMAND\"}; ",
+    );
+    command.push_str("export PROMPT_COMMAND; ");
+    command.push_str("fi; ");
+    command.push_str("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null\n");
+    command
+}
+
 #[cfg(any(test, target_os = "windows"))]
 fn path_if_file(path: impl Into<PathBuf>) -> Option<String> {
     let path = path.into();
@@ -245,6 +305,10 @@ pub struct Terminal {
     title: String,
     /// 当前工作目录（由 OSC 7 更新，仅 SSH 终端）
     current_working_dir: Option<String>,
+    /// 本地 shell 子进程 PID（Linux 下可直接读取 /proc/<pid>/cwd）
+    local_shell_pid: Option<u32>,
+    /// 本地终端的工作目录跟踪文件
+    local_cwd_file: Option<std::path::PathBuf>,
     /// 子进程退出码
     child_exited: Option<i32>,
     /// 连接状态
@@ -354,6 +418,8 @@ impl Terminal {
             backend: None,
             title: String::new(),
             current_working_dir: None,
+            local_shell_pid: None,
+            local_cwd_file: None,
             child_exited: None,
             connection_state: ConnectionState::Disconnected { error: Some(error) },
             connection_status_message: None,
@@ -397,6 +463,7 @@ impl Terminal {
             shell,
             working_dir,
             env,
+            cwd_file,
         } = config;
 
         let pty_options = PtyOptions {
@@ -408,6 +475,24 @@ impl Terminal {
             escape_args: true,
         };
         let local_backend = LocalPtyBackend::new(term.clone(), event_proxy, pty_options)?;
+        let local_shell_pid = local_backend.child_pid();
+        #[cfg(not(target_os = "linux"))]
+        let local_cwd_file = {
+            let cwd_file_path = cwd_file
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(next_local_cwd_file_path);
+            let _ = std::fs::write(&cwd_file_path, "");
+            local_backend.write(
+                build_local_cwd_tracking_init_command(&cwd_file_path.to_string_lossy())
+                    .into_bytes(),
+            );
+            Some(cwd_file_path)
+        };
+        #[cfg(target_os = "linux")]
+        let local_cwd_file = {
+            let _ = cwd_file;
+            None
+        };
 
         Self::spawn_event_loop(event_rx, cx);
 
@@ -416,6 +501,8 @@ impl Terminal {
             backend: Some(Box::new(local_backend)),
             title: String::new(),
             current_working_dir: working_dir,
+            local_shell_pid,
+            local_cwd_file,
             child_exited: None,
             connection_state: ConnectionState::Connected,
             connection_status_message: None,
@@ -548,6 +635,8 @@ impl Terminal {
             backend: None,
             title: String::new(),
             current_working_dir: None,
+            local_shell_pid: None,
+            local_cwd_file: None,
             child_exited: None,
             connection_state: ConnectionState::Connecting,
             connection_status_message: Some(
@@ -594,6 +683,8 @@ impl Terminal {
             backend: None,
             title: String::new(),
             current_working_dir: None,
+            local_shell_pid: None,
+            local_cwd_file: None,
             child_exited: None,
             connection_state: ConnectionState::Connecting,
             connection_status_message: None,
@@ -717,22 +808,24 @@ impl Terminal {
 
     fn spawn_connection_status_tick(cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
-        cx.spawn(async move |_, cx| loop {
-            cx.background_executor().timer(Duration::from_secs(1)).await;
-            let keep_running = entity
-                .update(cx, |this, cx| {
-                    if matches!(this.connection_state, ConnectionState::Connecting)
-                        && this.connection_wait_started_at.is_some()
-                    {
-                        cx.emit(TerminalModelEvent::Wakeup);
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or(false);
-            if !keep_running {
-                break;
+        cx.spawn(async move |_, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_running = entity
+                    .update(cx, |this, cx| {
+                        if matches!(this.connection_state, ConnectionState::Connecting)
+                            && this.connection_wait_started_at.is_some()
+                        {
+                            cx.emit(TerminalModelEvent::Wakeup);
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
             }
         })
         .detach();
@@ -1010,6 +1103,25 @@ impl Terminal {
         self.current_working_dir.as_deref()
     }
 
+    /// 获取最新工作目录。
+    ///
+    /// 本地终端优先读取 cwd 跟踪文件，避免恢复时仍停留在初始目录。
+    pub fn latest_working_dir(&self) -> Option<String> {
+        if let Some(pid) = self.local_shell_pid {
+            if let Some(path) = read_local_working_dir_from_pid(pid) {
+                return Some(path);
+            }
+        }
+
+        if let Some(path) = self.local_cwd_file.as_deref() {
+            if let Some(path) = read_local_working_dir(path) {
+                return Some(path);
+            }
+        }
+
+        self.current_working_dir.clone()
+    }
+
     /// 获取 SSH 连接配置（仅 SSH 终端）
     pub fn ssh_config(&self) -> Option<&SshTerminalConfig> {
         self.ssh_config.as_ref()
@@ -1182,6 +1294,35 @@ impl Terminal {
         }
     }
 
+    /// 捕获整个终端内容（完整 grid 缓冲区 + 回滚历史）为纯文本
+    pub fn visible_content(&self) -> String {
+        let term = self.term.lock();
+        let history_size = term.history_size();
+        let screen_lines = term.screen_lines();
+        let cols = term.columns();
+
+        let mut lines = Vec::new();
+
+        // 遍历整个 grid：从最旧的回滚行到最新屏幕行
+        for line_idx in 0..(history_size + screen_lines) {
+            let grid_line = Line((line_idx as i32) - (history_size as i32));
+            let row = &term.grid()[grid_line];
+            let text: String = row[..].iter().map(|cell| cell.c).collect();
+            let trimmed = text.trim_end().to_string();
+            if !trimmed.is_empty() {
+                lines.push(trimmed);
+            }
+        }
+
+        // 限制输出大小（最多 500 行，保留最新内容）
+        const MAX_LINES: usize = 500;
+        if lines.len() > MAX_LINES {
+            lines = lines[lines.len() - MAX_LINES..].to_vec();
+        }
+
+        lines.join("\n")
+    }
+
     // ========== 滚动操作 ==========
 
     /// 滚动终端
@@ -1222,9 +1363,10 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
-        compose_ssh_init_commands, resolve_default_windows_shell_from_env, shell_escape_arg,
-        OSC7_PROMPT_COMMAND,
+        OSC7_PROMPT_COMMAND, build_cd_command, build_local_cwd_tracking_init_command,
+        build_ssh_base_init_commands, build_ssh_init_commands, compose_ssh_init_commands,
+        next_local_cwd_file_path, read_local_working_dir, resolve_default_windows_shell_from_env,
+        shell_escape_arg,
     };
     use std::fs;
 
@@ -1317,6 +1459,40 @@ mod tests {
 
         assert_eq!(resolved, cmd.to_string_lossy());
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn read_local_working_dir_trims_trailing_newlines() {
+        let temp_path =
+            std::env::temp_dir().join(format!("onetcli-cwd-test-{}", std::process::id()));
+        fs::write(&temp_path, "/tmp/demo\n").expect("应写入 cwd 文件");
+
+        assert_eq!(
+            read_local_working_dir(&temp_path).as_deref(),
+            Some("/tmp/demo")
+        );
+
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    #[test]
+    fn build_local_cwd_tracking_init_command_covers_zsh_and_bash() {
+        let command = build_local_cwd_tracking_init_command("/tmp/demo");
+
+        assert!(command.contains("ONETCLI_CWD_FILE='/tmp/demo'"));
+        assert!(command.contains("typeset -ga precmd_functions;"));
+        assert!(command.contains("precmd_functions+=(onetcli_cwd_write)"));
+        assert!(command.contains("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null"));
+        assert!(command.contains("PROMPT_COMMAND='pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null'"));
+    }
+
+    #[test]
+    fn next_local_cwd_file_path_is_unique_per_terminal() {
+        let first = next_local_cwd_file_path();
+        let second = next_local_cwd_file_path();
+
+        assert_ne!(first, second);
+        assert!(first.file_name().unwrap_or_default() != second.file_name().unwrap_or_default());
     }
 }
 

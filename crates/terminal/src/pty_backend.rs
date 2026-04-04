@@ -133,6 +133,7 @@ impl PtyWriteBack {
 pub struct LocalPtyBackend {
     event_loop_sender: EventLoopSender,
     _event_loop_handle: JoinHandle<()>,
+    child_pid: Option<u32>,
 }
 
 impl LocalPtyBackend {
@@ -157,6 +158,10 @@ impl LocalPtyBackend {
         );
 
         let pty = tty::new(&pty_options, window_size, 0)?;
+        #[cfg(unix)]
+        let child_pid = Some(pty.child().id());
+        #[cfg(not(unix))]
+        let child_pid = None;
         let event_loop = EventLoop::new(term, event_proxy.clone(), pty, true, false)?;
         let event_loop_sender = event_loop.channel();
 
@@ -170,7 +175,12 @@ impl LocalPtyBackend {
         Ok(Self {
             event_loop_sender,
             _event_loop_handle: handle,
+            child_pid,
         })
+    }
+
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
     }
 
     pub fn write(&self, data: Vec<u8>) {

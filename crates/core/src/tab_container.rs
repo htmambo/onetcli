@@ -1830,6 +1830,8 @@ impl TabContainer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 先关闭 pinned tab 激活状态，避免清空 tabs 时触发首页渲染
+        self.pinned_tab_active = false;
         self.tabs.clear();
         self.content_subscriptions.clear();
 
@@ -1851,6 +1853,13 @@ impl TabContainer {
 
         self.load_config(&state.config);
         self.reset_content_state_subscriptions(cx);
+
+        // 激活恢复的标签页
+        if !self.tabs.is_empty() {
+            if let Some(tab) = self.tabs.get(self.active_index) {
+                tab.content().on_activate(window, cx);
+            }
+        }
     }
 
     fn active_content_id(&self, cx: &App) -> Option<EntityId> {
@@ -2001,8 +2010,9 @@ impl TabContainer {
 
         // 非 Windows 平台使用状态管理窗口拖动；Windows 依赖 WindowControlArea 命中测试。
         let drag_state = window.use_state(cx, |_, _| TabBarDragState { should_move: false });
-        let interaction_state =
-            window.use_state(cx, |_, _| TabBarInteractionState { tab_click_active: false });
+        let interaction_state = window.use_state(cx, |_, _| TabBarInteractionState {
+            tab_click_active: false,
+        });
 
         h_flex()
             .id("tab-bar")
@@ -2175,34 +2185,28 @@ impl TabContainer {
                                 state.should_move = false;
                             },
                         ))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            {
-                                let drag_state = drag_state.clone();
-                                let interaction_state = interaction_state.clone();
-                                move |_: &gpui::MouseDownEvent, _, cx| {
-                                    // 如果当前有活跃的 tab 点击（tab 的 on_mouse_down 先执行），则不设置窗口拖动标志。
-                                    if !interaction_state.read(cx).tab_click_active {
-                                        drag_state.update(cx, |state, _| {
-                                            state.should_move = true;
-                                        });
-                                    }
-                                }
-                            },
-                        )
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            {
-                                let drag_state = drag_state.clone();
-                                let interaction_state = interaction_state.clone();
-                                window.listener_for(&drag_state, move |state, _, _, cx| {
-                                    state.should_move = false;
-                                    interaction_state.update(cx, |s, _| {
-                                        s.tab_click_active = false;
+                        .on_mouse_down(MouseButton::Left, {
+                            let drag_state = drag_state.clone();
+                            let interaction_state = interaction_state.clone();
+                            move |_: &gpui::MouseDownEvent, _, cx| {
+                                // 如果当前有活跃的 tab 点击（tab 的 on_mouse_down 先执行），则不设置窗口拖动标志。
+                                if !interaction_state.read(cx).tab_click_active {
+                                    drag_state.update(cx, |state, _| {
+                                        state.should_move = true;
                                     });
-                                })
-                            },
-                        )
+                                }
+                            }
+                        })
+                        .on_mouse_up(MouseButton::Left, {
+                            let drag_state = drag_state.clone();
+                            let interaction_state = interaction_state.clone();
+                            window.listener_for(&drag_state, move |state, _, _, cx| {
+                                state.should_move = false;
+                                interaction_state.update(cx, |s, _| {
+                                    s.tab_click_active = false;
+                                });
+                            })
+                        })
                         .on_mouse_move(window.listener_for(&drag_state, |state, _, window, _| {
                             if state.should_move {
                                 state.should_move = false;
@@ -2211,9 +2215,10 @@ impl TabContainer {
                         }))
                     })
                     // 仅在启用窗口控件且无 manual_window_move 时使用原生拖动区域
-                    .when(!manual_window_move && drag_plan.enable_scroll_area_drag, |this| {
-                        this.window_control_area(WindowControlArea::Drag)
-                    })
+                    .when(
+                        !manual_window_move && drag_plan.enable_scroll_area_drag,
+                        |this| this.window_control_area(WindowControlArea::Drag),
+                    )
                     .overflow_hidden()
                     .overflow_x_scroll()
                     .when(!is_macos && self.pinned_tab.is_none(), |this| {
@@ -2279,28 +2284,23 @@ impl TabContainer {
                             .when(is_active, |el| {
                                 el.cursor_grab()
                                     .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
-                                    .on_drag(
-                                        DragTab::new(idx, title.clone()),
-                                        |drag, _, _, cx| {
-                                            cx.stop_propagation();
-                                            cx.new(|_| drag.clone())
-                                        },
-                                    )
+                                    .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
+                                        cx.stop_propagation();
+                                        cx.new(|_| drag.clone())
+                                    })
                             })
                             // on_drop 和 drag_over 在所有 tab 上注册，接收来自其他 tab 的 drop 事件
                             .drag_over::<DragTab>(move |el, _, _, _cx| {
                                 el.border_l_2().border_color(drag_border_color)
                             })
-                            .on_drop(cx.listener(
-                                move |this, drag: &DragTab, window, cx| {
-                                    let from_idx = drag.tab_index;
-                                    let to_idx = idx;
-                                    if from_idx != to_idx {
-                                        this.move_tab(from_idx, to_idx, cx);
-                                    }
-                                    this.set_active_index(to_idx, window, cx);
-                                },
-                            ))
+                            .on_drop(cx.listener(move |this, drag: &DragTab, window, cx| {
+                                let from_idx = drag.tab_index;
+                                let to_idx = idx;
+                                if from_idx != to_idx {
+                                    this.move_tab(from_idx, to_idx, cx);
+                                }
+                                this.set_active_index(to_idx, window, cx);
+                            }))
                             .when_some(icon, |el, icon| {
                                 el.child(div().flex_shrink_0().flex().items_center().child(icon))
                             })
@@ -2356,28 +2356,31 @@ impl TabContainer {
                                 };
                                 let has_tabs_left = idx > 0;
                                 let has_tabs_right = idx < tab_count - 1;
-                                let menu = if is_ssh_tab {
-                                    if let Some(tab_id) = tab_id {
-                                        menu.item(
-                                            PopupMenuItem::new(
-                                                t!("TabContainer.menu_open_sftp").to_string(),
+                                let menu =
+                                    if is_ssh_tab {
+                                        if let Some(tab_id) = tab_id {
+                                            menu.item(
+                                                PopupMenuItem::new(
+                                                    t!("TabContainer.menu_open_sftp").to_string(),
+                                                )
+                                                .on_click(window.listener_for(
+                                                    &view_for_menu,
+                                                    move |_this, _, _window, cx| {
+                                                        cx.emit(
+                                                            TabContainerEvent::OpenSftpRequested {
+                                                                tab_id: tab_id.clone(),
+                                                            },
+                                                        );
+                                                    },
+                                                )),
                                             )
-                                            .on_click(window.listener_for(
-                                                &view_for_menu,
-                                                move |_this, _, _window, cx| {
-                                                    cx.emit(TabContainerEvent::OpenSftpRequested {
-                                                        tab_id: tab_id.clone(),
-                                                    });
-                                                },
-                                            )),
-                                        )
-                                        .item(PopupMenuItem::separator())
+                                            .item(PopupMenuItem::separator())
+                                        } else {
+                                            menu
+                                        }
                                     } else {
                                         menu
-                                    }
-                                } else {
-                                    menu
-                                };
+                                    };
 
                                 menu.item(
                                     PopupMenuItem::new(t!("TabContainer.menu_close").to_string())
@@ -2390,47 +2393,59 @@ impl TabContainer {
                                         )),
                                 )
                                 .item(
-                                    PopupMenuItem::new(t!("TabContainer.menu_close_all").to_string())
-                                        .on_click(window.listener_for(
+                                    PopupMenuItem::new(
+                                        t!("TabContainer.menu_close_all").to_string(),
+                                    )
+                                    .on_click(
+                                        window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
                                                 this.close_other_tabs(idx, window, cx).detach();
                                             },
-                                        )),
+                                        ),
+                                    ),
                                 )
                                 .item(
-                                    PopupMenuItem::new(t!("TabContainer.menu_close_others").to_string())
-                                        .disabled(tab_count <= 1)
-                                        .on_click(window.listener_for(
+                                    PopupMenuItem::new(
+                                        t!("TabContainer.menu_close_others").to_string(),
+                                    )
+                                    .disabled(tab_count <= 1)
+                                    .on_click(
+                                        window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
                                                 this.close_other_tabs(idx, window, cx).detach();
                                             },
-                                        )),
+                                        ),
+                                    ),
                                 )
                                 .item(
                                     PopupMenuItem::new(
                                         t!("TabContainer.menu_close_tabs_to_left").to_string(),
                                     )
-                                        .disabled(!has_tabs_left)
-                                        .on_click(window.listener_for(
+                                    .disabled(!has_tabs_left)
+                                    .on_click(
+                                        window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
                                                 this.close_tabs_to_left(idx, window, cx).detach();
                                             },
-                                        )),
+                                        ),
+                                    ),
                                 )
                                 .item(
                                     PopupMenuItem::new(
                                         t!("TabContainer.menu_close_tabs_to_right").to_string(),
                                     )
-                                        .disabled(!has_tabs_right)
-                                        .on_click(window.listener_for(
+                                    .disabled(!has_tabs_right)
+                                    .on_click(
+                                        window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
                                                 this.close_tabs_to_right(idx, window, cx).detach();
                                             },
-                                        )),
+                                        ),
+                                    ),
                                 )
                             })
                     }))
@@ -2669,7 +2684,10 @@ impl Render for TabContainer {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_render_windows_drag_spacer, uses_manual_window_move, TabBarDragPlan, build_tab_bar_drag_plan};
+    use super::{
+        TabBarDragPlan, build_tab_bar_drag_plan, should_render_windows_drag_spacer,
+        uses_manual_window_move,
+    };
 
     #[test]
     fn windows_仅渲染独立拖窗热区() {

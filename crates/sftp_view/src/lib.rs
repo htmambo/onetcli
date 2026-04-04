@@ -627,8 +627,7 @@ impl SftpView {
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
-        let remote_current_path =
-            initial_remote_path(ssh_params.sftp_remote_directory.as_deref());
+        let remote_current_path = initial_remote_path(ssh_params.sftp_remote_directory.as_deref());
 
         let local_panel = cx.new(|cx| {
             FileListPanel::new(

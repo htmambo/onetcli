@@ -315,7 +315,11 @@ impl HomePage {
                         let view_id = _view.entity_id();
                         let tab_container = this.tab_container.clone();
                         tab_container.update(cx, |container, cx| {
-                            if let Some(index) = container.tabs().iter().position(|t| t.content().content_id(cx) == view_id) {
+                            if let Some(index) = container
+                                .tabs()
+                                .iter()
+                                .position(|t| t.content().content_id(cx) == view_id)
+                            {
                                 container.close_tab(index, window, cx).detach();
                             }
                         });

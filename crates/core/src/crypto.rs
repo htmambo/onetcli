@@ -319,9 +319,7 @@ pub fn encrypt_password(password: &str) -> String {
     }
 
     // 如果已经是加密的，直接返回（支持 V1 和 V2 格式）
-    if password.starts_with(ENCRYPTED_PREFIX)
-        || password.starts_with(ENCRYPTED_PREFIX_V2)
-    {
+    if password.starts_with(ENCRYPTED_PREFIX) || password.starts_with(ENCRYPTED_PREFIX_V2) {
         return password.to_string();
     }
 
@@ -449,9 +447,7 @@ pub fn encrypt_with_key(plaintext: &str, master_key: &str) -> String {
     }
 
     // 如果已经是加密的，直接返回（支持 V1 和 V2 格式）
-    if plaintext.starts_with(ENCRYPTED_PREFIX)
-        || plaintext.starts_with(ENCRYPTED_PREFIX_V2)
-    {
+    if plaintext.starts_with(ENCRYPTED_PREFIX) || plaintext.starts_with(ENCRYPTED_PREFIX_V2) {
         return plaintext.to_string();
     }
 

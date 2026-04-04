@@ -4,16 +4,17 @@ use std::collections::HashSet;
 use crate::onetcli_app::GlobalHomePage;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
+    ActiveTheme, Icon, IconName, Sizable, Size, StyledExt,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     popover::Popover,
-    v_flex, ActiveTheme, Icon, IconName, Sizable, Size, StyledExt,
+    v_flex,
 };
 use one_core::storage::{ActiveConnections, ConnectionType, StoredConnection, Workspace};
 use rust_i18n::t;

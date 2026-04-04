@@ -1237,11 +1237,13 @@ impl SettingsPanel {
                                     vec![
                                         (
                                             "prompt".into(),
-                                            t!("Settings.General.Terminal.exit_behavior_prompt").into(),
+                                            t!("Settings.General.Terminal.exit_behavior_prompt")
+                                                .into(),
                                         ),
                                         (
                                             "close".into(),
-                                            t!("Settings.General.Terminal.exit_behavior_close").into(),
+                                            t!("Settings.General.Terminal.exit_behavior_close")
+                                                .into(),
                                         ),
                                     ],
                                     |cx: &App| {
@@ -1258,7 +1260,9 @@ impl SettingsPanel {
                                     },
                                 ))
                                 .default_value(
-                                    SharedString::from(default_settings.terminal_exit_behavior.clone()),
+                                    SharedString::from(
+                                        default_settings.terminal_exit_behavior.clone(),
+                                    ),
                                 ),
                             )
                             .description(

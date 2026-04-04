@@ -53,7 +53,6 @@ pub fn load_tabs(
     let state = load_tab_state()?;
 
     if state.tabs.is_empty() {
-        tracing::info!("Saved tab state is empty");
         return Ok(());
     }
 
@@ -61,7 +60,6 @@ pub fn load_tabs(
         container.load(state, registry, window, cx);
     });
 
-    tracing::info!("Tabs restored from saved state");
     Ok(())
 }
 

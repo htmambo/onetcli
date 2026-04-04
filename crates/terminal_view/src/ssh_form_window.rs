@@ -313,12 +313,10 @@ impl SshFormWindow {
             InputState::new(window, cx).placeholder(t!("SSH.default_directory_placeholder"))
         });
         let sftp_local_directory_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(t!("SSH.sftp_local_directory_placeholder"))
+            InputState::new(window, cx).placeholder(t!("SSH.sftp_local_directory_placeholder"))
         });
         let sftp_remote_directory_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(t!("SSH.sftp_remote_directory_placeholder"))
+            InputState::new(window, cx).placeholder(t!("SSH.sftp_remote_directory_placeholder"))
         });
 
         // 其他设置

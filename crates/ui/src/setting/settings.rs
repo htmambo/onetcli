@@ -1,6 +1,7 @@
 use crate::{
-    h_flex, IconName, Sizable, Size, StyledExt,
+    IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
+    h_flex,
     input::{Input, InputState},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
@@ -278,34 +279,30 @@ impl RenderOnce for Settings {
             layout: Axis::Horizontal,
         };
 
-        div()
-            .flex_1()
-            .size_full()
-            .overflow_hidden()
-            .child(
-                h_flex()
-                    .size_full()
-                    .child(
-                        div()
-                            .w(self.sidebar_width)
-                            .h_full()
-                            .flex_shrink_0()
-                            .overflow_hidden()
-                            .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .size_full()
-                            .overflow_hidden()
-                            .child(self.render_active_page(
-                                &state,
-                                &filtered_pages,
-                                &options,
-                                window,
-                                cx,
-                            )),
-                    ),
-            )
+        div().flex_1().size_full().overflow_hidden().child(
+            h_flex()
+                .size_full()
+                .child(
+                    div()
+                        .w(self.sidebar_width)
+                        .h_full()
+                        .flex_shrink_0()
+                        .overflow_hidden()
+                        .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .size_full()
+                        .overflow_hidden()
+                        .child(self.render_active_page(
+                            &state,
+                            &filtered_pages,
+                            &options,
+                            window,
+                            cx,
+                        )),
+                ),
+        )
     }
 }

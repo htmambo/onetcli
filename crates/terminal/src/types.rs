@@ -18,6 +18,8 @@ pub struct LocalConfig {
     pub working_dir: Option<String>,
     /// Environment variables
     pub env: Vec<(String, String)>,
+    /// 临时文件路径，用于通过 PROMPT_COMMAND 追踪当前工作目录
+    pub cwd_file: Option<String>,
 }
 
 impl Default for LocalConfig {
@@ -26,6 +28,7 @@ impl Default for LocalConfig {
             shell: None,
             working_dir: default_working_dir(),
             env: default_env(),
+            cwd_file: None,
         }
     }
 }
