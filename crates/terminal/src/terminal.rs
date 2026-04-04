@@ -19,11 +19,11 @@ use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
-use std::sync::Arc;
 #[cfg(any(test, not(target_os = "linux")))]
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::interval;
 
 #[cfg(any(test, target_os = "windows"))]
@@ -808,24 +808,22 @@ impl Terminal {
 
     fn spawn_connection_status_tick(cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
-        cx.spawn(async move |_, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                let keep_running = entity
-                    .update(cx, |this, cx| {
-                        if matches!(this.connection_state, ConnectionState::Connecting)
-                            && this.connection_wait_started_at.is_some()
-                        {
-                            cx.emit(TerminalModelEvent::Wakeup);
-                            true
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if !keep_running {
-                    break;
-                }
+        cx.spawn(async move |_, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let keep_running = entity
+                .update(cx, |this, cx| {
+                    if matches!(this.connection_state, ConnectionState::Connecting)
+                        && this.connection_wait_started_at.is_some()
+                    {
+                        cx.emit(TerminalModelEvent::Wakeup);
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if !keep_running {
+                break;
             }
         })
         .detach();
@@ -1363,10 +1361,10 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        OSC7_PROMPT_COMMAND, build_cd_command, build_local_cwd_tracking_init_command,
-        build_ssh_base_init_commands, build_ssh_init_commands, compose_ssh_init_commands,
-        next_local_cwd_file_path, read_local_working_dir, resolve_default_windows_shell_from_env,
-        shell_escape_arg,
+        build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
+        build_ssh_init_commands, compose_ssh_init_commands, next_local_cwd_file_path,
+        read_local_working_dir, resolve_default_windows_shell_from_env, shell_escape_arg,
+        OSC7_PROMPT_COMMAND,
     };
     use std::fs;
 

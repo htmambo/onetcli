@@ -601,6 +601,7 @@ impl MacWindow {
             focus,
             show,
             display_id,
+            window_background,
             window_min_size,
             tabbing_identifier,
         }: WindowParams,
@@ -708,6 +709,7 @@ impl MacWindow {
             let native_view: id = msg_send![VIEW_CLASS, alloc];
             let native_view = NSView::initWithFrame_(native_view, NSView::bounds(content_view));
             assert!(!native_view.is_null());
+            let transparent_background = window_background != WindowBackgroundAppearance::Opaque;
 
             let mut window = Self(Arc::new(Mutex::new(MacWindowState {
                 handle,
@@ -716,14 +718,14 @@ impl MacWindow {
                 native_window,
                 native_view: NonNull::new_unchecked(native_view),
                 blurred_view: None,
-                background_appearance: WindowBackgroundAppearance::Opaque,
+                background_appearance: window_background,
                 display_link: None,
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
                     native_view as *mut _,
                     bounds.size.map(|pixels| pixels.0),
-                    false,
+                    transparent_background,
                 ),
                 request_frame_callback: None,
                 event_callback: None,
@@ -897,6 +899,10 @@ impl MacWindow {
                     }
                 }
             }
+
+            // Apply the requested backdrop before the first show so macOS doesn't cache
+            // the window/layer as fully opaque on initial presentation.
+            window.set_background_appearance(window_background);
 
             if focus && show {
                 native_window.makeKeyAndOrderFront_(nil);

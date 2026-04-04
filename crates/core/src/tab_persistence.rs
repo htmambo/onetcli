@@ -49,18 +49,20 @@ pub fn load_tabs(
     registry: &TabContentRegistry,
     window: &mut Window,
     cx: &mut App,
-) -> Result<()> {
+) -> Result<usize> {
     let state = load_tab_state()?;
 
+    let active_index = state.active_index;
+
     if state.tabs.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     tab_container.update(cx, |container, cx| {
         container.load(state, registry, window, cx);
     });
 
-    Ok(())
+    Ok(active_index)
 }
 
 pub fn schedule_save(

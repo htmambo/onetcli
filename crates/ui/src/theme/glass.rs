@@ -99,6 +99,10 @@ pub(crate) fn apply_glass_highlight_tuning(
 }
 
 fn frosted_surface_tuning(mode: ThemeMode, opacity: f32) -> GlassSurfaceTuning {
+    if cfg!(target_os = "macos") {
+        return macos_frosted_surface_tuning(mode, opacity);
+    }
+
     if mode.is_dark() {
         GlassSurfaceTuning {
             base: opacity,
@@ -118,6 +122,30 @@ fn frosted_surface_tuning(mode: ThemeMode, opacity: f32) -> GlassSurfaceTuning {
             active: offset_alpha(opacity, 0.13),
             border: offset_alpha(opacity, -0.14),
             divider: offset_alpha(opacity, -0.32),
+        }
+    }
+}
+
+fn macos_frosted_surface_tuning(mode: ThemeMode, opacity: f32) -> GlassSurfaceTuning {
+    if mode.is_dark() {
+        GlassSurfaceTuning {
+            base: offset_alpha(opacity, -0.12),
+            elevated: offset_alpha(opacity, -0.08),
+            chrome: offset_alpha(opacity, -0.22),
+            hover: offset_alpha(opacity, -0.06),
+            active: offset_alpha(opacity, -0.02),
+            border: offset_alpha(opacity, -0.28),
+            divider: offset_alpha(opacity, -0.38),
+        }
+    } else {
+        GlassSurfaceTuning {
+            base: offset_alpha(opacity, -0.14),
+            elevated: offset_alpha(opacity, -0.09),
+            chrome: offset_alpha(opacity, -0.24),
+            hover: offset_alpha(opacity, -0.05),
+            active: offset_alpha(opacity, -0.01),
+            border: offset_alpha(opacity, -0.26),
+            divider: offset_alpha(opacity, -0.34),
         }
     }
 }

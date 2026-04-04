@@ -115,6 +115,13 @@ struct DragPreviewSize {
     height: f32,
 }
 
+fn macos_home_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(alpha);
+    }
+    color
+}
+
 #[derive(Clone)]
 struct DragWorkspace {
     workspace_id: i64,
@@ -259,6 +266,8 @@ pub struct HomePage {
     auth_error: Option<String>,
     /// 待处理的连接恢复快照
     pending_connection_restore_snapshot: Option<ConnectionRestoreSnapshot>,
+    /// 恢复标签时保存的原始活动标签索引（用于跳过恢复后恢复该标签）
+    saved_active_tab_index: Option<usize>,
     /// 工作区是否已完成初次加载
     workspaces_loaded: bool,
     /// 连接是否已完成初次加载
@@ -333,6 +342,7 @@ impl HomePage {
             logging_in: false,
             auth_error: None,
             pending_connection_restore_snapshot: load_pending_connection_restore_snapshot(),
+            saved_active_tab_index: None,
             workspaces_loaded: false,
             connections_loaded: false,
             connection_restore_prompt_opened: false,
@@ -518,9 +528,9 @@ impl HomePage {
             // 避免在 render 阶段直接清理状态，延后到窗口事件循环中执行。
             self.connection_restore_prompt_opened = true;
             let home_page = cx.entity();
-            window.defer(cx, move |_window, cx| {
+            window.defer(cx, move |window, cx| {
                 let _ = home_page.update(cx, |home, cx| {
-                    home.skip_pending_connection_restore(cx);
+                    home.skip_pending_connection_restore(window, cx);
                 });
             });
             return;
@@ -533,11 +543,31 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn skip_pending_connection_restore(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn skip_pending_connection_restore(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.pending_connection_restore_snapshot = None;
         self.connection_restore_prompt_opened = false;
         crate::connection_restore::clear_pending_connection_restore_snapshot();
+
+        // 跳过时恢复到标签恢复前的原始活动标签
+        if let Some(index) = self.saved_active_tab_index {
+            self.tab_container
+                .update(cx, |tc, cx| tc.set_active_index(index, window, cx));
+        }
+
         cx.notify();
+    }
+
+    /// 检查是否存在待处理的连接恢复快照
+    pub fn has_pending_connection_restore_snapshot(&self) -> bool {
+        self.pending_connection_restore_snapshot.is_some()
+    }
+
+    pub(crate) fn set_saved_active_tab_index(&mut self, index: Option<usize>) {
+        self.saved_active_tab_index = index;
     }
 
     pub(crate) fn restore_saved_connection_sessions(
@@ -556,7 +586,7 @@ impl HomePage {
             .collect::<HashSet<_>>();
         let resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
 
-        self.skip_pending_connection_restore(cx);
+        self.skip_pending_connection_restore(window, cx);
 
         for item in resolved_items
             .into_iter()
@@ -2409,6 +2439,9 @@ impl HomePage {
         let view_for_new_connection = cx.entity();
         let view_for_sort_field = view_for_new_connection.clone();
         let view_for_view_mode = view_for_new_connection.clone();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let toolbar_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.24);
+        let toolbar_input_bg = macos_home_glass(cx.theme().input_background(), blur_enabled, 0.14);
 
         let workspace_filter_open = self.workspace_filter_open;
         let workspace_filter =
@@ -2428,7 +2461,7 @@ impl HomePage {
             .py_2()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(toolbar_bg)
             .items_center()
             // ===== 左侧功能区 =====
             .child(
@@ -2624,7 +2657,8 @@ impl HomePage {
                         Input::new(&self.search_input)
                             .cleanable(true)
                             .w(px(240.0))
-                            .bg(cx.theme().muted),
+                            .bg(toolbar_input_bg)
+                            .border_color(cx.theme().border.opacity(0.62)),
                     )
                     .child(
                         Button::new("connection-sort-field-button")
@@ -2926,12 +2960,16 @@ impl HomePage {
             self.current_user = None;
         }
 
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let sidebar_bg = macos_home_glass(cx.theme().sidebar, blur_enabled, 0.18);
+        let sidebar_active_bg = macos_home_glass(cx.theme().list_active, blur_enabled, 0.18);
+        let sidebar_hover_bg = macos_home_glass(cx.theme().sidebar_accent, blur_enabled, 0.10);
         let filter_types = ConnectionType::all();
 
         v_flex()
             .w(px(200.0))
             .h_full()
-            .bg(cx.theme().sidebar)
+            .bg(sidebar_bg)
             .border_r_1()
             .border_color(cx.theme().border)
             .child(
@@ -2957,13 +2995,12 @@ impl HomePage {
                             .rounded_lg()
                             .overflow_hidden()
                             .when(is_selected, |this| {
-                                this.bg(cx.theme().list_active)
+                                this.bg(sidebar_active_bg)
                                     .border_l_3()
                                     .border_color(cx.theme().list_active_border)
                             })
                             .when(!is_selected, |this| {
-                                this.bg(cx.theme().sidebar)
-                                    .hover(|style| style.bg(cx.theme().sidebar_accent))
+                                this.hover(|style| style.bg(sidebar_hover_bg))
                             })
                             .on_click(cx.listener(move |this: &mut HomePage, _, window, cx| {
                                 if filter_type_clone == ConnectionType::ChatDB {
@@ -4186,6 +4223,9 @@ impl HomePage {
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let workspace_bg = macos_home_glass(cx.theme().tab, blur_enabled, 0.16);
+        let workspace_hover_bg = macos_home_glass(cx.theme().list_hover, blur_enabled, 0.10);
         let workspace_id = workspace.id;
         let is_collapsed = workspace_id
             .map(|id| self.collapsed_workspaces.contains(&id))
@@ -4218,7 +4258,7 @@ impl HomePage {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().tab)
+            .bg(workspace_bg)
             .child(
                 h_flex()
                     .id(ElementId::Name(SharedString::from(format!(
@@ -4240,7 +4280,7 @@ impl HomePage {
                         this.border_b_1().border_color(cx.theme().border)
                     })
                     .when(is_collapsed, |this| this.rounded_b_lg())
-                    .hover(|s| s.bg(cx.theme().list_hover))
+                    .hover(|s| s.bg(workspace_hover_bg))
                     .when(connection_workspace_drop_active, |this| {
                         this.border_color(cx.theme().drag_border)
                             .bg(cx.theme().drop_target.opacity(0.28))
@@ -4803,6 +4843,9 @@ impl HomePage {
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let item_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.14);
+        let item_icon_bg = macos_home_glass(cx.theme().muted, blur_enabled, 0.10);
         let conn_id = conn.id;
         let clone_conn = conn.clone();
         let sftp_hover_conn = conn.clone();
@@ -4855,7 +4898,7 @@ impl HomePage {
             .px_3()
             .py_1()
             .rounded_lg()
-            .bg(cx.theme().background)
+            .bg(item_bg)
             .border_1()
             .relative()
             .overflow_hidden()
@@ -5028,7 +5071,7 @@ impl HomePage {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .bg(cx.theme().muted)
+                            .bg(item_icon_bg)
                             .child(self.render_connection_icon(&conn, 20.0)),
                     )
                     .child(
@@ -5503,6 +5546,9 @@ impl HomePage {
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let card_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.16);
+        let card_overlay_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.20);
         let conn_id = conn.id;
         let clone_conn = conn.clone();
         let sftp_hover_conn = conn.clone();
@@ -5556,7 +5602,7 @@ impl HomePage {
             .w_full()
             .h(px(60.))
             .rounded(px(8.0))
-            .bg(cx.theme().background)
+            .bg(card_bg)
             .p_2()
             .border_1()
             .rounded_lg()
@@ -5782,7 +5828,7 @@ impl HomePage {
                     // .gap_1()
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .group_hover(group_name.clone(), |style| style.opacity(1.0))
-                    .bg(cx.theme().background.opacity(1.0))
+                    .bg(card_overlay_bg)
                     .rounded(px(8.0))
                     .border_1()
                     .border_color(cx.theme().border.opacity(0.8))
@@ -6895,6 +6941,13 @@ impl Render for HomePage {
         }
 
         self.maybe_prompt_connection_restore(window, cx);
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let home_shell_bg = if cx.theme().window_blur_enabled {
+            cx.theme().transparent
+        } else {
+            cx.theme().background
+        };
+        let home_content_bg = macos_home_glass(cx.theme().muted, blur_enabled, 0.12);
 
         div().size_full().track_focus(&self.focus_handle).child(
             h_flex()
@@ -6904,14 +6957,14 @@ impl Render for HomePage {
                     v_flex()
                         .flex_1()
                         .h_full()
-                        .bg(cx.theme().background)
+                        .bg(home_shell_bg)
                         .child(self.render_toolbar(window, cx))
                         .child(
                             div()
                                 .flex_1()
                                 .w_full()
                                 .overflow_hidden()
-                                .bg(cx.theme().muted)
+                                .bg(home_content_bg)
                                 .child(self.render_content_area(cx)),
                         ),
                 ),

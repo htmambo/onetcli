@@ -457,6 +457,11 @@ impl Styled for Root {
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(cx.theme().font_size);
+        let root_bg = if cx.theme().window_blur_enabled {
+            cx.theme().transparent
+        } else {
+            cx.theme().background
+        };
 
         window_border().shadow_size(self.window_shadow_size).child(
             div()
@@ -467,7 +472,7 @@ impl Render for Root {
                 .relative()
                 .size_full()
                 .font_family(cx.theme().font_family.clone())
-                .bg(cx.theme().background)
+                .bg(root_bg)
                 .text_color(cx.theme().foreground)
                 .refine_style(&self.style)
                 .child(self.view.clone()),

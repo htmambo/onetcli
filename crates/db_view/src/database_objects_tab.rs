@@ -8,7 +8,7 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     WeakEntity, Window, div, px, uniform_list,
 };
-use gpui_component::button::Button;
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::label::Label;
 use gpui_component::notification::Notification;
@@ -28,6 +28,27 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
+
+fn macos_toolbar_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.20);
+    }
+    color
+}
+
+fn macos_toolbar_input_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.12);
+    }
+    color
+}
+
+fn macos_table_head_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.16);
+    }
+    color
+}
 
 fn format_timestamp(ts: i64) -> String {
     use chrono::{DateTime, Local};
@@ -646,6 +667,7 @@ impl DatabaseObjects {
         show_row_number: bool,
         cx: &App,
     ) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
         let mut header = h_flex()
             .h(px(32.))
             .px_2()
@@ -653,7 +675,7 @@ impl DatabaseObjects {
             .border_b_1()
             .border_color(cx.theme().border)
             .text_color(cx.theme().table_head_foreground)
-            .bg(cx.theme().table_head);
+            .bg(macos_table_head_glass(cx.theme().table_head, blur_enabled));
 
         if show_row_number {
             header = header.child(
@@ -790,6 +812,7 @@ impl DatabaseObjects {
         buttons.push({
             let node = current_node.clone();
             Button::new("refresh-data")
+                .ghost()
                 .with_size(Size::Medium)
                 .icon(IconName::Refresh)
                 .tooltip(t!("Common.refresh"))
@@ -811,6 +834,7 @@ impl DatabaseObjects {
                         let node = current_node.clone();
                         let event_fn = btn_config.event_fn;
                         Button::new(btn_config.id)
+                            .ghost()
                             .with_size(Size::Medium)
                             .icon(btn_config.icon)
                             .tooltip(btn_config.tooltip)
@@ -825,6 +849,7 @@ impl DatabaseObjects {
                     ToolbarButtonType::SelectedRow => {
                         let event_fn = btn_config.event_fn;
                         Button::new(btn_config.id)
+                            .ghost()
                             .with_size(Size::Medium)
                             .icon(btn_config.icon)
                             .tooltip(btn_config.tooltip)
@@ -893,6 +918,10 @@ impl Render for DatabaseObjects {
         let header = self.render_header(&columns, show_row_number, cx);
         let list_columns = columns.clone();
         let list_search_query = search_query.clone();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let toolbar_bg = macos_toolbar_glass(cx.theme().background, blur_enabled);
+        let toolbar_input_bg =
+            macos_toolbar_input_glass(cx.theme().input_background(), blur_enabled);
 
         v_flex()
             .size_full()
@@ -904,7 +933,7 @@ impl Render for DatabaseObjects {
                     .py_1()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .bg(toolbar_bg)
                     .children(toolbar_buttons)
                     .child(div().flex_1())
                     .child({
@@ -914,6 +943,8 @@ impl Render for DatabaseObjects {
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),
                                 )
+                                .bg(toolbar_input_bg)
+                                .border_color(cx.theme().border.opacity(0.62))
                                 .cleanable(true)
                                 .small()
                                 .w_full(),

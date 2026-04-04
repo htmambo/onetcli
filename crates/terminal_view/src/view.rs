@@ -9,34 +9,34 @@ use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, Theme as UiTheme, WindowExt};
+use gpui_component::{BlinkCursor, Icon, IconName, Sizable, Theme as UiTheme, WindowExt, kbd::Kbd};
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::addon::{
-    register_default_addons, AddonManager, SearchAddon, TerminalAddonFrameContext,
-    TerminalAddonMouseContext,
+    AddonManager, SearchAddon, TerminalAddonFrameContext, TerminalAddonMouseContext,
+    register_default_addons,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
+use crate::terminal_element::{RenderCache, TerminalElement, terminal_font_features};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
-    MIN_LINE_HEIGHT_SCALE,
+    DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    TerminalTheme,
 };
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentEvent};
-use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
+use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use std::ops::Deref;
+use terminal::LocalConfig;
 use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
 };
-use terminal::LocalConfig;
 
 actions!(
     terminal_view,
@@ -109,9 +109,14 @@ fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) ->
 
 fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
     let ui_theme = UiTheme::global(cx);
+    let surface_opacity = if cfg!(target_os = "macos") && ui_theme.window_blur_enabled {
+        (ui_theme.surface_opacity - 0.52).max(0.26)
+    } else {
+        ui_theme.surface_opacity
+    };
     theme
         .clone()
-        .with_surface_opacity(ui_theme.surface_opacity)
+        .with_surface_opacity(surface_opacity)
         .with_material_tint(ui_theme.window_blur_enabled)
 }
 
@@ -2862,9 +2867,10 @@ impl Element for ResizeEventHandler {
 #[cfg(test)]
 mod tests {
     use super::{
-        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
-        has_unterminated_shell_quote, multiline_non_empty_line_count, preserve_theme_typography,
-        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, UnbracketedPasteHazard,
+        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
+        has_trailing_line_continuation, has_unterminated_shell_quote,
+        multiline_non_empty_line_count, preserve_theme_typography,
+        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
     };
     use crate::theme::TerminalTheme;
     use gpui::SharedString;

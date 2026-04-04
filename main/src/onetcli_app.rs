@@ -506,36 +506,44 @@ impl OnetCliApp {
         // 记录是否有可恢复的标签状态
         let has_restored_tabs = tab_state_exists();
 
-        match load_tabs(&tab_container, &registry, window, cx) {
-            Ok(_) => {
+        let saved_active_index = match load_tabs(&tab_container, &registry, window, cx) {
+            Ok(active_index) => {
                 tracing::info!("Tab layout loaded successfully");
+                Some(active_index)
             }
             Err(err) => {
                 tracing::error!("Failed to load tab layout: {:?}", err);
+                None
             }
-        }
+        };
 
         // Set HomePage as the pinned tab (always visible, not scrollable)
+        // 先创建 HomePage 以获取待恢复连接快照
+        let home_page = cx.new(|cx| HomePage::new(tab_container.clone(), window, cx));
+        let has_pending_restore = home_page.read(cx).has_pending_connection_restore_snapshot();
+        // 将恢复标签时保存的原始活动标签索引存入 HomePage，供跳过恢复时使用
+        let _ = home_page.update(cx, |home, _| {
+            home.set_saved_active_tab_index(saved_active_index);
+        });
         let saved_connection_picker = {
-            let tab_container_clone = tab_container.clone();
             tab_container.update(cx, |tc, cx| {
-                let home_page = cx.new(|cx| HomePage::new(tab_container_clone, window, cx));
-                cx.set_global(GlobalHomePage {
-                    home_page: home_page.clone(),
-                });
                 let saved_connection_picker =
                     cx.new(|cx| TabBarSavedConnectionPicker::new(window, cx));
-                let home_tab = TabItem::new("home", "app", home_page);
+                let home_tab = TabItem::new("home", "app", home_page.clone());
                 tc.set_pinned_tab(home_tab, cx);
                 tc.set_tab_bar_trailing_view(saved_connection_picker.clone());
                 tc.set_tab_list_header_action_label(t!("Home.new_connection").to_string());
-                // 只有在没有恢复标签时才激活 pinned tab
-                if !has_restored_tabs {
+                // 如果有待恢复连接弹窗或没有恢复标签，激活 pinned tab。
+                // 有待恢复弹窗时激活是为了让 HomePage 渲染并触发弹窗流程。
+                if !has_restored_tabs || has_pending_restore {
                     tc.activate_pinned_tab(window, cx);
                 }
                 saved_connection_picker
             })
         };
+        cx.set_global(GlobalHomePage {
+            home_page: home_page.clone(),
+        });
 
         let tab_container_for_events = tab_container.clone();
         let saved_connection_picker_for_events = saved_connection_picker.clone();

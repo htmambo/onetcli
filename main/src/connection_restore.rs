@@ -180,9 +180,17 @@ pub fn open_connection_restore_dialog(
             cx.new(|_| ConnectionRestorePopupView::new(home_page, items))
         },
         move |window, cx| {
-            let _ = home_for_close.update(cx, |home, cx| {
-                home.skip_pending_connection_restore(cx);
-            });
+            if let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() {
+                let home_page = home_for_close.clone();
+                let _ = cx.update_window(
+                    main_window_handle.window_handle,
+                    move |_, main_window, cx| {
+                        home_page.update(cx, |home, cx| {
+                            home.skip_pending_connection_restore(main_window, cx);
+                        });
+                    },
+                );
+            }
             request_popup_window_close(window, cx);
             false
         },
@@ -227,9 +235,20 @@ impl ConnectionRestorePopupView {
     }
 
     fn on_skip(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let _ = self.home_page.update(cx, |home, cx| {
-            home.skip_pending_connection_restore(cx);
-        });
+        let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
+            tracing::warn!("恢复连接弹窗未找到主窗口句柄，无法执行跳过恢复操作");
+            return;
+        };
+
+        let home_page = self.home_page.clone();
+        let _ = cx.update_window(
+            main_window_handle.window_handle,
+            move |_, main_window, cx| {
+                home_page.update(cx, |home, cx| {
+                    home.skip_pending_connection_restore(main_window, cx);
+                });
+            },
+        );
         request_popup_window_close(window, cx);
     }
 

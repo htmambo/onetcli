@@ -17,6 +17,13 @@ use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::layout::TOOLBAR_WIDTH;
 
+fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(alpha);
+    }
+    color
+}
+
 /// 侧边栏面板类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarPanel {
@@ -154,11 +161,12 @@ impl DatabaseSidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
         let is_active = self.active_panel == Some(panel);
-        let accent_color = cx.theme().accent;
+        let accent_color = macos_sidebar_glass(cx.theme().accent, blur_enabled, 0.18);
         let accent_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = cx.theme().muted;
+        let muted_bg = macos_sidebar_glass(cx.theme().muted, blur_enabled, 0.10);
 
         div()
             .id(SharedString::from(format!("sidebar-btn-{:?}", panel)))
@@ -184,7 +192,8 @@ impl DatabaseSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let muted_bg = cx.theme().muted;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let muted_bg = macos_sidebar_glass(cx.theme().muted, blur_enabled, 0.16);
 
         v_flex()
             .flex_shrink_0()
@@ -224,7 +233,8 @@ impl Focusable for DatabaseSidebar {
 impl Render for DatabaseSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let bg_color = macos_sidebar_glass(cx.theme().background, blur_enabled, 0.18);
 
         div()
             .h_full()

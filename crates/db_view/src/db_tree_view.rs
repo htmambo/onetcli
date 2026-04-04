@@ -42,6 +42,34 @@ use one_core::{
     storage::{ActiveConnections, GlobalStorageState, StoredConnection},
 };
 
+fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.20);
+    }
+    color
+}
+
+fn macos_sidebar_input_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.12);
+    }
+    color
+}
+
+fn macos_sidebar_selection_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.08);
+    }
+    color
+}
+
+fn macos_sidebar_hover_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+    if cfg!(target_os = "macos") && blur_enabled {
+        color.a = color.a.min(0.05);
+    }
+    color
+}
+
 // ============================================================================
 // SQL 导出模式
 // ============================================================================
@@ -2066,11 +2094,15 @@ impl DbTreeView {
 impl Render for DbTreeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entries_len = self.flat_entries.len();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let sidebar_bg = macos_sidebar_glass(cx.theme().sidebar, blur_enabled);
+        let sidebar_input_bg =
+            macos_sidebar_input_glass(cx.theme().input_background(), blur_enabled);
 
         v_flex()
             .id("db-tree-view")
             .size_full()
-            .bg(cx.theme().sidebar)
+            .bg(sidebar_bg)
             .child({
                 let view_for_collapse = cx.entity();
                 h_flex()
@@ -2079,7 +2111,6 @@ impl Render for DbTreeView {
                     .gap_1()
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
-                    .bg(cx.theme().sidebar)
                     .child(
                         div().flex_1().child(
                             Input::new(&self.search_input)
@@ -2087,6 +2118,8 @@ impl Render for DbTreeView {
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),
                                 )
+                                .bg(sidebar_input_bg)
+                                .border_color(cx.theme().sidebar_border.opacity(0.6))
                                 .cleanable(true)
                                 .small()
                                 .w_full(),
@@ -2110,7 +2143,6 @@ impl Render for DbTreeView {
                 v_flex()
                     .flex_1()
                     .w_full()
-                    .bg(cx.theme().sidebar)
                     .child(
                         div()
                             .id("tree-scroll")
@@ -2267,10 +2299,11 @@ impl DbTreeView {
         let db_filter_list = self.db_filter_list_states.get(&node_id).cloned();
 
         // 样式
-        let selection_bg = cx.theme().sidebar_accent;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let selection_bg = macos_sidebar_selection_glass(cx.theme().sidebar_accent, blur_enabled);
         let selection_bar_color = cx.theme().blue;
         let selection_text_color = cx.theme().sidebar_accent_foreground;
-        let hover_bg = cx.theme().secondary;
+        let hover_bg = macos_sidebar_hover_glass(cx.theme().secondary, blur_enabled);
         let folder_text_color = cx.theme().muted_foreground;
         let foreground_color = cx.theme().sidebar_foreground;
         let indent = px(8.) + px(16.) * depth as f32;
