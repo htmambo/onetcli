@@ -2370,6 +2370,10 @@ impl TabContent for TerminalView {
         true
     }
 
+    fn on_activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
+    }
+
     fn dump(&self, cx: &App) -> JsonValue {
         match self.connection_kind(cx) {
             TerminalConnectionKind::Ssh => {
