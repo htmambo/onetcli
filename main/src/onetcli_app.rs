@@ -9,8 +9,8 @@ use crate::saved_connection_picker::TabBarSavedConnectionPicker;
 use crate::setting_tab::{AppSettings, SavedWindowBounds};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyWindowHandle, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, Styled, Task, Window, actions, div, px,
+    AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
+    ParentElement, Render, Styled, Task, Window, actions, div, px,
 };
 use gpui_component::WindowExt;
 
@@ -1001,7 +1001,7 @@ impl Render for OnetCliApp {
         div()
             .size_full()
             .relative()
-            .bg(cx.theme().background)
+            .bg(cx.theme().transparent)
             .child(
                 v_flex()
                     .size_full()

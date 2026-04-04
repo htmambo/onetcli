@@ -8,8 +8,8 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
-use gpui_component::scroll::{ScrollableElement as _, Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{app_style, kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, WindowExt};
+use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
+use gpui_component::{kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, Theme as UiTheme, WindowExt};
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
 use std::path::PathBuf;
@@ -106,6 +106,15 @@ fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) ->
         .with_font_fallbacks(current.font_fallbacks.clone())
         .with_line_height_scale(current.line_height_scale)
 }
+
+fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
+    let ui_theme = UiTheme::global(cx);
+    theme
+        .clone()
+        .with_surface_opacity(ui_theme.surface_opacity)
+        .with_material_tint(ui_theme.window_blur_enabled)
+}
+
 const DEFAULT_COLS: usize = 80;
 const DEFAULT_ROWS: usize = 24;
 
@@ -1637,6 +1646,8 @@ impl TerminalView {
     }
 
     fn render_terminal(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let effective_theme = effective_terminal_theme(&self.current_theme, cx);
+
         // Prepare addons before rendering
         {
             let is_local =
@@ -1668,7 +1679,7 @@ impl TerminalView {
             let mut term = term.lock();
 
             self.render_cache
-                .update(&mut term, &self.addon_manager, &self.current_theme);
+                .update(&mut term, &self.addon_manager, &effective_theme);
             term.reset_damage();
         }
 
@@ -2479,7 +2490,6 @@ impl Render for TerminalView {
 
         let connection_state = self.terminal.read(cx).connection_state().clone();
         let can_reconnect = self.terminal.read(cx).can_reconnect();
-        let bg_color = self.current_theme.background;
         let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
         let selection_text = self.terminal.read(cx).selection_text();
         let sidebar_visible = self.sidebar.read(cx).is_visible();
@@ -2493,7 +2503,6 @@ impl Render for TerminalView {
             .size_full()
             .flex()
             .flex_row()
-            .bg(bg_color)
             .child({
                 let tooltip = self.addon_manager.tooltip();
                 let mouse_pos = self.mouse_position;
@@ -2570,7 +2579,6 @@ impl Render for TerminalView {
                             .right(px(12.))
                             .top(px(12.))
                             .bottom(px(12.))
-                            .bg(self.current_theme.background)
                             .overflow_hidden()
                             .child(self.render_terminal(cx))
                             .context_menu(move |menu, window, cx| {

@@ -12,14 +12,20 @@ use std::{
 };
 
 mod color;
+mod glass;
 mod registry;
 mod schema;
 mod theme_color;
 
 pub use color::*;
+pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning};
 pub use registry::*;
 pub use schema::*;
 pub use theme_color::*;
+
+pub const DEFAULT_GLASS_OPACITY: f32 = 0.84;
+pub const MIN_GLASS_OPACITY: f32 = 0.40;
+pub const MAX_GLASS_OPACITY: f32 = 1.00;
 
 pub fn init(cx: &mut App) {
     registry::init(cx);
@@ -68,6 +74,8 @@ pub struct Theme {
     pub radius_lg: Pixels,
     pub shadow: bool,
     pub transparent: Hsla,
+    pub window_blur_enabled: bool,
+    pub surface_opacity: f32,
     /// Show the scrollbar mode, default: Scrolling
     pub scrollbar_show: ScrollbarShow,
     /// The notification setting.
@@ -158,12 +166,7 @@ impl Theme {
     /// Change the theme mode.
     pub fn change(mode: impl Into<ThemeMode>, window: Option<&mut Window>, cx: &mut App) {
         let mode = mode.into();
-        if !cx.has_global::<Theme>() {
-            let mut theme = Theme::default();
-            theme.light_theme = ThemeRegistry::global(cx).default_light_theme().clone();
-            theme.dark_theme = ThemeRegistry::global(cx).default_dark_theme().clone();
-            cx.set_global(theme);
-        }
+        Self::ensure_global(cx);
 
         let theme = cx.global_mut::<Theme>();
         theme.mode = mode;
@@ -177,6 +180,14 @@ impl Theme {
         if let Some(window) = window {
             window.refresh();
         }
+    }
+
+    pub fn set_window_surface_preferences(blur_enabled: bool, opacity: f64, cx: &mut App) {
+        Self::ensure_global(cx);
+
+        let theme = cx.global_mut::<Theme>();
+        theme.window_blur_enabled = blur_enabled;
+        theme.surface_opacity = clamp_surface_opacity(opacity);
     }
 
     /// Get the input background color.
@@ -204,6 +215,8 @@ impl From<&ThemeColor> for Theme {
         Theme {
             mode: ThemeMode::default(),
             transparent: Hsla::transparent_black(),
+            window_blur_enabled: true,
+            surface_opacity: DEFAULT_GLASS_OPACITY,
             font_family: ".SystemUIFont".into(),
             font_size: px(16.),
             mono_font_family: if cfg!(target_os = "macos") {
@@ -229,6 +242,21 @@ impl From<&ThemeColor> for Theme {
             dark_theme: Rc::new(ThemeConfig::default()),
             highlight_theme: HighlightTheme::default_light(),
             sheet: SheetSettings::default(),
+        }
+    }
+}
+
+fn clamp_surface_opacity(opacity: f64) -> f32 {
+    (opacity as f32).clamp(MIN_GLASS_OPACITY, MAX_GLASS_OPACITY)
+}
+
+impl Theme {
+    fn ensure_global(cx: &mut App) {
+        if !cx.has_global::<Theme>() {
+            let mut theme = Theme::default();
+            theme.light_theme = ThemeRegistry::global(cx).default_light_theme().clone();
+            theme.dark_theme = ThemeRegistry::global(cx).default_dark_theme().clone();
+            cx.set_global(theme);
         }
     }
 }

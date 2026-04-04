@@ -319,6 +319,29 @@ impl TerminalTheme {
         self
     }
 
+    /// 调整终端主背景透明度，用于接入窗口毛玻璃效果。
+    pub fn with_surface_opacity(mut self, opacity: f32) -> Self {
+        self.background.a = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 在支持或模拟毛玻璃时，为终端主背景增加更接近 frosted glass 的材质感。
+    pub fn with_material_tint(mut self, blur_enabled: bool) -> Self {
+        if !blur_enabled {
+            return self;
+        }
+
+        if self.is_dark() {
+            self.background.s *= 0.52;
+            self.background.l = (self.background.l + 0.14).min(1.0);
+        } else {
+            self.background.s *= 0.72;
+            self.background.l = (self.background.l + 0.08).min(1.0);
+        }
+
+        self
+    }
+
     /// 获取计算后的行高
     pub fn line_height(&self) -> Pixels {
         self.font_size * self.line_height_scale
@@ -484,5 +507,38 @@ impl TerminalTheme {
     /// 获取可用的行高比例预设列表
     pub fn available_line_height_scales() -> Vec<f32> {
         vec![1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.0, 2.2, 2.5]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TerminalTheme;
+
+    #[test]
+    fn 终端主背景透明度可被单独调整() {
+        let theme = TerminalTheme::ocean();
+        let tuned = theme.clone().with_surface_opacity(0.72);
+
+        assert_eq!(tuned.background.a, 0.72);
+        assert_eq!(tuned.foreground, theme.foreground);
+        assert_eq!(tuned.cursor, theme.cursor);
+        assert_eq!(tuned.selection, theme.selection);
+    }
+
+    #[test]
+    fn 终端主背景透明度会被限制在合法范围() {
+        let theme = TerminalTheme::ocean();
+
+        assert_eq!(theme.clone().with_surface_opacity(-0.5).background.a, 0.0);
+        assert_eq!(theme.with_surface_opacity(1.5).background.a, 1.0);
+    }
+
+    #[test]
+    fn 毛玻璃材质会调整终端背景色调() {
+        let theme = TerminalTheme::ocean();
+        let tinted = theme.clone().with_material_tint(true);
+
+        assert!(tinted.background.l > theme.background.l);
+        assert!(tinted.background.s < theme.background.s);
     }
 }

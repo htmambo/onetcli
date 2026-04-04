@@ -6,13 +6,14 @@ use std::sync::{Arc, RwLock};
 use gpui::{
     App, AppContext, AsyncApp, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Pixels,
-    Render, SharedString, StyleRefinement, Styled, Window, WindowAppearance, WindowBounds, div,
-    point, prelude::FluentBuilder, px, size,
+    Render, SharedString, StyleRefinement, Styled, Window, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, div, point, prelude::FluentBuilder, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, Theme, ThemeMode,
+    ActiveTheme, Icon, IconName, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme,
+    ThemeMode,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -328,6 +329,10 @@ pub struct AppSettings {
     pub theme_mode: String,
     #[serde(default)]
     pub auto_switch_theme: bool,
+    #[serde(default = "default_true")]
+    pub enable_glass_effect: bool,
+    #[serde(default = "default_glass_opacity")]
+    pub glass_opacity: f64,
     #[serde(default = "default_font_family")]
     pub font_family: String,
     #[serde(default = "default_font_size")]
@@ -395,6 +400,14 @@ fn default_font_size() -> f64 {
 
 fn clamp_ui_font_size(size: f64) -> f32 {
     size.clamp(8.0, 72.0) as f32
+}
+
+fn default_glass_opacity() -> f64 {
+    0.84
+}
+
+fn clamp_glass_opacity(opacity: f64) -> f64 {
+    opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
 }
 
 #[cfg(target_os = "linux")]
@@ -553,6 +566,8 @@ impl Default for AppSettings {
             locale: "zh-CN".to_string(),
             theme_mode: "light".to_string(),
             auto_switch_theme: false,
+            enable_glass_effect: default_true(),
+            glass_opacity: default_glass_opacity(),
             font_family: default_font_family(),
             font_size: default_font_size(),
             terminal_font_size: default_terminal_font_size(),
@@ -712,6 +727,27 @@ impl AppSettings {
             })
     }
 
+    pub fn preferred_window_background(&self) -> WindowBackgroundAppearance {
+        if !self.enable_glass_effect {
+            return WindowBackgroundAppearance::Transparent;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            WindowBackgroundAppearance::Blurred
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            WindowBackgroundAppearance::Blurred
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            WindowBackgroundAppearance::MicaAltBackdrop
+        }
+    }
+
     pub fn save_global(cx: &mut App) {
         if !cx.has_global::<AppSettings>() {
             return;
@@ -789,8 +825,20 @@ impl AppSettings {
     pub fn apply_theme_preferences(&self, window: Option<&mut Window>, cx: &mut App) {
         let appearance = Self::resolve_system_appearance(window.as_deref(), cx);
         let mode = self.effective_theme_mode(appearance);
+        Theme::set_window_surface_preferences(self.enable_glass_effect, self.glass_opacity, cx);
         Theme::change(mode, window, cx);
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
+        self.apply_window_background_preferences(cx);
+    }
+
+    fn apply_window_background_preferences(&self, cx: &mut App) {
+        let background = self.preferred_window_background();
+        for window_handle in cx.windows() {
+            let _ = window_handle.update(cx, |_, window, _| {
+                window.set_background_appearance(background);
+                window.refresh();
+            });
+        }
     }
 
     pub fn apply(&self, cx: &mut App) {
@@ -1016,6 +1064,49 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Appearance.theme_mode_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.glass_effect"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).enable_glass_effect,
+                                    |val: bool, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.enable_glass_effect = val;
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                )
+                                .default_value(default_settings.enable_glass_effect),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.glass_effect_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.glass_opacity"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: MIN_GLASS_OPACITY as f64,
+                                        max: MAX_GLASS_OPACITY as f64,
+                                        step: 0.01,
+                                    },
+                                    |cx: &App| AppSettings::global(cx).glass_opacity,
+                                    |val: f64, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.glass_opacity = clamp_glass_opacity(val);
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.glass_opacity),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.glass_opacity_desc").to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Font.font_family"),
@@ -1448,11 +1539,11 @@ mod tests {
     use super::parse_deepin_theme_appearance;
     use super::{
         AppSettings, SavedWindowBounds, SavedWindowDisplayState,
-        centered_window_bounds_within_visible_area,
+        centered_window_bounds_within_visible_area, clamp_glass_opacity,
     };
-    use gpui::{Bounds, WindowBounds, point, px, size};
+    use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
-    use gpui_component::ThemeMode;
+    use gpui_component::{MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, ThemeMode};
 
     #[test]
     fn 自动切换关闭时沿用手动主题() {
@@ -1512,6 +1603,24 @@ mod tests {
         settings.set_theme_preference("light");
         assert_eq!(settings.theme_mode, "light");
         assert!(!settings.auto_switch_theme);
+    }
+
+    #[test]
+    fn 毛玻璃透明度会被限制在允许范围内() {
+        assert_eq!(clamp_glass_opacity(0.2), MIN_GLASS_OPACITY as f64);
+        assert_eq!(clamp_glass_opacity(0.84), 0.84);
+        assert_eq!(clamp_glass_opacity(1.5), MAX_GLASS_OPACITY as f64);
+    }
+
+    #[test]
+    fn 关闭毛玻璃时窗口背景保持普通透明() {
+        let mut settings = AppSettings::default();
+        settings.enable_glass_effect = false;
+
+        assert_eq!(
+            settings.preferred_window_background(),
+            WindowBackgroundAppearance::Transparent
+        );
     }
 
     #[test]

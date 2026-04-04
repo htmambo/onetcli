@@ -740,6 +740,22 @@ Settings:
         en: Dark
         zh-CN: 暗色
         zh-HK: 暗色
+      glass_effect:
+        en: Glass Effect
+        zh-CN: 毛玻璃效果
+        zh-HK: 毛玻璃效果
+      glass_effect_desc:
+        en: Enable platform blur or material backdrop for the application window without changing surface opacity
+        zh-CN: 为应用窗口启用平台毛玻璃或材质效果，不影响透明度
+        zh-HK: 為應用視窗啟用平台毛玻璃或材質效果，不影響透明度
+      glass_opacity:
+        en: Window Opacity
+        zh-CN: 窗口透明度
+        zh-HK: 視窗透明度
+      glass_opacity_desc:
+        en: Adjust the translucency of the main surfaces independently from the blur effect
+        zh-CN: 独立调整主界面表面的透明程度，不受毛玻璃开关影响
+        zh-HK: 獨立調整主介面表面的透明程度，不受毛玻璃開關影響
 
     Sync:
       group_title:

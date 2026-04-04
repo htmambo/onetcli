@@ -85,6 +85,7 @@ x11rb::atom_manager! {
         _GTK_EDGE_CONSTRAINTS,
         _DEEPIN_NO_TITLEBAR,
         _DEEPIN_FORCE_DECORATE,
+        _KDE_NET_WM_BLUR_BEHIND_REGION,
         _NET_CLIENT_LIST_STACKING,
     }
 }
@@ -287,6 +288,15 @@ impl X11WindowState {
     fn is_transparent(&self) -> bool {
         self.background_appearance != WindowBackgroundAppearance::Opaque
     }
+}
+
+fn x11_blur_hint_enabled(background_appearance: WindowBackgroundAppearance) -> bool {
+    matches!(background_appearance, WindowBackgroundAppearance::Blurred)
+}
+
+fn x11_blur_hint_region() -> [u32; 1] {
+    // KWin/Deepin on X11 treat a single zero CARDINAL as "blur the whole window".
+    [0]
 }
 
 #[derive(Clone)]
@@ -1017,6 +1027,38 @@ impl X11Window {
 }
 
 impl X11WindowStatePtr {
+    fn sync_background_material_hint(&self) {
+        let (background_appearance, blur_atom) = {
+            let state = self.state.borrow();
+            (
+                state.background_appearance,
+                state.atoms._KDE_NET_WM_BLUR_BEHIND_REGION,
+            )
+        };
+
+        let result = if x11_blur_hint_enabled(background_appearance) {
+            check_reply(
+                || "X11 ChangeProperty32 for _KDE_NET_WM_BLUR_BEHIND_REGION failed.",
+                self.xcb.change_property32(
+                    xproto::PropMode::REPLACE,
+                    self.x_window,
+                    blur_atom,
+                    xproto::AtomEnum::CARDINAL,
+                    &x11_blur_hint_region(),
+                ),
+            )
+        } else {
+            check_reply(
+                || "X11 DeleteProperty for _KDE_NET_WM_BLUR_BEHIND_REGION failed.",
+                self.xcb.delete_property(self.x_window, blur_atom),
+            )
+        };
+
+        if result.log_err().is_some() {
+            xcb_flush(&self.xcb);
+        }
+    }
+
     pub fn should_close(&self) -> bool {
         let mut cb = self.callbacks.borrow_mut();
         if let Some(mut should_close) = cb.should_close.take() {
@@ -1553,6 +1595,9 @@ impl PlatformWindow for X11Window {
         state.background_appearance = background_appearance;
         let transparent = state.is_transparent();
         state.renderer.update_transparency(transparent);
+        drop(state);
+
+        self.0.sync_background_material_hint();
     }
 
     fn background_appearance(&self) -> WindowBackgroundAppearance {
@@ -1928,7 +1973,11 @@ impl PlatformWindow for X11Window {
 
 #[cfg(test)]
 mod tests {
-    use super::{WmHintPropertyState, maximized_wm_hint_property_state};
+    use super::{
+        WmHintPropertyState, maximized_wm_hint_property_state, x11_blur_hint_enabled,
+        x11_blur_hint_region,
+    };
+    use crate::WindowBackgroundAppearance;
 
     #[test]
     fn maximized_windows_use_remove_for_restore() {
@@ -1944,5 +1993,19 @@ mod tests {
             maximized_wm_hint_property_state(false) as u32,
             WmHintPropertyState::Add as u32
         );
+    }
+
+    #[test]
+    fn only_blurred_background_requests_x11_blur_hint() {
+        assert!(!x11_blur_hint_enabled(WindowBackgroundAppearance::Opaque));
+        assert!(!x11_blur_hint_enabled(
+            WindowBackgroundAppearance::Transparent
+        ));
+        assert!(x11_blur_hint_enabled(WindowBackgroundAppearance::Blurred));
+    }
+
+    #[test]
+    fn x11_blur_hint_region_defaults_to_whole_window() {
+        assert_eq!(x11_blur_hint_region(), [0]);
     }
 }

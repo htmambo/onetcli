@@ -640,14 +640,11 @@ impl Theme {
         } else {
             self.light_theme = config.clone();
         }
-        if let Some(style) = &config.highlight {
-            let highlight_theme = Arc::new(HighlightTheme {
-                name: config.name.to_string(),
-                appearance: config.mode,
-                style: style.clone(),
-            });
-            self.highlight_theme = highlight_theme.clone();
-        }
+        let next_highlight_theme = config.highlight.as_ref().map(|style| HighlightTheme {
+            name: config.name.to_string(),
+            appearance: config.mode,
+            style: style.clone(),
+        });
 
         let default_theme = if config.mode.is_dark() {
             Self::from(ThemeColor::dark().as_ref())
@@ -692,6 +689,20 @@ impl Theme {
         }
 
         self.colors.apply_config(&config, &default_theme.colors);
+        crate::theme::apply_glass_tuning(
+            &mut self.colors,
+            config.mode,
+            self.window_blur_enabled,
+            self.surface_opacity,
+        );
+        if let Some(mut highlight_theme) = next_highlight_theme {
+            crate::theme::apply_glass_highlight_tuning(
+                &mut highlight_theme.style,
+                self.window_blur_enabled,
+                self.surface_opacity,
+            );
+            self.highlight_theme = Arc::new(highlight_theme);
+        }
         self.mode = config.mode;
     }
 }

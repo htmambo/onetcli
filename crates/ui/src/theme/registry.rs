@@ -23,7 +23,6 @@ pub(crate) static DEFAULT_THEME_COLORS: LazyLock<
     for theme in themes {
         let mut theme_color = ThemeColor::default();
         theme_color.apply_config(&theme, &ThemeColor::default());
-
         let highlight_theme = HighlightTheme {
             name: theme.name.to_string(),
             appearance: theme.mode,

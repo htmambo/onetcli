@@ -25,8 +25,6 @@ use db_view::database_view_plugin::DatabaseViewPluginRegistry;
 use gpui::*;
 
 use gpui_component::Root;
-#[cfg(target_os = "linux")]
-use gpui_component::linux_prefers_system_window_controls;
 use gpui_component_assets::Assets;
 
 fn main() {
@@ -58,13 +56,6 @@ fn main() {
         }
 
         let window_bounds = AppSettings::global(cx).restored_main_window_bounds(window_size, cx);
-        #[cfg(target_os = "linux")]
-        let window_background = if linux_prefers_system_window_controls() {
-            gpui::WindowBackgroundAppearance::Opaque
-        } else {
-            gpui::WindowBackgroundAppearance::Transparent
-        };
-
         let options = WindowOptions {
             window_bounds: Some(window_bounds),
             #[cfg(not(target_os = "linux"))]
@@ -73,8 +64,7 @@ fn main() {
                 width: px(640.),
                 height: px(480.),
             }),
-            #[cfg(target_os = "linux")]
-            window_background,
+            window_background: AppSettings::global(cx).preferred_window_background(),
             #[cfg(target_os = "linux")]
             app_id: Some("onetcli".to_string()),
             #[cfg(target_os = "linux")]
