@@ -1685,7 +1685,7 @@ impl Render for FileListPanel {
                             .top_0()
                             .right_0()
                             .bottom_0()
-                            .w(px(12.0))
+                            .w(Scrollbar::width())
                             .child(
                                 Scrollbar::vertical(&self.scroll_handle)
                                     .scrollbar_show(ScrollbarShow::Always),

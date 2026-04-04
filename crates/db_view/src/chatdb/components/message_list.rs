@@ -170,7 +170,7 @@ impl MessageListRenderer {
                     .top_0()
                     .right_0()
                     .bottom_0()
-                    .w(px(16.0))
+                    .w(Scrollbar::width())
                     .child(Scrollbar::vertical(ctx.scroll_handle)),
             )
     }

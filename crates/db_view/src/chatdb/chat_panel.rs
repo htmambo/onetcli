@@ -1448,7 +1448,7 @@ impl ChatPanel {
                     .top_0()
                     .right_0()
                     .bottom_0()
-                    .w(px(16.0))
+                    .w(Scrollbar::width())
                     .child(Scrollbar::vertical(&self.scroll_handle)),
             )
     }

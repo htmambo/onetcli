@@ -9,7 +9,7 @@ use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{BlinkCursor, Icon, IconName, Sizable, Theme as UiTheme, WindowExt, kbd::Kbd};
+use gpui_component::{BlinkCursor, Icon, IconName, Root, Sizable, Theme as UiTheme, WindowExt, kbd::Kbd};
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
 use std::path::PathBuf;
@@ -478,10 +478,15 @@ impl TerminalView {
         let view = Self::new_with_terminal(terminal, None, None, true, tab_index, window, cx);
 
         if let Some(error) = init_error.borrow_mut().take() {
-            window.push_notification(
-                Notification::error(format!("创建本地终端失败: {}", error)).autohide(true),
-                cx,
-            );
+            // 窗口初始化期间（如标签页恢复）Root 尚未设置，跳过通知以避免崩溃
+            if window.root::<Root>().is_some() {
+                window.push_notification(
+                    Notification::error(format!("创建本地终端失败: {}", error)).autohide(true),
+                    cx,
+                );
+            } else {
+                tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
+            }
         }
 
         view
@@ -1837,9 +1842,16 @@ impl TerminalView {
         let child_exited = terminal.child_exited();
         let is_user_exit = child_exited.is_some();
 
+        // 根据连接类型选择正确的 locale 前缀
+        let is_ssh = matches!(
+            terminal.connection_kind(),
+            TerminalConnectionKind::Ssh | TerminalConnectionKind::Serial
+        );
+
         div()
             .absolute()
             .inset_0()
+            .occlude()
             .flex()
             .items_center()
             .justify_center()
@@ -1885,9 +1897,17 @@ impl TerminalView {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(rgb(0xffffff))
                                     .child(if is_connecting {
-                                        t!("SshSession.connecting")
+                                        if is_ssh {
+                                            t!("SshSession.connecting")
+                                        } else {
+                                            t!("TerminalView.connecting")
+                                        }
                                     } else {
-                                        t!("SshSession.connection_lost")
+                                        if is_ssh {
+                                            t!("SshSession.connection_lost")
+                                        } else {
+                                            t!("LocalTerminal.connection_lost")
+                                        }
                                     }),
                             ),
                     )
@@ -1907,66 +1927,51 @@ impl TerminalView {
                             .text_sm()
                             .text_color(rgb(0x9ca3af))
                             .child(if is_connecting {
-                                connection_status_message
-                                    .unwrap_or_else(|| t!("SshSession.establishing").to_string())
+                                if is_ssh {
+                                    connection_status_message
+                                        .unwrap_or_else(|| t!("SshSession.establishing").to_string())
+                                } else {
+                                    connection_status_message
+                                        .unwrap_or_else(|| t!("TerminalView.connecting").to_string())
+                                }
                             } else if is_user_exit {
-                                t!("SshSession.session_ended").to_string()
+                                if is_ssh {
+                                    t!("SshSession.session_ended").to_string()
+                                } else {
+                                    t!("LocalTerminal.session_ended").to_string()
+                                }
                             } else {
-                                t!("SshSession.disconnected").to_string()
+                                if is_ssh {
+                                    t!("SshSession.disconnected").to_string()
+                                } else {
+                                    t!("LocalTerminal.disconnected").to_string()
+                                }
                             }),
                     )
                     .when(!is_connecting, |this| {
-                        if is_user_exit {
-                            // 用户通过 exit 命令退出：显示关闭和重新连接按钮
-                            this.child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("close-tab-btn")
-                                            .label(t!("Common.close"))
-                                            .warning()
-                                            .on_click(cx.listener(|this, _, _window, cx| {
-                                                this.request_close(cx);
+                        this.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("close-tab-btn")
+                                        .label(t!("Common.close"))
+                                        .warning()
+                                        .on_click(cx.listener(|this, _, _window, cx| {
+                                            this.request_close(cx);
+                                        })),
+                                )
+                                .when(can_reconnect, |el| {
+                                    el.child(
+                                        Button::new("reconnect-btn")
+                                            .label(t!("SshSession.reconnect"))
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reconnect(window, cx);
                                             })),
                                     )
-                                    .when(can_reconnect, |el| {
-                                        el.child(
-                                            Button::new("reconnect-btn")
-                                                .label(t!("SshSession.reconnect"))
-                                                .primary()
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.reconnect(window, cx);
-                                                })),
-                                        )
-                                    }),
-                            )
-                        } else {
-                            // 网络/远程故障：显示关闭和重连按钮
-                            this.child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("close-tab-btn")
-                                            .label(t!("Common.close"))
-                                            .warning()
-                                            .on_click(cx.listener(|this, _, _window, cx| {
-                                                this.request_close(cx);
-                                            })),
-                                    )
-                                    .when(can_reconnect, |el| {
-                                        el.child(
-                                            Button::new("reconnect-btn")
-                                                .label(t!("SshSession.reconnect"))
-                                                .primary()
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.reconnect(window, cx);
-                                                })),
-                                        )
-                                    }),
-                            )
-                        }
+                                }),
+                        )
                     }),
             )
             .into_any_element()
@@ -2494,6 +2499,9 @@ impl Render for TerminalView {
         }
 
         let connection_state = self.terminal.read(cx).connection_state().clone();
+        let show_connection_overlay =
+            matches!(connection_state, ConnectionState::Disconnected { .. })
+                || matches!(connection_state, ConnectionState::Connecting);
         let can_reconnect = self.terminal.read(cx).can_reconnect();
         let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
         let selection_text = self.terminal.read(cx).selection_text();
@@ -2570,20 +2578,20 @@ impl Render for TerminalView {
                             },
                         )
                         .absolute()
-                        .left(px(12.))
-                        .right(px(12.))
-                        .top(px(12.))
-                        .bottom(px(12.)),
+                        .left_0()
+                        .right_0()
+                        .top_0()
+                        .bottom_0(),
                     )
                     .child({
                         let view = cx.entity().clone();
                         let sidebar = self.sidebar.clone();
                         div()
                             .absolute()
-                            .left(px(12.))
-                            .right(px(12.))
-                            .top(px(12.))
-                            .bottom(px(12.))
+                            .left_0()
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
                             .overflow_hidden()
                             .child(self.render_terminal(cx))
                             .context_menu(move |menu, window, cx| {
@@ -2640,12 +2648,7 @@ impl Render for TerminalView {
                                         .child(tooltip.display_text),
                                 ),
                         )
-                    })
-                    .when(
-                        matches!(connection_state, ConnectionState::Disconnected { .. })
-                            || matches!(connection_state, ConnectionState::Connecting),
-                        |this| this.child(self.render_connection_overlay(can_reconnect, cx)),
-                    );
+                    });
 
                 div()
                     .relative()
@@ -2653,14 +2656,18 @@ impl Render for TerminalView {
                     .flex()
                     .flex_col()
                     .child(terminal_core)
+                    // 连接状态弹窗放在 terminal_core 外部，避免被 Canvas 层拦截点击
+                    .when(show_connection_overlay, |this| {
+                        this.child(self.render_connection_overlay(can_reconnect, cx))
+                    })
                     .when(show_scrollbar, |this| {
                         this.child(
                             div()
                                 .absolute()
                                 .top(px(12.0))
-                                .right(px(4.0))
+                                .right(px(1.0))
                                 .bottom(px(12.0))
-                                .w(px(12.0))
+                                .w(Scrollbar::width())
                                 .child(
                                     Scrollbar::vertical(&self.scrollbar_handle)
                                         .scrollbar_show(ScrollbarShow::Always),

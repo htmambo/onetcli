@@ -482,10 +482,10 @@ impl Terminal {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(next_local_cwd_file_path);
             let _ = std::fs::write(&cwd_file_path, "");
-            local_backend.write(
-                build_local_cwd_tracking_init_command(&cwd_file_path.to_string_lossy())
-                    .into_bytes(),
-            );
+            // local_backend.write(
+            //     build_local_cwd_tracking_init_command(&cwd_file_path.to_string_lossy())
+            //         .into_bytes(),
+            // );
             Some(cwd_file_path)
         };
         #[cfg(target_os = "linux")]

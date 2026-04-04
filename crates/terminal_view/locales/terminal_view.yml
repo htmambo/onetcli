@@ -797,7 +797,25 @@ Serial:
     zh-CN: macOS 不支持虚拟串口(pty)，请使用真实串口设备。
     zh-HK: macOS 不支持虛擬串口(pty)，請使用真實串口設備。
 
-# SSH 会话状态
+# 本地终端状态
+LocalTerminal:
+  connection_lost:
+    en: Connection Lost
+    zh-CN: 连接已断开
+    zh-HK: 連接已斷開
+  disconnected:
+    en: Terminal initialization failed.
+    zh-CN: 终端初始化失败。
+    zh-HK: 終端初始化失敗。
+  session_ended:
+    en: Session ended.
+    zh-CN: 会话已结束。
+    zh-HK: 工作階段已結束。
+  will_close_hint:
+    en: "Click 'Close' to exit."
+    zh-CN: 点击"关闭"退出。
+    zh-HK: 點擊"關閉"退出。
+
 # 终端
 Terminal:
   shell_still_running_title:
@@ -813,7 +831,12 @@ Terminal:
     zh-CN: 强制关闭
     zh-HK: 強制關閉
 
+# SSH 会话状态
 SshSession:
+  reconnect:
+    en: Reconnect
+    zh-CN: 重新连接
+    zh-HK: 重新連接
   connecting:
     en: Connecting...
     zh-CN: 连接中...
@@ -838,10 +861,6 @@ SshSession:
     en: "Click 'Close' to exit."
     zh-CN: 点击"关闭"退出。
     zh-HK: 點擊"關閉"退出。
-  reconnect:
-    en: Reconnect
-    zh-CN: 重新连接
-    zh-HK: 重新連接
 
 # 文件管理器
 FileManager:

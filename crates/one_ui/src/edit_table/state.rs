@@ -22,8 +22,6 @@ use gpui_component::{
     v_flex,
 };
 
-const SCROLLBAR_WIDTH: Pixels = px(16.);
-
 gpui::actions!(
     edit_table_internal,
     [
@@ -424,7 +422,7 @@ where
         }
 
         if self.options.scrollbar_visible.right && self.delegate.rows_count(cx) > 0 {
-            viewport_right -= SCROLLBAR_WIDTH;
+            viewport_right -= Scrollbar::width();
         }
 
         if viewport_right <= viewport_left {
@@ -2842,7 +2840,7 @@ where
                 .top(self.options.size.table_row_height())
                 .right_0()
                 .bottom_0()
-                .w(SCROLLBAR_WIDTH)
+                .w(Scrollbar::width())
                 .child(Scrollbar::vertical(&self.vertical_scroll_handle)),
         )
     }
@@ -2858,7 +2856,7 @@ where
             .left(self.fixed_head_cols_bounds.size.width)
             .right_0()
             .bottom_0()
-            .h(SCROLLBAR_WIDTH)
+            .h(Scrollbar::width())
             .child(Scrollbar::horizontal(&self.horizontal_scroll_handle))
     }
 }
@@ -2973,7 +2971,7 @@ where
                             .flex_grow()
                             .size_full()
                             .when(self.options.scrollbar_visible.bottom, |this| {
-                                this.pb(SCROLLBAR_WIDTH)
+                                this.pb(Scrollbar::width())
                             })
                             .child(
                                 uniform_list(
