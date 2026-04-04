@@ -116,7 +116,7 @@ struct DragPreviewSize {
 }
 
 fn macos_home_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(alpha);
     }
     color

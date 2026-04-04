@@ -16,6 +16,13 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
+fn glass_bg(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
+    if blur_enabled {
+        color.a = color.a.min(alpha);
+    }
+    color
+}
+
 use crate::theme::{TerminalColors, TerminalTheme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -517,10 +524,11 @@ impl TerminalSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
-        let accent_color = self.colors.accent;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let accent_color = glass_bg(self.colors.accent, blur_enabled, 0.18);
         let accent_fg = self.colors.accent_foreground;
         let muted_fg = self.colors.muted_foreground;
-        let muted_bg = self.colors.muted;
+        let muted_bg = glass_bg(self.colors.muted, blur_enabled, 0.10);
 
         div()
             .id(SharedString::from(format!("toolbar-btn-{:?}", panel)))
@@ -546,7 +554,8 @@ impl TerminalSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = self.colors.border;
-        let muted_bg = self.colors.background;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let muted_bg = glass_bg(self.colors.background, blur_enabled, 0.16);
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -612,18 +621,19 @@ impl Focusable for TerminalSidebar {
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let bg_color = glass_bg(cx.theme().background, blur_enabled, 0.18);
 
         div()
             .h_full()
             .flex_shrink_0()
+            .bg(bg_color)
             .when_some(self.active_panel, |this, panel| {
                 this.w_full().child(
                     v_flex()
                         .size_full()
                         .border_l_1()
                         .border_color(border_color)
-                        .bg(bg_color)
                         .child(self.render_panel_content(panel, window, cx)),
                 )
             })

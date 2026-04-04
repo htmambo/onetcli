@@ -18,7 +18,7 @@ use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::layout::TOOLBAR_WIDTH;
 
 fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(alpha);
     }
     color

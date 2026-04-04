@@ -109,7 +109,7 @@ fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) ->
 
 fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
     let ui_theme = UiTheme::global(cx);
-    let surface_opacity = if cfg!(target_os = "macos") && ui_theme.window_blur_enabled {
+    let surface_opacity = if ui_theme.window_blur_enabled {
         (ui_theme.surface_opacity - 0.52).max(0.26)
     } else {
         ui_theme.surface_opacity

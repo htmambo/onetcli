@@ -30,21 +30,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn macos_toolbar_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.20);
     }
     color
 }
 
 fn macos_toolbar_input_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.12);
     }
     color
 }
 
 fn macos_table_head_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.16);
     }
     color

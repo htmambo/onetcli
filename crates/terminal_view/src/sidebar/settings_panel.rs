@@ -848,7 +848,6 @@ impl Render for SettingsPanel {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(

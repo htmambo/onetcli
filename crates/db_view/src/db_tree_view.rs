@@ -43,28 +43,28 @@ use one_core::{
 };
 
 fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.20);
     }
     color
 }
 
 fn macos_sidebar_input_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.12);
     }
     color
 }
 
 fn macos_sidebar_selection_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.08);
     }
     color
 }
 
 fn macos_sidebar_hover_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
-    if cfg!(target_os = "macos") && blur_enabled {
+    if blur_enabled {
         color.a = color.a.min(0.05);
     }
     color
