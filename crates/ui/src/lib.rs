@@ -72,6 +72,7 @@ pub mod table;
 pub mod tag;
 pub mod text;
 pub mod theme;
+pub mod tokens;
 pub mod tooltip;
 pub mod tree;
 
