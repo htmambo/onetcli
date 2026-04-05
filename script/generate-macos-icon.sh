@@ -20,6 +20,12 @@ if [ ! -f "$SOURCE_SVG" ]; then
     exit 1
 fi
 
+# Skip generation if icns already exists
+if [ -f "$OUTPUT_ICNS" ]; then
+    echo "${OUTPUT_ICNS} already exists, skipping generation."
+    exit 0
+fi
+
 mkdir -p "$ICONSET_DIR"
 mkdir -p "$(dirname "$OUTPUT_ICNS")"
 
@@ -46,5 +52,40 @@ render_icon 512 icon_512x512.png
 render_icon 1024 icon_512x512@2x.png
 
 iconutil -c icns "$ICONSET_DIR" -o "$OUTPUT_ICNS"
+
+# Clean trailing garbage from PNG data in ic* chunks.
+# sips sometimes writes extra bytes after PNG IEND, causing non-deterministic icns output.
+python3 - "$OUTPUT_ICNS" << 'PYEOF'
+import struct
+icns_path = __import__('sys').argv[1]
+with open(icns_path, 'rb') as f:
+    data = f.read()
+result = bytearray(data)
+pos = 8
+modified = False
+while pos + 8 <= len(result):
+    chunk_type = result[pos:pos+4]
+    chunk_data_len = struct.unpack('>I', result[pos+4:pos+8])[0]
+    chunk_total = 8 + chunk_data_len
+    if chunk_type[:2] == b'ic':
+        png_data = bytes(result[pos+8:pos+8+chunk_data_len])
+        iend_pos = png_data.find(b'IEND')
+        if iend_pos >= 0:
+            proper_png_len = iend_pos + 12
+            if proper_png_len < chunk_data_len:
+                cleaned_png = png_data[:proper_png_len]
+                before = bytes(result[:pos+8])
+                after = bytes(result[pos+8+chunk_data_len:])
+                new_file_len = len(before) + len(cleaned_png) + len(after)
+                new_header = before[:4] + struct.pack('>I', new_file_len) + before[8:]
+                result = bytearray(new_header + cleaned_png + after)
+                modified = True
+                chunk_total = 8 + proper_png_len
+    pos += chunk_total
+if modified:
+    with open(icns_path, 'wb') as f:
+        f.write(result)
+    print(f"Cleaned trailing garbage from {icns_path}")
+PYEOF
 
 echo "Generated ${OUTPUT_ICNS}"
