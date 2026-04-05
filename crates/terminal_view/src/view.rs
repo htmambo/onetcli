@@ -2511,6 +2511,7 @@ impl Render for TerminalView {
         let terminal_mode = self.terminal.read(cx).mode();
         let history_size = self.terminal.read(cx).term().lock().history_size();
         let show_scrollbar = !terminal_mode.contains(TermMode::ALT_SCREEN) && history_size > 0;
+        let ui_theme = UiTheme::global(cx);
 
         div()
             .size_full()
@@ -2587,8 +2588,9 @@ impl Render for TerminalView {
                         let view = cx.entity().clone();
                         let sidebar = self.sidebar.clone();
                         div()
+                            .bg(if ui_theme.window_blur_enabled { ui_theme.transparent } else { ui_theme.background }) // 终端背景色，避免 Canvas 层未覆盖时闪烁
                             .absolute()
-                            .left_0()
+                            .left_2()
                             .right_0()
                             .top_0()
                             .bottom_0()

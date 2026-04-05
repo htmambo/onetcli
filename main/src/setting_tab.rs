@@ -12,8 +12,8 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
-    ActiveTheme, Icon, IconName, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme,
-    ThemeMode,
+    ActiveTheme, Icon, IconName, LEFT_PANEL_ALPHA_OFFSET, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
+    Sizable, Size, Theme, ThemeMode,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -534,22 +534,37 @@ fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
         .text_color(sync_server_theme::text_primary())
 }
 
-fn settings_group_content_style() -> StyleRefinement {
-    sync_server_theme::surface_style().rounded(px(16.0))
+fn settings_group_content_style(cx: &App) -> StyleRefinement {
+    let blur_enabled = cx.theme().window_blur_enabled;
+    let glass_opacity = AppSettings::global(cx).glass_opacity;
+    // Layer 4: 设置分组内容 - 0.14
+    let bg = settings_glass_with_offset(cx.theme().group_box, blur_enabled, glass_opacity, 0.14);
+    sync_server_theme::surface_style()
+        .rounded(px(16.0))
+        .bg(bg)
 }
 
 fn settings_group_title_style() -> StyleRefinement {
     StyleRefinement::default().text_color(sync_server_theme::text_primary())
 }
 
-fn themed_setting_group(group: SettingGroup) -> SettingGroup {
+fn themed_setting_group(group: SettingGroup, cx: &App) -> SettingGroup {
     group
         .title_style(&settings_group_title_style())
-        .content_style(&settings_group_content_style())
+        .content_style(&settings_group_content_style(cx))
 }
 
-fn themed_setting_page(page: SettingPage) -> SettingPage {
-    page.header_style(&sync_server_theme::page_header_style())
+fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
+    let blur_enabled = cx.theme().window_blur_enabled;
+    let glass_opacity = AppSettings::global(cx).glass_opacity;
+    // Layer 3: 页面标题 - 0.10
+    let header_bg = settings_glass_with_offset(cx.theme().secondary, blur_enabled, glass_opacity, 0.10);
+    page.header_style(
+        &StyleRefinement::default()
+            .bg(header_bg)
+            .border_color(sync_server_theme::border())
+            .text_color(sync_server_theme::text_primary()),
+    )
 }
 
 fn default_system_hotkey_macos() -> String {
@@ -978,18 +993,18 @@ impl SettingsPanel {
         }
     }
 
-    fn setting_pages(&self, _window: &mut Window, _cx: &App) -> Vec<SettingPage> {
+    fn setting_pages(&self, _window: &mut Window, cx: &App) -> Vec<SettingPage> {
         let certificate_manager_view = self.certificate_manager_view.clone();
         let llm_view = self.llm_providers_view.clone();
         let default_settings = AppSettings::default();
         let default_system_hotkey = AppSettings::default().current_system_hotkey().to_string();
 
         vec![
-            themed_setting_page(SettingPage::new(t!("Settings.General.title")))
+            themed_setting_page(SettingPage::new(t!("Settings.General.title")), cx)
                 .resettable(true)
                 .default_open(true)
                 .groups(vec![
-                    themed_setting_group(SettingGroup::new())
+                    themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Language.group_title"))
                         .items(vec![
                             SettingItem::new(
@@ -1022,7 +1037,7 @@ impl SettingsPanel {
                                 t!("Settings.General.Language.ui_language_desc").to_string(),
                             ),
                         ]),
-                    themed_setting_group(SettingGroup::new())
+                    themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Appearance.group_title"))
                         .items(vec![
                             SettingItem::new(
@@ -1169,7 +1184,7 @@ impl SettingsPanel {
                             )
                             .description(t!("Settings.General.Font.font_size_desc").to_string()),
                         ]),
-                    themed_setting_group(SettingGroup::new())
+                    themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Sync.group_title"))
                         .item(
                             SettingItem::new(
@@ -1190,7 +1205,7 @@ impl SettingsPanel {
                             )
                             .description(t!("Settings.General.Sync.server_url_desc").to_string()),
                         ),
-                    themed_setting_group(SettingGroup::new())
+                    themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Terminal.group_title"))
                         .items(vec![
                             SettingItem::new(
@@ -1360,7 +1375,7 @@ impl SettingsPanel {
                                 t!("Settings.General.Terminal.exit_behavior_desc").to_string(),
                             ),
                         ]),
-                    themed_setting_group(SettingGroup::new())
+                    themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Database.group_title"))
                         .items(vec![
                             SettingItem::new(
@@ -1446,8 +1461,8 @@ impl SettingsPanel {
                         ]),
                 ]),
             // 快捷键页面
-            themed_setting_page(SettingPage::new(t!("Settings.Shortcuts.title"))).group(
-                themed_setting_group(SettingGroup::new())
+            themed_setting_page(SettingPage::new(t!("Settings.Shortcuts.title")), cx).group(
+                themed_setting_group(SettingGroup::new(), cx)
                     .item(
                         SettingItem::new(
                             t!("Settings.Shortcuts.system_hotkey"),
@@ -1499,33 +1514,33 @@ impl SettingsPanel {
                         render_shortcuts_section(cx)
                     })),
             ),
-            themed_setting_page(SettingPage::new(t!("LlmProviders.title"))).group(
-                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+            themed_setting_page(SettingPage::new(t!("LlmProviders.title")), cx).group(
+                themed_setting_group(SettingGroup::new(), cx).item(SettingItem::render(
                     move |_options, _window, _cx| llm_view.clone().into_any_element(),
                 )),
             ),
-            themed_setting_page(SettingPage::new(t!("CertificateManager.title"))).group(
-                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+            themed_setting_page(SettingPage::new(t!("CertificateManager.title")), cx).group(
+                themed_setting_group(SettingGroup::new(), cx).item(SettingItem::render(
                     move |_options, _window, _cx| {
                         certificate_manager_view.clone().into_any_element()
                     },
                 )),
             ),
             // 账户设置页
-            themed_setting_page(SettingPage::new(t!("Settings.Account.title"))).group(
-                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+            themed_setting_page(SettingPage::new(t!("Settings.Account.title")), cx).group(
+                themed_setting_group(SettingGroup::new(), cx).item(SettingItem::render(
                     move |_options, window, cx| render_account_section(window, cx),
                 )),
             ),
             // 支持作者页面
-            themed_setting_page(SettingPage::new(t!("Encourage.button_label"))).group(
-                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+            themed_setting_page(SettingPage::new(t!("Encourage.button_label")), cx).group(
+                themed_setting_group(SettingGroup::new(), cx).item(SettingItem::render(
                     move |_options, _window, cx| render_encourage_section(cx),
                 )),
             ),
             // 关于页面
-            themed_setting_page(SettingPage::new(t!("Settings.About.title"))).group(
-                themed_setting_group(SettingGroup::new()).item(SettingItem::render(
+            themed_setting_page(SettingPage::new(t!("Settings.About.title")), cx).group(
+                themed_setting_group(SettingGroup::new(), cx).item(SettingItem::render(
                     move |_options, _window, cx| render_about_section(cx),
                 )),
             ),
@@ -1772,24 +1787,66 @@ impl TabContent for SettingsPanel {
     }
 }
 
+/// 透明度辅助函数：根据层级和应用透明度计算最终透明度
+/// 当毛玻璃关闭时，返回原始颜色（让主题色的 surface_tuning 决定透明度）
+/// 当毛玻璃开启时，使用 glass_opacity 作为基础透明度，并根据层级调整
+fn settings_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f64) -> gpui::Hsla {
+    if !blur_enabled {
+        return color;
+    }
+    // 左侧面板：alpha = glass_opacity + LEFT_PANEL_ALPHA_OFFSET
+    let offset = LEFT_PANEL_ALPHA_OFFSET;
+    let new_a = (glass_opacity as f32 + offset).clamp(0.0, 1.0);
+    color.a = new_a;
+    color
+}
+
+fn settings_glass_with_offset(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f64, extra_offset: f32) -> gpui::Hsla {
+    if !blur_enabled {
+        return color;
+    }
+    // alpha = glass_opacity + extra_offset
+    let new_a = (glass_opacity as f32 + extra_offset).clamp(0.0, 1.0);
+    color.a = new_a;
+    color
+}
+
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !cx.has_global::<AppSettings>() {
             init_settings(cx);
         }
 
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = AppSettings::global(cx).glass_opacity;
+        // 左侧面板透明度：使用统一的 alpha = glass_opacity + LEFT_PANEL_ALPHA_OFFSET
+        let sidebar_bg = settings_glass(cx.theme().sidebar, blur_enabled, glass_opacity);
+        // 页面背景透明度：glass_opacity + 0.02
+        let page_bg = settings_glass_with_offset(cx.theme().background, blur_enabled, glass_opacity, 0.02);
+        let sidebar_style = StyleRefinement::default()
+            .bg(sidebar_bg)
+            .border_color(cx.theme().sidebar_border)
+            .text_color(cx.theme().sidebar_foreground);
+        let content_style = StyleRefinement::default()
+            .bg(page_bg);
+
         div()
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(sync_server_theme::page_bg())
+            .bg(if blur_enabled { cx.theme().transparent } else { cx.theme().background })
             .child(
-                Settings::new("main-app-settings")
-                    .with_size(self.size)
-                    .with_group_variant(self.group_variant)
-                    .sidebar_style(&sync_server_theme::sidebar_style())
-                    .header_style(&sync_server_theme::control_style())
-                    .default_selected_index(self.selected_page.select_index())
-                    .pages(self.setting_pages(window, cx)),
+                div()
+                    .size_full()
+                    .child(
+                        Settings::new("main-app-settings")
+                            .with_size(self.size)
+                            .with_group_variant(self.group_variant)
+                            .sidebar_style(&sidebar_style)
+                            .content_style(&content_style)
+                            .header_style(&sync_server_theme::control_style())
+                            .default_selected_index(self.selected_page.select_index())
+                            .pages(self.setting_pages(window, cx)),
+                    ),
             )
     }
 }

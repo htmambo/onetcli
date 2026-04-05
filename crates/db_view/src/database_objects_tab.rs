@@ -29,23 +29,23 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn macos_toolbar_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+fn macos_toolbar_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
     if blur_enabled {
-        color.a = color.a.min(0.20);
+        color.a = alpha;
     }
     color
 }
 
-fn macos_toolbar_input_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+fn macos_toolbar_input_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
     if blur_enabled {
-        color.a = color.a.min(0.12);
+        color.a = alpha;
     }
     color
 }
 
-fn macos_table_head_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
+fn macos_table_head_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
     if blur_enabled {
-        color.a = color.a.min(0.16);
+        color.a = alpha;
     }
     color
 }
@@ -675,7 +675,7 @@ impl DatabaseObjects {
             .border_b_1()
             .border_color(cx.theme().border)
             .text_color(cx.theme().table_head_foreground)
-            .bg(macos_table_head_glass(cx.theme().table_head, blur_enabled));
+            .bg(macos_table_head_glass(cx.theme().table_head, blur_enabled, 0.16));
 
         if show_row_number {
             header = header.child(
@@ -919,9 +919,10 @@ impl Render for DatabaseObjects {
         let list_columns = columns.clone();
         let list_search_query = search_query.clone();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let toolbar_bg = macos_toolbar_glass(cx.theme().background, blur_enabled);
+        let toolbar_bg = macos_toolbar_glass(cx.theme().background, blur_enabled, 0.20);
         let toolbar_input_bg =
-            macos_toolbar_input_glass(cx.theme().input_background(), blur_enabled);
+            macos_toolbar_input_glass(cx.theme().input_background(), blur_enabled, 0.12);
+        let list_bg = macos_toolbar_glass(cx.theme().background, blur_enabled, 0.20);
 
         v_flex()
             .size_full()
@@ -954,7 +955,7 @@ impl Render for DatabaseObjects {
             )
             .child(
                 v_flex().size_full().gap_2().child(header).child(
-                    div().flex_1().overflow_hidden().child(
+                    div().flex_1().overflow_hidden().bg(list_bg).child(
                         uniform_list("database-objects-list", row_count, {
                             cx.processor(
                                 move |state: &mut Self, range: Range<usize>, _window, cx| {
@@ -1024,7 +1025,7 @@ impl Render for DatabaseObjects {
                     ),
                 ),
             )
-            .child(div().p_2().text_sm().child(title))
+            .child(div().p_2().text_sm().bg(list_bg).child(title))
     }
 }
 

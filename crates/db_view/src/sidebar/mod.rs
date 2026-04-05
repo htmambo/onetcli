@@ -17,9 +17,10 @@ use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::layout::TOOLBAR_WIDTH;
 
-fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, alpha: f32) -> gpui::Hsla {
+fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
     if blur_enabled {
-        color.a = color.a.min(alpha);
+        let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
+        color.a = alpha;
     }
     color
 }
@@ -162,11 +163,12 @@ impl DatabaseSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
         let is_active = self.active_panel == Some(panel);
-        let accent_color = macos_sidebar_glass(cx.theme().accent, blur_enabled, 0.18);
+        let accent_color = macos_sidebar_glass(cx.theme().accent, blur_enabled, glass_opacity);
         let accent_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = macos_sidebar_glass(cx.theme().muted, blur_enabled, 0.10);
+        let muted_bg = macos_sidebar_glass(cx.theme().muted, blur_enabled, glass_opacity);
 
         div()
             .id(SharedString::from(format!("sidebar-btn-{:?}", panel)))
@@ -193,7 +195,8 @@ impl DatabaseSidebar {
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let muted_bg = macos_sidebar_glass(cx.theme().muted, blur_enabled, 0.16);
+        let glass_opacity = cx.theme().surface_opacity;
+        let muted_bg = macos_sidebar_glass(cx.theme().muted, blur_enabled, glass_opacity);
 
         v_flex()
             .flex_shrink_0()
@@ -234,7 +237,8 @@ impl Render for DatabaseSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let bg_color = macos_sidebar_glass(cx.theme().background, blur_enabled, 0.18);
+        let glass_opacity = cx.theme().surface_opacity;
+        let bg_color = macos_sidebar_glass(cx.theme().background, blur_enabled, glass_opacity);
 
         div()
             .h_full()

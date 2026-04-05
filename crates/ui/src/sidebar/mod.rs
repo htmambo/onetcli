@@ -213,7 +213,6 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
             .h_full()
             .overflow_hidden()
             .relative()
-            .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
             .border_color(cx.theme().sidebar_border)
             .map(|this| match self.side {

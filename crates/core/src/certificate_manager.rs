@@ -4,7 +4,7 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Subscription, Window, div,
 };
 use gpui_component::{
-    Disableable, IndexPath, Sizable, StyledExt as _, WindowExt, app_style,
+    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, WindowExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -185,6 +185,14 @@ impl Focusable for CertificateManagerView {
 
 impl Render for CertificateManagerView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 层级透明度：容器 Layer 2 (0.10)
+        let container_bg = if cx.theme().window_blur_enabled {
+            cx.theme().background.opacity(0.10)
+        } else {
+            cx.theme().background
+        };
+        let primary_btn_variant = app_style::primary_button_variant(cx);
+
         let certificate_cards =
             v_flex()
                 .gap_3()
@@ -205,7 +213,12 @@ impl Render for CertificateManagerView {
                         .rounded_lg()
                         .border_1()
                         .border_color(app_style::border())
-                        .bg(app_style::panel_bg())
+                        // Layer 5: 卡片 - 0.18
+                        .bg(if cx.theme().window_blur_enabled {
+                            cx.theme().group_box.opacity(0.18)
+                        } else {
+                            cx.theme().group_box
+                        })
                         .child(
                             h_flex()
                                 .justify_between()
@@ -288,7 +301,7 @@ impl Render for CertificateManagerView {
 
         v_flex()
             .size_full()
-            .bg(app_style::page_bg())
+            .bg(container_bg)
             .child(
                 div()
                     .refine_style(&app_style::page_header_style())
@@ -319,7 +332,7 @@ impl Render for CertificateManagerView {
                             )
                             .child(
                                 Button::new("add-certificate")
-                                    .with_variant(app_style::primary_button_variant(cx))
+                                    .with_variant(primary_btn_variant)
                                     .label(t!("CertificateManager.add").to_string())
                                     .on_click(cx.listener(|_, _, window, cx| {
                                         open_certificate_editor_popup(None, window, cx);

@@ -208,10 +208,19 @@ impl LlmProvidersView {
 
 impl Render for LlmProvidersView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        // 层级透明度：容器 Layer 2 (0.10)，卡片 Layer 5 (0.18)
+        let container_bg = if blur_enabled {
+            cx.theme().background.opacity(0.10)
+        } else {
+            cx.theme().background
+        };
+
         v_flex()
             .size_full()
             .gap_4()
             .p_6()
+            .bg(container_bg)
             .child(
                 h_flex()
                     .justify_between()
@@ -284,6 +293,7 @@ impl LlmProvidersView {
         provider: &ProviderConfig,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
         let provider_id = provider.id;
         let provider_for_default = provider.clone();
         let provider_for_toggle = provider.clone();
@@ -305,7 +315,12 @@ impl LlmProvidersView {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            // Layer 5: 卡片 - 0.18
+            .bg(if blur_enabled {
+                cx.theme().background.opacity(0.18)
+            } else {
+                cx.theme().background
+            })
             .child(info)
             .child(actions)
     }

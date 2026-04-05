@@ -26,6 +26,8 @@ pub use theme_color::*;
 pub const DEFAULT_GLASS_OPACITY: f32 = 0.84;
 pub const MIN_GLASS_OPACITY: f32 = 0.40;
 pub const MAX_GLASS_OPACITY: f32 = 1.00;
+/// 左侧面板毛玻璃透明度偏移量
+pub const LEFT_PANEL_ALPHA_OFFSET: f32 = 0.1;
 
 pub fn init(cx: &mut App) {
     registry::init(cx);
@@ -186,8 +188,20 @@ impl Theme {
         Self::ensure_global(cx);
 
         let theme = cx.global_mut::<Theme>();
+        let mode = theme.mode;
         theme.window_blur_enabled = blur_enabled;
         theme.surface_opacity = clamp_surface_opacity(opacity);
+
+        // 重新应用毛玻璃调整到主题颜色
+        crate::theme::apply_glass_tuning(
+            &mut theme.colors,
+            mode,
+            blur_enabled,
+            theme.surface_opacity,
+        );
+
+        // 刷新所有窗口以应用新颜色
+        cx.refresh_windows();
     }
 
     /// Get the input background color.

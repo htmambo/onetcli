@@ -9,6 +9,14 @@ use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::ai_chat::{AiChatPanel, AiChatPanelEvent};
 use one_core::layout::TOOLBAR_WIDTH;
 
+fn sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
+    if blur_enabled {
+        let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
+        color.a = alpha;
+    }
+    color
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarPanel {
     AiChat,
@@ -117,10 +125,12 @@ impl MongoSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
-        let accent_color = cx.theme().accent;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
+        let accent_color = sidebar_glass(cx.theme().accent, blur_enabled, glass_opacity);
         let accent_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = cx.theme().muted;
+        let muted_bg = sidebar_glass(cx.theme().muted, blur_enabled, glass_opacity);
 
         div()
             .id(SharedString::from(format!(
@@ -148,7 +158,9 @@ impl MongoSidebar {
 
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let muted_bg = cx.theme().muted;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
+        let muted_bg = sidebar_glass(cx.theme().muted, blur_enabled, glass_opacity);
 
         v_flex()
             .flex_shrink_0()
@@ -187,7 +199,9 @@ impl Focusable for MongoSidebar {
 impl Render for MongoSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
+        let bg_color = sidebar_glass(cx.theme().background, blur_enabled, glass_opacity);
 
         div()
             .h_full()
