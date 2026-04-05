@@ -165,3 +165,77 @@ pub fn danger_button_variant(cx: &App) -> ButtonVariant {
             .active(cx.theme().danger_active),
     )
 }
+
+// === 语义化背景色 ===
+
+/// 毛玻璃基础层背景（窗口最底层）
+pub fn glass_base() -> Hsla {
+    active_theme().background
+}
+
+/// 毛玻璃浮层背景（Popover 等）
+pub fn glass_elevated() -> Hsla {
+    active_theme().popover
+}
+
+/// 内容区背景
+pub fn glass_content() -> Hsla {
+    active_theme().secondary
+}
+
+/// 卡片/面板背景
+pub fn glass_surface() -> Hsla {
+    active_theme().group_box
+}
+
+/// 侧边栏背景
+pub fn glass_sidebar() -> Hsla {
+    active_theme().sidebar
+}
+
+// === 语义化边框色 ===
+
+/// 细线分隔边框
+pub fn border_subtle() -> Hsla {
+    active_theme().border
+}
+
+/// 标准边框
+pub fn border_default() -> Hsla {
+    active_theme().border
+}
+
+// === 语义化文字色 ===
+
+/// 次要文字
+pub fn text_secondary() -> Hsla {
+    active_theme().muted_foreground
+}
+
+// === 语义化交互色 ===
+
+/// 主要交互色（按钮背景等）
+pub fn interactive_primary() -> Hsla {
+    active_theme().primary
+}
+
+pub fn interactive_hover() -> Hsla {
+    active_theme().primary_hover
+}
+
+// === 语义化区域色 ===
+
+/// 标题栏背景
+pub fn title_bar_bg() -> Hsla {
+    active_theme().title_bar
+}
+
+/// 工具栏背景
+pub fn toolbar_bg() -> Hsla {
+    active_theme().sidebar
+}
+
+/// Tab 栏背景
+pub fn tab_bar_bg() -> Hsla {
+    active_theme().tab_bar
+}
