@@ -8,6 +8,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::clipboard::Clipboard;
+use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use rust_i18n::t;
 use std::sync::Arc;
@@ -70,7 +71,7 @@ impl EncourageContent {
                             .child(
                                 div()
                                     .w(px(36.0))
-                                    .h(px(36.0))
+                                    .h(px(TOOLBAR_HEIGHT))
                                     .rounded_xl()
                                     .bg(gpui::hsla(0.0, 0.0, 0.5, 0.08))
                                     .flex()

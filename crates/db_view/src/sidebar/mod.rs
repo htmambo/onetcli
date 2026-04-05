@@ -12,6 +12,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
+use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, v_flex};
 use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
@@ -173,7 +174,7 @@ impl DatabaseSidebar {
         div()
             .id(SharedString::from(format!("sidebar-btn-{:?}", panel)))
             .w(px(36.0))
-            .h(px(36.0))
+            .h(px(TOOLBAR_HEIGHT))
             .flex()
             .items_center()
             .justify_center()
