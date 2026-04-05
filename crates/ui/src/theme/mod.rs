@@ -27,7 +27,7 @@ pub const DEFAULT_GLASS_OPACITY: f32 = 0.84;
 pub const MIN_GLASS_OPACITY: f32 = 0.40;
 pub const MAX_GLASS_OPACITY: f32 = 1.00;
 /// 左侧面板毛玻璃透明度偏移量
-pub const LEFT_PANEL_ALPHA_OFFSET: f32 = 0.1;
+pub const LEFT_PANEL_ALPHA_OFFSET: f32 = 0.20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsSurfaceLayer {

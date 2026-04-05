@@ -185,12 +185,6 @@ impl Focusable for CertificateManagerView {
 
 impl Render for CertificateManagerView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 层级透明度：容器 Layer 2 (0.10)
-        let container_bg = if cx.theme().window_blur_enabled {
-            cx.theme().background.opacity(0.10)
-        } else {
-            cx.theme().background
-        };
         let primary_btn_variant = app_style::primary_button_variant(cx);
 
         let certificate_cards =
@@ -301,7 +295,6 @@ impl Render for CertificateManagerView {
 
         v_flex()
             .size_full()
-            .bg(container_bg)
             .child(
                 div()
                     .refine_style(&app_style::page_header_style())

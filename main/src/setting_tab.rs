@@ -536,9 +536,7 @@ fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
 
 fn settings_group_content_style(cx: &App) -> StyleRefinement {
     let blur_enabled = cx.theme().window_blur_enabled;
-    let glass_opacity = AppSettings::global(cx).glass_opacity;
-    // Layer 4: 设置分组内容 - 0.14
-    let bg = settings_glass_with_offset(cx.theme().group_box, blur_enabled, glass_opacity, 0.14);
+    let bg = settings_glass_with_offset(cx.theme().group_box, blur_enabled, 0.0, 0.14);
     sync_server_theme::surface_style()
         .rounded(px(16.0))
         .bg(bg)
@@ -558,7 +556,7 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     let blur_enabled = cx.theme().window_blur_enabled;
     let glass_opacity = AppSettings::global(cx).glass_opacity;
     // Layer 3: 页面标题 - 0.10
-    let header_bg = settings_glass_with_offset(cx.theme().secondary, blur_enabled, glass_opacity, 0.10);
+    let header_bg = settings_glass_with_offset(cx.theme().secondary, blur_enabled, 0.0, 0.28);
     page.header_style(
         &StyleRefinement::default()
             .bg(header_bg)
