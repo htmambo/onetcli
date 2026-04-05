@@ -1,6 +1,6 @@
 use crate::{
     highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
-    scroll::ScrollbarShow, sheet::SheetSettings,
+    scroll::ScrollbarShow, sheet::SheetSettings, tokens::color::semantic::{SemanticColorsDark, SemanticColorsLight},
 };
 use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
 use schemars::JsonSchema;
@@ -15,12 +15,14 @@ mod color;
 mod glass;
 mod registry;
 mod schema;
+mod semantic;
 mod theme_color;
 
 pub use color::*;
 pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning};
 pub use registry::*;
 pub use schema::*;
+pub use semantic::SemanticColorsRef;
 pub use theme_color::*;
 
 pub const DEFAULT_GLASS_OPACITY: f32 = 0.84;
@@ -141,6 +143,12 @@ pub struct Theme {
     /// The sheet settings.
     pub sheet: SheetSettings,
 }
+
+/// Dark 模式语义色静态实例
+static SEMANTIC_DARK: SemanticColorsDark = SemanticColorsDark;
+
+/// Light 模式语义色静态实例
+static SEMANTIC_LIGHT: SemanticColorsLight = SemanticColorsLight;
 
 impl Default for Theme {
     fn default() -> Self {
@@ -269,6 +277,16 @@ impl Theme {
             .style
             .editor_background
             .unwrap_or_else(|| self.input_background())
+    }
+
+    /// 获取语义化颜色（基于当前模式）
+    #[inline(always)]
+    pub fn semantic(&self) -> SemanticColorsRef<'_> {
+        if self.is_dark() {
+            SemanticColorsRef::Dark(&SEMANTIC_DARK)
+        } else {
+            SemanticColorsRef::Light(&SEMANTIC_LIGHT)
+        }
     }
 }
 
