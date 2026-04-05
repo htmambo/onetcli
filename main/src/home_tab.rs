@@ -35,6 +35,7 @@ use one_core::crypto;
 use one_core::key_storage;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
+use one_core::layout::SIDEBAR_DEFAULT_WIDTH;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
     PendingCloudDeletionMetadata, PendingCloudDeletionRepository, RedisMode, StoredConnection,
@@ -3016,7 +3017,7 @@ impl HomePage {
         let filter_types = ConnectionType::all();
 
         v_flex()
-            .w(px(200.0))
+            .w(SIDEBAR_DEFAULT_WIDTH)
             .h_full()
             .bg(sidebar_bg)
             .border_r_1()
