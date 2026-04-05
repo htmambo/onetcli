@@ -12,21 +12,19 @@ mod tests {
 
     #[test]
     fn test_spacing_values() {
-        // Note: enum indices start at 0, so Unit1=0, Unit2=1, etc.
-        // Values are index * 4.0
-        assert!((f32::from(Spacing::Unit1.px()) - 0.0).abs() < 0.001);
-        assert!((f32::from(Spacing::Unit2.px()) - 4.0).abs() < 0.001);
-        assert!((f32::from(Spacing::Unit3.px()) - 8.0).abs() < 0.001);
-        assert!((f32::from(Spacing::Unit4.px()) - 12.0).abs() < 0.001);
-        assert!((f32::from(Spacing::Unit8.px()) - 24.0).abs() < 0.001);
-        assert!((f32::from(Spacing::Unit10.px()) - 28.0).abs() < 0.001);
+        assert!((f32::from(Spacing::Unit1.px()) - 4.0).abs() < 0.001);
+        assert!((f32::from(Spacing::Unit2.px()) - 8.0).abs() < 0.001);
+        assert!((f32::from(Spacing::Unit3.px()) - 12.0).abs() < 0.001);
+        assert!((f32::from(Spacing::Unit4.px()) - 16.0).abs() < 0.001);
+        assert!((f32::from(Spacing::Unit8.px()) - 32.0).abs() < 0.001);
+        assert!((f32::from(Spacing::Unit10.px()) - 40.0).abs() < 0.001);
     }
 
     #[test]
     fn test_spacing_values_as_f32() {
-        assert!((Spacing::Unit1.value() - 0.0).abs() < 0.001);
-        assert!((Spacing::Unit4.value() - 12.0).abs() < 0.001);
-        assert!((Spacing::Unit16.value() - 36.0).abs() < 0.001);
+        assert!((Spacing::Unit1.value() - 4.0).abs() < 0.001);
+        assert!((Spacing::Unit4.value() - 16.0).abs() < 0.001);
+        assert!((Spacing::Unit16.value() - 64.0).abs() < 0.001);
     }
 
     #[test]

@@ -8,36 +8,36 @@ use gpui::Pixels;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spacing {
     /// 4px
-    Unit1,
+    Unit1 = 4,
     /// 8px
-    Unit2,
+    Unit2 = 8,
     /// 12px
-    Unit3,
+    Unit3 = 12,
     /// 16px
-    Unit4,
+    Unit4 = 16,
     /// 20px
-    Unit5,
+    Unit5 = 20,
     /// 24px
-    Unit6,
+    Unit6 = 24,
     /// 32px
-    Unit8,
+    Unit8 = 32,
     /// 40px
-    Unit10,
+    Unit10 = 40,
     /// 48px
-    Unit12,
+    Unit12 = 48,
     /// 64px
-    Unit16,
+    Unit16 = 64,
 }
 
 impl Spacing {
     /// 转换为 Pixels
     pub fn px(self) -> Pixels {
-        Pixels::from((self as i32 as f32) * 4.0)
+        Pixels::from(self as i32 as f32)
     }
 
     /// 直接数值（用于需要 f32 的场景）
     pub fn value(self) -> f32 {
-        self as i32 as f32 * 4.0
+        self as i32 as f32
     }
 }
 
