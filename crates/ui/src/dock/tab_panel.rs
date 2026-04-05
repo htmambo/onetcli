@@ -25,6 +25,8 @@ use super::{
 
 const TAB_DRAG_THRESHOLD: f64 = 6.0;
 
+const DOCK_TAB_HEIGHT: f32 = 30.0;
+
 #[derive(Clone)]
 struct TabState {
     closable: bool,
@@ -640,7 +642,7 @@ impl TabPanel {
             return h_flex()
                 .justify_between()
                 .line_height(rems(1.0))
-                .h(px(30.))
+                .h(px(DOCK_TAB_HEIGHT))
                 .py_2()
                 .pl_3()
                 .pr_2()
