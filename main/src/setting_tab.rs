@@ -1837,7 +1837,7 @@ impl Render for SettingsPanel {
         div()
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(if blur_enabled { cx.theme().transparent } else { cx.theme().background })
+            // .bg(if blur_enabled { cx.theme().transparent } else { cx.theme().background })
             .child(
                 div()
                     .size_full()
