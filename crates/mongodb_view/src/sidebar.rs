@@ -4,18 +4,11 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, v_flex};
+use gpui_component::{ActiveTheme, glass_sidebar, Icon, IconName, Sizable, Size, v_flex};
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::ai_chat::{AiChatPanel, AiChatPanelEvent};
 use one_core::layout::TOOLBAR_WIDTH;
 
-fn sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
-    if blur_enabled {
-        let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
-        color.a = alpha;
-    }
-    color
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarPanel {
@@ -127,10 +120,10 @@ impl MongoSidebar {
         let is_active = self.active_panel == Some(panel);
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let accent_color = sidebar_glass(cx.theme().accent, blur_enabled, glass_opacity);
+        let accent_color = glass_sidebar(cx.theme().accent, blur_enabled, glass_opacity);
         let accent_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = sidebar_glass(cx.theme().muted, blur_enabled, glass_opacity);
+        let muted_bg = glass_sidebar(cx.theme().muted, blur_enabled, glass_opacity);
 
         div()
             .id(SharedString::from(format!(
@@ -160,7 +153,7 @@ impl MongoSidebar {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let muted_bg = sidebar_glass(cx.theme().muted, blur_enabled, glass_opacity);
+        let muted_bg = glass_sidebar(cx.theme().muted, blur_enabled, glass_opacity);
 
         v_flex()
             .flex_shrink_0()
@@ -201,7 +194,7 @@ impl Render for MongoSidebar {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let bg_color = sidebar_glass(cx.theme().background, blur_enabled, glass_opacity);
+        let bg_color = glass_sidebar(cx.theme().background, blur_enabled, glass_opacity);
 
         div()
             .h_full()

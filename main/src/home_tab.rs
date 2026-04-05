@@ -14,7 +14,7 @@ use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt,
-    LEFT_PANEL_ALPHA_OFFSET, Sizable, Size, WindowExt, WindowsSurfaceLayer, app_style,
+    glass_sidebar_f64, Sizable, Size, WindowExt, WindowsSurfaceLayer, app_style,
     tokens::Radius,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
@@ -138,19 +138,6 @@ fn macos_home_glass(
     color
 }
 
-/// 首页侧边栏毛玻璃效果：使用统一的 LEFT_PANEL_ALPHA_OFFSET
-fn macos_home_sidebar_glass(
-    mut color: gpui::Hsla,
-    blur_enabled: bool,
-    glass_opacity: f64,
-) -> gpui::Hsla {
-    if !blur_enabled {
-        return color;
-    }
-    let new_a = (glass_opacity as f32 + LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
-    color.a = new_a;
-    color
-}
 
 #[derive(Clone)]
 struct DragWorkspace {
@@ -3009,11 +2996,11 @@ impl HomePage {
 
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
-        let sidebar_bg = macos_home_sidebar_glass(cx.theme().sidebar, blur_enabled, glass_opacity);
+        let sidebar_bg = glass_sidebar_f64(cx.theme().sidebar, blur_enabled, glass_opacity);
         let sidebar_active_bg =
-            macos_home_sidebar_glass(cx.theme().list_active, blur_enabled, glass_opacity);
+            glass_sidebar_f64(cx.theme().list_active, blur_enabled, glass_opacity);
         let sidebar_hover_bg =
-            macos_home_sidebar_glass(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
+            glass_sidebar_f64(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
         let filter_types = ConnectionType::all();
 
         v_flex()

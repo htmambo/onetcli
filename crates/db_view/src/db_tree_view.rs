@@ -13,7 +13,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize,
-    tokens::Radius,
+    glass_sidebar, tokens::Radius,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -43,13 +43,6 @@ use one_core::{
     storage::{ActiveConnections, GlobalStorageState, StoredConnection},
 };
 
-fn macos_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
-    if blur_enabled {
-        let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
-        color.a = alpha;
-    }
-    color
-}
 
 fn macos_sidebar_input_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
     if blur_enabled {
@@ -2099,7 +2092,7 @@ impl Render for DbTreeView {
         let entries_len = self.flat_entries.len();
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let sidebar_bg = macos_sidebar_glass(cx.theme().sidebar, blur_enabled, glass_opacity);
+        let sidebar_bg = glass_sidebar(cx.theme().sidebar, blur_enabled, glass_opacity);
         let sidebar_input_bg =
             macos_sidebar_input_glass(cx.theme().input_background(), blur_enabled, glass_opacity);
 

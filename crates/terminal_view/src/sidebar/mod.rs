@@ -16,13 +16,6 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
-fn glass_bg(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
-    if blur_enabled {
-        let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
-        color.a = alpha;
-    }
-    color
-}
 
 use crate::theme::{TerminalColors, TerminalTheme};
 use gpui::prelude::FluentBuilder;
@@ -31,7 +24,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
+use gpui_component::{v_flex, ActiveTheme, glass_sidebar, Icon, IconName, Sizable, Size};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};
@@ -527,10 +520,10 @@ impl TerminalSidebar {
         let is_active = self.active_panel == Some(panel);
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let accent_color = glass_bg(self.colors.accent, blur_enabled, glass_opacity);
+        let accent_color = glass_sidebar(self.colors.accent, blur_enabled, glass_opacity);
         let accent_fg = self.colors.accent_foreground;
         let muted_fg = self.colors.muted_foreground;
-        let muted_bg = glass_bg(self.colors.muted, blur_enabled, glass_opacity);
+        let muted_bg = glass_sidebar(self.colors.muted, blur_enabled, glass_opacity);
 
         div()
             .id(SharedString::from(format!("toolbar-btn-{:?}", panel)))
@@ -558,7 +551,7 @@ impl TerminalSidebar {
         let border_color = self.colors.border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let muted_bg = glass_bg(self.colors.background, blur_enabled, glass_opacity);
+        let muted_bg = glass_sidebar(self.colors.background, blur_enabled, glass_opacity);
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -626,7 +619,7 @@ impl Render for TerminalSidebar {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let bg_color = glass_bg(cx.theme().background, blur_enabled, glass_opacity);
+        let bg_color = glass_sidebar(cx.theme().background, blur_enabled, glass_opacity);
 
         div()
             .h_full()
