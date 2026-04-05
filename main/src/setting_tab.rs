@@ -14,6 +14,7 @@ use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Icon, IconName, LEFT_PANEL_ALPHA_OFFSET, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
     Sizable, Size, Theme, ThemeMode,
+    tokens::Radius,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -538,7 +539,7 @@ fn settings_group_content_style(cx: &App) -> StyleRefinement {
     let blur_enabled = cx.theme().window_blur_enabled;
     let bg = settings_glass_with_offset(cx.theme().group_box, blur_enabled, 0.0, 0.14);
     sync_server_theme::surface_style()
-        .rounded(px(16.0))
+        .rounded(Radius::Xl.px())
         .bg(bg)
 }
 

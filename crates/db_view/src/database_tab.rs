@@ -13,11 +13,12 @@ use gpui::{
     MouseUpEvent, ParentElement, Pixels, Point, Render, SharedString, Style, Styled, Task, Window,
     div, prelude::FluentBuilder, px,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, v_flex};
+use gpui_component::{tokens::Radius, ActiveTheme, Icon, IconName, Sizable, Size, h_flex, v_flex};
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
+    CHAT_SIDEBAR_MIN_WIDTH, CHAT_SIDEBAR_DEFAULT_WIDTH, PANEL_MIN_SIZE, TREE_PANEL_DEFAULT_SIZE,
 };
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, Workspace};
@@ -29,10 +30,6 @@ use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use uuid::Uuid;
 
-const PANEL_MIN_SIZE: Pixels = px(100.0);
-const TREE_PANEL_DEFAULT_SIZE: Pixels = px(250.0);
-const CHAT_SIDEBAR_MIN_WIDTH: Pixels = px(360.0);
-const CHAT_SIDEBAR_DEFAULT_WIDTH: Pixels = px(420.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizingPanel {
@@ -396,7 +393,7 @@ impl DatabaseTabView {
                         div()
                             .w(px(48.0))
                             .h(px(48.0))
-                            .rounded(px(24.0))
+                            .rounded(Radius::Xl.px())
                             .flex()
                             .items_center()
                             .justify_center()
