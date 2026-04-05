@@ -15,6 +15,7 @@ use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt,
     LEFT_PANEL_ALPHA_OFFSET, Sizable, Size, WindowExt, WindowsSurfaceLayer, app_style,
+    tokens::Radius,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -5139,7 +5140,7 @@ impl HomePage {
                     .child(
                         div()
                             .size(px(32.0))
-                            .rounded(px(8.0))
+                            .rounded(Radius::Lg.px())
                             .flex()
                             .items_center()
                             .justify_center()
@@ -5685,7 +5686,7 @@ impl HomePage {
             )))
             .w_full()
             .h(px(60.))
-            .rounded(px(8.0))
+            .rounded(Radius::Lg.px())
             .bg(card_bg)
             .p_2()
             .border_1()
@@ -5847,7 +5848,7 @@ impl HomePage {
                     .child(
                         div()
                             .h(px(48.0))
-                            .rounded(px(8.0))
+                            .rounded(Radius::Lg.px())
                             .flex()
                             .items_center()
                             .justify_center()
@@ -5913,7 +5914,7 @@ impl HomePage {
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .group_hover(group_name.clone(), |style| style.opacity(1.0))
                     .bg(card_overlay_bg)
-                    .rounded(px(8.0))
+                    .rounded(Radius::Lg.px())
                     .border_1()
                     .border_color(cx.theme().border.opacity(0.8))
                     .shadow_sm()

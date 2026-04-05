@@ -10,6 +10,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, StyledExt,
+    tokens::Radius,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -250,7 +251,7 @@ impl SavedConnectionPickerList {
                     .gap_2()
                     .px_2()
                     .py_1p5()
-                    .rounded(px(6.0))
+                    .rounded(Radius::Md.px())
                     .cursor_pointer()
                     .hover(|style| style.bg(cx.theme().list_hover))
                     .on_click(move |_, _, cx| {
@@ -322,7 +323,7 @@ impl SavedConnectionPickerList {
                                 .px_2()
                                 // .py_1p5()
                                 .relative()
-                                .rounded(px(6.0))
+                                .rounded(Radius::Md.px())
                                 .cursor_pointer()
                                 .hover(|style| style.bg(cx.theme().list_hover))
                                 .on_click(move |_, _, cx| {
@@ -415,7 +416,7 @@ impl Render for SavedConnectionPickerList {
                     .w_full()
                     .px_2()
                     .py_1p5()
-                    .rounded(px(6.0))
+                    .rounded(Radius::Md.px())
                     .cursor_pointer()
                     .flex()
                     .items_center()
@@ -534,7 +535,7 @@ impl Render for TabBarSavedConnectionPicker {
                     )
                     .compact()
                     .w(px(32.0))
-                    .rounded(px(6.0))
+                    .rounded(Radius::Md.px())
                     .cursor_pointer()
                     .tooltip(t!("Home.saved_connection_picker_trigger")),
             )

@@ -3,6 +3,7 @@ use gpui::{App, Context, Entity, ParentElement, SharedString, Styled, Task, Wind
 use gpui_component::{
     ActiveTheme, IndexPath, WindowExt, h_flex,
     list::{ListDelegate, ListItem, ListState},
+    tokens::Radius,
 };
 use one_core::storage::DatabaseType;
 use rust_i18n::t;
@@ -162,7 +163,7 @@ impl ListDelegate for NewConnectionDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(px(6.0))
+                .rounded(Radius::Md.px())
                 .on_click(move |_, window, cx| {
                     parent.update(cx, |this, cx| {
                         kind.execute(this, window, cx);

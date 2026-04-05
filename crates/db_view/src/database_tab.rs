@@ -423,7 +423,7 @@ impl DatabaseTabView {
                     .gap_2()
                     .p_4()
                     .bg(cx.theme().muted)
-                    .rounded(px(8.0))
+                    .rounded(Radius::Lg.px())
                     .child(
                         h_flex()
                             .gap_2()

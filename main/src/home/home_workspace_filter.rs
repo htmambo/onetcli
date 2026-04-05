@@ -7,6 +7,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, IconName, IndexPath, Sizable,
+    tokens::Radius,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -121,7 +122,7 @@ impl ListDelegate for WorkspaceFilterDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(px(4.0))
+                .rounded(Radius::Sm.px())
                 .on_click(move |_, _, cx| {
                     parent.update(cx, |this, cx| {
                         this.toggle_workspace_filter(item_id, cx);
