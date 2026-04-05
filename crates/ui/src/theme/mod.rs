@@ -29,6 +29,54 @@ pub const MAX_GLASS_OPACITY: f32 = 1.00;
 /// 左侧面板毛玻璃透明度偏移量
 pub const LEFT_PANEL_ALPHA_OFFSET: f32 = 0.1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsSurfaceLayer {
+    ContentBase,
+    ContentSection,
+    ContentCard,
+    TerminalFallback,
+    TerminalCanvas,
+}
+
+pub fn windows_surface_opacity(
+    opacity: f32,
+    blur_enabled: bool,
+    layer: WindowsSurfaceLayer,
+) -> f32 {
+    let opacity = clamp_surface_opacity(opacity as f64);
+    if !cfg!(target_os = "windows") {
+        return opacity;
+    }
+
+    let factor = match (blur_enabled, layer) {
+        (true, WindowsSurfaceLayer::ContentBase) => 0.58,
+        (true, WindowsSurfaceLayer::ContentSection) => 0.38,
+        (true, WindowsSurfaceLayer::ContentCard) => 0.24,
+        (true, WindowsSurfaceLayer::TerminalFallback) => 0.26,
+        (true, WindowsSurfaceLayer::TerminalCanvas) => 0.42,
+        (false, WindowsSurfaceLayer::ContentBase) => 0.45,
+        (false, WindowsSurfaceLayer::ContentSection) => 0.24,
+        (false, WindowsSurfaceLayer::ContentCard) => 0.14,
+        (false, WindowsSurfaceLayer::TerminalFallback) => 0.16,
+        (false, WindowsSurfaceLayer::TerminalCanvas) => 0.34,
+    };
+
+    (opacity * factor).clamp(0.0, 1.0)
+}
+
+pub fn windows_surface_color(
+    mut color: Hsla,
+    blur_enabled: bool,
+    opacity: f32,
+    layer: WindowsSurfaceLayer,
+) -> Hsla {
+    if cfg!(target_os = "windows") {
+        color.a = windows_surface_opacity(opacity, blur_enabled, layer);
+    }
+
+    color
+}
+
 pub fn init(cx: &mut App) {
     registry::init(cx);
 

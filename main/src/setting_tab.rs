@@ -759,7 +759,11 @@ impl AppSettings {
 
         #[cfg(target_os = "windows")]
         {
-            WindowBackgroundAppearance::MicaAltBackdrop
+            // 使用 Blurred (Acrylic) 而非 MicaAltBackdrop：
+            // - Acrylic 通过 SetWindowCompositionAttribute 实现，兼容性更广
+            // - MicaAltBackdrop 在某些 Windows 环境下可能静默失败
+            // - Blurred 与 macOS/Linux 的透明+模糊行为更一致
+            WindowBackgroundAppearance::Blurred
         }
     }
 

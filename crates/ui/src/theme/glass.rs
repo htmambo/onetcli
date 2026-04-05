@@ -60,7 +60,7 @@ pub(crate) fn apply_glass_tuning(
         mode,
         blur_enabled,
         tuning.chrome,
-        0.96,
+        0.6,
     );
     colors.table = surface_color(colors.table, mode, blur_enabled, tuning.base, 0.88);
     colors.table_even = surface_color(colors.table_even, mode, blur_enabled, tuning.base, 0.84);

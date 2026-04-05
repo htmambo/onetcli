@@ -9,34 +9,37 @@ use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{BlinkCursor, Icon, IconName, Root, Sizable, Theme as UiTheme, WindowExt, kbd::Kbd};
+use gpui_component::{
+    kbd::Kbd, windows_surface_color, windows_surface_opacity, BlinkCursor, Icon, IconName, Root,
+    Sizable, Theme as UiTheme, WindowExt, WindowsSurfaceLayer,
+};
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::addon::{
-    AddonManager, SearchAddon, TerminalAddonFrameContext, TerminalAddonMouseContext,
-    register_default_addons,
+    register_default_addons, AddonManager, SearchAddon, TerminalAddonFrameContext,
+    TerminalAddonMouseContext,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{RenderCache, TerminalElement, terminal_font_features};
+use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
 use crate::theme::{
-    DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
-    TerminalTheme,
+    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE,
 };
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentEvent};
-use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
+use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use std::ops::Deref;
-use terminal::LocalConfig;
 use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
 };
+use terminal::LocalConfig;
 
 actions!(
     terminal_view,
@@ -109,7 +112,13 @@ fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) ->
 
 fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
     let ui_theme = UiTheme::global(cx);
-    let surface_opacity = if ui_theme.window_blur_enabled {
+    let surface_opacity = if cfg!(target_os = "windows") {
+        windows_surface_opacity(
+            ui_theme.surface_opacity,
+            ui_theme.window_blur_enabled,
+            WindowsSurfaceLayer::TerminalCanvas,
+        )
+    } else if ui_theme.window_blur_enabled {
         (ui_theme.surface_opacity - 0.52).max(0.26)
     } else {
         ui_theme.surface_opacity
@@ -1928,11 +1937,13 @@ impl TerminalView {
                             .text_color(rgb(0x9ca3af))
                             .child(if is_connecting {
                                 if is_ssh {
-                                    connection_status_message
-                                        .unwrap_or_else(|| t!("SshSession.establishing").to_string())
+                                    connection_status_message.unwrap_or_else(|| {
+                                        t!("SshSession.establishing").to_string()
+                                    })
                                 } else {
-                                    connection_status_message
-                                        .unwrap_or_else(|| t!("TerminalView.connecting").to_string())
+                                    connection_status_message.unwrap_or_else(|| {
+                                        t!("TerminalView.connecting").to_string()
+                                    })
                                 }
                             } else if is_user_exit {
                                 if is_ssh {
@@ -2587,8 +2598,20 @@ impl Render for TerminalView {
                     .child({
                         let view = cx.entity().clone();
                         let sidebar = self.sidebar.clone();
+                        let terminal_bg = if cfg!(target_os = "windows") {
+                            windows_surface_color(
+                                ui_theme.background,
+                                ui_theme.window_blur_enabled,
+                                ui_theme.surface_opacity,
+                                WindowsSurfaceLayer::TerminalFallback,
+                            )
+                        } else if ui_theme.window_blur_enabled {
+                            ui_theme.transparent
+                        } else {
+                            ui_theme.background
+                        };
                         div()
-                            .bg(if ui_theme.window_blur_enabled { ui_theme.transparent } else { ui_theme.background }) // 终端背景色，避免 Canvas 层未覆盖时闪烁
+                            .bg(terminal_bg) // 终端背景色，避免 Canvas 层未覆盖时闪烁
                             .absolute()
                             .left_2()
                             .right_0()
@@ -2876,10 +2899,9 @@ impl Element for ResizeEventHandler {
 #[cfg(test)]
 mod tests {
     use super::{
-        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
-        has_trailing_line_continuation, has_unterminated_shell_quote,
-        multiline_non_empty_line_count, preserve_theme_typography,
-        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
+        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
+        has_unterminated_shell_quote, multiline_non_empty_line_count, preserve_theme_typography,
+        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, UnbracketedPasteHazard,
     };
     use crate::theme::TerminalTheme;
     use gpui::SharedString;

@@ -13,8 +13,8 @@ use gpui::{
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
-    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, LEFT_PANEL_ALPHA_OFFSET,
-    Sizable, Size, WindowExt, app_style,
+    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt,
+    LEFT_PANEL_ALPHA_OFFSET, Sizable, Size, WindowExt, WindowsSurfaceLayer, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -23,7 +23,7 @@ use gpui_component::{
     menu::PopupMenuItem,
     popover::Popover,
     tooltip::Tooltip,
-    v_flex,
+    v_flex, windows_surface_color,
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
@@ -118,7 +118,12 @@ struct DragPreviewSize {
 /// 毛玻璃效果辅助函数：与 settings_glass 保持一致的处理逻辑
 /// 当毛玻璃关闭时，返回原始颜色
 /// 当毛玻璃开启时，使用 glass_opacity 作为基础透明度，并根据层级调整
-fn macos_home_glass(mut color: gpui::Hsla, blur_enabled: bool, level_ratio: f32, glass_opacity: f64) -> gpui::Hsla {
+fn macos_home_glass(
+    mut color: gpui::Hsla,
+    blur_enabled: bool,
+    level_ratio: f32,
+    glass_opacity: f64,
+) -> gpui::Hsla {
     if !blur_enabled {
         return color;
     }
@@ -132,7 +137,11 @@ fn macos_home_glass(mut color: gpui::Hsla, blur_enabled: bool, level_ratio: f32,
 }
 
 /// 首页侧边栏毛玻璃效果：使用统一的 LEFT_PANEL_ALPHA_OFFSET
-fn macos_home_sidebar_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f64) -> gpui::Hsla {
+fn macos_home_sidebar_glass(
+    mut color: gpui::Hsla,
+    blur_enabled: bool,
+    glass_opacity: f64,
+) -> gpui::Hsla {
     if !blur_enabled {
         return color;
     }
@@ -2460,8 +2469,24 @@ impl HomePage {
         let view_for_view_mode = view_for_new_connection.clone();
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
-        let toolbar_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.14, glass_opacity);
-        let toolbar_input_bg = macos_home_glass(cx.theme().input_background(), blur_enabled, 0.10, glass_opacity);
+        let windows_opacity = glass_opacity as f32;
+        let toolbar_bg = windows_surface_color(
+            macos_home_glass(cx.theme().background, blur_enabled, 0.14, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
+        let toolbar_input_bg = windows_surface_color(
+            macos_home_glass(
+                cx.theme().input_background(),
+                blur_enabled,
+                0.10,
+                glass_opacity,
+            ),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentCard,
+        );
 
         let workspace_filter_open = self.workspace_filter_open;
         let workspace_filter =
@@ -2983,8 +3008,10 @@ impl HomePage {
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
         let sidebar_bg = macos_home_sidebar_glass(cx.theme().sidebar, blur_enabled, glass_opacity);
-        let sidebar_active_bg = macos_home_sidebar_glass(cx.theme().list_active, blur_enabled, glass_opacity);
-        let sidebar_hover_bg = macos_home_sidebar_glass(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
+        let sidebar_active_bg =
+            macos_home_sidebar_glass(cx.theme().list_active, blur_enabled, glass_opacity);
+        let sidebar_hover_bg =
+            macos_home_sidebar_glass(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
         let filter_types = ConnectionType::all();
 
         v_flex()
@@ -4246,8 +4273,19 @@ impl HomePage {
     ) -> impl IntoElement {
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
-        let workspace_bg = macos_home_glass(cx.theme().tab, blur_enabled, 0.14, glass_opacity);
-        let workspace_hover_bg = macos_home_glass(cx.theme().list_hover, blur_enabled, 0.10, glass_opacity);
+        let windows_opacity = glass_opacity as f32;
+        let workspace_bg = windows_surface_color(
+            macos_home_glass(cx.theme().tab, blur_enabled, 0.14, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
+        let workspace_hover_bg = windows_surface_color(
+            macos_home_glass(cx.theme().list_hover, blur_enabled, 0.10, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
         let workspace_id = workspace.id;
         let is_collapsed = workspace_id
             .map(|id| self.collapsed_workspaces.contains(&id))
@@ -4867,8 +4905,19 @@ impl HomePage {
     ) -> AnyElement {
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
-        let item_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.14, glass_opacity);
-        let item_icon_bg = macos_home_glass(cx.theme().muted, blur_enabled, 0.10, glass_opacity);
+        let windows_opacity = glass_opacity as f32;
+        let item_bg = windows_surface_color(
+            macos_home_glass(cx.theme().background, blur_enabled, 0.14, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentCard,
+        );
+        let item_icon_bg = windows_surface_color(
+            macos_home_glass(cx.theme().muted, blur_enabled, 0.10, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
         let conn_id = conn.id;
         let clone_conn = conn.clone();
         let sftp_hover_conn = conn.clone();
@@ -5571,8 +5620,19 @@ impl HomePage {
     ) -> AnyElement {
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
-        let card_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.16, glass_opacity);
-        let card_overlay_bg = macos_home_glass(cx.theme().background, blur_enabled, 0.18, glass_opacity);
+        let windows_opacity = glass_opacity as f32;
+        let card_bg = windows_surface_color(
+            macos_home_glass(cx.theme().background, blur_enabled, 0.16, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentCard,
+        );
+        let card_overlay_bg = windows_surface_color(
+            macos_home_glass(cx.theme().background, blur_enabled, 0.18, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
         let conn_id = conn.id;
         let clone_conn = conn.clone();
         let sftp_hover_conn = conn.clone();
@@ -6967,12 +7027,18 @@ impl Render for HomePage {
         self.maybe_prompt_connection_restore(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity;
-        let home_shell_bg = if cx.theme().window_blur_enabled {
+        let windows_opacity = glass_opacity as f32;
+        let home_shell_bg = if cfg!(target_os = "windows") || cx.theme().window_blur_enabled {
             cx.theme().transparent
         } else {
             cx.theme().background
         };
-        let home_content_bg = macos_home_glass(cx.theme().muted, blur_enabled, 0.10, glass_opacity);
+        let home_content_bg = windows_surface_color(
+            macos_home_glass(cx.theme().muted, blur_enabled, 0.10, glass_opacity),
+            blur_enabled,
+            windows_opacity,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         div().size_full().track_focus(&self.focus_handle).child(
             h_flex()
