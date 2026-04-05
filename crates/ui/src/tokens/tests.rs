@@ -53,7 +53,6 @@ mod tests {
         assert!((f32::from(blur) - 8.0).abs() < 0.001);
         assert!((f32::from(offset) - 2.0).abs() < 0.001);
         assert!(alpha > 0.0);
-        assert!(alpha > 0.0);
 
         let (blur, _offset, _spread, _alpha) = ShadowToken::Lg.values();
         assert!((f32::from(blur) - 16.0).abs() < 0.001);
