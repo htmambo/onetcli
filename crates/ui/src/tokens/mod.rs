@@ -21,3 +21,6 @@ pub use typography::TypographyTokens;
 pub use radius::Radius;
 pub use shadow::ShadowToken;
 pub use motion::MotionTokens;
+
+#[cfg(test)]
+mod tests;
