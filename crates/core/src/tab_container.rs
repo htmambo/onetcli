@@ -1,3 +1,4 @@
+use crate::RunningState;
 use futures::future::{Either, select};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -159,6 +160,23 @@ pub trait TabContent: EventEmitter<TabContentEvent> + Render + Focusable {
         Task::ready(true)
     }
 
+    /// Force close this tab during an application-level confirmed exit.
+    /// By default it reuses the normal close path.
+    fn force_close(
+        &mut self,
+        tab_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        self.try_close(tab_id, window, cx)
+    }
+
+    /// Get running state for this tab. Returns Some if there are blocking operations
+    /// (e.g., running process, active transfer) that require user confirmation before close.
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        None
+    }
+
     /// Get tab's preferred width size
     fn width_size(&self, cx: &App) -> Option<Size> {
         None
@@ -188,6 +206,8 @@ pub trait TabContentView: 'static + Send + Sync {
     fn on_activate(&self, window: &mut Window, cx: &mut App);
     fn on_deactivate(&self, window: &mut Window, cx: &mut App);
     fn try_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool>;
+    fn force_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool>;
+    fn running_state(&self, cx: &App) -> Option<RunningState>;
     fn width_size(&self, cx: &App) -> Option<Size>;
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn view(&self) -> AnyView;
@@ -236,6 +256,15 @@ impl<T: TabContent> TabContentView for Entity<T> {
     fn try_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool> {
         let tab_id = tab_id.to_string();
         self.update(cx, |this, cx| this.try_close(&tab_id, window, cx))
+    }
+
+    fn force_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool> {
+        let tab_id = tab_id.to_string();
+        self.update(cx, |this, cx| this.force_close(&tab_id, window, cx))
+    }
+
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        self.read(cx).running_state(cx)
     }
 
     fn width_size(&self, cx: &App) -> Option<Size> {
@@ -922,6 +951,7 @@ pub struct TabContainer {
     tab_list: Option<Entity<ListState<TabListDelegate>>>,
     closing_tabs: HashSet<SharedString>,
     show_window_controls: bool,
+    window_close_handler: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     tab_bar_trailing_view: Option<AnyView>,
     tab_list_header_action_label: Option<SharedString>,
     /// Pinned tab that stays fixed before the scrollable tab list
@@ -956,6 +986,7 @@ impl TabContainer {
             tab_list: None,
             closing_tabs: HashSet::new(),
             show_window_controls: false,
+            window_close_handler: None,
             tab_bar_trailing_view: None,
             tab_list_header_action_label: None,
             pinned_tab: None,
@@ -1011,6 +1042,14 @@ impl TabContainer {
 
     pub fn with_window_controls(mut self, show: bool) -> Self {
         self.show_window_controls = show;
+        self
+    }
+
+    pub fn with_window_close_handler(
+        mut self,
+        handler: impl Fn(&mut Window, &mut App) + 'static + Send + Sync,
+    ) -> Self {
+        self.window_close_handler = Some(Arc::new(handler));
         self
     }
 
@@ -1343,6 +1382,57 @@ impl TabContainer {
                             }
                         })
                     });
+
+                match should_close {
+                    Ok(Some(task)) => {
+                        let can_close = task.await;
+                        if !can_close {
+                            return false;
+                        }
+                        let _ = entity.update(cx, |this, cx| {
+                            this.do_remove_tab_by_id(&tab_id, cx);
+                        });
+                    }
+                    Ok(None) => continue,
+                    Err(_) => return false,
+                }
+            }
+            true
+        })
+    }
+
+    pub fn force_close_all_tabs(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        let tab_ids: Vec<String> = self
+            .tabs
+            .iter()
+            .filter(|t| t.content().closeable(cx))
+            .map(|t| t.id().to_string())
+            .collect();
+
+        if tab_ids.is_empty() {
+            return Task::ready(true);
+        }
+
+        let entity = cx.entity();
+        let window_handle = window.window_handle();
+
+        cx.spawn(async move |_handle, cx| {
+            for tab_id in tab_ids {
+                let should_close = cx.update_window(window_handle, |_, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        if let Some(index) = this.tabs.iter().position(|t| t.id() == tab_id) {
+                            this.set_active_index(index, window, cx);
+                            let content = this.tabs[index].content().clone();
+                            Some(content.force_close(&tab_id, window, cx))
+                        } else {
+                            None
+                        }
+                    })
+                });
 
                 match should_close {
                     Ok(Some(task)) => {
@@ -2597,6 +2687,7 @@ impl TabContainer {
         round_self: bool,
         cx: &App,
     ) -> impl IntoElement {
+        let window_close_handler = self.window_close_handler.clone();
         div()
             .id(id)
             .flex()
@@ -2640,7 +2731,13 @@ impl TabContainer {
                     match control_area {
                         WindowControlArea::Min => window.minimize_window(),
                         WindowControlArea::Max => window.zoom_window(),
-                        WindowControlArea::Close => window.remove_window(),
+                        WindowControlArea::Close => {
+                            if let Some(handler) = window_close_handler.as_ref() {
+                                handler(window, cx);
+                            } else {
+                                window.remove_window();
+                            }
+                        }
                         _ => {}
                     }
                 })

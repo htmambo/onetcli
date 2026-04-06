@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
-use gpui::{Hsla, SharedString, hsla};
-use serde::{Deserialize, Deserializer, de::Error as _};
+use gpui::{hsla, Hsla, SharedString};
+use serde::{de::Error as _, Deserialize, Deserializer};
 
-use anyhow::{Error, Result, anyhow};
+use anyhow::{anyhow, Error, Result};
 
 /// Create a [`gpui::Hsla`] color.
 ///

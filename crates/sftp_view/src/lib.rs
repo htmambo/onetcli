@@ -33,6 +33,7 @@ use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
+use one_core::RunningState;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};
@@ -4114,6 +4115,44 @@ impl TabContent for SftpView {
         }
         self.set_connection_active(false, cx);
         gpui::Task::ready(true)
+    }
+
+    fn force_close(
+        &mut self,
+        _tab_id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Task<bool> {
+        self.cancel_all_transfers();
+        let client = self.sftp_client.take();
+        self.set_connection_active(false, cx);
+
+        if let Some(client) = client {
+            let task = Tokio::spawn(cx, async move {
+                let mut guard = client.lock().await;
+                if let Err(e) = guard.disconnect().await {
+                    tracing::error!("强制关闭 SFTP 连接失败: {}", e);
+                }
+            });
+            return cx.spawn(async move |_this, _cx| {
+                let _ = task.await;
+                true
+            });
+        }
+
+        gpui::Task::ready(true)
+    }
+
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        let active_count = self.transfer_queue.active_tasks().len();
+        if active_count == 0 {
+            return None;
+        }
+
+        RunningState::sftp(
+            self.title(cx),
+            t!("RunningState.sftp.activity", count = active_count).into(),
+        )
     }
 }
 

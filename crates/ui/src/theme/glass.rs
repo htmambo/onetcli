@@ -1,5 +1,7 @@
-use crate::{Colorize, ThemeColor, ThemeMode, highlighter::HighlightThemeStyle};
+use crate::{highlighter::HighlightThemeStyle, Colorize, ThemeColor, ThemeMode};
 use gpui::Hsla;
+
+const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.80;
 
 #[derive(Clone, Copy)]
 struct GlassSurfaceTuning {
@@ -96,6 +98,10 @@ pub(crate) fn apply_glass_highlight_tuning(
     if let Some(active_line) = style.editor_active_line {
         style.editor_active_line = Some(with_alpha(active_line, active_line_alpha));
     }
+}
+
+pub(crate) fn dialog_surface_color(color: Hsla, mode: ThemeMode, blur_enabled: bool) -> Hsla {
+    with_alpha(color, dialog_surface_alpha(mode, blur_enabled))
 }
 
 fn frosted_surface_tuning(mode: ThemeMode, opacity: f32) -> GlassSurfaceTuning {
@@ -209,4 +215,66 @@ fn frost_color(color: Hsla, mode: ThemeMode, intensity: f32) -> Hsla {
 
 fn offset_alpha(alpha: f32, delta: f32) -> f32 {
     (alpha + delta).clamp(0.0, 1.0)
+}
+
+fn dialog_surface_alpha(mode: ThemeMode, blur_enabled: bool) -> f32 {
+    let tuning = if blur_enabled {
+        frosted_surface_tuning(mode, DIALOG_SURFACE_BASE_OPACITY)
+    } else {
+        plain_surface_tuning(mode, DIALOG_SURFACE_BASE_OPACITY)
+    };
+
+    tuning.base
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_alpha_eq(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < f32::EPSILON,
+            "expected alpha {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn dialog_surface_alpha_uses_fixed_base_when_blur_disabled() {
+        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Dark, false), 0.80);
+        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Light, false), 0.80);
+    }
+
+    #[test]
+    fn dialog_surface_alpha_preserves_frosted_base_adjustments() {
+        let expected_dark = if cfg!(target_os = "macos") {
+            0.68
+        } else {
+            0.80
+        };
+        let expected_light = if cfg!(target_os = "macos") {
+            0.66
+        } else {
+            0.80
+        };
+
+        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Dark, true), expected_dark);
+        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Light, true), expected_light);
+    }
+
+    #[test]
+    fn dialog_surface_color_only_overrides_alpha() {
+        let color = Hsla {
+            h: 0.23,
+            s: 0.42,
+            l: 0.51,
+            a: 0.17,
+        };
+
+        let dialog_color = dialog_surface_color(color, ThemeMode::Dark, true);
+
+        assert_eq!(dialog_color.h, color.h);
+        assert_eq!(dialog_color.s, color.s);
+        assert_eq!(dialog_color.l, color.l);
+        assert_alpha_eq(dialog_color.a, dialog_surface_alpha(ThemeMode::Dark, true));
+    }
 }

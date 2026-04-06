@@ -26,6 +26,22 @@ Common:
     en: Cancel
     zh-CN: 取消
     zh-HK: 取消
+  close_anyway:
+    en: Close Anyway
+    zh-CN: 仍然关闭
+    zh-HK: 仍然關閉
+  running_process_close_title:
+    en: Close Application
+    zh-CN: 关闭应用
+    zh-HK: 關閉應用
+  running_process_close_message:
+    en: Some tabs still have active sessions or tasks. Do you want to close the application anyway?
+    zh-CN: 部分标签页仍有活动会话或任务，确定仍要关闭应用吗？
+    zh-HK: 部分標籤頁仍有活動會話或任務，確定仍要關閉應用嗎？
+  running_process_safe_to_close:
+    en: Active tasks have been stopped. You can now safely close the application.
+    zh-CN: 活动任务已停止，现在可以安全关闭应用了。
+    zh-HK: 活動任務已停止，現在可以安全關閉應用了。
   confirm:
     en: Confirm
     zh-CN: 确认

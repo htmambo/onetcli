@@ -1,24 +1,23 @@
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges,
-    FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
-    prelude::FluentBuilder, px, relative,
+    anchored, div, hsla, point, prelude::FluentBuilder, px, relative, Animation, AnimationExt as _,
+    AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges, FocusHandle, Hsla, InteractiveElement,
+    IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Point, RenderOnce, SharedString, StyleRefinement, Styled, Window,
+    WindowControlArea,
 };
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, FocusTrapElement as _, IconName, Root, Sizable as _, StyledExt,
-    TITLE_BAR_HEIGHT, WindowExt as _,
     actions::{Cancel, Confirm},
     animation::cubic_bezier,
     app_style,
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement as _,
-    v_flex,
+    v_flex, ActiveTheme as _, FocusTrapElement as _, IconName, Root, Sizable as _, StyledExt,
+    WindowExt as _, TITLE_BAR_HEIGHT,
 };
 
 pub static ANIMATION_DURATION: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs_f64(0.25));
@@ -516,7 +515,11 @@ impl RenderOnce for Dialog {
                             .id(layer_ix)
                             .track_focus(&self.focus_handle)
                             .focus_trap(format!("dialog-{}", layer_ix), &self.focus_handle)
-                            .bg(app_style::panel_bg())
+                            .bg(crate::theme::dialog_surface_color(
+                                app_style::page_bg(),
+                                cx.theme().mode,
+                                cx.theme().window_blur_enabled,
+                            ))
                             .border_1()
                             .border_color(app_style::border_strong())
                             .rounded(cx.theme().radius_lg)

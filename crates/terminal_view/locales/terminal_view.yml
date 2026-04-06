@@ -571,6 +571,26 @@ TerminalView:
     en: Paste preview
     zh-CN: 粘贴预览
     zh-HK: 貼上預覽
+RunningState:
+  terminal:
+    activity:
+      en: "Process is running"
+      zh-CN: "进程正在运行"
+      zh-HK: "進程正在運行"
+
+TerminalCloseDialog:
+  running_process_close_title:
+    en: Close Terminal
+    zh-CN: 关闭终端
+    zh-HK: 關閉終端
+  running_process_close_message:
+    en: There are still running processes in this terminal. Do you want to close anyway?
+    zh-CN: 终端中仍有进程正在运行，确定要关闭吗？
+    zh-HK: 終端中仍有進程正在運行，確定要關閉嗎？
+  running_process_close_ok:
+    en: Close Anyway
+    zh-CN: 仍然关闭
+    zh-HK: 仍然關閉
 
 TerminalSidebar:
   paste_to_terminal:

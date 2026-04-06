@@ -1,8 +1,12 @@
 use crate::{
-    highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
-    scroll::ScrollbarShow, sheet::SheetSettings, tokens::color::semantic::{SemanticColorsDark, SemanticColorsLight},
+    highlighter::HighlightTheme,
+    list::ListSettings,
+    notification::NotificationSettings,
+    scroll::ScrollbarShow,
+    sheet::SheetSettings,
+    tokens::color::semantic::{SemanticColorsDark, SemanticColorsLight},
 };
-use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
+use gpui::{px, App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,7 +23,7 @@ mod semantic;
 mod theme_color;
 
 pub use color::*;
-pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning};
+pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning, dialog_surface_color};
 pub use registry::*;
 pub use schema::*;
 pub use semantic::SemanticColorsRef;

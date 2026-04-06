@@ -33,6 +33,7 @@ use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WID
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentEvent};
+use one_core::RunningState;
 use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use std::ops::Deref;
@@ -465,6 +466,10 @@ impl TerminalView {
         };
 
         cx.global_mut::<ActiveConnections>().remove(connection_id);
+    }
+
+    fn has_blocking_terminal_activity(&self, cx: &App) -> bool {
+        self.terminal.read(cx).has_running_processes()
     }
 
     pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -1082,6 +1087,12 @@ impl TerminalView {
 
     fn request_close(&self, cx: &mut Context<Self>) {
         cx.emit(TerminalViewEvent::Close);
+    }
+
+    fn shutdown_for_close(&mut self, cx: &mut Context<Self>) {
+        // tab 会立即从容器中移除，先同步回收活跃状态，避免主页残留"连接使用中"标记。
+        self.release_active_connection(cx);
+        self.terminal.read(cx).shutdown();
     }
 
     fn write_to_pty(&mut self, data: Vec<u8>, cx: &mut Context<Self>) {
@@ -2505,14 +2516,84 @@ impl TabContent for TerminalView {
     fn try_close(
         &mut self,
         _tab_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        if !self.has_blocking_terminal_activity(cx) {
+            self.shutdown_for_close(cx);
+            return Task::ready(true);
+        }
+
+        let view = cx.entity().clone();
+        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+        let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        let tx_ok = tx.clone();
+        let tx_cancel = tx;
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let tx_ok = tx_ok.clone();
+            let tx_cancel = tx_cancel.clone();
+            let view = view.clone();
+            dialog
+                .title(t!("TerminalCloseDialog.running_process_close_title"))
+                .confirm()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(t!("TerminalCloseDialog.running_process_close_message")),
+                        ),
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(t!("TerminalCloseDialog.running_process_close_ok"))
+                        .cancel_text(t!("Common.cancel")),
+                )
+                .on_ok(move |_event, _window, _cx| {
+                    view.update(_cx, |this, cx| {
+                        this.shutdown_for_close(cx);
+                    });
+                    if let Ok(mut guard) = tx_ok.lock() {
+                        if let Some(sender) = guard.take() {
+                            let _ = sender.send(true);
+                        }
+                    }
+                    true
+                })
+                .on_cancel(move |_event, _window, _cx| {
+                    if let Ok(mut guard) = tx_cancel.lock() {
+                        if let Some(sender) = guard.take() {
+                            let _ = sender.send(false);
+                        }
+                    }
+                    true
+                })
+        });
+
+        cx.spawn(async move |_this, _cx| rx.await.unwrap_or(false))
+    }
+
+    fn force_close(
+        &mut self,
+        _tab_id: &str,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<bool> {
-        // tab 会立即从容器中移除，先同步回收活跃状态，避免主页残留"连接使用中"标记。
-        self.release_active_connection(cx);
-        // 关闭终端连接
-        self.terminal.read(cx).shutdown();
+        self.shutdown_for_close(cx);
         Task::ready(true)
+    }
+
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        if !self.has_blocking_terminal_activity(cx) {
+            return None;
+        }
+        let title = self.title(cx);
+        let activity = t!("RunningState.terminal.activity").into();
+        RunningState::terminal(title, activity)
     }
 }
 

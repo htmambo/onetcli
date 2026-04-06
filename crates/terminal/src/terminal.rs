@@ -19,6 +19,8 @@ use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
+#[cfg(target_os = "linux")]
+use std::collections::HashSet;
 #[cfg(any(test, not(target_os = "linux")))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -175,6 +177,58 @@ fn read_local_working_dir_from_pid(pid: u32) -> Option<String> {
     std::fs::read_link(proc_cwd)
         .ok()
         .and_then(|path| normalize_working_dir(path.to_string_lossy().as_ref()))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_children(contents: &str) -> Vec<u32> {
+    contents
+        .split_whitespace()
+        .filter_map(|pid| pid.parse::<u32>().ok())
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_children(proc_root: &std::path::Path, pid: u32) -> Vec<u32> {
+    let children_path = proc_root.join(pid.to_string()).join("task").join(pid.to_string()).join("children");
+    std::fs::read_to_string(children_path)
+        .map(|contents| parse_proc_children(&contents))
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_state(contents: &str) -> Option<char> {
+    let (_, tail) = contents.rsplit_once(") ")?;
+    tail.chars().next()
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_state(proc_root: &std::path::Path, pid: u32) -> Option<char> {
+    let stat_path = proc_root.join(pid.to_string()).join("stat");
+    std::fs::read_to_string(stat_path)
+        .ok()
+        .and_then(|contents| parse_proc_state(&contents))
+}
+
+#[cfg(target_os = "linux")]
+fn has_live_descendant_process(proc_root: &std::path::Path, pid: u32) -> bool {
+    let mut seen = HashSet::new();
+    let mut pending = read_proc_children(proc_root, pid);
+
+    while let Some(child_pid) = pending.pop() {
+        if !seen.insert(child_pid) {
+            continue;
+        }
+
+        match read_proc_state(proc_root, child_pid) {
+            Some('Z' | 'X') => {}
+            Some(_) => return true,
+            None => continue,
+        }
+
+        pending.extend(read_proc_children(proc_root, child_pid));
+    }
+
+    false
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1063,6 +1117,28 @@ impl Terminal {
         self.child_exited
     }
 
+    /// 是否存在会在关闭时被中断的本地子进程。
+    ///
+    /// 仅 Linux 本地终端支持精确检测：shell 停在提示符时返回 false，
+    /// shell 下仍有存活子进程（如 vim、top、sleep、后台任务）时返回 true。
+    /// 其它连接类型当前没有可靠信号，统一返回 false，避免把“会话仍然打开”误判为“任务仍在运行”。
+    pub fn has_running_processes(&self) -> bool {
+        if self.child_exited.is_some() {
+            return false;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if self.connection_kind == TerminalConnectionKind::Local {
+                return self
+                    .local_shell_pid
+                    .is_some_and(|pid| has_live_descendant_process(std::path::Path::new("/proc"), pid));
+            }
+        }
+
+        false
+    }
+
     /// 获取连接状态
     pub fn connection_state(&self) -> &ConnectionState {
         &self.connection_state
@@ -1367,6 +1443,8 @@ mod tests {
         OSC7_PROMPT_COMMAND,
     };
     use std::fs;
+    #[cfg(target_os = "linux")]
+    use std::path::Path;
 
     #[test]
     fn shell_escape_arg_handles_single_quote() {
@@ -1491,6 +1569,64 @@ mod tests {
 
         assert_ne!(first, second);
         assert!(first.file_name().unwrap_or_default() != second.file_name().unwrap_or_default());
+    }
+
+    #[cfg(target_os = "linux")]
+    fn write_proc_entry(root: &Path, pid: u32, state: char, children: &[u32]) {
+        let proc_dir = root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+        fs::create_dir_all(&task_dir).expect("应创建伪 proc 目录");
+        fs::write(proc_dir.join("stat"), format!("{pid} (fake process) {state} 0 0 0 0\n"))
+            .expect("应写入伪 stat 文件");
+        let children_text = children
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+        fs::write(task_dir.join("children"), children_text).expect("应写入伪 children 文件");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_proc_state_supports_names_with_spaces() {
+        let state = super::parse_proc_state("123 (ssh worker) S 0 0 0 0");
+        assert_eq!(state, Some('S'));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn has_live_descendant_process_detects_non_zombie_children() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onetcli-proc-tree-live-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("应创建伪 proc 根目录");
+
+        write_proc_entry(&temp_dir, 100, 'S', &[200]);
+        write_proc_entry(&temp_dir, 200, 'S', &[]);
+
+        assert!(super::has_live_descendant_process(&temp_dir, 100));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn has_live_descendant_process_ignores_zombie_children() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "onetcli-proc-tree-zombie-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("应创建伪 proc 根目录");
+
+        write_proc_entry(&temp_dir, 100, 'S', &[200]);
+        write_proc_entry(&temp_dir, 200, 'Z', &[]);
+
+        assert!(!super::has_live_descendant_process(&temp_dir, 100));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
 

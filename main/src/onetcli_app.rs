@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,6 +55,13 @@ pub struct GlobalMainWindowHandle {
 }
 
 impl gpui::Global for GlobalMainWindowHandle {}
+
+#[derive(Clone)]
+struct GlobalAppCloseState {
+    guard: Rc<RefCell<AppCloseGuard>>,
+}
+
+impl gpui::Global for GlobalAppCloseState {}
 
 /// 系统监控全局状态 - CPU、内存、系统资源监控
 #[derive(Clone)]
@@ -136,6 +145,7 @@ use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
+use one_core::{RunningKind, RunningState};
 use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save, tab_state_exists};
 use one_core::utils::debouncer::Debouncer;
 use reqwest_client::ReqwestClient;
@@ -214,6 +224,184 @@ fn build_status_bar_title(active_tab_title: Option<&str>) -> String {
         .filter(|title| !title.is_empty())
         .unwrap_or(APP_WINDOW_TITLE)
         .to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppCloseDecision {
+    Allow,
+    Prompt,
+    Ignore,
+}
+
+#[derive(Debug, Default)]
+struct AppCloseGuard {
+    dialog_open: bool,
+    force_closing: bool,
+}
+
+impl AppCloseGuard {
+    fn on_close_requested(&mut self, has_running_tasks: bool) -> AppCloseDecision {
+        if self.force_closing {
+            return AppCloseDecision::Allow;
+        }
+        if self.dialog_open {
+            return AppCloseDecision::Ignore;
+        }
+        if has_running_tasks {
+            self.dialog_open = true;
+            return AppCloseDecision::Prompt;
+        }
+        AppCloseDecision::Allow
+    }
+
+    fn cancel_prompt(&mut self) {
+        self.dialog_open = false;
+    }
+
+    fn begin_force_close(&mut self) {
+        self.dialog_open = false;
+        self.force_closing = true;
+    }
+
+    fn cancel_force_close(&mut self) {
+        self.dialog_open = false;
+        self.force_closing = false;
+    }
+}
+
+fn collect_running_states(tab_container: &Entity<TabContainer>, cx: &App) -> Vec<RunningState> {
+    tab_container
+        .read(cx)
+        .tabs()
+        .iter()
+        .filter_map(|tab| tab.content().running_state(cx))
+        .collect()
+}
+
+fn force_close_tabs_then_quit(
+    window_handle: AnyWindowHandle,
+    tab_container: Entity<TabContainer>,
+    guard: Rc<RefCell<AppCloseGuard>>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        let close_task = window_handle.update(cx, |_, window, cx| {
+            tab_container.update(cx, |tc, cx| tc.force_close_all_tabs(window, cx))
+        });
+
+        let can_quit = match close_task {
+            Ok(task) => task.await,
+            Err(_) => true,
+        };
+
+        let _ = cx.update(|cx| {
+            if can_quit {
+                cx.quit();
+            } else {
+                guard.borrow_mut().cancel_force_close();
+            }
+        });
+    })
+    .detach();
+}
+
+fn open_app_close_dialog(
+    window: &mut Window,
+    tab_container: Entity<TabContainer>,
+    running_states: Vec<RunningState>,
+    guard: Rc<RefCell<AppCloseGuard>>,
+    cx: &mut App,
+) {
+    let border_color = cx.theme().border;
+    let muted_foreground = cx.theme().muted_foreground;
+    let window_handle = window.window_handle();
+
+    window.open_dialog(cx, move |dialog, _window, _cx| {
+        let tab_container = tab_container.clone();
+        let guard_for_ok = guard.clone();
+        let guard_for_cancel = guard.clone();
+
+        dialog
+            .title(t!("Common.running_process_close_title"))
+            .confirm()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(div().text_sm().child(t!("Common.running_process_close_message")))
+                    .child(div().h_px().bg(border_color))
+                    .children(running_states.iter().map(|state| {
+                        let icon = match state.kind {
+                            RunningKind::Terminal => Icon::new(IconName::Terminal),
+                            RunningKind::Ssh => Icon::new(IconName::Server),
+                            RunningKind::Sftp => Icon::new(IconName::FolderOpen),
+                            RunningKind::Db => Icon::new(IconName::Database),
+                        };
+
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(icon.size_4().text_color(muted_foreground))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .child(div().text_sm().child(state.title.to_string())),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted_foreground)
+                                    .child(state.activity.to_string()),
+                            )
+                    })),
+            )
+            .button_props(
+                gpui_component::dialog::DialogButtonProps::default()
+                    .ok_text(t!("Common.close_anyway"))
+                    .cancel_text(t!("Common.cancel")),
+            )
+            .on_ok(move |_, _window, cx| {
+                guard_for_ok.borrow_mut().begin_force_close();
+                force_close_tabs_then_quit(
+                    window_handle,
+                    tab_container.clone(),
+                    guard_for_ok.clone(),
+                    cx,
+                );
+                true
+            })
+            .on_cancel(move |_, _window, _cx| {
+                guard_for_cancel.borrow_mut().cancel_prompt();
+                true
+            })
+    });
+}
+
+fn request_main_window_close(window: &mut Window, cx: &mut App) -> bool {
+    let Some(tab_container) = cx.try_global::<GlobalTabContainer>().map(|g| g.tab_container.clone())
+    else {
+        return true;
+    };
+    let Some(close_state) = cx.try_global::<GlobalAppCloseState>().cloned() else {
+        return true;
+    };
+
+    let running_states = collect_running_states(&tab_container, cx);
+    let guard = close_state.guard.clone();
+    let decision = guard
+        .borrow_mut()
+        .on_close_requested(!running_states.is_empty());
+
+    match decision {
+        AppCloseDecision::Allow => true,
+        AppCloseDecision::Ignore => false,
+        AppCloseDecision::Prompt => {
+            open_app_close_dialog(window, tab_container, running_states, guard, cx);
+            false
+        }
+    }
 }
 
 fn activate_tab_by_number(number: usize, cx: &mut App) {
@@ -295,7 +483,19 @@ fn open_sftp_from_tab(tab_id: String, cx: &mut App) {
 }
 
 fn quit_app(cx: &mut App) {
-    cx.quit();
+    let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
+        cx.quit();
+        return;
+    };
+
+    let should_quit = main_window_handle
+        .window_handle
+        .update(cx, |_, window, cx| request_main_window_close(window, cx))
+        .unwrap_or(true);
+
+    if should_quit {
+        cx.quit();
+    }
 }
 
 pub fn init(cx: &mut App) {
@@ -463,6 +663,10 @@ impl OnetCliApp {
         cx.set_global(GlobalMainWindowHandle {
             window_handle: window.window_handle(),
         });
+        let close_guard = Rc::new(RefCell::new(AppCloseGuard::default()));
+        cx.set_global(GlobalAppCloseState {
+            guard: close_guard.clone(),
+        });
 
         if AppSettings::global(cx).auto_switch_theme {
             let settings = AppSettings::global(cx).clone();
@@ -491,10 +695,20 @@ impl OnetCliApp {
 
             #[cfg(not(target_os = "macos"))]
             {
-                container = container.with_window_controls(true)
+                container = container
+                    .with_window_controls(true)
+                    .with_window_close_handler(|window, cx| {
+                        if request_main_window_close(window, cx) {
+                            cx.quit();
+                        }
+                    })
             }
 
             container
+        });
+
+        window.on_window_should_close(cx, move |window, cx| {
+            request_main_window_close(window, cx)
         });
 
         cx.set_global(GlobalTabContainer {
@@ -1024,7 +1238,9 @@ impl Render for OnetCliApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_status_bar_title, build_window_title};
+    use super::{
+        AppCloseDecision, AppCloseGuard, build_status_bar_title, build_window_title,
+    };
 
     #[test]
     fn 活动标签存在时拼接应用名和标签名() {
@@ -1041,5 +1257,37 @@ mod tests {
     fn 状态栏标题在空值时回退到应用名() {
         assert_eq!(build_status_bar_title(Some("  ")), "OnetCli");
         assert_eq!(build_status_bar_title(None), "OnetCli");
+    }
+
+    #[test]
+    fn app_close_guard_在无活动任务时直接放行() {
+        let mut guard = AppCloseGuard::default();
+
+        assert_eq!(guard.on_close_requested(false), AppCloseDecision::Allow);
+    }
+
+    #[test]
+    fn app_close_guard_在有活动任务时要求确认() {
+        let mut guard = AppCloseGuard::default();
+
+        assert_eq!(guard.on_close_requested(true), AppCloseDecision::Prompt);
+    }
+
+    #[test]
+    fn app_close_guard_确认框打开时忽略重复请求() {
+        let mut guard = AppCloseGuard::default();
+
+        assert_eq!(guard.on_close_requested(true), AppCloseDecision::Prompt);
+        assert_eq!(guard.on_close_requested(true), AppCloseDecision::Ignore);
+    }
+
+    #[test]
+    fn app_close_guard_进入强制关闭阶段后直接放行() {
+        let mut guard = AppCloseGuard::default();
+
+        assert_eq!(guard.on_close_requested(true), AppCloseDecision::Prompt);
+        guard.begin_force_close();
+
+        assert_eq!(guard.on_close_requested(true), AppCloseDecision::Allow);
     }
 }

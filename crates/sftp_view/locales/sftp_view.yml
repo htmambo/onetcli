@@ -352,6 +352,13 @@ FileList:
     zh-HK: 位元組
 
 # 传输相关
+RunningState:
+  sftp:
+    activity:
+      en: "%{count} file task(s) in progress"
+      zh-CN: "%{count} 个文件任务进行中"
+      zh-HK: "%{count} 個文件任務進行中"
+
 Transfer:
   has_active_tasks:
     en: "There are %{count} file operation(s) in progress (upload/download/delete)."

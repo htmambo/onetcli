@@ -775,16 +775,20 @@ impl X11Client {
             }
             Event::ClientMessage(event) => {
                 let window = self.get_window(event.window)?;
-                let [atom, arg1, arg2, arg3, arg4] = event.data.as_data32();
+                let [data0, arg1, arg2, arg3, arg4] = event.data.as_data32();
                 let mut state = self.0.borrow_mut();
-
-                if atom == state.atoms.WM_DELETE_WINDOW && window.should_close() {
-                    // window "x" button clicked by user
-                    // Rest of the close logic is handled in drop_window()
+                let is_close_request = if event.type_ == u32::from(state.atoms.WM_PROTOCOLS) {
+                    data0 == u32::from(state.atoms.WM_DELETE_WINDOW)
+                } else {
+                    event.type_ == u32::from(state.atoms.WM_DELETE_WINDOW)
+                };
+                if is_close_request && window.should_close() {
                     drop(state);
                     window.close();
                     state = self.0.borrow_mut();
-                } else if atom == state.atoms._NET_WM_SYNC_REQUEST {
+                } else if event.type_ == u32::from(state.atoms.WM_PROTOCOLS)
+                    && data0 == u32::from(state.atoms._NET_WM_SYNC_REQUEST)
+                {
                     window.state.borrow_mut().last_sync_counter =
                         Some(x11rb::protocol::sync::Int64 {
                             lo: arg2,
@@ -792,8 +796,8 @@ impl X11Client {
                         })
                 }
 
-                if event.type_ == state.atoms.XdndEnter {
-                    state.xdnd_state.other_window = atom;
+                if event.type_ == u32::from(state.atoms.XdndEnter) {
+                    state.xdnd_state.other_window = data0;
                     if (arg1 & 0x1) == 0x1 {
                         state.xdnd_state.drag_type = xdnd_get_supported_atom(
                             &state.xcb_connection,
@@ -808,7 +812,7 @@ impl X11Client {
                             state.xdnd_state.drag_type = atom;
                         }
                     }
-                } else if event.type_ == state.atoms.XdndLeave {
+                } else if event.type_ == u32::from(state.atoms.XdndLeave) {
                     let position = state.xdnd_state.position;
                     drop(state);
                     window
