@@ -3039,11 +3039,19 @@ mod tests {
     use super::{
         alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
         has_unterminated_shell_quote, multiline_non_empty_line_count, preserve_theme_typography,
-        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, UnbracketedPasteHazard,
+        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, TerminalView,
+        UnbracketedPasteHazard,
     };
     use crate::theme::TerminalTheme;
-    use gpui::SharedString;
+    use gpui::{AppContext, SharedString, TestAppContext};
     use std::cell::Cell as StdCell;
+    #[cfg(target_os = "macos")]
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    #[cfg(target_os = "macos")]
+    use terminal::LocalConfig;
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {
@@ -3166,5 +3174,138 @@ mod tests {
             vec![SharedString::from("Noto Sans Mono CJK SC")]
         );
         assert!((merged.line_height_scale - 1.8).abs() < f32::EPSILON);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn local_terminal_view_reports_blocking_activity_after_keyboard_input() {
+        let mut cx = TestAppContext::single();
+        let previous_home = std::env::var_os("HOME");
+        let temp_home = std::env::temp_dir().join(format!(
+            "onetcli-terminal-view-test-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
+        std::env::set_var("HOME", &temp_home);
+        cx.update(one_core::gpui_tokio::init);
+        cx.update(one_core::storage::init);
+        cx.update(gpui_component::init);
+
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+            })
+            .expect("应创建终端测试窗口")
+        });
+
+        window
+            .update(&mut cx, |view, window, cx| {
+                window.focus(&view.focus_handle, cx);
+            })
+            .expect("应能聚焦终端视图");
+
+        thread::sleep(Duration::from_millis(800));
+        cx.simulate_keystrokes(*window, "s l e e p space 5 enter");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            cx.run_until_parked();
+
+            let has_blocking = window
+                .update(&mut cx, |view, _window, cx| {
+                    view.has_blocking_terminal_activity(cx)
+                })
+                .expect("应能读取终端 busy 状态");
+            if has_blocking {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                panic!("TerminalView 在键盘输入后仍未识别到 blocking activity");
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        window
+            .update(&mut cx, |view, _window, cx| view.shutdown_for_close(cx))
+            .expect("应能关闭测试终端");
+        cx.run_until_parked();
+
+        if let Some(home) = previous_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn local_terminal_view_reports_blocking_activity_after_top_command() {
+        let mut cx = TestAppContext::single();
+        let previous_home = std::env::var_os("HOME");
+        let temp_home = std::env::temp_dir().join(format!(
+            "onetcli-terminal-view-top-test-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
+        std::env::set_var("HOME", &temp_home);
+        cx.update(one_core::gpui_tokio::init);
+        cx.update(one_core::storage::init);
+        cx.update(gpui_component::init);
+
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+            })
+            .expect("应创建终端测试窗口")
+        });
+
+        window
+            .update(&mut cx, |view, window, cx| {
+                window.focus(&view.focus_handle, cx);
+            })
+            .expect("应能聚焦终端视图");
+
+        thread::sleep(Duration::from_millis(800));
+        cx.simulate_keystrokes(*window, "t o p enter");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            cx.run_until_parked();
+
+            let has_blocking = window
+                .update(&mut cx, |view, _window, cx| {
+                    view.has_blocking_terminal_activity(cx)
+                })
+                .expect("应能读取终端 busy 状态");
+            if has_blocking {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                let visible = window
+                    .update(&mut cx, |view, _window, cx| {
+                        view.terminal.read(cx).visible_content()
+                    })
+                    .expect("应能读取终端可见内容");
+                panic!(
+                    "TerminalView 在执行 top 后仍未识别到 blocking activity，visible_content={visible:?}"
+                );
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        window
+            .update(&mut cx, |view, _window, cx| view.shutdown_for_close(cx))
+            .expect("应能关闭测试终端");
+        cx.run_until_parked();
+
+        if let Some(home) = previous_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
     }
 }

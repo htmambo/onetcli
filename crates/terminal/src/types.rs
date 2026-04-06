@@ -45,7 +45,7 @@ fn default_working_dir() -> Option<String> {
 }
 
 fn default_env() -> Vec<(String, String)> {
-    let mut env_vars = Vec::with_capacity(if cfg!(target_os = "windows") { 2 } else { 5 });
+    let mut env_vars = Vec::with_capacity(if cfg!(target_os = "windows") { 2 } else { 7 });
     env_vars.push(("TERM".to_string(), "xterm-256color".to_string()));
     env_vars.push(("COLORTERM".to_string(), "truecolor".to_string()));
 
@@ -57,6 +57,13 @@ fn default_env() -> Vec<(String, String)> {
             "LANG".to_string(),
             env::var("LANG").unwrap_or_else(|_| "zh_CN.UTF-8".to_string()),
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // 避免继承外层 Terminal.app 会话，导致 zsh 将 OSC 序列写入 ~/.zsh_sessions。
+        env_vars.push(("SHELL_SESSIONS_DISABLE".to_string(), "1".to_string()));
+        env_vars.push(("TERM_SESSION_ID".to_string(), String::new()));
     }
 
     env_vars
@@ -79,5 +86,23 @@ impl Default for TerminalSize {
             pixel_width: 0,
             pixel_height: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_env;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn default_env_disables_apple_shell_sessions() {
+        let env_vars = default_env();
+
+        assert!(env_vars
+            .iter()
+            .any(|(key, value)| key == "SHELL_SESSIONS_DISABLE" && value == "1"));
+        assert!(env_vars
+            .iter()
+            .any(|(key, value)| key == "TERM_SESSION_ID" && value.is_empty()));
     }
 }

@@ -21,3 +21,6 @@ serialport = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

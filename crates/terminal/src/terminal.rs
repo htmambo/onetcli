@@ -19,7 +19,9 @@ use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "macos")]
+use std::cell::Cell;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::collections::HashSet;
 #[cfg(any(test, not(target_os = "linux")))]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -189,7 +191,11 @@ fn parse_proc_children(contents: &str) -> Vec<u32> {
 
 #[cfg(target_os = "linux")]
 fn read_proc_children(proc_root: &std::path::Path, pid: u32) -> Vec<u32> {
-    let children_path = proc_root.join(pid.to_string()).join("task").join(pid.to_string()).join("children");
+    let children_path = proc_root
+        .join(pid.to_string())
+        .join("task")
+        .join(pid.to_string())
+        .join("children");
     std::fs::read_to_string(children_path)
         .map(|contents| parse_proc_children(&contents))
         .unwrap_or_default()
@@ -229,6 +235,163 @@ fn has_live_descendant_process(proc_root: &std::path::Path, pid: u32) -> bool {
     }
 
     false
+}
+
+#[cfg(target_os = "macos")]
+fn read_child_pids(pid: u32) -> Vec<u32> {
+    let child_count =
+        unsafe { libc::proc_listchildpids(pid as libc::pid_t, std::ptr::null_mut(), 0) };
+    if child_count <= 0 {
+        return Vec::new();
+    }
+
+    let mut children = vec![0 as libc::pid_t; child_count as usize];
+    let loaded = unsafe {
+        libc::proc_listchildpids(
+            pid as libc::pid_t,
+            children.as_mut_ptr().cast(),
+            (children.len() * std::mem::size_of::<libc::pid_t>()) as libc::c_int,
+        )
+    };
+    if loaded <= 0 {
+        return Vec::new();
+    }
+
+    children.truncate(loaded as usize);
+    children
+        .into_iter()
+        .filter_map(|child_pid| u32::try_from(child_pid).ok())
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn read_process_bsdinfo(pid: u32) -> Option<libc::proc_bsdinfo> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let loaded = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int,
+        )
+    };
+    (loaded == std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int)
+        .then(|| unsafe { info.assume_init() })
+}
+
+#[cfg(target_os = "macos")]
+fn process_name_from_bsdinfo(info: &libc::proc_bsdinfo) -> Option<String> {
+    let name = unsafe { std::ffi::CStr::from_ptr(info.pbi_name.as_ptr()) }
+        .to_str()
+        .ok()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+
+    name.or_else(|| {
+        unsafe { std::ffi::CStr::from_ptr(info.pbi_comm.as_ptr()) }
+            .to_str()
+            .ok()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_terminal_process_pid(
+    pid: u32,
+    process_name: Option<&str>,
+    process_info_available: bool,
+    children: &[u32],
+) -> u32 {
+    if children.len() == 1 && (!process_info_available || process_name == Some("login")) {
+        return children[0];
+    }
+    pid
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_local_shell_pid(pid: u32) -> u32 {
+    let deadline = Instant::now() + Duration::from_millis(150);
+    loop {
+        let process_info = read_process_bsdinfo(pid);
+        let process_name = process_info.as_ref().and_then(process_name_from_bsdinfo);
+        let process_name = process_name.as_deref().map(str::trim);
+        let children = read_child_pids(pid);
+        let resolved =
+            resolve_terminal_process_pid(pid, process_name, process_info.is_some(), &children);
+        if resolved != pid {
+            return resolved;
+        }
+
+        if !children.is_empty() || Instant::now() >= deadline {
+            return pid;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn has_live_descendant_process(pid: u32) -> bool {
+    let mut seen = HashSet::new();
+    let mut pending = read_child_pids(pid);
+
+    while let Some(child_pid) = pending.pop() {
+        if !seen.insert(child_pid) {
+            continue;
+        }
+
+        match read_process_bsdinfo(child_pid) {
+            Some(info) if info.pbi_status == libc::SZOMB => {}
+            Some(_) => return true,
+            None if bsdinfo_access_denied(child_pid) => return true,
+            None => continue,
+        }
+
+        pending.extend(read_child_pids(child_pid));
+    }
+
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn bsdinfo_access_denied(pid: u32) -> bool {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let _ = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int,
+        )
+    };
+    matches!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::EPERM | libc::EACCES)
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn should_report_local_running_processes(
+    startup_settled: bool,
+    has_running_processes: bool,
+) -> bool {
+    startup_settled && has_running_processes
+}
+
+#[cfg(target_os = "macos")]
+fn note_local_user_input(
+    connection_kind: TerminalConnectionKind,
+    startup_settled: &Cell<bool>,
+    data: &[u8],
+) {
+    if connection_kind == TerminalConnectionKind::Local && !data.is_empty() {
+        startup_settled.set(true);
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -363,6 +526,9 @@ pub struct Terminal {
     local_shell_pid: Option<u32>,
     /// 本地终端的工作目录跟踪文件
     local_cwd_file: Option<std::path::PathBuf>,
+    /// macOS 本地 shell 启动阶段会短暂拉起辅助子进程；待首次稳定后再启用关闭拦截。
+    #[cfg(target_os = "macos")]
+    local_process_tree_settled: Cell<bool>,
     /// 子进程退出码
     child_exited: Option<i32>,
     /// 连接状态
@@ -474,6 +640,8 @@ impl Terminal {
             current_working_dir: None,
             local_shell_pid: None,
             local_cwd_file: None,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(true),
             child_exited: None,
             connection_state: ConnectionState::Disconnected { error: Some(error) },
             connection_status_message: None,
@@ -549,6 +717,8 @@ impl Terminal {
         };
 
         Self::spawn_event_loop(event_rx, cx);
+        #[cfg(target_os = "macos")]
+        Self::spawn_local_process_tree_settler(cx);
 
         Ok(Self {
             term,
@@ -557,6 +727,8 @@ impl Terminal {
             current_working_dir: working_dir,
             local_shell_pid,
             local_cwd_file,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(false),
             child_exited: None,
             connection_state: ConnectionState::Connected,
             connection_status_message: None,
@@ -691,6 +863,8 @@ impl Terminal {
             current_working_dir: None,
             local_shell_pid: None,
             local_cwd_file: None,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(true),
             child_exited: None,
             connection_state: ConnectionState::Connecting,
             connection_status_message: Some(
@@ -739,6 +913,8 @@ impl Terminal {
             current_working_dir: None,
             local_shell_pid: None,
             local_cwd_file: None,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(true),
             child_exited: None,
             connection_state: ConnectionState::Connecting,
             connection_status_message: None,
@@ -876,6 +1052,45 @@ impl Terminal {
                     }
                 })
                 .unwrap_or(false);
+            if !keep_running {
+                break;
+            }
+        })
+        .detach();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_local_process_tree_settler(cx: &mut Context<Self>) {
+        let entity = cx.entity().downgrade();
+        cx.spawn(async move |_, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(50))
+                .await;
+
+            let keep_running = entity
+                .update(cx, |this, _cx| {
+                    if this.connection_kind != TerminalConnectionKind::Local {
+                        return false;
+                    }
+
+                    if this.local_process_tree_settled.get() {
+                        return false;
+                    }
+
+                    let Some(pid) = this.local_shell_pid.map(resolve_local_shell_pid) else {
+                        this.local_process_tree_settled.set(true);
+                        return false;
+                    };
+
+                    if !has_live_descendant_process(pid) {
+                        this.local_process_tree_settled.set(true);
+                        return false;
+                    }
+
+                    true
+                })
+                .unwrap_or(false);
+
             if !keep_running {
                 break;
             }
@@ -1119,7 +1334,7 @@ impl Terminal {
 
     /// 是否存在会在关闭时被中断的本地子进程。
     ///
-    /// 仅 Linux 本地终端支持精确检测：shell 停在提示符时返回 false，
+    /// Linux / macOS 本地终端支持精确检测：shell 停在提示符时返回 false，
     /// shell 下仍有存活子进程（如 vim、top、sleep、后台任务）时返回 true。
     /// 其它连接类型当前没有可靠信号，统一返回 false，避免把“会话仍然打开”误判为“任务仍在运行”。
     pub fn has_running_processes(&self) -> bool {
@@ -1130,9 +1345,23 @@ impl Terminal {
         #[cfg(target_os = "linux")]
         {
             if self.connection_kind == TerminalConnectionKind::Local {
-                return self
+                return self.local_shell_pid.is_some_and(|pid| {
+                    has_live_descendant_process(std::path::Path::new("/proc"), pid)
+                });
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if self.connection_kind == TerminalConnectionKind::Local {
+                let has_running_processes = self
                     .local_shell_pid
-                    .is_some_and(|pid| has_live_descendant_process(std::path::Path::new("/proc"), pid));
+                    .map(resolve_local_shell_pid)
+                    .is_some_and(has_live_descendant_process);
+                return should_report_local_running_processes(
+                    self.local_process_tree_settled.get(),
+                    has_running_processes,
+                );
             }
         }
 
@@ -1213,6 +1442,9 @@ impl Terminal {
 
     /// 写入数据到终端
     pub fn write(&self, data: &[u8]) {
+        #[cfg(target_os = "macos")]
+        note_local_user_input(self.connection_kind, &self.local_process_tree_settled, data);
+
         if let Some(ref backend) = self.backend {
             backend.write(data.to_vec());
         }
@@ -1440,11 +1672,22 @@ mod tests {
         build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
         build_ssh_init_commands, compose_ssh_init_commands, next_local_cwd_file_path,
         read_local_working_dir, resolve_default_windows_shell_from_env, shell_escape_arg,
-        OSC7_PROMPT_COMMAND,
+        LocalPtyBackend, TerminalConnectionKind, OSC7_PROMPT_COMMAND,
     };
+    use alacritty_terminal::tty::Options as PtyOptions;
+    #[cfg(target_os = "macos")]
+    use gpui::{AppContext, TestAppContext};
+    #[cfg(target_os = "macos")]
+    use std::cell::Cell;
     use std::fs;
     #[cfg(target_os = "linux")]
     use std::path::Path;
+    #[cfg(target_os = "macos")]
+    use std::process::{Child, Command};
+    #[cfg(target_os = "macos")]
+    use std::thread;
+    #[cfg(target_os = "macos")]
+    use std::time::{Duration, Instant};
 
     #[test]
     fn shell_escape_arg_handles_single_quote() {
@@ -1576,8 +1819,11 @@ mod tests {
         let proc_dir = root.join(pid.to_string());
         let task_dir = proc_dir.join("task").join(pid.to_string());
         fs::create_dir_all(&task_dir).expect("应创建伪 proc 目录");
-        fs::write(proc_dir.join("stat"), format!("{pid} (fake process) {state} 0 0 0 0\n"))
-            .expect("应写入伪 stat 文件");
+        fs::write(
+            proc_dir.join("stat"),
+            format!("{pid} (fake process) {state} 0 0 0 0\n"),
+        )
+        .expect("应写入伪 stat 文件");
         let children_text = children
             .iter()
             .map(u32::to_string)
@@ -1596,10 +1842,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn has_live_descendant_process_detects_non_zombie_children() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-proc-tree-live-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("onetcli-proc-tree-live-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).expect("应创建伪 proc 根目录");
 
@@ -1614,10 +1858,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn has_live_descendant_process_ignores_zombie_children() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-proc-tree-zombie-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("onetcli-proc-tree-zombie-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).expect("应创建伪 proc 根目录");
 
@@ -1627,6 +1869,331 @@ mod tests {
         assert!(!super::has_live_descendant_process(&temp_dir, 100));
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_sleep_child(seconds: u64) -> Child {
+        Command::new("sleep")
+            .arg(seconds.to_string())
+            .spawn()
+            .expect("应创建 sleep 子进程")
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn has_live_descendant_process_detects_non_zombie_children() {
+        let mut child = spawn_sleep_child(3);
+
+        assert!(super::has_live_descendant_process(std::process::id()));
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe fn fork_exit_child(delay_ms: u32) -> libc::pid_t {
+        let pid = libc::fork();
+        assert!(pid >= 0, "fork 应成功");
+        if pid == 0 {
+            libc::usleep(delay_ms * 1000);
+            libc::_exit(0);
+        }
+        pid
+    }
+
+    #[cfg(target_os = "macos")]
+    fn wait_until_terminal_unblocked() {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if !super::has_live_descendant_process(std::process::id()) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("子进程退出后终端仍被错误识别为存在活动进程");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn has_live_descendant_process_ignores_zombie_children() {
+        let pid = unsafe { fork_exit_child(50) };
+
+        assert!(super::has_live_descendant_process(std::process::id()));
+        wait_until_terminal_unblocked();
+
+        assert!(!super::has_live_descendant_process(std::process::id()));
+
+        let mut status = 0;
+        unsafe {
+            libc::waitpid(pid, &mut status, 0);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn resolve_terminal_process_pid_skips_login_wrapper() {
+        assert_eq!(
+            super::resolve_terminal_process_pid(10, Some("login"), true, &[20]),
+            20
+        );
+        assert_eq!(
+            super::resolve_terminal_process_pid(10, Some("login"), true, &[]),
+            10
+        );
+        assert_eq!(
+            super::resolve_terminal_process_pid(10, Some("zsh"), true, &[20]),
+            10
+        );
+        assert_eq!(
+            super::resolve_terminal_process_pid(10, None, false, &[20]),
+            20
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn startup_helpers_do_not_trigger_close_prompt_before_terminal_settles() {
+        assert!(!super::should_report_local_running_processes(false, true));
+        assert!(!super::should_report_local_running_processes(false, false));
+        assert!(super::should_report_local_running_processes(true, true));
+        assert!(!super::should_report_local_running_processes(true, false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn local_user_input_marks_startup_as_settled() {
+        let settled = Cell::new(false);
+
+        super::note_local_user_input(TerminalConnectionKind::Local, &settled, b"top\r");
+        assert!(settled.get());
+
+        settled.set(false);
+        super::note_local_user_input(TerminalConnectionKind::Ssh, &settled, b"top\r");
+        assert!(!settled.get());
+
+        super::note_local_user_input(TerminalConnectionKind::Local, &settled, b"");
+        assert!(!settled.get());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_process_tree_lines(pid: u32, depth: usize, lines: &mut Vec<String>) {
+        let indent = "  ".repeat(depth);
+        let name = super::read_process_bsdinfo(pid)
+            .as_ref()
+            .and_then(super::process_name_from_bsdinfo)
+            .unwrap_or_else(|| "<unavailable>".to_string());
+        let children = super::read_child_pids(pid);
+        lines.push(format!(
+            "{indent}pid={pid} name={name} children={:?}",
+            children
+        ));
+        for child_pid in children {
+            macos_process_tree_lines(child_pid, depth + 1, lines);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_process_tree_snapshot(pid: u32) -> String {
+        let mut lines = Vec::new();
+        macos_process_tree_lines(pid, 0, &mut lines);
+        lines.join(" | ")
+    }
+
+    #[cfg(target_os = "macos")]
+    fn wait_for_local_process_state(
+        local_pid: u32,
+        timeout: Duration,
+        expected_running: bool,
+    ) -> u32 {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let resolved_pid = super::resolve_local_shell_pid(local_pid);
+            let is_running = super::has_live_descendant_process(resolved_pid);
+            if is_running == expected_running {
+                return resolved_pid;
+            }
+
+            if Instant::now() >= deadline {
+                let tree = macos_process_tree_snapshot(local_pid);
+                panic!(
+                    "等待本地终端进程状态超时: local_pid={local_pid}, resolved_pid={resolved_pid}, expected_running={expected_running}, actual_running={is_running}, tree={tree}"
+                );
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_idle_local_terminal_has_no_blocking_processes() {
+        let config = super::LocalConfig::default();
+        let pty_options = PtyOptions {
+            shell: super::build_local_shell(config.shell),
+            working_directory: config.working_dir.clone().map(Into::into),
+            env: config.env.into_iter().collect(),
+            drain_on_exit: true,
+        };
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (term, event_proxy, _colors) =
+            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
+        let backend = LocalPtyBackend::new(term, event_proxy, pty_options).expect("应创建本地 PTY");
+        let local_pid = backend.child_pid().expect("本地 PTY 应返回 child pid");
+
+        let resolved_pid = wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
+        let tree = macos_process_tree_snapshot(local_pid);
+        let has_children = super::has_live_descendant_process(resolved_pid);
+
+        backend.shutdown();
+
+        assert!(
+            !has_children,
+            "空闲本地终端不应被识别为存在活动进程: local_pid={local_pid}, resolved_pid={resolved_pid}, tree={tree}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_local_terminal_detects_blocking_process_after_command() {
+        let config = super::LocalConfig::default();
+        let pty_options = PtyOptions {
+            shell: super::build_local_shell(config.shell),
+            working_directory: config.working_dir.clone().map(Into::into),
+            env: config.env.into_iter().collect(),
+            drain_on_exit: true,
+        };
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (term, event_proxy, _colors) =
+            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
+        let backend = LocalPtyBackend::new(term, event_proxy, pty_options).expect("应创建本地 PTY");
+        let local_pid = backend.child_pid().expect("本地 PTY 应返回 child pid");
+
+        let idle_pid = wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
+        backend.write(b"sleep 5\r".to_vec());
+
+        let running_pid = wait_for_local_process_state(local_pid, Duration::from_secs(3), true);
+        let tree = macos_process_tree_snapshot(local_pid);
+
+        backend.shutdown();
+
+        assert_ne!(idle_pid, 0, "空闲阶段应解析到有效 shell pid");
+        assert_ne!(running_pid, 0, "运行命令后应解析到有效 shell pid");
+        assert!(
+            super::has_live_descendant_process(running_pid),
+            "运行命令后应识别为存在活动进程: local_pid={local_pid}, idle_pid={idle_pid}, running_pid={running_pid}, tree={tree}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_entity_reports_running_processes_after_user_input() {
+        let mut cx = TestAppContext::single();
+        cx.update(one_core::gpui_tokio::init);
+        let terminal: gpui::Entity<super::Terminal> = cx.update(|cx: &mut gpui::App| {
+            cx.new(|cx| {
+                super::Terminal::new_local(super::LocalConfig::default(), cx)
+                    .expect("应创建本地终端")
+            })
+        });
+
+        let local_pid = cx.read(|app| {
+            terminal
+                .read(app)
+                .local_shell_pid
+                .expect("本地终端应记录 child pid")
+        });
+        wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
+
+        terminal.update(&mut cx, |terminal, _| {
+            terminal.local_process_tree_settled.set(true);
+            terminal.write(b"sleep 5\r");
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            cx.run_until_parked();
+
+            if cx.read(|app| terminal.read(app).has_running_processes()) {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                let (child_exited, settled) = cx.read(|app| {
+                    let snapshot = terminal.read(app);
+                    (
+                        snapshot.child_exited,
+                        snapshot.local_process_tree_settled.get(),
+                    )
+                });
+                let tree = macos_process_tree_snapshot(local_pid);
+                panic!(
+                    "Terminal 实体未识别到运行中进程: local_pid={local_pid}, child_exited={:?}, settled={}, tree={tree}",
+                    child_exited,
+                    settled,
+                );
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        terminal.update(&mut cx, |terminal: &mut super::Terminal, _| terminal.shutdown());
+        cx.run_until_parked();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_entity_reports_running_processes_after_top_command() {
+        let mut cx = TestAppContext::single();
+        cx.update(one_core::gpui_tokio::init);
+        let terminal: gpui::Entity<super::Terminal> = cx.update(|cx: &mut gpui::App| {
+            cx.new(|cx| {
+                super::Terminal::new_local(super::LocalConfig::default(), cx)
+                    .expect("应创建本地终端")
+            })
+        });
+
+        let local_pid = cx.read(|app| {
+            terminal
+                .read(app)
+                .local_shell_pid
+                .expect("本地终端应记录 child pid")
+        });
+        wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
+
+        terminal.update(&mut cx, |terminal, _| {
+            terminal.local_process_tree_settled.set(true);
+            terminal.write(b"top\r");
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            cx.run_until_parked();
+
+            if cx.read(|app| terminal.read(app).has_running_processes()) {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                let (child_exited, settled) = cx.read(|app| {
+                    let snapshot = terminal.read(app);
+                    (
+                        snapshot.child_exited,
+                        snapshot.local_process_tree_settled.get(),
+                    )
+                });
+                let tree = macos_process_tree_snapshot(local_pid);
+                panic!(
+                    "Terminal 实体在执行 top 后仍未识别到运行中进程: local_pid={local_pid}, child_exited={:?}, settled={}, tree={tree}",
+                    child_exited,
+                    settled,
+                );
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        terminal.update(&mut cx, |terminal: &mut super::Terminal, _| terminal.shutdown());
+        cx.run_until_parked();
     }
 }
 
