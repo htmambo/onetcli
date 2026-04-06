@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Subscription,
-    Window, WindowBounds, WindowKind, WindowOptions, actions, div, px, size,
+    actions, div, px, size, AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled,
+    Subscription, Window, WindowBounds, WindowKind, WindowOptions,
 };
-use gpui_component::{FocusTrapElement, Root, TitleBar, app_style, v_flex};
+use gpui_component::{
+    app_style, modal_surface_palette, v_flex, ActiveTheme as _, FocusTrapElement, Root, TitleBar,
+};
 
 actions!(popup_window, [CancelPopup]);
 
@@ -127,10 +129,12 @@ impl Focusable for PopupWindowView {
 
 impl Render for PopupWindowView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let surface_palette = modal_surface_palette(cx.theme());
+
         v_flex()
             .id("popup-window-root")
             .size_full()
-            .bg(app_style::page_bg())
+            .bg(surface_palette.content)
             .border_1()
             .border_color(app_style::border_strong())
             .text_color(app_style::text_primary())
@@ -142,7 +146,7 @@ impl Render for PopupWindowView {
             .child(
                 div()
                     .size_full()
-                    .bg(app_style::page_bg())
+                    .bg(surface_palette.content)
                     .child(self.content.clone()),
             )
     }
@@ -320,7 +324,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Bounds, point};
+    use gpui::{point, Bounds};
 
     #[test]
     fn popup_window_defaults_to_dialog_kind() {

@@ -332,8 +332,9 @@ impl TerminalTheme {
         }
 
         if self.is_dark() {
-            self.background.s *= 0.52;
-            self.background.l = (self.background.l + 0.14).min(1.0);
+            // 深色主题：略微增加亮度，降低饱和度，模拟毛玻璃效果
+            self.background.s *= 1.0;
+            self.background.l = (self.background.l - 0.08).min(1.0);
         } else {
             self.background.s *= 0.72;
             self.background.l = (self.background.l + 0.08).min(1.0);

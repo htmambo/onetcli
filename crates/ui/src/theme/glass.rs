@@ -1,8 +1,8 @@
 use crate::{highlighter::HighlightThemeStyle, Colorize, Theme, ThemeColor, ThemeMode};
 use gpui::Hsla;
 
-const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.80;
-const DIALOG_CHROME_ALPHA_OFFSET: f32 = 0.10;
+const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.50;
+const DIALOG_CHROME_ALPHA_OFFSET: f32 = 0.20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DialogSurfaceRole {
@@ -11,7 +11,7 @@ pub(crate) enum DialogSurfaceRole {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct DialogSurfacePalette {
+pub struct ModalSurfacePalette {
     pub content: Hsla,
     pub title_bar: Hsla,
     pub footer: Hsla,
@@ -128,12 +128,12 @@ pub(crate) fn dialog_chrome_surface_color(color: Hsla, blur_enabled: bool, opaci
     )
 }
 
-pub(crate) fn dialog_surface_palette(theme: &Theme) -> DialogSurfacePalette {
+pub fn modal_surface_palette(theme: &Theme) -> ModalSurfacePalette {
     let colors = theme.colors_without_glass();
     let blur_enabled = theme.window_blur_enabled;
     let opacity = theme.surface_opacity;
 
-    DialogSurfacePalette {
+    ModalSurfacePalette {
         content: dialog_content_surface_color(colors.background, blur_enabled, opacity),
         title_bar: dialog_chrome_surface_color(colors.title_bar, blur_enabled, opacity),
         footer: dialog_chrome_surface_color(colors.secondary, blur_enabled, opacity),
@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn dialog_surface_palette_uses_non_glass_base_colors() {
+    fn modal_surface_palette_uses_non_glass_base_colors() {
         let mut theme = Theme::from(ThemeColor::light().as_ref());
         theme.mode = ThemeMode::Light;
         theme.window_blur_enabled = true;
@@ -376,7 +376,7 @@ mod tests {
         );
 
         let raw_colors = theme.colors_without_glass();
-        let palette = dialog_surface_palette(&theme);
+        let palette = modal_surface_palette(&theme);
 
         assert_eq!(palette.content.h, raw_colors.background.h);
         assert_eq!(palette.content.s, raw_colors.background.s);

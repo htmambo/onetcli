@@ -433,7 +433,7 @@ impl RenderOnce for Dialog {
             paddings.bottom
         };
         let footer_padding_y = paddings.bottom.min(px(16.)).max(px(12.));
-        let dialog_palette = crate::theme::dialog_surface_palette(cx.theme());
+        let dialog_palette = crate::theme::modal_surface_palette(cx.theme());
 
         let animation =
             Animation::new(*ANIMATION_DURATION).with_easing(cubic_bezier(0.32, 0.72, 0., 1.));

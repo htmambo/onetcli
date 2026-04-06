@@ -120,7 +120,7 @@ fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
             WindowsSurfaceLayer::TerminalCanvas,
         )
     } else if ui_theme.window_blur_enabled {
-        (ui_theme.surface_opacity - 0.52).max(0.26)
+        (ui_theme.surface_opacity + 0.05).clamp(0.0, 1.0)
     } else {
         ui_theme.surface_opacity
     };
@@ -2751,7 +2751,7 @@ impl Render for TerminalView {
                         div()
                             .bg(terminal_bg) // 终端背景色，避免 Canvas 层未覆盖时闪烁
                             .absolute()
-                            .left_2()
+                            .left_1()
                             .right_0()
                             .top_0()
                             .bottom_0()

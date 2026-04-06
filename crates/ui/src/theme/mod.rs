@@ -23,7 +23,8 @@ mod semantic;
 mod theme_color;
 
 pub use color::*;
-pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning, dialog_surface_palette};
+pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning};
+pub use glass::{modal_surface_palette, ModalSurfacePalette};
 pub use registry::*;
 pub use schema::*;
 pub use semantic::SemanticColorsRef;
