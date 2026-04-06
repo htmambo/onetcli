@@ -25,8 +25,8 @@ use crate::addon::{
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
 use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
-    MIN_LINE_HEIGHT_SCALE,
+    TerminalTheme, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE,
+    MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
 };
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
@@ -2346,6 +2346,51 @@ pub fn build_local_terminal(
     };
     let view = cx.new(|cx| TerminalView::new(config, window, cx));
 
+    // 从恢复的 tab state 中读取保存的设置；若字段缺失则使用 TerminalView::new() 的默认值
+    let font_size = data.get("font_size").and_then(|v| v.as_f64()).unwrap_or(f64::from(DEFAULT_FONT_SIZE)) as f32;
+    // font_family 可能为 None（字段完全缺失）或 Some("")（旧数据空值）；两者均视为无有效值，跳过字体设置
+    let font_family = data.get("font_family").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from);
+    let font_ligatures = data.get("font_ligatures").and_then(|v| v.as_bool()).unwrap_or(false);
+    let line_height_scale = data.get("line_height_scale").and_then(|v| v.as_f64()).unwrap_or(f64::from(DEFAULT_LINE_HEIGHT_SCALE)) as f32;
+    let auto_copy = data.get("auto_copy").and_then(|v| v.as_bool()).unwrap_or(true);
+    let middle_click_paste = data.get("middle_click_paste").and_then(|v| v.as_bool()).unwrap_or(true);
+    let cursor_blink = data.get("cursor_blink").and_then(|v| v.as_bool()).unwrap_or(false);
+    let confirm_multiline = data.get("confirm_multiline_paste").and_then(|v| v.as_bool()).unwrap_or(true);
+    let confirm_high_risk = data.get("confirm_high_risk_command").and_then(|v| v.as_bool()).unwrap_or(true);
+    let exit_behavior = data.get("exit_behavior").and_then(|v| v.as_str()).unwrap_or("prompt").to_string();
+    let theme_name = data.get("theme_name").and_then(|v| v.as_str()).map(String::from);
+
+    // 注意：不能在 cx.new() 的闭包内调用 view.update()（GPUI 不允许在 entity 构造期间更新自身）。
+    // 使用 window.defer() 将设置应用延迟到 entity 构造完成之后，且能获得新鲜的 &mut Window。
+    let view_clone = view.clone();
+    window.defer(cx, move |window, cx| {
+        view_clone.update(cx, |view, cx| {
+            // 仅当有有效 font_family 时才应用字体相关设置，否则保持 TerminalView::new() 的默认行为
+            if let Some(ref family) = font_family {
+                view.apply_terminal_settings(
+                    font_size,
+                    family.clone(),
+                    font_ligatures,
+                    line_height_scale,
+                    auto_copy,
+                    middle_click_paste,
+                    false,
+                    &exit_behavior,
+                    window,
+                    cx,
+                );
+            }
+            if let Some(name) = theme_name {
+                if let Some(theme) = TerminalTheme::find_by_name(&name) {
+                    view.apply_theme(&theme, window, cx);
+                }
+            }
+            view.apply_cursor_blink(cursor_blink, window, cx);
+            view.apply_confirm_multiline_paste(confirm_multiline, cx);
+            view.apply_confirm_high_risk_command(confirm_high_risk, cx);
+        });
+    });
+
     Some(std::sync::Arc::new(view))
 }
 
@@ -2440,6 +2485,18 @@ impl TabContent for TerminalView {
                     "kind": "local_terminal",
                     "working_dir": terminal.latest_working_dir(),
                     "title": self.title(cx).to_string(),
+                    // 保存字体和行间距设置，恢复时正确应用
+                    "font_size": f32::from(self.current_theme.font_size),
+                    "font_family": self.current_theme.font_family.to_string(),
+                    "font_ligatures": self.font_ligatures_enabled,
+                    "line_height_scale": self.current_theme.line_height_scale,
+                    "cursor_blink": self.cursor_blink_enabled,
+                    "auto_copy": self.auto_copy_on_select,
+                    "middle_click_paste": self.middle_click_paste,
+                    "confirm_multiline_paste": self.confirm_multiline_paste,
+                    "confirm_high_risk_command": self.confirm_high_risk_command,
+                    "exit_behavior": self.exit_behavior,
+                    "theme_name": self.current_theme.name,
                 })
             }
         }
