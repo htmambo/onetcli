@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use gpui::{
-    actions, div, px, size, AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled,
-    Subscription, Window, WindowBounds, WindowKind, WindowOptions,
+    AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Subscription,
+    Window, WindowBounds, WindowKind, WindowOptions, actions, div, px, size,
 };
 use gpui_component::{
-    app_style, modal_surface_palette, v_flex, ActiveTheme as _, FocusTrapElement, Root, TitleBar,
+    ActiveTheme as _, FocusTrapElement, Root, TitleBar, app_style, modal_surface_palette, v_flex,
 };
 
 actions!(popup_window, [CancelPopup]);
@@ -324,7 +324,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{point, Bounds};
+    use gpui::{Bounds, point};
 
     #[test]
     fn popup_window_defaults_to_dialog_kind() {

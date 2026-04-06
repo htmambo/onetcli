@@ -26,6 +26,7 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex,
 };
+use one_core::RunningState;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
@@ -33,7 +34,6 @@ use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
-use one_core::RunningState;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};

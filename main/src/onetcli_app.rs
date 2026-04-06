@@ -145,9 +145,9 @@ use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
-use one_core::{RunningKind, RunningState};
 use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save, tab_state_exists};
 use one_core::utils::debouncer::Debouncer;
+use one_core::{RunningKind, RunningState};
 use reqwest_client::ReqwestClient;
 use rust_i18n::t;
 use tracing_subscriber::layer::SubscriberExt;
@@ -329,7 +329,11 @@ fn open_app_close_dialog(
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(div().text_sm().child(t!("Common.running_process_close_message")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(t!("Common.running_process_close_message")),
+                    )
                     .child(div().h_px().bg(border_color))
                     .children(running_states.iter().map(|state| {
                         let icon = match state.kind {
@@ -380,7 +384,9 @@ fn open_app_close_dialog(
 }
 
 fn request_main_window_close(window: &mut Window, cx: &mut App) -> bool {
-    let Some(tab_container) = cx.try_global::<GlobalTabContainer>().map(|g| g.tab_container.clone())
+    let Some(tab_container) = cx
+        .try_global::<GlobalTabContainer>()
+        .map(|g| g.tab_container.clone())
     else {
         return true;
     };
@@ -707,9 +713,7 @@ impl OnetCliApp {
             container
         });
 
-        window.on_window_should_close(cx, move |window, cx| {
-            request_main_window_close(window, cx)
-        });
+        window.on_window_should_close(cx, move |window, cx| request_main_window_close(window, cx));
 
         cx.set_global(GlobalTabContainer {
             tab_container: tab_container.clone(),
@@ -1238,9 +1242,7 @@ impl Render for OnetCliApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AppCloseDecision, AppCloseGuard, build_status_bar_title, build_window_title,
-    };
+    use super::{AppCloseDecision, AppCloseGuard, build_status_bar_title, build_window_title};
 
     #[test]
     fn 活动标签存在时拼接应用名和标签名() {

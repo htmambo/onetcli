@@ -1,23 +1,24 @@
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
-    anchored, div, hsla, point, prelude::FluentBuilder, px, relative, Animation, AnimationExt as _,
-    AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges, FocusHandle, Hsla, InteractiveElement,
-    IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, RenderOnce, SharedString, StyleRefinement, Styled, Window,
-    WindowControlArea,
+    Animation, AnimationExt as _, AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges,
+    FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
+    prelude::FluentBuilder, px, relative,
 };
 use rust_i18n::t;
 
 use crate::{
+    ActiveTheme as _, FocusTrapElement as _, IconName, Root, Sizable as _, StyledExt,
+    TITLE_BAR_HEIGHT, WindowExt as _,
     actions::{Cancel, Confirm},
     animation::cubic_bezier,
     app_style,
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement as _,
-    v_flex, ActiveTheme as _, FocusTrapElement as _, IconName, Root, Sizable as _, StyledExt,
-    WindowExt as _, TITLE_BAR_HEIGHT,
+    v_flex,
 };
 
 pub static ANIMATION_DURATION: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs_f64(0.25));

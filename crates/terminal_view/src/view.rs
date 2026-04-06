@@ -2358,18 +2358,53 @@ pub fn build_local_terminal(
     let view = cx.new(|cx| TerminalView::new(config, window, cx));
 
     // 从恢复的 tab state 中读取保存的设置；若字段缺失则使用 TerminalView::new() 的默认值
-    let font_size = data.get("font_size").and_then(|v| v.as_f64()).unwrap_or(f64::from(DEFAULT_FONT_SIZE)) as f32;
+    let font_size = data
+        .get("font_size")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::from(DEFAULT_FONT_SIZE)) as f32;
     // font_family 可能为 None（字段完全缺失）或 Some("")（旧数据空值）；两者均视为无有效值，跳过字体设置
-    let font_family = data.get("font_family").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from);
-    let font_ligatures = data.get("font_ligatures").and_then(|v| v.as_bool()).unwrap_or(false);
-    let line_height_scale = data.get("line_height_scale").and_then(|v| v.as_f64()).unwrap_or(f64::from(DEFAULT_LINE_HEIGHT_SCALE)) as f32;
-    let auto_copy = data.get("auto_copy").and_then(|v| v.as_bool()).unwrap_or(true);
-    let middle_click_paste = data.get("middle_click_paste").and_then(|v| v.as_bool()).unwrap_or(true);
-    let cursor_blink = data.get("cursor_blink").and_then(|v| v.as_bool()).unwrap_or(false);
-    let confirm_multiline = data.get("confirm_multiline_paste").and_then(|v| v.as_bool()).unwrap_or(true);
-    let confirm_high_risk = data.get("confirm_high_risk_command").and_then(|v| v.as_bool()).unwrap_or(true);
-    let exit_behavior = data.get("exit_behavior").and_then(|v| v.as_str()).unwrap_or("prompt").to_string();
-    let theme_name = data.get("theme_name").and_then(|v| v.as_str()).map(String::from);
+    let font_family = data
+        .get("font_family")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let font_ligatures = data
+        .get("font_ligatures")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let line_height_scale = data
+        .get("line_height_scale")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::from(DEFAULT_LINE_HEIGHT_SCALE)) as f32;
+    let auto_copy = data
+        .get("auto_copy")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let middle_click_paste = data
+        .get("middle_click_paste")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let cursor_blink = data
+        .get("cursor_blink")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let confirm_multiline = data
+        .get("confirm_multiline_paste")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let confirm_high_risk = data
+        .get("confirm_high_risk_command")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let exit_behavior = data
+        .get("exit_behavior")
+        .and_then(|v| v.as_str())
+        .unwrap_or("prompt")
+        .to_string();
+    let theme_name = data
+        .get("theme_name")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     // 注意：不能在 cx.new() 的闭包内调用 view.update()（GPUI 不允许在 entity 构造期间更新自身）。
     // 使用 window.defer() 将设置应用延迟到 entity 构造完成之后，且能获得新鲜的 &mut Window。
@@ -2538,15 +2573,11 @@ impl TabContent for TerminalView {
                 .title(t!("TerminalCloseDialog.running_process_close_title"))
                 .confirm()
                 .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .child(t!("TerminalCloseDialog.running_process_close_message")),
-                        ),
+                    div().flex().flex_col().gap_2().child(
+                        div()
+                            .text_sm()
+                            .child(t!("TerminalCloseDialog.running_process_close_message")),
+                    ),
                 )
                 .button_props(
                     DialogButtonProps::default()

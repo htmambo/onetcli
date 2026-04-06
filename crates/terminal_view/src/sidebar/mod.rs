@@ -16,7 +16,6 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
-
 use crate::theme::{TerminalColors, TerminalTheme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -24,7 +23,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{v_flex, ActiveTheme, glass_sidebar, Icon, IconName, Sizable, Size};
+use gpui_component::{glass_sidebar, v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};

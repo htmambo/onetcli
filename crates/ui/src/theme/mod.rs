@@ -6,7 +6,7 @@ use crate::{
     sheet::SheetSettings,
     tokens::color::semantic::{SemanticColorsDark, SemanticColorsLight},
 };
-use gpui::{px, App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance};
+use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -23,8 +23,8 @@ mod semantic;
 mod theme_color;
 
 pub use color::*;
+pub use glass::{ModalSurfacePalette, modal_surface_palette};
 pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning};
-pub use glass::{modal_surface_palette, ModalSurfacePalette};
 pub use registry::*;
 pub use schema::*;
 pub use semantic::SemanticColorsRef;

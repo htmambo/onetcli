@@ -9,18 +9,18 @@
 //! - `motion.rs` — 动效 token
 
 pub mod color;
-pub mod spacing;
-pub mod typography;
+pub mod motion;
 pub mod radius;
 pub mod shadow;
-pub mod motion;
+pub mod spacing;
+pub mod typography;
 
 pub use color::semantic::SemanticColors;
-pub use spacing::Spacing;
-pub use typography::TypographyTokens;
+pub use motion::MotionTokens;
 pub use radius::Radius;
 pub use shadow::ShadowToken;
-pub use motion::MotionTokens;
+pub use spacing::Spacing;
+pub use typography::TypographyTokens;
 
 #[cfg(test)]
 mod tests;

@@ -7,11 +7,11 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, IconName, IndexPath, Sizable,
-    tokens::Radius,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     list::{ListDelegate, ListItem, ListState},
+    tokens::Radius,
     tooltip::Tooltip,
 };
 use one_core::storage::{StoredConnection, Workspace};

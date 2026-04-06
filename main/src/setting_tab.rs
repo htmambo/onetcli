@@ -14,7 +14,6 @@ use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Icon, IconName, LEFT_PANEL_ALPHA_OFFSET, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
     Sizable, Size, Theme, ThemeMode,
-    tokens::Radius,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -24,6 +23,7 @@ use gpui_component::{
         NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
         Settings,
     },
+    tokens::Radius,
     v_flex,
 };
 use one_core::certificate_manager::CertificateManagerView;
@@ -1804,7 +1804,12 @@ fn settings_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f64)
     color
 }
 
-fn settings_glass_with_offset(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f64, extra_offset: f32) -> gpui::Hsla {
+fn settings_glass_with_offset(
+    mut color: gpui::Hsla,
+    blur_enabled: bool,
+    glass_opacity: f64,
+    extra_offset: f32,
+) -> gpui::Hsla {
     if !blur_enabled {
         return color;
     }
@@ -1825,31 +1830,29 @@ impl Render for SettingsPanel {
         // 左侧面板透明度：使用统一的 alpha = glass_opacity + LEFT_PANEL_ALPHA_OFFSET
         let sidebar_bg = settings_glass(cx.theme().sidebar, blur_enabled, glass_opacity);
         // 页面背景透明度：glass_opacity + 0.02
-        let page_bg = settings_glass_with_offset(cx.theme().background, blur_enabled, glass_opacity, 0.02);
+        let page_bg =
+            settings_glass_with_offset(cx.theme().background, blur_enabled, glass_opacity, 0.02);
         let sidebar_style = StyleRefinement::default()
             .bg(sidebar_bg)
             .border_color(cx.theme().sidebar_border)
             .text_color(cx.theme().sidebar_foreground);
-        let content_style = StyleRefinement::default()
-            .bg(page_bg);
+        let content_style = StyleRefinement::default().bg(page_bg);
 
         div()
             .track_focus(&self.focus_handle)
             .size_full()
             // .bg(if blur_enabled { cx.theme().transparent } else { cx.theme().background })
             .child(
-                div()
-                    .size_full()
-                    .child(
-                        Settings::new("main-app-settings")
-                            .with_size(self.size)
-                            .with_group_variant(self.group_variant)
-                            .sidebar_style(&sidebar_style)
-                            .content_style(&content_style)
-                            .header_style(&sync_server_theme::control_style())
-                            .default_selected_index(self.selected_page.select_index())
-                            .pages(self.setting_pages(window, cx)),
-                    ),
+                div().size_full().child(
+                    Settings::new("main-app-settings")
+                        .with_size(self.size)
+                        .with_group_variant(self.group_variant)
+                        .sidebar_style(&sidebar_style)
+                        .content_style(&content_style)
+                        .header_style(&sync_server_theme::control_style())
+                        .default_selected_index(self.selected_page.select_index())
+                        .pages(self.setting_pages(window, cx)),
+                ),
             )
     }
 }

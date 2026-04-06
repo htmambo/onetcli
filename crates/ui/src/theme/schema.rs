@@ -1,12 +1,13 @@
 use std::{rc::Rc, sync::Arc};
 
-use gpui::{px, SharedString};
+use gpui::{SharedString, px};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    Colorize, Theme, ThemeColor, ThemeMode,
     highlighter::{HighlightTheme, HighlightThemeStyle},
-    try_parse_color, Colorize, Theme, ThemeColor, ThemeMode,
+    try_parse_color,
 };
 
 /// Represents a theme configuration.

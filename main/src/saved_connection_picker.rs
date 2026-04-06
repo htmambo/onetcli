@@ -10,11 +10,11 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, StyledExt,
-    tokens::Radius,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     popover::Popover,
+    tokens::Radius,
     v_flex,
 };
 use one_core::storage::{ActiveConnections, ConnectionType, StoredConnection, Workspace};

@@ -13,12 +13,12 @@ use gpui::{
     MouseUpEvent, ParentElement, Pixels, Point, Render, SharedString, Style, Styled, Task, Window,
     div, prelude::FluentBuilder, px,
 };
-use gpui_component::{tokens::Radius, ActiveTheme, Icon, IconName, Sizable, Size, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, tokens::Radius, v_flex};
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{
-    SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
-    CHAT_SIDEBAR_MIN_WIDTH, CHAT_SIDEBAR_DEFAULT_WIDTH, PANEL_MIN_SIZE, TREE_PANEL_DEFAULT_SIZE,
+    CHAT_SIDEBAR_DEFAULT_WIDTH, CHAT_SIDEBAR_MIN_WIDTH, PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH, TREE_PANEL_DEFAULT_SIZE,
 };
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, Workspace};
@@ -29,7 +29,6 @@ use one_core::{
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use uuid::Uuid;
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizingPanel {

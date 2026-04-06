@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
 use alacritty_terminal::sync::FairMutex;
@@ -14,6 +14,8 @@ use ssh::{
 
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
 use crate::{TerminalBackend, TerminalSize};
+
+const SSH_PROMPT_READY_MARKER: &[u8] = b"\x1b]1337;OnetcliPromptReady=1\x07";
 
 /// 从终端数据中提取当前工作目录
 ///
@@ -83,6 +85,11 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
         }
     }
     None
+}
+
+fn contains_prompt_ready_marker(data: &[u8]) -> bool {
+    data.windows(SSH_PROMPT_READY_MARKER.len())
+        .any(|window| window == SSH_PROMPT_READY_MARKER)
 }
 
 /// 简单的 percent-decode 实现，将 %XX 编码转为实际字节
@@ -236,12 +243,18 @@ impl SshBackend {
                                 if let Some(path) = extract_cwd(&data) {
                                     let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
                                 }
+                                if contains_prompt_ready_marker(&data) {
+                                    let _ = event_tx.send(TerminalEvent::SshPromptReady);
+                                }
                                 processor.advance(&mut *term.lock(), &data);
                                 let _ = notify_tx.send(());
                             }
                             Some(ChannelEvent::ExtendedData { data, .. }) => {
                                 if let Some(path) = extract_cwd(&data) {
                                     let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
+                                }
+                                if contains_prompt_ready_marker(&data) {
+                                    let _ = event_tx.send(TerminalEvent::SshPromptReady);
                                 }
                                 processor.advance(&mut *term.lock(), &data);
                                 let _ = notify_tx.send(());
@@ -282,5 +295,18 @@ impl TerminalBackend for SshBackend {
 
     fn shutdown(&self) {
         let _ = self.command_tx.send(SshCommand::Shutdown);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contains_prompt_ready_marker;
+
+    #[test]
+    fn prompt_ready_marker_detection_matches_embedded_osc() {
+        assert!(contains_prompt_ready_marker(
+            b"hello\x1b]1337;OnetcliPromptReady=1\x07world"
+        ));
+        assert!(!contains_prompt_ready_marker(b"hello world"));
     }
 }

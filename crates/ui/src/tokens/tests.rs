@@ -3,11 +3,11 @@
 #[cfg(test)]
 mod tests {
     use crate::tokens::{
-        spacing::Spacing,
+        motion::{Easing, MotionTokens},
         radius::Radius,
         shadow::ShadowToken,
+        spacing::Spacing,
         typography::TypographyTokens,
-        motion::{MotionTokens, Easing},
     };
 
     #[test]

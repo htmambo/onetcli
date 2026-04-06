@@ -675,7 +675,11 @@ impl DatabaseObjects {
             .border_b_1()
             .border_color(cx.theme().border)
             .text_color(cx.theme().table_head_foreground)
-            .bg(macos_table_head_glass(cx.theme().table_head, blur_enabled, 0.16));
+            .bg(macos_table_head_glass(
+                cx.theme().table_head,
+                blur_enabled,
+                0.16,
+            ));
 
         if show_row_number {
             header = header.child(

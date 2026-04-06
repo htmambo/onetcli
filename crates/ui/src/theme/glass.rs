@@ -1,4 +1,4 @@
-use crate::{highlighter::HighlightThemeStyle, Colorize, Theme, ThemeColor, ThemeMode};
+use crate::{Colorize, Theme, ThemeColor, ThemeMode, highlighter::HighlightThemeStyle};
 use gpui::Hsla;
 
 const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.50;

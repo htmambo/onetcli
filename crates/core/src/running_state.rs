@@ -28,21 +28,37 @@ pub struct RunningState {
 impl RunningState {
     /// 创建一个终端运行状态
     pub fn terminal(title: SharedString, activity: SharedString) -> Option<Self> {
-        Some(Self { kind: RunningKind::Terminal, title, activity })
+        Some(Self {
+            kind: RunningKind::Terminal,
+            title,
+            activity,
+        })
     }
 
     /// 创建一个 SSH 会话运行状态
     pub fn ssh(title: SharedString, activity: SharedString) -> Option<Self> {
-        Some(Self { kind: RunningKind::Ssh, title, activity })
+        Some(Self {
+            kind: RunningKind::Ssh,
+            title,
+            activity,
+        })
     }
 
     /// 创建一个 SFTP 传输运行状态
     pub fn sftp(title: SharedString, activity: SharedString) -> Option<Self> {
-        Some(Self { kind: RunningKind::Sftp, title, activity })
+        Some(Self {
+            kind: RunningKind::Sftp,
+            title,
+            activity,
+        })
     }
 
     /// 创建一个数据库运行状态
     pub fn db(title: SharedString, activity: SharedString) -> Option<Self> {
-        Some(Self { kind: RunningKind::Db, title, activity })
+        Some(Self {
+            kind: RunningKind::Db,
+            title,
+            activity,
+        })
     }
 }

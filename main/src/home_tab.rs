@@ -13,16 +13,16 @@ use gpui::{
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
-    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt,
-    glass_sidebar_f64, Sizable, Size, WindowExt, WindowsSurfaceLayer, app_style,
-    tokens::Radius,
+    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
+    WindowExt, WindowsSurfaceLayer, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex,
+    glass_sidebar_f64, h_flex,
     input::{Input, InputEvent, InputState},
     list::{List, ListState},
     menu::PopupMenuItem,
     popover::Popover,
+    tokens::Radius,
     tooltip::Tooltip,
     v_flex, windows_surface_color,
 };
@@ -33,9 +33,9 @@ use one_core::cloud_sync::{
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
 use one_core::key_storage;
+use one_core::layout::SIDEBAR_DEFAULT_WIDTH;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
-use one_core::layout::SIDEBAR_DEFAULT_WIDTH;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
     PendingCloudDeletionMetadata, PendingCloudDeletionRepository, RedisMode, StoredConnection,
@@ -137,7 +137,6 @@ fn macos_home_glass(
     color.a = new_a;
     color
 }
-
 
 #[derive(Clone)]
 struct DragWorkspace {

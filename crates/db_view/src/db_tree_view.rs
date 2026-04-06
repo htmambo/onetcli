@@ -13,17 +13,17 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize,
-    glass_sidebar, tokens::Radius,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
-    h_flex,
+    glass_sidebar, h_flex,
     input::{Input, InputEvent, InputState},
     list::{List, ListDelegate, ListState},
     menu::{ContextMenuExt, PopupMenuItem},
     popover::Popover,
     scroll::Scrollbar,
     spinner::Spinner,
+    tokens::Radius,
     tooltip::Tooltip,
     v_flex,
 };
@@ -43,8 +43,11 @@ use one_core::{
     storage::{ActiveConnections, GlobalStorageState, StoredConnection},
 };
 
-
-fn macos_sidebar_input_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f32) -> gpui::Hsla {
+fn macos_sidebar_input_glass(
+    mut color: gpui::Hsla,
+    blur_enabled: bool,
+    glass_opacity: f32,
+) -> gpui::Hsla {
     if blur_enabled {
         let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
         color.a = alpha;

@@ -13,11 +13,10 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
-use gpui_component::{glass_sidebar, ActiveTheme, Icon, IconName, Sizable, Size, v_flex};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, glass_sidebar, v_flex};
 use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::layout::TOOLBAR_WIDTH;
-
 
 /// 侧边栏面板类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

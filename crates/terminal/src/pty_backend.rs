@@ -90,6 +90,8 @@ pub enum TerminalEvent {
     ClipboardLoad(ClipboardType),
     /// 远程工作目录变更（OSC 7）
     WorkingDirChanged(String),
+    /// SSH 远端 shell 已回到提示符，可视为空闲态
+    SshPromptReady,
 }
 
 /// Commands from UI layer to PTY backend

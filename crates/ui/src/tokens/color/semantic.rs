@@ -2,8 +2,8 @@
 //!
 //! 供组件使用。名称表达用途而非具体色值。
 
-use super::primitives::{dark, light};
 use super::modes::{ColorModes, DarkMode, LightMode};
+use super::primitives::{dark, light};
 use gpui::Hsla;
 
 /// 语义化颜色结构体 — dark 模式

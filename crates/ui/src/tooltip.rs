@@ -3,8 +3,8 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
 
-use crate::{ActiveTheme, StyledExt, h_flex, kbd::Kbd, text::Text};
 use crate::tokens::Radius;
+use crate::{ActiveTheme, StyledExt, h_flex, kbd::Kbd, text::Text};
 
 enum TooltipContext {
     Text(Text),
