@@ -23,7 +23,7 @@ mod semantic;
 mod theme_color;
 
 pub use color::*;
-pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning, dialog_surface_color};
+pub(crate) use glass::{apply_glass_highlight_tuning, apply_glass_tuning, dialog_surface_palette};
 pub use registry::*;
 pub use schema::*;
 pub use semantic::SemanticColorsRef;
@@ -202,6 +202,22 @@ impl Theme {
         } else {
             &self.light_theme.name
         }
+    }
+
+    pub(crate) fn colors_without_glass(&self) -> ThemeColor {
+        let default_colors = if self.is_dark() {
+            ThemeColor::dark()
+        } else {
+            ThemeColor::light()
+        };
+        let mut colors = *default_colors.as_ref();
+        let active_config = if self.is_dark() {
+            self.dark_theme.as_ref()
+        } else {
+            self.light_theme.as_ref()
+        };
+        colors.apply_config(active_config, default_colors.as_ref());
+        colors
     }
 
     /// Sync the theme with the system appearance

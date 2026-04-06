@@ -433,6 +433,7 @@ impl RenderOnce for Dialog {
             paddings.bottom
         };
         let footer_padding_y = paddings.bottom.min(px(16.)).max(px(12.));
+        let dialog_palette = crate::theme::dialog_surface_palette(cx.theme());
 
         let animation =
             Animation::new(*ANIMATION_DURATION).with_easing(cubic_bezier(0.32, 0.72, 0., 1.));
@@ -515,11 +516,6 @@ impl RenderOnce for Dialog {
                             .id(layer_ix)
                             .track_focus(&self.focus_handle)
                             .focus_trap(format!("dialog-{}", layer_ix), &self.focus_handle)
-                            .bg(crate::theme::dialog_surface_color(
-                                app_style::page_bg(),
-                                cx.theme().mode,
-                                cx.theme().window_blur_enabled,
-                            ))
                             .border_1()
                             .border_color(app_style::border_strong())
                             .rounded(cx.theme().radius_lg)
@@ -582,6 +578,7 @@ impl RenderOnce for Dialog {
                                         .items_center()
                                         .cursor_move()
                                         .refine_style(&app_style::title_bar_style())
+                                        .bg(dialog_palette.title_bar)
                                         .border_b_1()
                                         .border_color(app_style::border())
                                         .on_mouse_down(
@@ -634,17 +631,21 @@ impl RenderOnce for Dialog {
                                     })
                             }))
                             .child(
-                                div().flex_1().overflow_hidden().child(
-                                    // Body
-                                    v_flex()
-                                        .size_full()
-                                        .overflow_y_scrollbar()
-                                        .pl(paddings.left)
-                                        .pr(paddings.right)
-                                        .pt(body_top_padding)
-                                        .pb(body_bottom_padding)
-                                        .children(self.children),
-                                ),
+                                div()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .bg(dialog_palette.content)
+                                    .child(
+                                        // Body
+                                        v_flex()
+                                            .size_full()
+                                            .overflow_y_scrollbar()
+                                            .pl(paddings.left)
+                                            .pr(paddings.right)
+                                            .pt(body_top_padding)
+                                            .pb(body_bottom_padding)
+                                            .children(self.children),
+                                    ),
                             )
                             .when_some(self.footer, |this, footer| {
                                 this.child(
@@ -658,6 +659,7 @@ impl RenderOnce for Dialog {
                                         .line_height(relative(1.))
                                         .justify_end()
                                         .refine_style(&app_style::footer_style())
+                                        .bg(dialog_palette.footer)
                                         .border_t_1()
                                         .border_color(app_style::border())
                                         .children(footer(render_ok, render_cancel, window, cx)),

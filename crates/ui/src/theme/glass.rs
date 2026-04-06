@@ -1,7 +1,21 @@
-use crate::{highlighter::HighlightThemeStyle, Colorize, ThemeColor, ThemeMode};
+use crate::{highlighter::HighlightThemeStyle, Colorize, Theme, ThemeColor, ThemeMode};
 use gpui::Hsla;
 
 const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.80;
+const DIALOG_CHROME_ALPHA_OFFSET: f32 = 0.10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DialogSurfaceRole {
+    Content,
+    Chrome,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DialogSurfacePalette {
+    pub content: Hsla,
+    pub title_bar: Hsla,
+    pub footer: Hsla,
+}
 
 #[derive(Clone, Copy)]
 struct GlassSurfaceTuning {
@@ -100,8 +114,30 @@ pub(crate) fn apply_glass_highlight_tuning(
     }
 }
 
-pub(crate) fn dialog_surface_color(color: Hsla, mode: ThemeMode, blur_enabled: bool) -> Hsla {
-    with_alpha(color, dialog_surface_alpha(mode, blur_enabled))
+pub(crate) fn dialog_content_surface_color(color: Hsla, blur_enabled: bool, opacity: f32) -> Hsla {
+    with_alpha(
+        color,
+        dialog_surface_alpha(blur_enabled, opacity, DialogSurfaceRole::Content),
+    )
+}
+
+pub(crate) fn dialog_chrome_surface_color(color: Hsla, blur_enabled: bool, opacity: f32) -> Hsla {
+    with_alpha(
+        color,
+        dialog_surface_alpha(blur_enabled, opacity, DialogSurfaceRole::Chrome),
+    )
+}
+
+pub(crate) fn dialog_surface_palette(theme: &Theme) -> DialogSurfacePalette {
+    let colors = theme.colors_without_glass();
+    let blur_enabled = theme.window_blur_enabled;
+    let opacity = theme.surface_opacity;
+
+    DialogSurfacePalette {
+        content: dialog_content_surface_color(colors.background, blur_enabled, opacity),
+        title_bar: dialog_chrome_surface_color(colors.title_bar, blur_enabled, opacity),
+        footer: dialog_chrome_surface_color(colors.secondary, blur_enabled, opacity),
+    }
 }
 
 fn frosted_surface_tuning(mode: ThemeMode, opacity: f32) -> GlassSurfaceTuning {
@@ -217,19 +253,23 @@ fn offset_alpha(alpha: f32, delta: f32) -> f32 {
     (alpha + delta).clamp(0.0, 1.0)
 }
 
-fn dialog_surface_alpha(mode: ThemeMode, blur_enabled: bool) -> f32 {
-    let tuning = if blur_enabled {
-        frosted_surface_tuning(mode, DIALOG_SURFACE_BASE_OPACITY)
-    } else {
-        plain_surface_tuning(mode, DIALOG_SURFACE_BASE_OPACITY)
-    };
+fn dialog_surface_alpha(blur_enabled: bool, opacity: f32, role: DialogSurfaceRole) -> f32 {
+    let opacity = opacity.clamp(0.0, 1.0);
+    if !blur_enabled && opacity >= 1.0 {
+        return 1.0;
+    }
 
-    tuning.base
+    let base_alpha = opacity.max(DIALOG_SURFACE_BASE_OPACITY);
+    match role {
+        DialogSurfaceRole::Content => base_alpha,
+        DialogSurfaceRole::Chrome => offset_alpha(base_alpha, DIALOG_CHROME_ALPHA_OFFSET),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::apply_glass_tuning;
 
     fn assert_alpha_eq(actual: f32, expected: f32) {
         assert!(
@@ -239,26 +279,47 @@ mod tests {
     }
 
     #[test]
-    fn dialog_surface_alpha_uses_fixed_base_when_blur_disabled() {
-        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Dark, false), 0.80);
-        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Light, false), 0.80);
+    fn dialog_content_surface_alpha_uses_minimum_when_translucent() {
+        assert_alpha_eq(
+            dialog_surface_alpha(false, 0.40, DialogSurfaceRole::Content),
+            0.80,
+        );
+        assert_alpha_eq(
+            dialog_surface_alpha(true, 0.40, DialogSurfaceRole::Content),
+            0.80,
+        );
     }
 
     #[test]
-    fn dialog_surface_alpha_preserves_frosted_base_adjustments() {
-        let expected_dark = if cfg!(target_os = "macos") {
-            0.68
-        } else {
-            0.80
-        };
-        let expected_light = if cfg!(target_os = "macos") {
-            0.66
-        } else {
-            0.80
-        };
+    fn dialog_surface_alpha_uses_app_opacity_when_above_minimum() {
+        assert_alpha_eq(
+            dialog_surface_alpha(true, 0.84, DialogSurfaceRole::Content),
+            0.84,
+        );
+        assert_alpha_eq(
+            dialog_surface_alpha(false, 0.84, DialogSurfaceRole::Chrome),
+            0.94,
+        );
+    }
 
-        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Dark, true), expected_dark);
-        assert_alpha_eq(dialog_surface_alpha(ThemeMode::Light, true), expected_light);
+    #[test]
+    fn dialog_surface_alpha_keeps_opaque_dialogs_fully_opaque() {
+        assert_alpha_eq(
+            dialog_surface_alpha(false, 1.0, DialogSurfaceRole::Content),
+            1.0,
+        );
+        assert_alpha_eq(
+            dialog_surface_alpha(false, 1.0, DialogSurfaceRole::Chrome),
+            1.0,
+        );
+    }
+
+    #[test]
+    fn dialog_chrome_surface_alpha_clamps_to_one() {
+        assert_alpha_eq(
+            dialog_surface_alpha(true, 0.96, DialogSurfaceRole::Chrome),
+            1.0,
+        );
     }
 
     #[test]
@@ -270,11 +331,66 @@ mod tests {
             a: 0.17,
         };
 
-        let dialog_color = dialog_surface_color(color, ThemeMode::Dark, true);
+        let dialog_color = dialog_content_surface_color(color, true, 0.84);
 
         assert_eq!(dialog_color.h, color.h);
         assert_eq!(dialog_color.s, color.s);
         assert_eq!(dialog_color.l, color.l);
-        assert_alpha_eq(dialog_color.a, dialog_surface_alpha(ThemeMode::Dark, true));
+        assert_alpha_eq(
+            dialog_color.a,
+            dialog_surface_alpha(true, 0.84, DialogSurfaceRole::Content),
+        );
+    }
+
+    #[test]
+    fn dialog_chrome_surface_color_only_overrides_alpha() {
+        let color = Hsla {
+            h: 0.61,
+            s: 0.18,
+            l: 0.43,
+            a: 0.29,
+        };
+
+        let dialog_color = dialog_chrome_surface_color(color, true, 0.84);
+
+        assert_eq!(dialog_color.h, color.h);
+        assert_eq!(dialog_color.s, color.s);
+        assert_eq!(dialog_color.l, color.l);
+        assert_alpha_eq(
+            dialog_color.a,
+            dialog_surface_alpha(true, 0.84, DialogSurfaceRole::Chrome),
+        );
+    }
+
+    #[test]
+    fn dialog_surface_palette_uses_non_glass_base_colors() {
+        let mut theme = Theme::from(ThemeColor::light().as_ref());
+        theme.mode = ThemeMode::Light;
+        theme.window_blur_enabled = true;
+        theme.surface_opacity = 0.84;
+        apply_glass_tuning(
+            &mut theme.colors,
+            theme.mode,
+            theme.window_blur_enabled,
+            theme.surface_opacity,
+        );
+
+        let raw_colors = theme.colors_without_glass();
+        let palette = dialog_surface_palette(&theme);
+
+        assert_eq!(palette.content.h, raw_colors.background.h);
+        assert_eq!(palette.content.s, raw_colors.background.s);
+        assert_eq!(palette.content.l, raw_colors.background.l);
+        assert_alpha_eq(palette.content.a, 0.84);
+
+        assert_eq!(palette.title_bar.h, raw_colors.title_bar.h);
+        assert_eq!(palette.title_bar.s, raw_colors.title_bar.s);
+        assert_eq!(palette.title_bar.l, raw_colors.title_bar.l);
+        assert_alpha_eq(palette.title_bar.a, 0.94);
+
+        assert_eq!(palette.footer.h, raw_colors.secondary.h);
+        assert_eq!(palette.footer.s, raw_colors.secondary.s);
+        assert_eq!(palette.footer.l, raw_colors.secondary.l);
+        assert_alpha_eq(palette.footer.a, 0.94);
     }
 }
