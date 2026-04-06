@@ -37,6 +37,8 @@ Thumbs.db
 .Spotlight-V100
 .Trashes
 
+# Windows special device names
+nul
 
 # Environment variables
 .env
