@@ -45,6 +45,7 @@ hdiutil create \
     -volname "${APP_NAME}" \
     -srcfolder "$TMP_DIR" \
     -ov \
+    -size 200m \
     -format UDZO \
     "$DMG_PATH"
 
