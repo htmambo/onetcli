@@ -35,7 +35,8 @@ impl TableDataTabContent {
             database_type,
         )
         .editable(editable)
-        .show_toolbar(true);
+        .show_toolbar(true)
+        .undo_stack_size(50); // TODO: 从 AppSettings 同步
 
         if let Some(schema) = schema_name {
             config = config.with_schema(schema);

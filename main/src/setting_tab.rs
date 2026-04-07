@@ -382,6 +382,9 @@ pub struct AppSettings {
     /// SQL查询自动保存的间隔（秒），默认5秒
     #[serde(default = "default_auto_save_interval")]
     pub sql_auto_save_interval: f64,
+    /// 数据库编辑器撤销栈容量，0表示禁用逐步撤销
+    #[serde(default = "default_db_undo_stack_size")]
+    pub db_undo_stack_size: usize,
     #[serde(default = "default_system_hotkey_macos")]
     pub system_hotkey_macos: String,
     #[serde(default = "default_system_hotkey_other")]
@@ -528,6 +531,10 @@ fn default_auto_save_interval() -> f64 {
     5.0
 }
 
+fn default_db_undo_stack_size() -> usize {
+    50
+}
+
 fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
     field
         .bg(sync_server_theme::panel_alt_bg())
@@ -605,6 +612,7 @@ impl Default for AppSettings {
             main_window_bounds: None,
             enable_sql_auto_save: true,
             sql_auto_save_interval: default_auto_save_interval(),
+            db_undo_stack_size: default_db_undo_stack_size(),
             system_hotkey_macos: default_system_hotkey_macos(),
             system_hotkey_other: default_system_hotkey_other(),
         }
@@ -1460,6 +1468,27 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Database.auto_save_interval_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Database.undo_stack_size"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 0.0,
+                                        max: 100.0,
+                                        step: 1.0,
+                                        ..Default::default()
+                                    },
+                                    |cx: &App| AppSettings::global(cx).db_undo_stack_size as f64,
+                                    |val: f64, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.db_undo_stack_size = val as usize;
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(default_settings.db_undo_stack_size as f64),
+                            )
+                            .description(
+                                t!("Settings.General.Database.undo_stack_size_desc").to_string(),
                             ),
                         ]),
                 ]),

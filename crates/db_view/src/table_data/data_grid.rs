@@ -113,6 +113,8 @@ pub struct DataGridConfig {
     execution_time: u128,
     /// 数据行数（SqlResult 场景使用）
     rows_count: usize,
+    /// 逐步撤销栈容量（0表示禁用）
+    undo_stack_size: usize,
 }
 
 impl DataGridConfig {
@@ -134,6 +136,7 @@ impl DataGridConfig {
             sql: "".to_string(),
             execution_time: 0,
             rows_count: 0,
+            undo_stack_size: 50,
         }
     }
 
@@ -167,6 +170,10 @@ impl DataGridConfig {
     }
     pub fn rows_count(mut self, rows_count: usize) -> Self {
         self.rows_count = rows_count;
+        self
+    }
+    pub fn undo_stack_size(mut self, size: usize) -> Self {
+        self.undo_stack_size = size;
         self
     }
 }
@@ -318,7 +325,9 @@ impl DataGrid {
             EditTableState::new(delegate, window, cx)
         });
         table.update(cx, |state, _| {
-            state.delegate_mut().set_data_grid(data_grid_handle.clone());
+            let delegate = state.delegate_mut();
+            delegate.set_data_grid(data_grid_handle.clone());
+            delegate.set_undo_stack_size(config.undo_stack_size);
         });
         let focus_handle = cx.focus_handle();
         let filter_editor = cx.new(|cx| TableFilterEditor::new(window, cx));
@@ -1134,6 +1143,15 @@ impl DataGrid {
         self.revert_changes(cx);
     }
 
+    fn handle_step_undo(
+        &mut self,
+        _: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.step_undo(cx);
+    }
+
     fn handle_sql_preview(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.table.update(cx, |state, cx| {
             state.commit_cell_edit(window, cx);
@@ -1332,8 +1350,29 @@ impl DataGrid {
         });
     }
 
+    /// Perform a single step undo operation
+    pub fn step_undo(&self, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            let delegate = state.delegate_mut();
+            if delegate.undo() {
+                state.refresh(cx);
+                cx.notify();
+            }
+        });
+    }
+
+    /// Check if step undo is available
+    pub fn can_step_undo(&self, cx: &App) -> bool {
+        self.table.read(cx).delegate().can_undo()
+    }
+
     pub fn has_unsaved_changes(&self, cx: &App) -> bool {
         !self.get_changes(cx).is_empty()
+    }
+
+    pub fn get_page_info(&self, cx: &App) -> (usize, usize) {
+        let info = self.table_data_info.read(cx);
+        (info.current_page, info.page_size)
     }
 
     pub fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
@@ -2133,6 +2172,7 @@ impl DataGrid {
     pub fn render_toolbar(&self, _window: &mut Window, cx: &Context<Self>) -> AnyElement {
         let editable = self.config.editable;
         let loading = self.table.read(cx).delegate().is_loading();
+        let has_changes = self.has_unsaved_changes(cx);
         let data_grid = cx.entity().clone();
 
         h_flex()
@@ -2175,10 +2215,21 @@ impl DataGrid {
                 this.child(
                     Button::new("undo-changes")
                         .with_size(Size::Medium)
-                        .icon(IconName::Undo)
+                        .icon(IconName::Refresh)
                         .tooltip(t!("TableDataGrid.undo").to_string())
-                        .disabled(loading)
+                        .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_revert_changes)),
+                )
+            })
+            .when(editable, |this| {
+                let can_undo = self.can_step_undo(cx);
+                this.child(
+                    Button::new("step-undo")
+                        .with_size(Size::Medium)
+                        .icon(IconName::ArrowLeft)
+                        .tooltip(t!("TableDataGrid.step_undo").to_string())
+                        .disabled(loading || !can_undo)
+                        .on_click(cx.listener(Self::handle_step_undo)),
                 )
             })
             .when(editable, |this| {
@@ -2197,7 +2248,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::ArrowUp)
                         .tooltip(t!("TableDataGrid.commit_changes").to_string())
-                        .disabled(loading)
+                        .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_commit_changes)),
                 )
             })

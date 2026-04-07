@@ -923,6 +923,14 @@ Settings:
         en: Set the interval for automatic saving (1-60 seconds)
         zh-CN: 设置自动保存的时间间隔（1-60秒）
         zh-HK: 設置自動保存的時間間隔（1-60秒）
+      undo_stack_size:
+        en: Undo History Size
+        zh-CN: 撤销历史数量
+        zh-HK: 撤銷歷史數量
+      undo_stack_size_desc:
+        en: "Maximum number of undo steps for data editing (0 to disable)"
+        zh-CN: 数据编辑的最大撤销步数（设为0则禁用逐步撤销）
+        zh-HK: 資料編輯的最大撤銷步數（設為0則停用逐步撤銷）
 
   # 快捷键
   Shortcuts:

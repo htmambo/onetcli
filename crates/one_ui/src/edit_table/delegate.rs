@@ -247,6 +247,22 @@ pub trait EditTableDelegate: Sized + 'static {
         false
     }
 
+    /// 获取行号的起始偏移值（用于分页时显示正确的行号）
+    /// 返回 1 表示从 1 开始，返回 (page-1)*page_size + 1 表示按页码偏移
+    fn row_number_offset(&self, cx: &App) -> usize {
+        1
+    }
+
+    /// 检查是否可以撤销
+    fn can_undo(&self) -> bool {
+        false
+    }
+
+    /// 执行单次撤销操作
+    fn undo(&mut self) -> bool {
+        false
+    }
+
     fn columns_count(&self, cx: &App) -> usize;
 
     fn rows_count(&self, cx: &App) -> usize;

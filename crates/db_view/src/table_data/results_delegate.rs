@@ -73,6 +73,41 @@ pub enum RowChange {
     },
 }
 
+/// Represents an undo entry for step-by-step undo
+#[derive(Debug, Clone)]
+pub enum UndoEntry {
+    /// A cell value was changed
+    CellChange {
+        /// Row index
+        row: usize,
+        /// Column index
+        col: usize,
+        /// Old value before change
+        old_value: Option<String>,
+    },
+    /// A row was deleted
+    DeleteRow {
+        /// Original row data
+        row_data: Vec<Option<String>>,
+        /// Row index where it was deleted
+        row_index: usize,
+        /// Row ID from database
+        rowid: Option<String>,
+    },
+    /// A new row was added
+    AddRow {
+        /// Row index of the new row
+        row_index: usize,
+    },
+    /// A deleted row was restored
+    UndeleteRow {
+        /// Row index where it was restored
+        row_index: usize,
+        /// Row ID
+        rowid: Option<String>,
+    },
+}
+
 pub struct EditorTableDelegate {
     pub columns: Vec<Column>,
     /// Column metadata with type information
@@ -117,6 +152,10 @@ pub struct EditorTableDelegate {
     primary_key_indices: Vec<usize>,
     /// Data grid handle for context menu actions
     data_grid: Option<WeakEntity<DataGrid>>,
+    /// Undo stack for step-by-step undo
+    undo_stack: Vec<UndoEntry>,
+    /// Maximum undo stack size (0 means disabled)
+    undo_stack_size: usize,
 }
 
 fn parse_primary_order_by_clause(order_by_clause: &str) -> Option<(String, ColumnSort)> {
@@ -201,6 +240,8 @@ impl Clone for EditorTableDelegate {
             table_name: self.table_name.clone(),
             primary_key_indices: self.primary_key_indices.clone(),
             data_grid: self.data_grid.clone(),
+            undo_stack: self.undo_stack.clone(),
+            undo_stack_size: self.undo_stack_size,
         }
     }
 }
@@ -239,6 +280,8 @@ impl EditorTableDelegate {
             table_name: SharedString::default(),
             primary_key_indices: Vec::new(),
             data_grid: None,
+            undo_stack: Vec::new(),
+            undo_stack_size: 50, // 默认值
         }
     }
 
@@ -248,6 +291,119 @@ impl EditorTableDelegate {
 
     pub fn set_editable(&mut self, editable: bool) {
         self.editable = editable;
+    }
+
+    pub fn set_undo_stack_size(&mut self, size: usize) {
+        self.undo_stack_size = size;
+        // 如果新值小于当前栈大小，截断栈
+        if size > 0 && self.undo_stack.len() > size {
+            self.undo_stack.truncate(size);
+        }
+    }
+
+    /// Push an entry to the undo stack
+    fn push_undo(&mut self, entry: UndoEntry) {
+        if self.undo_stack_size == 0 {
+            return; // 禁用逐步撤销
+        }
+        self.undo_stack.push(entry);
+        // 保持栈大小不超过限制
+        if self.undo_stack.len() > self.undo_stack_size {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Check if undo is available
+    pub fn can_undo(&self) -> bool {
+        self.undo_stack_size > 0 && !self.undo_stack.is_empty()
+    }
+
+    /// Perform a single undo operation
+    /// Returns true if an undo was performed, false if nothing to undo
+    pub fn undo(&mut self) -> bool {
+        if self.undo_stack_size == 0 || self.undo_stack.is_empty() {
+            return false;
+        }
+
+        let entry = self.undo_stack.pop().expect("undo stack is empty");
+        match entry {
+            UndoEntry::CellChange { row, col, old_value } => {
+                // 恢复单元格旧值
+                if let Some(r) = self.rows.get_mut(row) {
+                    if let Some(cell) = r.get_mut(col) {
+                        let new_value = cell.clone();
+                        *cell = old_value.clone();
+
+                        // 更新 cell_changes 记录
+                        if old_value.is_none() && new_value.is_none() {
+                            self.cell_changes.remove(&(row, col));
+                        } else if old_value.is_none() {
+                            self.cell_changes.insert((row, col), (old_value.clone(), new_value));
+                        } else {
+                            self.cell_changes
+                                .entry((row, col))
+                                .and_modify(|(_, new)| *new = old_value.clone());
+                        }
+
+                        // 更新 UI 高亮
+                        if old_value.is_some() {
+                            self.modified_cells.insert((row, col));
+                        } else {
+                            self.modified_cells.remove(&(row, col));
+                        }
+                    }
+                }
+                true
+            }
+            UndoEntry::DeleteRow { row_data, row_index, rowid } => {
+                // 恢复被删除的行
+                self.rows.insert(row_index, row_data.clone());
+                self.rowids.insert(row_index, rowid.clone().unwrap_or_default());
+                self.row_status.insert(row_index, RowStatus::Original);
+                self.deleted_original_rows.remove(&row_index);
+
+                // 更新 row_index_map
+                let mut new_map = HashMap::new();
+                for (&idx, &orig_idx) in &self.row_index_map {
+                    if idx >= row_index {
+                        new_map.insert(idx + 1, orig_idx);
+                    } else {
+                        new_map.insert(idx, orig_idx);
+                    }
+                }
+                new_map.insert(row_index, row_index);
+                self.row_index_map = new_map;
+                true
+            }
+            UndoEntry::AddRow { row_index } => {
+                // 删除新增的行
+                if row_index < self.rows.len() {
+                    self.rows.remove(row_index);
+                    self.rowids.remove(row_index);
+
+                    // 更新 row_index_map
+                    let mut new_map = HashMap::new();
+                    for (&idx, &orig_idx) in &self.row_index_map {
+                        if idx > row_index {
+                            new_map.insert(idx - 1, orig_idx);
+                        } else if idx < row_index {
+                            new_map.insert(idx, orig_idx);
+                        }
+                    }
+                    self.row_index_map = new_map;
+
+                    // 更新 row_status：移除被删行的状态
+                    self.row_status.remove(&row_index);
+                }
+                true
+            }
+            UndoEntry::UndeleteRow { row_index, rowid: _ } => {
+                // 重新标记为已删除
+                self.row_status.insert(row_index, RowStatus::Deleted);
+                self.deleted_original_rows.insert(row_index);
+                true
+            }
+        }
     }
 
     fn values_equal(a: &Option<String>, b: &Option<String>) -> bool {
@@ -375,6 +531,13 @@ impl EditorTableDelegate {
 
         let old_value = cell.clone();
         *cell = new_opt_value.clone();
+
+        // Record for undo
+        self.push_undo(UndoEntry::CellChange {
+            row: row_ix,
+            col: col_ix,
+            old_value: old_value.clone(),
+        });
 
         // Mark cell as modified for UI
         self.modified_cells.insert((row_ix, col_ix));
@@ -620,6 +783,8 @@ impl EditorTableDelegate {
 
         // Clear all change tracking
         self.clear_changes();
+        // Clear undo stack
+        self.undo_stack.clear();
 
         // Recalculate filter results with restored data
         if !self.column_filters.is_empty() {
@@ -801,6 +966,20 @@ impl EditTableDelegate for EditorTableDelegate {
     fn row_number_enabled(&self, _cx: &App) -> bool {
         true
     }
+
+    fn row_number_offset(&self, cx: &App) -> usize {
+        // 从 data_grid 获取分页信息计算起始行号
+        if let Some(data_grid) = &self.data_grid {
+            if let Some(data_grid) = data_grid.upgrade() {
+                let (page, page_size) = data_grid.read(cx).get_page_info(cx);
+                if page_size > 0 {
+                    return (page - 1) * page_size + 1;
+                }
+            }
+        }
+        1
+    }
+
     fn columns_count(&self, _cx: &App) -> usize {
         self.columns.len()
     }
@@ -1960,6 +2139,10 @@ impl EditTableDelegate for EditorTableDelegate {
         // Add a new empty row (None represents NULL/empty value)
         let new_row: Vec<Option<String>> = vec![None; self.columns.len()];
         let row_ix = self.rows.len();
+
+        // Record for undo before adding
+        self.push_undo(UndoEntry::AddRow { row_index: row_ix });
+
         self.rows.push(new_row.clone());
 
         // Track as new row
@@ -1986,6 +2169,9 @@ impl EditTableDelegate for EditorTableDelegate {
 
         // Check if this is a new row (not yet saved to DB)
         if self.is_new_row(row_ix) {
+            // Record for undo before deletion
+            self.push_undo(UndoEntry::AddRow { row_index: row_ix });
+
             // For new rows, remove them immediately since they don't exist in DB
             if let Some(new_row_id) = self.find_new_row_id(row_ix) {
                 self.new_rows.remove(&new_row_id);
@@ -1998,6 +2184,16 @@ impl EditTableDelegate for EditorTableDelegate {
             self.reindex_after_deletion(row_ix);
         } else {
             // For existing rows (from DB), only mark as deleted but keep the row visible
+            // Record for undo before marking as deleted
+            if let Some(row_data) = self.rows.get(row_ix).cloned() {
+                let rowid = self.rowids.get(row_ix).cloned();
+                self.push_undo(UndoEntry::DeleteRow {
+                    row_data,
+                    row_index: row_ix,
+                    rowid,
+                });
+            }
+
             // This allows users to see deleted rows with special styling and undo the deletion
             if let Some(&original_ix) = self.row_index_map.get(&row_ix) {
                 self.deleted_original_rows.insert(original_ix);

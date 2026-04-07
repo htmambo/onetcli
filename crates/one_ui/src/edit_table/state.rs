@@ -2786,6 +2786,7 @@ where
         let is_row_number_col = self.delegate.row_number_enabled(cx) && col_ix == 0;
 
         if is_row_number_col {
+            let row_number_offset = self.delegate.row_number_offset(cx);
             return div()
                 .id(ElementId::Name(format!("row-number-{}", row_ix).into()))
                 .size_full()
@@ -2793,7 +2794,7 @@ where
                 .items_center()
                 .justify_end()
                 .text_color(cx.theme().muted_foreground)
-                .child((row_ix + 1).to_string())
+                .child((row_ix + row_number_offset).to_string())
                 .on_click(cx.listener(move |this, e, window, cx| {
                     this.on_row_left_click(e, row_ix, window, cx);
                 }))
