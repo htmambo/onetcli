@@ -319,9 +319,24 @@ impl DatabaseObjects {
         let table_delegate = DatabaseObjectsTableDelegate::default();
         let table = cx.new(|cx| {
             TableState::new(table_delegate, window, cx)
-                .row_selectable(false)
-                .cell_selectable(true)
+                .row_selectable(true)
+                .cell_selectable(false)
         });
+
+        // Subscribe to table double-click events
+        let table_sub = cx.subscribe_in(
+            &table,
+            window,
+            move |this: &mut DatabaseObjects,
+                  _: &Entity<TableState<DatabaseObjectsTableDelegate>>,
+                  event: &TableEvent,
+                  _window,
+                  cx| {
+                if let TableEvent::DoubleClickedRow(row_ix) = event {
+                    this.handle_row_double_click(*row_ix, cx);
+                }
+            },
+        );
 
         Self {
             loaded_data,
@@ -338,7 +353,7 @@ impl DatabaseObjects {
             current_node: None,
             selected_indices: HashSet::new(),
             table,
-            _subscriptions: vec![search_sub],
+            _subscriptions: vec![search_sub, table_sub],
         }
     }
 
@@ -899,26 +914,6 @@ impl Render for DatabaseObjects {
             state.delegate_mut().filtered_rows = self.filtered_rows.clone();
             state.delegate_mut().db_node_type = self.db_node_type.clone();
         });
-
-        // Subscribe to table events for double-click (only if not already subscribed)
-        let entity = cx.entity().downgrade();
-        let _subscription = cx.subscribe_in(
-            &self.table,
-            window,
-            move |_this: &mut DatabaseObjects,
-                  _: &Entity<TableState<DatabaseObjectsTableDelegate>>,
-                  event: &TableEvent,
-                  _window,
-                  cx| {
-                if let TableEvent::DoubleClickedRow(row_ix) = event {
-                    if let Some(entity) = entity.upgrade() {
-                        let _ = entity.update(cx, |this, cx| {
-                            this.handle_row_double_click(*row_ix, cx);
-                        });
-                    }
-                }
-            },
-        );
 
         v_flex()
             .size_full()

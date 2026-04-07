@@ -713,7 +713,13 @@ impl OnetCliApp {
             container
         });
 
-        window.on_window_should_close(cx, move |window, cx| request_main_window_close(window, cx));
+        window.on_window_should_close(cx, move |window, cx| {
+            let should_close = request_main_window_close(window, cx);
+            if should_close {
+                cx.quit();
+            }
+            should_close
+        });
 
         cx.set_global(GlobalTabContainer {
             tab_container: tab_container.clone(),
