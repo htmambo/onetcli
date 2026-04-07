@@ -148,7 +148,7 @@ use one_core::tab_container::{
 };
 use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save, tab_state_exists};
 use one_core::utils::debouncer::Debouncer;
-use one_core::{RunningKind, RunningState};
+use one_core::{PendingChangeLevel, RunningKind, RunningState};
 use reqwest_client::ReqwestClient;
 use rust_i18n::t;
 use tracing_subscriber::layer::SubscriberExt;
@@ -331,6 +331,9 @@ fn open_app_close_dialog(
 ) {
     let border_color = cx.theme().border;
     let muted_foreground = cx.theme().muted_foreground;
+    let error_color = cx.theme().red;
+    let yellow = cx.theme().yellow;
+    let green = cx.theme().green;
     let window_handle = window.window_handle();
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
@@ -358,12 +361,25 @@ fn open_app_close_dialog(
                             RunningKind::Ssh => Icon::new(IconName::Server),
                             RunningKind::Sftp => Icon::new(IconName::FolderOpen),
                             RunningKind::Db => Icon::new(IconName::Database),
+                            RunningKind::DbPendingChanges => Icon::new(IconName::TriangleAlert),
+                        };
+
+                        // 根据 PendingChangeLevel 设置颜色：Delete=红色，Modify=黄色，Insert=绿色
+                        let text_color = if matches!(state.kind, RunningKind::DbPendingChanges) {
+                            match state.pending_change_level {
+                                Some(PendingChangeLevel::Delete) => error_color,
+                                Some(PendingChangeLevel::Modify) => yellow,
+                                Some(PendingChangeLevel::Insert) => green,
+                                None => muted_foreground,
+                            }
+                        } else {
+                            muted_foreground
                         };
 
                         h_flex()
                             .gap_2()
                             .items_center()
-                            .child(icon.size_4().text_color(muted_foreground))
+                            .child(icon.size_4().text_color(text_color))
                             .child(
                                 div()
                                     .flex_1()
@@ -373,7 +389,7 @@ fn open_app_close_dialog(
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(muted_foreground)
+                                    .text_color(text_color)
                                     .child(state.activity.to_string()),
                             )
                     })),
@@ -772,16 +788,10 @@ impl OnetCliApp {
 
         let tab_container = cx.new(|cx| {
             let mut container = TabContainer::new(window, cx)
-                .with_tab_bar_colors(
-                    Some(gpui::rgb(0x2b2b2b).into()),
-                    Some(gpui::rgb(0x1e1e1e).into()),
-                )
-                .with_tab_item_colors(
-                    Some(gpui::rgb(0x555555).into()),
-                    Some(gpui::rgb(0x3a3a3a).into()),
-                )
-                .with_inactive_tab_bg_color(Some(gpui::rgb(0x3a3a3a).into()))
-                .with_tab_content_colors(Some(gpui::white()), Some(gpui::rgb(0xaaaaaa).into()));
+                .with_tab_bar_colors(None, None)
+                .with_tab_item_colors(None, None)
+                .with_inactive_tab_bg_color(None)
+                .with_tab_content_colors(None, None);
 
             #[cfg(target_os = "macos")]
             {

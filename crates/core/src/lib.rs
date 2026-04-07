@@ -17,7 +17,7 @@ pub mod layout;
 pub mod llm;
 pub mod popup_window;
 pub mod running_state;
-pub use crate::running_state::{RunningKind, RunningState};
+pub use crate::running_state::{PendingChangeLevel, RunningKind, RunningState};
 pub mod storage;
 pub mod tab_container;
 pub mod tab_persistence;

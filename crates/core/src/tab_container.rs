@@ -1,4 +1,4 @@
-use crate::RunningState;
+use crate::{PendingChangeLevel, RunningState};
 use futures::future::{Either, select};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -177,6 +177,16 @@ pub trait TabContent: EventEmitter<TabContentEvent> + Render + Focusable {
         None
     }
 
+    /// Check if this tab has pending changes that need to be committed (e.g., unsaved database edits).
+    fn has_pending_changes(&self, cx: &App) -> bool {
+        false
+    }
+
+    /// Get the pending change level for visual indication (Delete > Modify > Insert)
+    fn pending_change_level(&self, cx: &App) -> Option<PendingChangeLevel> {
+        None
+    }
+
     /// Get tab's preferred width size
     fn width_size(&self, cx: &App) -> Option<Size> {
         None
@@ -208,6 +218,8 @@ pub trait TabContentView: 'static + Send + Sync {
     fn try_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool>;
     fn force_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool>;
     fn running_state(&self, cx: &App) -> Option<RunningState>;
+    fn has_pending_changes(&self, cx: &App) -> bool;
+    fn pending_change_level(&self, cx: &App) -> Option<PendingChangeLevel>;
     fn width_size(&self, cx: &App) -> Option<Size>;
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn view(&self) -> AnyView;
@@ -265,6 +277,14 @@ impl<T: TabContent> TabContentView for Entity<T> {
 
     fn running_state(&self, cx: &App) -> Option<RunningState> {
         self.read(cx).running_state(cx)
+    }
+
+    fn has_pending_changes(&self, cx: &App) -> bool {
+        self.read(cx).has_pending_changes(cx)
+    }
+
+    fn pending_change_level(&self, cx: &App) -> Option<PendingChangeLevel> {
+        self.read(cx).pending_change_level(cx)
     }
 
     fn width_size(&self, cx: &App) -> Option<Size> {
@@ -2071,6 +2091,11 @@ impl TabContainer {
             .tab_close_button_color
             .unwrap_or(theme.muted_foreground);
         let drag_border_color = theme.drag_border;
+        // Pending change indicator colors
+        let indicator_red = theme.red;
+        let indicator_yellow = theme.yellow;
+        let indicator_green = theme.green;
+        let indicator_default = theme.muted_foreground;
         let active_index = self.active_index;
         let left_padding = self.left_padding.unwrap_or(px(8.0));
 
@@ -2327,6 +2352,15 @@ impl TabContainer {
                         let title_clone = title.clone();
                         let tab_width = self.get_tab_width(tab, cx);
                         let interaction_state = interaction_state.clone();
+                        let pending_change_level = tab.content().pending_change_level(cx);
+                        // 根据 pending_change_level 确定指示器颜色
+                        let indicator_color = match pending_change_level {
+                            Some(PendingChangeLevel::Delete) => indicator_red,
+                            Some(PendingChangeLevel::Modify) => indicator_yellow,
+                            Some(PendingChangeLevel::Insert) => indicator_green,
+                            None => indicator_default,
+                        };
+                        let has_pending_indicator = pending_change_level.is_some();
 
                         div()
                             .id(idx)
@@ -2404,6 +2438,18 @@ impl TabContainer {
                                     .text_ellipsis()
                                     .child(title_clone.to_string()),
                             )
+                            // Pending changes 颜色指示器（圆点）
+                            .when(has_pending_indicator, |el| {
+                                el.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .w(px(8.0))
+                                        .h(px(8.0))
+                                        .rounded_full()
+                                        .bg(indicator_color)
+                                        .ml(px(-4.0)),
+                                )
+                            })
                             .when(closeable, |el| {
                                 let view_clone = view_clone.clone();
                                 el.child(

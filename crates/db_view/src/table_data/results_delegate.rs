@@ -8,6 +8,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
+use one_core::PendingChangeLevel;
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
 use gpui_component::datetime_picker::{DateTimePickerEvent, DateTimePickerState};
@@ -631,6 +632,27 @@ impl EditorTableDelegate {
         !self.cell_changes.is_empty()
             || !self.deleted_original_rows.is_empty()
             || !self.new_rows.is_empty()
+    }
+
+    /// Get the highest pending change level (Delete > Modify > Insert)
+    pub fn pending_change_level(&self) -> Option<PendingChangeLevel> {
+        let mut level = None;
+        if !self.deleted_original_rows.is_empty() {
+            level = Some(PendingChangeLevel::Delete);
+        }
+        if !self.cell_changes.is_empty() {
+            let modify_level = Some(PendingChangeLevel::Modify);
+            if level.is_none() || modify_level > level {
+                level = modify_level;
+            }
+        }
+        if !self.new_rows.is_empty() {
+            let insert_level = Some(PendingChangeLevel::Insert);
+            if level.is_none() || insert_level > level {
+                level = insert_level;
+            }
+        }
+        level
     }
 
     /// Get the count of pending changes

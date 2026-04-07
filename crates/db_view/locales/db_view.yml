@@ -2879,3 +2879,19 @@ TeamSync:
     en: Team
     zh-CN: 团队归属
     zh-HK: 團隊歸屬
+
+# 运行状态
+RunningState:
+  db_pending_changes:
+    activity_delete:
+      en: "Has records marked for deletion"
+      zh-CN: "有待删除的记录"
+      zh-HK: "有待刪除的記錄"
+    activity_modify:
+      en: "Has modified records"
+      zh-CN: "有已修改的记录"
+      zh-HK: "有已修改的記錄"
+    activity_insert:
+      en: "Has new records"
+      zh-CN: "有新记录"
+      zh-HK: "有新記錄"

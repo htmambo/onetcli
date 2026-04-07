@@ -84,6 +84,14 @@ impl TabContent for TableDataTabContent {
         true
     }
 
+    fn has_pending_changes(&self, cx: &App) -> bool {
+        self.data_grid.read(cx).has_unsaved_changes(cx)
+    }
+
+    fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
+        self.data_grid.read(cx).pending_change_level(cx)
+    }
+
     fn try_close(
         &mut self,
         _tab_id: &str,

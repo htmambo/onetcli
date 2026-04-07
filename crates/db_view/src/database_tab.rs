@@ -517,6 +517,44 @@ impl TabContent for DatabaseTabView {
         true
     }
 
+    fn has_pending_changes(&self, cx: &App) -> bool {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .tabs()
+            .iter()
+            .any(|tab| tab.content().has_pending_changes(cx))
+    }
+
+    fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
+        let tab_container = self.tab_container.read(cx);
+        let mut max_level = None;
+        for tab in tab_container.tabs() {
+            if let Some(level) = tab.content().pending_change_level(cx) {
+                max_level = Some(match max_level {
+                    Some(current) if current > level => current,
+                    _ => level,
+                });
+            }
+        }
+        max_level
+    }
+
+    fn running_state(&self, cx: &App) -> Option<one_core::RunningState> {
+        let tab_container = self.tab_container.read(cx);
+        // First check for pending changes
+        if let Some(level) = self.pending_change_level(cx) {
+            let activity = t!(level.i18n_key()).into();
+            return one_core::RunningState::db_pending_changes(self.title(cx), activity, level);
+        }
+        // Then check for other running states
+        for tab in tab_container.tabs() {
+            if let Some(state) = tab.content().running_state(cx) {
+                return Some(state);
+            }
+        }
+        None
+    }
+
     fn dump(&self, cx: &App) -> JsonValue {
         let kind = if self.workspace.is_some() {
             ConnectionRestoreKind::DatabaseWorkspace

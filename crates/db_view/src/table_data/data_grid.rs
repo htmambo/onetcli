@@ -1336,6 +1336,10 @@ impl DataGrid {
         !self.get_changes(cx).is_empty()
     }
 
+    pub fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
+        self.table.read(cx).delegate().pending_change_level()
+    }
+
     // ========== 复制为 SQL 语句 ==========
 
     /// 复制选中行为 INSERT 语句
@@ -2501,6 +2505,7 @@ impl Render for DataGrid {
                         .w_full()
                         .px_2()
                         .py_1()
+                        .bg(cx.theme().background)
                         .child(self.filter_editor.clone()),
                 )
             })

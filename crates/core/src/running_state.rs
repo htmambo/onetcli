@@ -13,6 +13,30 @@ pub enum RunningKind {
     Sftp,
     /// 数据库事务
     Db,
+    /// 数据库有待提交的变更
+    DbPendingChanges,
+}
+
+/// 数据库待提交变更的等级（用于确定颜色）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PendingChangeLevel {
+    /// 新增记录
+    Insert = 1,
+    /// 修改记录
+    Modify = 2,
+    /// 删除记录
+    Delete = 3,
+}
+
+impl PendingChangeLevel {
+    /// 获取对应的国际化 key
+    pub fn i18n_key(&self) -> &'static str {
+        match self {
+            PendingChangeLevel::Delete => "RunningState.db_pending_changes.activity_delete",
+            PendingChangeLevel::Modify => "RunningState.db_pending_changes.activity_modify",
+            PendingChangeLevel::Insert => "RunningState.db_pending_changes.activity_insert",
+        }
+    }
 }
 
 /// 运行状态信息
@@ -23,6 +47,8 @@ pub struct RunningState {
     pub title: SharedString,
     /// 具体活动描述，如 "vim 正在运行"、"文件传输进行中 (65%)"
     pub activity: SharedString,
+    /// 数据库待提交变更的等级（如果有）
+    pub pending_change_level: Option<PendingChangeLevel>,
 }
 
 impl RunningState {
@@ -32,6 +58,7 @@ impl RunningState {
             kind: RunningKind::Terminal,
             title,
             activity,
+            pending_change_level: None,
         })
     }
 
@@ -41,6 +68,7 @@ impl RunningState {
             kind: RunningKind::Ssh,
             title,
             activity,
+            pending_change_level: None,
         })
     }
 
@@ -50,6 +78,7 @@ impl RunningState {
             kind: RunningKind::Sftp,
             title,
             activity,
+            pending_change_level: None,
         })
     }
 
@@ -59,6 +88,21 @@ impl RunningState {
             kind: RunningKind::Db,
             title,
             activity,
+            pending_change_level: None,
+        })
+    }
+
+    /// 创建一个数据库待提交变更状态
+    pub fn db_pending_changes(
+        title: SharedString,
+        activity: SharedString,
+        level: PendingChangeLevel,
+    ) -> Option<Self> {
+        Some(Self {
+            kind: RunningKind::DbPendingChanges,
+            title,
+            activity,
+            pending_change_level: Some(level),
         })
     }
 }

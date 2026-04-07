@@ -906,9 +906,7 @@ pub fn create_simple_editor(
 ) -> SimpleCodeEditor {
     let editor = cx.new(|cx| {
         let editor = InputState::new(window, cx)
-            .code_editor(Language::from_str("sql"))
             .multi_line(true)
-            .line_number(false)
             .rows(1)
             .clean_on_escape();
 

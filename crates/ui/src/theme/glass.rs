@@ -79,8 +79,8 @@ pub(crate) fn apply_glass_tuning(
         0.6,
     );
     colors.table = surface_color(colors.table, mode, blur_enabled, tuning.base, 0.88);
-    colors.table_even = surface_color(colors.table_even, mode, blur_enabled, tuning.base, 0.84);
-    colors.table_head = surface_color(colors.table_head, mode, blur_enabled, tuning.elevated, 1.0);
+    colors.table_even = surface_color(colors.table_even, mode, blur_enabled, 0.3, 0.84);
+    colors.table_head = surface_color(colors.table_head, mode, blur_enabled, 0.5, 1.0);
     colors.table_hover = surface_color(colors.table_hover, mode, blur_enabled, tuning.hover, 0.72);
     colors.table_row_border = with_alpha(colors.table_row_border, tuning.divider);
     colors.title_bar = surface_color(colors.title_bar, mode, blur_enabled, tuning.chrome, 1.0);
