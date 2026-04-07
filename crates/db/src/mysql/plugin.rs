@@ -55,6 +55,40 @@ impl MySqlPlugin {
     pub fn new() -> Self {
         Self
     }
+
+    async fn list_views_detailed(
+        &self,
+        connection: &dyn DbConnection,
+        database: &str,
+    ) -> Result<Vec<ViewInfo>> {
+        let sql = format!(
+            "SELECT TABLE_NAME, VIEW_DEFINITION \
+             FROM INFORMATION_SCHEMA.VIEWS \
+             WHERE TABLE_SCHEMA = '{}' \
+             ORDER BY TABLE_NAME",
+            database
+        );
+
+        let result = connection
+            .query(&sql)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to list views: {}", e))?;
+
+        if let SqlResult::Query(query_result) = result {
+            Ok(query_result
+                .rows
+                .iter()
+                .map(|row| ViewInfo {
+                    name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
+                    schema: None,
+                    definition: row.get(1).and_then(|v| v.clone()),
+                    comment: None,
+                })
+                .collect())
+        } else {
+            Err(anyhow::anyhow!("Unexpected result type"))
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -292,19 +326,9 @@ impl DatabasePlugin for MySqlPlugin {
         database: &str,
         _schema: Option<String>,
     ) -> Result<Vec<TableInfo>> {
-        // Query to get all tables with their description/metadata
         let sql = format!(
-            "SELECT \
-                TABLE_NAME, \
-                TABLE_COMMENT, \
-                ENGINE, \
-                TABLE_ROWS, \
-                CREATE_TIME, \
-                TABLE_COLLATION \
-             FROM INFORMATION_SCHEMA.TABLES \
-             WHERE TABLE_SCHEMA = '{}' AND TABLE_TYPE IN ('BASE TABLE','SYSTEM VIEW') \
-             ORDER BY TABLE_NAME",
-            database
+            "SHOW FULL TABLES FROM {} WHERE Table_type = 'BASE TABLE'",
+            self.quote_identifier(database)
         );
 
         let result = connection
@@ -313,35 +337,22 @@ impl DatabasePlugin for MySqlPlugin {
             .map_err(|e| anyhow::anyhow!("Failed to list tables: {}", e))?;
 
         if let SqlResult::Query(query_result) = result {
-            let tables: Vec<TableInfo> = query_result
+            let mut tables: Vec<TableInfo> = query_result
                 .rows
                 .iter()
-                .map(|row| {
-                    let collation = row.get(5).and_then(|v| v.clone());
-                    // Extract charset from collation (e.g., "utf8mb4_general_ci" -> "utf8mb4")
-                    let charset = collation
-                        .as_ref()
-                        .and_then(|c| c.split('_').next().map(|s| s.to_string()));
-
-                    // Parse row count
-                    let row_count = row
-                        .get(3)
-                        .and_then(|v| v.clone())
-                        .and_then(|s| s.parse::<i64>().ok());
-
-                    TableInfo {
-                        name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
-                        schema: None,
-                        comment: row.get(1).and_then(|v| v.clone()).filter(|s| !s.is_empty()),
-                        engine: row.get(2).and_then(|v| v.clone()),
-                        row_count,
-                        create_time: row.get(4).and_then(|v| v.clone()),
-                        charset,
-                        collation,
-                    }
+                .map(|row| TableInfo {
+                    name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
+                    schema: None,
+                    comment: None,
+                    engine: None,
+                    row_count: None,
+                    create_time: None,
+                    charset: None,
+                    collation: None,
                 })
                 .collect();
 
+            tables.sort_by(|left, right| left.name.cmp(&right.name));
             Ok(tables)
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
@@ -398,12 +409,9 @@ impl DatabasePlugin for MySqlPlugin {
         table: &str,
     ) -> Result<Vec<ColumnInfo>> {
         let sql = format!(
-            "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, COLUMN_COMMENT, \
-             CHARACTER_SET_NAME, COLLATION_NAME \
-             FROM INFORMATION_SCHEMA.COLUMNS \
-             WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}' \
-             ORDER BY ORDINAL_POSITION",
-            database, table
+            "SHOW FULL COLUMNS FROM {} FROM {}",
+            self.quote_identifier(table),
+            self.quote_identifier(database)
         );
 
         let result = connection
@@ -419,19 +427,23 @@ impl DatabasePlugin for MySqlPlugin {
                     name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
                     data_type: row.get(1).and_then(|v| v.clone()).unwrap_or_default(),
                     is_nullable: row
-                        .get(2)
+                        .get(3)
                         .and_then(|v| v.clone())
                         .map(|v| v == "YES")
                         .unwrap_or(true),
                     is_primary_key: row
-                        .get(3)
+                        .get(4)
                         .and_then(|v| v.clone())
                         .map(|v| v == "PRI")
                         .unwrap_or(false),
-                    default_value: row.get(4).and_then(|v| v.clone()),
-                    comment: row.get(5).and_then(|v| v.clone()),
-                    charset: row.get(6).and_then(|v| v.clone()),
-                    collation: row.get(7).and_then(|v| v.clone()),
+                    default_value: row.get(5).and_then(|v| v.clone()),
+                    comment: row.get(8).and_then(|v| v.clone()),
+                    charset: row
+                        .get(2)
+                        .and_then(|v| v.clone())
+                        .as_ref()
+                        .and_then(|c| c.split('_').next().map(|s| s.to_string())),
+                    collation: row.get(2).and_then(|v| v.clone()),
                 })
                 .collect())
         } else {
@@ -491,11 +503,9 @@ impl DatabasePlugin for MySqlPlugin {
         table: &str,
     ) -> Result<Vec<IndexInfo>> {
         let sql = format!(
-            "SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, INDEX_TYPE \
-             FROM INFORMATION_SCHEMA.STATISTICS \
-             WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}' AND INDEX_NAME != 'PRIMARY' \
-             ORDER BY INDEX_NAME, SEQ_IN_INDEX",
-            database, table
+            "SHOW INDEX FROM {} FROM {}",
+            self.quote_identifier(table),
+            self.quote_identifier(database)
         );
 
         let result = connection
@@ -507,14 +517,17 @@ impl DatabasePlugin for MySqlPlugin {
             let mut indexes: HashMap<String, IndexInfo> = HashMap::new();
 
             for row in query_result.rows {
-                let index_name = row.first().and_then(|v| v.clone()).unwrap_or_default();
-                let column_name = row.get(1).and_then(|v| v.clone()).unwrap_or_default();
+                let index_name = row.get(2).and_then(|v| v.clone()).unwrap_or_default();
+                if index_name.eq_ignore_ascii_case("PRIMARY") {
+                    continue;
+                }
+                let column_name = row.get(4).and_then(|v| v.clone()).unwrap_or_default();
                 let is_unique = row
-                    .get(2)
+                    .get(1)
                     .and_then(|v| v.clone())
                     .map(|v| v == "0")
                     .unwrap_or(false);
-                let index_type = row.get(3).and_then(|v| v.clone());
+                let index_type = row.get(10).and_then(|v| v.clone());
 
                 indexes
                     .entry(index_name.clone())
@@ -621,11 +634,8 @@ impl DatabasePlugin for MySqlPlugin {
         _schema: Option<String>,
     ) -> Result<Vec<ViewInfo>> {
         let sql = format!(
-            "SELECT TABLE_NAME, VIEW_DEFINITION \
-             FROM INFORMATION_SCHEMA.VIEWS \
-             WHERE TABLE_SCHEMA = '{}' \
-             ORDER BY TABLE_NAME",
-            database
+            "SHOW FULL TABLES FROM {} WHERE Table_type = 'VIEW'",
+            self.quote_identifier(database)
         );
 
         let result = connection
@@ -634,16 +644,18 @@ impl DatabasePlugin for MySqlPlugin {
             .map_err(|e| anyhow::anyhow!("Failed to list views: {}", e))?;
 
         if let SqlResult::Query(query_result) = result {
-            Ok(query_result
+            let mut views: Vec<ViewInfo> = query_result
                 .rows
                 .iter()
                 .map(|row| ViewInfo {
                     name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
                     schema: None,
-                    definition: row.get(1).and_then(|v| v.clone()),
+                    definition: None,
                     comment: None,
                 })
-                .collect())
+                .collect();
+            views.sort_by(|left, right| left.name.cmp(&right.name));
+            Ok(views)
         } else {
             Err(anyhow::anyhow!("Unexpected result type"))
         }
@@ -658,7 +670,7 @@ impl DatabasePlugin for MySqlPlugin {
     ) -> Result<ObjectView> {
         use gpui::px;
 
-        let views = self.list_views(connection, database, None).await?;
+        let views = self.list_views_detailed(connection, database).await?;
 
         let columns = vec![
             Column::new("name", "Name").width(px(200.0)),

@@ -1,7 +1,7 @@
 use crate::{Colorize, Theme, ThemeColor, ThemeMode, highlighter::HighlightThemeStyle};
 use gpui::Hsla;
 
-const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.50;
+const DIALOG_SURFACE_BASE_OPACITY: f32 = 0.70;
 const DIALOG_CHROME_ALPHA_OFFSET: f32 = 0.20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,7 +50,7 @@ pub(crate) fn apply_glass_tuning(
     colors.list_head = surface_color(colors.list_head, mode, blur_enabled, tuning.elevated, 1.0);
     colors.list_hover = surface_color(colors.list_hover, mode, blur_enabled, tuning.hover, 0.72);
     colors.muted = surface_color(colors.muted, mode, blur_enabled, tuning.elevated, 0.82);
-    colors.popover = surface_color(colors.popover, mode, blur_enabled, tuning.active, 1.0);
+    colors.popover = surface_color(colors.popover, mode, blur_enabled, 1.0, 1.0);
     colors.secondary = surface_color(colors.secondary, mode, blur_enabled, tuning.elevated, 0.86);
     colors.secondary_active = surface_color(
         colors.secondary_active,

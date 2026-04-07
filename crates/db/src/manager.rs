@@ -315,10 +315,7 @@ impl ConnectionManager {
 
         // Create new connection
         let plugin = db_manager.get_plugin(&config.database_type)?;
-        let mut connection = plugin.create_connection(config.clone()).await?;
-
-        // Connect to database
-        connection.connect().await?;
+        let connection = plugin.create_connection(config.clone()).await?;
         info!(
             "Created new session: {} (database: {:?})",
             session_id, config.database
