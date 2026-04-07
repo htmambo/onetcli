@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ::sysinfo::{Pid, System};
@@ -12,7 +13,7 @@ use crate::setting_tab::{AppSettings, SavedWindowBounds};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement, Render, Styled, Task, Window, actions, div, px,
+    Menu, MenuItem, ParentElement, Render, Styled, Task, Window, actions, div, px,
 };
 use gpui_component::WindowExt;
 
@@ -229,6 +230,7 @@ fn build_status_bar_title(active_tab_title: Option<&str>) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppCloseDecision {
     Allow,
+    ForceClose,
     Prompt,
     Ignore,
 }
@@ -242,13 +244,28 @@ struct AppCloseGuard {
 impl AppCloseGuard {
     fn on_close_requested(&mut self, has_running_tasks: bool) -> AppCloseDecision {
         if self.force_closing {
-            return AppCloseDecision::Allow;
+            return AppCloseDecision::ForceClose;
         }
         if self.dialog_open {
             return AppCloseDecision::Ignore;
         }
         if has_running_tasks {
             self.dialog_open = true;
+            return AppCloseDecision::Prompt;
+        }
+        AppCloseDecision::Allow
+    }
+
+    /// 只读版本的关闭请求检查。不会推进 dialog_open 状态机，
+    /// 用于在没有窗口句柄可用时的 fallback 检查（避免污染守卫状态）。
+    fn on_close_requested_without_ui(&self, has_running_tasks: bool) -> AppCloseDecision {
+        if self.force_closing {
+            return AppCloseDecision::ForceClose;
+        }
+        if self.dialog_open {
+            return AppCloseDecision::Ignore;
+        }
+        if has_running_tasks {
             return AppCloseDecision::Prompt;
         }
         AppCloseDecision::Allow
@@ -401,7 +418,7 @@ fn request_main_window_close(window: &mut Window, cx: &mut App) -> bool {
         .on_close_requested(!running_states.is_empty());
 
     match decision {
-        AppCloseDecision::Allow => true,
+        AppCloseDecision::Allow | AppCloseDecision::ForceClose => true,
         AppCloseDecision::Ignore => false,
         AppCloseDecision::Prompt => {
             open_app_close_dialog(window, tab_container, running_states, guard, cx);
@@ -489,18 +506,81 @@ fn open_sftp_from_tab(tab_id: String, cx: &mut App) {
 }
 
 fn quit_app(cx: &mut App) {
+    // Guard: 防止 Cmd+Q 同时触发菜单回调和 KeyBinding 导致 quit_app 被多次调用
+    static QUITTING: AtomicBool = AtomicBool::new(false);
+    if QUITTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    // 尝试通过窗口更新方式检查关闭守卫（主路径：能正常弹窗）。
+    // 注意：由于 Cmd+Q 通过菜单回调分发时，窗口正处于 dispatch_action 的 update 栈上，
+    // 直接调用 window_handle.update 会失败（"window not found"）。
+    // 因此使用 cx.defer 将窗口更新延迟到本轮 effect flush 末尾执行，此时嵌套 update 已完成。
     let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
-        cx.quit();
+        // 没有主窗口句柄，使用无 UI 的 fallback 检查
+        if request_app_close_without_window(cx) {
+            cx.quit();
+        }
+        QUITTING.store(false, Ordering::SeqCst);
         return;
     };
 
-    let should_quit = main_window_handle
-        .window_handle
-        .update(cx, |_, window, cx| request_main_window_close(window, cx))
-        .unwrap_or(true);
+    cx.defer(move |cx| {
+        // 检查是否还有效（例如窗口可能已被关闭）
+        let Some(close_state) = cx.try_global::<GlobalAppCloseState>().cloned() else {
+            cx.quit();
+            QUITTING.store(false, Ordering::SeqCst);
+            return;
+        };
 
-    if should_quit {
-        cx.quit();
+        // 执行窗口更新（此时已不在 dispatch_action 的 update 栈上）
+        let should_quit = main_window_handle
+            .window_handle
+            .update(cx, |_, window, cx| request_main_window_close(window, cx))
+            .unwrap_or_else(|e| {
+                // 窗口更新失败。使用无 UI 检查，避免污染 dialog_open 状态机。
+                tracing::warn!(
+                    "quit_app: window update failed: {:?}, falling back to non-UI close check",
+                    e
+                );
+                request_app_close_without_window(cx)
+            });
+
+        if should_quit {
+            cx.quit();
+        }
+        // 无论是否退出，都重置 guard 以便下次重试
+        QUITTING.store(false, Ordering::SeqCst);
+    });
+}
+
+/// 在没有窗口句柄可用时执行关闭守卫检查。
+/// 使用只读方法，不会推进 AppCloseGuard 的 dialog_open 状态机。
+fn request_app_close_without_window(cx: &mut App) -> bool {
+    let Some(close_state) = cx.try_global::<GlobalAppCloseState>().cloned() else {
+        return true; // 没有关闭守卫，直接退出
+    };
+
+    let running_states = cx
+        .try_global::<GlobalTabContainer>()
+        .map(|g| collect_running_states(&g.tab_container, cx))
+        .unwrap_or_default();
+
+    let decision = close_state
+        .guard
+        .borrow()
+        .on_close_requested_without_ui(!running_states.is_empty());
+
+    match decision {
+        AppCloseDecision::Allow | AppCloseDecision::ForceClose => true,
+        AppCloseDecision::Ignore => false,
+        AppCloseDecision::Prompt => {
+            eprintln!(
+                "Cannot quit: {} running task(s) detected. Please close running tasks first.",
+                running_states.len()
+            );
+            false
+        }
     }
 }
 
@@ -649,6 +729,17 @@ pub fn init(cx: &mut App) {
         terminal_view::build_local_terminal(state, window, cx)
     });
     cx.set_global(registry);
+
+    // 设置应用菜单，将 Quit 菜单项映射到 QuitApp action。
+    // 这样 Cmd+Q (macOS) 会走 GPUI 的 action 分发系统，触发关闭守卫弹窗。
+    #[cfg(target_os = "macos")]
+    {
+        cx.set_menus(vec![Menu {
+            name: "OneNet".into(),
+            items: vec![MenuItem::action("Quit OneNet", QuitApp)],
+        }]);
+    }
+
     cx.activate(true);
 }
 
@@ -1296,6 +1387,6 @@ mod tests {
         assert_eq!(guard.on_close_requested(true), AppCloseDecision::Prompt);
         guard.begin_force_close();
 
-        assert_eq!(guard.on_close_requested(true), AppCloseDecision::Allow);
+        assert_eq!(guard.on_close_requested(true), AppCloseDecision::ForceClose);
     }
 }
