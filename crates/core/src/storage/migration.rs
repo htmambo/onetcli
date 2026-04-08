@@ -30,6 +30,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260326000003",
         include_str!("../../migrations/20260326000003_home_manual_sort.sql"),
     ),
+    (
+        "20260408000001",
+        include_str!("../../migrations/20260408000001_llm_thinking_budget.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {

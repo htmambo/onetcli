@@ -30,3 +30,4 @@ parking_lot.workspace = true
 util.workspace = true
 rust-i18n.workspace = true
 url.workspace = true
+regex.workspace = true

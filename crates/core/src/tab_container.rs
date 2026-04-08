@@ -951,6 +951,26 @@ impl ListDelegate for TabListDelegate {
 // TabContainer - Main container component
 // ============================================================================
 
+fn tab_bar_background_alpha(surface_opacity: f32) -> f32 {
+    (surface_opacity + 0.3).clamp(0.0, 1.0)
+}
+
+fn inactive_tab_background_alpha(surface_opacity: f32, tab_bar_alpha: f32) -> f32 {
+    let extra = if tab_bar_alpha < 1.0 { 0.4 } else { 0.2 };
+    (surface_opacity + extra).clamp(0.0, 1.0)
+}
+
+fn hover_tab_background_alpha(inactive_alpha: f32) -> f32 {
+    (inactive_alpha + 0.08).clamp(0.0, 1.0)
+}
+
+fn with_alpha(color: gpui::Hsla, alpha: f32) -> gpui::Hsla {
+    gpui::Hsla {
+        a: alpha.clamp(0.0, 1.0),
+        ..color
+    }
+}
+
 pub struct TabContainer {
     focus_handle: FocusHandle,
     tabs: Vec<TabItem>,
@@ -2079,13 +2099,21 @@ impl TabContainer {
         let view = cx.entity();
 
         let theme = cx.theme();
-        let bg_color = self.tab_bar_bg_color.unwrap_or(theme.tab);
+        let tab_bar_alpha = tab_bar_background_alpha(theme.surface_opacity);
+        let inactive_tab_alpha =
+            inactive_tab_background_alpha(theme.surface_opacity, tab_bar_alpha);
+        let hover_tab_alpha = hover_tab_background_alpha(inactive_tab_alpha);
+        let bg_color = self
+            .tab_bar_bg_color
+            .unwrap_or_else(|| with_alpha(theme.tab, tab_bar_alpha));
         let border_color = self.tab_bar_border_color.unwrap_or(theme.border);
         let active_tab_color = self.active_tab_bg_color.unwrap_or(theme.tab_active);
         let hover_tab_color = self
             .inactive_tab_hover_color
-            .unwrap_or(theme.tab.opacity(0.8));
-        let inactive_tab_color = self.inactive_tab_bg_color.unwrap_or(theme.tab.opacity(0.5));
+            .unwrap_or_else(|| with_alpha(theme.tab, hover_tab_alpha));
+        let inactive_tab_color = self
+            .inactive_tab_bg_color
+            .unwrap_or_else(|| with_alpha(theme.tab, inactive_tab_alpha));
         let text_color = self.tab_text_color.unwrap_or(theme.tab_foreground);
         let close_btn_color = self
             .tab_close_button_color
@@ -2828,8 +2856,8 @@ impl Render for TabContainer {
 #[cfg(test)]
 mod tests {
     use super::{
-        TabBarDragPlan, build_tab_bar_drag_plan, should_render_windows_drag_spacer,
-        uses_manual_window_move,
+        TabBarDragPlan, build_tab_bar_drag_plan, inactive_tab_background_alpha,
+        should_render_windows_drag_spacer, tab_bar_background_alpha, uses_manual_window_move,
     };
 
     #[test]
@@ -2883,5 +2911,23 @@ mod tests {
                 enable_single_pinned_tab_drag: false,
             }
         );
+    }
+
+    #[test]
+    fn tab_bar_background_alpha_使用系统透明度加_point_three() {
+        assert_eq!(tab_bar_background_alpha(0.4), 0.7);
+        assert_eq!(tab_bar_background_alpha(0.84), 1.0);
+    }
+
+    #[test]
+    fn inactive_tab_alpha_整体仍透明时加_point_four() {
+        assert_eq!(inactive_tab_background_alpha(0.4, 0.7), 0.8);
+        assert_eq!(inactive_tab_background_alpha(0.55, 0.85), 0.95);
+    }
+
+    #[test]
+    fn inactive_tab_alpha_整体不透明时加_point_two() {
+        assert_eq!(inactive_tab_background_alpha(0.4, 1.0), 0.6);
+        assert_eq!(inactive_tab_background_alpha(0.84, 1.0), 1.0);
     }
 }

@@ -161,6 +161,14 @@ impl LlmConnector {
             request.temperature = Some(temperature);
         }
 
+        // Anthropic 专属：thinking budget 仅对 Anthropic provider 生效
+        if self.provider_type == ProviderType::Anthropic {
+            if let Some(budget) = config.thinking_budget {
+                // llm-connector 1.1.17+ 的 ChatRequest 支持 thinking_budget 字段
+                request.thinking_budget = Some(budget as u32);
+            }
+        }
+
         request
     }
 }
@@ -288,5 +296,17 @@ mod tests {
         };
 
         assert!(!aliyun_prefers_compatible_mode(&config));
+    }
+
+    #[test]
+    fn thinking_budget_serde_roundtrip() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::Anthropic,
+            thinking_budget: Some(16000),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: ProviderConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.thinking_budget, Some(16000));
     }
 }

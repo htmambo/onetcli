@@ -6131,6 +6131,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7043,6 +7057,7 @@ dependencies = [
  "llm-connector",
  "parking_lot",
  "rand 0.8.5",
+ "regex",
  "rusqlite",
  "rust-i18n",
  "serde",

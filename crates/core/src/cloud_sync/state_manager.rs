@@ -1,9 +1,10 @@
 //! 同步状态管理器
 //!
-//! 追踪每个连接的同步状态，用于：
+//! 追踪每个连接的同步状态，支持：
 //! - 判断哪些连接需要同步
 //! - 检测冲突
 //! - 记录同步历史
+//! - 自动同步定时器
 
 use crate::cloud_sync::models::{SyncState, SyncStatus};
 use crate::storage::traits::Repository;
@@ -16,11 +17,20 @@ use std::collections::HashMap;
 /// - 获取单个连接的同步状态
 /// - 批量获取同步状态
 /// - 更新同步状态
+/// - 自动同步定时器
 pub struct SyncStateManager {
     /// 本地存储管理器
     storage: StorageManager,
     /// 内存中的状态缓存
     cache: HashMap<i64, SyncState>,
+    /// 自动同步间隔（秒），0 表示禁用
+    sync_interval_secs: u64,
+    /// 上次同步时间戳（秒）
+    last_sync_at: Option<i64>,
+    /// 是否正在运行
+    running: bool,
+    /// 停止信号
+    stop_tx: tokio::sync::watch::Sender<()>,
 }
 
 impl SyncStateManager {
@@ -29,8 +39,90 @@ impl SyncStateManager {
         Self {
             storage,
             cache: HashMap::new(),
+            sync_interval_secs: 0,
+            last_sync_at: None,
+            running: false,
+            stop_tx: tokio::sync::watch::channel(()).0,
         }
     }
+
+    /// 获取同步间隔（秒）
+    pub fn sync_interval_secs(&self) -> u64 {
+        self.sync_interval_secs
+    }
+
+    /// 设置同步间隔（秒），0 表示禁用自动同步
+    pub fn set_sync_interval(&mut self, seconds: u64) {
+        self.sync_interval_secs = seconds;
+    }
+
+    /// 获取上次同步时间
+    pub fn last_sync_at(&self) -> Option<i64> {
+        self.last_sync_at
+    }
+
+    /// 更新上次同步时间
+    pub fn update_last_sync(&mut self) {
+        self.last_sync_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+        );
+    }
+
+    /// 是否正在运行
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    /// 启动自动同步定时器
+    ///
+    /// `sync_fn` 会在每个间隔被调用执行同步。
+    /// 返回是否成功启动。
+    pub fn start_auto_sync<F, Fut>(&mut self, sync_fn: F) -> bool
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
+        if self.sync_interval_secs == 0 {
+            return false;
+        }
+        if self.running {
+            return false;
+        }
+
+        let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(());
+        self.stop_tx = stop_tx;
+        self.running = true;
+        let interval_secs = self.sync_interval_secs;
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            loop {
+                tokio::select! {
+                    _ = stop_rx.changed() => {
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        sync_fn().await;
+                    }
+                }
+            }
+        });
+
+        true
+    }
+
+    /// 停止自动同步
+    pub fn stop_auto_sync(&mut self) {
+        if !self.running {
+            return;
+        }
+        let _ = self.stop_tx.send(());
+        self.running = false;
+    }
+
 
     /// 获取连接的同步状态
     ///

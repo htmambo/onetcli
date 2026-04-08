@@ -312,6 +312,275 @@ impl ConflictResolver {
     }
 }
 
+// ============================================================================
+// 三路合并算法（Three-Way Merge）
+// 移植自 Netcatty syncMerge.ts
+// ============================================================================
+
+/// 三路合并结果
+#[derive(Debug, Clone)]
+pub enum ThreeWayMergeResult<T> {
+    /// 合并后保留的实体
+    Merged(T),
+    /// 仅存在于 base 中（两边都删除了），保留为删除标记
+    Deleted(String),
+}
+
+/// 三路合并器
+///
+/// 对给定 ID 的实体，比较 base（共同祖先）、local（本地版本）、remote（云端版本）：
+/// - 纯新增 → 保留
+/// - 纯删除 → 标记删除
+/// - 两边都改 → 优先本地（记录冲突）
+/// - 一方改一方删 → 保留修改（安全优先）
+pub struct ThreeWayMerger<T: Clone> {
+    /// 内容提取函数
+    extract_content: Box<dyn Fn(&T) -> String + Send + Sync>,
+}
+
+impl<T: Clone> ThreeWayMerger<T> {
+    /// 创建三路合并器
+    ///
+    /// `extract_content` 用于将实体转换为可比较的字符串，用于 fingerprint 计算。
+    pub fn new<F>(extract_content: F) -> Self
+    where
+        F: Fn(&T) -> String + 'static + Send + Sync,
+    {
+        Self { extract_content: Box::new(extract_content) }
+    }
+
+    /// 计算内容的 fingerprint（递归键排序后序列化）
+    fn fingerprint(content: &str) -> String {
+        let parsed: serde_json::Value = serde_json::from_str(content).unwrap_or_else(|_| {
+            serde_json::Value::String(content.to_string())
+        });
+        let normalized = Self::sort_json_keys(&parsed);
+        serde_json::to_string(&normalized).unwrap_or_else(|_| content.to_string())
+    }
+
+    /// 递归对 JSON 对象键排序（确保相同内容的 JSON fingerprint 一致）
+    fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut sorted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+                let mut keys: Vec<_> = map.keys().collect();
+                keys.sort();
+                for key in keys {
+                    sorted.insert(key.clone(), Self::sort_json_keys(&map[key]));
+                }
+                serde_json::Value::Object(sorted)
+            }
+            serde_json::Value::Array(arr) => {
+                serde_json::Value::Array(arr.iter().map(|v| Self::sort_json_keys(v)).collect())
+            }
+            _ => value.clone(),
+        }
+    }
+
+    /// 计算指纹（空内容返回固定值）
+    fn calc_fp(content: &str) -> String {
+        if content.is_empty() {
+            "null".to_string()
+        } else {
+            Self::fingerprint(content)
+        }
+    }
+
+    /// 对单条记录执行三路合并
+    pub fn merge_entity(
+        &self,
+        base_fp: &str,
+        local: Option<&T>,
+        remote: Option<&T>,
+    ) -> ThreeWayMergeResult<T> {
+        let local_fp = local.map(|e| Self::calc_fp(&(self.extract_content)(e))).unwrap_or_else(|| "null".to_string());
+        let remote_fp = remote.map(|e| Self::calc_fp(&(self.extract_content)(e))).unwrap_or_else(|| "null".to_string());
+
+        // 基础版本
+        let base_fp_actual = if base_fp.is_empty() { "null".to_string() } else { base_fp.to_string() };
+
+        // 两边都没变化
+        if local_fp == base_fp_actual && remote_fp == base_fp_actual {
+            if let Some(v) = local {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+            return ThreeWayMergeResult::Deleted("both_deleted".to_string());
+        }
+
+        // 纯新增（local 新增，remote 不变）
+        if local_fp != base_fp_actual && remote_fp == base_fp_actual {
+            if let Some(v) = local {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+        }
+
+        // 纯新增（remote 新增，local 不变）
+        if remote_fp != base_fp_actual && local_fp == base_fp_actual {
+            if let Some(v) = remote {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+        }
+
+        // 两边都删除了（相对于 base）
+        if local_fp == "null" && remote_fp == "null" && base_fp_actual != "null" {
+            return ThreeWayMergeResult::Deleted("both_deleted".to_string());
+        }
+
+        // 一方删一方改 → 优先保留修改（安全优先）
+        if local_fp == "null" && remote_fp != base_fp_actual {
+            if let Some(v) = remote {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+        }
+        if remote_fp == "null" && local_fp != base_fp_actual {
+            if let Some(v) = local {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+        }
+
+        // 两边都改（冲突） → 优先本地
+        if local_fp != base_fp_actual && remote_fp != base_fp_actual && local_fp != remote_fp {
+            if let Some(v) = local {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+        }
+
+        // 两边相同修改
+        if local_fp == remote_fp && local_fp != base_fp_actual {
+            if let Some(v) = local {
+                return ThreeWayMergeResult::Merged(v.clone());
+            }
+        }
+
+        // fallback
+        if let Some(v) = local {
+            ThreeWayMergeResult::Merged(v.clone())
+        } else if let Some(v) = remote {
+            ThreeWayMergeResult::Merged(v.clone())
+        } else {
+            ThreeWayMergeResult::Deleted("merged_out".to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod three_way_merge_tests {
+    use super::*;
+
+    struct TestEntity {
+        content: String,
+    }
+
+    fn extract(e: &TestEntity) -> String {
+        e.content.clone()
+    }
+
+    #[test]
+    fn test_both_unchanged() {
+        let merger = ThreeWayMerger::new(extract);
+        let entity = TestEntity { content: r#"{"name":"test"}"#.to_string() };
+        let fp = merger.fingerprint(r#"{"name":"test"}"#);
+
+        let result = merger.merge_entity(&fp, Some(&entity), Some(&entity));
+        match result {
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, entity.content),
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn test_local_added() {
+        let merger = ThreeWayMerger::new(extract);
+        let entity = TestEntity { content: r#"{"name":"test"}"#.to_string() };
+
+        let result = merger.merge_entity("", Some(&entity), None);
+        match result {
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, entity.content),
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn test_remote_added() {
+        let merger = ThreeWayMerger::new(extract);
+        let entity = TestEntity { content: r#"{"name":"test"}"#.to_string() };
+
+        let result = merger.merge_entity("", None, Some(&entity));
+        match result {
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, entity.content),
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn test_both_modified_conflict_prefers_local() {
+        let merger = ThreeWayMerger::new(extract);
+        let base = r#"{"name":"test"}"#;
+        let local = TestEntity { content: r#"{"name":"local"}"#.to_string() };
+        let remote = TestEntity { content: r#"{"name":"remote"}"#.to_string() };
+        let base_fp = merger.fingerprint(base);
+
+        let result = merger.merge_entity(&base_fp, Some(&local), Some(&remote));
+        match result {
+            ThreeWayMergeResult::Merged(v) => {
+                // 优先本地
+                assert_eq!(v.content, local.content);
+            }
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn test_same_modification() {
+        let merger = ThreeWayMerger::new(extract);
+        let base = r#"{"name":"test"}"#;
+        let local = TestEntity { content: r#"{"name":"both"}"#.to_string() };
+        let remote = TestEntity { content: r#"{"name":"both"}"#.to_string() };
+        let base_fp = merger.fingerprint(base);
+
+        let result = merger.merge_entity(&base_fp, Some(&local), Some(&remote));
+        match result {
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, "both"),
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn test_delete_vs_modify_prefers_modify() {
+        let merger = ThreeWayMerger::new(extract);
+        let base = r#"{"name":"test"}"#;
+        let local = TestEntity { content: r#"{"name":"modified"}"#.to_string() };
+        let base_fp = merger.fingerprint(base);
+
+        // remote 删除了，local 修改了 → 保留修改
+        let result = merger.merge_entity(&base_fp, Some(&local), None);
+        match result {
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, "modified"),
+            _ => panic!("expected Merged"),
+        }
+
+        // local 删除了，remote 修改了 → 保留修改
+        let result2 = merger.merge_entity(&base_fp, None, Some(&local));
+        match result2 {
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, "modified"),
+            _ => panic!("expected Merged"),
+        }
+    }
+
+    #[test]
+    fn test_fingerprint_stable() {
+        let content = r#"{"z":"last","a":"first","nested":{"b":1,"a":2}}"#;
+        let fp1 = ThreeWayMerger::<TestEntity>::fingerprint(content);
+        let fp2 = ThreeWayMerger::<TestEntity>::fingerprint(content);
+        assert_eq!(fp1, fp2);
+
+        // 不同顺序应产生相同 fingerprint
+        let content2 = r#"{"a":"first","nested":{"a":2,"b":1},"z":"last"}"#;
+        let fp3 = ThreeWayMerger::<TestEntity>::fingerprint(content2);
+        assert_eq!(fp1, fp3);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

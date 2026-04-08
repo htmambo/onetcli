@@ -790,6 +790,18 @@ Settings:
         en: Set the sync_server URL, for example http://127.0.0.1:8787. Changes take effect immediately and require logging in again.
         zh-CN: 配置 sync_server 地址，例如 http://127.0.0.1:8787。修改后会立即生效，并需要重新登录。
         zh-HK: 配置 sync_server 地址，例如 http://127.0.0.1:8787。修改後會立即生效，並需要重新登入。
+      backend_type:
+        en: Sync Backend
+        zh-CN: 同步后端
+        zh-HK: 同步後端
+      backend_type_desc:
+        en: Choose the sync backend type. The default is "Custom Sync Server", which allows you to use your own sync server implementation based on the `sync_server` protocol.
+        zh-CN: 选择同步后端类型，默认是“自建 ONetCli 同步服务器”则允许你使用自己搭建的基于 `sync_server` 协议的同步服务器。
+        zh-HK: 選擇同步後端類型，默認是“自建 ONetCli 同步服務器”則允許你使用自己搭建的基於 `sync_server` 協議的同步服務器。
+      self_hosted_backend:
+        en: Custom Sync Server
+        zh-CN: 自建 ONetCli 同步服务器
+        zh-HK: 自建 ONetCli 同步服務器
 
     # 字体设置
     Font:

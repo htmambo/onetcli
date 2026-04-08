@@ -9,6 +9,8 @@ use llm_connector::ChatRequest;
 use std::fmt;
 use std::sync::Arc;
 
+use super::blob_vault::BlobVault;
+
 /// 云端 API 错误类型
 #[derive(Debug, Clone)]
 pub enum CloudApiError {
@@ -28,6 +30,8 @@ pub enum CloudApiError {
     NotFound(String),
     /// 冲突
     Conflict(String),
+    /// 不支持的操作
+    NotSupported(String),
     /// 未知错误
     Unknown(String),
 }
@@ -43,6 +47,7 @@ impl fmt::Display for CloudApiError {
             CloudApiError::ParseError(msg) => write!(f, "数据解析错误: {}", msg),
             CloudApiError::NotFound(msg) => write!(f, "资源未找到: {}", msg),
             CloudApiError::Conflict(msg) => write!(f, "冲突: {}", msg),
+            CloudApiError::NotSupported(msg) => write!(f, "不支持: {}", msg),
             CloudApiError::Unknown(msg) => write!(f, "未知错误: {}", msg),
         }
     }
@@ -184,6 +189,18 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 聊天流
     async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream, CloudApiError>;
+
+    // ========================================================================
+    // Blob 存储（可选实现）
+    // ========================================================================
+
+    /// 将客户端作为 BlobVault 使用
+    ///
+    /// 返回 `Some(&dyn BlobVault)` 表示该客户端支持直接 blob 存储操作（如 WebDAV、S3）。
+    /// 返回 `None` 表示该客户端不支持 blob 操作（如 sync_server REST API）。
+    fn as_blob_vault(&self) -> Option<&dyn BlobVault> {
+        None
+    }
 }
 
 /// 认证响应

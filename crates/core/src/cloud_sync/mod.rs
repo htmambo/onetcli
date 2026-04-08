@@ -17,6 +17,7 @@
 //! 4. 验证通过后解锁同步服务
 //! 5. 执行同步操作（上传/下载/删除）
 
+pub mod blob_vault;
 mod certificate_sync;
 pub mod client;
 pub mod conflict;
@@ -29,6 +30,7 @@ mod service;
 pub mod state_manager;
 pub mod sync_server;
 pub mod sync_type;
+pub mod webdav_adapter;
 mod workspace_sync;
 
 use std::sync::{Arc, RwLock};

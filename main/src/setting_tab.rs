@@ -367,6 +367,12 @@ pub struct AppSettings {
     pub auto_update: bool,
     #[serde(default)]
     pub sync_server_url: String,
+    /// 同步后端类型："sync_server" | "webdav"
+    #[serde(default = "default_sync_backend_type")]
+    pub sync_backend_type: String,
+    /// WebDAV 配置
+    #[serde(default)]
+    pub webdav_config: Option<WebDavSettings>,
     #[serde(default)]
     pub database_open_mode: DatabaseOpenMode,
     #[serde(default)]
@@ -582,6 +588,35 @@ fn default_system_hotkey_other() -> String {
     DEFAULT_SYSTEM_HOTKEY_OTHER.to_string()
 }
 
+fn default_sync_backend_type() -> String {
+    "sync_server".to_string()
+}
+
+/// WebDAV 同步配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebDavSettings {
+    pub endpoint: String,
+    /// "basic" | "bearer"
+    pub auth_type: String,
+    pub username: String,
+    pub password: String,
+    pub bearer_token: String,
+    pub vault_path: String,
+}
+
+impl Default for WebDavSettings {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            auth_type: "basic".to_string(),
+            username: String::new(),
+            password: String::new(),
+            bearer_token: String::new(),
+            vault_path: "netcatty-vault".to_string(),
+        }
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -606,6 +641,8 @@ impl Default for AppSettings {
             terminal_exit_behavior: default_terminal_exit_behavior(),
             auto_update: true,
             sync_server_url: String::new(),
+            sync_backend_type: default_sync_backend_type(),
+            webdav_config: None,
             database_open_mode: DatabaseOpenMode::default(),
             connection_list_sort_field: ConnectionListSortField::default(),
             connection_list_sort_order: ConnectionListSortOrder::default(),
@@ -752,7 +789,7 @@ impl AppSettings {
 
     pub fn preferred_window_background(&self) -> WindowBackgroundAppearance {
         if !self.enable_glass_effect {
-            return WindowBackgroundAppearance::Transparent;
+            return WindowBackgroundAppearance::Opaque;
         }
 
         #[cfg(target_os = "linux")]
@@ -1203,7 +1240,39 @@ impl SettingsPanel {
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Sync.group_title"))
-                        .item(
+                        .items(vec![
+                            SettingItem::new(
+                                t!("Settings.General.Sync.backend_type"),
+                                themed_setting_field(SettingField::dropdown(
+                                    vec![
+                                        (
+                                            "sync_server".into(),
+                                            t!("Settings.General.Sync.self_hosted_backend").into(),
+                                        ),
+                                        (
+                                            "webdav".into(),
+                                            t!("Settings.General.Sync.webdav_backend").into(),
+                                        ),
+                                    ],
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).sync_backend_type.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.sync_backend_type = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(
+                                    SharedString::from(default_settings.sync_backend_type.clone()),
+                                ),
+                            )
+                            .description(
+                                t!("Settings.General.Sync.backend_type_desc").to_string(),
+                            ),
+                            // sync_server URL
                             SettingItem::new(
                                 t!("Settings.General.Sync.server_url"),
                                 themed_setting_field(SettingField::input(
@@ -1221,7 +1290,140 @@ impl SettingsPanel {
                                 ),
                             )
                             .description(t!("Settings.General.Sync.server_url_desc").to_string()),
-                        ),
+                            // WebDAV 配置
+                            SettingItem::new(
+                                "WebDAV 地址",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .webdav_config
+                                                .as_ref()
+                                                .map(|c| c.endpoint.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        webdav.endpoint = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            )
+                            .description("WebDAV 服务器地址，如 https://dav.example.com".to_string()),
+                            SettingItem::new(
+                                "WebDAV 认证方式",
+                                themed_setting_field(SettingField::dropdown(
+                                    vec![
+                                        ("basic".into(), "用户名密码".into()),
+                                        ("bearer".into(), "Bearer Token".into()),
+                                    ],
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .webdav_config
+                                                .as_ref()
+                                                .map(|c| c.auth_type.clone())
+                                                .unwrap_or_else(|| "basic".to_string()),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        webdav.auth_type = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from("basic".to_string())),
+                            ),
+                            SettingItem::new(
+                                "WebDAV 用户名",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .webdav_config
+                                                .as_ref()
+                                                .map(|c| c.username.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        webdav.username = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            ),
+                            SettingItem::new(
+                                "WebDAV 密码",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .webdav_config
+                                                .as_ref()
+                                                .map(|c| c.password.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        webdav.password = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            ),
+                            SettingItem::new(
+                                "WebDAV Bearer Token",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .webdav_config
+                                                .as_ref()
+                                                .map(|c| c.bearer_token.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        webdav.bearer_token = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            ),
+                            SettingItem::new(
+                                "WebDAV 存储路径",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .webdav_config
+                                                .as_ref()
+                                                .map(|c| c.vault_path.clone())
+                                                .unwrap_or_else(|| "netcatty-vault".to_string()),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        webdav.vault_path = if val.is_empty() { "netcatty-vault".to_string() } else { val.to_string() };
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from("netcatty-vault".to_string())),
+                            )
+                            .description("同步文件存放的路径前缀".to_string()),
+                        ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Terminal.group_title"))
                         .items(vec![
@@ -1670,13 +1872,13 @@ mod tests {
     }
 
     #[test]
-    fn 关闭毛玻璃时窗口背景保持普通透明() {
+    fn 关闭毛玻璃时窗口背景切换为不透明() {
         let mut settings = AppSettings::default();
         settings.enable_glass_effect = false;
 
         assert_eq!(
             settings.preferred_window_background(),
-            WindowBackgroundAppearance::Transparent
+            WindowBackgroundAppearance::Opaque
         );
     }
 

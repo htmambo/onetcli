@@ -116,6 +116,8 @@ pub struct ProviderConfig {
     pub models: Vec<String>,
     pub max_tokens: Option<i32>,
     pub temperature: Option<f32>,
+    /// Anthropic 专属：thinking budget（最大 thinking token 数）
+    pub thinking_budget: Option<i32>,
     pub enabled: bool,
     pub is_default: bool,
     pub created_at: i64,
@@ -135,6 +137,7 @@ impl Default for ProviderConfig {
             models: Vec::new(),
             max_tokens: None,
             temperature: None,
+            thinking_budget: None,
             enabled: true,
             is_default: false,
             created_at: 0,
@@ -179,5 +182,27 @@ mod tests {
         };
 
         assert!(config.is_runtime_available());
+    }
+
+    #[test]
+    fn anthropic_provider_supports_thinking_budget() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::Anthropic,
+            thinking_budget: Some(10000),
+            ..Default::default()
+        };
+
+        assert_eq!(config.thinking_budget, Some(10000));
+    }
+
+    #[test]
+    fn non_anthropic_provider_thinking_budget_is_optional() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::OpenAI,
+            thinking_budget: None,
+            ..Default::default()
+        };
+
+        assert_eq!(config.thinking_budget, None);
     }
 }

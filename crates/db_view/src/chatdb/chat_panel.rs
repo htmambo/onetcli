@@ -790,7 +790,7 @@ impl ChatPanel {
                 }
             }
 
-            // 构建 AgentContext（注入 DB capability）
+            // 构建 AgentContext（注入 DB capability + 会话 ID 用于跨会话状态持久化）
             let mut ctx_agent = AgentContext::new(
                 message_content,
                 history,
@@ -798,7 +798,8 @@ impl ChatPanel {
                 global_provider_state,
                 storage_manager,
                 cancel_token,
-            );
+            )
+            .with_session_id(session_db_id.to_string());
 
             if let Some(db_meta) = db_metadata {
                 ctx_agent.set_capability(CAP_DB_METADATA, db_meta);

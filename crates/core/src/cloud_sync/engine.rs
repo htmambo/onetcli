@@ -8,15 +8,16 @@
 //! - 支持冲突检测和多种解决策略
 //! - 提供完整同步和增量同步两种模式
 
+use super::blob_vault::{Blob, BlobMeta, BlobVault};
 use super::certificate_sync::CertificateSyncType;
+use super::client::CloudApiClient;
 use super::connection_sync::ConnectionSyncHandler;
 use super::generic_sync::generic_sync;
+use super::models::{ConflictResolution, ConflictType, SyncResult, Team};
+use super::queue::OperationQueue;
+use super::service::{CloudSyncService, SyncError};
 use super::sync_type::SyncTypeHandler;
 use super::workspace_sync::WorkspaceSyncType;
-use crate::cloud_sync::client::CloudApiClient;
-use crate::cloud_sync::models::{ConflictResolution, ConflictType, SyncResult, Team};
-use crate::cloud_sync::queue::OperationQueue;
-use crate::cloud_sync::service::{CloudSyncService, SyncError};
 use crate::crypto;
 use crate::storage::traits::Repository;
 use crate::storage::{StorageManager, TeamKeyCacheRepository};
@@ -68,6 +69,8 @@ pub struct SyncEngine {
     handlers: Vec<Box<dyn SyncHandler>>,
     /// 当前用户所在团队列表（同步开始时获取）
     pub(crate) cached_teams: std::sync::RwLock<Vec<Team>>,
+    /// Blob 存储后端（可选，WebDAV/S3 等）
+    blob_vault: Option<Arc<dyn BlobVault>>,
 }
 
 impl SyncEngine {
@@ -92,6 +95,7 @@ impl SyncEngine {
                 Box::new(ConnectionSyncHandler),
             ],
             cached_teams: std::sync::RwLock::new(Vec::new()),
+            blob_vault: None,
         }
     }
 
@@ -111,6 +115,91 @@ impl SyncEngine {
     pub fn register_type<H: SyncTypeHandler>(mut self, handler: H) -> Self {
         self.handlers.push(Box::new(TypedSyncBridge { handler }));
         self
+    }
+
+    /// 设置 Blob 存储后端
+    pub fn with_blob_vault(mut self, vault: Arc<dyn BlobVault>) -> Self {
+        self.blob_vault = Some(vault);
+        self
+    }
+
+    /// 获取 Blob 存储后端
+    pub fn blob_vault(&self) -> Option<&dyn BlobVault> {
+        self.blob_vault.as_ref().map(|v| v.as_ref() as &dyn BlobVault)
+    }
+
+    // ========================================================================
+    // Blob Vault 便捷操作（封装加密/解密）
+    // ========================================================================
+
+    /// 通过 BlobVault 上传加密 blob
+    pub async fn upload_blob(
+        &self,
+        key: &str,
+        data: &[u8],
+        _team_id: Option<&str>,
+    ) -> Result<BlobMeta, SyncError> {
+        let vault = self.blob_vault.as_ref()
+            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
+
+        vault.upload(key, data.to_vec()).await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))
+    }
+
+    /// 通过 BlobVault 下载并解密 blob
+    pub async fn download_blob(
+        &self,
+        key: &str,
+        team_id: Option<&str>,
+    ) -> Result<Blob, SyncError> {
+        let vault = self.blob_vault.as_ref()
+            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
+
+        let blob = vault.download(key).await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+        // 解密 blob 内容
+        let plaintext = {
+            let crypto = self.crypto_service.read()
+                .map_err(|_| SyncError::StorageError("加密服务锁获取失败".to_string()))?;
+            crypto.decrypt_blob(
+                &String::from_utf8_lossy(&blob.data),
+                team_id,
+            )?
+        };
+
+        Ok(Blob {
+            key: blob.key,
+            data: plaintext.into_bytes(),
+            updated_at: blob.updated_at,
+        })
+    }
+
+    /// 检查 blob 是否存在
+    pub async fn blob_exists(&self, key: &str) -> Result<bool, SyncError> {
+        let vault = self.blob_vault.as_ref()
+            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
+
+        vault.exists(key).await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))
+    }
+
+    /// 删除 blob
+    pub async fn delete_blob(&self, key: &str) -> Result<(), SyncError> {
+        let vault = self.blob_vault.as_ref()
+            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
+
+        vault.delete(key).await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))
+    }
+
+    /// 列举 blob
+    pub async fn list_blobs(&self, prefix: Option<&str>) -> Result<Vec<BlobMeta>, SyncError> {
+        let vault = self.blob_vault.as_ref()
+            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
+
+        vault.list(prefix).await
+            .map_err(|e| SyncError::NetworkError(e.to_string()))
     }
 
     /// 获取当前时间戳（秒）
