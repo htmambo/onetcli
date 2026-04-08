@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, RwLock};
 
+use db_view::set_db_view_settings;
 use gpui::{
     App, AppContext, AsyncApp, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Pixels,
@@ -873,11 +874,16 @@ impl AppSettings {
 
         // 同步自动保存配置
         self.sync_auto_save_config(cx);
+        self.sync_db_view_settings(cx);
     }
 
     /// 同步自动保存配置到全局状态
     pub fn sync_auto_save_config(&self, cx: &mut App) {
         Self::update_auto_save_config(self.enable_sql_auto_save, self.sql_auto_save_interval, cx);
+    }
+
+    pub fn sync_db_view_settings(&self, cx: &mut App) {
+        set_db_view_settings(cx, self.db_undo_stack_size);
     }
 
     /// 更新自动保存配置（静态方法，避免借用冲突）
@@ -1480,9 +1486,13 @@ impl SettingsPanel {
                                     },
                                     |cx: &App| AppSettings::global(cx).db_undo_stack_size as f64,
                                     |val: f64, cx: &mut App| {
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.db_undo_stack_size = val as usize;
-                                        settings.save();
+                                        {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.db_undo_stack_size = val as usize;
+                                            settings.save();
+                                        }
+                                        let undo_stack_size = AppSettings::global(cx).db_undo_stack_size;
+                                        set_db_view_settings(cx, undo_stack_size);
                                     },
                                 ))
                                 .default_value(default_settings.db_undo_stack_size as f64),

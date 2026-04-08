@@ -1342,6 +1342,14 @@ impl DataGrid {
         });
     }
 
+    pub fn accept_saved_changes(&self, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            state.delegate_mut().accept_current_state_as_saved();
+            state.refresh(cx);
+            cx.notify();
+        });
+    }
+
     pub fn revert_changes(&self, cx: &mut App) {
         self.table.update(cx, |state, cx| {
             state.delegate_mut().revert_all_changes();
@@ -1767,7 +1775,8 @@ impl DataGrid {
                             t!("TableDataGrid.save_changes_failed", error = err_msg).to_string(),
                         );
                     } else {
-                        this.clear_changes(cx);
+                        this.accept_saved_changes(cx);
+                        this.refresh_data(cx);
                         notification(
                             cx,
                             t!("TableDataGrid.save_changes_success", count = change_count)
@@ -1902,7 +1911,8 @@ impl DataGrid {
                             t!("TableDataGrid.save_changes_failed", error = err_msg).to_string(),
                         );
                     } else {
-                        this.clear_changes(cx);
+                        this.accept_saved_changes(cx);
+                        this.refresh_data(cx);
                         notification(
                             cx,
                             t!("TableDataGrid.save_changes_success", count = change_count)
@@ -2124,7 +2134,8 @@ impl DataGrid {
                     cx.update(|cx| {
                         if let Some(window_id) = cx.active_window() {
                             let _ = cx.update_window(window_id, |_entity, window, cx| {
-                                data_grid.clear_changes(cx);
+                                data_grid.accept_saved_changes(cx);
+                                data_grid.refresh_data(cx);
                                 window.close_dialog(cx);
                                 window.push_notification(
                                     t!("TableDataGrid.execute_success").to_string(),

@@ -1,4 +1,5 @@
 use crate::table_data::data_grid::{DataGrid, DataGridConfig};
+use crate::current_db_undo_stack_size;
 use futures::channel::oneshot;
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
@@ -36,7 +37,7 @@ impl TableDataTabContent {
         )
         .editable(editable)
         .show_toolbar(true)
-        .undo_stack_size(50); // TODO: 从 AppSettings 同步
+        .undo_stack_size(current_db_undo_stack_size(cx));
 
         if let Some(schema) = schema_name {
             config = config.with_schema(schema);
