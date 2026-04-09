@@ -31,3 +31,5 @@ util.workspace = true
 rust-i18n.workspace = true
 url.workspace = true
 regex.workspace = true
+tiny_http.workspace = true
+urlencoding.workspace = true

@@ -373,6 +373,9 @@ pub struct AppSettings {
     /// WebDAV 配置
     #[serde(default)]
     pub webdav_config: Option<WebDavSettings>,
+    /// GitHub Gist 配置
+    #[serde(default)]
+    pub gist_config: Option<GistSettings>,
     #[serde(default)]
     pub database_open_mode: DatabaseOpenMode,
     #[serde(default)]
@@ -617,6 +620,22 @@ impl Default for WebDavSettings {
     }
 }
 
+/// GitHub Gist 同步配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GistSettings {
+    pub client_id: String,
+    pub gist_id: Option<String>,
+}
+
+impl Default for GistSettings {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            gist_id: None,
+        }
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -643,6 +662,7 @@ impl Default for AppSettings {
             sync_server_url: String::new(),
             sync_backend_type: default_sync_backend_type(),
             webdav_config: None,
+            gist_config: None,
             database_open_mode: DatabaseOpenMode::default(),
             connection_list_sort_field: ConnectionListSortField::default(),
             connection_list_sort_order: ConnectionListSortOrder::default(),
@@ -1253,6 +1273,10 @@ impl SettingsPanel {
                                             "webdav".into(),
                                             t!("Settings.General.Sync.webdav_backend").into(),
                                         ),
+                                        (
+                                            "github_gist".into(),
+                                            t!("Settings.General.Sync.github_gist_backend").into(),
+                                        ),
                                     ],
                                     |cx: &App| {
                                         SharedString::from(
@@ -1423,6 +1447,55 @@ impl SettingsPanel {
                                 .default_value(SharedString::from("netcatty-vault".to_string())),
                             )
                             .description("同步文件存放的路径前缀".to_string()),
+                        ]),
+                        // GitHub Gist 配置
+                        themed_setting_group(SettingGroup::new(), cx)
+                        .title(t!("Settings.General.Sync.github_gist_group_title"))
+                        .items(vec![
+                            SettingItem::new(
+                                t!("Settings.General.Sync.github_client_id"),
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .gist_config
+                                                .as_ref()
+                                                .map(|c| c.client_id.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let gist = settings.gist_config.get_or_insert_with(GistSettings::default);
+                                        gist.client_id = val.to_string();
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            )
+                            .description(t!("Settings.General.Sync.github_client_id_desc").to_string()),
+                            SettingItem::new(
+                                t!("Settings.General.Sync.gist_id"),
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .gist_config
+                                                .as_ref()
+                                                .and_then(|c| c.gist_id.clone())
+                                                .unwrap_or_else(|| "未授权".to_string()),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let gist = settings.gist_config.get_or_insert_with(GistSettings::default);
+                                        gist.gist_id = Some(val.to_string()).filter(|s| !s.is_empty() && s != "未授权");
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from("未授权".to_string())),
+                            )
+                            .description("授权成功后自动填充 Gist ID".to_string()),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Terminal.group_title"))

@@ -122,6 +122,30 @@
 
 ---
 
+### T6: GitHub Gist 端到端集成
+
+**状态**: ✅ 已完成
+
+**实现内容**:
+- `GithubGistSettings` 配置结构（client_id + gist_id）
+- `BlobVault` trait 完整实现（upload/download/delete/exists/list）
+- `authenticate()` 方法串联 Device Flow：获取 token → 查找/创建 vault gist
+- OAuth token 通过 base64 编解码存储到 gist
+- UI 下拉框增加 `github_gist` 选项
+- GitHub Gist 配置面板（client_id 输入 + gist_id 显示）
+- `SyncEngine::with_blob_vault()` 接入 GitHub Gist vault
+
+**涉及文件**:
+- `crates/core/src/cloud_sync/oauth/github_gist.rs` — BlobVault impl + authenticate
+- `crates/core/src/cloud_sync/mod.rs` — 导出 GithubGistSettings/Vault
+- `main/src/setting_tab.rs` — GistSettings 结构 + UI 配置区
+- `main/src/home_tab.rs` — SyncEngine 注入 vault
+- `main/locales/main.yml` — 国际化文案
+
+**验收标准**: ✅ GitHub Gist 可作为同步后端，端到端可用
+
+---
+
 ## 实施顺序
 
 ```
@@ -141,3 +165,4 @@ T1 是基础，T2 是用户最迫切的需求（"看不到新增的同步服务�
 | T3: 三路合并算法 | ✅ 已完成 |
 | T4: Auto-sync 定时器 | ✅ 已完成 |
 | T5: S3 Adapter | ⏳ 未开始 |
+| T6: GitHub Gist 端到端集成 | ✅ 已完成 |

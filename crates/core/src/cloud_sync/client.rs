@@ -32,6 +32,8 @@ pub enum CloudApiError {
     Conflict(String),
     /// 不支持的操作
     NotSupported(String),
+    /// 数据格式错误
+    DataFormatError(String),
     /// 未知错误
     Unknown(String),
 }
@@ -48,6 +50,7 @@ impl fmt::Display for CloudApiError {
             CloudApiError::NotFound(msg) => write!(f, "资源未找到: {}", msg),
             CloudApiError::Conflict(msg) => write!(f, "冲突: {}", msg),
             CloudApiError::NotSupported(msg) => write!(f, "不支持: {}", msg),
+            CloudApiError::DataFormatError(msg) => write!(f, "数据格式错误: {}", msg),
             CloudApiError::Unknown(msg) => write!(f, "未知错误: {}", msg),
         }
     }

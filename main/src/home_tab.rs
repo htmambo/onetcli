@@ -28,7 +28,8 @@ use gpui_component::{
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
-    CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo, can_edit_connection,
+    BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, SyncConflict, SyncEngine,
+    UserInfo, can_edit_connection,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
@@ -982,7 +983,26 @@ impl HomePage {
         }
 
         // 创建同步引擎
-        let engine = SyncEngine::new(cloud_client, sync_service, storage);
+        let settings = AppSettings::global(cx);
+        let engine = if settings.sync_backend_type == "github_gist" {
+            if let Some(ref gist_cfg) = settings.gist_config {
+                if !gist_cfg.client_id.is_empty() {
+                    let vault = GithubGistVault::new(cx.http_client(), gist_cfg.client_id.clone());
+                    let vault: Arc<dyn BlobVault> = if let Some(ref gist_id) = gist_cfg.gist_id {
+                        Arc::new(vault.with_gist_id(gist_id.clone()))
+                    } else {
+                        Arc::new(vault)
+                    };
+                    SyncEngine::new(cloud_client, sync_service, storage).with_blob_vault(vault)
+                } else {
+                    SyncEngine::new(cloud_client, sync_service, storage)
+                }
+            } else {
+                SyncEngine::new(cloud_client, sync_service, storage)
+            }
+        } else {
+            SyncEngine::new(cloud_client, sync_service, storage)
+        };
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let result = engine.sync().await;
@@ -1298,8 +1318,27 @@ impl HomePage {
         self.cloud_error = None;
         cx.notify();
 
-        // 创建同步引擎
-        let engine = SyncEngine::new(cloud_client, sync_service, storage);
+        // 创建同步引擎（复用同步设置的 blob vault 配置）
+        let settings = AppSettings::global(cx);
+        let engine = if settings.sync_backend_type == "github_gist" {
+            if let Some(ref gist_cfg) = settings.gist_config {
+                if !gist_cfg.client_id.is_empty() {
+                    let vault = GithubGistVault::new(cx.http_client(), gist_cfg.client_id.clone());
+                    let vault: Arc<dyn BlobVault> = if let Some(ref gist_id) = gist_cfg.gist_id {
+                        Arc::new(vault.with_gist_id(gist_id.clone()))
+                    } else {
+                        Arc::new(vault)
+                    };
+                    SyncEngine::new(cloud_client, sync_service, storage).with_blob_vault(vault)
+                } else {
+                    SyncEngine::new(cloud_client, sync_service, storage)
+                }
+            } else {
+                SyncEngine::new(cloud_client, sync_service, storage)
+            }
+        } else {
+            SyncEngine::new(cloud_client, sync_service, storage)
+        };
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             // 使用策略映射应用冲突解决方案

@@ -26,6 +26,7 @@ pub mod engine;
 mod generic_sync;
 mod models;
 pub mod queue;
+pub mod oauth;
 mod service;
 pub mod state_manager;
 pub mod sync_server;
@@ -37,14 +38,17 @@ use std::sync::{Arc, RwLock};
 
 use gpui::{App, Global};
 
+pub use blob_vault::*;
 pub use client::*;
 pub use conflict::*;
 pub use engine::*;
 pub use models::*;
+pub use oauth::github_gist::{GithubGistSettings, GithubGistVault};
 pub use queue::*;
 pub use service::*;
 pub use state_manager::*;
 pub use sync_type::*;
+pub use webdav_adapter::{WebDavConfig, WebDavVault};
 
 use crate::storage::{GlobalStorageState, StoredConnection, TeamKeyCacheRepository};
 

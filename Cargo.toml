@@ -144,6 +144,8 @@ mongodb = "3.5.1"
 futures-util="0.3.31"
 url = "2.5.4"
 percent-encoding = "2.3.1"
+tiny_http = "0.8"
+urlencoding = "2.1"
 global-hotkey = "0.7.0"
 [workspace.dependencies.windows]
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]

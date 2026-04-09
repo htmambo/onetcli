@@ -802,6 +802,30 @@ Settings:
         en: Custom Sync Server
         zh-CN: 自建 ONetCli 同步服务器
         zh-HK: 自建 ONetCli 同步服務器
+      webdav_backend:
+        en: WebDAV
+        zh-CN: WebDAV
+        zh-HK: WebDAV
+      github_gist_backend:
+        en: GitHub Gist
+        zh-CN: GitHub Gist
+        zh-HK: GitHub Gist
+      github_gist_group_title:
+        en: GitHub Gist
+        zh-CN: GitHub Gist
+        zh-HK: GitHub Gist
+      github_client_id:
+        en: GitHub OAuth App Client ID
+        zh-CN: GitHub OAuth 应用 Client ID
+        zh-HK: GitHub OAuth 應用 Client ID
+      github_client_id_desc:
+        en: Create a GitHub OAuth App at https://github.com/settings/developers, set the Device Flow callback URL to http://localhost
+        zh-CN: 在 https://github.com/settings/developers 创建 GitHub OAuth App，设备流回调地址设为 http://localhost
+        zh-HK: 在 https://github.com/settings/developers 建立 GitHub OAuth App，設備流回調位址設為 http://localhost
+      gist_id:
+        en: Gist ID
+        zh-CN: Gist ID
+        zh-HK: Gist ID
 
     # 字体设置
     Font:
