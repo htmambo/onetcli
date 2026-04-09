@@ -18,6 +18,8 @@ pub mod google_drive;
 pub mod onedrive;
 pub mod pkce;
 
+pub use github_device::{create_vault_gist, find_vault_gist};
+
 use serde::{Deserialize, Serialize};
 
 /// OAuth 令牌

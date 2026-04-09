@@ -1,5 +1,5 @@
-use crate::table_data::data_grid::{DataGrid, DataGridConfig};
 use crate::current_db_undo_stack_size;
+use crate::table_data::data_grid::{DataGrid, DataGridConfig};
 use futures::channel::oneshot;
 use gpui::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,

@@ -4,7 +4,7 @@
 //! 1. 生成 code_verifier（随机字符串，43-128字符）
 //! 2. 计算 code_challenge = BASE64URL(SHA256(code_verifier))
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::Rng;
 
 /// 生成 PKCE code_verifier

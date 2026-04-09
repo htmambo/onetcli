@@ -346,14 +346,15 @@ impl<T: Clone> ThreeWayMerger<T> {
     where
         F: Fn(&T) -> String + 'static + Send + Sync,
     {
-        Self { extract_content: Box::new(extract_content) }
+        Self {
+            extract_content: Box::new(extract_content),
+        }
     }
 
     /// 计算内容的 fingerprint（递归键排序后序列化）
     fn fingerprint(content: &str) -> String {
-        let parsed: serde_json::Value = serde_json::from_str(content).unwrap_or_else(|_| {
-            serde_json::Value::String(content.to_string())
-        });
+        let parsed: serde_json::Value = serde_json::from_str(content)
+            .unwrap_or_else(|_| serde_json::Value::String(content.to_string()));
         let normalized = Self::sort_json_keys(&parsed);
         serde_json::to_string(&normalized).unwrap_or_else(|_| content.to_string())
     }
@@ -393,11 +394,19 @@ impl<T: Clone> ThreeWayMerger<T> {
         local: Option<&T>,
         remote: Option<&T>,
     ) -> ThreeWayMergeResult<T> {
-        let local_fp = local.map(|e| Self::calc_fp(&(self.extract_content)(e))).unwrap_or_else(|| "null".to_string());
-        let remote_fp = remote.map(|e| Self::calc_fp(&(self.extract_content)(e))).unwrap_or_else(|| "null".to_string());
+        let local_fp = local
+            .map(|e| Self::calc_fp(&(self.extract_content)(e)))
+            .unwrap_or_else(|| "null".to_string());
+        let remote_fp = remote
+            .map(|e| Self::calc_fp(&(self.extract_content)(e)))
+            .unwrap_or_else(|| "null".to_string());
 
         // 基础版本
-        let base_fp_actual = if base_fp.is_empty() { "null".to_string() } else { base_fp.to_string() };
+        let base_fp_actual = if base_fp.is_empty() {
+            "null".to_string()
+        } else {
+            base_fp.to_string()
+        };
 
         // 两边都没变化
         if local_fp == base_fp_actual && remote_fp == base_fp_actual {
@@ -478,7 +487,9 @@ mod three_way_merge_tests {
     #[test]
     fn test_both_unchanged() {
         let merger = ThreeWayMerger::new(extract);
-        let entity = TestEntity { content: r#"{"name":"test"}"#.to_string() };
+        let entity = TestEntity {
+            content: r#"{"name":"test"}"#.to_string(),
+        };
         let fp = merger.fingerprint(r#"{"name":"test"}"#);
 
         let result = merger.merge_entity(&fp, Some(&entity), Some(&entity));
@@ -491,7 +502,9 @@ mod three_way_merge_tests {
     #[test]
     fn test_local_added() {
         let merger = ThreeWayMerger::new(extract);
-        let entity = TestEntity { content: r#"{"name":"test"}"#.to_string() };
+        let entity = TestEntity {
+            content: r#"{"name":"test"}"#.to_string(),
+        };
 
         let result = merger.merge_entity("", Some(&entity), None);
         match result {
@@ -503,7 +516,9 @@ mod three_way_merge_tests {
     #[test]
     fn test_remote_added() {
         let merger = ThreeWayMerger::new(extract);
-        let entity = TestEntity { content: r#"{"name":"test"}"#.to_string() };
+        let entity = TestEntity {
+            content: r#"{"name":"test"}"#.to_string(),
+        };
 
         let result = merger.merge_entity("", None, Some(&entity));
         match result {
@@ -516,8 +531,12 @@ mod three_way_merge_tests {
     fn test_both_modified_conflict_prefers_local() {
         let merger = ThreeWayMerger::new(extract);
         let base = r#"{"name":"test"}"#;
-        let local = TestEntity { content: r#"{"name":"local"}"#.to_string() };
-        let remote = TestEntity { content: r#"{"name":"remote"}"#.to_string() };
+        let local = TestEntity {
+            content: r#"{"name":"local"}"#.to_string(),
+        };
+        let remote = TestEntity {
+            content: r#"{"name":"remote"}"#.to_string(),
+        };
         let base_fp = merger.fingerprint(base);
 
         let result = merger.merge_entity(&base_fp, Some(&local), Some(&remote));
@@ -534,8 +553,12 @@ mod three_way_merge_tests {
     fn test_same_modification() {
         let merger = ThreeWayMerger::new(extract);
         let base = r#"{"name":"test"}"#;
-        let local = TestEntity { content: r#"{"name":"both"}"#.to_string() };
-        let remote = TestEntity { content: r#"{"name":"both"}"#.to_string() };
+        let local = TestEntity {
+            content: r#"{"name":"both"}"#.to_string(),
+        };
+        let remote = TestEntity {
+            content: r#"{"name":"both"}"#.to_string(),
+        };
         let base_fp = merger.fingerprint(base);
 
         let result = merger.merge_entity(&base_fp, Some(&local), Some(&remote));
@@ -549,7 +572,9 @@ mod three_way_merge_tests {
     fn test_delete_vs_modify_prefers_modify() {
         let merger = ThreeWayMerger::new(extract);
         let base = r#"{"name":"test"}"#;
-        let local = TestEntity { content: r#"{"name":"modified"}"#.to_string() };
+        let local = TestEntity {
+            content: r#"{"name":"modified"}"#.to_string(),
+        };
         let base_fp = merger.fingerprint(base);
 
         // remote 删除了，local 修改了 → 保留修改

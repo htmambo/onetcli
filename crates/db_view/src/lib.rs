@@ -15,13 +15,13 @@ pub mod mssql;
 pub mod mysql;
 pub mod oracle;
 pub mod postgresql;
+pub mod settings;
 mod sidebar;
 pub mod sql_editor;
 #[cfg(test)]
 mod sql_editor_completion_tests;
 pub mod sql_editor_view;
 pub(crate) mod sql_inline_completion;
-pub mod settings;
 pub mod sql_result_tab;
 pub mod sqlite;
 mod table_data;

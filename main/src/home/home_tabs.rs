@@ -816,7 +816,6 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        SettingsPanel::request_page(SettingsPanelPage::Account, cx);
         self.add_settings_tab(window, cx);
     }
 

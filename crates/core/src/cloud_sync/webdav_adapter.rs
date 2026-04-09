@@ -25,7 +25,7 @@ pub struct WebDavConfig {
     pub endpoint: String,
     /// 认证信息
     pub auth: WebDavAuth,
-    /// 同步文件存放的路径前缀（末尾不带斜杠），默认 "netcatty-vault"
+    /// 同步文件存放的路径前缀（末尾不带斜杠），默认 "ONetCli-vault"
     pub vault_path: String,
 }
 
@@ -45,8 +45,8 @@ impl WebDavConfig {
         match &self.auth {
             WebDavAuth::Basic { username, password } => {
                 use base64::Engine;
-                let credentials =
-                    base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+                let credentials = base64::engine::general_purpose::STANDARD
+                    .encode(format!("{username}:{password}"));
                 format!("Basic {credentials}")
             }
             WebDavAuth::Bearer { token } => format!("Bearer {token}"),
@@ -66,7 +66,10 @@ impl WebDavVault {
     }
 
     /// 发送请求并读取响应体
-    async fn send_and_read(&self, req: Request<AsyncBody>) -> Result<(StatusCode, Vec<u8>), CloudApiError> {
+    async fn send_and_read(
+        &self,
+        req: Request<AsyncBody>,
+    ) -> Result<(StatusCode, Vec<u8>), CloudApiError> {
         let response = self
             .http
             .send(req)
@@ -104,7 +107,11 @@ impl BlobVault for WebDavVault {
         let (status, _) = self.send_and_read(req).await?;
 
         if status.is_success() || status == StatusCode::CREATED {
-            Ok(BlobMeta { key: key.to_string(), size, updated_at: now })
+            Ok(BlobMeta {
+                key: key.to_string(),
+                size,
+                updated_at: now,
+            })
         } else {
             Err(CloudApiError::ServerError(format!(
                 "WebDAV 上传失败: HTTP {}",
@@ -136,7 +143,11 @@ impl BlobVault for WebDavVault {
             )));
         }
 
-        Ok(Blob { key: key.to_string(), data: bytes, updated_at: now })
+        Ok(Blob {
+            key: key.to_string(),
+            data: bytes,
+            updated_at: now,
+        })
     }
 
     async fn delete(&self, key: &str) -> Result<(), CloudApiError> {
@@ -182,7 +193,11 @@ impl BlobVault for WebDavVault {
             self.config.vault_path.trim_start_matches('/')
         );
         let search_prefix = prefix.unwrap_or("");
-        let depth = if search_prefix.is_empty() { "1" } else { "infinity" };
+        let depth = if search_prefix.is_empty() {
+            "1"
+        } else {
+            "infinity"
+        };
 
         let body = r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:allprop/></d:propfind>"#;
 
@@ -213,7 +228,11 @@ impl BlobVault for WebDavVault {
                 if let Some(end) = line[start + 9..].find("</d:href>") {
                     let href = &line[start + 9..start + 9 + end];
                     if href.starts_with(&vault_prefix) && href.contains(search_prefix) {
-                        results.push(BlobMeta { key: href.to_string(), size: 0, updated_at: 0 });
+                        results.push(BlobMeta {
+                            key: href.to_string(),
+                            size: 0,
+                            updated_at: 0,
+                        });
                     }
                 }
             }

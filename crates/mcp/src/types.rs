@@ -174,8 +174,16 @@ pub struct ReadResourceResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ResourceContents {
-    Text { uri: String, mime_type: Option<String>, text: String },
-    Blob { uri: String, mime_type: String, blob: String },
+    Text {
+        uri: String,
+        mime_type: Option<String>,
+        text: String,
+    },
+    Blob {
+        uri: String,
+        mime_type: String,
+        blob: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

@@ -118,10 +118,13 @@ impl OneDriveVault {
     }
 
     /// 开始 PKCE OAuth 流程
-    pub async fn authenticate(&mut self, config: &OAuthConfig) -> Result<OAuthTokens, CloudApiError> {
+    pub async fn authenticate(
+        &mut self,
+        config: &OAuthConfig,
+    ) -> Result<OAuthTokens, CloudApiError> {
         let code_verifier = generate_code_verifier();
         let code_challenge = generate_code_challenge(&code_verifier);
-        let state = format!("netcatty_{}", chrono::Utc::now().timestamp_millis());
+        let state = format!("ONetCli_{}", chrono::Utc::now().timestamp_millis());
 
         // 构建授权 URL
         let _auth_url = format!(
@@ -150,18 +153,22 @@ impl OneDriveVault {
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(8787);
 
-        let (_port, callback) =
-            start_callback_server(redirect_port, 300).map_err(|e| CloudApiError::AuthenticationFailed(e.to_string()))?;
+        let (_port, callback) = start_callback_server(redirect_port, 300)
+            .map_err(|e| CloudApiError::AuthenticationFailed(e.to_string()))?;
 
         if !callback.is_success() {
             return Err(CloudApiError::AuthenticationFailed(
-                callback.error_description.unwrap_or_else(|| "授权失败".to_string()),
+                callback
+                    .error_description
+                    .unwrap_or_else(|| "授权失败".to_string()),
             ));
         }
 
         // 验证 state
         if callback.state.as_deref() != Some(&state) {
-            return Err(CloudApiError::AuthenticationFailed("State 不匹配".to_string()));
+            return Err(CloudApiError::AuthenticationFailed(
+                "State 不匹配".to_string(),
+            ));
         }
 
         // 用 code 换 token
@@ -198,7 +205,10 @@ impl OneDriveVault {
 
         let status = response.status();
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if !status.is_success() {
@@ -208,8 +218,8 @@ impl OneDriveVault {
             )));
         }
 
-        let token_resp: MsTokenResponse = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let token_resp: MsTokenResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         let tokens = token_resp.into_tokens();
         self.tokens = Some(tokens.clone());
@@ -222,10 +232,13 @@ impl OneDriveVault {
             return Ok(id.clone());
         }
 
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
 
-        // 查询 netcatty-vault 文件夹
-        let query = urlencoding::encode("name='netcatty-vault' and folder");
+        // 查询 ONetCli-vault 文件夹
+        let query = urlencoding::encode("name='ONetCli-vault' and folder");
         let uri = format!(
             "https://graph.microsoft.com/v1.0/me/drive/root/children?q={}",
             query
@@ -247,27 +260,41 @@ impl OneDriveVault {
 
         let status = response.status();
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if status.is_success() {
             let children: DriveChildrenResponse = serde_json::from_slice(&bytes)
                 .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
-            if let Some(folder) = children.value.into_iter().find(|i| i.name == "netcatty-vault") {
+            if let Some(folder) = children
+                .value
+                .into_iter()
+                .find(|i| i.name == "ONetCli-vault")
+            {
                 self.root_id = Some(folder.id.clone());
                 return Ok(folder.id);
             }
         }
 
         // 创建文件夹
-        let folder_id = self.create_folder("netcatty-vault", None).await?;
+        let folder_id = self.create_folder("ONetCli-vault", None).await?;
         self.root_id = Some(folder_id.clone());
         Ok(folder_id)
     }
 
     /// 创建文件夹
-    async fn create_folder(&self, name: &str, parent_id: Option<&str>) -> Result<String, CloudApiError> {
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+    async fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<&str>,
+    ) -> Result<String, CloudApiError> {
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
 
         #[derive(Serialize)]
         struct CreateFolderRequest<'a> {
@@ -292,7 +319,8 @@ impl OneDriveVault {
             name,
             folder: FolderRef {},
             conflict_behavior: "rename",
-        }).map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
+        })
+        .map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
 
         let req = Request::builder()
             .method(Method::POST)
@@ -319,18 +347,29 @@ impl OneDriveVault {
         }
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        let item: DriveItem = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let item: DriveItem =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         Ok(item.id)
     }
 
     /// 上传文件
-    async fn upload_file(&self, name: &str, content: &[u8], folder_id: &str) -> Result<BlobMeta, CloudApiError> {
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+    async fn upload_file(
+        &self,
+        name: &str,
+        content: &[u8],
+        folder_id: &str,
+    ) -> Result<BlobMeta, CloudApiError> {
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
         let now = chrono::Utc::now().timestamp_millis();
 
         let uri = format!(
@@ -364,11 +403,14 @@ impl OneDriveVault {
         }
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        let item: DriveItem = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let item: DriveItem =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         Ok(BlobMeta {
             key: item.id,
@@ -379,10 +421,16 @@ impl OneDriveVault {
 
     /// 下载文件
     async fn download_file(&self, item_id: &str) -> Result<Blob, CloudApiError> {
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
         let now = chrono::Utc::now().timestamp_millis();
 
-        let uri = format!("https://graph.microsoft.com/v1.0/me/drive/items/{}/content", item_id);
+        let uri = format!(
+            "https://graph.microsoft.com/v1.0/me/drive/items/{}/content",
+            item_id
+        );
 
         let req = Request::builder()
             .method(Method::GET)
@@ -408,17 +456,30 @@ impl OneDriveVault {
         }
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        Ok(Blob { key: item_id.to_string(), data: bytes, updated_at: now })
+        Ok(Blob {
+            key: item_id.to_string(),
+            data: bytes,
+            updated_at: now,
+        })
     }
 
     /// 删除文件
     async fn delete_file(&self, item_id: &str) -> Result<(), CloudApiError> {
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
 
-        let uri = format!("https://graph.microsoft.com/v1.0/me/drive/items/{}", item_id);
+        let uri = format!(
+            "https://graph.microsoft.com/v1.0/me/drive/items/{}",
+            item_id
+        );
 
         let req = Request::builder()
             .method(Method::DELETE)
@@ -444,13 +505,19 @@ impl OneDriveVault {
     }
 
     /// 查找 vault 文件
-    async fn find_vault_file(&self, folder_id: &str, name: &str) -> Result<Option<DriveItem>, CloudApiError> {
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+    async fn find_vault_file(
+        &self,
+        folder_id: &str,
+        name: &str,
+    ) -> Result<Option<DriveItem>, CloudApiError> {
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
 
         let uri = format!(
             "https://graph.microsoft.com/v1.0/me/drive/items/{}/children?$filter=name eq '{}'",
-            folder_id,
-            name
+            folder_id, name
         );
 
         let req = Request::builder()
@@ -468,18 +535,24 @@ impl OneDriveVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        let children: DriveChildrenResponse = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let children: DriveChildrenResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         Ok(children.value.into_iter().find(|i| i.name == name))
     }
 
     /// 列出 vault 中的所有文件
     async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
-        let tokens = self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or(CloudApiError::NotAuthenticated)?;
         let now = chrono::Utc::now().timestamp_millis();
 
         let uri = format!(
@@ -502,11 +575,14 @@ impl OneDriveVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        let children: DriveChildrenResponse = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let children: DriveChildrenResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         Ok(children
             .value
@@ -527,22 +603,32 @@ impl BlobVault for OneDriveVault {
     }
 
     async fn upload(&self, _key: &str, _data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
-        Err(CloudApiError::NotSupported("请使用 OneDriveVault 专用方法".to_string()))
+        Err(CloudApiError::NotSupported(
+            "请使用 OneDriveVault 专用方法".to_string(),
+        ))
     }
 
     async fn download(&self, _key: &str) -> Result<Blob, CloudApiError> {
-        Err(CloudApiError::NotSupported("请使用 OneDriveVault 专用方法".to_string()))
+        Err(CloudApiError::NotSupported(
+            "请使用 OneDriveVault 专用方法".to_string(),
+        ))
     }
 
     async fn delete(&self, _key: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("请使用 OneDriveVault 专用方法".to_string()))
+        Err(CloudApiError::NotSupported(
+            "请使用 OneDriveVault 专用方法".to_string(),
+        ))
     }
 
     async fn exists(&self, _key: &str) -> Result<bool, CloudApiError> {
-        Err(CloudApiError::NotSupported("请使用 OneDriveVault 专用方法".to_string()))
+        Err(CloudApiError::NotSupported(
+            "请使用 OneDriveVault 专用方法".to_string(),
+        ))
     }
 
     async fn list(&self, _prefix: Option<&str>) -> Result<Vec<BlobMeta>, CloudApiError> {
-        Err(CloudApiError::NotSupported("请使用 OneDriveVault 专用方法".to_string()))
+        Err(CloudApiError::NotSupported(
+            "请使用 OneDriveVault 专用方法".to_string(),
+        ))
     }
 }

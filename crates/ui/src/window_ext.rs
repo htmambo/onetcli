@@ -83,7 +83,7 @@ pub trait WindowExt: Sized {
     /// Opens a Dialog.
     fn open_dialog<F>(&mut self, cx: &mut App, build: F)
     where
-        F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static;
+        F: FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static;
 
     /// Return true, if there is an active Dialog.
     fn has_active_dialog(&mut self, cx: &mut App) -> bool;
@@ -149,7 +149,7 @@ impl WindowExt for Window {
     #[inline]
     fn open_dialog<F>(&mut self, cx: &mut App, build: F)
     where
-        F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+        F: FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static,
     {
         Root::update(self, cx, move |root, window, cx| {
             root.open_dialog(build, window, cx);

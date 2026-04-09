@@ -30,7 +30,9 @@ impl StdioTransport {
 }
 
 impl Default for StdioTransport {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]

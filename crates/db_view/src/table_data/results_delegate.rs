@@ -8,7 +8,6 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
-use one_core::PendingChangeLevel;
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
 use gpui_component::datetime_picker::{DateTimePickerEvent, DateTimePickerState};
@@ -17,6 +16,7 @@ use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::time_picker::{TimePickerEvent, TimePickerState};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, WindowExt, h_flex};
+use one_core::PendingChangeLevel;
 use one_core::storage::DatabaseType;
 use one_ui::edit_table::{
     CellEditor, Column, ColumnSort, EditTableDelegate, EditTableEvent, EditTableState,
@@ -360,7 +360,11 @@ impl EditorTableDelegate {
         was_modified: bool,
         previous_row_status: Option<RowStatus>,
     ) -> bool {
-        let Some(cell) = self.rows.get_mut(row).and_then(|current| current.get_mut(col)) else {
+        let Some(cell) = self
+            .rows
+            .get_mut(row)
+            .and_then(|current| current.get_mut(col))
+        else {
             return false;
         };
         *cell = old_value.clone();
@@ -665,7 +669,8 @@ impl EditorTableDelegate {
             self.cell_changes.remove(&(row_ix, col_ix));
             self.modified_cells.remove(&(row_ix, col_ix));
         } else {
-            self.cell_changes.insert((row_ix, col_ix), (original_value, value));
+            self.cell_changes
+                .insert((row_ix, col_ix), (original_value, value));
             self.modified_cells.insert((row_ix, col_ix));
         }
 
@@ -682,7 +687,12 @@ impl EditorTableDelegate {
         col_ix: usize,
         new_opt_value: Option<String>,
     ) -> bool {
-        let old_value = match self.rows.get(row_ix).and_then(|row| row.get(col_ix)).cloned() {
+        let old_value = match self
+            .rows
+            .get(row_ix)
+            .and_then(|row| row.get(col_ix))
+            .cloned()
+        {
             Some(value) => value,
             None => return false,
         };
@@ -974,7 +984,9 @@ impl EditorTableDelegate {
         self.original_rows = rows;
         self.rowids = rowids.clone();
         self.original_rowids = rowids;
-        self.row_index_map = (0..self.rows.len()).map(|row_ix| (row_ix, row_ix)).collect();
+        self.row_index_map = (0..self.rows.len())
+            .map(|row_ix| (row_ix, row_ix))
+            .collect();
         self.clear_changes();
 
         if !self.column_filters.is_empty() {
@@ -2674,7 +2686,10 @@ mod tests {
 
         assert!(delegate.undo());
         assert_eq!(delegate.rows[0][0], opt("B"));
-        assert_eq!(delegate.cell_changes.get(&(0, 0)), Some(&(opt("A"), opt("B"))));
+        assert_eq!(
+            delegate.cell_changes.get(&(0, 0)),
+            Some(&(opt("A"), opt("B")))
+        );
         assert!(delegate.modified_cells.contains(&(0, 0)));
         assert_eq!(delegate.row_status.get(&0), Some(&RowStatus::Modified));
 
@@ -2812,7 +2827,9 @@ mod tests {
         assert!(delegate.record_cell_change(new_row_ix, 0, "C".to_string()));
 
         let deleted_original_index = delegate.row_index_map[&1];
-        delegate.deleted_original_rows.insert(deleted_original_index);
+        delegate
+            .deleted_original_rows
+            .insert(deleted_original_index);
         delegate.row_status.insert(1, RowStatus::Deleted);
         delegate.cell_changes.retain(|&(row, _), _| row != 1);
         delegate.modified_cells.retain(|&(row, _)| row != 1);

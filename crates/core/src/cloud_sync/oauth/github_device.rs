@@ -12,8 +12,17 @@ use crate::cloud_sync::client::CloudApiError;
 use crate::cloud_sync::oauth::OAuthTokens;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use smol::Timer;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// GitHub Device Flow 返回结果
+pub struct DeviceFlowResponse {
+    pub verification_uri: String,
+    pub user_code: String,
+    pub device_code: String,
+}
 
 /// GitHub Device Flow 错误响应
 #[derive(Debug, Deserialize)]
@@ -66,8 +75,8 @@ impl GithubOAuthClient {
         Self { http, client_id }
     }
 
-    /// 开始 Device Flow，返回验证 URI 和 user_code
-    pub async fn start_device_flow(&self) -> Result<(String, String), CloudApiError> {
+    /// 开始 Device Flow，返回验证 URI、user_code 和 device_code
+    pub async fn start_device_flow(&self) -> Result<DeviceFlowResponse, CloudApiError> {
         let body = format!("client_id={}&scope=gist", self.client_id);
 
         let req = Request::builder()
@@ -93,12 +102,19 @@ impl GithubOAuthClient {
 
         let _status = response.status();
         let mut body_bytes = Vec::new();
-        response.into_body().read_to_end(&mut body_bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut body_bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         // 先尝试解析成功响应
         if let Ok(code_resp) = serde_json::from_slice::<GithubDeviceCodeResponse>(&body_bytes) {
-            return Ok((code_resp.verification_uri, code_resp.user_code));
+            return Ok(DeviceFlowResponse {
+                verification_uri: code_resp.verification_uri,
+                user_code: code_resp.user_code,
+                device_code: code_resp.device_code,
+            });
         }
 
         // 再尝试解析错误
@@ -132,7 +148,7 @@ impl GithubOAuthClient {
         );
 
         for _ in 0..max_attempts {
-            tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;
+            Timer::after(std::time::Duration::from_secs(interval_secs)).await;
 
             let req = Request::builder()
                 .method(Method::POST)
@@ -150,7 +166,10 @@ impl GithubOAuthClient {
 
             let _status = response.status();
             let mut body_bytes = Vec::new();
-            response.into_body().read_to_end(&mut body_bytes).await
+            response
+                .into_body()
+                .read_to_end(&mut body_bytes)
+                .await
                 .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
             // 解析 token 响应
@@ -195,4 +214,133 @@ impl GithubOAuthClient {
             "授权超时，请重试".to_string(),
         ))
     }
+}
+
+// === Gist helper types ===
+
+#[derive(Debug, Serialize)]
+struct GistFile {
+    filename: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateGistRequest {
+    description: String,
+    #[serde(rename = "public")]
+    is_public: bool,
+    files: HashMap<String, GistFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GistResponse {
+    id: String,
+    #[serde(default)]
+    files: HashMap<String, GistFileResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GistFileResponse {
+    content: Option<String>,
+    filename: String,
+}
+
+/// 查找用户的 ONetCli-vault gist
+pub async fn find_vault_gist(
+    http: Arc<dyn HttpClient>,
+    tokens: &OAuthTokens,
+) -> Result<Option<String>, CloudApiError> {
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("https://api.github.com/gists")
+        .header("Authorization", format!("Bearer {}", tokens.access_token))
+        .header("User-Agent", "onetcli")
+        .header("Accept", "application/vnd.github+json")
+        .body(AsyncBody::empty())
+        .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+    let response = http
+        .send(req)
+        .await
+        .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(CloudApiError::ServerError(format!(
+            "列出 gists 失败: HTTP {}",
+            response.status().as_u16()
+        )));
+    }
+
+    let mut bytes = Vec::new();
+    response
+        .into_body()
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+    let gists: Vec<GistResponse> =
+        serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+
+    for gist in gists {
+        if gist.files.contains_key("ONetCli-vault.json") {
+            return Ok(Some(gist.id));
+        }
+    }
+    Ok(None)
+}
+
+/// 创建 ONetCli-vault gist
+pub async fn create_vault_gist(
+    http: Arc<dyn HttpClient>,
+    tokens: &OAuthTokens,
+) -> Result<String, CloudApiError> {
+    let mut files = HashMap::new();
+    files.insert(
+        "ONetCli-vault.json".to_string(),
+        GistFile {
+            filename: "ONetCli-vault.json".to_string(),
+            content: "{}".to_string(),
+        },
+    );
+
+    let body = serde_json::to_vec(&CreateGistRequest {
+        description: "ONetCli sync vault".to_string(),
+        is_public: false,
+        files,
+    })
+    .map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("https://api.github.com/gists")
+        .header("Authorization", format!("Bearer {}", tokens.access_token))
+        .header("User-Agent", "ONetCli")
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .body(AsyncBody::from(body))
+        .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+    let response = http
+        .send(req)
+        .await
+        .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+    if !response.status().is_success() && response.status() != StatusCode::CREATED {
+        return Err(CloudApiError::ServerError(format!(
+            "创建 gist 失败: HTTP {}",
+            response.status().as_u16()
+        )));
+    }
+
+    let mut bytes = Vec::new();
+    response
+        .into_body()
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+    let gist: GistResponse =
+        serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+
+    Ok(gist.id)
 }

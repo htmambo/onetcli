@@ -3,14 +3,14 @@
 //! 将加密数据存储到用户的 GitHub Gist。
 //!
 //! ## 存储策略
-//! - 使用单个 gist 作为同步文件（文件名 `netcatty-vault.json`）
+//! - 使用单个 gist 作为同步文件（文件名 `ONetCli-vault.json`）
 //! - initializeSync 时创建或定位该 gist
 //! - Gist ID 存储在本地配置中
 
 use crate::cloud_sync::blob_vault::{Blob, BlobMeta, BlobVault};
 use crate::cloud_sync::client::CloudApiError;
-use crate::cloud_sync::oauth::github_device::GithubOAuthClient;
 use crate::cloud_sync::oauth::OAuthTokens;
+use crate::cloud_sync::oauth::github_device::GithubOAuthClient;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
@@ -114,14 +114,21 @@ impl GithubGistVault {
 
     /// 设置 tokens 并自动查找或创建 vault gist
     pub async fn authenticate(&mut self) -> Result<String, CloudApiError> {
-        // 1. 启动 Device Flow 获取 user_code
-        let (verification_uri, user_code) = self.client.start_device_flow().await?;
-        tracing::info!("GitHub Device Flow: 打开 {} 并输入代码 {}", verification_uri, user_code);
+        // 1. 启动 Device Flow 获取 user_code 和 device_code
+        let resp = self.client.start_device_flow().await?;
+        tracing::info!(
+            "GitHub Device Flow: 打开 {} 并输入代码 {}",
+            resp.verification_uri,
+            resp.user_code
+        );
 
         // 2. 轮询 token（最大等待约 5 分钟）
         let interval = 5; // GitHub 默认 interval
         let max_attempts = 60;
-        let tokens = self.client.poll_for_token(&user_code, interval, max_attempts).await?;
+        let tokens = self
+            .client
+            .poll_for_token(&resp.device_code, interval, max_attempts)
+            .await?;
         self.tokens = Some(tokens.clone());
 
         // 3. 查找或创建 vault gist
@@ -138,7 +145,7 @@ impl GithubGistVault {
         Ok(gist_id)
     }
 
-    /// 查找 netcatty-vault gist
+    /// 查找 ONetCli-vault gist
     async fn find_vault_gist(&self, tokens: &OAuthTokens) -> Result<Option<String>, CloudApiError> {
         let req = Request::builder()
             .method(Method::GET)
@@ -163,15 +170,18 @@ impl GithubGistVault {
         }
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        // 解析 gists 列表，查找 netcatty-vault.json
-        let gists: Vec<GistResponse> = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        // 解析 gists 列表，查找 ONetCli-vault.json
+        let gists: Vec<GistResponse> =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         for gist in gists {
-            if gist.files.contains_key("netcatty-vault.json") {
+            if gist.files.contains_key("ONetCli-vault.json") {
                 return Ok(Some(gist.id));
             }
         }
@@ -182,21 +192,25 @@ impl GithubGistVault {
     async fn create_vault_gist(&self, tokens: &OAuthTokens) -> Result<String, CloudApiError> {
         let mut files = std::collections::HashMap::new();
         files.insert(
-            "netcatty-vault.json".to_string(),
-            GistFile { filename: "netcatty-vault.json".to_string(), content: "{}".to_string() },
+            "ONetCli-vault.json".to_string(),
+            GistFile {
+                filename: "ONetCli-vault.json".to_string(),
+                content: "{}".to_string(),
+            },
         );
 
         let body = serde_json::to_vec(&CreateGistRequest {
-            description: "onetcli sync vault".to_string(),
+            description: "ONetCli sync vault".to_string(),
             is_public: false,
             files,
-        }).map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
+        })
+        .map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
 
         let req = Request::builder()
             .method(Method::POST)
             .uri("https://api.github.com/gists")
             .header("Authorization", format!("Bearer {}", tokens.access_token))
-            .header("User-Agent", "onetcli")
+            .header("User-Agent", "ONetCli")
             .header("Accept", "application/vnd.github+json")
             .header("Content-Type", "application/json")
             .body(AsyncBody::from(body))
@@ -216,23 +230,30 @@ impl GithubGistVault {
         }
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        let gist: GistResponse = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let gist: GistResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         Ok(gist.id)
     }
 
     /// 获取 gist 内容
-    async fn get_gist(&self, gist_id: &str, tokens: &OAuthTokens) -> Result<Option<String>, CloudApiError> {
+    async fn get_gist(
+        &self,
+        gist_id: &str,
+        tokens: &OAuthTokens,
+    ) -> Result<Option<String>, CloudApiError> {
         let uri = format!("https://api.github.com/gists/{}", gist_id);
         let req = Request::builder()
             .method(Method::GET)
             .uri(&uri)
             .header("Authorization", format!("Bearer {}", tokens.access_token))
-            .header("User-Agent", "onetcli")
+            .header("User-Agent", "ONetCli")
             .header("Accept", "application/vnd.github+json")
             .body(AsyncBody::empty())
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
@@ -254,13 +275,16 @@ impl GithubGistVault {
         }
 
         let mut bytes = Vec::new();
-        response.into_body().read_to_end(&mut bytes).await
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
-        let gist: GistResponse = serde_json::from_slice(&bytes)
-            .map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+        let gist: GistResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
-        if let Some(file) = gist.files.get("netcatty-vault.json") {
+        if let Some(file) = gist.files.get("ONetCli-vault.json") {
             Ok(file.content.clone())
         } else {
             Ok(None)
@@ -268,24 +292,33 @@ impl GithubGistVault {
     }
 
     /// 更新 gist
-    async fn update_gist(&self, gist_id: &str, content: &str, tokens: &OAuthTokens) -> Result<(), CloudApiError> {
+    async fn update_gist(
+        &self,
+        gist_id: &str,
+        content: &str,
+        tokens: &OAuthTokens,
+    ) -> Result<(), CloudApiError> {
         let mut files = std::collections::HashMap::new();
         files.insert(
-            "netcatty-vault.json".to_string(),
-            GistFile { filename: "netcatty-vault.json".to_string(), content: content.to_string() },
+            "ONetCli-vault.json".to_string(),
+            GistFile {
+                filename: "ONetCli-vault.json".to_string(),
+                content: content.to_string(),
+            },
         );
 
         let body = serde_json::to_vec(&UpdateGistRequest {
             description: None,
             files,
-        }).map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
+        })
+        .map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
 
         let uri = format!("https://api.github.com/gists/{}", gist_id);
         let req = Request::builder()
             .method(Method::PATCH)
             .uri(&uri)
             .header("Authorization", format!("Bearer {}", tokens.access_token))
-            .header("User-Agent", "onetcli")
+            .header("User-Agent", "ONetCli")
             .header("Accept", "application/vnd.github+json")
             .header("Content-Type", "application/json")
             .body(AsyncBody::from(body))
@@ -314,7 +347,7 @@ impl GithubGistVault {
             .method(Method::DELETE)
             .uri(&uri)
             .header("Authorization", format!("Bearer {}", tokens.access_token))
-            .header("User-Agent", "onetcli")
+            .header("User-Agent", "ONetCli")
             .header("Accept", "application/vnd.github+json")
             .body(AsyncBody::empty())
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
@@ -366,12 +399,14 @@ impl BlobVault for GithubGistVault {
         })?;
         let tokens = self.tokens()?;
 
-        let content = self.get_gist(&gist_id, tokens).await?
+        let content = self
+            .get_gist(&gist_id, tokens)
+            .await?
             .ok_or_else(|| CloudApiError::NotFound("vault gist 不存在".to_string()))?;
 
-        let data = base64::engine::general_purpose::STANDARD.decode(&content).map_err(|e| {
-            CloudApiError::DataFormatError(format!("base64 解码失败: {}", e))
-        })?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(&content)
+            .map_err(|e| CloudApiError::DataFormatError(format!("base64 解码失败: {}", e)))?;
 
         Ok(Blob {
             key: key.to_string(),

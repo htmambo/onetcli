@@ -49,7 +49,7 @@ use terminal_view::TerminalView;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
-use crate::auth::{AuthService, PasswordAuthAction, show_password_auth_dialog};
+use crate::auth::AuthService;
 use crate::connection_restore::{
     ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
     open_connection_restore_dialog, resolve_restore_items,
@@ -61,9 +61,8 @@ use crate::home::home_workspace_filter::WorkspaceFilterDelegate;
 use crate::home::workspace_form_window::{WorkspaceFormWindow, WorkspaceFormWindowConfig};
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
-    GlobalCurrentUser,
+    GlobalCurrentUser, SettingsPanel,
 };
-use crate::user_avatar::render_user_avatar;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestoreSnapshot};
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
@@ -912,6 +911,23 @@ impl HomePage {
         }
     }
 
+    fn github_gist_vault(settings: &AppSettings, cx: &App) -> Option<Arc<dyn BlobVault>> {
+        let gist_cfg = settings.gist_config.as_ref()?;
+        if gist_cfg.client_id.is_empty() {
+            return None;
+        }
+
+        let mut vault = GithubGistVault::new(cx.http_client(), gist_cfg.client_id.clone());
+        if let Some(gist_id) = gist_cfg.gist_id.clone().filter(|id| !id.is_empty()) {
+            vault = vault.with_gist_id(gist_id);
+        }
+        if let Some(tokens) = gist_cfg.tokens.clone() {
+            vault = vault.with_tokens(tokens);
+        }
+
+        Some(Arc::new(vault))
+    }
+
     /// 触发云端同步
     ///
     /// 使用 SyncEngine 执行同步，包括：
@@ -920,26 +936,31 @@ impl HomePage {
     /// 3. 执行同步操作
     /// 4. 更新本地状态
     fn trigger_sync(&mut self, cx: &mut Context<Self>) {
-        if !self.auth_service.has_valid_sync_server_url() {
-            let message = t!("Home.sync_server_url_required").to_string();
-            self.cloud_error = Some(message.clone());
-            self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
-            if let Some(feedback) = &self.sync_feedback {
-                Self::push_sync_notification(feedback, cx);
-            }
-            cx.notify();
-            return;
-        }
+        let backend_type = AppSettings::global(cx).sync_backend_type.clone();
 
-        if self.current_user.is_none() {
-            let message = t!("Home.cloud_need_login").to_string();
-            self.cloud_error = Some(message.clone());
-            self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
-            if let Some(feedback) = &self.sync_feedback {
-                Self::push_sync_notification(feedback, cx);
+        // sync_server 后端需要校验 URL 和登录状态
+        if backend_type == "sync_server" {
+            if !self.auth_service.has_valid_sync_server_url() {
+                let message = t!("Home.sync_server_url_required").to_string();
+                self.cloud_error = Some(message.clone());
+                self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
+                if let Some(feedback) = &self.sync_feedback {
+                    Self::push_sync_notification(feedback, cx);
+                }
+                cx.notify();
+                return;
             }
-            cx.notify();
-            return;
+
+            if self.current_user.is_none() {
+                let message = t!("Home.cloud_need_login").to_string();
+                self.cloud_error = Some(message.clone());
+                self.set_sync_feedback(SyncFeedbackLevel::Warning, message);
+                if let Some(feedback) = &self.sync_feedback {
+                    Self::push_sync_notification(feedback, cx);
+                }
+                cx.notify();
+                return;
+            }
         }
 
         if !self.pending_conflicts.is_empty() {
@@ -984,24 +1005,20 @@ impl HomePage {
 
         // 创建同步引擎
         let settings = AppSettings::global(cx);
-        let engine = if settings.sync_backend_type == "github_gist" {
-            if let Some(ref gist_cfg) = settings.gist_config {
-                if !gist_cfg.client_id.is_empty() {
-                    let vault = GithubGistVault::new(cx.http_client(), gist_cfg.client_id.clone());
-                    let vault: Arc<dyn BlobVault> = if let Some(ref gist_id) = gist_cfg.gist_id {
-                        Arc::new(vault.with_gist_id(gist_id.clone()))
-                    } else {
-                        Arc::new(vault)
-                    };
-                    SyncEngine::new(cloud_client, sync_service, storage).with_blob_vault(vault)
-                } else {
-                    SyncEngine::new(cloud_client, sync_service, storage)
-                }
-            } else {
+        let backend_type = settings.sync_backend_type.clone();
+        let backend = one_core::cloud_sync::create_backend(&backend_type);
+        let engine = match backend_type.as_str() {
+            "github_gist" => {
+                let vault = Self::github_gist_vault(&settings, cx);
                 SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+                    .with_opt_blob_vault(vault)
             }
-        } else {
-            SyncEngine::new(cloud_client, sync_service, storage)
+            "webdav" => {
+                SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+            }
+            _ => SyncEngine::new(cloud_client, sync_service, storage).with_backend(backend),
         };
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
@@ -1320,24 +1337,20 @@ impl HomePage {
 
         // 创建同步引擎（复用同步设置的 blob vault 配置）
         let settings = AppSettings::global(cx);
-        let engine = if settings.sync_backend_type == "github_gist" {
-            if let Some(ref gist_cfg) = settings.gist_config {
-                if !gist_cfg.client_id.is_empty() {
-                    let vault = GithubGistVault::new(cx.http_client(), gist_cfg.client_id.clone());
-                    let vault: Arc<dyn BlobVault> = if let Some(ref gist_id) = gist_cfg.gist_id {
-                        Arc::new(vault.with_gist_id(gist_id.clone()))
-                    } else {
-                        Arc::new(vault)
-                    };
-                    SyncEngine::new(cloud_client, sync_service, storage).with_blob_vault(vault)
-                } else {
-                    SyncEngine::new(cloud_client, sync_service, storage)
-                }
-            } else {
+        let backend_type = settings.sync_backend_type.clone();
+        let backend = one_core::cloud_sync::create_backend(&backend_type);
+        let engine = match backend_type.as_str() {
+            "github_gist" => {
+                let vault = Self::github_gist_vault(&settings, cx);
                 SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+                    .with_opt_blob_vault(vault)
             }
-        } else {
-            SyncEngine::new(cloud_client, sync_service, storage)
+            "webdav" => {
+                SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+            }
+            _ => SyncEngine::new(cloud_client, sync_service, storage).with_backend(backend),
         };
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
@@ -1423,49 +1436,6 @@ impl HomePage {
     }
 
     /// 使用邮箱密码登录或注册
-    fn authenticate_with_password(
-        &mut self,
-        action: PasswordAuthAction,
-        email: String,
-        password: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.logging_in = true;
-        self.auth_error = None;
-        cx.notify();
-
-        let auth = self.auth_service.clone();
-
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let result = match action {
-                PasswordAuthAction::Login => auth.login_with_password(&email, &password).await,
-                PasswordAuthAction::SignUp => auth.sign_up_with_password(&email, &password).await,
-            };
-
-            _ = this.update(cx, |this, cx| {
-                this.logging_in = false;
-                match result {
-                    Ok(user) => {
-                        this.current_user = Some(user.clone());
-                        GlobalCurrentUser::set_user(Some(user.clone()), cx);
-
-                        this.auth_error = None;
-                        if crypto::has_master_key() {
-                            tracing::info!("密码登录成功且密钥已解锁，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
-                    }
-                    Err(error) => {
-                        tracing::error!("密码登录失败: {}", error);
-                        this.auth_error = Some(error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     /// 显示登录对话框
     fn show_login_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.auth_service.has_valid_sync_server_url() {
@@ -1487,10 +1457,8 @@ impl HomePage {
             return;
         }
 
-        let view = cx.entity();
-        show_password_auth_dialog(window, cx, view, |this, action, email, password, cx| {
-            this.authenticate_with_password(action, email, password, cx);
-        });
+        // 引导用户前往设置页面的同步分组完成登录
+        self.add_settings_tab(window, cx);
     }
 
     fn confirm_edit_connection(
@@ -2524,6 +2492,9 @@ impl HomePage {
 
         let is_syncing = self.syncing;
         let is_logged_in = self.current_user.is_some();
+        let sync_backend_type = AppSettings::global(cx).sync_backend_type.clone();
+        let uses_github_gist = sync_backend_type == "github_gist";
+        let can_sync = is_logged_in || uses_github_gist;
         let has_master_key = crypto::has_master_key();
         let has_conflicts = !self.pending_conflicts.is_empty();
         let conflict_count = self.pending_conflicts.len();
@@ -2668,8 +2639,8 @@ impl HomePage {
                             })
                             .cursor_pointer()
                             .ghost()
-                            .disabled(!is_logged_in || is_syncing)
-                            .tooltip(if !is_logged_in {
+                            .disabled(!can_sync || is_syncing)
+                            .tooltip(if !can_sync {
                                 t!("Home.cloud_need_login")
                             } else {
                                 t!("Home.sync_tooltip")
@@ -3096,7 +3067,7 @@ impl HomePage {
                     })),
             )
             .child(
-                // 底部区域：主题切换、设置和用户头像
+                // 底部区域：设置
                 v_flex()
                     .w_full()
                     // .p_4()
@@ -3113,31 +3084,7 @@ impl HomePage {
                             .on_click(cx.listener(|this: &mut HomePage, _, window, cx| {
                                 this.add_settings_tab(window, cx);
                             })),
-                    )
-                    // 用户头像区域
-                    .child({
-                        let user = self.current_user.as_ref();
-                        let view = cx.entity();
-                        v_flex()
-                            .relative()
-                            .w_full()
-                            // .mt_2()
-                            // .pt_2()
-                            .border_t_1()
-                            .border_color(cx.theme().border)
-                            .child(render_user_avatar(
-                                user,
-                                view.clone(),
-                                |this: &mut HomePage, window, cx| {
-                                    if this.current_user.is_none() {
-                                        this.show_login_dialog(window, cx);
-                                    } else {
-                                        this.open_account_settings_tab(window, cx);
-                                    }
-                                },
-                                cx,
-                            ))
-                    }),
+                    ),
             )
     }
 

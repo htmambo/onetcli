@@ -20,7 +20,11 @@ pub struct JsonRpcError {
 
 impl JsonRpcError {
     pub fn new(code: i32, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 
     pub fn with_data(mut self, data: serde_json::Value) -> Self {
@@ -75,14 +79,26 @@ pub struct JsonRpcResponse {
 
 impl JsonRpcResponse {
     pub fn success(id: RequestId, result: serde_json::Value) -> Self {
-        Self { jsonrpc: JSONRPC_VERSION.to_string(), id: Some(id), result: Some(result), error: None }
+        Self {
+            jsonrpc: JSONRPC_VERSION.to_string(),
+            id: Some(id),
+            result: Some(result),
+            error: None,
+        }
     }
 
     pub fn error(id: RequestId, error: JsonRpcError) -> Self {
-        Self { jsonrpc: JSONRPC_VERSION.to_string(), id: Some(id), result: None, error: Some(error) }
+        Self {
+            jsonrpc: JSONRPC_VERSION.to_string(),
+            id: Some(id),
+            result: None,
+            error: Some(error),
+        }
     }
 
-    pub fn id(&self) -> Option<&RequestId> { self.id.as_ref() }
+    pub fn id(&self) -> Option<&RequestId> {
+        self.id.as_ref()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +125,11 @@ pub enum JsonRpcResponseResult {
 /// Parse a JSON-RPC 2.0 version string, returning the trimmed string if valid.
 pub fn parse_version(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
-    if trimmed == JSONRPC_VERSION { Some(trimmed.to_string()) } else { None }
+    if trimmed == JSONRPC_VERSION {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -135,7 +155,10 @@ mod tests {
 
     #[test]
     fn test_response_error() {
-        let resp = JsonRpcResponse::error(RequestId::Number(1), JsonRpcError::new(-32600, "Invalid Request"));
+        let resp = JsonRpcResponse::error(
+            RequestId::Number(1),
+            JsonRpcError::new(-32600, "Invalid Request"),
+        );
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains(r#""error":"#));
     }

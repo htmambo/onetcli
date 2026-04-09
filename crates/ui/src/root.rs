@@ -12,7 +12,7 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement as _, Pixels, Render, StyleRefinement, Styled,
     WeakFocusHandle, Window, actions, div, prelude::FluentBuilder as _,
 };
-use std::{any::TypeId, rc::Rc};
+use std::{any::TypeId, cell::RefCell, rc::Rc};
 
 actions!(root, [Tab, TabPrev]);
 
@@ -52,19 +52,19 @@ pub(crate) struct ActiveDialog {
     focus_handle: FocusHandle,
     /// The previous focused handle before opening the Dialog.
     previous_focused_handle: Option<WeakFocusHandle>,
-    builder: Rc<dyn Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static>,
+    builder: Rc<RefCell<Box<dyn FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static>>>,
 }
 
 impl ActiveDialog {
     pub(crate) fn new(
         focus_handle: FocusHandle,
         previous_focused_handle: Option<WeakFocusHandle>,
-        builder: impl Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+        builder: impl FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static,
     ) -> Self {
         Self {
             focus_handle,
             previous_focused_handle,
-            builder: Rc::new(builder),
+            builder: Rc::new(RefCell::new(Box::new(builder))),
         }
     }
 }
@@ -218,7 +218,7 @@ impl Root {
             .map(|(i, active_dialog)| {
                 let mut dialog = Dialog::new(window, cx);
 
-                dialog = (active_dialog.builder)(dialog, window, cx);
+                dialog = (active_dialog.builder.borrow_mut())(dialog, window, cx);
 
                 // Give the dialog the focus handle, because `dialog` is a temporary value, is not possible to
                 // keep the focus handle in the dialog.
@@ -247,7 +247,7 @@ impl Root {
 
     pub fn open_dialog<F>(&mut self, build: F, window: &mut Window, cx: &mut Context<'_, Root>)
     where
-        F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+        F: FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static,
     {
         let previous_focused_handle = window.focused(cx).map(|h| h.downgrade());
         let focus_handle = cx.focus_handle();

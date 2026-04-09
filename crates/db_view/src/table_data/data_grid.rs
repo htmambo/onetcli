@@ -1143,12 +1143,7 @@ impl DataGrid {
         self.revert_changes(cx);
     }
 
-    fn handle_step_undo(
-        &mut self,
-        _: &ClickEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_step_undo(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.step_undo(cx);
     }
 

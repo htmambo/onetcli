@@ -68,9 +68,11 @@ pub fn start_callback_server(
             })
             .ok_or(CallbackServerError::NoAvailablePort)?
     } else {
-        let listener =
-            TcpListener::bind(("127.0.0.1", port)).map_err(|e| CallbackServerError::StartFailed(e.to_string()))?;
-        let local_addr = listener.local_addr().map_err(|e| CallbackServerError::StartFailed(e.to_string()))?;
+        let listener = TcpListener::bind(("127.0.0.1", port))
+            .map_err(|e| CallbackServerError::StartFailed(e.to_string()))?;
+        let local_addr = listener
+            .local_addr()
+            .map_err(|e| CallbackServerError::StartFailed(e.to_string()))?;
         (local_addr.port(), listener)
     };
 
@@ -180,7 +182,12 @@ fn parse_callback_from_request(buffer: &[u8]) -> OAuthCallback {
             error_description,
         }
     } else if let Some(c) = code {
-        OAuthCallback { code: c, state, error: None, error_description: None }
+        OAuthCallback {
+            code: c,
+            state,
+            error: None,
+            error_description: None,
+        }
     } else {
         OAuthCallback::error("missing_code", "Authorization code not found in callback")
     }

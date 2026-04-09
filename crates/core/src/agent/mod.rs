@@ -7,7 +7,7 @@ pub mod types;
 
 pub use dispatcher::{AgentDispatcher, SessionAffinity};
 pub use registry::AgentRegistry;
-pub use security::{check_command, CommandBlacklist, CommandCheckResult, PermissionMode};
+pub use security::{CommandBlacklist, CommandCheckResult, PermissionMode, check_command};
 pub use types::{
     Agent, AgentContext, AgentDescriptor, AgentEvent, AgentResult, Artifact, DynAgent,
 };

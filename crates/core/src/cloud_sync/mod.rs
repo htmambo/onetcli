@@ -18,6 +18,7 @@
 //! 5. 执行同步操作（上传/下载/删除）
 
 pub mod blob_vault;
+mod blob_vault_driver;
 mod certificate_sync;
 pub mod client;
 pub mod conflict;
@@ -25,11 +26,13 @@ mod connection_sync;
 pub mod engine;
 mod generic_sync;
 mod models;
-pub mod queue;
 pub mod oauth;
+pub mod queue;
 mod service;
 pub mod state_manager;
+pub mod sync_backend;
 pub mod sync_server;
+pub mod sync_server_driver;
 pub mod sync_type;
 pub mod webdav_adapter;
 mod workspace_sync;
@@ -47,6 +50,7 @@ pub use oauth::github_gist::{GithubGistSettings, GithubGistVault};
 pub use queue::*;
 pub use service::*;
 pub use state_manager::*;
+pub use sync_backend::*;
 pub use sync_type::*;
 pub use webdav_adapter::{WebDavConfig, WebDavVault};
 

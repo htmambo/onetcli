@@ -7,7 +7,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::security::{check_command, CommandBlacklist, CommandCheckResult, PermissionMode};
+use super::security::{CommandBlacklist, CommandCheckResult, PermissionMode, check_command};
 use crate::llm::manager::GlobalProviderState;
 use crate::llm::{Message, ProviderConfig};
 use crate::storage::StorageManager;

@@ -4,7 +4,6 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 mod auth;
 
-
 mod app_init;
 mod connection_restore;
 mod encourage;
@@ -17,7 +16,6 @@ mod setting_tab;
 mod settings;
 mod sync_server_theme;
 mod update;
-mod user_avatar;
 
 use crate::onetcli_app::OnetCliApp;
 use crate::setting_tab::AppSettings;

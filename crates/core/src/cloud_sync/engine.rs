@@ -16,6 +16,7 @@ use super::generic_sync::generic_sync;
 use super::models::{ConflictResolution, ConflictType, SyncResult, Team};
 use super::queue::OperationQueue;
 use super::service::{CloudSyncService, SyncError};
+use super::sync_backend::SyncBackend;
 use super::sync_type::SyncTypeHandler;
 use super::workspace_sync::WorkspaceSyncType;
 use crate::crypto;
@@ -66,11 +67,13 @@ pub struct SyncEngine {
     pub(crate) storage: StorageManager,
     /// 冲突解决策略
     pub(crate) conflict_strategy: ConflictResolution,
-    handlers: Vec<Box<dyn SyncHandler>>,
+    pub(crate) handlers: Vec<Box<dyn SyncHandler>>,
     /// 当前用户所在团队列表（同步开始时获取）
     pub(crate) cached_teams: std::sync::RwLock<Vec<Team>>,
     /// Blob 存储后端（可选，WebDAV/S3 等）
-    blob_vault: Option<Arc<dyn BlobVault>>,
+    pub(crate) blob_vault: Option<Arc<dyn BlobVault>>,
+    /// 同步后端策略
+    backend: Arc<dyn SyncBackend>,
 }
 
 impl SyncEngine {
@@ -96,6 +99,7 @@ impl SyncEngine {
             ],
             cached_teams: std::sync::RwLock::new(Vec::new()),
             blob_vault: None,
+            backend: Arc::new(super::sync_backend::SyncServerBackend),
         }
     }
 
@@ -123,9 +127,23 @@ impl SyncEngine {
         self
     }
 
+    /// 设置可选的 Blob 存储后端
+    pub fn with_opt_blob_vault(mut self, vault: Option<Arc<dyn BlobVault>>) -> Self {
+        self.blob_vault = vault;
+        self
+    }
+
+    /// 设置同步后端策略
+    pub fn with_backend(mut self, backend: Arc<dyn SyncBackend>) -> Self {
+        self.backend = backend;
+        self
+    }
+
     /// 获取 Blob 存储后端
     pub fn blob_vault(&self) -> Option<&dyn BlobVault> {
-        self.blob_vault.as_ref().map(|v| v.as_ref() as &dyn BlobVault)
+        self.blob_vault
+            .as_ref()
+            .map(|v| v.as_ref() as &dyn BlobVault)
     }
 
     // ========================================================================
@@ -139,33 +157,36 @@ impl SyncEngine {
         data: &[u8],
         _team_id: Option<&str>,
     ) -> Result<BlobMeta, SyncError> {
-        let vault = self.blob_vault.as_ref()
+        let vault = self
+            .blob_vault
+            .as_ref()
             .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
 
-        vault.upload(key, data.to_vec()).await
+        vault
+            .upload(key, data.to_vec())
+            .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))
     }
 
     /// 通过 BlobVault 下载并解密 blob
-    pub async fn download_blob(
-        &self,
-        key: &str,
-        team_id: Option<&str>,
-    ) -> Result<Blob, SyncError> {
-        let vault = self.blob_vault.as_ref()
+    pub async fn download_blob(&self, key: &str, team_id: Option<&str>) -> Result<Blob, SyncError> {
+        let vault = self
+            .blob_vault
+            .as_ref()
             .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
 
-        let blob = vault.download(key).await
+        let blob = vault
+            .download(key)
+            .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
         // 解密 blob 内容
         let plaintext = {
-            let crypto = self.crypto_service.read()
+            let crypto = self
+                .crypto_service
+                .read()
                 .map_err(|_| SyncError::StorageError("加密服务锁获取失败".to_string()))?;
-            crypto.decrypt_blob(
-                &String::from_utf8_lossy(&blob.data),
-                team_id,
-            )?
+            crypto.decrypt_blob(&String::from_utf8_lossy(&blob.data), team_id)?
         };
 
         Ok(Blob {
@@ -177,28 +198,40 @@ impl SyncEngine {
 
     /// 检查 blob 是否存在
     pub async fn blob_exists(&self, key: &str) -> Result<bool, SyncError> {
-        let vault = self.blob_vault.as_ref()
+        let vault = self
+            .blob_vault
+            .as_ref()
             .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
 
-        vault.exists(key).await
+        vault
+            .exists(key)
+            .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))
     }
 
     /// 删除 blob
     pub async fn delete_blob(&self, key: &str) -> Result<(), SyncError> {
-        let vault = self.blob_vault.as_ref()
+        let vault = self
+            .blob_vault
+            .as_ref()
             .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
 
-        vault.delete(key).await
+        vault
+            .delete(key)
+            .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))
     }
 
     /// 列举 blob
     pub async fn list_blobs(&self, prefix: Option<&str>) -> Result<Vec<BlobMeta>, SyncError> {
-        let vault = self.blob_vault.as_ref()
+        let vault = self
+            .blob_vault
+            .as_ref()
             .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
 
-        vault.list(prefix).await
+        vault
+            .list(prefix)
+            .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))
     }
 
@@ -211,7 +244,7 @@ impl SyncEngine {
     }
 
     /// 确保加密服务已解锁
-    fn ensure_unlocked(&self) -> Result<(), SyncError> {
+    pub(crate) fn ensure_unlocked(&self) -> Result<(), SyncError> {
         // 如果本地 crypto 模块已解锁但同步服务未解锁，同步密钥状态
         if crypto::has_master_key() {
             if let Some(raw_key) = crypto::get_raw_master_key() {
@@ -241,7 +274,7 @@ impl SyncEngine {
     /// 确保个人主密钥配置已经同步到云端
     ///
     /// 首次同步时自动创建 `user_config`，后续同步则从云端恢复正确的 `key_version`。
-    async fn ensure_personal_key_config(&self) -> Result<(), SyncError> {
+    pub(crate) async fn ensure_personal_key_config(&self) -> Result<(), SyncError> {
         let raw_key = crypto::get_raw_master_key().ok_or(SyncError::NotUnlocked)?;
         let cloud_config = self
             .cloud_client
@@ -331,70 +364,15 @@ impl SyncEngine {
 
     /// 执行完整同步
     ///
-    /// ## 同步流程
-    /// 1. 获取团队列表并缓存
-    /// 2. 先同步工作空间（无外键依赖）
-    /// 3. 再同步连接（依赖工作空间）
+    /// 根据后端策略路由到相应流程：
+    /// - `SyncServerBackend`：通过 REST API 同步（团队列表 + handlers）
+    /// - `BlobVaultBackend`：通过 BlobVault 加密 blob 同步
     pub async fn sync(&self) -> Result<SyncResult, SyncError> {
-        tracing::info!("========== 开始云同步 ==========");
+        tracing::info!("========== 开始云同步 (后端: {}) ==========", self.backend.backend_type());
 
-        self.ensure_unlocked()?;
-        self.ensure_personal_key_config().await?;
+        self.backend.init_crypto(self).await?;
 
-        // 获取并缓存团队列表
-        match self.cloud_client.list_teams().await {
-            Ok(teams) => {
-                tracing::info!("[同步] 获取到 {} 个团队", teams.len());
-
-                // 获取当前用户 ID
-                let user_id = self
-                    .crypto_service
-                    .read()
-                    .ok()
-                    .and_then(|s| s.user_id().map(|id| id.to_string()));
-
-                // 缓存团队角色信息到 team_key_cache
-                if let Some(uid) = &user_id {
-                    self.cache_team_roles(&teams, uid).await;
-                }
-
-                if let Ok(mut cache) = self.cached_teams.write() {
-                    *cache = teams;
-                }
-            }
-            Err(e) => {
-                tracing::warn!("[同步] 获取团队列表失败: {}（将仅同步个人数据）", e);
-            }
-        }
-
-        let mut result = SyncResult::default();
-
-        for handler in &self.handlers {
-            match handler.sync(self).await {
-                Ok(sync_result) => {
-                    result.uploaded += sync_result.uploaded;
-                    result.downloaded += sync_result.downloaded;
-                    result.deleted += sync_result.deleted;
-                    result.conflicts.extend(sync_result.conflicts);
-                    result.errors.extend(sync_result.errors);
-                }
-                Err(e) => {
-                    tracing::error!("[同步] {}同步失败: {}", handler.name(), e);
-                    result
-                        .errors
-                        .push(format!("{}同步失败: {}", handler.name(), e));
-                }
-            }
-        }
-
-        tracing::info!(
-            "========== 同步完成: 上传 {} 个, 下载 {} 个, 错误 {} 个 ==========",
-            result.uploaded,
-            result.downloaded,
-            result.errors.len()
-        );
-
-        Ok(result)
+        self.backend.execute_sync(self).await
     }
 
     pub(crate) fn take_operation_queue(&self, key: &str) -> Result<OperationQueue, SyncError> {
@@ -434,37 +412,6 @@ impl SyncEngine {
             .read()
             .map(|service| service.is_team_unlocked(team_id))
             .unwrap_or(false)
-    }
-
-    /// 缓存团队角色信息到 team_key_cache 表
-    async fn cache_team_roles(&self, teams: &[Team], user_id: &str) {
-        let repo = match self.storage.get::<TeamKeyCacheRepository>() {
-            Some(repo) => repo,
-            None => return,
-        };
-
-        for team in teams {
-            match self.cloud_client.list_team_members(&team.id).await {
-                Ok(members) => {
-                    if let Some(member) = members.iter().find(|m| m.user_id == user_id) {
-                        let role_str = match member.role {
-                            crate::cloud_sync::models::TeamRole::Owner => "owner",
-                            crate::cloud_sync::models::TeamRole::Member => "member",
-                        };
-                        // 更新已有缓存的 role 字段
-                        if let Ok(Some(mut cache)) = repo.get(&team.id) {
-                            cache.role = Some(role_str.to_string());
-                            if let Err(e) = repo.upsert(&cache) {
-                                tracing::warn!("[同步] 更新团队 {} 角色缓存失败: {}", team.id, e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("[同步] 获取团队 {} 成员列表失败: {}", team.id, e);
-                }
-            }
-        }
     }
 
     /// 使用指定的策略映射应用冲突解决方案

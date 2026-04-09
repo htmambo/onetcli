@@ -5,30 +5,33 @@ use std::sync::{Arc, RwLock};
 
 use db_view::set_db_view_settings;
 use gpui::{
-    App, AppContext, AsyncApp, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement, Pixels,
-    Render, SharedString, StyleRefinement, Styled, Window, WindowAppearance,
+    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
+    Pixels, Render, SharedString, StyleRefinement, Styled, Window, WindowAppearance,
     WindowBackgroundAppearance, WindowBounds, div, point, prelude::FluentBuilder, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Icon, IconName, LEFT_PANEL_ALPHA_OFFSET, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
-    Sizable, Size, Theme, ThemeMode,
+    Sizable, Size, Theme, ThemeMode, WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
+    input::{Input, InputEvent, InputState},
     group_box::GroupBoxVariant,
     h_flex,
     kbd::Kbd,
     setting::{
-        NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage,
-        Settings,
+        NumberFieldOptions, RenderOptions, SelectIndex, SettingField, SettingGroup, SettingItem,
+        SettingPage, Settings,
     },
     tokens::Radius,
     v_flex,
 };
 use one_core::certificate_manager::CertificateManagerView;
-use one_core::cloud_sync::{GlobalCloudUser, UserInfo, sync_server::SyncServerClient};
+use one_core::cloud_sync::{
+    GlobalCloudUser, UserInfo, oauth::OAuthTokens, sync_server::SyncServerClient,
+};
 use one_core::storage::manager::get_config_dir;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
@@ -40,10 +43,10 @@ use terminal_view::{
 use tracing::{error, info};
 
 use crate::app_init::is_valid_system_hotkey;
-use crate::auth::get_auth_service;
+use crate::auth::{PasswordAuthAction, get_auth_service};
 use crate::encourage::render_encourage_section;
 use crate::onetcli_app::GlobalHomePage;
-use crate::settings::llm_providers_view::LlmProvidersView;
+use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView};
 use crate::sync_server_theme;
 
 // ============================================================================
@@ -89,7 +92,6 @@ pub enum SettingsPanelPage {
     #[default]
     General,
     Certificate,
-    Account,
 }
 
 impl SettingsPanelPage {
@@ -98,10 +100,6 @@ impl SettingsPanelPage {
             Self::General => SelectIndex::default(),
             Self::Certificate => SelectIndex {
                 page_ix: 3,
-                group_ix: None,
-            },
-            Self::Account => SelectIndex {
-                page_ix: 4,
                 group_ix: None,
             },
         }
@@ -615,7 +613,7 @@ impl Default for WebDavSettings {
             username: String::new(),
             password: String::new(),
             bearer_token: String::new(),
-            vault_path: "netcatty-vault".to_string(),
+            vault_path: "ONetCli-vault".to_string(),
         }
     }
 }
@@ -625,6 +623,7 @@ impl Default for WebDavSettings {
 pub struct GistSettings {
     pub client_id: String,
     pub gist_id: Option<String>,
+    pub tokens: Option<OAuthTokens>,
 }
 
 impl Default for GistSettings {
@@ -632,6 +631,7 @@ impl Default for GistSettings {
         Self {
             client_id: String::new(),
             gist_id: None,
+            tokens: None,
         }
     }
 }
@@ -1041,7 +1041,7 @@ pub struct SettingsPanel {
 }
 
 impl SettingsPanel {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let certificate_manager_view = cx.new(|cx| CertificateManagerView::new(cx));
         let llm_providers_view = cx.new(|cx| LlmProvidersView::new(cx));
         Self {
@@ -1293,10 +1293,8 @@ impl SettingsPanel {
                                     SharedString::from(default_settings.sync_backend_type.clone()),
                                 ),
                             )
-                            .description(
-                                t!("Settings.General.Sync.backend_type_desc").to_string(),
-                            ),
-                            // sync_server URL
+                            .description(t!("Settings.General.Sync.backend_type_desc").to_string()),
+                            // sync_server URL（仅 sync_server 后端显示）
                             SettingItem::new(
                                 t!("Settings.General.Sync.server_url"),
                                 themed_setting_field(SettingField::input(
@@ -1313,8 +1311,26 @@ impl SettingsPanel {
                                     SharedString::from(default_settings.sync_server_url.clone()),
                                 ),
                             )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "sync_server"
+                            })
+                            .layout(Axis::Vertical)
                             .description(t!("Settings.General.Sync.server_url_desc").to_string()),
-                            // WebDAV 配置
+                            // 登录/认证表单（仅 sync_server 后端显示）
+                            SettingItem::render(
+                                |_opts: &RenderOptions, window: &mut gpui::Window, cx: &mut gpui::App| {
+                                    if AppSettings::global(cx).sync_backend_type != "sync_server" {
+                                        return gpui::div().into_any_element();
+                                    }
+                                    let user = GlobalCurrentUser::get_user(cx);
+                                    if let Some(user) = user {
+                                        render_logged_in_user_sync(&user, cx)
+                                    } else {
+                                        render_auth_form_sync(window, cx)
+                                    }
+                                },
+                            ),
+                            // WebDAV 配置（仅 webdav 后端显示）
                             SettingItem::new(
                                 "WebDAV 地址",
                                 themed_setting_field(SettingField::input(
@@ -1329,14 +1345,21 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        let webdav = settings
+                                            .webdav_config
+                                            .get_or_insert_with(WebDavSettings::default);
                                         webdav.endpoint = val.to_string();
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from(String::new())),
                             )
-                            .description("WebDAV 服务器地址，如 https://dav.example.com".to_string()),
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "webdav"
+                            })
+                            .description(
+                                "WebDAV 服务器地址，如 https://dav.example.com".to_string(),
+                            ),
                             SettingItem::new(
                                 "WebDAV 认证方式",
                                 themed_setting_field(SettingField::dropdown(
@@ -1355,13 +1378,18 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        let webdav = settings
+                                            .webdav_config
+                                            .get_or_insert_with(WebDavSettings::default);
                                         webdav.auth_type = val.to_string();
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from("basic".to_string())),
-                            ),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "webdav"
+                            }),
                             SettingItem::new(
                                 "WebDAV 用户名",
                                 themed_setting_field(SettingField::input(
@@ -1376,13 +1404,18 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        let webdav = settings
+                                            .webdav_config
+                                            .get_or_insert_with(WebDavSettings::default);
                                         webdav.username = val.to_string();
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from(String::new())),
-                            ),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "webdav"
+                            }),
                             SettingItem::new(
                                 "WebDAV 密码",
                                 themed_setting_field(SettingField::input(
@@ -1397,13 +1430,18 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        let webdav = settings
+                                            .webdav_config
+                                            .get_or_insert_with(WebDavSettings::default);
                                         webdav.password = val.to_string();
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from(String::new())),
-                            ),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "webdav"
+                            }),
                             SettingItem::new(
                                 "WebDAV Bearer Token",
                                 themed_setting_field(SettingField::input(
@@ -1418,13 +1456,18 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
+                                        let webdav = settings
+                                            .webdav_config
+                                            .get_or_insert_with(WebDavSettings::default);
                                         webdav.bearer_token = val.to_string();
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from(String::new())),
-                            ),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "webdav"
+                            }),
                             SettingItem::new(
                                 "WebDAV 存储路径",
                                 themed_setting_field(SettingField::input(
@@ -1434,24 +1477,29 @@ impl SettingsPanel {
                                                 .webdav_config
                                                 .as_ref()
                                                 .map(|c| c.vault_path.clone())
-                                                .unwrap_or_else(|| "netcatty-vault".to_string()),
+                                                .unwrap_or_else(|| "ONetCli-vault".to_string()),
                                         )
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let webdav = settings.webdav_config.get_or_insert_with(WebDavSettings::default);
-                                        webdav.vault_path = if val.is_empty() { "netcatty-vault".to_string() } else { val.to_string() };
+                                        let webdav = settings
+                                            .webdav_config
+                                            .get_or_insert_with(WebDavSettings::default);
+                                        webdav.vault_path = if val.is_empty() {
+                                            "ONetCli-vault".to_string()
+                                        } else {
+                                            val.to_string()
+                                        };
                                         settings.save();
                                     },
                                 ))
-                                .default_value(SharedString::from("netcatty-vault".to_string())),
+                                .default_value(SharedString::from("ONetCli-vault".to_string())),
                             )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "webdav"
+                            })
                             .description("同步文件存放的路径前缀".to_string()),
-                        ]),
-                        // GitHub Gist 配置
-                        themed_setting_group(SettingGroup::new(), cx)
-                        .title(t!("Settings.General.Sync.github_gist_group_title"))
-                        .items(vec![
+                            // GitHub Gist 配置（仅 github_gist 后端显示）
                             SettingItem::new(
                                 t!("Settings.General.Sync.github_client_id"),
                                 themed_setting_field(SettingField::input(
@@ -1466,14 +1514,26 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let gist = settings.gist_config.get_or_insert_with(GistSettings::default);
-                                        gist.client_id = val.to_string();
+                                        let gist = settings
+                                            .gist_config
+                                            .get_or_insert_with(GistSettings::default);
+                                        let next_client_id = val.to_string();
+                                        if gist.client_id != next_client_id {
+                                            gist.gist_id = None;
+                                            gist.tokens = None;
+                                        }
+                                        gist.client_id = next_client_id;
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from(String::new())),
                             )
-                            .description(t!("Settings.General.Sync.github_client_id_desc").to_string()),
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "github_gist"
+                            })
+                            .description(
+                                t!("Settings.General.Sync.github_client_id_desc").to_string(),
+                            ),
                             SettingItem::new(
                                 t!("Settings.General.Sync.gist_id"),
                                 themed_setting_field(SettingField::input(
@@ -1488,14 +1548,84 @@ impl SettingsPanel {
                                     },
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
-                                        let gist = settings.gist_config.get_or_insert_with(GistSettings::default);
-                                        gist.gist_id = Some(val.to_string()).filter(|s| !s.is_empty() && s != "未授权");
+                                        let gist = settings
+                                            .gist_config
+                                            .get_or_insert_with(GistSettings::default);
+                                        let gist_id = Some(val.to_string())
+                                            .filter(|s| !s.is_empty() && s != "未授权");
+                                        if gist_id.is_none() {
+                                            gist.tokens = None;
+                                        }
+                                        gist.gist_id = gist_id;
                                         settings.save();
                                     },
                                 ))
                                 .default_value(SharedString::from("未授权".to_string())),
                             )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "github_gist"
+                            })
                             .description("授权成功后自动填充 Gist ID".to_string()),
+                            SettingItem::action_button(
+                                |_opts: &RenderOptions,
+                                 _window: &mut gpui::Window,
+                                 cx: &mut gpui::App| {
+                                    use gpui_component::button::{
+                                        Button, ButtonVariant, ButtonVariants as _,
+                                    };
+                                    let client_id = AppSettings::global(cx)
+                                        .gist_config
+                                        .as_ref()
+                                        .map(|c| c.client_id.clone())
+                                        .unwrap_or_default();
+                                    if client_id.is_empty() {
+                                        gpui::div().into_any_element()
+                                    } else {
+                                        let has_auth = AppSettings::global(cx)
+                                            .gist_config
+                                            .as_ref()
+                                            .map(|c| {
+                                                c.gist_id
+                                                    .as_ref()
+                                                    .map(|id| !id.is_empty())
+                                                    .unwrap_or(false)
+                                                    && c.tokens.is_some()
+                                            })
+                                            .unwrap_or(false);
+                                        Button::new("github-auth-btn")
+                                            .with_variant(if has_auth {
+                                                ButtonVariant::Ghost
+                                            } else {
+                                                ButtonVariant::Primary
+                                            })
+                                            .child(if has_auth {
+                                                "重新授权"
+                                            } else {
+                                                "授权 GitHub"
+                                            })
+                                            .into_any_element()
+                                    }
+                                },
+                                move |window, cx| {
+                                    let client_id = AppSettings::global(cx)
+                                        .gist_config
+                                        .as_ref()
+                                        .map(|c| c.client_id.clone())
+                                        .unwrap_or_default();
+                                    if !client_id.is_empty() {
+                                        let dialog_entity =
+                                            cx.new(|_cx| GithubAuthDialog::new(client_id.clone()));
+                                        window.open_dialog(cx, move |dialog, _window, _cx| {
+                                            dialog
+                                                .title("GitHub 授权".to_string())
+                                                .child(dialog_entity.clone())
+                                        });
+                                    }
+                                },
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "github_gist"
+                            }),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Terminal.group_title"))
@@ -1766,7 +1896,8 @@ impl SettingsPanel {
                                             settings.db_undo_stack_size = val as usize;
                                             settings.save();
                                         }
-                                        let undo_stack_size = AppSettings::global(cx).db_undo_stack_size;
+                                        let undo_stack_size =
+                                            AppSettings::global(cx).db_undo_stack_size;
                                         set_db_view_settings(cx, undo_stack_size);
                                     },
                                 ))
@@ -1841,12 +1972,6 @@ impl SettingsPanel {
                     move |_options, _window, _cx| {
                         certificate_manager_view.clone().into_any_element()
                     },
-                )),
-            ),
-            // 账户设置页
-            themed_setting_page(SettingPage::new(t!("Settings.Account.title")), cx).group(
-                themed_setting_group(SettingGroup::new(), cx).item(SettingItem::render(
-                    move |_options, window, cx| render_account_section(window, cx),
                 )),
             ),
             // 支持作者页面
@@ -2171,221 +2296,258 @@ impl Render for SettingsPanel {
     }
 }
 
-/// 渲染账户设置区域
-fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
-    let render_account_row = |label: String, value: String| {
-        h_flex()
-            .w_full()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(sync_server_theme::text_muted())
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(sync_server_theme::text_primary())
-                    .child(value),
-            )
-    };
+// ============================================================================
+// 同步服务器认证表单（嵌入在设置 → 同步分组，独立 Entity + Global）
+// ============================================================================
 
-    let render_account_shell = |title: String,
-                                subtitle: Option<String>,
-                                body: gpui::AnyElement|
-     -> gpui::AnyElement {
-        v_flex()
-                .gap_4()
-                .p_4()
-                .child(
-                    div()
-                        .w_full()
-                        .rounded_xl()
-                        .border_1()
-                        .border_color(sync_server_theme::border())
-                        .bg(sync_server_theme::panel_bg())
-                        .shadow_lg()
-                        .child(
-                            v_flex()
-                                .gap_4()
-                                .p_5()
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .items_center()
-                                        .justify_between()
-                                        .gap_3()
-                                        .child(
-                                            h_flex()
-                                                .items_center()
-                                                .gap_3()
-                                                .child(
-                                                    div()
-                                                        .w(px(42.))
-                                                        .h(px(42.))
-                                                        .rounded_xl()
-                                                        .bg(sync_server_theme::accent_dim())
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .child(
-                                                            Icon::new(IconName::Server)
-                                                                .with_size(px(18.))
-                                                                .text_color(
-                                                                    sync_server_theme::accent(),
-                                                                ),
-                                                        ),
-                                                )
-                                                .child(
-                                                    v_flex()
-                                                        .gap_1()
-                                                        .child(
-                                                            div()
-                                                                .text_sm()
-                                                                .font_weight(
-                                                                    FontWeight::SEMIBOLD,
-                                                                )
-                                                                .text_color(
-                                                                    sync_server_theme::text_primary(),
-                                                                )
-                                                                .child(title),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .text_xs()
-                                                                .text_color(
-                                                                    sync_server_theme::text_soft(),
-                                                                )
-                                                                .child(
-                                                                    t!(
-                                                                        "Settings.General.Sync.server_name"
-                                                                    )
-                                                                    .to_string(),
-                                                                ),
-                                                        )
-                                                        .when_some(subtitle, |this, subtitle| {
-                                                            this.child(
-                                                                div()
-                                                                    .text_sm()
-                                                                    .text_color(
-                                                                        sync_server_theme::text_muted(),
-                                                                    )
-                                                                    .child(subtitle),
-                                                            )
-                                                        }),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .rounded_full()
-                                                .px_2()
-                                                .py_1()
-                                                .bg(sync_server_theme::accent_dim_strong())
-                                                .text_xs()
-                                                .text_color(sync_server_theme::accent())
-                                                .child(t!("Settings.Account.title").to_string()),
-                                        ),
-                                )
-                                .child(body),
-                        ),
-                )
-                .into_any_element()
-    };
+/// 同步认证表单状态（独立 Entity，通过 lazy init 创建）
+struct SyncAuthForm {
+    email_input: Entity<InputState>,
+    password_input: Entity<InputState>,
+    confirm_password_input: Entity<InputState>,
+    error: Entity<Option<String>>,
+    is_sign_up: bool,
+    is_submitting: bool,
+}
 
-    let user = GlobalCurrentUser::get_user(cx);
+struct GlobalSyncAuthForm(Entity<SyncAuthForm>);
+impl gpui::Global for GlobalSyncAuthForm {}
 
-    if let Some(user) = user {
-        let display_name = user.display_name();
-        let secondary_identity = user
-            .secondary_identity()
-            .unwrap_or_else(|| user.email.clone());
-
-        render_account_shell(
-            display_name.clone(),
-            Some(secondary_identity),
-            v_flex()
-                .gap_4()
-                .child(
-                    div()
-                        .w_full()
-                        .rounded_xl()
-                        .border_1()
-                        .border_color(sync_server_theme::border())
-                        .bg(sync_server_theme::panel_alt_bg())
-                        .child(
-                            v_flex()
-                                .gap_3()
-                                .p_4()
-                                .child(render_account_row(
-                                    t!("Settings.Account.username").to_string(),
-                                    display_name,
-                                ))
-                                .child(render_account_row(
-                                    t!("Settings.Account.email").to_string(),
-                                    user.email.clone(),
-                                )),
-                        ),
-                )
-                .child(
-                    h_flex().gap_2().justify_end().child(
-                        Button::new("logout-button")
-                            .icon(IconName::Close)
-                            .label(t!("Auth.logout"))
-                            .with_variant(sync_server_theme::danger_button_variant(cx))
-                            .on_click(move |_, _window, cx| {
-                                let auth = get_auth_service(cx);
-                                cx.spawn(async move |cx: &mut AsyncApp| {
-                                    auth.sign_out().await;
-                                    cx.update(|cx| {
-                                        GlobalCurrentUser::set_user(None, cx);
-                                        if let Some(home) = cx.try_global::<GlobalHomePage>() {
-                                            let home_page = home.home_page.clone();
-                                            home_page.update(cx, |home_page, cx| {
-                                                home_page.handle_auth_state_cleared(cx);
-                                            });
-                                        }
-                                    });
-                                })
-                                .detach();
-                            }),
-                    ),
-                )
-                .into_any_element(),
-        )
-    } else {
-        render_account_shell(
-            t!("Settings.Account.title").to_string(),
-            None,
-            div()
-                .w_full()
-                .rounded_xl()
-                .border_1()
-                .border_color(sync_server_theme::border())
-                .bg(sync_server_theme::panel_alt_bg())
-                .child(
-                    v_flex()
-                        .gap_2()
-                        .p_4()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(sync_server_theme::text_primary())
-                                .child(t!("Settings.Account.title").to_string()),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(sync_server_theme::text_muted())
-                                .child(t!("Settings.Account.not_logged_in").to_string()),
-                        ),
-                )
-                .into_any_element(),
-        )
+impl SyncAuthForm {
+    fn new(window: &mut Window, cx: &mut App) -> Self {
+        Self {
+            email_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Auth.email_placeholder"))),
+            password_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("Auth.password_placeholder"))),
+            confirm_password_input: cx.new(|cx| {
+                InputState::new(window, cx).placeholder(t!("Auth.confirm_password_placeholder"))
+            }),
+            error: cx.new(|_| None),
+            is_sign_up: false,
+            is_submitting: false,
+        }
     }
+
+    fn init(window: &mut Window, cx: &mut App) -> Entity<Self> {
+        if !cx.has_global::<GlobalSyncAuthForm>() {
+            let form = cx.new(|cx| Self::new(window, cx));
+            cx.set_global(GlobalSyncAuthForm(form));
+        }
+        cx.global::<GlobalSyncAuthForm>().0.clone()
+    }
+
+    fn global(cx: &App) -> Option<Entity<Self>> {
+        cx.try_global::<GlobalSyncAuthForm>().map(|g| g.0.clone())
+    }
+}
+
+/// 在 SyncAuthForm 中执行登录/注册认证
+fn auth_submit(cx: &mut App) {
+    let Some(form) = SyncAuthForm::global(cx) else { return };
+    let state = form.read(cx);
+    let email = state.email_input.read(cx).text().to_string();
+    let password = state.password_input.read(cx).text().to_string();
+    let confirm_password = state.confirm_password_input.read(cx).text().to_string();
+    let is_sign_up = state.is_sign_up;
+    drop(state);
+
+    if email.is_empty() {
+        form.update(cx, |this, cx| {
+            this.error.update(cx, |v, cx| { *v = Some(t!("Auth.email_required").to_string()); cx.notify(); });
+        });
+        return;
+    }
+    if password.is_empty() {
+        form.update(cx, |this, cx| {
+            this.error.update(cx, |v, cx| { *v = Some(t!("Auth.password_required").to_string()); cx.notify(); });
+        });
+        return;
+    }
+    if is_sign_up && password != confirm_password {
+        form.update(cx, |this, cx| {
+            this.error.update(cx, |v, cx| { *v = Some(t!("Auth.password_mismatch").to_string()); cx.notify(); });
+        });
+        return;
+    }
+
+    form.update(cx, |this, cx| {
+        this.is_submitting = true;
+        this.error.update(cx, |v, cx| { *v = None; cx.notify(); });
+        cx.notify();
+    });
+
+    let action = if is_sign_up {
+        PasswordAuthAction::SignUp
+    } else {
+        PasswordAuthAction::Login
+    };
+    let auth = get_auth_service(cx);
+    let form_weak = form.downgrade();
+    let home_page = cx
+        .try_global::<GlobalHomePage>()
+        .map(|h| h.home_page.clone());
+
+    cx.spawn(async move |cx| {
+        let result = match action {
+            PasswordAuthAction::Login => auth.login_with_password(&email, &password).await,
+            PasswordAuthAction::SignUp => auth.sign_up_with_password(&email, &password).await,
+        };
+
+        let _ = form_weak.update(cx, |this, cx| {
+            this.is_submitting = false;
+            match result {
+                Ok(user) => {
+                    GlobalCurrentUser::set_user(Some(user), cx);
+                    cx.notify();
+                }
+                Err(error) => {
+                    tracing::error!("密码登录失败: {}", error);
+                    this.error.update(cx, |v, cx| { *v = Some(error); cx.notify(); });
+                }
+            }
+        });
+
+        if let Some(home_page) = home_page {
+            let _ = home_page.update(cx, |h, cx| {
+                h.handle_auth_state_cleared(cx);
+            });
+        }
+    })
+    .detach();
+}
+
+/// 渲染已登录用户信息（同步分组内）
+fn render_logged_in_user_sync(user: &UserInfo, cx: &mut App) -> AnyElement {
+    let display_name = user.display_name();
+    let secondary_identity = user
+        .secondary_identity()
+        .unwrap_or_else(|| user.email.clone());
+
+    v_flex()
+        .gap_3()
+        .p_3()
+        .rounded_md()
+        .bg(sync_server_theme::panel_alt_bg())
+        .border_1()
+        .border_color(sync_server_theme::border())
+        .child(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(Icon::new(IconName::User).with_size(px(16.)))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(sync_server_theme::text_primary())
+                        .child(display_name),
+                ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(sync_server_theme::text_muted())
+                .child(secondary_identity),
+        )
+        .child(
+            h_flex().justify_end().mt_1().child(
+                Button::new("sync-logout-button")
+                    .label(t!("Auth.logout"))
+                    .ghost()
+                    .text_color(sync_server_theme::danger())
+                    .on_click(move |_, _window, cx| {
+                        let auth = get_auth_service(cx);
+                        let home_page = cx
+                            .try_global::<GlobalHomePage>()
+                            .map(|h| h.home_page.clone());
+                        cx.spawn(async move |cx| {
+                            auth.sign_out().await;
+                            cx.update(|cx| {
+                                GlobalCurrentUser::set_user(None, cx);
+                            });
+                            if let Some(home_page) = home_page {
+                                let _ = home_page.update(cx, |h, cx| {
+                                    h.handle_auth_state_cleared(cx);
+                                });
+                            }
+                        })
+                        .detach();
+                    }),
+            ),
+        )
+        .into_any_element()
+}
+
+/// 渲染未登录时的登录/注册表单（同步分组内）
+fn render_auth_form_sync(window: &mut Window, cx: &mut App) -> AnyElement {
+    let form = SyncAuthForm::init(window, cx);
+
+    v_flex()
+        .gap_3()
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(sync_server_theme::text_muted())
+                .child(t!("Settings.General.Sync.account_auth").to_string()),
+        )
+        .child(
+            v_flex()
+                .gap_2()
+                .child(Input::new(&form.read(cx).email_input).w_full())
+                .child(Input::new(&form.read(cx).password_input).w_full())
+                .when(form.read(cx).is_sign_up, |this| {
+                    this.child(Input::new(&form.read(cx).confirm_password_input).w_full())
+                }),
+        )
+        .child(
+            h_flex()
+                .gap_2()
+                .child(
+                    Button::new("auth-submit")
+                        .label(if form.read(cx).is_sign_up {
+                            t!("Auth.sign_up")
+                        } else {
+                            t!("Auth.login")
+                        })
+                        .w_full()
+                        .on_click(move |_, _window, cx: &mut App| {
+                            auth_submit(cx);
+                        }),
+                )
+                .child(
+                    Button::new("auth-switch")
+                        .label(if form.read(cx).is_sign_up {
+                            t!("Auth.switch_to_login")
+                        } else {
+                            t!("Auth.switch_to_sign_up")
+                        })
+                        .ghost()
+                        .on_click({
+                            let f = form.clone();
+                            move |_, _window, cx: &mut App| {
+                                f.update(cx, |this, cx| {
+                                    this.is_sign_up = !this.is_sign_up;
+                                    this.error.update(cx, |v, cx| { *v = None; cx.notify(); });
+                                    cx.notify();
+                                });
+                            }
+                        }),
+                ),
+        )
+        .when_some(
+            form.read(cx).error.read(cx).clone(),
+            |this, msg| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(sync_server_theme::danger())
+                        .child(msg),
+                )
+            },
+        )
+        .into_any_element()
 }
 
 // ============================================================================

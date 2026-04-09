@@ -44,7 +44,9 @@ impl fmt::Display for McpErrorCode {
 }
 
 impl McpErrorCode {
-    pub fn code(&self) -> i32 { *self as i32 }
+    pub fn code(&self) -> i32 {
+        *self as i32
+    }
 }
 
 /// MCP protocol error with code, message, and optional data.
@@ -67,7 +69,11 @@ impl std::error::Error for McpError {}
 
 impl McpError {
     pub fn new(code: McpErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 
     pub fn with_data(mut self, data: serde_json::Value) -> Self {
@@ -84,7 +90,10 @@ impl McpError {
     }
 
     pub fn method_not_found(method: &str) -> Self {
-        Self::new(McpErrorCode::MethodNotFound, format!("method not found: {method}"))
+        Self::new(
+            McpErrorCode::MethodNotFound,
+            format!("method not found: {method}"),
+        )
     }
 
     pub fn invalid_params(msg: impl Into<String>) -> Self {

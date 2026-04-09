@@ -123,7 +123,6 @@ impl SyncStateManager {
         self.running = false;
     }
 
-
     /// 获取连接的同步状态
     ///
     /// 优先从缓存获取，缓存未命中时从本地连接信息构建
