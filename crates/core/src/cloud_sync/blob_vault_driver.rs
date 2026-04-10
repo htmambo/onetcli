@@ -44,12 +44,12 @@ impl Default for BundleMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SyncBundle {
     meta: BundleMeta,
-    /// 连接数据：JSON 数组的 StoredConnection
-    connections: Option<String>,
-    /// 工作空间数据：JSON 数组的 Workspace
-    workspaces: Option<String>,
-    /// 凭证数据：JSON 数组的 Certificate
-    certificates: Option<String>,
+    /// 连接数据：StoredConnection 数组
+    connections: Option<serde_json::Value>,
+    /// 工作空间数据：Workspace 数组
+    workspaces: Option<serde_json::Value>,
+    /// 凭证数据：Certificate 数组
+    certificates: Option<serde_json::Value>,
 }
 
 /// Gist 存储使用的 blob key
@@ -143,47 +143,114 @@ impl SyncEngine {
     // Bundle 构建
     // ========================================================================
 
+    /// 对证书数组中的 params 字段加密
+    fn encrypt_certificate_params(&self, certs: &serde_json::Value) -> serde_json::Value {
+        if let Some(arr) = certs.as_array() {
+            let encrypted: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|cert| {
+                    let mut cert = cert.clone();
+                    if let Some(params) = cert.get("params") {
+                        if let Ok(json) = serde_json::to_string(params) {
+                            let crypto = self.crypto_service.read().ok();
+                            if let Some(ref crypto) = crypto {
+                                if let Ok(key) = crypto.select_encrypt_key(None) {
+                                    let encrypted = crate::crypto::encrypt_with_key(&json, key);
+                                    if let Some(obj) = cert.as_object_mut() {
+                                        obj.insert("params".to_string(), serde_json::Value::String(encrypted));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    cert
+                })
+                .collect();
+            serde_json::Value::Array(encrypted)
+        } else {
+            certs.clone()
+        }
+    }
+
+    /// 对证书数组中的 params 字段解密
+    fn decrypt_certificate_params(&self, certs: &serde_json::Value) -> serde_json::Value {
+        if let Some(arr) = certs.as_array() {
+            let decrypted: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|cert| {
+                    let mut cert = cert.clone();
+                    if let Some(params_str) = cert.get("params").and_then(|v| v.as_str()) {
+                        let crypto = self.crypto_service.read().ok();
+                        if let Some(ref crypto) = crypto {
+                            if let Ok(key) = crypto.select_decrypt_key(None) {
+                                if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key) {
+                                    if let Ok(params) = serde_json::from_str::<serde_json::Value>(&json) {
+                                        if let Some(obj) = cert.as_object_mut() {
+                                            obj.insert("params".to_string(), params);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    cert
+                })
+                .collect();
+            serde_json::Value::Array(decrypted)
+        } else {
+            certs.clone()
+        }
+    }
+
     fn build_local_bundle(&self) -> Result<SyncBundle, SyncError> {
         use crate::storage::traits::Repository;
 
-        // 获取各类型数据
-        let connections = self
+        // 获取各类型数据为 JSON Value
+        let connections: Option<serde_json::Value> = self
             .storage
             .get::<crate::storage::ConnectionRepository>()
             .and_then(|repo| repo.list().ok())
-            .map(|conns| {
-                serde_json::to_string(&conns).unwrap_or_else(|_| "[]".to_string())
-            });
+            .map(|conns| serde_json::to_value(&conns).unwrap_or_default());
 
-        let workspaces = self
+        let workspaces: Option<serde_json::Value> = self
             .storage
             .get::<crate::storage::WorkspaceRepository>()
             .and_then(|repo| repo.list().ok())
-            .map(|wss| serde_json::to_string(&wss).unwrap_or_else(|_| "[]".to_string()));
+            .map(|wss| serde_json::to_value(&wss).unwrap_or_default());
 
-        let certificates = self
+        let certificates: Option<serde_json::Value> = self
             .storage
             .get::<crate::storage::CertificateRepository>()
             .and_then(|repo| repo.list().ok())
-            .map(|certs| serde_json::to_string(&certs).unwrap_or_else(|_| "[]".to_string()));
+            .map(|certs| serde_json::to_value(&certs).unwrap_or_default())
+            .map(|json_val| self.encrypt_certificate_params(&json_val));
 
         // 计算各类型的最大更新时间
         let mut type_timestamps = HashMap::new();
-        if let Some(ref json) = connections {
-            if let Ok(conns) = serde_json::from_str::<Vec<crate::storage::StoredConnection>>(json) {
-                let max_ts = conns.iter().filter_map(|c| c.updated_at).max().unwrap_or(0);
+        if let Some(ref val) = connections {
+            if let Some(arr) = val.as_array() {
+                let max_ts = arr.iter()
+                    .filter_map(|v| v.get("updated_at").and_then(|v| v.as_i64()))
+                    .max()
+                    .unwrap_or(0);
                 type_timestamps.insert("connection".to_string(), max_ts);
             }
         }
-        if let Some(ref json) = workspaces {
-            if let Ok(wss) = serde_json::from_str::<Vec<crate::storage::Workspace>>(json) {
-                let max_ts = wss.iter().filter_map(|w| w.updated_at).max().unwrap_or(0);
+        if let Some(ref val) = workspaces {
+            if let Some(arr) = val.as_array() {
+                let max_ts = arr.iter()
+                    .filter_map(|v| v.get("updated_at").and_then(|v| v.as_i64()))
+                    .max()
+                    .unwrap_or(0);
                 type_timestamps.insert("workspace".to_string(), max_ts);
             }
         }
-        if let Some(ref json) = certificates {
-            if let Ok(certs) = serde_json::from_str::<Vec<crate::storage::Certificate>>(json) {
-                let max_ts = certs.iter().filter_map(|c| c.updated_at).max().unwrap_or(0);
+        if let Some(ref val) = certificates {
+            if let Some(arr) = val.as_array() {
+                let max_ts = arr.iter()
+                    .filter_map(|v| v.get("updated_at").and_then(|v| v.as_i64()))
+                    .max()
+                    .unwrap_or(0);
                 type_timestamps.insert("certificate".to_string(), max_ts);
             }
         }
@@ -204,13 +271,12 @@ impl SyncEngine {
     // Blob 上传/下载
     // ========================================================================
 
-    /// 下载并解密云端 bundle
+    /// 下载并解析云端 bundle
     async fn download_bundle_blob(
         &self,
         vault: &Arc<dyn BlobVault>,
     ) -> Result<Option<SyncBundle>, SyncError> {
         let blob = vault.download(BUNDLE_KEY).await.map_err(|e| {
-            // 文件不存在是正常情况（首次同步）
             let msg = e.to_string();
             if msg.contains("不存在") || msg.contains("not found") || msg.contains("404") {
                 return SyncError::NetworkError("not_found".to_string());
@@ -218,14 +284,7 @@ impl SyncEngine {
             SyncError::NetworkError(e.to_string())
         })?;
 
-        // 解密
-        let plaintext = {
-            let crypto = self
-                .crypto_service
-                .read()
-                .map_err(|_| SyncError::StorageError("加密服务锁获取失败".to_string()))?;
-            crypto.decrypt_blob(&String::from_utf8_lossy(&blob.data), None)?
-        };
+        let plaintext = String::from_utf8_lossy(&blob.data).to_string();
 
         let bundle: SyncBundle = serde_json::from_str(&plaintext)
             .map_err(|e| SyncError::StorageError(format!("bundle 反序列化失败: {}", e)))?;
@@ -240,22 +299,13 @@ impl SyncEngine {
         bundle: SyncBundle,
         timestamp: i64,
     ) -> Result<usize, SyncError> {
-        // 序列化
-        let plaintext = serde_json::to_string(&bundle)
+        // 序列化为 JSON 明文直接存储（暂不加密，便于观察验证）
+        let plaintext = serde_json::to_string_pretty(&bundle)
             .map_err(|e| SyncError::StorageError(format!("bundle 序列化失败: {}", e)))?;
-
-        // 加密
-        let encrypted = {
-            let crypto = self
-                .crypto_service
-                .read()
-                .map_err(|_| SyncError::StorageError("加密服务锁获取失败".to_string()))?;
-            crypto.encrypt_blob(&plaintext, None)?
-        };
 
         // 上传
         vault
-            .upload(BUNDLE_KEY, encrypted.into_bytes())
+            .upload(BUNDLE_KEY, plaintext.into_bytes())
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
@@ -263,26 +313,14 @@ impl SyncEngine {
 
         // 计算上传项数
         let mut count = 0;
-        if bundle.connections.is_some() {
-            count += bundle
-                .connections
-                .and_then(|j| serde_json::from_str::<Vec<serde_json::Value>>(&j).ok())
-                .map(|v| v.len())
-                .unwrap_or(0);
+        if let Some(ref val) = bundle.connections {
+            count += val.as_array().map(|v| v.len()).unwrap_or(0);
         }
-        if bundle.workspaces.is_some() {
-            count += bundle
-                .workspaces
-                .and_then(|j| serde_json::from_str::<Vec<serde_json::Value>>(&j).ok())
-                .map(|v| v.len())
-                .unwrap_or(0);
+        if let Some(ref val) = bundle.workspaces {
+            count += val.as_array().map(|v| v.len()).unwrap_or(0);
         }
-        if bundle.certificates.is_some() {
-            count += bundle
-                .certificates
-                .and_then(|j| serde_json::from_str::<Vec<serde_json::Value>>(&j).ok())
-                .map(|v| v.len())
-                .unwrap_or(0);
+        if let Some(ref val) = bundle.certificates {
+            count += val.as_array().map(|v| v.len()).unwrap_or(0);
         }
 
         Ok(count)
@@ -299,9 +337,9 @@ impl SyncEngine {
         let mut updated = 0;
 
         // 恢复连接
-        if let Some(ref json) = bundle.connections {
+        if let Some(ref val) = bundle.connections {
             let cloud_connections: Vec<crate::storage::StoredConnection> =
-                serde_json::from_str(json)
+                serde_json::from_value(val.clone())
                     .map_err(|e| SyncError::StorageError(format!("连接数据解析失败: {}", e)))?;
 
             let repo = self
@@ -382,8 +420,8 @@ impl SyncEngine {
         }
 
         // 恢复工作空间
-        if let Some(ref json) = bundle.workspaces {
-            let cloud_workspaces: Vec<crate::storage::Workspace> = serde_json::from_str(json)
+        if let Some(ref val) = bundle.workspaces {
+            let cloud_workspaces: Vec<crate::storage::Workspace> = serde_json::from_value(val.clone())
                 .map_err(|e| SyncError::StorageError(format!("工作空间数据解析失败: {}", e)))?;
 
             let repo = self
@@ -434,8 +472,9 @@ impl SyncEngine {
         }
 
         // 恢复凭证
-        if let Some(ref json) = bundle.certificates {
-            let cloud_certs: Vec<crate::storage::Certificate> = serde_json::from_str(json)
+        if let Some(ref val) = bundle.certificates {
+            let decrypted_certs = self.decrypt_certificate_params(val);
+            let cloud_certs: Vec<crate::storage::Certificate> = serde_json::from_value(decrypted_certs)
                 .map_err(|e| SyncError::StorageError(format!("凭证数据解析失败: {}", e)))?;
 
             let repo = self
@@ -466,10 +505,7 @@ impl SyncEngine {
                             let mut updated_cert = local.clone();
                             updated_cert.name = cloud_cert.name.clone();
                             updated_cert.kind = cloud_cert.kind;
-                            updated_cert.username = cloud_cert.username.clone();
-                            updated_cert.password = cloud_cert.password.clone();
-                            updated_cert.key_path = cloud_cert.key_path.clone();
-                            updated_cert.passphrase = cloud_cert.passphrase.clone();
+                            updated_cert.params = cloud_cert.params.clone();
                             updated_cert.remark = cloud_cert.remark.clone();
                             updated_cert.updated_at = cloud_cert.updated_at;
                             updated_cert.last_synced_at = Some(SyncEngine::current_timestamp());

@@ -298,7 +298,7 @@ impl CloudSyncService {
     // ========================================================================
 
     /// 选择加密密钥：个人数据用 master_key，团队数据用 team_key
-    fn select_encrypt_key(&self, team_id: Option<&str>) -> Result<&str, SyncError> {
+    pub(crate) fn select_encrypt_key(&self, team_id: Option<&str>) -> Result<&str, SyncError> {
         match team_id {
             Some(tid) => self
                 .team_keys
@@ -306,6 +306,21 @@ impl CloudSyncService {
                 .map(|s| s.as_str())
                 .ok_or(SyncError::NotUnlocked),
             None => self.master_key.as_deref().ok_or(SyncError::NotUnlocked),
+        }
+    }
+
+    /// 选择解密密钥：与加密使用同一套密钥
+    pub(crate) fn select_decrypt_key(&self, team_id: Option<&str>) -> Result<String, SyncError> {
+        match team_id {
+            Some(tid) => self
+                .team_keys
+                .get(tid)
+                .map(|s| s.clone())
+                .ok_or(SyncError::NotUnlocked),
+            None => self
+                .master_key
+                .clone()
+                .ok_or(SyncError::NotUnlocked),
         }
     }
 
@@ -434,13 +449,16 @@ impl CloudSyncService {
         team_id: Option<&str>,
         teams: &[Team],
     ) -> Result<CloudSyncData, SyncError> {
+        // 对 params 进行加密 + base64 编码
+        let params_json = serde_json::to_string(&certificate.params)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+        let key = self.select_encrypt_key(team_id)?;
+        let encrypted_params = crypto::encrypt_with_key(&params_json, key);
+
         let plain_data = CertificatePlainData {
             name: certificate.name.clone(),
             kind: certificate.kind.to_string(),
-            username: certificate.username.clone(),
-            password: certificate.password.clone(),
-            key_path: certificate.key_path.clone(),
-            passphrase: certificate.passphrase.clone(),
+            params: encrypted_params,
             remark: certificate.remark.clone(),
             owner_id: certificate.owner_id.clone(),
         };
@@ -563,14 +581,18 @@ impl CloudSyncService {
         let plain_data: CertificatePlainData = serde_json::from_str(&plaintext)
             .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
 
+        // 解密 params
+        let key = self.select_decrypt_key(cloud_data.team_id.as_deref())?;
+        let params_json = crypto::decrypt_with_key(&plain_data.params, &key)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+        let params: serde_json::Value = serde_json::from_str(&params_json)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+
         Ok(Certificate {
             id: None,
             name: plain_data.name,
             kind: CertificateKind::from_str(&plain_data.kind),
-            username: plain_data.username,
-            password: plain_data.password,
-            key_path: plain_data.key_path,
-            passphrase: plain_data.passphrase,
+            params,
             remark: plain_data.remark,
             sync_enabled: true,
             cloud_id: Some(cloud_data.id.clone()),

@@ -1462,24 +1462,29 @@ impl DbConnectionForm {
             return;
         };
 
+        let username = certificate.username().unwrap_or("").to_string();
+        let password = certificate.password().unwrap_or("").to_string();
+        let key_path = certificate.key_path().unwrap_or("").to_string();
+        let passphrase = certificate.passphrase().unwrap_or("").to_string();
+
         match field_name {
             "credential_ref" => {
-                self.set_field_value("username", &certificate.username, window, cx);
+                self.set_field_value("username", &username, window, cx);
                 self.set_field_value(
                     "password",
-                    certificate.password.as_deref().unwrap_or(""),
+                    &password,
                     window,
                     cx,
                 );
             }
             "ssh_tunnel_credential_ref" => {
-                self.set_field_value("ssh_username", &certificate.username, window, cx);
+                self.set_field_value("ssh_username", &username, window, cx);
                 match certificate.kind {
                     CertificateKind::UsernamePassword => {
                         self.set_field_value("ssh_auth_type", "password", window, cx);
                         self.set_field_value(
                             "ssh_password",
-                            certificate.password.as_deref().unwrap_or(""),
+                            &password,
                             window,
                             cx,
                         );
@@ -1490,13 +1495,13 @@ impl DbConnectionForm {
                         self.set_field_value("ssh_auth_type", "private_key", window, cx);
                         self.set_field_value(
                             "ssh_private_key_path",
-                            certificate.key_path.as_deref().unwrap_or(""),
+                            &key_path,
                             window,
                             cx,
                         );
                         self.set_field_value(
                             "ssh_private_key_passphrase",
-                            certificate.passphrase.as_deref().unwrap_or(""),
+                            &passphrase,
                             window,
                             cx,
                         );
@@ -1595,22 +1600,24 @@ impl DbConnectionForm {
 
         let username = selected_credential
             .as_ref()
-            .map(|certificate| certificate.username.clone())
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
             .unwrap_or_else(|| self.get_field_value("username", cx).unwrap_or_default());
         let password = selected_credential
             .as_ref()
-            .and_then(|certificate| certificate.password.clone())
+            .and_then(|certificate| certificate.password().map(|s| s.to_string()))
             .unwrap_or_else(|| self.get_field_value("password", cx).unwrap_or_default());
 
         if let Some(certificate) = selected_ssh_credential.as_ref() {
-            extra_params.insert("ssh_username".to_string(), certificate.username.clone());
+            if let Some(username) = certificate.username() {
+                extra_params.insert("ssh_username".to_string(), username.to_string());
+            }
 
             match certificate.kind {
                 CertificateKind::UsernamePassword => {
                     extra_params.insert("ssh_auth_type".to_string(), "password".to_string());
                     extra_params.insert(
                         "ssh_password".to_string(),
-                        certificate.password.clone().unwrap_or_default(),
+                        certificate.password().unwrap_or("").to_string(),
                     );
                     extra_params.remove("ssh_private_key_path");
                     extra_params.remove("ssh_private_key_passphrase");
@@ -1619,11 +1626,11 @@ impl DbConnectionForm {
                     extra_params.insert("ssh_auth_type".to_string(), "private_key".to_string());
                     extra_params.insert(
                         "ssh_private_key_path".to_string(),
-                        certificate.key_path.clone().unwrap_or_default(),
+                        certificate.key_path().unwrap_or("").to_string(),
                     );
                     extra_params.insert(
                         "ssh_private_key_passphrase".to_string(),
-                        certificate.passphrase.clone().unwrap_or_default(),
+                        certificate.passphrase().unwrap_or("").to_string(),
                     );
                     extra_params.remove("ssh_password");
                 }

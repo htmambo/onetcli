@@ -17,10 +17,16 @@ use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Gist 文件
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Gist 文件（创建时用）
+#[derive(Debug, Serialize)]
 struct GistFile {
     filename: String,
+    content: String,
+}
+
+/// Gist 文件更新（更新时只用 content，不含 filename）
+#[derive(Debug, Serialize)]
+struct GistFileUpdate {
     content: String,
 }
 
@@ -43,8 +49,9 @@ struct CreateGistRequest {
 /// 更新 Gist 请求
 #[derive(Debug, Serialize)]
 struct UpdateGistRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
-    files: std::collections::HashMap<String, GistFile>,
+    files: std::collections::HashMap<String, GistFileUpdate>,
 }
 
 /// Gist 响应
@@ -76,8 +83,6 @@ pub struct GithubGistVault {
     gist_id: Option<String>,
     tokens: Option<OAuthTokens>,
 }
-
-use base64::Engine as _;
 
 impl GithubGistVault {
     pub fn new(http: Arc<dyn HttpClient>, client_id: String) -> Self {
@@ -301,8 +306,7 @@ impl GithubGistVault {
         let mut files = std::collections::HashMap::new();
         files.insert(
             "ONetCli-vault.json".to_string(),
-            GistFile {
-                filename: "ONetCli-vault.json".to_string(),
+            GistFileUpdate {
                 content: content.to_string(),
             },
         );
@@ -321,6 +325,7 @@ impl GithubGistVault {
             .header("User-Agent", "ONetCli")
             .header("Accept", "application/vnd.github+json")
             .header("Content-Type", "application/json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
             .body(AsyncBody::from(body))
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
@@ -331,9 +336,17 @@ impl GithubGistVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if !response.status().is_success() {
+            let status = response.status().as_u16();
+            // 读取错误响应体
+            let mut err_bytes = Vec::new();
+            let _ = response
+                .into_body()
+                .read_to_end(&mut err_bytes)
+                .await;
+            let err_body = String::from_utf8_lossy(&err_bytes);
             return Err(CloudApiError::ServerError(format!(
-                "更新 gist 失败: HTTP {}",
-                response.status().as_u16()
+                "更新 gist 失败: HTTP {} - {}",
+                status, err_body
             )));
         }
 
@@ -382,12 +395,15 @@ impl BlobVault for GithubGistVault {
         })?;
         let tokens = self.tokens()?;
 
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-        self.update_gist(&gist_id, &encoded, tokens).await?;
+        // 加密数据本身就是安全的字符串，直接存储为 JSON 字符串
+        let content = String::from_utf8(data).map_err(|_| {
+            CloudApiError::DataFormatError("加密数据不是有效的 UTF-8".to_string())
+        })?;
+        self.update_gist(&gist_id, &content, tokens).await?;
 
         Ok(BlobMeta {
             key: key.to_string(),
-            size: data.len() as u64,
+            size: content.len() as u64,
             updated_at: chrono::Utc::now().timestamp_millis(),
         })
     }
@@ -404,13 +420,9 @@ impl BlobVault for GithubGistVault {
             .await?
             .ok_or_else(|| CloudApiError::NotFound("vault gist 不存在".to_string()))?;
 
-        let data = base64::engine::general_purpose::STANDARD
-            .decode(&content)
-            .map_err(|e| CloudApiError::DataFormatError(format!("base64 解码失败: {}", e)))?;
-
         Ok(Blob {
             key: key.to_string(),
-            data,
+            data: content.into_bytes(),
             updated_at: chrono::Utc::now().timestamp_millis(),
         })
     }

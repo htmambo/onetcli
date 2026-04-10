@@ -1044,7 +1044,7 @@ impl SettingsPanel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let certificate_manager_view = cx.new(|cx| CertificateManagerView::new(cx));
         let llm_providers_view = cx.new(|cx| LlmProvidersView::new(cx));
-        Self {
+        let mut this = Self {
             focus_handle: cx.focus_handle(),
             certificate_manager_view,
             llm_providers_view,
@@ -1052,7 +1052,13 @@ impl SettingsPanel {
             group_variant: GroupBoxVariant::Outline,
             selected_page: PendingSettingsPanelPage::take(cx).unwrap_or_default(),
             state_version: 0,
-        }
+        };
+        // 订阅 AppSettings 全局变化，确保外部（如 GitHub 授权弹窗）更新设置后能刷新 UI
+        cx.observe_global::<AppSettings>(|_, cx| {
+            cx.notify();
+        })
+        .detach();
+        this
     }
 
     pub fn request_page(page: SettingsPanelPage, cx: &mut App) {
@@ -2350,7 +2356,7 @@ fn auth_submit(cx: &mut App) {
     let password = state.password_input.read(cx).text().to_string();
     let confirm_password = state.confirm_password_input.read(cx).text().to_string();
     let is_sign_up = state.is_sign_up;
-    drop(state);
+    let _ = state;
 
     if email.is_empty() {
         form.update(cx, |this, cx| {

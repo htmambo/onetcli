@@ -550,11 +550,13 @@ impl RedisFormWindow {
             return;
         };
 
+        let username = certificate.username().unwrap_or("").to_string();
+        let password = certificate.password().unwrap_or("").to_string();
         self.username_input.update(cx, |state, cx| {
-            state.set_value(&certificate.username, window, cx)
+            state.set_value(username, window, cx)
         });
         self.password_input.update(cx, |state, cx| {
-            state.set_value(certificate.password.clone().unwrap_or_default(), window, cx);
+            state.set_value(password, window, cx);
         });
     }
 
@@ -571,15 +573,15 @@ impl RedisFormWindow {
             .unwrap_or(6379);
         let password = selected_certificate
             .as_ref()
-            .and_then(|certificate| certificate.password.clone())
+            .and_then(|certificate| certificate.password().map(|s| s.to_string()))
             .or_else(|| {
                 let pwd = self.password_input.read(cx).text().to_string();
                 if pwd.is_empty() { None } else { Some(pwd) }
             });
         let username = selected_certificate
             .as_ref()
-            .map(|certificate| Some(certificate.username.clone()))
-            .unwrap_or_else(|| {
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
+            .or_else(|| {
                 let user = self.username_input.read(cx).text().to_string();
                 if user.is_empty() { None } else { Some(user) }
             });

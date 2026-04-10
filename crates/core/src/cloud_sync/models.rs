@@ -402,17 +402,8 @@ pub struct CertificatePlainData {
     pub name: String,
     /// 证书类型
     pub kind: String,
-    /// 用户名
-    pub username: String,
-    /// 密码
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
-    /// 私钥路径
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_path: Option<String>,
-    /// 私钥口令
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub passphrase: Option<String>,
+    /// 证书参数（用户名、密码、密钥路径等），加密后 base64 字符串
+    pub params: String,
     /// 备注
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,

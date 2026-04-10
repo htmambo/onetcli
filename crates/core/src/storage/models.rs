@@ -609,13 +609,7 @@ pub struct Certificate {
     pub id: Option<i64>,
     pub name: String,
     pub kind: CertificateKind,
-    pub username: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub passphrase: Option<String>,
+    pub params: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
     #[serde(default = "default_sync_enabled")]
@@ -635,16 +629,63 @@ pub struct Certificate {
 }
 
 impl Certificate {
+    pub fn username(&self) -> Option<&str> {
+        self.params.get("username")?.as_str()
+    }
+    pub fn password(&self) -> Option<&str> {
+        self.params.get("password")?.as_str()
+    }
+    pub fn key_path(&self) -> Option<&str> {
+        self.params.get("key_path")?.as_str()
+    }
+    pub fn passphrase(&self) -> Option<&str> {
+        self.params.get("passphrase")?.as_str()
+    }
+    pub fn ssh_private_key(&self) -> Option<&str> {
+        self.params.get("ssh_private_key")?.as_str()
+    }
+
+    pub fn set_username(&mut self, value: &str) {
+        self.params
+            .as_object_mut()
+            .unwrap()
+            .insert("username".to_string(), serde_json::Value::String(value.to_string()));
+    }
+    pub fn set_password(&mut self, value: Option<String>) {
+        let obj = self.params.as_object_mut().unwrap();
+        match value {
+            Some(v) => obj.insert("password".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("password"),
+        };
+    }
+    pub fn set_key_path(&mut self, value: Option<String>) {
+        let obj = self.params.as_object_mut().unwrap();
+        match value {
+            Some(v) => obj.insert("key_path".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("key_path"),
+        };
+    }
+    pub fn set_passphrase(&mut self, value: Option<String>) {
+        let obj = self.params.as_object_mut().unwrap();
+        match value {
+            Some(v) => obj.insert("passphrase".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("passphrase"),
+        };
+    }
+
     pub fn display_subtitle(&self) -> String {
         match self.kind {
-            CertificateKind::UsernamePassword => format!("{} / 账号密码", self.username),
+            CertificateKind::UsernamePassword => {
+                let username = self.username().unwrap_or("");
+                format!("{} / 账号密码", username)
+            }
             CertificateKind::SshPrivateKey => {
+                let username = self.username().unwrap_or("");
                 let key_path = self
-                    .key_path
-                    .as_deref()
+                    .key_path()
                     .filter(|path| !path.is_empty())
                     .unwrap_or("未设置私钥路径");
-                format!("{} / {}", self.username, key_path)
+                format!("{} / {}", username, key_path)
             }
         }
     }
@@ -1194,13 +1235,17 @@ fn apply_certificate_to_db_config(
         if reference.matches_certificate(certificate) {
             changed |= reference.sync_with_certificate(certificate);
             if certificate.kind == CertificateKind::UsernamePassword {
-                if config.username != certificate.username {
-                    config.username = certificate.username.clone();
-                    changed = true;
+                if let Some(username) = certificate.username() {
+                    if config.username != username {
+                        config.username = username.to_string();
+                        changed = true;
+                    }
                 }
-                if config.password != certificate.password.clone().unwrap_or_default() {
-                    config.password = certificate.password.clone().unwrap_or_default();
-                    changed = true;
+                if let Some(password) = certificate.password() {
+                    if config.password != password {
+                        config.password = password.to_string();
+                        changed = true;
+                    }
                 }
             }
         }
@@ -1210,11 +1255,13 @@ fn apply_certificate_to_db_config(
         if reference.matches_certificate(certificate) {
             changed |= reference.sync_with_certificate(certificate);
 
-            if config.extra_params.get("ssh_username") != Some(&certificate.username) {
-                config
-                    .extra_params
-                    .insert("ssh_username".to_string(), certificate.username.clone());
-                changed = true;
+            if let Some(username) = certificate.username() {
+                if config.extra_params.get("ssh_username") != Some(&username.to_string()) {
+                    config
+                        .extra_params
+                        .insert("ssh_username".to_string(), username.to_string());
+                    changed = true;
+                }
             }
 
             match certificate.kind {
@@ -1227,10 +1274,11 @@ fn apply_certificate_to_db_config(
                             .insert("ssh_auth_type".to_string(), "password".to_string());
                         changed = true;
                     }
-                    if config.extra_params.get("ssh_password") != certificate.password.as_ref() {
+                    let cert_pass = certificate.password().unwrap_or("");
+                    if config.extra_params.get("ssh_password") != Some(&cert_pass.to_string()) {
                         config.extra_params.insert(
                             "ssh_password".to_string(),
-                            certificate.password.clone().unwrap_or_default(),
+                            cert_pass.to_string(),
                         );
                         changed = true;
                     }
@@ -1249,19 +1297,27 @@ fn apply_certificate_to_db_config(
                             .insert("ssh_auth_type".to_string(), "private_key".to_string());
                         changed = true;
                     }
-                    let key_path = certificate.key_path.clone().unwrap_or_default();
-                    if config.extra_params.get("ssh_private_key_path") != Some(&key_path) {
+                    let key_path = certificate.key_path().unwrap_or("");
+                    if config.extra_params.get("ssh_private_key_path") != Some(&key_path.to_string()) {
                         config
                             .extra_params
-                            .insert("ssh_private_key_path".to_string(), key_path);
+                            .insert("ssh_private_key_path".to_string(), key_path.to_string());
                         changed = true;
                     }
-                    let passphrase = certificate.passphrase.clone().unwrap_or_default();
-                    if config.extra_params.get("ssh_private_key_passphrase") != Some(&passphrase) {
-                        config
-                            .extra_params
-                            .insert("ssh_private_key_passphrase".to_string(), passphrase);
-                        changed = true;
+                    match certificate.passphrase() {
+                        Some(pass) if !pass.is_empty() => {
+                            if config.extra_params.get("ssh_private_key_passphrase")
+                                != Some(&pass.to_string())
+                            {
+                                config
+                                    .extra_params
+                                    .insert("ssh_private_key_passphrase".to_string(), pass.to_string());
+                                changed = true;
+                            }
+                        }
+                        _ => {
+                            changed |= config.extra_params.remove("ssh_private_key_passphrase").is_some();
+                        }
                     }
                     changed |= config.extra_params.remove("ssh_password").is_some();
                 }
@@ -1310,32 +1366,34 @@ fn apply_certificate_to_ssh_params(params: &mut SshParams, certificate: &Certifi
 
     let mut changed = reference.sync_with_certificate(certificate);
 
-    if params.username != certificate.username {
-        params.username = certificate.username.clone();
-        changed = true;
+    if let Some(username) = certificate.username() {
+        if params.username != username {
+            params.username = username.to_string();
+            changed = true;
+        }
     }
 
     match certificate.kind {
         CertificateKind::UsernamePassword => {
-            let password = certificate.password.clone().unwrap_or_default();
+            let password = certificate.password().unwrap_or("");
             if !matches!(params.auth_method, SshAuthMethod::Password { .. }) {
                 params.auth_method = SshAuthMethod::Password {
-                    password: password.clone(),
+                    password: password.to_string(),
                 };
                 changed = true;
             } else if let SshAuthMethod::Password { password: existing } = &mut params.auth_method {
                 if *existing != password {
-                    *existing = password;
+                    *existing = password.to_string();
                     changed = true;
                 }
             }
         }
         CertificateKind::SshPrivateKey => {
-            let key_path = certificate.key_path.clone().unwrap_or_default();
-            let passphrase = certificate.passphrase.clone();
+            let key_path = certificate.key_path().unwrap_or("");
+            let passphrase = certificate.passphrase().map(|s| s.to_string());
             if !matches!(params.auth_method, SshAuthMethod::PrivateKey { .. }) {
                 params.auth_method = SshAuthMethod::PrivateKey {
-                    key_path,
+                    key_path: key_path.to_string(),
                     passphrase,
                 };
                 changed = true;
@@ -1345,7 +1403,7 @@ fn apply_certificate_to_ssh_params(params: &mut SshParams, certificate: &Certifi
             } = &mut params.auth_method
             {
                 if *existing_path != key_path {
-                    *existing_path = key_path;
+                    *existing_path = key_path.to_string();
                     changed = true;
                 }
                 if *existing_passphrase != passphrase {
@@ -1388,13 +1446,13 @@ fn apply_certificate_to_redis_params(params: &mut RedisParams, certificate: &Cer
         return changed;
     }
 
-    let username = Some(certificate.username.clone());
+    let username = certificate.username().map(|s| s.to_string());
     if params.username != username {
         params.username = username;
         changed = true;
     }
 
-    let password = certificate.password.clone();
+    let password = certificate.password().map(|s| s.to_string());
     if params.password != password {
         params.password = password;
         changed = true;
@@ -1435,13 +1493,13 @@ fn apply_certificate_to_mongodb_params(
         return changed;
     }
 
-    let username = Some(certificate.username.clone());
+    let username = certificate.username().map(|s| s.to_string());
     if params.username != username {
         params.username = username;
         changed = true;
     }
 
-    let password = certificate.password.clone();
+    let password = certificate.password().map(|s| s.to_string());
     if params.password != password {
         params.password = password;
         changed = true;

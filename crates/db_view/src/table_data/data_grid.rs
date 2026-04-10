@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AsyncApp, ClickEvent, Context, Corner, Entity, FocusHandle, Focusable,
@@ -6,7 +8,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, IconName, Sizable as _, Size, WindowExt, button::Button,
-    h_flex, v_flex,
+    h_flex, menu::PopupMenu, v_flex,
 };
 use one_ui::edit_table::{Column, EditTable, EditTableEvent, EditTableState};
 use rust_i18n::t;
@@ -308,6 +310,10 @@ pub struct DataGrid {
     filter_editor: Entity<TableFilterEditor>,
     /// 过滤器事件订阅
     _filter_sub: Option<Subscription>,
+    /// 隐藏的列（本地持久化）
+    hidden_columns: HashSet<SharedString>,
+    /// 列可见性是否已加载
+    column_visibility_loaded: bool,
 }
 
 impl DataGrid {
@@ -341,6 +347,8 @@ impl DataGrid {
             table_data_info,
             filter_editor,
             _filter_sub: None,
+            hidden_columns: HashSet::new(),
+            column_visibility_loaded: false,
         };
         result.bind_table_event(window, cx);
         if is_table_data {
@@ -375,6 +383,52 @@ impl DataGrid {
             },
         );
         self._filter_sub = Some(sub);
+    }
+
+    fn apply_column_visibility(&self, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            state.delegate_mut().update_visible_columns(&self.hidden_columns);
+            state.refresh(cx);
+        });
+    }
+
+    fn column_visibility_key(&self) -> String {
+        format!(
+            "column_visibility:{}:{}:{}",
+            self.config.connection_id, self.config.database_name, self.config.table_name
+        )
+    }
+
+    fn load_column_visibility(&mut self, cx: &mut Context<Self>) {
+        let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
+        let Some(storage) = storage else { return };
+        let Some(kv_repo) = storage.storage.get::<one_core::storage::KeyValueRepository>() else {
+            return;
+        };
+        let key = self.column_visibility_key();
+        if let Ok(Some(value)) = kv_repo.get_by_key(&key) {
+            if let Ok(hidden) = serde_json::from_str::<Vec<String>>(&value) {
+                self.hidden_columns = hidden.into_iter().map(SharedString::from).collect();
+                self.apply_column_visibility(cx);
+            }
+        }
+    }
+
+    fn save_column_visibility(&self, cx: &mut App) {
+        let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
+        let Some(storage) = storage else { return };
+        let Some(kv_repo) = storage.storage.get::<one_core::storage::KeyValueRepository>() else {
+            return;
+        };
+        let key = self.column_visibility_key();
+        let hidden: Vec<String> = self
+            .hidden_columns
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if let Ok(value) = serde_json::to_string(&hidden) {
+            let _ = kv_repo.set(&key, &value);
+        }
     }
 
     // ========== 公共访问器 ==========
@@ -496,6 +550,10 @@ impl DataGrid {
         let order_by_clause = self.filter_editor.read(cx).get_order_by_clause(cx);
         let filter_editor = self.filter_editor.clone();
         let page_size = self.table_data_info.read(cx).page_size;
+        let vis_key = format!(
+            "column_visibility:{}:{}:{}",
+            self.config.connection_id, self.config.database_name, self.config.table_name
+        );
 
         tracing::info!(
             "load_data_with_clauses: connection_id={}, database={}, table={}",
@@ -621,11 +679,34 @@ impl DataGrid {
                             );
                         });
 
+                        // 加载并应用列可见性配置
+                        let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
+                        let hidden_columns: HashSet<SharedString> = if let Some(storage) = storage {
+                            if let Some(kv_repo) = storage.storage.get::<one_core::storage::KeyValueRepository>() {
+                                if let Ok(Some(value)) = kv_repo.get_by_key(&vis_key) {
+                                    if let Ok(hidden) = serde_json::from_str::<Vec<String>>(&value) {
+                                        hidden.into_iter().map(SharedString::from).collect()
+                                    } else {
+                                        HashSet::new()
+                                    }
+                                } else {
+                                    HashSet::new()
+                                }
+                            } else {
+                                HashSet::new()
+                            }
+                        } else {
+                            HashSet::new()
+                        };
+
                         table.update(cx, |state, cx| {
                             state.delegate_mut().set_loading(false);
                             state.delegate_mut().set_column_meta(column_meta);
                             state.delegate_mut().update_data(columns, rows, rowids, cx);
                             state.delegate_mut().apply_order_by_clause(&order_by_clause);
+                            if !hidden_columns.is_empty() {
+                                state.delegate_mut().update_visible_columns(&hidden_columns);
+                            }
                             state.refresh(cx);
                         });
                     });
@@ -2259,6 +2340,83 @@ impl DataGrid {
                 )
             })
             .child(div().flex_1())
+            .child({
+                let data_grid_entity = cx.entity();
+                Button::new("column-visibility")
+                    .with_size(Size::Medium)
+                    .icon(IconName::ListCheck)
+                    .tooltip(t!("TableDataGrid.column_visibility").to_string())
+                    .disabled(loading)
+                    .dropdown_menu(move |menu, window, cx| {
+                        let data_grid_weak = data_grid_entity.downgrade();
+                        let delegate_read = data_grid_entity.read(cx).table.read(cx);
+                        let visible_indices: Vec<usize> = delegate_read
+                            .delegate()
+                            .visible_column_indices()
+                            .to_vec();
+                        let all_columns = delegate_read.delegate().columns().to_vec();
+                        let pk_keys: HashSet<SharedString> = delegate_read
+                            .delegate()
+                            .primary_key_indices()
+                            .iter()
+                            .filter_map(|&i| delegate_read.delegate().columns().get(i).map(|c| c.key.clone()))
+                            .collect();
+                        drop(delegate_read);
+
+                        // Derive hidden from visible indices
+                        let hidden: HashSet<SharedString> = all_columns
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| !visible_indices.contains(i))
+                            .map(|(_, c)| c.key.clone())
+                            .collect();
+
+                        all_columns
+                            .into_iter()
+                            .fold(menu, |menu, col| {
+                                let is_pk = pk_keys.contains(&col.key);
+                                let is_hidden = hidden.contains(&col.key);
+                                let col_key = col.key.clone();
+                                let col_name = col.name.clone();
+                                let dg_weak = data_grid_weak.clone();
+                                menu.item(
+                                    PopupMenuItem::new(col_name)
+                                        .checked(!is_hidden)
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                if is_pk {
+                                                    return;
+                                                }
+                                                if let Some(dg) = dg_weak.upgrade() {
+                                                    dg.update(cx, |grid, cx| {
+                                                        if grid.hidden_columns.contains(&col_key) {
+                                                            grid.hidden_columns.remove(&col_key);
+                                                        } else {
+                                                            grid.hidden_columns.insert(col_key.clone());
+                                                        }
+                                                        grid.apply_column_visibility(cx);
+                                                        grid.save_column_visibility(cx);
+                                                    });
+                                                }
+                                            },
+                                        ),
+                                )
+                            })
+                            .separator()
+                            .item(
+                                PopupMenuItem::new(t!("TableDataGrid.reset_column_visibility").to_string())
+                                    .on_click(move |_, _, cx| {
+                                        if let Some(dg) = data_grid_weak.upgrade() {
+                                            dg.update(cx, |grid, cx| {
+                                                grid.hidden_columns.clear();
+                                                grid.apply_column_visibility(cx);
+                                                grid.save_column_visibility(cx);
+                                            });
+                                        }
+                                    }),
+                            )
+                    })
+            })
             .child(
                 Button::new("toggle-editor")
                     .with_size(Size::Medium)
@@ -2591,6 +2749,8 @@ impl Clone for DataGrid {
             table_data_info: self.table_data_info.clone(),
             filter_editor: self.filter_editor.clone(),
             _filter_sub: None,
+            hidden_columns: self.hidden_columns.clone(),
+            column_visibility_loaded: self.column_visibility_loaded,
         }
     }
 }

@@ -2129,6 +2129,14 @@ TableDataGrid:
     en: Refresh
     zh-CN: 刷新
     zh-HK: 重新整理
+  column_visibility:
+    en: Column Visibility
+    zh-CN: 列可见性
+    zh-HK: 列可見性
+  reset_column_visibility:
+    en: Reset Column Visibility
+    zh-CN: 重置列可见性
+    zh-HK: 重置列可見性
   add_row:
     en: Add Row
     zh-CN: 添加行

@@ -175,6 +175,8 @@ pub struct EditorTableDelegate {
     undo_stack: Vec<UndoEntry>,
     /// Maximum undo stack size (0 means disabled)
     undo_stack_size: usize,
+    /// Visible column mapping: UI column index -> original column index
+    visible_column_indices: Vec<usize>,
 }
 
 fn parse_primary_order_by_clause(order_by_clause: &str) -> Option<(String, ColumnSort)> {
@@ -261,11 +263,42 @@ impl Clone for EditorTableDelegate {
             data_grid: self.data_grid.clone(),
             undo_stack: self.undo_stack.clone(),
             undo_stack_size: self.undo_stack_size,
+            visible_column_indices: self.visible_column_indices.clone(),
         }
     }
 }
 
 impl EditorTableDelegate {
+    /// 获取可见列映射的引用
+    pub fn visible_column_indices(&self) -> &[usize] {
+        &self.visible_column_indices
+    }
+
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    /// 更新可见列映射，根据隐藏列集合过滤
+    pub fn update_visible_columns(&mut self, hidden_columns: &HashSet<SharedString>) {
+        self.visible_column_indices = self
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, col)| !hidden_columns.contains(&col.key))
+            .map(|(idx, _)| idx)
+            .collect();
+        tracing::info!("[column_visibility] update_visible_columns: hidden={}, visible={:?}, total={}", hidden_columns.len(), self.visible_column_indices, self.columns.len());
+    }
+
+    /// 将 UI 列索引映射为原始列索引
+    pub fn map_visible_to_original(&self, visible_ix: usize) -> usize {
+        self.visible_column_indices.get(visible_ix).copied().unwrap_or(visible_ix)
+    }
+
+    pub fn primary_key_indices(&self) -> &[usize] {
+        &self.primary_key_indices
+    }
+
     pub fn new(
         columns: Vec<Column>,
         rows: Vec<Vec<Option<String>>>,
@@ -301,6 +334,7 @@ impl EditorTableDelegate {
             data_grid: None,
             undo_stack: Vec::new(),
             undo_stack_size: 50, // 默认值
+            visible_column_indices: Vec::new(),
         }
     }
 
@@ -799,6 +833,9 @@ impl EditorTableDelegate {
             })
             .collect();
 
+        // Reset visible columns — will be rebuilt by caller if needed
+        self.visible_column_indices.clear();
+
         let row_count = rows.len();
         self.original_rows = rows.clone();
         self.rows = rows.clone();
@@ -1210,7 +1247,11 @@ impl EditTableDelegate for EditorTableDelegate {
     }
 
     fn columns_count(&self, _cx: &App) -> usize {
-        self.columns.len()
+        if self.visible_column_indices.is_empty() {
+            self.columns.len()
+        } else {
+            self.visible_column_indices.len()
+        }
     }
 
     fn rows_count(&self, _cx: &App) -> usize {
@@ -1219,7 +1260,14 @@ impl EditTableDelegate for EditorTableDelegate {
     }
 
     fn column(&self, col_ix: usize, _cx: &App) -> Column {
-        self.columns[col_ix].clone()
+        let real_ix = if self.visible_column_indices.is_empty() {
+            col_ix
+        } else {
+            self.visible_column_indices.get(col_ix).copied().unwrap_or(col_ix)
+        };
+        self.columns.get(real_ix).cloned().unwrap_or_else(|| {
+            Column::new("unknown", "??")
+        })
     }
 
     fn perform_sort(
@@ -1229,9 +1277,10 @@ impl EditTableDelegate for EditorTableDelegate {
         window: &mut Window,
         cx: &mut Context<EditTableState<Self>>,
     ) {
+        let real_ix = self.map_visible_to_original(col_ix);
         let Some(column_name) = self
             .columns
-            .get(col_ix)
+            .get(real_ix)
             .map(|column| column.name.to_string())
         else {
             return;
@@ -1258,15 +1307,16 @@ impl EditTableDelegate for EditorTableDelegate {
         _window: &mut Window,
         _: &mut Context<EditTableState<Self>>,
     ) -> impl IntoElement {
+        let real_ix = self.map_visible_to_original(col_ix);
         let col_name = self
             .columns
-            .get(col_ix)
+            .get(real_ix)
             .map(|c| c.name.clone())
             .unwrap_or_default();
 
         let tooltip_text = self
             .column_meta
-            .get(col_ix)
+            .get(real_ix)
             .map(|meta| {
                 let mut text = meta.data_type.to_lowercase().clone();
                 if let Some(comment) = &meta.comment {
@@ -1280,7 +1330,7 @@ impl EditTableDelegate for EditorTableDelegate {
             .unwrap_or_default();
 
         h_flex()
-            .id(SharedString::from(format!("col-{}", col_ix)))
+            .id(SharedString::from(format!("col-{}", real_ix)))
             .size_full()
             .items_center()
             .justify_between()
@@ -1750,10 +1800,13 @@ impl EditTableDelegate for EditorTableDelegate {
         // Map display row index to actual row index
         let actual_row = self.map_display_to_actual_row(row);
 
+        // Map display column index to actual column index
+        let actual_col = self.map_visible_to_original(col);
+
         let value = self
             .rows
             .get(actual_row)
-            .and_then(|r| r.get(col))
+            .and_then(|r| r.get(actual_col))
             .cloned()
             .unwrap_or(None);
 

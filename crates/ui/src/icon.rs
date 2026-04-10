@@ -200,6 +200,7 @@ pub enum IconName {
     SerialPort,
     Monitor,
     DuckDB,
+    ListCheck,
 }
 
 impl IconName {
@@ -389,6 +390,7 @@ impl IconNamed for IconName {
             Self::SerialPort => "icons/serial_port.svg",
             Self::Monitor => "icons/monitor.svg",
             Self::DuckDB => "icons/duckdb.svg",
+            Self::ListCheck => "icons/list-check.svg",
         }
         .into()
     }

@@ -7,7 +7,7 @@ use crate::crypto;
 use crate::storage::connection::SqliteConnection;
 use crate::storage::manager::{GlobalStorageState, StorageManager, now};
 use crate::storage::models::{
-    Certificate, CertificateKind, apply_certificate_to_connection_snapshot,
+    Certificate, CertificateKind, KeyValue, apply_certificate_to_connection_snapshot,
     detach_certificate_from_connection_snapshot, has_decrypt_failure_in_sensitive_fields,
 };
 use crate::storage::quick_command::QuickCommandRepository;
@@ -127,12 +127,23 @@ impl From<WorkspaceRow> for Workspace {
     }
 }
 
-fn encrypt_secret(value: &Option<String>) -> Option<String> {
-    value.as_deref().map(crypto::encrypt_password)
-}
-
 fn decrypt_secret(value: Option<String>) -> Option<String> {
     value.map(|secret| crypto::decrypt_password(&secret))
+}
+
+/// 对证书 params 中的敏感字段加密后序列化
+fn encrypt_certificate_params(params: &serde_json::Value) -> String {
+    let mut encrypted = params.clone();
+    if let Some(obj) = encrypted.as_object_mut() {
+        for key in ["password", "passphrase"] {
+            if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
+                if !v.is_empty() {
+                    obj.insert(key.to_string(), serde_json::Value::String(crypto::encrypt_password(v)));
+                }
+            }
+        }
+    }
+    serde_json::to_string(&encrypted).unwrap_or_default()
 }
 
 fn next_workspace_sort_order(conn: &rusqlite::Connection) -> Result<i64> {
@@ -168,10 +179,7 @@ struct CertificateRow {
     id: i64,
     name: String,
     kind: String,
-    username: String,
-    password: Option<String>,
-    key_path: Option<String>,
-    passphrase: Option<String>,
+    params: String,
     remark: Option<String>,
     sync_enabled: bool,
     cloud_id: Option<String>,
@@ -188,10 +196,7 @@ impl FromSqliteRow for CertificateRow {
             id: row.get("id")?,
             name: row.get("name")?,
             kind: row.get("kind")?,
-            username: row.get("username")?,
-            password: row.get("password")?,
-            key_path: row.get("key_path")?,
-            passphrase: row.get("passphrase")?,
+            params: row.get("params")?,
             remark: row.get("remark")?,
             sync_enabled: row
                 .get::<_, i64>("sync_enabled")
@@ -209,14 +214,26 @@ impl FromSqliteRow for CertificateRow {
 
 impl From<CertificateRow> for Certificate {
     fn from(row: CertificateRow) -> Self {
+        let mut params: serde_json::Value = serde_json::from_str(&row.params)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+        // 对敏感字段解密
+        if let Some(obj) = params.as_object_mut() {
+            for key in ["password", "passphrase"] {
+                if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
+                    if !v.is_empty() {
+                        let decrypted = decrypt_secret(Some(v.to_string()));
+                        if let Some(d) = decrypted {
+                            obj.insert(key.to_string(), serde_json::Value::String(d));
+                        }
+                    }
+                }
+            }
+        }
         Self {
             id: Some(row.id),
             name: row.name,
             kind: CertificateKind::from_str(&row.kind),
-            username: row.username,
-            password: decrypt_secret(row.password),
-            key_path: row.key_path,
-            passphrase: decrypt_secret(row.passphrase),
+            params,
             remark: row.remark,
             sync_enabled: row.sync_enabled,
             cloud_id: row.cloud_id,
@@ -483,16 +500,15 @@ impl CertificateRepository {
             .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
         let updated_at = item.updated_at.unwrap_or_else(now);
 
+        let params_str = encrypt_certificate_params(&item.params);
+
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE certificates SET name = ?1, kind = ?2, username = ?3, password = ?4, key_path = ?5, passphrase = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
+                "UPDATE certificates SET name = ?1, kind = ?2, params = ?3, remark = ?4, sync_enabled = ?5, cloud_id = ?6, last_synced_at = ?7, team_id = ?8, owner_id = ?9, updated_at = ?10 WHERE id = ?11",
                 params![
                     item.name,
                     item.kind.to_string(),
-                    item.username,
-                    encrypt_secret(&item.password),
-                    item.key_path,
-                    encrypt_secret(&item.passphrase),
+                    params_str,
                     item.remark,
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
@@ -525,7 +541,7 @@ impl CertificateRepository {
     pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE cloud_id = ?1",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE cloud_id = ?1",
             )?;
             let mut rows = stmt.query(params![cloud_id])?;
             if let Some(row) = rows.next()? {
@@ -539,7 +555,7 @@ impl CertificateRepository {
     pub fn list_by_team(&self, team_id: &str) -> Result<Vec<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id = ?1 ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map(params![team_id], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -553,7 +569,7 @@ impl CertificateRepository {
     pub fn list_personal(&self) -> Result<Vec<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id IS NULL ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id IS NULL ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -575,17 +591,17 @@ impl Repository for CertificateRepository {
     fn insert(&self, item: &mut Self::Entity) -> Result<i64> {
         let ts = now();
 
+        // Serialize params with encryption for sensitive fields
+        let params_str = encrypt_certificate_params(&item.params);
+
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO certificates (name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                "INSERT INTO certificates (name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     item.name,
                     item.kind.to_string(),
-                    item.username,
-                    encrypt_secret(&item.password),
-                    item.key_path,
-                    encrypt_secret(&item.passphrase),
+                    params_str,
                     item.remark,
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
@@ -612,16 +628,15 @@ impl Repository for CertificateRepository {
             .ok_or_else(|| anyhow::anyhow!("Cannot update without ID"))?;
         let ts = now();
 
+        let params_str = encrypt_certificate_params(&item.params);
+
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE certificates SET name = ?1, kind = ?2, username = ?3, password = ?4, key_path = ?5, passphrase = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
+                "UPDATE certificates SET name = ?1, kind = ?2, params = ?3, remark = ?4, sync_enabled = ?5, cloud_id = ?6, last_synced_at = ?7, team_id = ?8, owner_id = ?9, updated_at = ?10 WHERE id = ?11",
                 params![
                     item.name,
                     item.kind.to_string(),
-                    item.username,
-                    encrypt_secret(&item.password),
-                    item.key_path,
-                    encrypt_secret(&item.passphrase),
+                    params_str,
                     item.remark,
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
@@ -646,7 +661,7 @@ impl Repository for CertificateRepository {
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE id = ?1",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE id = ?1",
             )?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
@@ -660,7 +675,7 @@ impl Repository for CertificateRepository {
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, username, password, key_path, passphrase, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -1462,6 +1477,51 @@ impl TeamKeyCacheRepository {
     }
 }
 
+#[derive(Clone)]
+pub struct KeyValueRepository {
+    conn: SqliteConnection,
+}
+
+impl KeyValueRepository {
+    pub fn new(conn: SqliteConnection) -> Self {
+        Self { conn }
+    }
+
+    pub fn get_by_key(&self, key: &str) -> Result<Option<String>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT value FROM key_values WHERE key = ?1")?;
+            let mut rows = stmt.query(params![key])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some(row.get(0)?))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    pub fn set(&self, key: &str, value: &str) -> Result<()> {
+        let ts = now();
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO key_values (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = ?4",
+                params![key, value, ts, ts],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete(&self, key: &str) -> Result<()> {
+        self.conn
+            .with_connection(|conn| {
+                conn.execute("DELETE FROM key_values WHERE key = ?1", params![key])?;
+                Ok(())
+            })
+    }
+}
+
 pub fn init(cx: &mut App) {
     let storage_state = cx.global::<GlobalStorageState>();
     let storage = storage_state.storage.clone();
@@ -1473,6 +1533,7 @@ pub fn init(cx: &mut App) {
     let quick_cmd_repo = QuickCommandRepository::new(conn.clone());
     let pending_deletion_repo = PendingCloudDeletionRepository::new(conn.clone());
     let team_key_cache_repo = TeamKeyCacheRepository::new(conn.clone());
+    let kv_repo = KeyValueRepository::new(conn.clone());
 
     storage.register(certificate_repo);
     storage.register(workspace_repo);
@@ -1480,6 +1541,7 @@ pub fn init(cx: &mut App) {
     storage.register(quick_cmd_repo);
     storage.register(pending_deletion_repo);
     storage.register(team_key_cache_repo);
+    storage.register(kv_repo);
 }
 
 #[cfg(test)]

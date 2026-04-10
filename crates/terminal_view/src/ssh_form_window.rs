@@ -607,28 +607,28 @@ impl SshFormWindow {
             return;
         };
 
+        let username = certificate.username().unwrap_or("").to_string();
         self.username_input.update(cx, |state, cx| {
-            state.set_value(&certificate.username, window, cx)
+            state.set_value(username, window, cx)
         });
 
         match certificate.kind {
             one_core::storage::CertificateKind::UsernamePassword => {
                 self.auth_method = AuthMethodSelection::Password;
+                let password = certificate.password().unwrap_or("").to_string();
                 self.password_input.update(cx, |state, cx| {
-                    state.set_value(certificate.password.clone().unwrap_or_default(), window, cx);
+                    state.set_value(password, window, cx);
                 });
             }
             one_core::storage::CertificateKind::SshPrivateKey => {
                 self.auth_method = AuthMethodSelection::PrivateKey;
+                let key_path = certificate.key_path().unwrap_or("").to_string();
+                let passphrase = certificate.passphrase().unwrap_or("").to_string();
                 self.key_path_input.update(cx, |state, cx| {
-                    state.set_value(certificate.key_path.clone().unwrap_or_default(), window, cx);
+                    state.set_value(key_path, window, cx);
                 });
                 self.passphrase_input.update(cx, |state, cx| {
-                    state.set_value(
-                        certificate.passphrase.clone().unwrap_or_default(),
-                        window,
-                        cx,
-                    );
+                    state.set_value(passphrase, window, cx);
                 });
             }
         }
@@ -646,7 +646,7 @@ impl SshFormWindow {
             .unwrap_or(22);
         let username = selected_certificate
             .as_ref()
-            .map(|certificate| certificate.username.clone())
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
             .unwrap_or_else(|| self.username_input.read(cx).text().to_string());
 
         if host.is_empty() || username.is_empty() {
@@ -656,11 +656,11 @@ impl SshFormWindow {
         let auth_method = if let Some(certificate) = &selected_certificate {
             match certificate.kind {
                 one_core::storage::CertificateKind::UsernamePassword => SshAuthMethod::Password {
-                    password: certificate.password.clone().unwrap_or_default(),
+                    password: certificate.password().unwrap_or("").to_string(),
                 },
                 one_core::storage::CertificateKind::SshPrivateKey => SshAuthMethod::PrivateKey {
-                    key_path: certificate.key_path.clone().unwrap_or_default(),
-                    passphrase: certificate.passphrase.clone(),
+                    key_path: certificate.key_path().unwrap_or("").to_string(),
+                    passphrase: certificate.passphrase().map(|s| s.to_string()),
                 },
             }
         } else {

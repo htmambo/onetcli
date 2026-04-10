@@ -381,7 +381,9 @@ impl CertificateForm {
             let mut state = InputState::new(window, cx)
                 .placeholder(t!("CertificateManager.username_placeholder"));
             if let Some(certificate) = &certificate {
-                state.set_value(certificate.username.clone(), window, cx);
+                if let Some(username) = certificate.username() {
+                    state.set_value(username.to_string(), window, cx);
+                }
             }
             state
         });
@@ -390,8 +392,8 @@ impl CertificateForm {
                 .placeholder(t!("CertificateManager.password_placeholder"))
                 .masked(true);
             if let Some(certificate) = &certificate {
-                if let Some(password) = &certificate.password {
-                    state.set_value(password.clone(), window, cx);
+                if let Some(password) = certificate.password() {
+                    state.set_value(password.to_string(), window, cx);
                 }
             }
             state
@@ -400,8 +402,8 @@ impl CertificateForm {
             let mut state = InputState::new(window, cx)
                 .placeholder(t!("CertificateManager.key_path_placeholder"));
             if let Some(certificate) = &certificate {
-                if let Some(key_path) = &certificate.key_path {
-                    state.set_value(key_path.clone(), window, cx);
+                if let Some(key_path) = certificate.key_path() {
+                    state.set_value(key_path.to_string(), window, cx);
                 }
             }
             state
@@ -411,8 +413,8 @@ impl CertificateForm {
                 .placeholder(t!("CertificateManager.passphrase_placeholder"))
                 .masked(true);
             if let Some(certificate) = &certificate {
-                if let Some(passphrase) = &certificate.passphrase {
-                    state.set_value(passphrase.clone(), window, cx);
+                if let Some(passphrase) = certificate.passphrase() {
+                    state.set_value(passphrase.to_string(), window, cx);
                 }
             }
             state
@@ -530,14 +532,29 @@ impl CertificateForm {
             if value.is_empty() { None } else { Some(value) }
         };
 
+        // Build params JSON
+        let mut params_map = serde_json::Map::new();
+        params_map.insert("username".to_string(), serde_json::Value::String(username.clone()));
+        if kind == CertificateKind::UsernamePassword {
+            if let Some(ref p) = password {
+                params_map.insert("password".to_string(), serde_json::Value::String(p.clone()));
+            }
+        }
+        if kind == CertificateKind::SshPrivateKey {
+            if let Some(ref kp) = key_path {
+                params_map.insert("key_path".to_string(), serde_json::Value::String(kp.clone()));
+            }
+            if let Some(ref ph) = passphrase {
+                params_map.insert("passphrase".to_string(), serde_json::Value::String(ph.clone()));
+            }
+        }
+        let params = serde_json::Value::Object(params_map);
+
         let mut certificate = self.original.clone().unwrap_or(Certificate {
             id: None,
             name: String::new(),
             kind,
-            username: String::new(),
-            password: None,
-            key_path: None,
-            passphrase: None,
+            params,
             remark: None,
             sync_enabled: true,
             cloud_id: None,
@@ -550,22 +567,32 @@ impl CertificateForm {
 
         certificate.name = name;
         certificate.kind = kind;
-        certificate.username = username;
-        certificate.password = if kind == CertificateKind::UsernamePassword {
-            password
-        } else {
-            None
-        };
-        certificate.key_path = if kind == CertificateKind::SshPrivateKey {
-            key_path
-        } else {
-            None
-        };
-        certificate.passphrase = if kind == CertificateKind::SshPrivateKey {
-            passphrase
-        } else {
-            None
-        };
+        // Update params by mutating the JSON
+        if let Some(obj) = certificate.params.as_object_mut() {
+            obj.insert("username".to_string(), serde_json::Value::String(username));
+            match kind {
+                CertificateKind::UsernamePassword => {
+                    if let Some(ref p) = password {
+                        obj.insert("password".to_string(), serde_json::Value::String(p.clone()));
+                    } else {
+                        obj.remove("password");
+                    }
+                    obj.remove("key_path");
+                    obj.remove("passphrase");
+                }
+                CertificateKind::SshPrivateKey => {
+                    obj.remove("password");
+                    if let Some(ref kp) = key_path {
+                        obj.insert("key_path".to_string(), serde_json::Value::String(kp.clone()));
+                    }
+                    if let Some(ref ph) = passphrase {
+                        obj.insert("passphrase".to_string(), serde_json::Value::String(ph.clone()));
+                    } else {
+                        obj.remove("passphrase");
+                    }
+                }
+            }
+        }
         certificate.remark = remark;
         certificate.sync_enabled = self.sync_enabled;
         certificate.team_id = None;

@@ -34,6 +34,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260408000001",
         include_str!("../../migrations/20260408000001_llm_thinking_budget.sql"),
     ),
+    (
+        "20260410000001",
+        include_str!("../../migrations/20260410000001_certificate_params.sql"),
+    ),
+    (
+        "20260410000002",
+        include_str!("../../migrations/20260410000002_key_value.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
