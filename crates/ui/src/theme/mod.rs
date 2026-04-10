@@ -56,11 +56,11 @@ pub fn windows_surface_opacity(
     }
 
     let factor = match (blur_enabled, layer) {
-        (true, WindowsSurfaceLayer::ContentBase) => 0.58,
-        (true, WindowsSurfaceLayer::ContentSection) => 0.38,
-        (true, WindowsSurfaceLayer::ContentCard) => 0.24,
-        (true, WindowsSurfaceLayer::TerminalFallback) => 0.26,
-        (true, WindowsSurfaceLayer::TerminalCanvas) => 0.42,
+        (true, WindowsSurfaceLayer::ContentBase) => 0.68,
+        (true, WindowsSurfaceLayer::ContentSection) => 0.48,
+        (true, WindowsSurfaceLayer::ContentCard) => 0.34,
+        (true, WindowsSurfaceLayer::TerminalFallback) => 0.36,
+        (true, WindowsSurfaceLayer::TerminalCanvas) => 0.52,
         (false, WindowsSurfaceLayer::ContentBase) => 0.45,
         (false, WindowsSurfaceLayer::ContentSection) => 0.24,
         (false, WindowsSurfaceLayer::ContentCard) => 0.14,

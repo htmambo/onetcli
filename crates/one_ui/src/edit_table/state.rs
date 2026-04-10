@@ -1998,32 +1998,34 @@ where
             .when(is_in_selection && !is_editing, |this| {
                 this.bg(cx.theme().table_active)
             })
-            // 选区边框 - 上边界
-            .when(border_top, |this| {
-                this.border_t_2().border_color(selection_border_color)
-            })
-            // 选区边框 - 下边界
-            .when(border_bottom, |this| {
-                this.border_b_2().border_color(selection_border_color)
-            })
-            // 选区边框 - 左边界
-            .when(border_left, |this| {
-                this.border_l_2().border_color(selection_border_color)
-            })
-            // 选区边框 - 右边界
-            .when(border_right, |this| {
-                this.border_r_2().border_color(selection_border_color)
-            })
-            // 活动单元格额外添加完整边框（仅在单选时显示）
+            // 活动单元格边框（用绝对定位子元素，不占用 content 区域）
             .when(
                 (is_active_cell || is_select_cell) && !is_editing && !is_multi_selection,
-                |this| this.border_2().border_color(selection_border_color),
+                |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .border_2()
+                            .border_color(selection_border_color),
+                    )
+                },
             )
-            // 编辑状态的单元格
+            // 编辑状态边框（用绝对定位子元素，不占用 content 区域）
             .when(is_editing, |this| {
-                this.bg(cx.theme().background)
-                    .border_2()
-                    .border_color(cx.theme().ring)
+                this.bg(cx.theme().background).child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .border_2()
+                        .border_color(cx.theme().ring),
+                )
             })
             .when(is_modified && !is_editing && !is_in_selection, |this| {
                 this.bg(cx.theme().warning.opacity(0.15))

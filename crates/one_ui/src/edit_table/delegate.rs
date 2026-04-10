@@ -18,6 +18,7 @@ use gpui_component::{
 
 pub enum CellEditor {
     Input(Entity<InputState>),
+    NumberInput(Entity<InputState>),
     DatePicker(Entity<DatePickerState>),
     DateTimePicker(Entity<DateTimePickerState>),
     TimePicker(Entity<TimePickerState>),
@@ -43,21 +44,48 @@ impl CellEditor {
                 .h_full()
                 .text_base()
                 .appearance(false)
+                .px_2()
+                .py_1()
+                .ml(px(1.))
+                .mt(px(3.))
+                .items_center()
+                .into_any_element(),
+            CellEditor::NumberInput(input) => Input::new(input)
+                .w_full()
+                .h_full()
+                .text_base()
+                .appearance(false)
+                .px_2()
+                .py_1()
+                .ml(px(1.))
+                .mt(px(1.))
+                .items_center()
                 .into_any_element(),
             CellEditor::DatePicker(picker) => DatePicker::new(picker)
                 .w_full()
                 .appearance(false)
                 .cleanable(true)
+                .px_0()
+                .py_1()
+                .mt(px(2.))
                 .into_any_element(),
             CellEditor::DateTimePicker(picker) => DateTimePicker::new(picker)
                 .w_full()
                 .appearance(false)
                 .cleanable(true)
+                .px_2()
+                .py_1()
+                .ml(px(1.))
+                .mt(px(1.))
                 .into_any_element(),
             CellEditor::TimePicker(picker) => TimePicker::new(picker)
                 .w_full()
                 .appearance(false)
                 .cleanable(true)
+                .px_2()
+                .py_1()
+                .ml(px(1.))
+                .mt(px(1.))
                 .into_any_element(),
             CellEditor::DatePickerInput { input, picker } => {
                 let input_handle = input.clone();
@@ -72,7 +100,11 @@ impl CellEditor {
                             .flex_1()
                             .h_full()
                             .text_base()
-                            .appearance(false),
+                            .appearance(false)
+                            .px_2()
+                            .py_1()
+                            .ml(px(1.))
+                            .items_center(),
                     )
                     .child(
                         div()
@@ -120,7 +152,11 @@ impl CellEditor {
                             .flex_1()
                             .h_full()
                             .text_base()
-                            .appearance(false),
+                            .appearance(false)
+                            .px_2()
+                            .py_1()
+                            .ml(px(1.))
+                            .items_center(),
                     )
                     .child(
                         div()
@@ -167,7 +203,11 @@ impl CellEditor {
                             .flex_1()
                             .h_full()
                             .text_base()
-                            .appearance(false),
+                            .appearance(false)
+                            .px_2()
+                            .py_1()
+                            .ml(px(1.))
+                            .items_center(),
                     )
                     .child(
                         div()
@@ -207,6 +247,7 @@ impl CellEditor {
     pub fn get_value(&self, cx: &App) -> String {
         match self {
             CellEditor::Input(input) => input.read(cx).text().to_string(),
+            CellEditor::NumberInput(input) => input.read(cx).text().to_string(),
             CellEditor::DatePicker(picker) => picker
                 .read(cx)
                 .date()

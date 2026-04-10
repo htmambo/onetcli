@@ -2183,7 +2183,6 @@ impl EditTableDelegate for EditorTableDelegate {
                 ))
             }
             _ => {
-                // 使用 Input 组件
                 let input = cx.new(|cx| {
                     let mut state = match field_type {
                         FieldType::Integer | FieldType::Decimal => {
@@ -2211,7 +2210,13 @@ impl EditTableDelegate for EditorTableDelegate {
                     },
                 );
 
-                Some((CellEditor::Input(input), vec![input_subscription]))
+                let editor = match field_type {
+                    FieldType::Integer | FieldType::Decimal => {
+                        CellEditor::NumberInput(input)
+                    }
+                    _ => CellEditor::Input(input),
+                };
+                Some((editor, vec![input_subscription]))
             }
         }
     }
