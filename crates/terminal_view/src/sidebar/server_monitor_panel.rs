@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 const REFRESH_INTERVAL_SECS: u64 = 3;
 const HISTORY_LIMIT: usize = 30;
@@ -34,6 +35,7 @@ const MAX_HISTORY_X_AXIS_LABELS: usize = 6;
 const SERVER_MONITOR_PREFS_FILE: &str = "server-monitor.json";
 const REMOTE_HELPER_DIR: &str = "$HOME/.onetcli-monitor";
 const REMOTE_HELPER_SCRIPT: &str = "$HOME/.onetcli-monitor/collect.sh";
+const STATS_COLLECT_TIMEOUT_SECS: u64 = 30;
 
 const REMOTE_MONITOR_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -u
@@ -1256,6 +1258,7 @@ fn render_cpu_core_grid(
     cores: &[CpuUsageCore],
     cx: &mut Context<ServerMonitorPanel>,
 ) -> AnyElement {
+    let core_chunks: Vec<_> = cores.chunks(2).collect();
     v_flex()
         .gap_2()
         .child(
@@ -1264,16 +1267,15 @@ fn render_cpu_core_grid(
                 .text_color(cx.theme().muted_foreground)
                 .child("Per-core"),
         )
-        .child(
+        .children(core_chunks.iter().map(|chunk| {
             h_flex()
                 .w_full()
-                .flex_wrap()
                 .gap_2()
-                .children(cores.iter().map(|core| {
+                .children(chunk.iter().map(|core| {
                     let value = core.percent.clamp(0.0, 100.0);
                     let label = core.name.clone();
                     v_flex()
-                        .w(px(108.0))
+                        .flex_1()
                         .gap_1()
                         .child(
                             h_flex()
@@ -1290,8 +1292,8 @@ fn render_cpu_core_grid(
                             Progress::new(SharedString::from(format!("cpu-core-{label}")))
                                 .value(value as f32),
                         )
-                })),
-        )
+                }))
+        }))
         .into_any_element()
 }
 
@@ -1806,25 +1808,40 @@ async fn exec_capture(client: Arc<Mutex<RusshClient>>, command: &str) -> Result<
     let mut guard = client.lock().await;
     let mut channel = guard.open_channel().await?;
     channel.exec(command).await?;
+    drop(guard); // 释放锁，允许并发其他操作
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let mut exit_status = 0u32;
+    let timeout_duration = Duration::from_secs(STATS_COLLECT_TIMEOUT_SECS);
 
-    while let Some(event) = channel.recv().await {
-        match event {
-            ChannelEvent::Data(data) => stdout.extend(data),
-            ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
-            ChannelEvent::ExitStatus(status) => exit_status = status,
-            ChannelEvent::ExitSignal {
-                signal_name,
-                error_message,
-            } => {
+    loop {
+        let result = timeout(timeout_duration, channel.recv()).await;
+        match result {
+            Ok(Some(event)) => {
+                match event {
+                    ChannelEvent::Data(data) => stdout.extend(data),
+                    ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
+                    ChannelEvent::ExitStatus(status) => exit_status = status,
+                    ChannelEvent::ExitSignal {
+                        signal_name,
+                        error_message,
+                    } => {
+                        return Err(anyhow!(
+                            "remote command failed with signal {signal_name}: {error_message}"
+                        ));
+                    }
+                    ChannelEvent::Eof | ChannelEvent::Close => break,
+                }
+            }
+            Ok(None) => break, // channel closed
+            Err(_) => {
+                // 超时：命令可能在等待数据但未返回
                 return Err(anyhow!(
-                    "remote command failed with signal {signal_name}: {error_message}"
+                    "command execution timed out after {} seconds",
+                    STATS_COLLECT_TIMEOUT_SECS
                 ));
             }
-            ChannelEvent::Eof | ChannelEvent::Close => break,
         }
     }
 

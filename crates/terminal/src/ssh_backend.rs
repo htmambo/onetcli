@@ -66,7 +66,8 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
                     let path_start = at + colon + 1;
                     if path_start < title.len() {
                         let path = &title[path_start..];
-                        if path.starts_with('/') || path.starts_with('~') {
+                        // ~ 需要 shell 展开，SFTP 客户端无法处理，只接受绝对路径
+                        if path.starts_with('/') {
                             return Some(path.to_string());
                         }
                     }
@@ -79,7 +80,8 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
             let after = &text[pos + 4..];
             let end_pos = after.find('\x07').unwrap_or(after.len());
             let path = after[..end_pos].trim();
-            if path.starts_with('/') || path.starts_with('~') {
+            // ~ 需要 shell 展开，SFTP 客户端无法处理，只接受绝对路径
+            if path.starts_with('/') {
                 return Some(path.to_string());
             }
         }
