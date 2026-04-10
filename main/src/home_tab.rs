@@ -2997,10 +2997,14 @@ impl HomePage {
     }
 
     fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 同步全局用户状态：如果设置页面执行了登出，同步清空本地状态
+        // 同步全局用户状态：设置页面登录/登出后，同步本地状态
         let global_user = GlobalCurrentUser::get_user(cx);
         if global_user.is_none() && self.current_user.is_some() {
             self.current_user = None;
+        } else if let Some(user) = global_user {
+            if self.current_user.is_none() {
+                self.current_user = Some(user);
+            }
         }
 
         let blur_enabled = cx.theme().window_blur_enabled;
