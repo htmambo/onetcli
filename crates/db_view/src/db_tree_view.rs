@@ -406,6 +406,8 @@ pub struct DbTreeView {
     connection_name: Option<String>,
     // 工作区ID
     workspace_id: Option<i64>,
+    // 是否为工作区模式（由外部打开方式决定）
+    is_workspace_mode: bool,
     // 搜索输入框状态
     search_input: Entity<InputState>,
     // 搜索关键字
@@ -496,6 +498,7 @@ impl DbTreeView {
         connections: &Vec<StoredConnection>,
         window: &mut Window,
         cx: &mut Context<Self>,
+        is_workspace_mode: bool,
     ) -> Self {
         let focus_handle = cx.focus_handle();
         let mut db_nodes = HashMap::new();
@@ -596,7 +599,7 @@ impl DbTreeView {
         }
 
         // 构建初始的扁平化条目
-        let flat_entries = Self::build_initial_flat_entries(&db_nodes);
+        let flat_entries = Self::build_initial_flat_entries(&db_nodes, is_workspace_mode);
 
         Self {
             focus_handle,
@@ -611,6 +614,7 @@ impl DbTreeView {
             expanded_nodes: HashSet::new(),
             connection_name: None,
             workspace_id,
+            is_workspace_mode,
             search_input,
             search_query: String::new(),
             search_seq: 0,
@@ -624,20 +628,36 @@ impl DbTreeView {
     }
 
     /// 构建初始的扁平化条目
-    fn build_initial_flat_entries(db_nodes: &HashMap<String, DbNode>) -> Vec<FlatDbEntry> {
+    fn build_initial_flat_entries(
+        db_nodes: &HashMap<String, DbNode>,
+        is_workspace_mode: bool,
+    ) -> Vec<FlatDbEntry> {
         let mut root_nodes: Vec<&DbNode> = db_nodes
             .values()
             .filter(|n| n.parent_context.is_none())
             .collect();
         root_nodes.sort();
 
-        root_nodes
-            .iter()
-            .map(|n| FlatDbEntry {
-                node_id: n.id.clone(),
-                depth: 0,
-            })
-            .collect()
+        let skip_connection = !is_workspace_mode;
+
+        let mut entries = Vec::new();
+        for n in root_nodes {
+            if skip_connection && n.node_type == DbNodeType::Connection {
+                // 单库模式下跳过 Connection 根节点，递归添加其子节点
+                for child in &n.children {
+                    entries.push(FlatDbEntry {
+                        node_id: child.id.clone(),
+                        depth: 0,
+                    });
+                }
+            } else {
+                entries.push(FlatDbEntry {
+                    node_id: n.id.clone(),
+                    depth: 0,
+                });
+            }
+        }
+        entries
     }
 
     /// 处理全局连接数据变更事件
@@ -1473,15 +1493,23 @@ impl DbTreeView {
             return false;
         }
 
-        // 添加当前节点
-        self.flat_entries.push(FlatDbEntry {
-            node_id: node_id.to_string(),
-            depth,
-        });
+        // 单库模式下跳过 Connection 根节点，直接显示其子节点
+        let is_connection = node.node_type == DbNodeType::Connection;
+        let skip_connection = is_connection && !self.is_workspace_mode;
+
+        if !skip_connection {
+            self.flat_entries.push(FlatDbEntry {
+                node_id: node_id.to_string(),
+                depth,
+            });
+        }
 
         // 如果展开或者搜索匹配到子节点，添加子节点
         let should_show_children = if !query.is_empty() {
             has_matching_children
+        } else if skip_connection {
+            // 单库模式下 Connection 的子节点始终显示
+            true
         } else {
             self.expanded_nodes.contains(node_id)
         };
@@ -1490,7 +1518,9 @@ impl DbTreeView {
             // 需要克隆 children 以避免借用冲突
             let children: Vec<String> = node.children.iter().map(|c| c.id.clone()).collect();
             for child_id in children {
-                self.add_flat_entry_recursive(&child_id, depth + 1, query, conn_id);
+                // 单库模式下 Connection 的子节点保持在 depth 0
+                let child_depth = if skip_connection { depth } else { depth + 1 };
+                self.add_flat_entry_recursive(&child_id, child_depth, query, conn_id);
             }
         }
 

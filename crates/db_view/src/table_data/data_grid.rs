@@ -2361,7 +2361,7 @@ impl DataGrid {
                             .iter()
                             .filter_map(|&i| delegate_read.delegate().columns().get(i).map(|c| c.key.clone()))
                             .collect();
-                        drop(delegate_read);
+                        // drop(delegate_read);
 
                         // Derive hidden from visible indices
                         let hidden: HashSet<SharedString> = all_columns

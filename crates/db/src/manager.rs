@@ -385,10 +385,10 @@ impl ConnectionManager {
             {
                 session.mark_in_use();
 
-                info!(
-                    "Reusing session: {} (database: {:?})",
-                    session.session_id, config.database
-                );
+                // trace!(
+                //     "Reusing session: {} (database: {:?})",
+                //     session.session_id, config.database
+                // );
                 return Ok(Some(session.session_id.clone()));
             }
         }
@@ -447,7 +447,7 @@ impl ConnectionManager {
                     Ok(_) => {
                         // Check passed (consistent or updated), release normally
                         session.release();
-                        info!("Session {} released", session_id);
+                        // trace!("Session {} released", session_id);
                         return Ok(());
                     }
                     Err(e) => {
