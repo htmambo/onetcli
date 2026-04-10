@@ -202,6 +202,7 @@ pub struct ConnectionRestorePopupView {
     home_page: Entity<HomePage>,
     items: Vec<ResolvedConnectionRestoreItem>,
     selected_snapshot_ids: HashSet<String>,
+    restoring: bool,
 }
 
 impl ConnectionRestorePopupView {
@@ -215,6 +216,7 @@ impl ConnectionRestorePopupView {
             home_page,
             items,
             selected_snapshot_ids,
+            restoring: false,
         }
     }
 
@@ -235,44 +237,60 @@ impl ConnectionRestorePopupView {
     }
 
     fn on_skip(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
-            tracing::warn!("恢复连接弹窗未找到主窗口句柄，无法执行跳过恢复操作");
+        // 防止重复点击
+        if self.restoring {
             return;
-        };
+        }
+        self.restoring = true;
 
         let home_page = self.home_page.clone();
-        let _ = cx.update_window(
-            main_window_handle.window_handle,
-            move |_, main_window, cx| {
-                home_page.update(cx, |home, cx| {
-                    home.skip_pending_connection_restore(main_window, cx);
-                });
-            },
-        );
+
+        // 使用 defer 延迟到下一个事件循环，避免在 update 上下文中嵌套 update
+        window.defer(cx, move |_window, cx| {
+            if let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() {
+                let _ = cx.update_window(
+                    main_window_handle.window_handle,
+                    move |_, main_window, cx| {
+                        home_page.update(cx, |home, cx| {
+                            home.skip_pending_connection_restore(main_window, cx);
+                        });
+                    },
+                );
+            }
+        });
+
         request_popup_window_close(window, cx);
     }
 
     fn on_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
+        // 防止重复点击
+        if self.restoring {
+            return;
+        }
+        self.restoring = true;
+
+        let Some(_main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
             tracing::warn!("恢复连接弹窗未找到主窗口句柄，无法执行恢复操作");
+            self.restoring = false;
             return;
         };
 
         let selected_snapshot_ids = self.selected_snapshot_ids();
         let home_page = self.home_page.clone();
-        let restore_result = cx.update_window(
-            main_window_handle.window_handle,
-            move |_, main_window, cx| {
-                home_page.update(cx, |home, cx| {
-                    home.restore_saved_connection_sessions(&selected_snapshot_ids, main_window, cx);
-                });
-            },
-        );
 
-        if let Err(error) = restore_result {
-            tracing::warn!("恢复连接弹窗调用主窗口恢复逻辑失败：{}", error);
-            return;
-        }
+        // 使用 defer 延迟到下一个事件循环，避免在 update 上下文中嵌套 update
+        window.defer(cx, move |_window, cx| {
+            if let Some(main_window_handle) = cx.try_global::<GlobalMainWindowHandle>().copied() {
+                let _ = cx.update_window(
+                    main_window_handle.window_handle,
+                    move |_, main_window, cx| {
+                        home_page.update(cx, |home, cx| {
+                            home.restore_saved_connection_sessions(&selected_snapshot_ids, main_window, cx);
+                        });
+                    },
+                );
+            }
+        });
 
         request_popup_window_close(window, cx);
     }
@@ -288,6 +306,7 @@ impl Render for ConnectionRestorePopupView {
         let all_selected = self.all_selected();
         let selected_count = self.selected_snapshot_ids.len();
         let total_count = self.items.len();
+        let restoring = self.restoring;
         let item_views = self
             .items
             .iter()
@@ -465,6 +484,7 @@ impl Render for ConnectionRestorePopupView {
                                             .small()
                                             .with_variant(app_style::secondary_button_variant(cx))
                                             .label("跳过")
+                                            .disabled(restoring)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.on_skip(window, cx);
                                             })),
@@ -473,8 +493,8 @@ impl Render for ConnectionRestorePopupView {
                                         Button::new("connection-restore-apply")
                                             .small()
                                             .with_variant(app_style::primary_button_variant(cx))
-                                            .label("恢复所选")
-                                            .disabled(selected_count == 0)
+                                            .label(if restoring { "恢复中..." } else { "恢复所选" })
+                                            .disabled(selected_count == 0 || restoring)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.on_restore(window, cx);
                                             })),

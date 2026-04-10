@@ -559,14 +559,19 @@ impl HomePage {
         });
     }
 
+    /// 仅清理连接恢复快照状态，不涉及标签页操作
+    fn clear_connection_restore_state(&mut self) {
+        self.pending_connection_restore_snapshot = None;
+        self.connection_restore_prompt_opened = false;
+        crate::connection_restore::clear_pending_connection_restore_snapshot();
+    }
+
     pub(crate) fn skip_pending_connection_restore(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pending_connection_restore_snapshot = None;
-        self.connection_restore_prompt_opened = false;
-        crate::connection_restore::clear_pending_connection_restore_snapshot();
+        self.clear_connection_restore_state();
 
         // 跳过时恢复到标签恢复前的原始活动标签
         if let Some(index) = self.saved_active_tab_index {
@@ -602,7 +607,8 @@ impl HomePage {
             .collect::<HashSet<_>>();
         let resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
 
-        self.skip_pending_connection_restore(window, cx);
+        // 仅清理状态，不涉及标签页操作（避免嵌套 update 导致 panic）
+        self.clear_connection_restore_state();
 
         for item in resolved_items
             .into_iter()

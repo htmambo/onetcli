@@ -2356,6 +2356,14 @@ pub fn build_local_terminal(
     let working_dir = data
         .get("working_dir")
         .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        // 验证是绝对路径（Windows: 包含 :\ 或 UNC；Unix: 以 / 开头）
+        // 相对路径会导致 conPTY/os error 267
+        .filter(|s| {
+            std::path::Path::new(s).is_absolute()
+                || s.contains(":\\")
+                || s.starts_with("\\\\")
+        })
         .map(String::from);
     let config = LocalConfig {
         working_dir,
@@ -2607,7 +2615,7 @@ impl TabContent for TerminalView {
                             let _ = sender.send(false);
                         }
                     }
-                    true
+                    false
                 })
         });
 

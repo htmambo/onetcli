@@ -19,19 +19,15 @@ fn extract_path_from_powershell_title(title: &str) -> Option<String> {
     // 去掉 ANSI 颜色序列
     let title = strip_ansi(title);
 
-    // pwsh: "pwsh in D:\path" 或 "pwsh in C:/path" 或 "pwsh in /home/user" 或 "pwsh in hoping"（Windows 短路径）
+    // pwsh: "pwsh in D:\path" 或 "pwsh in C:/path" 或 "pwsh in /home/user"
     if let Some(pos) = title.strip_prefix("pwsh in ") {
         let path = pos.trim();
-        // pwsh 格式的路径即使没有分隔符也可能是有效路径（如 "pwsh in hoping" = C:\Users\hoping）
         if !path.is_empty() && path.len() < 256 {
-            // 验证是路径：包含分隔符 或 : 或以 ~ 开头，或全由合法路径字符组成
+            // 验证是绝对路径：包含分隔符 或 : 或以 ~ 开头
             if path.contains('\\')
                 || path.contains('/')
                 || path.contains(':')
                 || path.starts_with('~')
-                || (path
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.'))
             {
                 return Some(path.to_string());
             }
