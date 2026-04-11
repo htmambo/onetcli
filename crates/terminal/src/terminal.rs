@@ -176,21 +176,19 @@ fn build_ssh_prompt_hook_command(sync_path_with_terminal: bool) -> String {
     hook_body.push(SSH_PROMPT_READY_COMMAND);
     let hook_body = hook_body.join("; ");
 
-    // 使用守卫变量防止重复执行。ONETCLI_PROMPT_HOOK_SETUP 变量用于检测当前 shell 会话是否已初始化过 hook，
-    // 避免在 .zshrc 等文件被重复 source 时导致 hook 被多次注册和输出。
+    // 仅在函数未定义时才注册（避免重复注册和可见输出）。
+    // 使用 type 内置命令检测函数，比环境变量守卫更简洁可靠。
     format!(
         "\
-if [ -z \"$ONETCLI_PROMPT_HOOK_SETUP\" ]; then \
-export ONETCLI_PROMPT_HOOK_SETUP=1; \
+type {hook_name} >/dev/null 2>&1 || {{ \
 {hook_name}() {{ {hook_body}; }}; \
 if [ -n \"$ZSH_VERSION\" ]; then \
 typeset -ga precmd_functions; \
-case \" ${{precmd_functions[*]}} \" in *\" {hook_name} \"*) ;; *) precmd_functions+=({hook_name}) ;; esac; \
+precmd_functions+=({hook_name}); \
 else \
 PROMPT_COMMAND='{hook_name}'${{PROMPT_COMMAND:+\";$PROMPT_COMMAND\"}}; export PROMPT_COMMAND; \
 fi; \
-{hook_name}; \
-fi",
+}}",
         hook_name = SSH_PROMPT_HOOK_NAME,
         hook_body = hook_body,
     )
