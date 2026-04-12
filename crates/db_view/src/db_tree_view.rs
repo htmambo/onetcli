@@ -638,24 +638,12 @@ impl DbTreeView {
             .collect();
         root_nodes.sort();
 
-        let skip_connection = !is_workspace_mode;
-
         let mut entries = Vec::new();
         for n in root_nodes {
-            if skip_connection && n.node_type == DbNodeType::Connection {
-                // 单库模式下跳过 Connection 根节点，递归添加其子节点
-                for child in &n.children {
-                    entries.push(FlatDbEntry {
-                        node_id: child.id.clone(),
-                        depth: 0,
-                    });
-                }
-            } else {
-                entries.push(FlatDbEntry {
-                    node_id: n.id.clone(),
-                    depth: 0,
-                });
-            }
+            entries.push(FlatDbEntry {
+                node_id: n.id.clone(),
+                depth: 0,
+            });
         }
         entries
     }
@@ -1493,23 +1481,14 @@ impl DbTreeView {
             return false;
         }
 
-        // 单库模式下跳过 Connection 根节点，直接显示其子节点
-        let is_connection = node.node_type == DbNodeType::Connection;
-        let skip_connection = is_connection && !self.is_workspace_mode;
-
-        if !skip_connection {
-            self.flat_entries.push(FlatDbEntry {
-                node_id: node_id.to_string(),
-                depth,
-            });
-        }
+        self.flat_entries.push(FlatDbEntry {
+            node_id: node_id.to_string(),
+            depth,
+        });
 
         // 如果展开或者搜索匹配到子节点，添加子节点
         let should_show_children = if !query.is_empty() {
             has_matching_children
-        } else if skip_connection {
-            // 单库模式下 Connection 的子节点始终显示
-            true
         } else {
             self.expanded_nodes.contains(node_id)
         };
@@ -1518,9 +1497,7 @@ impl DbTreeView {
             // 需要克隆 children 以避免借用冲突
             let children: Vec<String> = node.children.iter().map(|c| c.id.clone()).collect();
             for child_id in children {
-                // 单库模式下 Connection 的子节点保持在 depth 0
-                let child_depth = if skip_connection { depth } else { depth + 1 };
-                self.add_flat_entry_recursive(&child_id, child_depth, query, conn_id);
+                self.add_flat_entry_recursive(&child_id, depth + 1, query, conn_id);
             }
         }
 

@@ -2149,6 +2149,10 @@ TableDataGrid:
     en: Undo
     zh-CN: 撤销
     zh-HK: 復原
+  step_undo:
+    en: Undo one step
+    zh-CN: 单步撤销
+    zh-HK: 单步復原
   sql_preview:
     en: SQL Preview
     zh-CN: SQL预览

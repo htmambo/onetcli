@@ -339,10 +339,7 @@ impl GithubGistVault {
             let status = response.status().as_u16();
             // 读取错误响应体
             let mut err_bytes = Vec::new();
-            let _ = response
-                .into_body()
-                .read_to_end(&mut err_bytes)
-                .await;
+            let _ = response.into_body().read_to_end(&mut err_bytes).await;
             let err_body = String::from_utf8_lossy(&err_bytes);
             return Err(CloudApiError::ServerError(format!(
                 "更新 gist 失败: HTTP {} - {}",
@@ -396,9 +393,8 @@ impl BlobVault for GithubGistVault {
         let tokens = self.tokens()?;
 
         // 加密数据本身就是安全的字符串，直接存储为 JSON 字符串
-        let content = String::from_utf8(data).map_err(|_| {
-            CloudApiError::DataFormatError("加密数据不是有效的 UTF-8".to_string())
-        })?;
+        let content = String::from_utf8(data)
+            .map_err(|_| CloudApiError::DataFormatError("加密数据不是有效的 UTF-8".to_string()))?;
         self.update_gist(&gist_id, &content, tokens).await?;
 
         Ok(BlobMeta {

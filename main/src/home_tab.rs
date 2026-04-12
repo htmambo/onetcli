@@ -1020,10 +1020,7 @@ impl HomePage {
                     .with_backend(backend)
                     .with_opt_blob_vault(vault)
             }
-            "webdav" => {
-                SyncEngine::new(cloud_client, sync_service, storage)
-                    .with_backend(backend)
-            }
+            "webdav" => SyncEngine::new(cloud_client, sync_service, storage).with_backend(backend),
             _ => SyncEngine::new(cloud_client, sync_service, storage).with_backend(backend),
         };
 
@@ -1352,10 +1349,7 @@ impl HomePage {
                     .with_backend(backend)
                     .with_opt_blob_vault(vault)
             }
-            "webdav" => {
-                SyncEngine::new(cloud_client, sync_service, storage)
-                    .with_backend(backend)
-            }
+            "webdav" => SyncEngine::new(cloud_client, sync_service, storage).with_backend(backend),
             _ => SyncEngine::new(cloud_client, sync_service, storage).with_backend(backend),
         };
 

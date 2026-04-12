@@ -287,12 +287,20 @@ impl EditorTableDelegate {
             .filter(|(_, col)| !hidden_columns.contains(&col.key))
             .map(|(idx, _)| idx)
             .collect();
-        tracing::info!("[column_visibility] update_visible_columns: hidden={}, visible={:?}, total={}", hidden_columns.len(), self.visible_column_indices, self.columns.len());
+        tracing::info!(
+            "[column_visibility] update_visible_columns: hidden={}, visible={:?}, total={}",
+            hidden_columns.len(),
+            self.visible_column_indices,
+            self.columns.len()
+        );
     }
 
     /// 将 UI 列索引映射为原始列索引
     pub fn map_visible_to_original(&self, visible_ix: usize) -> usize {
-        self.visible_column_indices.get(visible_ix).copied().unwrap_or(visible_ix)
+        self.visible_column_indices
+            .get(visible_ix)
+            .copied()
+            .unwrap_or(visible_ix)
     }
 
     pub fn primary_key_indices(&self) -> &[usize] {
@@ -1263,11 +1271,15 @@ impl EditTableDelegate for EditorTableDelegate {
         let real_ix = if self.visible_column_indices.is_empty() {
             col_ix
         } else {
-            self.visible_column_indices.get(col_ix).copied().unwrap_or(col_ix)
+            self.visible_column_indices
+                .get(col_ix)
+                .copied()
+                .unwrap_or(col_ix)
         };
-        self.columns.get(real_ix).cloned().unwrap_or_else(|| {
-            Column::new("unknown", "??")
-        })
+        self.columns
+            .get(real_ix)
+            .cloned()
+            .unwrap_or_else(|| Column::new("unknown", "??"))
     }
 
     fn perform_sort(
@@ -2211,9 +2223,7 @@ impl EditTableDelegate for EditorTableDelegate {
                 );
 
                 let editor = match field_type {
-                    FieldType::Integer | FieldType::Decimal => {
-                        CellEditor::NumberInput(input)
-                    }
+                    FieldType::Integer | FieldType::Decimal => CellEditor::NumberInput(input),
                     _ => CellEditor::Input(input),
                 };
                 Some((editor, vec![input_subscription]))
@@ -2701,6 +2711,7 @@ mod tests {
             data_grid: None,
             undo_stack: Vec::new(),
             undo_stack_size: 50,
+            visible_column_indices: Vec::new(),
         }
     }
 

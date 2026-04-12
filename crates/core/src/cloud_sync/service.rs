@@ -317,10 +317,7 @@ impl CloudSyncService {
                 .get(tid)
                 .map(|s| s.clone())
                 .ok_or(SyncError::NotUnlocked),
-            None => self
-                .master_key
-                .clone()
-                .ok_or(SyncError::NotUnlocked),
+            None => self.master_key.clone().ok_or(SyncError::NotUnlocked),
         }
     }
 

@@ -92,7 +92,8 @@ pub struct EditTableState<D: EditTableDelegate> {
     bounds: Bounds<Pixels>,
     fixed_head_cols_bounds: Bounds<Pixels>,
 
-    col_groups: Vec<ColGroup>,
+    /// Column groups (pub(super) for use within one_ui crate, e.g., by DataGrid)
+    pub(super) col_groups: Vec<ColGroup>,
 
     pub loop_selection: bool,
     pub col_selectable: bool,
@@ -2288,7 +2289,10 @@ where
                 .hover(|this| this.bg(cx.theme().secondary).opacity(7.))
                 .active(|this| this.bg(cx.theme().secondary_active).opacity(1.))
                 .on_click(
-                    cx.listener(move |table, _, window, cx| table.perform_sort(col_ix, window, cx)),
+                    cx.listener(move |table, _e: &ClickEvent, window, cx| {
+                        // 点击排序图标：循环切换排序方向
+                        table.perform_sort(col_ix, window, cx);
+                    }),
                 )
                 .child(
                     Icon::new(icon)

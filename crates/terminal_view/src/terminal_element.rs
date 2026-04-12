@@ -602,12 +602,26 @@ impl RenderCache {
             // Get base colors from terminal
             let base_fg = convert_color(cell.fg, &self.colors);
             let base_bg = convert_color(cell.bg, &self.colors);
+            let is_decorative = is_decorative_character(cell.c);
+
+            // 将默认前景/背景映射到主题实际渲染颜色，确保反色等属性能基于真实显示颜色工作。
+            let rendered_fg =
+                if matches!(cell.fg, Color::Named(NamedColor::Foreground)) && !is_decorative {
+                    self.custom_foreground
+                } else {
+                    base_fg
+                };
+            let rendered_bg = if matches!(cell.bg, Color::Named(NamedColor::Background)) {
+                self.custom_background
+            } else {
+                base_bg
+            };
 
             // Apply selection (higher priority than decorations)
             let (mut fg, mut bg) = if cell.is_selected {
                 (hsla(0.0, 0.0, 1.0, 1.0), hsla(0.58, 0.5, 0.4, 1.0))
             } else {
-                (base_fg, base_bg)
+                (rendered_fg, rendered_bg)
             };
 
             // Apply decorations from addons (unless selected)
@@ -621,37 +635,32 @@ impl RenderCache {
                 underline = deco_underline;
             }
 
-            // Apply custom foreground for default foreground color (lowest priority)
-            // Decorative characters (box drawing, powerline, etc.) keep their original colors
-            if !cell.is_selected
-                && matches!(cell.fg, Color::Named(NamedColor::Foreground))
-                && !is_decorative_character(cell.c)
-            {
-                // Only apply if decorations didn't change the foreground
-                if hsla_eq(fg, base_fg) {
-                    fg = self.custom_foreground;
+            if !cell.is_selected {
+                // 反色属性用于许多 TUI 的“当前项/光标块”效果，必须交换实际渲染颜色。
+                if cell.flags.contains(Flags::INVERSE) {
+                    std::mem::swap(&mut fg, &mut bg);
+                }
+
+                let is_hidden = cell.flags.contains(Flags::HIDDEN);
+
+                // Hidden 文本保留背景但不显示前景。
+                if is_hidden {
+                    fg = bg;
+                } else {
+                    // DIM 标志：降低前景色透明度
+                    if cell.flags.contains(Flags::DIM) {
+                        fg.a *= 0.7;
+                    }
+
+                    // 对比度保证：确保非装饰字符的文字可读性。
+                    if !is_decorative {
+                        fg = ensure_minimum_contrast(fg, bg);
+                    }
                 }
             }
 
-            // DIM 标志：降低前景色透明度
-            if cell.flags.contains(Flags::DIM) {
-                fg.a *= 0.7;
-            }
-
-            // 对比度保证：确保非装饰字符的文字可读性
-            // 关键：当单元格使用默认背景时，应该用 custom_background（来自 TerminalTheme）
-            // 而不是 alacritty 的 NamedColor::Background，因为实际渲染的背景是 custom_background
-            if !cell.is_selected && !is_decorative_character(cell.c) {
-                let actual_bg = if matches!(cell.bg, Color::Named(NamedColor::Background)) {
-                    self.custom_background
-                } else {
-                    bg
-                };
-                fg = ensure_minimum_contrast(fg, actual_bg);
-            }
-
             // Background batching
-            let is_default_bg = !cell.is_selected && hsla_eq(bg, self.default_bg);
+            let is_default_bg = !cell.is_selected && hsla_eq(bg, self.custom_background);
 
             if is_default_bg {
                 if let Some((start, color)) = bg_span.take() {
@@ -1290,7 +1299,11 @@ fn indexed_color_to_hsla(idx: u8) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use super::terminal_font_features;
+    use super::{hsla_eq, terminal_font_features, CellData, RenderCache};
+    use alacritty_terminal::term::cell::Flags;
+    use alacritty_terminal::term::color::Colors;
+    use alacritty_terminal::vte::ansi::{Color, NamedColor};
+    use gpui::hsla;
 
     #[test]
     fn terminal_font_features_explicitly_enable_all_ligature_tags() {
@@ -1318,5 +1331,63 @@ mod tests {
                 ("calt".to_string(), 0),
             ]
         );
+    }
+
+    #[test]
+    fn inverse_default_colors_render_as_reversed_block() {
+        let mut cache = RenderCache::new(1, 1, Colors::default());
+        cache.custom_foreground = hsla(0.0, 0.0, 1.0, 1.0);
+        cache.custom_background = hsla(0.0, 0.0, 0.0, 1.0);
+
+        cache.build_line_cache(
+            0,
+            vec![CellData {
+                column: 0,
+                c: 'X',
+                fg: Color::Named(NamedColor::Foreground),
+                bg: Color::Named(NamedColor::Background),
+                flags: Flags::INVERSE,
+                is_selected: false,
+            }],
+        );
+
+        assert_eq!(cache.lines[0].background_rects.len(), 1);
+        assert_eq!(cache.lines[0].background_rects[0].0, 0);
+        assert_eq!(cache.lines[0].background_rects[0].1, 1);
+        assert!(hsla_eq(
+            cache.lines[0].background_rects[0].2,
+            cache.custom_foreground
+        ));
+
+        assert_eq!(cache.lines[0].text_runs.len(), 1);
+        assert!(hsla_eq(
+            cache.lines[0].text_runs[0].color,
+            cache.custom_background
+        ));
+    }
+
+    #[test]
+    fn hidden_text_uses_background_color_for_foreground() {
+        let mut cache = RenderCache::new(1, 1, Colors::default());
+        cache.custom_background = hsla(0.0, 0.0, 0.0, 1.0);
+
+        cache.build_line_cache(
+            0,
+            vec![CellData {
+                column: 0,
+                c: 'X',
+                fg: Color::Named(NamedColor::Foreground),
+                bg: Color::Named(NamedColor::Background),
+                flags: Flags::HIDDEN,
+                is_selected: false,
+            }],
+        );
+
+        assert_eq!(cache.lines[0].background_rects.len(), 0);
+        assert_eq!(cache.lines[0].text_runs.len(), 1);
+        assert!(hsla_eq(
+            cache.lines[0].text_runs[0].color,
+            cache.custom_background
+        ));
     }
 }

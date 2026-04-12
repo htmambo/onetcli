@@ -18,6 +18,7 @@ mod time;
 mod title_bar;
 mod virtual_list;
 mod window_border;
+mod system_notification;
 mod window_ext;
 
 pub(crate) mod actions;
@@ -95,6 +96,7 @@ pub use theme::*;
 pub use time::{calendar, date_picker, datetime_picker, time_picker};
 pub use title_bar::*;
 pub use virtual_list::{VirtualList, VirtualListScrollHandle, h_virtual_list, v_virtual_list};
+pub use system_notification::{show_system_notification, SystemNotificationOptions};
 pub use window_border::{WindowBorder, window_border, window_paddings};
 pub use window_ext::WindowExt;
 

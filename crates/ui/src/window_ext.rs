@@ -1,5 +1,6 @@
 use crate::{
     Placement, Root, dialog::Dialog, input::InputState, notification::Notification, sheet::Sheet,
+    show_system_notification, SystemNotificationOptions,
 };
 use gpui::{App, Entity, Window};
 use std::{process::Command, rc::Rc};
@@ -113,6 +114,9 @@ pub trait WindowExt: Sized {
 
     /// 按照 macOS 系统设置执行标题栏双击动作。
     fn handle_titlebar_double_click(&self);
+
+    /// 发送系统级通知（不依赖窗口可见状态）
+    fn show_system_notification(&self, opts: SystemNotificationOptions, cx: &App);
 }
 
 impl WindowExt for Window {
@@ -210,6 +214,11 @@ impl WindowExt for Window {
     #[inline]
     fn focused_input(&mut self, cx: &mut App) -> Option<Entity<InputState>> {
         Root::read(self, cx).focused_input.clone()
+    }
+
+    #[inline]
+    fn show_system_notification(&self, opts: SystemNotificationOptions, cx: &App) {
+        show_system_notification(opts, cx);
     }
 
     #[inline]

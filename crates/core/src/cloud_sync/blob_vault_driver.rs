@@ -112,7 +112,10 @@ impl SyncEngine {
             }
         } else {
             // 本地更新或首次，上传
-            match self.upload_bundle(vault, local_bundle, local_timestamp).await {
+            match self
+                .upload_bundle(vault, local_bundle, local_timestamp)
+                .await
+            {
                 Ok(uploaded) => {
                     result.uploaded = uploaded;
                     tracing::info!("[Blob同步] 上传 bundle 到云端: {} 项", result.uploaded);
@@ -157,7 +160,10 @@ impl SyncEngine {
                                 if let Ok(key) = crypto.select_encrypt_key(None) {
                                     let encrypted = crate::crypto::encrypt_with_key(&json, key);
                                     if let Some(obj) = cert.as_object_mut() {
-                                        obj.insert("params".to_string(), serde_json::Value::String(encrypted));
+                                        obj.insert(
+                                            "params".to_string(),
+                                            serde_json::Value::String(encrypted),
+                                        );
                                     }
                                 }
                             }
@@ -183,8 +189,11 @@ impl SyncEngine {
                         let crypto = self.crypto_service.read().ok();
                         if let Some(ref crypto) = crypto {
                             if let Ok(key) = crypto.select_decrypt_key(None) {
-                                if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key) {
-                                    if let Ok(params) = serde_json::from_str::<serde_json::Value>(&json) {
+                                if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key)
+                                {
+                                    if let Ok(params) =
+                                        serde_json::from_str::<serde_json::Value>(&json)
+                                    {
                                         if let Some(obj) = cert.as_object_mut() {
                                             obj.insert("params".to_string(), params);
                                         }
@@ -229,7 +238,8 @@ impl SyncEngine {
         let mut type_timestamps = HashMap::new();
         if let Some(ref val) = connections {
             if let Some(arr) = val.as_array() {
-                let max_ts = arr.iter()
+                let max_ts = arr
+                    .iter()
                     .filter_map(|v| v.get("updated_at").and_then(|v| v.as_i64()))
                     .max()
                     .unwrap_or(0);
@@ -238,7 +248,8 @@ impl SyncEngine {
         }
         if let Some(ref val) = workspaces {
             if let Some(arr) = val.as_array() {
-                let max_ts = arr.iter()
+                let max_ts = arr
+                    .iter()
                     .filter_map(|v| v.get("updated_at").and_then(|v| v.as_i64()))
                     .max()
                     .unwrap_or(0);
@@ -247,7 +258,8 @@ impl SyncEngine {
         }
         if let Some(ref val) = certificates {
             if let Some(arr) = val.as_array() {
-                let max_ts = arr.iter()
+                let max_ts = arr
+                    .iter()
                     .filter_map(|v| v.get("updated_at").and_then(|v| v.as_i64()))
                     .max()
                     .unwrap_or(0);
@@ -349,9 +361,9 @@ impl SyncEngine {
                     SyncError::StorageError("ConnectionRepository not found".to_string())
                 })?;
 
-            let local_connections = repo.list().map_err(|e| {
-                SyncError::StorageError(format!("获取本地连接失败: {}", e))
-            })?;
+            let local_connections = repo
+                .list()
+                .map_err(|e| SyncError::StorageError(format!("获取本地连接失败: {}", e)))?;
 
             let local_by_cloud_id: HashMap<String, &crate::storage::StoredConnection> =
                 local_connections
@@ -359,11 +371,10 @@ impl SyncEngine {
                     .filter_map(|c| c.cloud_id.as_ref().map(|id| (id.clone(), c)))
                     .collect();
 
-            let local_by_name: HashMap<&str, &crate::storage::StoredConnection> =
-                local_connections
-                    .iter()
-                    .map(|c| (c.name.as_str(), c))
-                    .collect();
+            let local_by_name: HashMap<&str, &crate::storage::StoredConnection> = local_connections
+                .iter()
+                .map(|c| (c.name.as_str(), c))
+                .collect();
 
             for cloud_conn in &cloud_connections {
                 let cloud_id = cloud_conn.cloud_id.as_deref();
@@ -381,8 +392,7 @@ impl SyncEngine {
                             updated_conn.name = cloud_conn.name.clone();
                             updated_conn.params = cloud_conn.params.clone();
                             updated_conn.workspace_id = cloud_conn.workspace_id;
-                            updated_conn.selected_databases =
-                                cloud_conn.selected_databases.clone();
+                            updated_conn.selected_databases = cloud_conn.selected_databases.clone();
                             updated_conn.remark = cloud_conn.remark.clone();
                             updated_conn.team_id = cloud_conn.team_id.clone();
                             updated_conn.owner_id = cloud_conn.owner_id.clone();
@@ -400,9 +410,8 @@ impl SyncEngine {
                         let mut new_conn = cloud_conn.clone();
                         new_conn.id = None;
                         new_conn.last_synced_at = Some(SyncEngine::current_timestamp());
-                        repo.insert(&mut new_conn).map_err(|e| {
-                            SyncError::StorageError(format!("创建连接失败: {}", e))
-                        })?;
+                        repo.insert(&mut new_conn)
+                            .map_err(|e| SyncError::StorageError(format!("创建连接失败: {}", e)))?;
                         downloaded += 1;
                     }
                 } else if !local_by_name.contains_key(cloud_conn.name.as_str()) {
@@ -411,9 +420,8 @@ impl SyncEngine {
                     new_conn.id = None;
                     new_conn.cloud_id = None;
                     new_conn.last_synced_at = Some(SyncEngine::current_timestamp());
-                    repo.insert(&mut new_conn).map_err(|e| {
-                        SyncError::StorageError(format!("创建连接失败: {}", e))
-                    })?;
+                    repo.insert(&mut new_conn)
+                        .map_err(|e| SyncError::StorageError(format!("创建连接失败: {}", e)))?;
                     downloaded += 1;
                 }
             }
@@ -421,8 +429,9 @@ impl SyncEngine {
 
         // 恢复工作空间
         if let Some(ref val) = bundle.workspaces {
-            let cloud_workspaces: Vec<crate::storage::Workspace> = serde_json::from_value(val.clone())
-                .map_err(|e| SyncError::StorageError(format!("工作空间数据解析失败: {}", e)))?;
+            let cloud_workspaces: Vec<crate::storage::Workspace> =
+                serde_json::from_value(val.clone())
+                    .map_err(|e| SyncError::StorageError(format!("工作空间数据解析失败: {}", e)))?;
 
             let repo = self
                 .storage
@@ -431,15 +440,14 @@ impl SyncEngine {
                     SyncError::StorageError("WorkspaceRepository not found".to_string())
                 })?;
 
-            let local_workspaces = repo.list().map_err(|e| {
-                SyncError::StorageError(format!("获取本地工作空间失败: {}", e))
-            })?;
+            let local_workspaces = repo
+                .list()
+                .map_err(|e| SyncError::StorageError(format!("获取本地工作空间失败: {}", e)))?;
 
-            let local_by_cloud_id: HashMap<String, &crate::storage::Workspace> =
-                local_workspaces
-                    .iter()
-                    .filter_map(|w| w.cloud_id.as_ref().map(|id| (id.clone(), w)))
-                    .collect();
+            let local_by_cloud_id: HashMap<String, &crate::storage::Workspace> = local_workspaces
+                .iter()
+                .filter_map(|w| w.cloud_id.as_ref().map(|id| (id.clone(), w)))
+                .collect();
 
             for cloud_ws in &cloud_workspaces {
                 if let Some(cloud_id) = &cloud_ws.cloud_id {
@@ -474,8 +482,9 @@ impl SyncEngine {
         // 恢复凭证
         if let Some(ref val) = bundle.certificates {
             let decrypted_certs = self.decrypt_certificate_params(val);
-            let cloud_certs: Vec<crate::storage::Certificate> = serde_json::from_value(decrypted_certs)
-                .map_err(|e| SyncError::StorageError(format!("凭证数据解析失败: {}", e)))?;
+            let cloud_certs: Vec<crate::storage::Certificate> =
+                serde_json::from_value(decrypted_certs)
+                    .map_err(|e| SyncError::StorageError(format!("凭证数据解析失败: {}", e)))?;
 
             let repo = self
                 .storage
@@ -484,15 +493,14 @@ impl SyncEngine {
                     SyncError::StorageError("CertificateRepository not found".to_string())
                 })?;
 
-            let local_certs = repo.list().map_err(|e| {
-                SyncError::StorageError(format!("获取本地凭证失败: {}", e))
-            })?;
+            let local_certs = repo
+                .list()
+                .map_err(|e| SyncError::StorageError(format!("获取本地凭证失败: {}", e)))?;
 
-            let local_by_cloud_id: HashMap<String, &crate::storage::Certificate> =
-                local_certs
-                    .iter()
-                    .filter_map(|c| c.cloud_id.as_ref().map(|id| (id.clone(), c)))
-                    .collect();
+            let local_by_cloud_id: HashMap<String, &crate::storage::Certificate> = local_certs
+                .iter()
+                .filter_map(|c| c.cloud_id.as_ref().map(|id| (id.clone(), c)))
+                .collect();
 
             for cloud_cert in &cloud_certs {
                 if let Some(cloud_id) = &cloud_cert.cloud_id {
@@ -519,9 +527,8 @@ impl SyncEngine {
                         let mut new_cert = cloud_cert.clone();
                         new_cert.id = None;
                         new_cert.last_synced_at = Some(SyncEngine::current_timestamp());
-                        repo.insert(&mut new_cert).map_err(|e| {
-                            SyncError::StorageError(format!("创建凭证失败: {}", e))
-                        })?;
+                        repo.insert(&mut new_cert)
+                            .map_err(|e| SyncError::StorageError(format!("创建凭证失败: {}", e)))?;
                         downloaded += 1;
                     }
                 }

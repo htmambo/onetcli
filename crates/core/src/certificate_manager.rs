@@ -534,7 +534,10 @@ impl CertificateForm {
 
         // Build params JSON
         let mut params_map = serde_json::Map::new();
-        params_map.insert("username".to_string(), serde_json::Value::String(username.clone()));
+        params_map.insert(
+            "username".to_string(),
+            serde_json::Value::String(username.clone()),
+        );
         if kind == CertificateKind::UsernamePassword {
             if let Some(ref p) = password {
                 params_map.insert("password".to_string(), serde_json::Value::String(p.clone()));
@@ -542,10 +545,16 @@ impl CertificateForm {
         }
         if kind == CertificateKind::SshPrivateKey {
             if let Some(ref kp) = key_path {
-                params_map.insert("key_path".to_string(), serde_json::Value::String(kp.clone()));
+                params_map.insert(
+                    "key_path".to_string(),
+                    serde_json::Value::String(kp.clone()),
+                );
             }
             if let Some(ref ph) = passphrase {
-                params_map.insert("passphrase".to_string(), serde_json::Value::String(ph.clone()));
+                params_map.insert(
+                    "passphrase".to_string(),
+                    serde_json::Value::String(ph.clone()),
+                );
             }
         }
         let params = serde_json::Value::Object(params_map);
@@ -583,10 +592,16 @@ impl CertificateForm {
                 CertificateKind::SshPrivateKey => {
                     obj.remove("password");
                     if let Some(ref kp) = key_path {
-                        obj.insert("key_path".to_string(), serde_json::Value::String(kp.clone()));
+                        obj.insert(
+                            "key_path".to_string(),
+                            serde_json::Value::String(kp.clone()),
+                        );
                     }
                     if let Some(ref ph) = passphrase {
-                        obj.insert("passphrase".to_string(), serde_json::Value::String(ph.clone()));
+                        obj.insert(
+                            "passphrase".to_string(),
+                            serde_json::Value::String(ph.clone()),
+                        );
                     } else {
                         obj.remove("passphrase");
                     }

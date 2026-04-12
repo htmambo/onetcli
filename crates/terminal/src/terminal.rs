@@ -199,6 +199,26 @@ fn normalize_working_dir(path: &str) -> Option<String> {
     (!path.is_empty()).then(|| path.to_string())
 }
 
+/// 将路径中的 `~` 替换为实际的 home 目录路径。
+///
+/// shell prompt 有时会将 home 目录显示为 `~` 或 `~/...`，
+/// 此函数将其展开为真实路径以便在 UI 状态栏中正确显示。
+pub fn expand_tilde(path: &str) -> String {
+    let home = std::env::var("HOME").ok();
+    if let Some(ref home) = home {
+        if path == "~" {
+            return home.clone();
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            return format!("{}/{}", home, rest);
+        }
+        if let Some(rest) = path.strip_prefix("~\\") {
+            return format!("{}\\{}", home, rest);
+        }
+    }
+    path.to_string()
+}
+
 fn read_local_working_dir(path: &std::path::Path) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()
@@ -1492,6 +1512,11 @@ impl Terminal {
         self.current_working_dir.clone()
     }
 
+    /// 获取工作目录的显示形式，将 `~` 替换为实际 home 路径。
+    pub fn working_dir_display(&self) -> Option<String> {
+        self.latest_working_dir().map(|path| expand_tilde(&path))
+    }
+
     /// 获取 SSH 连接配置（仅 SSH 终端）
     pub fn ssh_config(&self) -> Option<&SshTerminalConfig> {
         self.ssh_config.as_ref()
@@ -1674,7 +1699,7 @@ impl Terminal {
         let term = self.term.lock();
         let history_size = term.history_size();
         let screen_lines = term.screen_lines();
-        let cols = term.columns();
+        let _cols = term.columns();
 
         let mut lines = Vec::new();
 
@@ -1741,8 +1766,8 @@ mod tests {
         build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
         next_local_cwd_file_path, note_ssh_user_input, read_local_working_dir,
-        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend, SshProcessState,
-        TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
+        resolve_default_windows_shell_from_env, shell_escape_arg, expand_tilde, LocalPtyBackend,
+        SshProcessState, TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
     use alacritty_terminal::tty::Options as PtyOptions;
@@ -1943,6 +1968,26 @@ mod tests {
         assert!(command.contains("precmd_functions+=(onetcli_cwd_write)"));
         assert!(command.contains("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null"));
         assert!(command.contains("PROMPT_COMMAND='pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null'"));
+    }
+
+    #[test]
+    fn expand_tilde_replaces_tilde_with_home() {
+        let previous_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", "/home/testuser");
+
+        assert_eq!(expand_tilde("~"), "/home/testuser");
+        assert_eq!(expand_tilde("~/projects"), "/home/testuser/projects");
+        assert_eq!(expand_tilde("~/projects/code"), "/home/testuser/projects/code");
+        // 非 ~ 路径保持不变
+        assert_eq!(expand_tilde("/tmp"), "/tmp");
+        assert_eq!(expand_tilde("/var/log"), "/var/log");
+        assert_eq!(expand_tilde("/home/other"), "/home/other");
+
+        if let Some(home) = previous_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
     }
 
     #[test]

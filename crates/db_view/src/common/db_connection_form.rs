@@ -1470,41 +1470,21 @@ impl DbConnectionForm {
         match field_name {
             "credential_ref" => {
                 self.set_field_value("username", &username, window, cx);
-                self.set_field_value(
-                    "password",
-                    &password,
-                    window,
-                    cx,
-                );
+                self.set_field_value("password", &password, window, cx);
             }
             "ssh_tunnel_credential_ref" => {
                 self.set_field_value("ssh_username", &username, window, cx);
                 match certificate.kind {
                     CertificateKind::UsernamePassword => {
                         self.set_field_value("ssh_auth_type", "password", window, cx);
-                        self.set_field_value(
-                            "ssh_password",
-                            &password,
-                            window,
-                            cx,
-                        );
+                        self.set_field_value("ssh_password", &password, window, cx);
                         self.set_field_value("ssh_private_key_path", "", window, cx);
                         self.set_field_value("ssh_private_key_passphrase", "", window, cx);
                     }
                     CertificateKind::SshPrivateKey => {
                         self.set_field_value("ssh_auth_type", "private_key", window, cx);
-                        self.set_field_value(
-                            "ssh_private_key_path",
-                            &key_path,
-                            window,
-                            cx,
-                        );
-                        self.set_field_value(
-                            "ssh_private_key_passphrase",
-                            &passphrase,
-                            window,
-                            cx,
-                        );
+                        self.set_field_value("ssh_private_key_path", &key_path, window, cx);
+                        self.set_field_value("ssh_private_key_passphrase", &passphrase, window, cx);
                         self.set_field_value("ssh_password", "", window, cx);
                     }
                 }

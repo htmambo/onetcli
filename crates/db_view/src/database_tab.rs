@@ -68,7 +68,8 @@ impl DatabaseTabView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let db_tree_view = cx.new(|cx| DbTreeView::new(&connections, window, cx, workspace.is_some()));
+        let db_tree_view =
+            cx.new(|cx| DbTreeView::new(&connections, window, cx, workspace.is_some()));
 
         let tab_container = cx.new(|cx| TabContainer::new(window, cx));
 

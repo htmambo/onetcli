@@ -71,8 +71,8 @@ impl SyncEngine {
 
     /// 缓存团队角色信息到 team_key_cache 表
     async fn cache_team_roles(&self, teams: &[super::models::Team], user_id: &str) {
-        use crate::storage::traits::Repository;
         use crate::storage::TeamKeyCacheRepository;
+        use crate::storage::traits::Repository;
 
         let repo = match self.storage.get::<TeamKeyCacheRepository>() {
             Some(repo) => repo,

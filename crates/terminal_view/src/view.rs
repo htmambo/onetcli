@@ -11,7 +11,7 @@ use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     kbd::Kbd, windows_surface_color, windows_surface_opacity, BlinkCursor, Icon, IconName, Root,
-    Sizable, Theme as UiTheme, WindowExt, WindowsSurfaceLayer,
+    Sizable, Theme as UiTheme, WindowExt, WindowsSurfaceLayer, SystemNotificationOptions,
 };
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
@@ -362,6 +362,8 @@ pub struct TerminalView {
     font_ligatures_enabled: bool,
     /// 终端退出行为: "prompt" 显示弹窗, "close" 直接关闭
     exit_behavior: String,
+    /// 最近一次同步给 PTY 的焦点状态，用于支持 ReportFocusInOut
+    last_reported_terminal_focus: Option<bool>,
 
     /// 侧边栏面板大小
     sidebar_panel_size: Pixels,
@@ -494,8 +496,13 @@ impl TerminalView {
         if let Some(error) = init_error.borrow_mut().take() {
             // 窗口初始化期间（如标签页恢复）Root 尚未设置，跳过通知以避免崩溃
             if window.root::<Root>().is_some() {
+                let error_msg = format!("创建本地终端失败: {}", error);
+                window.show_system_notification(
+                    SystemNotificationOptions::with_id("终端错误", &error_msg, "terminal-init-error"),
+                    cx,
+                );
                 window.push_notification(
-                    Notification::error(format!("创建本地终端失败: {}", error)).autohide(true),
+                    Notification::error(error_msg).autohide(true),
                     cx,
                 );
             } else {
@@ -595,15 +602,17 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
 
         // 焦点获得/失去订阅
-        let focus_subscription = cx.on_focus(&focus_handle, window, |this, _window, cx| {
+        let focus_subscription = cx.on_focus(&focus_handle, window, |this, window, cx| {
             if this.cursor_blink_enabled {
                 this.blink_manager.update(cx, BlinkCursor::start);
             }
+            this.sync_terminal_focus(window, cx);
         });
-        let blur_subscription = cx.on_blur(&focus_handle, window, |this, _window, cx| {
+        let blur_subscription = cx.on_blur(&focus_handle, window, |this, window, cx| {
             if this.cursor_blink_enabled {
                 this.blink_manager.update(cx, BlinkCursor::stop);
             }
+            this.sync_terminal_focus(window, cx);
         });
 
         let mut subscriptions = Vec::new();
@@ -647,6 +656,7 @@ impl TerminalView {
             middle_click_paste: true,
             font_ligatures_enabled: false,
             exit_behavior: "prompt".to_string(),
+            last_reported_terminal_focus: None,
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
             view_bounds: Bounds::default(),
@@ -1486,6 +1496,17 @@ impl TerminalView {
 
     fn focus_terminal(&self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle, cx);
+    }
+
+    fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let is_focused = self.focus_handle.is_focused(window);
+        let focus_reporting_enabled = {
+            let terminal = self.terminal.read(cx);
+            let mut term = terminal.term().lock();
+            term.is_focused = is_focused;
+            term.mode().contains(TermMode::FOCUS_IN_OUT)
+        };
+
     }
 
     fn show_unbracketed_paste_block_dialog(
@@ -2360,9 +2381,7 @@ pub fn build_local_terminal(
         // 验证是绝对路径（Windows: 包含 :\ 或 UNC；Unix: 以 / 开头）
         // 相对路径会导致 conPTY/os error 267
         .filter(|s| {
-            std::path::Path::new(s).is_absolute()
-                || s.contains(":\\")
-                || s.starts_with("\\\\")
+            std::path::Path::new(s).is_absolute() || s.contains(":\\") || s.starts_with("\\\\")
         })
         .map(String::from);
     let config = LocalConfig {

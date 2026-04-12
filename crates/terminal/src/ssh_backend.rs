@@ -40,15 +40,18 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
             }
         }
 
-        // OSC 7: file:// URI
+        // OSC 7: file:// URI (格式: file://<hostname>/<path>，hostname 可能为空)
         if let Some(pos) = text.find("\x1b]7;") {
-            let after = &text[pos + 5..];
+            // \x1b + ] + 7 + ; = 4 bytes, skip all 4
+            let after = &text[pos + 4..];
             if let Some(end) = after.find('\x07') {
                 let uri = &after[..end];
-                if let Some(rest) = uri.strip_prefix("file://") {
-                    if let Some(slash_pos) = rest.find('/') {
-                        let path = &rest[slash_pos..];
-                        if !path.is_empty() && path.starts_with('/') {
+                // 跳过 file:// 后，找第二个 /（如果有的话），其后的内容即为路径
+                // 格式: file://[<hostname>]/<path>
+                if let Some(path_start) = uri.find("://") {
+                    if let Some(path_pos) = uri[path_start + 3..].find('/') {
+                        let path = &uri[path_start + 3 + path_pos..];
+                        if !path.is_empty() {
                             return percent_decode(path);
                         }
                     }
@@ -182,6 +185,13 @@ impl SshBackend {
         channel.request_pty(&pty_config).await?;
         progress(SshConnectionStage::StartingShell);
         channel.request_shell().await?;
+
+        // Bash 非交互式 shell 中 PROMPT_COMMAND 在首次 prompt 前不会执行，
+        // 导致 OSC 7 路径无法获取。通过子 shell 直接发送 OSC 7 序列。
+        progress(SshConnectionStage::RunningInitCommands);
+        channel
+            .send_data(b"printf '\\033]7;file://${HOSTNAME:-}%s\\007\\n' \"$PWD\"\n")
+            .await?;
 
         // 有初始化命令时直接写入 shell
         if let Some(ref commands) = init_commands {

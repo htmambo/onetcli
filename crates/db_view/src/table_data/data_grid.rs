@@ -362,7 +362,7 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.table,
             window,
-            |_this, _, evt: &EditTableEvent, _window, _cx| {
+            |this: &mut DataGrid, _, evt: &EditTableEvent, window, cx| {
                 if let EditTableEvent::SelectCell(row, col) = evt {
                     trace!("select cell: {:?}", (row, col))
                 }
@@ -375,10 +375,10 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.filter_editor,
             window,
-            |this: &mut DataGrid, _, evt: &FilterEditorEvent, _, cx| match evt {
-                FilterEditorEvent::QueryApply => {
+            |this: &mut DataGrid, _, evt: &FilterEditorEvent, window, cx| {
+                if matches!(evt, FilterEditorEvent::QueryApply) {
                     this.load_data_with_clauses(1, cx);
-                    cx.notify()
+                    cx.notify();
                 }
             },
         );
@@ -387,7 +387,9 @@ impl DataGrid {
 
     fn apply_column_visibility(&self, cx: &mut App) {
         self.table.update(cx, |state, cx| {
-            state.delegate_mut().update_visible_columns(&self.hidden_columns);
+            state
+                .delegate_mut()
+                .update_visible_columns(&self.hidden_columns);
             state.refresh(cx);
         });
     }
@@ -402,7 +404,10 @@ impl DataGrid {
     fn load_column_visibility(&mut self, cx: &mut Context<Self>) {
         let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
         let Some(storage) = storage else { return };
-        let Some(kv_repo) = storage.storage.get::<one_core::storage::KeyValueRepository>() else {
+        let Some(kv_repo) = storage
+            .storage
+            .get::<one_core::storage::KeyValueRepository>()
+        else {
             return;
         };
         let key = self.column_visibility_key();
@@ -417,15 +422,14 @@ impl DataGrid {
     fn save_column_visibility(&self, cx: &mut App) {
         let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
         let Some(storage) = storage else { return };
-        let Some(kv_repo) = storage.storage.get::<one_core::storage::KeyValueRepository>() else {
+        let Some(kv_repo) = storage
+            .storage
+            .get::<one_core::storage::KeyValueRepository>()
+        else {
             return;
         };
         let key = self.column_visibility_key();
-        let hidden: Vec<String> = self
-            .hidden_columns
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let hidden: Vec<String> = self.hidden_columns.iter().map(|s| s.to_string()).collect();
         if let Ok(value) = serde_json::to_string(&hidden) {
             let _ = kv_repo.set(&key, &value);
         }
@@ -514,23 +518,13 @@ impl DataGrid {
             return;
         }
 
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let order_by_clause = match build_header_order_by_clause(
-            &global_state.db_manager,
-            self.config.database_type,
-            column_name,
-            sort,
-        ) {
-            Ok(Some(clause)) => clause,
-            Ok(None) => String::new(),
-            Err(error) => {
-                window.push_notification(error, cx);
-                return;
-            }
-        };
+        // 跳过 Default 排序（取消排序）
+        if matches!(sort, ColumnSort::Default) {
+            return;
+        }
 
         self.filter_editor.update(cx, |editor, cx| {
-            editor.set_order_by_clause(order_by_clause.clone(), window, cx);
+            editor.add_sort_column(column_name, sort, cx);
         });
 
         self.load_data_with_clauses(1, cx);
@@ -556,10 +550,12 @@ impl DataGrid {
         );
 
         tracing::info!(
-            "load_data_with_clauses: connection_id={}, database={}, table={}",
+            "load_data_with_clauses: connection_id={}, database={}, table={}, WHERE={}, ORDER BY={}",
             connection_id,
             database_name,
-            table_name
+            table_name,
+            if where_clause.is_empty() { "(none)" } else { &where_clause },
+            if order_by_clause.is_empty() { "(none)" } else { &order_by_clause }
         );
 
         self.table.update(cx, |state, cx| {
@@ -682,9 +678,13 @@ impl DataGrid {
                         // 加载并应用列可见性配置
                         let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
                         let hidden_columns: HashSet<SharedString> = if let Some(storage) = storage {
-                            if let Some(kv_repo) = storage.storage.get::<one_core::storage::KeyValueRepository>() {
+                            if let Some(kv_repo) = storage
+                                .storage
+                                .get::<one_core::storage::KeyValueRepository>()
+                            {
                                 if let Ok(Some(value)) = kv_repo.get_by_key(&vis_key) {
-                                    if let Ok(hidden) = serde_json::from_str::<Vec<String>>(&value) {
+                                    if let Ok(hidden) = serde_json::from_str::<Vec<String>>(&value)
+                                    {
                                         hidden.into_iter().map(SharedString::from).collect()
                                     } else {
                                         HashSet::new()
@@ -2302,7 +2302,7 @@ impl DataGrid {
                 this.child(
                     Button::new("undo-changes")
                         .with_size(Size::Medium)
-                        .icon(IconName::Refresh)
+                        .icon(IconName::Undo)
                         .tooltip(t!("TableDataGrid.undo").to_string())
                         .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_revert_changes)),
@@ -2350,16 +2350,20 @@ impl DataGrid {
                     .dropdown_menu(move |menu, window, cx| {
                         let data_grid_weak = data_grid_entity.downgrade();
                         let delegate_read = data_grid_entity.read(cx).table.read(cx);
-                        let visible_indices: Vec<usize> = delegate_read
-                            .delegate()
-                            .visible_column_indices()
-                            .to_vec();
+                        let visible_indices: Vec<usize> =
+                            delegate_read.delegate().visible_column_indices().to_vec();
                         let all_columns = delegate_read.delegate().columns().to_vec();
                         let pk_keys: HashSet<SharedString> = delegate_read
                             .delegate()
                             .primary_key_indices()
                             .iter()
-                            .filter_map(|&i| delegate_read.delegate().columns().get(i).map(|c| c.key.clone()))
+                            .filter_map(|&i| {
+                                delegate_read
+                                    .delegate()
+                                    .columns()
+                                    .get(i)
+                                    .map(|c| c.key.clone())
+                            })
                             .collect();
                         // drop(delegate_read);
 
@@ -2380,40 +2384,40 @@ impl DataGrid {
                                 let col_name = col.name.clone();
                                 let dg_weak = data_grid_weak.clone();
                                 menu.item(
-                                    PopupMenuItem::new(col_name)
-                                        .checked(!is_hidden)
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                if is_pk {
-                                                    return;
-                                                }
-                                                if let Some(dg) = dg_weak.upgrade() {
-                                                    dg.update(cx, |grid, cx| {
-                                                        if grid.hidden_columns.contains(&col_key) {
-                                                            grid.hidden_columns.remove(&col_key);
-                                                        } else {
-                                                            grid.hidden_columns.insert(col_key.clone());
-                                                        }
-                                                        grid.apply_column_visibility(cx);
-                                                        grid.save_column_visibility(cx);
-                                                    });
-                                                }
-                                            },
-                                        ),
+                                    PopupMenuItem::new(col_name).checked(!is_hidden).on_click(
+                                        move |_, _, cx| {
+                                            if is_pk {
+                                                return;
+                                            }
+                                            if let Some(dg) = dg_weak.upgrade() {
+                                                dg.update(cx, |grid, cx| {
+                                                    if grid.hidden_columns.contains(&col_key) {
+                                                        grid.hidden_columns.remove(&col_key);
+                                                    } else {
+                                                        grid.hidden_columns.insert(col_key.clone());
+                                                    }
+                                                    grid.apply_column_visibility(cx);
+                                                    grid.save_column_visibility(cx);
+                                                });
+                                            }
+                                        },
+                                    ),
                                 )
                             })
                             .separator()
                             .item(
-                                PopupMenuItem::new(t!("TableDataGrid.reset_column_visibility").to_string())
-                                    .on_click(move |_, _, cx| {
-                                        if let Some(dg) = data_grid_weak.upgrade() {
-                                            dg.update(cx, |grid, cx| {
-                                                grid.hidden_columns.clear();
-                                                grid.apply_column_visibility(cx);
-                                                grid.save_column_visibility(cx);
-                                            });
-                                        }
-                                    }),
+                                PopupMenuItem::new(
+                                    t!("TableDataGrid.reset_column_visibility").to_string(),
+                                )
+                                .on_click(move |_, _, cx| {
+                                    if let Some(dg) = data_grid_weak.upgrade() {
+                                        dg.update(cx, |grid, cx| {
+                                            grid.hidden_columns.clear();
+                                            grid.apply_column_visibility(cx);
+                                            grid.save_column_visibility(cx);
+                                        });
+                                    }
+                                }),
                             )
                     })
             })

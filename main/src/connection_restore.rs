@@ -285,7 +285,11 @@ impl ConnectionRestorePopupView {
                     main_window_handle.window_handle,
                     move |_, main_window, cx| {
                         home_page.update(cx, |home, cx| {
-                            home.restore_saved_connection_sessions(&selected_snapshot_ids, main_window, cx);
+                            home.restore_saved_connection_sessions(
+                                &selected_snapshot_ids,
+                                main_window,
+                                cx,
+                            );
                         });
                     },
                 );
@@ -493,7 +497,11 @@ impl Render for ConnectionRestorePopupView {
                                         Button::new("connection-restore-apply")
                                             .small()
                                             .with_variant(app_style::primary_button_variant(cx))
-                                            .label(if restoring { "恢复中..." } else { "恢复所选" })
+                                            .label(if restoring {
+                                                "恢复中..."
+                                            } else {
+                                                "恢复所选"
+                                            })
                                             .disabled(selected_count == 0 || restoring)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.on_restore(window, cx);

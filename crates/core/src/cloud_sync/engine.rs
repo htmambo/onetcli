@@ -368,7 +368,10 @@ impl SyncEngine {
     /// - `SyncServerBackend`：通过 REST API 同步（团队列表 + handlers）
     /// - `BlobVaultBackend`：通过 BlobVault 加密 blob 同步
     pub async fn sync(&self) -> Result<SyncResult, SyncError> {
-        tracing::info!("========== 开始云同步 (后端: {}) ==========", self.backend.backend_type());
+        tracing::info!(
+            "========== 开始云同步 (后端: {}) ==========",
+            self.backend.backend_type()
+        );
 
         self.backend.init_crypto(self).await?;
 

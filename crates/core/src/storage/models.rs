@@ -646,10 +646,10 @@ impl Certificate {
     }
 
     pub fn set_username(&mut self, value: &str) {
-        self.params
-            .as_object_mut()
-            .unwrap()
-            .insert("username".to_string(), serde_json::Value::String(value.to_string()));
+        self.params.as_object_mut().unwrap().insert(
+            "username".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
     }
     pub fn set_password(&mut self, value: Option<String>) {
         let obj = self.params.as_object_mut().unwrap();
@@ -1276,10 +1276,9 @@ fn apply_certificate_to_db_config(
                     }
                     let cert_pass = certificate.password().unwrap_or("");
                     if config.extra_params.get("ssh_password") != Some(&cert_pass.to_string()) {
-                        config.extra_params.insert(
-                            "ssh_password".to_string(),
-                            cert_pass.to_string(),
-                        );
+                        config
+                            .extra_params
+                            .insert("ssh_password".to_string(), cert_pass.to_string());
                         changed = true;
                     }
                     changed |= config.extra_params.remove("ssh_private_key_path").is_some();
@@ -1298,7 +1297,9 @@ fn apply_certificate_to_db_config(
                         changed = true;
                     }
                     let key_path = certificate.key_path().unwrap_or("");
-                    if config.extra_params.get("ssh_private_key_path") != Some(&key_path.to_string()) {
+                    if config.extra_params.get("ssh_private_key_path")
+                        != Some(&key_path.to_string())
+                    {
                         config
                             .extra_params
                             .insert("ssh_private_key_path".to_string(), key_path.to_string());
@@ -1309,14 +1310,18 @@ fn apply_certificate_to_db_config(
                             if config.extra_params.get("ssh_private_key_passphrase")
                                 != Some(&pass.to_string())
                             {
-                                config
-                                    .extra_params
-                                    .insert("ssh_private_key_passphrase".to_string(), pass.to_string());
+                                config.extra_params.insert(
+                                    "ssh_private_key_passphrase".to_string(),
+                                    pass.to_string(),
+                                );
                                 changed = true;
                             }
                         }
                         _ => {
-                            changed |= config.extra_params.remove("ssh_private_key_passphrase").is_some();
+                            changed |= config
+                                .extra_params
+                                .remove("ssh_private_key_passphrase")
+                                .is_some();
                         }
                     }
                     changed |= config.extra_params.remove("ssh_password").is_some();

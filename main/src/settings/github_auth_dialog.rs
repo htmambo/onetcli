@@ -123,13 +123,15 @@ impl GithubAuthDialog {
                 one_core::cloud_sync::oauth::github_device::GithubOAuthClient::new(http, client_id);
 
             // 轮询 token，max_attempts 控制总次数，interval 5 秒
-            match client.poll_for_token(&device_code, 5, MAX_POLL_ATTEMPTS).await {
+            match client
+                .poll_for_token(&device_code, 5, MAX_POLL_ATTEMPTS)
+                .await
+            {
                 Ok(tokens) => {
                     let tokens_for_settings = tokens.clone();
                     let gist_result = {
                         use one_core::cloud_sync::oauth::{create_vault_gist, find_vault_gist};
-                        if let Ok(Some(id)) =
-                            find_vault_gist(http_for_gist.clone(), &tokens).await
+                        if let Ok(Some(id)) = find_vault_gist(http_for_gist.clone(), &tokens).await
                         {
                             Ok(id)
                         } else {
@@ -317,18 +319,14 @@ impl Render for GithubAuthDialog {
                             .child(format!("Gist ID: {}", gist_id)),
                     )
                     .child(
-                        h_flex()
-                            .justify_end()
-                            .gap_2()
-                            .mt_4()
-                            .child(
-                                Button::new("success-confirm-btn")
-                                    .with_variant(ButtonVariant::Primary)
-                                    .on_click(move |_, window, cx: &mut App| {
-                                        window.close_dialog(cx);
-                                    })
-                                    .child("确认"),
-                            ),
+                        h_flex().justify_end().gap_2().mt_4().child(
+                            Button::new("success-confirm-btn")
+                                .with_variant(ButtonVariant::Primary)
+                                .on_click(move |_, window, cx: &mut App| {
+                                    window.close_dialog(cx);
+                                })
+                                .child("确认"),
+                        ),
                     )
                     .into_any_element()
             }

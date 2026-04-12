@@ -1268,31 +1268,28 @@ fn render_cpu_core_grid(
                 .child("Per-core"),
         )
         .children(core_chunks.iter().map(|chunk| {
-            h_flex()
-                .w_full()
-                .gap_2()
-                .children(chunk.iter().map(|core| {
-                    let value = core.percent.clamp(0.0, 100.0);
-                    let label = core.name.clone();
-                    v_flex()
-                        .flex_1()
-                        .gap_1()
-                        .child(
-                            h_flex()
-                                .justify_between()
-                                .child(div().text_xs().child(label.clone()))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{value:.1}%")),
-                                ),
-                        )
-                        .child(
-                            Progress::new(SharedString::from(format!("cpu-core-{label}")))
-                                .value(value as f32),
-                        )
-                }))
+            h_flex().w_full().gap_2().children(chunk.iter().map(|core| {
+                let value = core.percent.clamp(0.0, 100.0);
+                let label = core.name.clone();
+                v_flex()
+                    .flex_1()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .child(div().text_xs().child(label.clone()))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("{value:.1}%")),
+                            ),
+                    )
+                    .child(
+                        Progress::new(SharedString::from(format!("cpu-core-{label}")))
+                            .value(value as f32),
+                    )
+            }))
         }))
         .into_any_element()
 }
@@ -1818,22 +1815,20 @@ async fn exec_capture(client: Arc<Mutex<RusshClient>>, command: &str) -> Result<
     loop {
         let result = timeout(timeout_duration, channel.recv()).await;
         match result {
-            Ok(Some(event)) => {
-                match event {
-                    ChannelEvent::Data(data) => stdout.extend(data),
-                    ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
-                    ChannelEvent::ExitStatus(status) => exit_status = status,
-                    ChannelEvent::ExitSignal {
-                        signal_name,
-                        error_message,
-                    } => {
-                        return Err(anyhow!(
-                            "remote command failed with signal {signal_name}: {error_message}"
-                        ));
-                    }
-                    ChannelEvent::Eof | ChannelEvent::Close => break,
+            Ok(Some(event)) => match event {
+                ChannelEvent::Data(data) => stdout.extend(data),
+                ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
+                ChannelEvent::ExitStatus(status) => exit_status = status,
+                ChannelEvent::ExitSignal {
+                    signal_name,
+                    error_message,
+                } => {
+                    return Err(anyhow!(
+                        "remote command failed with signal {signal_name}: {error_message}"
+                    ));
                 }
-            }
+                ChannelEvent::Eof | ChannelEvent::Close => break,
+            },
             Ok(None) => break, // channel closed
             Err(_) => {
                 // 超时：命令可能在等待数据但未返回

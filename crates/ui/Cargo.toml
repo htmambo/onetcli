@@ -67,6 +67,7 @@ smallvec.workspace = true
 smol.workspace = true
 sum-tree.workspace = true
 tracing.workspace = true
+notify-rust = "4.14"
 
 enum-iterator = "2.1.0"
 itertools = "0.13.0"

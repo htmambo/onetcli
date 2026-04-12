@@ -552,9 +552,8 @@ impl RedisFormWindow {
 
         let username = certificate.username().unwrap_or("").to_string();
         let password = certificate.password().unwrap_or("").to_string();
-        self.username_input.update(cx, |state, cx| {
-            state.set_value(username, window, cx)
-        });
+        self.username_input
+            .update(cx, |state, cx| state.set_value(username, window, cx));
         self.password_input.update(cx, |state, cx| {
             state.set_value(password, window, cx);
         });

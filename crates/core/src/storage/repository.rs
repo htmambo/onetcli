@@ -138,7 +138,10 @@ fn encrypt_certificate_params(params: &serde_json::Value) -> String {
         for key in ["password", "passphrase"] {
             if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
                 if !v.is_empty() {
-                    obj.insert(key.to_string(), serde_json::Value::String(crypto::encrypt_password(v)));
+                    obj.insert(
+                        key.to_string(),
+                        serde_json::Value::String(crypto::encrypt_password(v)),
+                    );
                 }
             }
         }
@@ -1489,8 +1492,7 @@ impl KeyValueRepository {
 
     pub fn get_by_key(&self, key: &str) -> Result<Option<String>> {
         self.conn.with_connection(|conn| {
-            let mut stmt =
-                conn.prepare("SELECT value FROM key_values WHERE key = ?1")?;
+            let mut stmt = conn.prepare("SELECT value FROM key_values WHERE key = ?1")?;
             let mut rows = stmt.query(params![key])?;
             if let Some(row) = rows.next()? {
                 Ok(Some(row.get(0)?))
@@ -1514,11 +1516,10 @@ impl KeyValueRepository {
     }
 
     pub fn delete(&self, key: &str) -> Result<()> {
-        self.conn
-            .with_connection(|conn| {
-                conn.execute("DELETE FROM key_values WHERE key = ?1", params![key])?;
-                Ok(())
-            })
+        self.conn.with_connection(|conn| {
+            conn.execute("DELETE FROM key_values WHERE key = ?1", params![key])?;
+            Ok(())
+        })
     }
 }
 
