@@ -510,7 +510,7 @@ impl FilterState {
             .map(|s| s.to_sql())
             .collect::<Vec<_>>()
             .join(", ");
-        tracing::debug!("[FilterState] to_order_by_clause: {} sorts, ORDER BY=\"{}\"", self.sorts.len(), sql);
+        tracing::info!("[FilterState] to_order_by_clause: {} sorts, ORDER BY=\"{}\"", self.sorts.len(), sql);
         sql
     }
 }

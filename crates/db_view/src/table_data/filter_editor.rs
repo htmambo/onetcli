@@ -1226,9 +1226,13 @@ impl VisualFilterBuilder {
             ColumnSort::Default => return,
         };
 
+        tracing::info!("[SORT] add_sort_column: column={}, dir={:?}", column, direction);
+
         // 移除该列已有的排序（避免重复）
         self.filter_state.sorts.retain(|s| s.column != column);
         self.filter_state.sorts.push(SortCondition::new(column.to_string(), sort_dir));
+
+        tracing::info!("[SORT] add_sort_column: sorts now = {:?}", self.filter_state.sorts.iter().map(|s| format!("{} {}", s.column, s.direction.label())).collect::<Vec<_>>());
     }
 
     /// 从 root_items 树同步到 filter_state
@@ -1543,13 +1547,73 @@ impl VisualFilterBuilder {
     fn add_group_to_group(&mut self, parent_group_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(idx) = find_group_mut(&mut self.root_items, parent_group_id) {
             if let FilterItem::Group(parent) = &mut self.root_items[idx] {
-                let mut group_row = GroupRow::new(LogicOperator::And);
-                let group_id = group_row.id.clone();
+                let schema = self.schema.clone();
+                let first_col = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.first())
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                let first_op = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.first())
+                    .map(operators_for_column)
+                    .and_then(|ops| ops.first().copied())
+                    .unwrap_or(FilterOperator::Equal);
 
-                let (condition_row, column_select_entity, operator_select_entity, value_input_entity) =
-                    self.create_default_condition(window, cx);
+                let condition_row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
                 let condition_id = condition_row.id.clone();
 
+                let column_items: Vec<FilterColumnItem> = schema
+                    .as_ref()
+                    .map(|s| {
+                        s.columns
+                            .iter()
+                            .map(|c| FilterColumnItem {
+                                name: c.name.clone(),
+                                data_type: c.data_type.clone(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let selected_col_index = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
+                    .map(|i| IndexPath::new(i));
+
+                let column_select_entity = cx.new(|cx| {
+                    SelectState::new(SearchableVec::new(column_items), selected_col_index, window, cx)
+                });
+
+                let operator_items: Vec<FilterOperatorItem> = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.first())
+                    .map(operators_for_column)
+                    .map(|ops| {
+                        ops.iter()
+                            .map(|op| FilterOperatorItem { op: *op })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let selected_op_index = operator_items
+                    .iter()
+                    .position(|item| item.op == first_op);
+
+                let operator_select_entity = cx.new(|cx| {
+                    SelectState::new(
+                        SearchableVec::new(operator_items),
+                        selected_op_index.map(|i| IndexPath::new(i)),
+                        window,
+                        cx,
+                    )
+                });
+
+                let value_input_entity = cx.new(|cx| {
+                    InputState::new(window, cx).placeholder("输入值...".to_string())
+                });
+
+                let mut group_row = GroupRow::new(LogicOperator::And);
                 group_row.children.push(FilterItem::Condition(condition_row));
                 parent.children.push(FilterItem::Group(group_row));
 
@@ -2182,7 +2246,7 @@ struct RenderConditionRow {
 }
 
 impl Render for VisualFilterBuilder {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_filters = !self.root_items.is_empty();
 
         let logic_label = match self.filter_state.root.logic_operator {
@@ -2275,7 +2339,7 @@ impl Render for VisualFilterBuilder {
                                             .icon(IconName::Folder)
                                             .ghost()
                                             .tooltip("添加分组")
-                                            .on_click(cx.listener(|this, _, _, cx| {
+                                            .on_click(cx.listener(|this, _, window, cx| {
                                                 this.add_group(window, cx);
                                             })),
                                     )

@@ -75,14 +75,10 @@ impl GlobalCurrentUser {
 
     /// 设置当前用户
     pub fn set_user(user: Option<UserInfo>, cx: &mut App) {
-        if !cx.has_global::<GlobalCurrentUser>() {
-            cx.set_global(GlobalCurrentUser::default());
-        }
-        if let Some(state) = cx.try_global::<GlobalCurrentUser>() {
-            if let Ok(mut guard) = state.user.write() {
-                *guard = user.clone();
-            }
-        }
+        // 重新创建 GlobalCurrentUser 以触发 observe_global 回调，使 SettingsPanel 能刷新 UI
+        cx.set_global(Self {
+            user: Arc::new(RwLock::new(user.clone())),
+        });
         GlobalCloudUser::set_user(user, cx);
     }
 }
@@ -994,18 +990,23 @@ fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
     });
 }
 
+fn editable_sync_server_url(value: &str) -> String {
+    value.trim().to_string()
+}
+
 fn normalize_sync_server_url(value: &str) -> String {
     SyncServerClient::normalize_base_url(value)
 }
 
 fn apply_sync_server_url_setting(value: SharedString, cx: &mut App) {
-    let normalized = normalize_sync_server_url(value.as_ref());
+    let editable = editable_sync_server_url(value.as_ref());
+    let normalized = normalize_sync_server_url(&editable);
     let settings_changed = {
         let settings = AppSettings::global_mut(cx);
-        if settings.sync_server_url == normalized {
+        if settings.sync_server_url == editable {
             false
         } else {
-            settings.sync_server_url = normalized.clone();
+            settings.sync_server_url = editable.clone();
             settings.save();
             true
         }
@@ -1055,6 +1056,11 @@ impl SettingsPanel {
         };
         // 订阅 AppSettings 全局变化，确保外部（如 GitHub 授权弹窗）更新设置后能刷新 UI
         cx.observe_global::<AppSettings>(|_, cx| {
+            cx.notify();
+        })
+        .detach();
+        // 订阅 GlobalCurrentUser 变化，确保同步登录/登出后能刷新账号 UI
+        cx.observe_global::<GlobalCurrentUser>(|_, cx| {
             cx.notify();
         })
         .detach();
@@ -2003,6 +2009,7 @@ mod tests {
     use super::{
         AppSettings, SavedWindowBounds, SavedWindowDisplayState,
         centered_window_bounds_within_visible_area, clamp_glass_opacity,
+        editable_sync_server_url, normalize_sync_server_url,
     };
     use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
@@ -2073,6 +2080,14 @@ mod tests {
         assert_eq!(clamp_glass_opacity(0.2), MIN_GLASS_OPACITY as f64);
         assert_eq!(clamp_glass_opacity(0.84), 0.84);
         assert_eq!(clamp_glass_opacity(1.5), MAX_GLASS_OPACITY as f64);
+    }
+
+    #[test]
+    fn 同步地址输入保留末尾斜杠但规范化结果移除末尾斜杠() {
+        let value = " https://example.com/api/ ";
+
+        assert_eq!(editable_sync_server_url(value), "https://example.com/api/");
+        assert_eq!(normalize_sync_server_url(value), "https://example.com/api");
     }
 
     #[test]
@@ -2324,8 +2339,11 @@ impl SyncAuthForm {
         Self {
             email_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder(t!("Auth.email_placeholder"))),
-            password_input: cx
-                .new(|cx| InputState::new(window, cx).placeholder(t!("Auth.password_placeholder"))),
+            password_input: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(t!("Auth.password_placeholder"))
+                    .masked(true)
+            }),
             confirm_password_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(t!("Auth.confirm_password_placeholder"))
             }),
@@ -2402,21 +2420,23 @@ fn auth_submit(cx: &mut App) {
 
         let _ = form_weak.update(cx, |this, cx| {
             this.is_submitting = false;
-            match result {
+            match &result {
                 Ok(user) => {
-                    GlobalCurrentUser::set_user(Some(user), cx);
+                    GlobalCurrentUser::set_user(Some(user.clone()), cx);
                     cx.notify();
                 }
                 Err(error) => {
                     tracing::error!("密码登录失败: {}", error);
-                    this.error.update(cx, |v, cx| { *v = Some(error); cx.notify(); });
+                    this.error.update(cx, |v, cx| { *v = Some(error.clone()); cx.notify(); });
                 }
             }
         });
 
-        if let Some(home_page) = home_page {
+        if let Some(home_page) = home_page
+            && let Ok(user) = result
+        {
             let _ = home_page.update(cx, |h, cx| {
-                h.handle_auth_state_cleared(cx);
+                h.handle_auth_state_restored(user, cx);
             });
         }
     })
@@ -2502,7 +2522,7 @@ fn render_auth_form_sync(window: &mut Window, cx: &mut App) -> AnyElement {
             v_flex()
                 .gap_2()
                 .child(Input::new(&form.read(cx).email_input).w_full())
-                .child(Input::new(&form.read(cx).password_input).w_full())
+                .child(Input::new(&form.read(cx).password_input).w_full().mask_toggle())
                 .when(form.read(cx).is_sign_up, |this| {
                     this.child(Input::new(&form.read(cx).confirm_password_input).w_full())
                 }),

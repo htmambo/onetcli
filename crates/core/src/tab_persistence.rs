@@ -25,7 +25,7 @@ pub fn save_tab_state(state: &TabContainerState) -> Result<()> {
     std::fs::write(&path, json)?;
     let snapshot = snapshot_from_tab_state(state);
     save_connection_restore_snapshot(&snapshot)?;
-    tracing::info!("Tab state saved to {:?}", path);
+    // tracing::info!("Tab state saved to {:?}", path);
     Ok(())
 }
 
@@ -36,7 +36,7 @@ pub fn load_tab_state() -> Result<TabContainerState> {
     }
     let json = std::fs::read_to_string(&path).context("Failed to read tab state file")?;
     let state = serde_json::from_str(&json).context("Failed to parse tab state JSON")?;
-    tracing::info!("Tab state loaded from {:?}", path);
+    // tracing::info!("Tab state loaded from {:?}", path);
     Ok(state)
 }
 
@@ -81,17 +81,17 @@ pub fn schedule_save(
             let current_state = tab_container.read(cx).dump(cx);
 
             if Some(&current_state) == last_state.as_ref() {
-                tracing::debug!("Tab state unchanged, skipping save");
+                // tracing::debug!("Tab state unchanged, skipping save");
                 return None;
             }
 
             if let Err(err) = save_tab_state(&current_state) {
-                tracing::error!("Failed to save tab state: {:?}", err);
+                // tracing::error!("Failed to save tab state: {:?}", err);
             }
 
             Some(current_state)
         }) {
-            tracing::info!("Tab state saved, {:?}", t)
+            // tracing::info!("Tab state saved, {:?}", t);
         }
     })
 }

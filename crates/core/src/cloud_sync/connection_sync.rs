@@ -30,15 +30,15 @@ impl SyncEngine {
         let mut result = SyncResult::default();
 
         let pending_deletions = self.process_pending_deletions().await;
-        tracing::info!("[同步] 处理待删除列表完成: {} 个", pending_deletions.len());
+        // tracing::info!("[同步] 处理待删除列表完成: {} 个", pending_deletions.len());
 
         let mut local_connections = self.get_local_connections()?;
         let sync_enabled_count = local_connections.iter().filter(|c| c.sync_enabled).count();
-        tracing::info!(
-            "[同步] 本地连接: {} 个，其中 {} 个启用同步",
-            local_connections.len(),
-            sync_enabled_count
-        );
+        // tracing::info!(
+        //     "[同步] 本地连接: {} 个，其中 {} 个启用同步",
+        //     local_connections.len(),
+        //     sync_enabled_count
+        // );
 
         let decrypt_failures = self.get_local_decrypt_failures()?;
         let failure_ids: HashSet<i64> = decrypt_failures.iter().map(|(id, _)| *id).collect();
@@ -56,13 +56,13 @@ impl SyncEngine {
             );
         }
 
-        tracing::info!("[同步] 正在获取云端同步数据列表...");
+        // tracing::info!("[同步] 正在获取云端同步数据列表...");
         let cloud_sync_data = self
             .cloud_client
             .list_sync_data(Some(data_type::CONNECTION), None, None)
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
-        tracing::info!("[同步] 云端连接同步数据: {} 个", cloud_sync_data.len());
+        // tracing::info!("[同步] 云端连接同步数据: {} 个", cloud_sync_data.len());
 
         // 过滤掉团队密钥未解锁的团队数据，避免解密失败中断同步
         let cloud_sync_data: Vec<_> = cloud_sync_data
@@ -71,14 +71,14 @@ impl SyncEngine {
                 Some(tid) => {
                     let unlocked = self.is_team_unlocked(tid);
                     if !unlocked {
-                        tracing::info!("[同步] 跳过未解锁团队 {} 的云端连接数据 {}", tid, d.id);
+                        // tracing::info!("[同步] 跳过未解锁团队 {} 的云端连接数据 {}", tid, d.id);
                     }
                     unlocked
                 }
                 None => true,
             })
             .collect();
-        tracing::info!("[同步] 可处理的云端连接数据: {} 个", cloud_sync_data.len());
+        // tracing::info!("[同步] 可处理的云端连接数据: {} 个", cloud_sync_data.len());
 
         // 解密一次建立 cloud_id → name 映射
         let cloud_name_map = self.build_cloud_name_map(&cloud_sync_data);
@@ -86,31 +86,31 @@ impl SyncEngine {
         let deleted_count =
             self.process_cloud_soft_deleted_sync_data(&cloud_sync_data, &local_connections)?;
         if deleted_count > 0 {
-            tracing::info!("[同步] 处理云端软删除: 删除了 {} 个本地连接", deleted_count);
+            // tracing::info!("[同步] 处理云端软删除: 删除了 {} 个本地连接", deleted_count);
             result.deleted += deleted_count;
             local_connections = self.get_local_connections()?;
-            tracing::info!(
-                "[同步] 软删除完成后刷新本地连接列表: {} 个",
-                local_connections.len()
-            );
+            // tracing::info!(
+            //     "[同步] 软删除完成后刷新本地连接列表: {} 个",
+            //     local_connections.len()
+            // );
         }
 
         let active_cloud_data: Vec<_> = cloud_sync_data
             .into_iter()
             .filter(|d| d.deleted_at.is_none())
             .collect();
-        tracing::info!("[同步] 活跃云端连接数据: {} 个", active_cloud_data.len());
+        // tracing::info!("[同步] 活跃云端连接数据: {} 个", active_cloud_data.len());
 
         let plan =
             self.calculate_sync_plan(&local_connections, &active_cloud_data, &cloud_name_map)?;
-        tracing::info!(
-            "[同步计划] 上传: {}, 更新云端: {}, 下载: {}, 更新本地: {}, 冲突: {}",
-            plan.to_upload.len(),
-            plan.to_update_cloud.len(),
-            plan.to_download.len(),
-            plan.to_update_local.len(),
-            plan.conflicts.len()
-        );
+        // tracing::info!(
+        //     "[同步计划] 上传: {}, 更新云端: {}, 下载: {}, 更新本地: {}, 冲突: {}",
+        //     plan.to_upload.len(),
+        //     plan.to_update_cloud.len(),
+        //     plan.to_download.len(),
+        //     plan.to_update_local.len(),
+        //     plan.conflicts.len()
+        // );
 
         let active_conflicts: Vec<_> = plan
             .conflicts
@@ -229,7 +229,7 @@ impl SyncEngine {
                             match self.update_sync_status(local_id, Some(cloud_id), None) {
                                 Ok(()) => {
                                     result.uploaded += 1;
-                                    tracing::info!("[上传] 成功: {}", local_conn.name);
+                                    // tracing::info!("[上传] 成功: {}", local_conn.name);
                                 }
                                 Err(e) => {
                                     let error_message =
@@ -268,7 +268,7 @@ impl SyncEngine {
                             ) {
                                 Ok(()) => {
                                     result.uploaded += 1;
-                                    tracing::info!("[更新云端] 成功: {}", local_conn.name);
+                                    // tracing::info!("[更新云端] 成功: {}", local_conn.name);
                                 }
                                 Err(e) => {
                                     let error_message =
@@ -305,7 +305,7 @@ impl SyncEngine {
                     match self.update_local_connection(cloud_data, local_conn).await {
                         Ok(()) => {
                             result.downloaded += 1;
-                            tracing::info!("[更新本地] 成功: {}", name);
+                            // tracing::info!("[更新本地] 成功: {}", name);
                         }
                         Err(e) => {
                             let error_message = format!("更新本地失败 {}: {}", name, e);
@@ -328,7 +328,7 @@ impl SyncEngine {
                     match self.download_connection(cloud_data).await {
                         Ok(()) => {
                             result.downloaded += 1;
-                            tracing::info!("[下载] 成功: {}", name);
+                            // tracing::info!("[下载] 成功: {}", name);
                         }
                         Err(e) => {
                             let error_message = format!("下载失败 {}: {}", name, e);
@@ -341,7 +341,7 @@ impl SyncEngine {
                     match self.delete_cloud_connection(&cloud_id).await {
                         Ok(()) => {
                             result.deleted += 1;
-                            tracing::info!("[删除云端] 成功: {}", cloud_id);
+                            // tracing::info!("[删除云端] 成功: {}", cloud_id);
                         }
                         Err(e) => {
                             let error_message = format!("删除云端失败 {}: {}", cloud_id, e);
@@ -354,7 +354,7 @@ impl SyncEngine {
                     match self.delete_local_connection(local_id) {
                         Ok(()) => {
                             result.deleted += 1;
-                            tracing::info!("[删除本地] 成功: {}", local_id);
+                            // tracing::info!("[删除本地] 成功: {}", local_id);
                         }
                         Err(e) => {
                             let error_message = format!("删除本地失败 {}: {}", local_id, e);
@@ -369,7 +369,7 @@ impl SyncEngine {
         for resolved in &resolved_conflicts {
             match self.apply_resolved_conflict(resolved).await {
                 Ok(()) => {
-                    tracing::info!("[冲突解决] 成功应用");
+                    // tracing::info!("[冲突解决] 成功应用");
                 }
                 Err(e) => {
                     result.errors.push(format!("应用冲突解决失败: {}", e));
@@ -442,10 +442,10 @@ impl SyncEngine {
         };
 
         for pending in pending_list {
-            tracing::info!("[同步] 处理待删除云端连接: {}", pending.cloud_id);
+            // tracing::info!("[同步] 处理待删除云端连接: {}", pending.cloud_id);
             match self.cloud_client.delete_sync_data(&pending.cloud_id).await {
                 Ok(_) => {
-                    tracing::info!("[同步] 云端连接删除成功: {}", pending.cloud_id);
+                    // tracing::info!("[同步] 云端连接删除成功: {}", pending.cloud_id);
                     if let Err(e) = pending_repo.remove(&pending.cloud_id) {
                         tracing::error!("[同步] 移除待删除记录失败: {}", e);
                     }
@@ -454,10 +454,10 @@ impl SyncEngine {
                 Err(e) => {
                     let error_str = e.to_string();
                     if error_str.contains("404") || error_str.contains("not found") {
-                        tracing::info!(
-                            "[同步] 云端连接已不存在，移除待删除记录: {}",
-                            pending.cloud_id
-                        );
+                        // tracing::info!(
+                        //     "[同步] 云端连接已不存在，移除待删除记录: {}",
+                        //     pending.cloud_id
+                        // );
                         if let Err(e) = pending_repo.remove(&pending.cloud_id) {
                             tracing::error!("[同步] 移除待删除记录失败: {}", e);
                         }
@@ -496,17 +496,17 @@ impl SyncEngine {
                 {
                     if let Some(local_id) = local_conn.id {
                         if should_keep_local_connection_on_cloud_delete(local_conn) {
-                            tracing::info!(
-                                "[软删除] 跳过删除本地连接 {}，因为存在未同步的本地更新",
-                                local_id
-                            );
+                            // tracing::info!(
+                            //     "[软删除] 跳过删除本地连接 {}，因为存在未同步的本地更新",
+                            //     local_id
+                            // );
                             continue;
                         }
-                        tracing::info!(
-                            "[软删除] 云端数据 {} 已被删除，删除对应的本地连接 {}",
-                            cloud_data.id,
-                            local_id
-                        );
+                        // tracing::info!(
+                        //     "[软删除] 云端数据 {} 已被删除，删除对应的本地连接 {}",
+                        //     cloud_data.id,
+                        //     local_id
+                        // );
                         if let Err(e) = repo.delete(local_id) {
                             tracing::error!("[软删除] 删除本地连接失败: {} - {}", local_id, e);
                         } else {
@@ -589,11 +589,11 @@ impl SyncEngine {
                             (false, false) => {}
                         }
                     } else {
-                        tracing::info!(
-                            "[同步计划] 连接 '{}' 的云端记录 {} 不存在，重新加入上传计划",
-                            local_conn.name,
-                            cloud_id
-                        );
+                        // tracing::info!(
+                        //     "[同步计划] 连接 '{}' 的云端记录 {} 不存在，重新加入上传计划",
+                        //     local_conn.name,
+                        //     cloud_id
+                        // );
                         plan.to_upload.push(local_conn.clone());
                     }
                 }
@@ -615,7 +615,7 @@ impl SyncEngine {
                         .get(&cloud_data.id)
                         .cloned()
                         .unwrap_or_else(|| cloud_data.id.clone());
-                    tracing::info!("[同步计划] 跳过待删除的云端连接: {}", name);
+                    // tracing::info!("[同步计划] 跳过待删除的云端连接: {}", name);
                     continue;
                 }
 
@@ -625,12 +625,12 @@ impl SyncEngine {
                     .unwrap_or_else(|| cloud_data.id.clone());
 
                 if let Some(local_conn) = local_unlinked_by_name.get(cloud_name.as_str()) {
-                    tracing::info!(
-                        "[同步计划] 按名称匹配连接: {} (云端 {} -> 本地 {:?})",
-                        cloud_name,
-                        cloud_data.id,
-                        local_conn.id
-                    );
+                    // tracing::info!(
+                    //     "[同步计划] 按名称匹配连接: {} (云端 {} -> 本地 {:?})",
+                    //     cloud_name,
+                    //     cloud_data.id,
+                    //     local_conn.id
+                    // );
                     plan.to_update_local
                         .push((cloud_data.clone(), (*local_conn).clone()));
                 } else {

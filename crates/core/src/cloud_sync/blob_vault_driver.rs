@@ -63,7 +63,7 @@ impl SyncEngine {
             .as_ref()
             .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
 
-        tracing::info!("[Blob同步] 后端类型: {}", vault.backend_type());
+        // tracing::info!("[Blob同步] 后端类型: {}", vault.backend_type());
 
         // 确保加密服务已解锁
         self.ensure_unlocked()?;
@@ -73,15 +73,15 @@ impl SyncEngine {
         // 1. 尝试下载云端 bundle
         let cloud_bundle = match self.download_bundle_blob(vault).await {
             Ok(Some(bundle)) => {
-                tracing::info!("[Blob同步] 云端 bundle 时间戳: {}", bundle.meta.timestamp);
+                // tracing::info!("[Blob同步] 云端 bundle 时间戳: {}", bundle.meta.timestamp);
                 Some(bundle)
             }
             Ok(None) => {
-                tracing::info!("[Blob同步] 云端无 bundle，将上传本地数据");
+                // tracing::info!("[Blob同步] 云端无 bundle，将上传本地数据");
                 None
             }
             Err(e) => {
-                tracing::warn!("[Blob同步] 下载云端 bundle 失败: {}", e);
+                // tracing::warn!("[Blob同步] 下载云端 bundle 失败: {}", e);
                 None
             }
         };
@@ -99,13 +99,13 @@ impl SyncEngine {
                 match self.apply_bundle(&bundle) {
                     Ok((downloaded, _)) => {
                         result.downloaded = downloaded;
-                        tracing::info!(
-                            "[Blob同步] 从云端 bundle 恢复: 下载 {} 项",
-                            result.downloaded
-                        );
+                        // tracing::info!(
+                        //     "[Blob同步] 从云端 bundle 恢复: 下载 {} 项",
+                        //     result.downloaded
+                        // );
                     }
                     Err(e) => {
-                        tracing::error!("[Blob同步] 应用云端 bundle 失败: {}", e);
+                        // tracing::error!("[Blob同步] 应用云端 bundle 失败: {}", e);
                         result.errors.push(format!("应用云端数据失败: {}", e));
                     }
                 }
@@ -118,10 +118,10 @@ impl SyncEngine {
             {
                 Ok(uploaded) => {
                     result.uploaded = uploaded;
-                    tracing::info!("[Blob同步] 上传 bundle 到云端: {} 项", result.uploaded);
+                    // tracing::info!("[Blob同步] 上传 bundle 到云端: {} 项", result.uploaded);
                 }
                 Err(e) => {
-                    tracing::error!("[Blob同步] 上传 bundle 失败: {}", e);
+                    // tracing::error!("[Blob同步] 上传 bundle 失败: {}", e);
                     result.errors.push(format!("上传云端失败: {}", e));
                 }
             }
@@ -132,12 +132,12 @@ impl SyncEngine {
             self.update_local_sync_status()?;
         }
 
-        tracing::info!(
-            "========== Blob同步完成: 上传 {} 个, 下载 {} 个, 错误 {} 个 ==========",
-            result.uploaded,
-            result.downloaded,
-            result.errors.len()
-        );
+        // tracing::info!(
+        //     "========== Blob同步完成: 上传 {} 个, 下载 {} 个, 错误 {} 个 ==========",
+        //     result.uploaded,
+        //     result.downloaded,
+        //     result.errors.len()
+        // );
 
         Ok(result)
     }
@@ -321,7 +321,7 @@ impl SyncEngine {
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
-        tracing::info!("[Blob同步] bundle 上传成功，时间戳: {}", timestamp);
+        // tracing::info!("[Blob同步] bundle 上传成功，时间戳: {}", timestamp);
 
         // 计算上传项数
         let mut count = 0;

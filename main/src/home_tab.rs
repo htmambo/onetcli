@@ -799,6 +799,15 @@ impl HomePage {
         self.clear_auth_related_state(cx);
     }
 
+    pub(crate) fn handle_auth_state_restored(&mut self, user: UserInfo, cx: &mut Context<Self>) {
+        self.current_user = Some(user.clone());
+        self.logging_in = false;
+        self.auth_error = None;
+        self.cloud_error = None;
+        GlobalCurrentUser::set_user(Some(user), cx);
+        cx.notify();
+    }
+
     pub(crate) fn handle_sync_server_url_changed(&mut self, cx: &mut Context<Self>) {
         self.clear_auth_related_state(cx);
     }

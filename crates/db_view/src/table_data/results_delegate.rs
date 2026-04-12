@@ -856,6 +856,8 @@ impl EditorTableDelegate {
     }
 
     pub fn apply_order_by_clause(&mut self, order_by_clause: &str) {
+        tracing::info!("[SORT] apply_order_by_clause: clause='{}'", order_by_clause);
+
         for column in &mut self.columns {
             if column.sort.is_some() {
                 column.sort = Some(ColumnSort::Default);
@@ -863,15 +865,20 @@ impl EditorTableDelegate {
         }
 
         let Some((column_name, sort)) = parse_primary_order_by_clause(order_by_clause) else {
+            tracing::info!("[SORT] apply_order_by_clause: no primary clause found");
             return;
         };
 
         let target = normalize_sort_identifier(&column_name);
+        tracing::info!("[SORT] apply_order_by_clause: looking for column target='{}', sort={:?}", target, sort);
         if let Some(column) = self.columns.iter_mut().find(|column| {
             normalize_sort_identifier(column.key.as_ref()) == target
                 || normalize_sort_identifier(column.name.as_ref()) == target
         }) {
+            tracing::info!("[SORT] apply_order_by_clause: MATCHED column '{}'", column.name);
             column.sort = Some(sort);
+        } else {
+            tracing::info!("[SORT] apply_order_by_clause: NO MATCH for target='{}', columns={:?}", target, self.columns.iter().map(|c| format!("key='{}' name='{}'", c.key, c.name)).collect::<Vec<_>>());
         }
     }
 
@@ -1300,6 +1307,8 @@ impl EditTableDelegate for EditorTableDelegate {
         let Some(data_grid) = self.data_grid.clone() else {
             return;
         };
+
+        tracing::info!("[SORT] delegate.perform_sort: col_ix={}, real_ix={}, column_name={}, sort={:?}", col_ix, real_ix, column_name, sort);
 
         // `EditTableState::perform_sort` 会在当前表格实体的 update 闭包中调用 delegate。
         // 如果这里同步触发 `DataGrid::apply_column_sort`，后者会再次更新同一个表格实体，

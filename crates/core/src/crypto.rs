@@ -653,11 +653,11 @@ pub fn get_current_verification_data() -> Option<String> {
 /// 返回是否成功恢复。
 pub fn try_restore_master_key() -> bool {
     let storage = key_storage::get_key_storage();
-    tracing::info!("[密钥恢复] 尝试从「{}」恢复主密钥...", storage.name());
+    // tracing::info!("[密钥恢复] 尝试从「{}」恢复主密钥...", storage.name());
 
     // 如果没有设置过密码验证文件，不需要恢复
     if !has_repo_password_set() {
-        tracing::info!("[密钥恢复] 未设置过主密钥，跳过恢复");
+        // tracing::info!("[密钥恢复] 未设置过主密钥，跳过恢复");
         return false;
     }
 
@@ -665,10 +665,10 @@ pub fn try_restore_master_key() -> bool {
     let master_key = match storage.load() {
         Some(key) => key,
         None => {
-            tracing::warn!(
-                "[密钥恢复] 从「{}」读取失败，需要用户手动输入",
-                storage.name()
-            );
+            // tracing::warn!(
+            //     "[密钥恢复] 从「{}」读取失败，需要用户手动输入",
+            //     storage.name()
+            // );
             return false;
         }
     };
@@ -676,7 +676,7 @@ pub fn try_restore_master_key() -> bool {
     // 验证密钥是否正确
     if let Some(verification_data) = load_verification_data() {
         if !verify_master_key(&master_key, &verification_data) {
-            tracing::warn!("[密钥恢复] 密钥验证失败，可能密码已修改");
+            // tracing::warn!("[密钥恢复] 密钥验证失败，可能密码已修改");
             let _ = storage.delete();
             return false;
         }
@@ -691,7 +691,7 @@ pub fn try_restore_master_key() -> bool {
         *guard = Some(master_key);
     }
 
-    tracing::info!("[密钥恢复] 主密钥恢复成功");
+    // tracing::info!("[密钥恢复] 主密钥恢复成功");
     true
 }
 

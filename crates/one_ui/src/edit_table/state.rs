@@ -2291,6 +2291,7 @@ where
                 .on_click(
                     cx.listener(move |table, _e: &ClickEvent, window, cx| {
                         // 点击排序图标：循环切换排序方向
+                        cx.stop_propagation();
                         table.perform_sort(col_ix, window, cx);
                     }),
                 )

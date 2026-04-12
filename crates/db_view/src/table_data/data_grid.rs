@@ -520,8 +520,11 @@ impl DataGrid {
 
         // 跳过 Default 排序（取消排序）
         if matches!(sort, ColumnSort::Default) {
+            tracing::info!("[SORT] apply_column_sort: skipped (Default) for column={}", column_name);
             return;
         }
+
+        tracing::info!("[SORT] apply_column_sort: column={}, sort={:?}", column_name, sort);
 
         self.filter_editor.update(cx, |editor, cx| {
             editor.add_sort_column(column_name, sort, cx);
