@@ -29,7 +29,6 @@ struct ConnectionRow {
     last_synced_at: Option<i64>,
     created_at: i64,
     updated_at: i64,
-    team_id: Option<String>,
     owner_id: Option<String>,
 }
 
@@ -52,7 +51,6 @@ impl FromSqliteRow for ConnectionRow {
             last_synced_at: row.get("last_synced_at")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
-            team_id: row.get("team_id").unwrap_or(None),
             owner_id: row.get("owner_id").unwrap_or(None),
         })
     }
@@ -74,7 +72,6 @@ impl From<ConnectionRow> for StoredConnection {
             last_synced_at: row.last_synced_at,
             created_at: Some(row.created_at),
             updated_at: Some(row.updated_at),
-            team_id: row.team_id,
             owner_id: row.owner_id,
         };
         // 从数据库读取后自动解密敏感字段
@@ -189,7 +186,6 @@ struct CertificateRow {
     last_synced_at: Option<i64>,
     created_at: i64,
     updated_at: i64,
-    team_id: Option<String>,
     owner_id: Option<String>,
 }
 
@@ -209,7 +205,6 @@ impl FromSqliteRow for CertificateRow {
             last_synced_at: row.get("last_synced_at")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
-            team_id: row.get("team_id").unwrap_or(None),
             owner_id: row.get("owner_id").unwrap_or(None),
         })
     }
@@ -243,7 +238,6 @@ impl From<CertificateRow> for Certificate {
             last_synced_at: row.last_synced_at,
             created_at: Some(row.created_at),
             updated_at: Some(row.updated_at),
-            team_id: row.team_id,
             owner_id: row.owner_id,
         }
     }
@@ -271,7 +265,6 @@ impl ConnectionRepository {
         let cloud_id = item.cloud_id.clone();
         let updated_at = item.updated_at.unwrap_or_else(now);
         let last_synced_at = item.last_synced_at.or(Some(updated_at));
-        let team_id = item.team_id.clone();
         let owner_id = item.owner_id.clone();
         let created_at = now();
         let computed_sort_order = self.conn.with_connection(|conn| {
@@ -282,8 +275,8 @@ impl ConnectionRepository {
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO connections (name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                "INSERT INTO connections (name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     name,
                     connection_type,
@@ -295,7 +288,6 @@ impl ConnectionRepository {
                     sync_enabled,
                     cloud_id,
                     last_synced_at,
-                    team_id,
                     owner_id,
                     created_at,
                     updated_at
@@ -328,7 +320,6 @@ impl ConnectionRepository {
         let cloud_id = item.cloud_id.clone();
         let updated_at = item.updated_at.unwrap_or_else(now);
         let last_synced_at = item.last_synced_at.or(Some(updated_at));
-        let team_id = item.team_id.clone();
         let owner_id = item.owner_id.clone();
 
         let (previous_workspace_id, previous_sort_order) = self.conn.with_connection(|conn| {
@@ -349,7 +340,7 @@ impl ConnectionRepository {
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, sort_order = ?4, workspace_id = ?5, selected_databases = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
+                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, sort_order = ?4, workspace_id = ?5, selected_databases = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, owner_id = ?11, updated_at = ?12 WHERE id = ?13",
                 params![
                     name,
                     connection_type,
@@ -361,7 +352,6 @@ impl ConnectionRepository {
                     sync_enabled,
                     cloud_id,
                     last_synced_at,
-                    team_id,
                     owner_id,
                     updated_at,
                     id
@@ -507,7 +497,7 @@ impl CertificateRepository {
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE certificates SET name = ?1, kind = ?2, params = ?3, remark = ?4, sync_enabled = ?5, cloud_id = ?6, last_synced_at = ?7, team_id = ?8, owner_id = ?9, updated_at = ?10 WHERE id = ?11",
+                "UPDATE certificates SET name = ?1, kind = ?2, params = ?3, remark = ?4, sync_enabled = ?5, cloud_id = ?6, last_synced_at = ?7, owner_id = ?8, updated_at = ?9 WHERE id = ?10",
                 params![
                     item.name,
                     item.kind.to_string(),
@@ -516,7 +506,7 @@ impl CertificateRepository {
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
                     item.last_synced_at,
-                    item.team_id,
+                    None::<String>,
                     item.owner_id,
                     updated_at,
                     id
@@ -544,7 +534,7 @@ impl CertificateRepository {
     pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE cloud_id = ?1",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates WHERE cloud_id = ?1",
             )?;
             let mut rows = stmt.query(params![cloud_id])?;
             if let Some(row) = rows.next()? {
@@ -558,7 +548,7 @@ impl CertificateRepository {
     pub fn list_by_team(&self, team_id: &str) -> Result<Vec<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id = ?1 ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates WHERE team_id = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map(params![team_id], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -572,7 +562,7 @@ impl CertificateRepository {
     pub fn list_personal(&self) -> Result<Vec<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE team_id IS NULL ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates WHERE team_id IS NULL ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -599,7 +589,7 @@ impl Repository for CertificateRepository {
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO certificates (name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
+                "INSERT INTO certificates (name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, owner_id, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     item.name,
@@ -609,7 +599,7 @@ impl Repository for CertificateRepository {
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
                     item.last_synced_at,
-                    item.team_id,
+                    None::<String>,
                     item.owner_id,
                     ts,
                     ts
@@ -635,7 +625,7 @@ impl Repository for CertificateRepository {
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE certificates SET name = ?1, kind = ?2, params = ?3, remark = ?4, sync_enabled = ?5, cloud_id = ?6, last_synced_at = ?7, team_id = ?8, owner_id = ?9, updated_at = ?10 WHERE id = ?11",
+                "UPDATE certificates SET name = ?1, kind = ?2, params = ?3, remark = ?4, sync_enabled = ?5, cloud_id = ?6, last_synced_at = ?7, owner_id = ?8, updated_at = ?9 WHERE id = ?10",
                 params![
                     item.name,
                     item.kind.to_string(),
@@ -644,7 +634,7 @@ impl Repository for CertificateRepository {
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
                     item.last_synced_at,
-                    item.team_id,
+                    None::<String>,
                     item.owner_id,
                     ts,
                     id
@@ -664,7 +654,7 @@ impl Repository for CertificateRepository {
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates WHERE id = ?1",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates WHERE id = ?1",
             )?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
@@ -678,7 +668,7 @@ impl Repository for CertificateRepository {
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM certificates ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -727,8 +717,7 @@ impl Repository for ConnectionRepository {
         let sync_enabled = if item.sync_enabled { 1i64 } else { 0i64 };
         let cloud_id = item.cloud_id.clone();
         let last_synced_at = item.last_synced_at;
-        let team_id = item.team_id.clone();
-        let owner_id = item.owner_id.clone();
+                let owner_id = item.owner_id.clone();
         let ts = now();
 
         let computed_sort_order = self.conn.with_connection(|conn| {
@@ -739,9 +728,9 @@ impl Repository for ConnectionRepository {
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO connections (name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                params![name, connection_type, params_str, computed_sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, ts],
+                "INSERT INTO connections (name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, owner_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![name, connection_type, params_str, computed_sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, owner_id, ts, ts],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
@@ -768,8 +757,7 @@ impl Repository for ConnectionRepository {
         let sync_enabled = if item.sync_enabled { 1i64 } else { 0i64 };
         let cloud_id = item.cloud_id.clone();
         let last_synced_at = item.last_synced_at;
-        let team_id = item.team_id.clone();
-        let owner_id = item.owner_id.clone();
+                let owner_id = item.owner_id.clone();
         let ts = now();
 
         let (previous_workspace_id, previous_sort_order) = self.conn.with_connection(|conn| {
@@ -790,8 +778,8 @@ impl Repository for ConnectionRepository {
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, sort_order = ?4, workspace_id = ?5, selected_databases = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, team_id = ?11, owner_id = ?12, updated_at = ?13 WHERE id = ?14",
-                params![name, connection_type, params_str, computed_sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, id],
+                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, sort_order = ?4, workspace_id = ?5, selected_databases = ?6, remark = ?7, sync_enabled = ?8, cloud_id = ?9, last_synced_at = ?10, owner_id = ?11, updated_at = ?12 WHERE id = ?13",
+                params![name, connection_type, params_str, computed_sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, owner_id, ts, id],
             )?;
             Ok(())
         })
@@ -807,7 +795,7 @@ impl Repository for ConnectionRepository {
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE id = ?1",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE id = ?1",
             )?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
@@ -821,7 +809,7 @@ impl Repository for ConnectionRepository {
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -856,9 +844,9 @@ impl ConnectionRepository {
     pub fn list_by_workspace(&self, workspace_id: Option<i64>) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let sql = if workspace_id.is_some() {
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id = ?1 ORDER BY updated_at DESC"
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE workspace_id = ?1 ORDER BY updated_at DESC"
             } else {
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id IS NULL ORDER BY updated_at DESC"
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE workspace_id IS NULL ORDER BY updated_at DESC"
             };
             let mut stmt = conn.prepare(sql)?;
 
@@ -900,7 +888,7 @@ impl ConnectionRepository {
     pub fn list_pending_sync(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at,  owner_id
                  FROM connections
                  WHERE sync_enabled = 1 AND (cloud_id IS NULL OR updated_at > COALESCE(last_synced_at, 0))
                  ORDER BY updated_at DESC",
@@ -918,7 +906,7 @@ impl ConnectionRepository {
     pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at,  owner_id
                  FROM connections WHERE cloud_id = ?1",
             )?;
             let mut rows = stmt.query(params![cloud_id])?;
@@ -960,7 +948,7 @@ impl ConnectionRepository {
     pub fn list_by_team(&self, team_id: &str) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id = ?1 ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE team_id = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map(params![team_id], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -975,7 +963,7 @@ impl ConnectionRepository {
     pub fn list_personal(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id IS NULL ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE team_id IS NULL ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -1404,7 +1392,7 @@ impl TeamKeyCacheRepository {
     pub fn get(&self, team_id: &str) -> Result<Option<TeamKeyCache>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT team_id, team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role FROM team_key_cache WHERE team_id = ?1",
+                "SELECT  team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role FROM team_key_cache WHERE team_id = ?1",
             )?;
             let mut rows = stmt.query(params![team_id])?;
             if let Some(row) = rows.next()? {
@@ -1428,7 +1416,7 @@ impl TeamKeyCacheRepository {
         let ts = now();
         self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO team_key_cache (team_id, team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role)
+                "INSERT INTO team_key_cache ( team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(team_id) DO UPDATE SET
                  team_name = excluded.team_name,
@@ -1447,7 +1435,7 @@ impl TeamKeyCacheRepository {
     pub fn list(&self) -> Result<Vec<TeamKeyCache>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT team_id, team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role FROM team_key_cache ORDER BY updated_at DESC",
+                "SELECT  team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role FROM team_key_cache ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok(TeamKeyCache {
@@ -1646,6 +1634,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1683,6 +1673,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1800,6 +1792,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1819,6 +1813,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1838,6 +1834,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1857,6 +1855,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1925,6 +1925,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1946,6 +1948,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -1992,6 +1996,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -2011,6 +2017,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -2030,6 +2038,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -2049,6 +2059,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },
@@ -2068,6 +2080,8 @@ mod tests {
                 enable_legacy_kex: false,
                 default_directory: None,
                 init_script: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
                 jump_server: None,
                 proxy: None,
             },

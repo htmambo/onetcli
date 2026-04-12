@@ -750,7 +750,6 @@ impl RedisFormWindow {
                 let mut conn = StoredConnection::new_redis(name, params, workspace_id);
                 conn.sync_enabled = sync_enabled;
                 conn.remark = remark;
-                conn.team_id = None;
                 if !is_editing {
                     conn.owner_id = owner_id;
                 }
@@ -859,6 +858,7 @@ impl RedisFormWindow {
                     &t!("Redis.password"),
                     self.styled_input(Input::new(&self.password_input))
                         .mask_toggle()
+                        .disable_ime()
                         .disabled(use_certificate),
                 ),
             )
@@ -947,7 +947,8 @@ impl RedisFormWindow {
                     self.render_form_row(
                         &t!("Redis.sentinel_password"),
                         self.styled_input(Input::new(&self.sentinel_password_input))
-                            .mask_toggle(),
+                            .mask_toggle()
+                            .disable_ime(),
                     ),
                 )
             })

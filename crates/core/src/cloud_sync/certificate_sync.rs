@@ -1,7 +1,7 @@
 //! 证书同步处理器
 
 use crate::cloud_sync::engine::SyncEngine;
-use crate::cloud_sync::models::{CloudSyncData, Team};
+use crate::cloud_sync::models::CloudSyncData;
 use crate::cloud_sync::service::{CloudSyncService, SyncError};
 use crate::cloud_sync::sync_type::SyncTypeHandler;
 use crate::storage::traits::Repository;
@@ -144,9 +144,8 @@ impl SyncTypeHandler for CertificateSyncType {
         &self,
         service: &CloudSyncService,
         item: &Certificate,
-        teams: &[Team],
     ) -> Result<CloudSyncData, SyncError> {
-        service.prepare_certificate_sync_data_upload(item, item.team_id.as_deref(), teams)
+        service.prepare_certificate_sync_data_upload(item)
     }
 
     fn pending_deletion_entity_type(&self) -> &'static str {

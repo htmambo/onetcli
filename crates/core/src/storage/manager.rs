@@ -31,8 +31,13 @@ impl Clone for GlobalStorageState {
 impl StorageManager {
     pub fn new() -> Result<Self> {
         let db_path = get_db_path()?;
+        Self::with_path(&db_path)
+    }
+
+    /// 使用指定路径创建存储管理器（用于测试隔离）
+    pub fn with_path(db_path: &std::path::Path) -> Result<Self> {
         std::fs::create_dir_all(db_path.parent().unwrap())?;
-        let conn = SqliteConnection::open(&db_path)?;
+        let conn = SqliteConnection::open(db_path)?;
 
         conn.with_connection(|c| {
             run_migrations(c)?;

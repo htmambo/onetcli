@@ -4489,6 +4489,12 @@ impl Window {
         });
     }
 
+    /// Disables IME for the current input context.
+    /// Used by password fields to prevent input method editors from interfering.
+    pub fn disable_ime(&self) {
+        self.platform_window.disable_ime();
+    }
+
     /// Present a platform dialog.
     /// The provided message will be presented, along with buttons for each answer.
     /// When a button is clicked, the returned Receiver will receive the index of the clicked button.

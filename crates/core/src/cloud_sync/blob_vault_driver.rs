@@ -157,7 +157,7 @@ impl SyncEngine {
                         if let Ok(json) = serde_json::to_string(params) {
                             let crypto = self.crypto_service.read().ok();
                             if let Some(ref crypto) = crypto {
-                                if let Ok(key) = crypto.select_encrypt_key(None) {
+                                if let Ok(key) = crypto.select_encrypt_key() {
                                     let encrypted = crate::crypto::encrypt_with_key(&json, key);
                                     if let Some(obj) = cert.as_object_mut() {
                                         obj.insert(
@@ -188,7 +188,7 @@ impl SyncEngine {
                     if let Some(params_str) = cert.get("params").and_then(|v| v.as_str()) {
                         let crypto = self.crypto_service.read().ok();
                         if let Some(ref crypto) = crypto {
-                            if let Ok(key) = crypto.select_decrypt_key(None) {
+                            if let Ok(key) = crypto.select_decrypt_key() {
                                 if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key)
                                 {
                                     if let Ok(params) =
@@ -394,7 +394,6 @@ impl SyncEngine {
                             updated_conn.workspace_id = cloud_conn.workspace_id;
                             updated_conn.selected_databases = cloud_conn.selected_databases.clone();
                             updated_conn.remark = cloud_conn.remark.clone();
-                            updated_conn.team_id = cloud_conn.team_id.clone();
                             updated_conn.owner_id = cloud_conn.owner_id.clone();
                             updated_conn.updated_at = cloud_conn.updated_at;
                             updated_conn.last_synced_at = Some(SyncEngine::current_timestamp());

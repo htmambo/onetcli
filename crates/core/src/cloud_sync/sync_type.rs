@@ -5,7 +5,7 @@
 //! 新增同步数据类型只需实现 trait 并通过 `SyncEngine::register_type` 注册即可。
 
 use crate::cloud_sync::engine::SyncEngine;
-use crate::cloud_sync::models::{CloudSyncData, Team};
+use crate::cloud_sync::models::CloudSyncData;
 use crate::cloud_sync::service::{CloudSyncService, SyncError};
 use crate::storage::PendingCloudDeletion;
 
@@ -40,11 +40,6 @@ pub trait SyncableItem: Clone + Send + Sync + 'static {
     /// 是否启用基于同步状态的比较逻辑
     fn uses_sync_state(&self) -> bool {
         false
-    }
-
-    /// 团队归属 ID（默认 None）
-    fn team_id(&self) -> Option<&str> {
-        None
     }
 }
 
@@ -140,7 +135,6 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
         &self,
         service: &CloudSyncService,
         item: &Self::Item,
-        teams: &[Team],
     ) -> Result<CloudSyncData, SyncError>;
 
     // --- 待删除处理（有默认实现） ---

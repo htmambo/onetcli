@@ -3,7 +3,7 @@
 //! 通过实现 `SyncTypeHandler` trait，将工作空间同步逻辑接入通用同步流程 `generic_sync`。
 
 use crate::cloud_sync::engine::SyncEngine;
-use crate::cloud_sync::models::{CloudSyncData, Team};
+use crate::cloud_sync::models::CloudSyncData;
 use crate::cloud_sync::service::{CloudSyncService, SyncError};
 use crate::cloud_sync::sync_type::{PendingDeletionDecision, SyncTypeHandler, SyncableItem};
 use crate::storage::traits::Repository;
@@ -188,9 +188,8 @@ impl SyncTypeHandler for WorkspaceSyncType {
         &self,
         service: &CloudSyncService,
         item: &Workspace,
-        teams: &[Team],
     ) -> Result<CloudSyncData, SyncError> {
-        service.prepare_workspace_sync_data_upload(item, item.team_id(), teams)
+        service.prepare_workspace_sync_data_upload(item)
     }
 
     fn pending_deletion_entity_type(&self) -> &'static str {

@@ -7,7 +7,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Bounds, Context, DragMoveEvent,
     ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, SharedString,
+    IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div, px,
 };
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
@@ -29,7 +29,7 @@ use gpui_component::{
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
     BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, SyncConflict, SyncEngine,
-    UserInfo, can_edit_connection,
+    UserInfo,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
@@ -290,6 +290,8 @@ pub struct HomePage {
     connections_loaded: bool,
     /// 恢复提示是否已经弹出
     connection_restore_prompt_opened: bool,
+    /// 首页内容滚动位置
+    scroll_handle: ScrollHandle,
 }
 
 impl HomePage {
@@ -362,6 +364,7 @@ impl HomePage {
             workspaces_loaded: false,
             connections_loaded: false,
             connection_restore_prompt_opened: false,
+            scroll_handle: ScrollHandle::new(),
         };
 
         // 异步加载工作区
@@ -4066,6 +4069,7 @@ impl HomePage {
             .id("home-content")
             .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll_handle)
             .p_3()
             .child({
                 let mut container = v_flex().gap_0().w_full();
@@ -4922,7 +4926,6 @@ impl HomePage {
         let is_active = conn
             .id
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
-        let can_edit = can_edit_connection(&conn, cx);
         let manual_sort_mode = Self::is_manual_sort_mode(cx);
         let view = cx.entity().clone();
         let drag_connection_id = conn.id;
@@ -5197,54 +5200,53 @@ impl HomePage {
                             )),
                         )
                     })
-                    .when(can_edit, |this| {
-                        this.child(
-                            Button::new(SharedString::from(format!(
-                                "list-edit-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Edit)
-                            .with_size(Size::Small)
-                            .primary()
-                            .tooltip(t!("Home.edit_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(conn_id) = edit_conn.id {
-                                        let conn_name = edit_conn_name.clone();
-                                        match edit_conn_type {
-                                            ConnectionType::SshSftp => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_ssh_form(window, cx);
-                                            }
-                                            ConnectionType::Database => {
-                                                let db_type = edit_conn
-                                                    .to_db_connection()
-                                                    .ok()
-                                                    .map(|p| p.database_type);
-                                                this.confirm_edit_connection(
-                                                    conn_id, conn_name, db_type, window, cx,
-                                                );
-                                            }
-                                            ConnectionType::Redis => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_redis_form(window, cx);
-                                            }
-                                            ConnectionType::MongoDB => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_mongodb_form(window, cx);
-                                            }
-                                            ConnectionType::Serial => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_serial_form(window, cx);
-                                            }
-                                            _ => {}
+                    .child(
+                        Button::new(SharedString::from(format!(
+                            "list-edit-conn-{}",
+                            conn.id.unwrap_or(0)
+                        )))
+                        .icon(IconName::Edit)
+                        .with_size(Size::Small)
+                        .primary()
+                        .tooltip(t!("Home.edit_connection"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                if let Some(conn_id) = edit_conn.id {
+                                    let conn_name = edit_conn_name.clone();
+                                    match edit_conn_type {
+                                        ConnectionType::SshSftp => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_ssh_form(window, cx);
                                         }
+                                        ConnectionType::Database => {
+                                            let db_type = edit_conn
+                                                .to_db_connection()
+                                                .ok()
+                                                .map(|p| p.database_type);
+                                            this.confirm_edit_connection(
+                                                conn_id, conn_name, db_type, window, cx,
+                                            );
+                                        }
+                                        ConnectionType::Redis => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_redis_form(window, cx);
+                                        }
+                                        ConnectionType::MongoDB => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_mongodb_form(window, cx);
+                                        }
+                                        ConnectionType::Serial => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_serial_form(window, cx);
+                                        }
+                                        _ => {}
                                     }
-                                },
-                            )),
-                        )
-                        .child(
+                                }
+                            },
+                        )),
+                    )
+                    .child(
                             Button::new(SharedString::from(format!(
                                 "list-duplicate-conn-{}",
                                 conn.id.unwrap_or(0)
@@ -5285,8 +5287,7 @@ impl HomePage {
                                 },
                             )),
                         )
-                    }),
-            )
+                    )
             .when(is_active, |this| {
                 this.child(
                     div()
@@ -5638,7 +5639,6 @@ impl HomePage {
             .id
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
 
-        let can_edit = can_edit_connection(&conn, cx);
         let manual_sort_mode = Self::is_manual_sort_mode(cx);
         let view = cx.entity().clone();
         let drag_connection_id = conn.id;
@@ -5925,98 +5925,96 @@ impl HomePage {
                             )),
                         )
                     })
-                    .when(can_edit, |this| {
-                        this.child(
-                            Button::new(SharedString::from(format!(
-                                "edit-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Edit)
-                            .with_size(Size::Small)
-                            // .primary()
-                            .cursor_pointer()
-                            .tooltip(t!("Home.edit_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(conn_id) = edit_conn.id {
-                                        let conn_name = edit_conn_name.clone();
-                                        match edit_conn_type {
-                                            ConnectionType::SshSftp => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_ssh_form(window, cx);
-                                            }
-                                            ConnectionType::Database => {
-                                                let db_type = edit_conn
-                                                    .to_db_connection()
-                                                    .ok()
-                                                    .map(|p| p.database_type);
-                                                this.confirm_edit_connection(
-                                                    conn_id, conn_name, db_type, window, cx,
-                                                );
-                                            }
-                                            ConnectionType::Redis => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_redis_form(window, cx);
-                                            }
-                                            ConnectionType::MongoDB => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_mongodb_form(window, cx);
-                                            }
-                                            ConnectionType::Serial => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_serial_form(window, cx);
-                                            }
-                                            _ => {}
+                    .child(
+                        Button::new(SharedString::from(format!(
+                            "edit-conn-{}",
+                            conn.id.unwrap_or(0)
+                        )))
+                        .icon(IconName::Edit)
+                        .with_size(Size::Small)
+                        // .primary()
+                        .cursor_pointer()
+                        .tooltip(t!("Home.edit_connection"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                if let Some(conn_id) = edit_conn.id {
+                                    let conn_name = edit_conn_name.clone();
+                                    match edit_conn_type {
+                                        ConnectionType::SshSftp => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_ssh_form(window, cx);
                                         }
+                                        ConnectionType::Database => {
+                                            let db_type = edit_conn
+                                                .to_db_connection()
+                                                .ok()
+                                                .map(|p| p.database_type);
+                                            this.confirm_edit_connection(
+                                                conn_id, conn_name, db_type, window, cx,
+                                            );
+                                        }
+                                        ConnectionType::Redis => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_redis_form(window, cx);
+                                        }
+                                        ConnectionType::MongoDB => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_mongodb_form(window, cx);
+                                        }
+                                        ConnectionType::Serial => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_serial_form(window, cx);
+                                        }
+                                        _ => {}
                                     }
-                                },
-                            )),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!(
-                                "duplicate-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Copy)
-                            .with_size(Size::Small)
-                            // .primary()
-                            .cursor_pointer()
-                            .tooltip(t!("Home.duplicate_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    this.duplicate_connection_and_open_editor(
-                                        &duplicate_conn,
-                                        window,
-                                        cx,
+                                }
+                            },
+                        )),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!(
+                            "duplicate-conn-{}",
+                            conn.id.unwrap_or(0)
+                        )))
+                        .icon(IconName::Copy)
+                        .with_size(Size::Small)
+                        // .primary()
+                        .cursor_pointer()
+                        .tooltip(t!("Home.duplicate_connection"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.duplicate_connection_and_open_editor(
+                                    &duplicate_conn,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        )),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!(
+                            "delete-conn-{}",
+                            conn.id.unwrap_or(0)
+                        )))
+                        .icon(IconName::Remove)
+                        .with_size(Size::Small)
+                        .danger()
+                        .cursor_pointer()
+                        .tooltip(t!("Home.delete_connection"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                if let Some(conn_id) = delete_conn_id {
+                                    let conn_name = delete_conn_name.clone();
+                                    this.confirm_delete_connection(
+                                        conn_id, conn_name, window, cx,
                                     );
-                                },
-                            )),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!(
-                                "delete-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Remove)
-                            .with_size(Size::Small)
-                            .danger()
-                            .cursor_pointer()
-                            .tooltip(t!("Home.delete_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(conn_id) = delete_conn_id {
-                                        let conn_name = delete_conn_name.clone();
-                                        this.confirm_delete_connection(
-                                            conn_id, conn_name, window, cx,
-                                        );
-                                    }
-                                },
-                            )),
-                        )
-                    }),
+                                }
+                            },
+                        )),
+                    )
             )
             .when(is_active, |this| {
                 this.child(

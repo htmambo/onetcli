@@ -530,7 +530,6 @@ impl SerialFormWindow {
         let workspace_id = self.get_workspace_id(cx);
         let mut conn = StoredConnection::new_serial(name, params, workspace_id);
         conn.sync_enabled = self.sync_enabled;
-        conn.team_id = None;
         if !self.is_editing {
             conn.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
         }

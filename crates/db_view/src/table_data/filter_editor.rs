@@ -1440,7 +1440,6 @@ impl VisualFilterBuilder {
         self.operator_selects.insert(condition_id.clone(), operator_select_entity);
         self.value_inputs.insert(condition_id, value_input_entity);
 
-        self.collapsed_groups.insert(group_id);
         self.sync_filter_state();
         cx.notify();
     }

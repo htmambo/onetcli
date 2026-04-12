@@ -2712,7 +2712,6 @@ mod tests {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }

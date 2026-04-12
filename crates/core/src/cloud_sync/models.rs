@@ -208,9 +208,6 @@ pub struct CloudSyncData {
     pub id: String,
     /// 记录创建者
     pub owner_id: String,
-    /// 团队归属：None = 个人数据，Some = 团队共享数据
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
     /// 数据类型标识（"connection" | "workspace" | ...）
     pub data_type: String,
     /// 明文名称，便于云端直接展示与轻量匹配
@@ -267,7 +264,6 @@ mod tests {
         CloudSyncData {
             id: "ab934c43-8e85-4c9c-8119-8c3fc43e9f15".to_string(),
             owner_id: "owner-1".to_string(),
-            team_id: None,
             data_type: "workspace".to_string(),
             name: name.to_string(),
             encrypted_data: "ENC:test".to_string(),
@@ -294,63 +290,6 @@ mod tests {
         assert!(cloud_data.has_resolved_name());
         assert!(!cloud_data.needs_name_backfill());
     }
-}
-
-/// 团队
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Team {
-    /// 团队 UUID
-    pub id: String,
-    /// 团队名称
-    pub name: String,
-    /// 团队拥有者 ID
-    pub owner_id: String,
-    /// 团队描述
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// 团队密钥验证数据（由 owner 设置，成员验证用）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_verification: Option<String>,
-    /// 团队密钥版本号
-    #[serde(default)]
-    pub key_version: u32,
-    /// 创建时间戳（毫秒）
-    pub created_at: i64,
-    /// 更新时间戳（毫秒）
-    pub updated_at: i64,
-}
-
-/// 团队成员角色
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TeamRole {
-    #[serde(rename = "owner")]
-    Owner,
-    #[serde(rename = "member")]
-    Member,
-}
-
-impl std::fmt::Display for TeamRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TeamRole::Owner => write!(f, "owner"),
-            TeamRole::Member => write!(f, "member"),
-        }
-    }
-}
-
-/// 团队成员
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TeamMember {
-    /// 成员记录 UUID
-    pub id: String,
-    /// 所属团队 ID
-    pub team_id: String,
-    /// 用户 ID
-    pub user_id: String,
-    /// 成员角色
-    pub role: TeamRole,
-    /// 加入时间戳（毫秒）
-    pub joined_at: i64,
 }
 
 /// 连接明文数据结构（加密前 / 解密后的 JSON blob）

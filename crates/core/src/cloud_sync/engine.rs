@@ -13,7 +13,7 @@ use super::certificate_sync::CertificateSyncType;
 use super::client::CloudApiClient;
 use super::connection_sync::ConnectionSyncHandler;
 use super::generic_sync::generic_sync;
-use super::models::{ConflictResolution, ConflictType, SyncResult, Team};
+use super::models::{ConflictResolution, ConflictType, SyncResult};
 use super::queue::OperationQueue;
 use super::service::{CloudSyncService, SyncError};
 use super::sync_backend::SyncBackend;
@@ -21,7 +21,7 @@ use super::sync_type::SyncTypeHandler;
 use super::workspace_sync::WorkspaceSyncType;
 use crate::crypto;
 use crate::storage::traits::Repository;
-use crate::storage::{StorageManager, TeamKeyCacheRepository};
+use crate::storage::StorageManager;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -68,8 +68,6 @@ pub struct SyncEngine {
     /// 冲突解决策略
     pub(crate) conflict_strategy: ConflictResolution,
     pub(crate) handlers: Vec<Box<dyn SyncHandler>>,
-    /// 当前用户所在团队列表（同步开始时获取）
-    pub(crate) cached_teams: std::sync::RwLock<Vec<Team>>,
     /// Blob 存储后端（可选，WebDAV/S3 等）
     pub(crate) blob_vault: Option<Arc<dyn BlobVault>>,
     /// 同步后端策略
@@ -97,7 +95,6 @@ impl SyncEngine {
                 }),
                 Box::new(ConnectionSyncHandler),
             ],
-            cached_teams: std::sync::RwLock::new(Vec::new()),
             blob_vault: None,
             backend: Arc::new(super::sync_backend::SyncServerBackend),
         }
@@ -155,7 +152,6 @@ impl SyncEngine {
         &self,
         key: &str,
         data: &[u8],
-        _team_id: Option<&str>,
     ) -> Result<BlobMeta, SyncError> {
         let vault = self
             .blob_vault
@@ -169,7 +165,7 @@ impl SyncEngine {
     }
 
     /// 通过 BlobVault 下载并解密 blob
-    pub async fn download_blob(&self, key: &str, team_id: Option<&str>) -> Result<Blob, SyncError> {
+    pub async fn download_blob(&self, key: &str) -> Result<Blob, SyncError> {
         let vault = self
             .blob_vault
             .as_ref()
@@ -186,7 +182,7 @@ impl SyncEngine {
                 .crypto_service
                 .read()
                 .map_err(|_| SyncError::StorageError("加密服务锁获取失败".to_string()))?;
-            crypto.decrypt_blob(&String::from_utf8_lossy(&blob.data), team_id)?
+            crypto.decrypt_blob(&String::from_utf8_lossy(&blob.data))?
         };
 
         Ok(Blob {
@@ -305,7 +301,7 @@ impl SyncEngine {
                     Err(SyncError::InvalidMasterKey) => {
                         let cloud_items = self
                             .cloud_client
-                            .list_sync_data(None, None, None)
+                            .list_sync_data(None, None)
                             .await
                             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
@@ -399,22 +395,6 @@ impl SyncEngine {
 
         service.store_operation_queue(key, queue);
         Ok(())
-    }
-
-    /// 获取缓存的团队列表
-    pub(crate) fn get_cached_teams(&self) -> Vec<Team> {
-        self.cached_teams
-            .read()
-            .map(|teams| teams.clone())
-            .unwrap_or_default()
-    }
-
-    /// 检查团队密钥是否已解锁
-    pub(crate) fn is_team_unlocked(&self, team_id: &str) -> bool {
-        self.crypto_service
-            .read()
-            .map(|service| service.is_team_unlocked(team_id))
-            .unwrap_or(false)
     }
 
     /// 使用指定的策略映射应用冲突解决方案
@@ -711,7 +691,6 @@ mod tests {
         async fn list_sync_data(
             &self,
             _data_type: Option<&str>,
-            _team_id: Option<&str>,
             _since: Option<i64>,
         ) -> Result<Vec<CloudSyncData>, CloudApiError> {
             Ok(Vec::new())
@@ -740,48 +719,6 @@ mod tests {
         }
 
         async fn delete_sync_data(&self, _id: &str) -> Result<(), CloudApiError> {
-            Ok(())
-        }
-
-        async fn list_teams(&self) -> Result<Vec<Team>, CloudApiError> {
-            Ok(Vec::new())
-        }
-
-        async fn create_team(&self, team: &Team) -> Result<Team, CloudApiError> {
-            Ok(team.clone())
-        }
-
-        async fn update_team(&self, team: &Team) -> Result<Team, CloudApiError> {
-            Ok(team.clone())
-        }
-
-        async fn delete_team(&self, _id: &str) -> Result<(), CloudApiError> {
-            Ok(())
-        }
-
-        async fn list_team_members(
-            &self,
-            _team_id: &str,
-        ) -> Result<Vec<crate::cloud_sync::TeamMember>, CloudApiError> {
-            Ok(Vec::new())
-        }
-
-        async fn add_team_member(
-            &self,
-            member: &crate::cloud_sync::TeamMember,
-        ) -> Result<crate::cloud_sync::TeamMember, CloudApiError> {
-            Ok(member.clone())
-        }
-
-        async fn add_team_member_by_email(
-            &self,
-            _team_id: &str,
-            _email: &str,
-        ) -> Result<crate::cloud_sync::TeamMember, CloudApiError> {
-            Err(CloudApiError::NotFound("not implemented".to_string()))
-        }
-
-        async fn remove_team_member(&self, _member_id: &str) -> Result<(), CloudApiError> {
             Ok(())
         }
 
@@ -855,7 +792,6 @@ mod tests {
                 last_synced_at: Some(1),
                 created_at: None,
                 updated_at: None,
-                team_id: None,
                 owner_id: Some("user-1".to_string()),
             };
             repo.insert(&mut local)
@@ -871,7 +807,6 @@ mod tests {
             let cloud = CloudSyncData {
                 id: "cloud-connection-1".to_string(),
                 owner_id: "user-1".to_string(),
-                team_id: None,
                 data_type: data_type::CONNECTION.to_string(),
                 name: "冲突连接".to_string(),
                 encrypted_data: String::new(),
@@ -972,7 +907,6 @@ mod tests {
                 last_synced_at: Some(10),
                 created_at: None,
                 updated_at: Some(20),
-                team_id: None,
                 owner_id: Some("user-1".to_string()),
             };
             repo.insert(&mut local)
@@ -1080,7 +1014,6 @@ mod tests {
                 last_synced_at: Some(10),
                 created_at: None,
                 updated_at: Some(20),
-                team_id: None,
                 owner_id: Some("user-1".to_string()),
             };
             repo.insert(&mut local)

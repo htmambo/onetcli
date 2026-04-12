@@ -21,7 +21,7 @@ use windows::{
         Graphics::Dwm::*,
         Graphics::Gdi::*,
         System::{Com::*, LibraryLoader::*, Ole::*, SystemServices::*},
-        UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
+        UI::{Controls::*, HiDpi::*, Input::{Ime::*, KeyboardAndMouse::*}, Shell::*, WindowsAndMessaging::*},
     },
     core::*,
 };
@@ -969,6 +969,12 @@ impl PlatformWindow for WindowsWindow {
         };
 
         self.0.update_ime_position(self.0.hwnd, caret_position);
+    }
+
+    fn disable_ime(&self) {
+        unsafe {
+            let _ = ImmAssociateContext(self.0.hwnd, HIMC::default());
+        }
     }
 }
 

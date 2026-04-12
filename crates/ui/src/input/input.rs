@@ -49,6 +49,7 @@ pub struct Input {
     focus_bordered: bool,
     tab_index: isize,
     selected: bool,
+    disable_ime: bool,
 }
 
 impl Sizable for Input {
@@ -87,6 +88,7 @@ impl Input {
             focus_bordered: true,
             tab_index: 0,
             selected: false,
+            disable_ime: false,
         }
     }
 
@@ -139,6 +141,13 @@ impl Input {
     /// Set to enable toggle button for password mask state.
     pub fn mask_toggle(mut self) -> Self {
         self.mask_toggle = true;
+        self
+    }
+
+    /// Disable IME (Input Method Editor) when this input gains focus.
+    /// Useful for password fields to prevent input method interference.
+    pub fn disable_ime(mut self) -> Self {
+        self.disable_ime = true;
         self
     }
 
@@ -261,6 +270,7 @@ impl RenderOnce for Input {
         self.state.update(cx, |state, _| {
             state.disabled = self.disabled;
             state.size = self.size;
+            state.disable_ime = self.disable_ime;
             // Only for single line mode
             if state.mode.is_single_line() {
                 state.text_align = text_align;

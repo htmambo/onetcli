@@ -570,7 +570,6 @@ impl CertificateForm {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: GlobalCloudUser::get_user(cx).map(|user| user.id),
         });
 
@@ -610,7 +609,6 @@ impl CertificateForm {
         }
         certificate.remark = remark;
         certificate.sync_enabled = self.sync_enabled;
-        certificate.team_id = None;
 
         Some(certificate)
     }
@@ -667,7 +665,7 @@ impl Render for CertificateForm {
                                 .text_sm()
                                 .child(t!("CertificateManager.password").to_string()),
                         )
-                        .child(Input::new(&self.password_input).w_full().mask_toggle()),
+                        .child(Input::new(&self.password_input).w_full().mask_toggle().disable_ime()),
                 )
             })
             .when(selected_kind == CertificateKind::SshPrivateKey, |this| {
@@ -689,7 +687,7 @@ impl Render for CertificateForm {
                                 .text_sm()
                                 .child(t!("CertificateManager.passphrase").to_string()),
                         )
-                        .child(Input::new(&self.passphrase_input).w_full().mask_toggle()),
+                        .child(Input::new(&self.passphrase_input).w_full().mask_toggle().disable_ime()),
                 )
             })
             .child(

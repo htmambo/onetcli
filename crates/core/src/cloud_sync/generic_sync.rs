@@ -360,23 +360,10 @@ async fn fetch_cloud_sync_data<H: SyncTypeHandler>(
     let type_name = handler.display_name();
     let cloud_sync_data = engine
         .cloud_client
-        .list_sync_data(Some(handler.data_type()), None, None)
+        .list_sync_data(Some(handler.data_type()), None)
         .await
         .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
-    let cloud_sync_data: Vec<_> = cloud_sync_data
-        .into_iter()
-        .filter(|d| match &d.team_id {
-            Some(tid) => {
-                let unlocked = engine.is_team_unlocked(tid);
-                if !unlocked {
-                    tracing::info!("[{}] 跳过未解锁团队 {} 的云端数据 {}", type_name, tid, d.id);
-                }
-                unlocked
-            }
-            None => true,
-        })
-        .collect();
     tracing::info!(
         "[{}] 可处理的云端数据: {} 个",
         type_name,
@@ -743,13 +730,12 @@ async fn upload_item<H: SyncTypeHandler>(
     handler: &H,
     item: &H::Item,
 ) -> Result<String, SyncError> {
-    let teams = engine.get_cached_teams();
     let cloud_data = {
         let service = engine
             .crypto_service
             .read()
             .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-        handler.encrypt(&service, item, &teams)?
+        handler.encrypt(&service, item)?
     };
 
     let created = engine
@@ -768,13 +754,12 @@ async fn update_cloud_item<H: SyncTypeHandler>(
     item: &H::Item,
     cloud_data: &CloudSyncData,
 ) -> Result<(), SyncError> {
-    let teams = engine.get_cached_teams();
     let updated_data = {
         let service = engine
             .crypto_service
             .read()
             .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-        let mut data = handler.encrypt(&service, item, &teams)?;
+        let mut data = handler.encrypt(&service, item)?;
         data.id = cloud_data.id.clone();
         data.version = cloud_data.version;
         data

@@ -1829,7 +1829,6 @@ impl DbConnectionForm {
                 }
                 c.workspace_id = connection.workspace_id;
                 c.sync_enabled = sync_enabled;
-                c.team_id = None;
                 c.params = serde_json::to_string(&connection)
                     .map_err(|e| format!("{}: {}", t!("ConnectionForm.serialize_failed"), e))?;
                 c
@@ -1837,7 +1836,6 @@ impl DbConnectionForm {
             None => {
                 let mut c = StoredConnection::from_db_connection(connection);
                 c.sync_enabled = sync_enabled;
-                c.team_id = None;
                 // 新建时自动填充 owner_id
                 c.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
                 c
@@ -2111,7 +2109,7 @@ impl DbConnectionForm {
                         if let Some(input_state) = self.get_input_by_name(&field_name) {
                             let input = Input::new(&input_state).w_full().disabled(disable_field);
                             let input = if is_password {
-                                input.mask_toggle()
+                                input.mask_toggle().disable_ime()
                             } else {
                                 input
                             };
@@ -2187,7 +2185,7 @@ impl DbConnectionForm {
                                         .styled_input(Input::new(input_state).w_full())
                                         .disabled(disable_field);
                                     let input = if is_password {
-                                        input.mask_toggle()
+                                        input.mask_toggle().disable_ime()
                                     } else {
                                         input
                                     };

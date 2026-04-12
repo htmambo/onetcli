@@ -739,7 +739,6 @@ impl MongoFormWindow {
                 let mut connection = StoredConnection::new_mongodb(name, parameters, workspace_id);
                 connection.sync_enabled = sync_enabled;
                 connection.remark = remark;
-                connection.team_id = None;
                 if !is_editing {
                     connection.owner_id = owner_id;
                 }
@@ -851,6 +850,7 @@ impl MongoFormWindow {
                     t!("MongoForm.password_label").as_ref(),
                     self.styled_input(Input::new(&self.password_input))
                         .mask_toggle()
+                        .disable_ime()
                         .disabled(use_certificate),
                 ),
             )

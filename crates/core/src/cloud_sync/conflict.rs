@@ -17,7 +17,35 @@
 use crate::cloud_sync::models::{CloudSyncData, ConflictResolution, ConflictType, SyncConflict};
 use crate::storage::StoredConnection;
 use sha2::{Digest, Sha256};
+use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// 计算内容的 fingerprint（递归键排序后序列化）
+pub(crate) fn fingerprint(content: &str) -> String {
+    let parsed: Value = serde_json::from_str(content)
+        .unwrap_or_else(|_| Value::String(content.to_string()));
+    let normalized = sort_json_keys(&parsed);
+    serde_json::to_string(&normalized).unwrap_or_else(|_| content.to_string())
+}
+
+/// 递归对 JSON 对象键排序
+fn sort_json_keys(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut sorted: Map<String, Value> = Map::new();
+            let mut keys: Vec<_> = map.keys().collect();
+            keys.sort();
+            for key in keys {
+                sorted.insert(key.clone(), sort_json_keys(&map[key]));
+            }
+            Value::Object(sorted)
+        }
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(|v| sort_json_keys(v)).collect())
+        }
+        _ => value.clone(),
+    }
+}
 
 /// 冲突解决器
 ///
@@ -103,7 +131,6 @@ impl ConflictResolver {
         let placeholder = CloudSyncData {
             id: cloud_id.to_string(),
             owner_id: String::new(),
-            team_id: None,
             data_type: crate::cloud_sync::models::data_type::CONNECTION.to_string(),
             name: local.name.clone(),
             encrypted_data: String::new(),
@@ -351,39 +378,12 @@ impl<T: Clone> ThreeWayMerger<T> {
         }
     }
 
-    /// 计算内容的 fingerprint（递归键排序后序列化）
-    fn fingerprint(content: &str) -> String {
-        let parsed: serde_json::Value = serde_json::from_str(content)
-            .unwrap_or_else(|_| serde_json::Value::String(content.to_string()));
-        let normalized = Self::sort_json_keys(&parsed);
-        serde_json::to_string(&normalized).unwrap_or_else(|_| content.to_string())
-    }
-
-    /// 递归对 JSON 对象键排序（确保相同内容的 JSON fingerprint 一致）
-    fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
-        match value {
-            serde_json::Value::Object(map) => {
-                let mut sorted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-                let mut keys: Vec<_> = map.keys().collect();
-                keys.sort();
-                for key in keys {
-                    sorted.insert(key.clone(), Self::sort_json_keys(&map[key]));
-                }
-                serde_json::Value::Object(sorted)
-            }
-            serde_json::Value::Array(arr) => {
-                serde_json::Value::Array(arr.iter().map(|v| Self::sort_json_keys(v)).collect())
-            }
-            _ => value.clone(),
-        }
-    }
-
     /// 计算指纹（空内容返回固定值）
     fn calc_fp(content: &str) -> String {
         if content.is_empty() {
             "null".to_string()
         } else {
-            Self::fingerprint(content)
+            fingerprint(content)
         }
     }
 
@@ -476,6 +476,7 @@ impl<T: Clone> ThreeWayMerger<T> {
 mod three_way_merge_tests {
     use super::*;
 
+    #[derive(Clone)]
     struct TestEntity {
         content: String,
     }
@@ -490,7 +491,7 @@ mod three_way_merge_tests {
         let entity = TestEntity {
             content: r#"{"name":"test"}"#.to_string(),
         };
-        let fp = merger.fingerprint(r#"{"name":"test"}"#);
+        let fp = fingerprint(r#"{"name":"test"}"#);
 
         let result = merger.merge_entity(&fp, Some(&entity), Some(&entity));
         match result {
@@ -537,13 +538,13 @@ mod three_way_merge_tests {
         let remote = TestEntity {
             content: r#"{"name":"remote"}"#.to_string(),
         };
-        let base_fp = merger.fingerprint(base);
+        let base_fp = fingerprint(base);
 
         let result = merger.merge_entity(&base_fp, Some(&local), Some(&remote));
         match result {
             ThreeWayMergeResult::Merged(v) => {
                 // 优先本地
-                assert_eq!(v.content, local.content);
+                assert_eq!(v.content, r#"{"name":"local"}"#);
             }
             _ => panic!("expected Merged"),
         }
@@ -559,11 +560,11 @@ mod three_way_merge_tests {
         let remote = TestEntity {
             content: r#"{"name":"both"}"#.to_string(),
         };
-        let base_fp = merger.fingerprint(base);
+        let base_fp = fingerprint(base);
 
         let result = merger.merge_entity(&base_fp, Some(&local), Some(&remote));
         match result {
-            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, "both"),
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, r#"{"name":"both"}"#),
             _ => panic!("expected Merged"),
         }
     }
@@ -575,19 +576,19 @@ mod three_way_merge_tests {
         let local = TestEntity {
             content: r#"{"name":"modified"}"#.to_string(),
         };
-        let base_fp = merger.fingerprint(base);
+        let base_fp = fingerprint(base);
 
         // remote 删除了，local 修改了 → 保留修改
         let result = merger.merge_entity(&base_fp, Some(&local), None);
         match result {
-            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, "modified"),
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, r#"{"name":"modified"}"#),
             _ => panic!("expected Merged"),
         }
 
         // local 删除了，remote 修改了 → 保留修改
         let result2 = merger.merge_entity(&base_fp, None, Some(&local));
         match result2 {
-            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, "modified"),
+            ThreeWayMergeResult::Merged(v) => assert_eq!(v.content, r#"{"name":"modified"}"#),
             _ => panic!("expected Merged"),
         }
     }
@@ -595,13 +596,13 @@ mod three_way_merge_tests {
     #[test]
     fn test_fingerprint_stable() {
         let content = r#"{"z":"last","a":"first","nested":{"b":1,"a":2}}"#;
-        let fp1 = ThreeWayMerger::<TestEntity>::fingerprint(content);
-        let fp2 = ThreeWayMerger::<TestEntity>::fingerprint(content);
+        let fp1 = fingerprint(content);
+        let fp2 = fingerprint(content);
         assert_eq!(fp1, fp2);
 
         // 不同顺序应产生相同 fingerprint
         let content2 = r#"{"a":"first","nested":{"a":2,"b":1},"z":"last"}"#;
-        let fp3 = ThreeWayMerger::<TestEntity>::fingerprint(content2);
+        let fp3 = fingerprint(content2);
         assert_eq!(fp1, fp3);
     }
 }
@@ -633,7 +634,6 @@ mod tests {
             last_synced_at: Some(100),
             created_at: None,
             updated_at: Some(200),
-            team_id: None,
             owner_id: None,
         };
 

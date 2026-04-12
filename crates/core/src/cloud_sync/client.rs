@@ -131,11 +131,10 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 获取同步数据列表
     ///
-    /// 可选过滤：data_type, team_id, since_timestamp
+    /// 可选过滤：data_type, since_timestamp
     async fn list_sync_data(
         &self,
         data_type: Option<&str>,
-        team_id: Option<&str>,
         since: Option<i64>,
     ) -> Result<Vec<CloudSyncData>, CloudApiError>;
 
@@ -149,39 +148,52 @@ pub trait CloudApiClient: Send + Sync {
     async fn delete_sync_data(&self, id: &str) -> Result<(), CloudApiError>;
 
     // ========================================================================
-    // 团队管理
+    // 团队管理（暂不支持）
     // ========================================================================
 
-    /// 获取当前用户所在的所有团队
-    async fn list_teams(&self) -> Result<Vec<Team>, CloudApiError>;
+    /// 获取当前用户所在的所有团队（暂不支持）
+    async fn list_teams(&self) -> Result<Vec<()>, CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 创建团队
-    async fn create_team(&self, team: &Team) -> Result<Team, CloudApiError>;
+    /// 创建团队（暂不支持）
+    async fn create_team(&self, _team: &str) -> Result<(), CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 更新团队信息
-    async fn update_team(&self, team: &Team) -> Result<Team, CloudApiError>;
+    /// 更新团队信息（暂不支持）
+    async fn update_team(&self, _team: &str) -> Result<(), CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 删除团队
-    async fn delete_team(&self, id: &str) -> Result<(), CloudApiError>;
+    /// 删除团队（暂不支持）
+    async fn delete_team(&self, _id: &str) -> Result<(), CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 获取团队成员列表
-    async fn list_team_members(&self, team_id: &str) -> Result<Vec<TeamMember>, CloudApiError>;
+    /// 获取团队成员列表（暂不支持）
+    async fn list_team_members(&self, _team_id: &str) -> Result<Vec<()>, CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 添加团队成员
-    async fn add_team_member(&self, member: &TeamMember) -> Result<TeamMember, CloudApiError>;
+    /// 添加团队成员（暂不支持）
+    async fn add_team_member(&self, _member: &str) -> Result<(), CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 通过邮箱添加团队成员
-    ///
-    /// 使用服务端 RPC 函数根据邮箱查找用户并添加为团队成员。
-    /// 解决了客户端无法直接访问 auth.users 表的问题。
+    /// 通过邮箱添加团队成员（暂不支持）
     async fn add_team_member_by_email(
         &self,
-        team_id: &str,
-        email: &str,
-    ) -> Result<TeamMember, CloudApiError>;
+        _team_id: &str,
+        _email: &str,
+    ) -> Result<(), CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
-    /// 移除团队成员
-    async fn remove_team_member(&self, member_id: &str) -> Result<(), CloudApiError>;
+    /// 移除团队成员（暂不支持）
+    async fn remove_team_member(&self, _member_id: &str) -> Result<(), CloudApiError> {
+        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
+    }
 
     // ========================================================================
     // AI 聊天

@@ -1012,7 +1012,6 @@ impl SshFormWindow {
         let workspace_id = self.get_workspace_id(cx);
         let mut conn = StoredConnection::new_ssh(name, params, workspace_id);
         conn.sync_enabled = self.sync_enabled; // 设置同步状态
-        conn.team_id = None;
         if !self.is_editing {
             conn.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
         }
@@ -1194,6 +1193,7 @@ impl SshFormWindow {
                         &t!("SSH.password"),
                         self.styled_input(Input::new(&self.password_input))
                             .mask_toggle()
+                            .disable_ime()
                             .disabled(use_certificate),
                     ),
                 )
@@ -1211,6 +1211,7 @@ impl SshFormWindow {
                         &t!("SSH.passphrase"),
                         self.styled_input(Input::new(&self.passphrase_input))
                             .mask_toggle()
+                            .disable_ime()
                             .disabled(use_certificate),
                     ),
                 )
@@ -1298,7 +1299,8 @@ impl SshFormWindow {
                     self.render_form_row(
                         &t!("SSH.jump_password"),
                         self.styled_input(Input::new(&self.jump_password_input))
-                            .mask_toggle(),
+                            .mask_toggle()
+                            .disable_ime(),
                     ),
                 )
             })
@@ -1364,7 +1366,8 @@ impl SshFormWindow {
                     self.render_form_row(
                         &t!("SSH.proxy_password"),
                         self.styled_input(Input::new(&self.proxy_password_input))
-                            .mask_toggle(),
+                            .mask_toggle()
+                            .disable_ime(),
                     ),
                 )
             })

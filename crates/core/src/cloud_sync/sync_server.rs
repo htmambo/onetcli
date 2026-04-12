@@ -13,7 +13,7 @@ use llm_connector::ChatRequest;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex as AsyncMutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use url::Url;
 
 /// sync_server 客户端配置
@@ -653,7 +653,6 @@ impl SyncServerClient {
         CloudSyncData {
             id,
             owner_id,
-            team_id: None,
             data_type,
             name,
             encrypted_data,
@@ -841,17 +840,8 @@ impl CloudApiClient for SyncServerClient {
     async fn list_sync_data(
         &self,
         data_type: Option<&str>,
-        team_id: Option<&str>,
         since: Option<i64>,
     ) -> Result<Vec<CloudSyncData>, CloudApiError> {
-        if let Some(team_id) = team_id {
-            warn!(
-                "[sync_server] 当前后端不支持团队同步过滤，忽略 team_id={}",
-                team_id
-            );
-            return Ok(Vec::new());
-        }
-
         let mut url = self.api_url("/api/v1/sync/items");
         let mut params = Vec::new();
         if let Some(data_type) = data_type {
@@ -881,10 +871,6 @@ impl CloudApiClient for SyncServerClient {
     }
 
     async fn create_sync_data(&self, data: &CloudSyncData) -> Result<CloudSyncData, CloudApiError> {
-        if data.team_id.is_some() {
-            return Err(Self::unsupported("当前 sync_server 不支持团队同步数据"));
-        }
-
         let url = self.api_url("/api/v1/sync/items");
         let body = CreateSyncItemRequest {
             id: (!data.id.is_empty()).then_some(data.id.as_str()),
@@ -910,10 +896,6 @@ impl CloudApiClient for SyncServerClient {
     }
 
     async fn update_sync_data(&self, data: &CloudSyncData) -> Result<CloudSyncData, CloudApiError> {
-        if data.team_id.is_some() {
-            return Err(Self::unsupported("当前 sync_server 不支持团队同步数据"));
-        }
-
         let url = self.api_url(&format!("/api/v1/sync/items/{}", data.id));
         let body = UpdateSyncItemRequest {
             name: &data.name,
@@ -968,15 +950,15 @@ impl CloudApiClient for SyncServerClient {
         )))
     }
 
-    async fn list_teams(&self) -> Result<Vec<Team>, CloudApiError> {
-        Ok(Vec::new())
-    }
-
-    async fn create_team(&self, _team: &Team) -> Result<Team, CloudApiError> {
+    async fn list_teams(&self) -> Result<Vec<()>, CloudApiError> {
         Err(Self::unsupported("当前 sync_server 不支持团队功能"))
     }
 
-    async fn update_team(&self, _team: &Team) -> Result<Team, CloudApiError> {
+    async fn create_team(&self, _team: &str) -> Result<(), CloudApiError> {
+        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
+    }
+
+    async fn update_team(&self, _team: &str) -> Result<(), CloudApiError> {
         Err(Self::unsupported("当前 sync_server 不支持团队功能"))
     }
 
@@ -984,11 +966,11 @@ impl CloudApiClient for SyncServerClient {
         Err(Self::unsupported("当前 sync_server 不支持团队功能"))
     }
 
-    async fn list_team_members(&self, _team_id: &str) -> Result<Vec<TeamMember>, CloudApiError> {
-        Ok(Vec::new())
+    async fn list_team_members(&self, _team_id: &str) -> Result<Vec<()>, CloudApiError> {
+        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
     }
 
-    async fn add_team_member(&self, _member: &TeamMember) -> Result<TeamMember, CloudApiError> {
+    async fn add_team_member(&self, _member: &str) -> Result<(), CloudApiError> {
         Err(Self::unsupported("当前 sync_server 不支持团队功能"))
     }
 
@@ -996,7 +978,7 @@ impl CloudApiClient for SyncServerClient {
         &self,
         _team_id: &str,
         _email: &str,
-    ) -> Result<TeamMember, CloudApiError> {
+    ) -> Result<(), CloudApiError> {
         Err(Self::unsupported("当前 sync_server 不支持团队功能"))
     }
 

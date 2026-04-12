@@ -59,26 +59,10 @@ impl SyncEngine {
         // tracing::info!("[同步] 正在获取云端同步数据列表...");
         let cloud_sync_data = self
             .cloud_client
-            .list_sync_data(Some(data_type::CONNECTION), None, None)
+            .list_sync_data(Some(data_type::CONNECTION), None)
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
         // tracing::info!("[同步] 云端连接同步数据: {} 个", cloud_sync_data.len());
-
-        // 过滤掉团队密钥未解锁的团队数据，避免解密失败中断同步
-        let cloud_sync_data: Vec<_> = cloud_sync_data
-            .into_iter()
-            .filter(|d| match &d.team_id {
-                Some(tid) => {
-                    let unlocked = self.is_team_unlocked(tid);
-                    if !unlocked {
-                        // tracing::info!("[同步] 跳过未解锁团队 {} 的云端连接数据 {}", tid, d.id);
-                    }
-                    unlocked
-                }
-                None => true,
-            })
-            .collect();
-        // tracing::info!("[同步] 可处理的云端连接数据: {} 个", cloud_sync_data.len());
 
         // 解密一次建立 cloud_id → name 映射
         let cloud_name_map = self.build_cloud_name_map(&cloud_sync_data);
@@ -86,7 +70,6 @@ impl SyncEngine {
         let deleted_count =
             self.process_cloud_soft_deleted_sync_data(&cloud_sync_data, &local_connections)?;
         if deleted_count > 0 {
-            // tracing::info!("[同步] 处理云端软删除: 删除了 {} 个本地连接", deleted_count);
             result.deleted += deleted_count;
             local_connections = self.get_local_connections()?;
             // tracing::info!(
@@ -688,13 +671,12 @@ impl SyncEngine {
         conn: &StoredConnection,
     ) -> Result<CloudSyncData, SyncError> {
         let workspace_cloud_id = self.resolve_workspace_cloud_id(conn.workspace_id)?;
-        let teams = self.get_cached_teams();
         let service = self
             .crypto_service
             .read()
             .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
 
-        service.prepare_sync_data_upload(conn, workspace_cloud_id, conn.team_id.as_deref(), &teams)
+        service.prepare_sync_data_upload(conn, workspace_cloud_id)
     }
 
     pub(crate) fn build_local_connection_from_cloud(
@@ -707,8 +689,7 @@ impl SyncEngine {
                 .read()
                 .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
             let local_conn = service.decrypt_sync_data_connection(cloud_data)?;
-            let plaintext =
-                service.decrypt_blob(&cloud_data.encrypted_data, cloud_data.team_id.as_deref())?;
+            let plaintext = service.decrypt_blob(&cloud_data.encrypted_data)?;
             let plain_data: ConnectionPlainData = serde_json::from_str(&plaintext)
                 .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
             (local_conn, plain_data.workspace_cloud_id)
@@ -971,15 +952,12 @@ fn should_keep_local_connection_on_cloud_delete(item: &StoredConnection) -> bool
 mod tests {
     use super::*;
     use crate::cloud_sync::client::{AuthResponse, CloudApiClient, CloudApiError, OAuthResponse};
-    use crate::cloud_sync::models::Team;
     use crate::llm::ChatStream;
-    use crate::storage::migration::run_migrations;
     use crate::storage::traits::Repository;
     use crate::storage::{ConnectionRepository, ConnectionType};
     use async_trait::async_trait;
     use llm_connector::ChatRequest;
-    use std::sync::{Arc, Mutex, OnceLock};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::{Arc, Mutex};
 
     #[derive(Default)]
     struct MockCloudClient {
@@ -1047,7 +1025,6 @@ mod tests {
         async fn list_sync_data(
             &self,
             data_type: Option<&str>,
-            _team_id: Option<&str>,
             _since: Option<i64>,
         ) -> Result<Vec<CloudSyncData>, CloudApiError> {
             let items = self
@@ -1084,48 +1061,6 @@ mod tests {
             Ok(())
         }
 
-        async fn list_teams(&self) -> Result<Vec<Team>, CloudApiError> {
-            Ok(Vec::new())
-        }
-
-        async fn create_team(&self, team: &Team) -> Result<Team, CloudApiError> {
-            Ok(team.clone())
-        }
-
-        async fn update_team(&self, team: &Team) -> Result<Team, CloudApiError> {
-            Ok(team.clone())
-        }
-
-        async fn delete_team(&self, _id: &str) -> Result<(), CloudApiError> {
-            Ok(())
-        }
-
-        async fn list_team_members(
-            &self,
-            _team_id: &str,
-        ) -> Result<Vec<crate::cloud_sync::TeamMember>, CloudApiError> {
-            Ok(Vec::new())
-        }
-
-        async fn add_team_member(
-            &self,
-            member: &crate::cloud_sync::TeamMember,
-        ) -> Result<crate::cloud_sync::TeamMember, CloudApiError> {
-            Ok(member.clone())
-        }
-
-        async fn add_team_member_by_email(
-            &self,
-            _team_id: &str,
-            _email: &str,
-        ) -> Result<crate::cloud_sync::TeamMember, CloudApiError> {
-            Err(CloudApiError::NotFound("not implemented".to_string()))
-        }
-
-        async fn remove_team_member(&self, _member_id: &str) -> Result<(), CloudApiError> {
-            Ok(())
-        }
-
         async fn chat(&self, _request: &ChatRequest) -> Result<String, CloudApiError> {
             Err(CloudApiError::NotFound("not implemented".to_string()))
         }
@@ -1135,57 +1070,29 @@ mod tests {
         }
     }
 
-    fn test_env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    fn create_test_storage() -> crate::storage::StorageManager {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after unix epoch")
-            .as_nanos();
-        let temp_home =
+    fn create_test_storage() -> (crate::storage::StorageManager, std::path::PathBuf) {
+        let unique = uuid::Uuid::new_v4().to_string();
+        let temp_db_dir =
             std::env::temp_dir().join(format!("one-core-connection-sync-test-{unique}"));
+        std::fs::create_dir_all(&temp_db_dir).expect("should create temp dir");
+        let db_path = temp_db_dir.join("one-hub.db");
 
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", &temp_home);
-        }
-
-        let storage =
-            crate::storage::StorageManager::new().expect("should create isolated storage manager");
+        let storage = crate::storage::StorageManager::with_path(&db_path)
+            .expect("should create isolated storage manager");
         storage.register(ConnectionRepository::new(storage.connection()));
+        storage.register(WorkspaceRepository::new(storage.connection()));
 
-        storage
-            .connection()
-            .with_connection(|db| {
-                run_migrations(db)?;
-                Ok(())
-            })
-            .expect("migrations should succeed");
-
-        match previous_home {
-            Some(value) => unsafe {
-                std::env::set_var("HOME", value);
-            },
-            None => unsafe {
-                std::env::remove_var("HOME");
-            },
-        }
-
-        storage
+        (storage, temp_db_dir)
     }
 
     #[test]
     fn remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item() {
-        let _lock = test_env_lock()
-            .lock()
-            .expect("test env mutex should not be poisoned");
-
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should be created");
+        crate::crypto::set_master_key("test-master-key");
         runtime.block_on(async {
-            let storage = create_test_storage();
+            let mut sync_service = crate::cloud_sync::CloudSyncService::new();
+            sync_service.set_master_key_directly("test-master-key".to_string());
+            let (storage, _temp_dir) = create_test_storage();
             let repo = storage
                 .get::<ConnectionRepository>()
                 .expect("connection repository should be registered");
@@ -1204,7 +1111,6 @@ mod tests {
                 last_synced_at: None,
                 created_at: None,
                 updated_at: None,
-                team_id: None,
                 owner_id: Some("user-1".to_string()),
             };
             repo.insert(&mut local)
@@ -1227,7 +1133,6 @@ mod tests {
                 sync_items: Mutex::new(vec![CloudSyncData {
                     id: "cloud-connection-1".to_string(),
                     owner_id: "user-1".to_string(),
-                    team_id: None,
                     data_type: crate::cloud_sync::models::data_type::CONNECTION.to_string(),
                     name: "远端删除连接".to_string(),
                     encrypted_data: String::new(),
@@ -1242,9 +1147,7 @@ mod tests {
 
             let engine = SyncEngine::new(
                 cloud_client.clone(),
-                Arc::new(std::sync::RwLock::new(
-                    crate::cloud_sync::CloudSyncService::new(),
-                )),
+                Arc::new(std::sync::RwLock::new(sync_service)),
                 storage.clone(),
             );
 

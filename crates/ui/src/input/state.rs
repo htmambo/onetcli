@@ -470,6 +470,9 @@ pub struct InputState {
     /// 是否启用括号自动配对
     /// 输入 `(` 时自动补全为 `()`，光标在中间
     pub(super) auto_pair: bool,
+    /// 是否在获得焦点时禁用 IME
+    /// 用于密码输入框，防止输入法干扰
+    pub(super) disable_ime: bool,
 }
 
 impl EventEmitter<InputEvent> for InputState {}
@@ -553,6 +556,7 @@ impl InputState {
             _pending_update: false,
             inline_completion: InlineCompletion::default(),
             auto_pair: false,
+            disable_ime: false,
         }
     }
 
@@ -615,6 +619,13 @@ impl InputState {
     /// 设置是否启用括号自动配对（运行时修改）
     pub fn set_auto_pair(&mut self, enabled: bool) {
         self.auto_pair = enabled;
+    }
+
+    /// Set whether to disable IME when this input gains focus.
+    /// Used for password fields to prevent input method editors from interfering.
+    pub fn disable_ime(mut self, disabled: bool) -> Self {
+        self.disable_ime = disabled;
+        self
     }
 
     /// Set this input is searchable, default is false (Default true for Code Editor).
@@ -1976,7 +1987,10 @@ impl InputState {
             && window.is_window_active()
     }
 
-    fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disable_ime {
+            window.disable_ime();
+        }
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });

@@ -623,8 +623,6 @@ pub struct Certificate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
 }
 
@@ -738,10 +736,6 @@ impl SyncableItem for Certificate {
 
     fn last_synced_at(&self) -> Option<i64> {
         self.last_synced_at
-    }
-
-    fn team_id(&self) -> Option<&str> {
-        self.team_id.as_deref()
     }
 }
 
@@ -865,9 +859,6 @@ pub struct StoredConnection {
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
-    /// 团队归属 ID（None = 个人数据）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
     /// 连接创建者 ID（用户 UUID，用于权限判断）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
@@ -925,10 +916,6 @@ impl SyncableItem for StoredConnection {
     fn last_synced_at(&self) -> Option<i64> {
         self.last_synced_at
     }
-
-    fn team_id(&self) -> Option<&str> {
-        self.team_id.as_deref()
-    }
 }
 
 impl StoredConnection {
@@ -955,7 +942,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -975,7 +961,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -995,7 +980,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -1015,7 +999,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -1047,7 +1030,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
