@@ -1966,6 +1966,13 @@ impl PlatformWindow for X11Window {
         client.update_ime_position(bounds);
     }
 
+    fn disable_ime(&self) {
+        let mut state = self.0.state.borrow_mut();
+        let client = state.client.clone();
+        drop(state);
+        client.disable_ime();
+    }
+
     fn gpu_specs(&self) -> Option<GpuSpecs> {
         self.0.state.borrow().renderer.gpu_specs().into()
     }

@@ -741,6 +741,24 @@ impl X11Client {
         }
     }
 
+    pub fn disable_ime(&self) {
+        let mut state = self.0.borrow_mut();
+        state.composing = false;
+        if let Some(mut ximc) = state.ximc.take() {
+            if let Some(xim_handler) = state.xim_handler.as_ref() {
+                let ic_attributes = ximc
+                    .build_ic_attributes()
+                    .push(AttributeName::InputStyle, InputStyle::empty())
+                    .build();
+                ximc.set_ic_values(xim_handler.im_id, xim_handler.ic_id, ic_attributes)
+                    .ok();
+            } else {
+                log::error!("bug: xim handler not set in disable_ime");
+            }
+            state.ximc = Some(ximc);
+        }
+    }
+
     pub(crate) fn get_window(&self, win: xproto::Window) -> Option<X11WindowStatePtr> {
         let state = self.0.borrow();
         state

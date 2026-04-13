@@ -1572,6 +1572,22 @@ impl PlatformWindow for MacWindow {
             .detach()
     }
 
+    fn disable_ime(&self) {
+        let executor = self.0.lock().foreground_executor.clone();
+        executor
+            .spawn(async move {
+                unsafe {
+                    let input_context: id =
+                        msg_send![class!(NSTextInputContext), currentInputContext];
+                    if input_context.is_null() {
+                        return;
+                    }
+                    let _: () = msg_send![input_context, invalidateCharacterCoordinates];
+                }
+            })
+            .detach()
+    }
+
     fn titlebar_double_click(&self) {
         let this = self.0.lock();
         let window = this.native_window;

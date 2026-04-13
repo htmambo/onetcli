@@ -1395,6 +1395,11 @@ impl PlatformWindow for WaylandWindow {
         state.client.update_ime_position(bounds);
     }
 
+    fn disable_ime(&self) {
+        let state = self.borrow();
+        state.client.disable_ime();
+    }
+
     fn gpu_specs(&self) -> Option<GpuSpecs> {
         self.borrow().renderer.gpu_specs().into()
     }
