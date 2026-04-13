@@ -28,8 +28,8 @@ use gpui_component::{
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
-    BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, SyncConflict, SyncEngine,
-    UserInfo,
+    BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, GoogleDriveVault, OneDriveVault,
+    SyncConflict, SyncEngine, UserInfo,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
@@ -946,6 +946,43 @@ impl HomePage {
         Some(Arc::new(vault))
     }
 
+    fn google_drive_vault(settings: &AppSettings, cx: &App) -> Option<Arc<dyn BlobVault>> {
+        let gd_cfg = settings.google_drive_config.as_ref()?;
+        if gd_cfg.client_id.is_empty() || gd_cfg.client_secret.is_empty() {
+            return None;
+        }
+
+        let vault = GoogleDriveVault::new(
+            cx.http_client(),
+            gd_cfg.client_id.clone(),
+            gd_cfg.client_secret.clone(),
+        );
+        let vault: Arc<GoogleDriveVault> = if let Some(tokens) = gd_cfg.tokens.clone() {
+            vault.with_tokens(tokens)
+        } else {
+            Arc::new(vault)
+        };
+        if let Some(folder_id) = gd_cfg.folder_id.clone() {
+            let wrapped = (*vault).with_folder_id(folder_id);
+            return Some(wrapped);
+        }
+        Some(vault)
+    }
+
+    fn onedrive_vault(settings: &AppSettings, cx: &App) -> Option<Arc<dyn BlobVault>> {
+        let od_cfg = settings.onedrive_config.as_ref()?;
+        if od_cfg.client_id.is_empty() {
+            return None;
+        }
+
+        let inner = OneDriveVault::new(cx.http_client(), od_cfg.client_id.clone());
+        if let Some(tokens) = od_cfg.tokens.clone() {
+            Some(inner.with_tokens(tokens))
+        } else {
+            Some(Arc::new(inner))
+        }
+    }
+
     /// 触发云端同步
     ///
     /// 使用 SyncEngine 执行同步，包括：
@@ -1028,6 +1065,18 @@ impl HomePage {
         let engine = match backend_type.as_str() {
             "github_gist" => {
                 let vault = Self::github_gist_vault(&settings, cx);
+                SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+                    .with_opt_blob_vault(vault)
+            }
+            "google_drive" => {
+                let vault = Self::google_drive_vault(&settings, cx);
+                SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+                    .with_opt_blob_vault(vault)
+            }
+            "onedrive" => {
+                let vault = Self::onedrive_vault(&settings, cx);
                 SyncEngine::new(cloud_client, sync_service, storage)
                     .with_backend(backend)
                     .with_opt_blob_vault(vault)
@@ -1357,6 +1406,18 @@ impl HomePage {
         let engine = match backend_type.as_str() {
             "github_gist" => {
                 let vault = Self::github_gist_vault(&settings, cx);
+                SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+                    .with_opt_blob_vault(vault)
+            }
+            "google_drive" => {
+                let vault = Self::google_drive_vault(&settings, cx);
+                SyncEngine::new(cloud_client, sync_service, storage)
+                    .with_backend(backend)
+                    .with_opt_blob_vault(vault)
+            }
+            "onedrive" => {
+                let vault = Self::onedrive_vault(&settings, cx);
                 SyncEngine::new(cloud_client, sync_service, storage)
                     .with_backend(backend)
                     .with_opt_blob_vault(vault)

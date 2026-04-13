@@ -113,7 +113,7 @@ impl SyncBackend for BlobVaultBackend {
 /// 统一入口，避免 UI 层到处 match 字符串。
 pub fn create_backend(sync_backend_type: &str) -> Arc<dyn SyncBackend> {
     match sync_backend_type {
-        "github_gist" | "webdav" => Arc::new(BlobVaultBackend),
+        "github_gist" | "webdav" | "google_drive" | "onedrive" => Arc::new(BlobVaultBackend),
         _ => Arc::new(SyncServerBackend),
     }
 }

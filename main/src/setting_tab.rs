@@ -46,7 +46,7 @@ use crate::app_init::is_valid_system_hotkey;
 use crate::auth::{PasswordAuthAction, get_auth_service};
 use crate::encourage::render_encourage_section;
 use crate::onetcli_app::GlobalHomePage;
-use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView};
+use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView, oauth_dialog};
 use crate::sync_server_theme;
 
 // ============================================================================
@@ -370,6 +370,12 @@ pub struct AppSettings {
     /// GitHub Gist 配置
     #[serde(default)]
     pub gist_config: Option<GistSettings>,
+    /// Google Drive 配置
+    #[serde(default)]
+    pub google_drive_config: Option<GoogleDriveSettings>,
+    /// OneDrive 配置
+    #[serde(default)]
+    pub onedrive_config: Option<OneDriveSettings>,
     #[serde(default)]
     pub database_open_mode: DatabaseOpenMode,
     #[serde(default)]
@@ -622,6 +628,46 @@ pub struct GistSettings {
     pub tokens: Option<OAuthTokens>,
 }
 
+/// Google Drive 同步配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoogleDriveSettings {
+    pub client_id: String,
+    pub client_secret: String,
+    pub folder_id: Option<String>,
+    pub tokens: Option<OAuthTokens>,
+}
+
+impl Default for GoogleDriveSettings {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret: String::new(),
+            folder_id: None,
+            tokens: None,
+        }
+    }
+}
+
+/// OneDrive 同步配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OneDriveSettings {
+    pub client_id: String,
+    pub client_secret: String,
+    pub root_id: Option<String>,
+    pub tokens: Option<OAuthTokens>,
+}
+
+impl Default for OneDriveSettings {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret: String::new(),
+            root_id: None,
+            tokens: None,
+        }
+    }
+}
+
 impl Default for GistSettings {
     fn default() -> Self {
         Self {
@@ -659,6 +705,8 @@ impl Default for AppSettings {
             sync_backend_type: default_sync_backend_type(),
             webdav_config: None,
             gist_config: None,
+            google_drive_config: None,
+            onedrive_config: None,
             database_open_mode: DatabaseOpenMode::default(),
             connection_list_sort_field: ConnectionListSortField::default(),
             connection_list_sort_order: ConnectionListSortOrder::default(),
@@ -1289,6 +1337,14 @@ impl SettingsPanel {
                                             "github_gist".into(),
                                             t!("Settings.General.Sync.github_gist_backend").into(),
                                         ),
+                                        (
+                                            "google_drive".into(),
+                                            "Google Drive".into(),
+                                        ),
+                                        (
+                                            "onedrive".into(),
+                                            "OneDrive".into(),
+                                        ),
                                     ],
                                     |cx: &App| {
                                         SharedString::from(
@@ -1637,6 +1693,204 @@ impl SettingsPanel {
                             )
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "github_gist"
+                            }),
+                            // Google Drive 配置（仅 google_drive 后端显示）
+                            SettingItem::new(
+                                "Google Drive Client ID",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .google_drive_config
+                                                .as_ref()
+                                                .map(|c| c.client_id.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let gd = settings
+                                            .google_drive_config
+                                            .get_or_insert_with(GoogleDriveSettings::default);
+                                        let next_client_id = val.to_string();
+                                        if gd.client_id != next_client_id {
+                                            gd.tokens = None;
+                                        }
+                                        gd.client_id = next_client_id;
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "google_drive"
+                            })
+                            .description("Google Cloud Console 中创建的 OAuth 2.0 Client ID".to_string()),
+                            SettingItem::new(
+                                "Google Drive Client Secret",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .google_drive_config
+                                                .as_ref()
+                                                .map(|c| c.client_secret.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let gd = settings
+                                            .google_drive_config
+                                            .get_or_insert_with(GoogleDriveSettings::default);
+                                        let next_secret = val.to_string();
+                                        if gd.client_secret != next_secret {
+                                            gd.tokens = None;
+                                        }
+                                        gd.client_secret = next_secret;
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "google_drive"
+                            })
+                            .description("Google Cloud Console 中创建的 OAuth 2.0 Client Secret".to_string()),
+                            SettingItem::action_button(
+                                |_opts: &RenderOptions,
+                                 _window: &mut gpui::Window,
+                                 cx: &mut gpui::App| {
+                                    use gpui_component::button::{
+                                        Button, ButtonVariant, ButtonVariants as _,
+                                    };
+                                    let config = AppSettings::global(cx)
+                                        .google_drive_config
+                                        .as_ref();
+                                    let client_id = config.map(|c| c.client_id.clone()).unwrap_or_default();
+                                    let client_secret = config.map(|c| c.client_secret.clone()).unwrap_or_default();
+                                    if client_id.is_empty() || client_secret.is_empty() {
+                                        return gpui::div().into_any_element();
+                                    }
+                                    let has_auth = config
+                                        .map(|c| c.tokens.is_some())
+                                        .unwrap_or(false);
+                                    Button::new("gdrive-auth-btn")
+                                        .with_variant(if has_auth {
+                                            ButtonVariant::Ghost
+                                        } else {
+                                            ButtonVariant::Primary
+                                        })
+                                        .child(if has_auth { "重新授权" } else { "授权 Google Drive" })
+                                        .into_any_element()
+                                },
+                                move |window, cx| {
+                                    let config = AppSettings::global(cx)
+                                        .google_drive_config
+                                        .as_ref();
+                                    let client_id = config.map(|c| c.client_id.clone()).unwrap_or_default();
+                                    let client_secret = config.map(|c| c.client_secret.clone()).unwrap_or_default();
+                                    if client_id.is_empty() || client_secret.is_empty() {
+                                        return;
+                                    }
+                                    let dialog_entity = cx.new(|_cx| {
+                                        crate::settings::oauth_dialog::GoogleDriveAuthDialog::new(
+                                            client_id,
+                                            client_secret,
+                                        )
+                                    });
+                                    window.open_dialog(cx, move |dialog, _window, _cx| {
+                                        dialog
+                                            .title("Google Drive 授权".to_string())
+                                            .child(dialog_entity.clone())
+                                    });
+                                },
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "google_drive"
+                            }),
+                            // OneDrive 配置（仅 onedrive 后端显示）
+                            SettingItem::new(
+                                "OneDrive Client ID",
+                                themed_setting_field(SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .onedrive_config
+                                                .as_ref()
+                                                .map(|c| c.client_id.clone())
+                                                .unwrap_or_default(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        let od = settings
+                                            .onedrive_config
+                                            .get_or_insert_with(OneDriveSettings::default);
+                                        let next_client_id = val.to_string();
+                                        if od.client_id != next_client_id {
+                                            od.tokens = None;
+                                        }
+                                        od.client_id = next_client_id;
+                                        settings.save();
+                                    },
+                                ))
+                                .default_value(SharedString::from(String::new())),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "onedrive"
+                            })
+                            .description("Microsoft Azure App Registration 中的 Application (client) ID".to_string()),
+                            SettingItem::action_button(
+                                |_opts: &RenderOptions,
+                                 _window: &mut gpui::Window,
+                                 cx: &mut gpui::App| {
+                                    use gpui_component::button::{
+                                        Button, ButtonVariant, ButtonVariants as _,
+                                    };
+                                    let client_id = AppSettings::global(cx)
+                                        .onedrive_config
+                                        .as_ref()
+                                        .map(|c| c.client_id.clone())
+                                        .unwrap_or_default();
+                                    if client_id.is_empty() {
+                                        return gpui::div().into_any_element();
+                                    }
+                                    let has_auth = AppSettings::global(cx)
+                                        .onedrive_config
+                                        .as_ref()
+                                        .map(|c| c.tokens.is_some())
+                                        .unwrap_or(false);
+                                    Button::new("onedrive-auth-btn")
+                                        .with_variant(if has_auth {
+                                            ButtonVariant::Ghost
+                                        } else {
+                                            ButtonVariant::Primary
+                                        })
+                                        .child(if has_auth { "重新授权" } else { "授权 OneDrive" })
+                                        .into_any_element()
+                                },
+                                move |window, cx| {
+                                    let client_id = AppSettings::global(cx)
+                                        .onedrive_config
+                                        .as_ref()
+                                        .map(|c| c.client_id.clone())
+                                        .unwrap_or_default();
+                                    if client_id.is_empty() {
+                                        return;
+                                    }
+                                    let dialog_entity = cx.new(|_cx| {
+                                        crate::settings::oauth_dialog::OneDriveAuthDialog::new(client_id)
+                                    });
+                                    window.open_dialog(cx, move |dialog, _window, _cx| {
+                                        dialog
+                                            .title("OneDrive 授权".to_string())
+                                            .child(dialog_entity.clone())
+                                    });
+                                },
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).sync_backend_type == "onedrive"
                             }),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)

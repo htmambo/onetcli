@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Microsoft OAuth Token 响应
 #[derive(Debug, Deserialize)]
@@ -88,8 +88,8 @@ pub struct OneDriveVault {
     http: Arc<dyn HttpClient>,
     client_id: String,
     client_secret: Option<String>,
-    tokens: Option<OAuthTokens>,
-    root_id: Option<String>,
+    tokens: Arc<Mutex<Option<OAuthTokens>>>,
+    root_id: Arc<Mutex<Option<String>>>,
 }
 
 impl OneDriveVault {
@@ -98,23 +98,34 @@ impl OneDriveVault {
             http,
             client_id,
             client_secret: None,
-            tokens: None,
-            root_id: None,
+            tokens: Arc::new(Mutex::new(None)),
+            root_id: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub fn with_tokens(mut self, tokens: OAuthTokens) -> Self {
-        self.tokens = Some(tokens);
-        self
+    pub fn with_tokens(&self, tokens: OAuthTokens) -> Arc<Self> {
+        *self.tokens.lock().unwrap() = Some(tokens);
+        Arc::new(Self {
+            http: Arc::clone(&self.http),
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            tokens: Arc::clone(&self.tokens),
+            root_id: Arc::clone(&self.root_id),
+        })
     }
 
-    pub fn with_secret(mut self, secret: String) -> Self {
-        self.client_secret = Some(secret);
-        self
+    pub fn with_secret(&self, secret: String) -> Arc<Self> {
+        Arc::new(Self {
+            http: Arc::clone(&self.http),
+            client_id: self.client_id.clone(),
+            client_secret: Some(secret),
+            tokens: Arc::clone(&self.tokens),
+            root_id: Arc::clone(&self.root_id),
+        })
     }
 
-    fn tokens(&self) -> Result<&OAuthTokens, CloudApiError> {
-        self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)
+    fn tokens(&self) -> Result<OAuthTokens, CloudApiError> {
+        self.tokens.lock().unwrap().clone().ok_or(CloudApiError::NotAuthenticated)
     }
 
     /// 开始 PKCE OAuth 流程
@@ -222,20 +233,19 @@ impl OneDriveVault {
             serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         let tokens = token_resp.into_tokens();
-        self.tokens = Some(tokens.clone());
+        *self.tokens.lock().unwrap() = Some(tokens.clone());
+        let folder_id = self.get_or_create_vault_folder().await?;
+        *self.root_id.lock().unwrap() = Some(folder_id);
         Ok(tokens)
     }
 
     /// 获取 vault 文件夹 ID
-    async fn get_or_create_vault_folder(&mut self) -> Result<String, CloudApiError> {
-        if let Some(ref id) = self.root_id {
+    async fn get_or_create_vault_folder(&self) -> Result<String, CloudApiError> {
+        if let Some(ref id) = *self.root_id.lock().unwrap() {
             return Ok(id.clone());
         }
 
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self.tokens()?;
 
         // 查询 ONetCli-vault 文件夹
         let query = urlencoding::encode("name='ONetCli-vault' and folder");
@@ -274,27 +284,20 @@ impl OneDriveVault {
                 .into_iter()
                 .find(|i| i.name == "ONetCli-vault")
             {
-                self.root_id = Some(folder.id.clone());
+                *self.root_id.lock().unwrap() = Some(folder.id.clone());
                 return Ok(folder.id);
             }
         }
 
         // 创建文件夹
         let folder_id = self.create_folder("ONetCli-vault", None).await?;
-        self.root_id = Some(folder_id.clone());
+        *self.root_id.lock().unwrap() = Some(folder_id.clone());
         Ok(folder_id)
     }
 
     /// 创建文件夹
-    async fn create_folder(
-        &self,
-        name: &str,
-        parent_id: Option<&str>,
-    ) -> Result<String, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    async fn create_folder(&self, name: &str, parent_id: Option<&str>) -> Result<String, CloudApiError> {
+        let tokens = self.tokens()?;
 
         #[derive(Serialize)]
         struct CreateFolderRequest<'a> {
@@ -360,16 +363,8 @@ impl OneDriveVault {
     }
 
     /// 上传文件
-    async fn upload_file(
-        &self,
-        name: &str,
-        content: &[u8],
-        folder_id: &str,
-    ) -> Result<BlobMeta, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    async fn upload_file(&self, name: &str, content: &[u8], folder_id: &str) -> Result<BlobMeta, CloudApiError> {
+        let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
         let uri = format!(
@@ -421,10 +416,7 @@ impl OneDriveVault {
 
     /// 下载文件
     async fn download_file(&self, item_id: &str) -> Result<Blob, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
         let uri = format!(
@@ -471,10 +463,7 @@ impl OneDriveVault {
 
     /// 删除文件
     async fn delete_file(&self, item_id: &str) -> Result<(), CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self.tokens()?;
 
         let uri = format!(
             "https://graph.microsoft.com/v1.0/me/drive/items/{}",
@@ -505,15 +494,8 @@ impl OneDriveVault {
     }
 
     /// 查找 vault 文件
-    async fn find_vault_file(
-        &self,
-        folder_id: &str,
-        name: &str,
-    ) -> Result<Option<DriveItem>, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    async fn find_vault_file(&self, folder_id: &str, name: &str) -> Result<Option<DriveItem>, CloudApiError> {
+        let tokens = self.tokens()?;
 
         let uri = format!(
             "https://graph.microsoft.com/v1.0/me/drive/items/{}/children?$filter=name eq '{}'",
@@ -548,11 +530,8 @@ impl OneDriveVault {
     }
 
     /// 列出 vault 中的所有文件
-    async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    pub(crate) async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
+        let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
         let uri = format!(
@@ -602,33 +581,37 @@ impl BlobVault for OneDriveVault {
         "onedrive"
     }
 
-    async fn upload(&self, _key: &str, _data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 OneDriveVault 专用方法".to_string(),
-        ))
+    async fn upload(&self, key: &str, data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
+        let folder_id = self.get_or_create_vault_folder().await?;
+        self.upload_file(key, &data, &folder_id).await
     }
 
-    async fn download(&self, _key: &str) -> Result<Blob, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 OneDriveVault 专用方法".to_string(),
-        ))
+    async fn download(&self, key: &str) -> Result<Blob, CloudApiError> {
+        let folder_id = self.get_or_create_vault_folder().await?;
+        let file = self.find_vault_file(&folder_id, key).await?;
+        let item_id = file.map(|f| f.id).ok_or_else(|| {
+            CloudApiError::NotFound(format!("OneDrive 中未找到文件: {}", key))
+        })?;
+        self.download_file(&item_id).await
     }
 
-    async fn delete(&self, _key: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 OneDriveVault 专用方法".to_string(),
-        ))
+    async fn delete(&self, key: &str) -> Result<(), CloudApiError> {
+        let folder_id = self.get_or_create_vault_folder().await?;
+        let file = self.find_vault_file(&folder_id, key).await?;
+        if let Some(f) = file {
+            self.delete_file(&f.id).await?;
+        }
+        Ok(())
     }
 
-    async fn exists(&self, _key: &str) -> Result<bool, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 OneDriveVault 专用方法".to_string(),
-        ))
+    async fn exists(&self, key: &str) -> Result<bool, CloudApiError> {
+        let folder_id = self.get_or_create_vault_folder().await?;
+        let file = self.find_vault_file(&folder_id, key).await?;
+        Ok(file.is_some())
     }
 
     async fn list(&self, _prefix: Option<&str>) -> Result<Vec<BlobMeta>, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 OneDriveVault 专用方法".to_string(),
-        ))
+        let folder_id = self.get_or_create_vault_folder().await?;
+        self.list_vault_files(&folder_id).await
     }
 }

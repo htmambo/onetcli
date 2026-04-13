@@ -47,6 +47,8 @@ pub use conflict::*;
 pub use engine::*;
 pub use models::*;
 pub use oauth::github_gist::{GithubGistSettings, GithubGistVault};
+pub use oauth::google_drive::GoogleDriveVault;
+pub use oauth::onedrive::OneDriveVault;
 pub use queue::*;
 pub use service::*;
 pub use state_manager::*;

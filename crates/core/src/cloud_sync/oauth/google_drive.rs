@@ -11,12 +11,14 @@
 
 use crate::cloud_sync::blob_vault::{Blob, BlobMeta, BlobVault};
 use crate::cloud_sync::client::CloudApiError;
-use crate::cloud_sync::oauth::OAuthTokens;
+use crate::cloud_sync::oauth::callback_server::start_callback_server;
+use crate::cloud_sync::oauth::pkce::{generate_code_challenge, generate_code_verifier};
+use crate::cloud_sync::oauth::{OAuthConfig, OAuthTokens};
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Google OAuth Token 响应
 #[derive(Debug, Deserialize)]
@@ -65,8 +67,8 @@ pub struct GoogleDriveVault {
     http: Arc<dyn HttpClient>,
     client_id: String,
     client_secret: String,
-    tokens: Option<OAuthTokens>,
-    folder_id: Option<String>,
+    tokens: Arc<Mutex<Option<OAuthTokens>>>,
+    folder_id: Arc<Mutex<Option<String>>>,
 }
 
 impl GoogleDriveVault {
@@ -75,35 +77,151 @@ impl GoogleDriveVault {
             http,
             client_id,
             client_secret,
-            tokens: None,
-            folder_id: None,
+            tokens: Arc::new(Mutex::new(None)),
+            folder_id: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub fn with_tokens(mut self, tokens: OAuthTokens) -> Self {
-        self.tokens = Some(tokens);
-        self
+    pub fn with_tokens(&self, tokens: OAuthTokens) -> Arc<Self> {
+        *self.tokens.lock().unwrap() = Some(tokens);
+        Arc::new(Self {
+            http: Arc::clone(&self.http),
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            tokens: Arc::clone(&self.tokens),
+            folder_id: Arc::clone(&self.folder_id),
+        })
     }
 
-    pub fn with_folder_id(mut self, folder_id: String) -> Self {
-        self.folder_id = Some(folder_id);
-        self
+    pub fn with_folder_id(&self, folder_id: String) -> Arc<Self> {
+        *self.folder_id.lock().unwrap() = Some(folder_id);
+        Arc::new(Self {
+            http: Arc::clone(&self.http),
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            tokens: Arc::clone(&self.tokens),
+            folder_id: Arc::clone(&self.folder_id),
+        })
     }
 
-    fn tokens(&self) -> Result<&OAuthTokens, CloudApiError> {
-        self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)
+    /// 开始 PKCE OAuth 流程
+    pub async fn authenticate(&mut self, config: &OAuthConfig) -> Result<OAuthTokens, CloudApiError> {
+        let code_verifier = generate_code_verifier();
+        let code_challenge = generate_code_challenge(&code_verifier);
+        let state = format!("ONetCli_{}", chrono::Utc::now().timestamp_millis());
+
+        let auth_url = format!(
+            "{}?{}",
+            config.provider.auth_url(),
+            [
+                ("client_id", config.client_id.as_str()),
+                ("response_type", "code"),
+                ("redirect_uri", &config.redirect_uri),
+                ("scope", &config.scopes),
+                ("state", &state),
+                ("code_challenge", &code_challenge),
+                ("code_challenge_method", "S256"),
+            ]
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&")
+        );
+
+        // 启动回调服务器
+        let redirect_port = config
+            .redirect_uri
+            .strip_prefix("http://localhost:")
+            .and_then(|s| s.split('/').next())
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(8787);
+
+        let (_port, callback) =
+            start_callback_server(redirect_port, 300)
+                .map_err(|e| CloudApiError::AuthenticationFailed(e.to_string()))?;
+
+        if !callback.is_success() {
+            return Err(CloudApiError::AuthenticationFailed(
+                callback
+                    .error_description
+                    .unwrap_or_else(|| "授权失败".to_string()),
+            ));
+        }
+
+        if callback.state.as_deref() != Some(&state) {
+            return Err(CloudApiError::AuthenticationFailed(
+                "State 不匹配".to_string(),
+            ));
+        }
+
+        let token_url = config.provider.token_url();
+        let code = callback.code;
+
+        let mut body_parts = vec![
+            "grant_type=authorization_code".to_string(),
+            format!("client_id={}", urlencoding::encode(&config.client_id)),
+            format!("code={}", urlencoding::encode(&code)),
+            format!("redirect_uri={}", urlencoding::encode(&config.redirect_uri)),
+            format!("code_verifier={}", urlencoding::encode(&code_verifier)),
+        ];
+
+        if let Some(ref secret) = config.client_secret {
+            body_parts.push(format!("client_secret={}", urlencoding::encode(secret)));
+        }
+
+        let body = body_parts.join("&");
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Accept", "application/json")
+            .body(AsyncBody::from(body.into_bytes()))
+            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+        let response = self
+            .http
+            .send(req)
+            .await
+            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+        let status = response.status();
+        let mut bytes = Vec::new();
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+        if !status.is_success() {
+            return Err(CloudApiError::ServerError(format!(
+                "Google token 请求失败: {}",
+                String::from_utf8_lossy(&bytes)
+            )));
+        }
+
+        let token_resp: GoogleTokenResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+
+        let tokens = token_resp.into_tokens();
+        *self.tokens.lock().unwrap() = Some(tokens.clone());
+        // 获取或创建 vault 文件夹
+        let folder_id = self.get_or_create_app_folder().await?;
+        *self.folder_id.lock().unwrap() = Some(folder_id);
+        Ok(tokens)
+    }
+
+    fn tokens(&self) -> Result<OAuthTokens, CloudApiError> {
+        self.tokens.lock().unwrap().clone().ok_or(CloudApiError::NotAuthenticated)
     }
 
     /// 获取或创建应用专属文件夹
-    async fn get_or_create_app_folder(&mut self) -> Result<String, CloudApiError> {
-        if let Some(ref id) = self.folder_id {
+    async fn get_or_create_app_folder(&self) -> Result<String, CloudApiError> {
+        if let Some(ref id) = *self.folder_id.lock().unwrap() {
             return Ok(id.clone());
         }
 
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self.tokens()?;
 
         // 查询应用文件夹
         let query = "name='ONetCli-vault' and mimeType='application/vnd.google-apps.folder' and trashed=false";
@@ -136,26 +254,19 @@ impl GoogleDriveVault {
             serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
         if let Some(folder) = list.files.into_iter().next() {
-            self.folder_id = Some(folder.id.clone());
+            *self.folder_id.lock().unwrap() = Some(folder.id.clone());
             return Ok(folder.id);
         }
 
         // 创建文件夹
         let folder_id = self.create_folder("ONetCli-vault", None).await?;
-        self.folder_id = Some(folder_id.clone());
+        *self.folder_id.lock().unwrap() = Some(folder_id.clone());
         Ok(folder_id)
     }
 
     /// 创建文件夹
-    async fn create_folder(
-        &self,
-        name: &str,
-        parent_id: Option<&str>,
-    ) -> Result<String, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    async fn create_folder(&self, name: &str, parent_id: Option<&str>) -> Result<String, CloudApiError> {
+        let tokens = self.tokens()?;
 
         #[derive(Serialize)]
         struct CreateFolderRequest<'a> {
@@ -209,16 +320,8 @@ impl GoogleDriveVault {
     }
 
     /// 上传或更新文件
-    async fn upload_file(
-        &self,
-        name: &str,
-        content: &[u8],
-        parent_id: &str,
-    ) -> Result<BlobMeta, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    async fn upload_file(&self, name: &str, content: &[u8], parent_id: &str) -> Result<BlobMeta, CloudApiError> {
+        let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
         // multipart/form-data 上传
@@ -293,10 +396,7 @@ impl GoogleDriveVault {
 
     /// 下载文件
     async fn download_file(&self, file_id: &str) -> Result<Blob, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
         let uri = format!(
@@ -342,10 +442,7 @@ impl GoogleDriveVault {
 
     /// 删除文件
     async fn delete_file(&self, file_id: &str) -> Result<(), CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+        let tokens = self.tokens()?;
 
         let uri = format!("https://www.googleapis.com/drive/v3/files/{}", file_id);
         let req = Request::builder()
@@ -371,16 +468,60 @@ impl GoogleDriveVault {
         Ok(())
     }
 
-    /// 查找 vault 文件
-    async fn find_vault_file(&self, folder_id: &str) -> Result<Option<DriveFile>, CloudApiError> {
-        let tokens = self
-            .tokens
-            .as_ref()
-            .ok_or(CloudApiError::NotAuthenticated)?;
+    /// 列出 vault 中的所有文件
+    pub(crate) async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
+        let tokens = self.tokens()?;
+        let now = chrono::Utc::now().timestamp_millis();
+
+        let query = format!("'{}' in parents and trashed=false", folder_id);
+        let uri = format!(
+            "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id,name,size,mimeType)",
+            urlencoding::encode(&query)
+        );
+
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(&uri)
+            .header("Authorization", format!("Bearer {}", tokens.access_token))
+            .body(AsyncBody::empty())
+            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+        let response = self
+            .http
+            .send(req)
+            .await
+            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+        let mut bytes = Vec::new();
+        response
+            .into_body()
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
+
+        #[derive(Deserialize)]
+        struct FileListResponse { files: Vec<DriveFile> }
+        let list: FileListResponse =
+            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
+
+        Ok(list
+            .files
+            .into_iter()
+            .map(|f| BlobMeta {
+                key: f.id,
+                size: f.size.as_ref().and_then(|s| s.parse().ok()).unwrap_or(0),
+                updated_at: now,
+            })
+            .collect())
+    }
+
+    /// 查找 vault 中指定名称的文件
+    pub(crate) async fn find_vault_file(&self, folder_id: &str, name: &str) -> Result<Option<DriveFile>, CloudApiError> {
+        let tokens = self.tokens()?;
 
         let query = format!(
-            "name='ONetCli-vault.json' and '{}' in parents and trashed=false",
-            folder_id
+            "name='{}' and '{}' in parents and trashed=false",
+            name, folder_id
         );
         let uri = format!(
             "https://www.googleapis.com/drive/v3/files?q={}",
@@ -420,34 +561,37 @@ impl BlobVault for GoogleDriveVault {
         "google_drive"
     }
 
-    async fn upload(&self, _key: &str, _data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
-        // key 作为文件名，存储到 app folder
-        Err(CloudApiError::NotSupported(
-            "请使用 GoogleDriveVault 专用方法".to_string(),
-        ))
+    async fn upload(&self, key: &str, data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
+        let folder_id = self.get_or_create_app_folder().await?;
+        self.upload_file(key, &data, &folder_id).await
     }
 
-    async fn download(&self, _key: &str) -> Result<Blob, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 GoogleDriveVault 专用方法".to_string(),
-        ))
+    async fn download(&self, key: &str) -> Result<Blob, CloudApiError> {
+        let folder_id = self.get_or_create_app_folder().await?;
+        let file = self.find_vault_file(&folder_id, key).await?;
+        let file_id = file.map(|f| f.id).ok_or_else(|| {
+            CloudApiError::NotFound(format!("Google Drive 中未找到文件: {}", key))
+        })?;
+        self.download_file(&file_id).await
     }
 
-    async fn delete(&self, _key: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 GoogleDriveVault 专用方法".to_string(),
-        ))
+    async fn delete(&self, key: &str) -> Result<(), CloudApiError> {
+        let folder_id = self.get_or_create_app_folder().await?;
+        let file = self.find_vault_file(&folder_id, key).await?;
+        if let Some(f) = file {
+            self.delete_file(&f.id).await?;
+        }
+        Ok(())
     }
 
-    async fn exists(&self, _key: &str) -> Result<bool, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 GoogleDriveVault 专用方法".to_string(),
-        ))
+    async fn exists(&self, key: &str) -> Result<bool, CloudApiError> {
+        let folder_id = self.get_or_create_app_folder().await?;
+        let file = self.find_vault_file(&folder_id, key).await?;
+        Ok(file.is_some())
     }
 
     async fn list(&self, _prefix: Option<&str>) -> Result<Vec<BlobMeta>, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "请使用 GoogleDriveVault 专用方法".to_string(),
-        ))
+        let folder_id = self.get_or_create_app_folder().await?;
+        self.list_vault_files(&folder_id).await
     }
 }
