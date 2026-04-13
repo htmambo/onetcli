@@ -148,54 +148,6 @@ pub trait CloudApiClient: Send + Sync {
     async fn delete_sync_data(&self, id: &str) -> Result<(), CloudApiError>;
 
     // ========================================================================
-    // 团队管理（暂不支持）
-    // ========================================================================
-
-    /// 获取当前用户所在的所有团队（暂不支持）
-    async fn list_teams(&self) -> Result<Vec<()>, CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 创建团队（暂不支持）
-    async fn create_team(&self, _team: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 更新团队信息（暂不支持）
-    async fn update_team(&self, _team: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 删除团队（暂不支持）
-    async fn delete_team(&self, _id: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 获取团队成员列表（暂不支持）
-    async fn list_team_members(&self, _team_id: &str) -> Result<Vec<()>, CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 添加团队成员（暂不支持）
-    async fn add_team_member(&self, _member: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 通过邮箱添加团队成员（暂不支持）
-    async fn add_team_member_by_email(
-        &self,
-        _team_id: &str,
-        _email: &str,
-    ) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    /// 移除团队成员（暂不支持）
-    async fn remove_team_member(&self, _member_id: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported("团队功能暂不支持".to_string()))
-    }
-
-    // ========================================================================
     // AI 聊天
     // ========================================================================
 

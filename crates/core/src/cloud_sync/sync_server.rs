@@ -950,42 +950,6 @@ impl CloudApiClient for SyncServerClient {
         )))
     }
 
-    async fn list_teams(&self) -> Result<Vec<()>, CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn create_team(&self, _team: &str) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn update_team(&self, _team: &str) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn delete_team(&self, _id: &str) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn list_team_members(&self, _team_id: &str) -> Result<Vec<()>, CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn add_team_member(&self, _member: &str) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn add_team_member_by_email(
-        &self,
-        _team_id: &str,
-        _email: &str,
-    ) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
-    async fn remove_team_member(&self, _member_id: &str) -> Result<(), CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持团队功能"))
-    }
-
     async fn chat(&self, _request: &ChatRequest) -> Result<String, CloudApiError> {
         Err(Self::unsupported("当前 sync_server 不支持云端 AI 聊天"))
     }

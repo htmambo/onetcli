@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS certificates (
     sync_enabled INTEGER NOT NULL DEFAULT 1,
     cloud_id TEXT,
     last_synced_at INTEGER,
-    team_id TEXT,
     owner_id TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -21,4 +20,3 @@ CREATE TABLE IF NOT EXISTS certificates (
 CREATE INDEX IF NOT EXISTS idx_certificates_name ON certificates(name);
 CREATE INDEX IF NOT EXISTS idx_certificates_kind ON certificates(kind);
 CREATE INDEX IF NOT EXISTS idx_certificates_cloud_id ON certificates(cloud_id);
-CREATE INDEX IF NOT EXISTS idx_certificates_team_id ON certificates(team_id);
