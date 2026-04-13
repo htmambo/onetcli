@@ -178,6 +178,71 @@ impl SyncEngine {
         }
     }
 
+    /// 对连接数组中的 params 字段加密
+    fn encrypt_connection_params(&self, conns: &serde_json::Value) -> serde_json::Value {
+        if let Some(arr) = conns.as_array() {
+            let encrypted: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|conn| {
+                    let mut conn = conn.clone();
+                    if let Some(params) = conn.get("params") {
+                        if let Ok(json) = serde_json::to_string(params) {
+                            let crypto = self.crypto_service.read().ok();
+                            if let Some(ref crypto) = crypto {
+                                if let Ok(key) = crypto.select_encrypt_key() {
+                                    let encrypted = crate::crypto::encrypt_with_key(&json, key);
+                                    if let Some(obj) = conn.as_object_mut() {
+                                        obj.insert(
+                                            "params".to_string(),
+                                            serde_json::Value::String(encrypted),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    conn
+                })
+                .collect();
+            serde_json::Value::Array(encrypted)
+        } else {
+            conns.clone()
+        }
+    }
+
+    /// 对连接数组中的 params 字段解密
+    fn decrypt_connection_params(&self, conns: &serde_json::Value) -> serde_json::Value {
+        if let Some(arr) = conns.as_array() {
+            let decrypted: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|conn| {
+                    let mut conn = conn.clone();
+                    if let Some(params_str) = conn.get("params").and_then(|v| v.as_str()) {
+                        let crypto = self.crypto_service.read().ok();
+                        if let Some(ref crypto) = crypto {
+                            if let Ok(key) = crypto.select_decrypt_key() {
+                                if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key)
+                                {
+                                    if let Ok(params) =
+                                        serde_json::from_str::<serde_json::Value>(&json)
+                                    {
+                                        if let Some(obj) = conn.as_object_mut() {
+                                            obj.insert("params".to_string(), params);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    conn
+                })
+                .collect();
+            serde_json::Value::Array(decrypted)
+        } else {
+            conns.clone()
+        }
+    }
+
     /// 对证书数组中的 params 字段解密
     fn decrypt_certificate_params(&self, certs: &serde_json::Value) -> serde_json::Value {
         if let Some(arr) = certs.as_array() {
@@ -219,7 +284,8 @@ impl SyncEngine {
             .storage
             .get::<crate::storage::ConnectionRepository>()
             .and_then(|repo| repo.list().ok())
-            .map(|conns| serde_json::to_value(&conns).unwrap_or_default());
+            .map(|conns| serde_json::to_value(&conns).unwrap_or_default())
+            .map(|json_val| self.encrypt_connection_params(&json_val));
 
         let workspaces: Option<serde_json::Value> = self
             .storage
@@ -350,8 +416,9 @@ impl SyncEngine {
 
         // 恢复连接
         if let Some(ref val) = bundle.connections {
+            let decrypted_conns = self.decrypt_connection_params(val);
             let cloud_connections: Vec<crate::storage::StoredConnection> =
-                serde_json::from_value(val.clone())
+                serde_json::from_value(decrypted_conns)
                     .map_err(|e| SyncError::StorageError(format!("连接数据解析失败: {}", e)))?;
 
             let repo = self

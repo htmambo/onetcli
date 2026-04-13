@@ -8,7 +8,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
     (
         "20260315000001",
-        include_str!("../../migrations/20260315000001_team_sync.sql"),
+        "",
     ),
     (
         "20260317000001",
