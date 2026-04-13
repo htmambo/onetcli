@@ -1,8 +1,5 @@
-import argon2 from "argon2-browser";
-
 const ENCRYPTED_PREFIX = "ENC:";
 const ENCRYPTED_PREFIX_V2 = "ENC:V2:";
-const VERIFICATION_V2_PREFIX = "V2:";
 const DERIVE_SALT = "onehub_password_encryption_salt_v1";
 const VERIFICATION_MAGIC = "ONEHUB_KEY_VERIFY_V1";
 const NONCE_LENGTH = 12;
@@ -37,30 +34,12 @@ function decodeBase64(value: string): Uint8Array {
   }
 }
 
-/// 使用 SHA-256 派生 AES-256 密钥（用于密码加密/解密，与 Rust 后端一致）
-async function deriveKeyForPassword(masterKey: string): Promise<CryptoKey> {
+/// 使用 SHA-256 派生 AES-256 密钥（与 Rust 后端 derive_key 一致）
+async function deriveKey(masterKey: string): Promise<CryptoKey> {
   ensureWebCryptoSupport();
   const material = toUtf8Bytes(masterKey + DERIVE_SALT);
   const digest = await crypto.subtle.digest("SHA-256", material);
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["decrypt", "encrypt"]);
-}
-
-/// 使用 Argon2id 派生 AES-256 密钥（用于验证数据解密，与 Rust 后端一致）
-async function deriveKeyForVerification(
-  masterKey: string,
-  salt: Uint8Array,
-): Promise<CryptoKey> {
-  ensureWebCryptoSupport();
-  const hash = await argon2.hash({
-    pass: masterKey,
-    salt: salt,
-    type: argon2.ArgonType.Argon2id,
-    hashLen: 32,
-    iterations: 1,
-    mem: 4096,
-    parallelism: 1,
-  });
-  return crypto.subtle.importKey("raw", hash.hash, "AES-GCM", false, ["decrypt", "encrypt"]);
 }
 
 /// 解密 V2 格式密文（salt(16) + nonce(12) + ciphertext）
@@ -113,7 +92,7 @@ async function decryptV1Payload(encodedPayload: string, key: CryptoKey): Promise
   }
 }
 
-/// 验证主密钥是否正确（支持 V2 和 V1 格式的验证数据）
+/// 验证主密钥是否正确（仅支持 V1 格式）
 export async function verifySyncMasterKey(
   masterKey: string,
   verificationData: string,
@@ -123,26 +102,9 @@ export async function verifySyncMasterKey(
   }
 
   try {
-    const combined = decodeBase64(verificationData);
-
-    if (verificationData.startsWith(VERIFICATION_V2_PREFIX)) {
-      // V2 格式: V2:(3) + salt(16) + nonce(12) + ciphertext
-      const body = combined.slice(3);
-      if (body.length < SALT_LENGTH + NONCE_LENGTH) {
-        return false;
-      }
-      const salt = body.slice(0, SALT_LENGTH);
-      const key = await deriveKeyForVerification(masterKey, salt);
-      const plaintext = await decryptV2Payload(verificationData.slice(VERIFICATION_V2_PREFIX.length), key);
-      return plaintext === VERIFICATION_MAGIC;
-    } else if (combined.length >= NONCE_LENGTH) {
-      // V1 格式: nonce(12) + ciphertext（旧格式，使用 SHA-256）
-      const key = await deriveKeyForPassword(masterKey);
-      const plaintext = await decryptV1Payload(verificationData, key);
-      return plaintext === VERIFICATION_MAGIC;
-    }
-
-    return false;
+    const key = await deriveKey(masterKey);
+    const plaintext = await decryptV1Payload(verificationData, key);
+    return plaintext === VERIFICATION_MAGIC;
   } catch {
     return false;
   }
@@ -164,14 +126,14 @@ export async function decryptSyncEncryptedData(
   if (encryptedData.startsWith(ENCRYPTED_PREFIX_V2)) {
     // V2 格式: ENC:V2: + base64(salt(16) + nonce(12) + ciphertext)
     const encodedPayload = encryptedData.slice(ENCRYPTED_PREFIX_V2.length);
-    const key = await deriveKeyForPassword(masterKey);
+    const key = await deriveKey(masterKey);
     return decryptV2Payload(encodedPayload, key);
   }
 
   if (encryptedData.startsWith(ENCRYPTED_PREFIX)) {
     // V1 格式: ENC: + base64(nonce(12) + ciphertext)
     const encodedPayload = encryptedData.slice(ENCRYPTED_PREFIX.length);
-    const key = await deriveKeyForPassword(masterKey);
+    const key = await deriveKey(masterKey);
     return decryptV1Payload(encodedPayload, key);
   }
 

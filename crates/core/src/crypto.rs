@@ -135,6 +135,29 @@ fn derive_key(master_key: &str) -> [u8; 32] {
 /// 验证数据魔术串前缀（用于标识新格式）
 const VERIFICATION_V2_PREFIX: &str = "V2:";
 
+/// 生成 V1 格式的密钥验证数据（用于前端同步兼容）
+///
+/// 使用 SHA-256 派生密钥，与前端 syncCrypto.ts 的 verifySyncMasterKey V1 逻辑一致。
+/// 格式：base64(nonce(12) + ciphertext)
+pub fn generate_key_verification_v1(master_key: &str) -> String {
+    let key = derive_key(master_key);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    match cipher.encrypt(nonce, VERIFICATION_MAGIC.as_bytes()) {
+        Ok(ciphertext) => {
+            let mut combined = Vec::with_capacity(12 + ciphertext.len());
+            combined.extend_from_slice(&nonce_bytes);
+            combined.extend_from_slice(&ciphertext);
+            BASE64.encode(&combined)
+        }
+        Err(_) => String::new(),
+    }
+}
+
 /// 生成密钥验证数据
 ///
 /// 返回一个加密的魔术字符串，用于验证用户输入的密钥是否正确。
@@ -728,6 +751,19 @@ mod tests {
         let master_key = "test_key_123";
         let verification = generate_key_verification(master_key);
 
+        assert!(verify_master_key(master_key, &verification));
+        assert!(!verify_master_key("wrong_key", &verification));
+    }
+
+    #[test]
+    fn test_key_verification_v1() {
+        let _guard = test_mutex().lock().unwrap();
+        let master_key = "test_key_123";
+        let verification = generate_key_verification_v1(master_key);
+
+        // V1 不以 V2: 开头
+        assert!(!verification.starts_with("V2:"));
+        // 仍可通过 verify_master_key 验证
         assert!(verify_master_key(master_key, &verification));
         assert!(!verify_master_key("wrong_key", &verification));
     }

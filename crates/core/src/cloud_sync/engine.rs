@@ -919,7 +919,7 @@ mod tests {
                     "deleted-cloud-id",
                 );
 
-            let verification = crate::crypto::generate_key_verification("test-master-key");
+            let verification = crate::crypto::generate_key_verification_v1("test-master-key");
             let cloud_client = Arc::new(MockCloudClient {
                 user_config: Mutex::new(Some(crate::cloud_sync::CloudUserConfig {
                     user_id: "user-1".to_string(),

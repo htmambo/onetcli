@@ -183,7 +183,7 @@ impl CloudSyncService {
             return Err(SyncError::NotLoggedIn);
         }
 
-        let verification = crypto::generate_key_verification(master_key);
+        let verification = crypto::generate_key_verification_v1(master_key);
         let user_id = self.user_id.clone().unwrap_or_default();
 
         let config = CloudUserConfig {
@@ -223,7 +223,7 @@ impl CloudSyncService {
         }
 
         // 生成新的用户配置
-        let new_verification = crypto::generate_key_verification(new_key);
+        let new_verification = crypto::generate_key_verification_v1(new_key);
         let user_id = self.user_id.clone().unwrap_or_default();
 
         let new_config = CloudUserConfig {
