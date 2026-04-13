@@ -6625,7 +6625,6 @@ mod connection_list_sort_tests {
             last_synced_at: None,
             created_at: Some(created_at),
             updated_at: Some(updated_at),
-            team_id: None,
             owner_id: None,
         }
     }

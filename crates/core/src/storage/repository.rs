@@ -506,7 +506,6 @@ impl CertificateRepository {
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
                     item.last_synced_at,
-                    None::<String>,
                     item.owner_id,
                     updated_at,
                     id
@@ -545,24 +544,10 @@ impl CertificateRepository {
         })
     }
 
-    pub fn list_by_team(&self, team_id: &str) -> Result<Vec<Certificate>> {
-        self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates WHERE team_id = ?1 ORDER BY updated_at DESC",
-            )?;
-            let rows = stmt.query_map(params![team_id], |row| CertificateRow::from_row(row))?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?.into());
-            }
-            Ok(results)
-        })
-    }
-
     pub fn list_personal(&self) -> Result<Vec<Certificate>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates WHERE team_id IS NULL ORDER BY updated_at DESC",
+                "SELECT id, name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM certificates ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| CertificateRow::from_row(row))?;
             let mut results = Vec::new();
@@ -590,7 +575,7 @@ impl Repository for CertificateRepository {
         let id = self.conn.with_connection(|conn| {
             conn.execute(
                 "INSERT INTO certificates (name, kind, params, remark, sync_enabled, cloud_id, last_synced_at, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     item.name,
                     item.kind.to_string(),
@@ -599,7 +584,6 @@ impl Repository for CertificateRepository {
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
                     item.last_synced_at,
-                    None::<String>,
                     item.owner_id,
                     ts,
                     ts
@@ -634,7 +618,6 @@ impl Repository for CertificateRepository {
                     if item.sync_enabled { 1i64 } else { 0i64 },
                     item.cloud_id,
                     item.last_synced_at,
-                    None::<String>,
                     item.owner_id,
                     ts,
                     id
@@ -944,26 +927,11 @@ impl ConnectionRepository {
         })
     }
 
-    /// 按团队 ID 查询连接
-    pub fn list_by_team(&self, team_id: &str) -> Result<Vec<StoredConnection>> {
-        self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE team_id = ?1 ORDER BY updated_at DESC",
-            )?;
-            let rows = stmt.query_map(params![team_id], |row| ConnectionRow::from_row(row))?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?.into());
-            }
-            Ok(results)
-        })
-    }
-
-    /// 查询个人连接（team_id 为 NULL）
+    /// 查询个人连接
     pub fn list_personal(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections WHERE team_id IS NULL ORDER BY updated_at DESC",
+                "SELECT id, name, connection_type, params, sort_order, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, created_at, updated_at, owner_id FROM connections ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
@@ -1363,111 +1331,6 @@ pub fn detach_connections_for_certificate(
     Ok(changed_connections)
 }
 
-/// 团队密钥缓存（本地存储，用 personal_key 加密 team_key）
-#[derive(Debug, Clone)]
-pub struct TeamKeyCache {
-    pub team_id: String,
-    pub team_name: String,
-    pub key_version: u32,
-    /// 用 personal_key 加密后的 team_key
-    pub encrypted_team_key: Option<String>,
-    pub last_verified_at: Option<i64>,
-    pub updated_at: i64,
-    /// 当前用户在该团队中的角色（owner / member）
-    pub role: Option<String>,
-}
-
-/// 团队密钥缓存仓库
-#[derive(Clone)]
-pub struct TeamKeyCacheRepository {
-    conn: SqliteConnection,
-}
-
-impl TeamKeyCacheRepository {
-    pub fn new(conn: SqliteConnection) -> Self {
-        Self { conn }
-    }
-
-    /// 获取团队密钥缓存
-    pub fn get(&self, team_id: &str) -> Result<Option<TeamKeyCache>> {
-        self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT  team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role FROM team_key_cache WHERE team_id = ?1",
-            )?;
-            let mut rows = stmt.query(params![team_id])?;
-            if let Some(row) = rows.next()? {
-                Ok(Some(TeamKeyCache {
-                    team_id: row.get(0)?,
-                    team_name: row.get(1)?,
-                    key_version: row.get::<_, i64>(2)? as u32,
-                    encrypted_team_key: row.get(3)?,
-                    last_verified_at: row.get(4)?,
-                    updated_at: row.get(5)?,
-                    role: row.get(6).unwrap_or(None),
-                }))
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
-    /// 保存或更新团队密钥缓存
-    pub fn upsert(&self, cache: &TeamKeyCache) -> Result<()> {
-        let ts = now();
-        self.conn.with_connection(|conn| {
-            conn.execute(
-                "INSERT INTO team_key_cache ( team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(team_id) DO UPDATE SET
-                 team_name = excluded.team_name,
-                 key_version = excluded.key_version,
-                 encrypted_team_key = excluded.encrypted_team_key,
-                 last_verified_at = excluded.last_verified_at,
-                 updated_at = excluded.updated_at,
-                 role = excluded.role",
-                params![cache.team_id, cache.team_name, cache.key_version as i64, cache.encrypted_team_key, cache.last_verified_at, ts, cache.role],
-            )?;
-            Ok(())
-        })
-    }
-
-    /// 获取所有缓存的团队密钥
-    pub fn list(&self) -> Result<Vec<TeamKeyCache>> {
-        self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT  team_name, key_version, encrypted_team_key, last_verified_at, updated_at, role FROM team_key_cache ORDER BY updated_at DESC",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(TeamKeyCache {
-                    team_id: row.get(0)?,
-                    team_name: row.get(1)?,
-                    key_version: row.get::<_, i64>(2)? as u32,
-                    encrypted_team_key: row.get(3)?,
-                    last_verified_at: row.get(4)?,
-                    updated_at: row.get(5)?,
-                    role: row.get(6).unwrap_or(None),
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-    }
-
-    /// 删除团队密钥缓存
-    pub fn delete(&self, team_id: &str) -> Result<()> {
-        self.conn.with_connection(|conn| {
-            conn.execute(
-                "DELETE FROM team_key_cache WHERE team_id = ?1",
-                params![team_id],
-            )?;
-            Ok(())
-        })
-    }
-}
-
 #[derive(Clone)]
 pub struct KeyValueRepository {
     conn: SqliteConnection,
@@ -1521,7 +1384,6 @@ pub fn init(cx: &mut App) {
     let workspace_repo = WorkspaceRepository::new(conn.clone());
     let quick_cmd_repo = QuickCommandRepository::new(conn.clone());
     let pending_deletion_repo = PendingCloudDeletionRepository::new(conn.clone());
-    let team_key_cache_repo = TeamKeyCacheRepository::new(conn.clone());
     let kv_repo = KeyValueRepository::new(conn.clone());
 
     storage.register(certificate_repo);
@@ -1529,7 +1391,6 @@ pub fn init(cx: &mut App) {
     storage.register(conn_repo);
     storage.register(quick_cmd_repo);
     storage.register(pending_deletion_repo);
-    storage.register(team_key_cache_repo);
     storage.register(kv_repo);
 }
 
