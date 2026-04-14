@@ -384,7 +384,7 @@ where
 
     fn select_cell_for_navigation(&mut self, row_ix: usize, col_ix: usize, cx: &mut Context<Self>) {
         self.select_cell(row_ix, col_ix, cx);
-        self.queue_cell_scroll(row_ix, col_ix, ScrollStrategy::Center, cx);
+        self.queue_cell_scroll(row_ix, col_ix, ScrollStrategy::Nearest, cx);
         cx.notify();
     }
 
