@@ -292,6 +292,43 @@ impl X11ClientStatePtr {
         state.ximc = Some(ximc);
         state.xim_handler = Some(xim_handler);
     }
+
+    pub fn reset_ime(&self) {
+        let Some(client) = self.get_client() else {
+            return;
+        };
+        let mut state = client.0.borrow_mut();
+        state.composing = false;
+        if let Some(mut ximc) = state.ximc.take() {
+            if let Some(xim_handler) = state.xim_handler.as_ref() {
+                ximc.reset_ic(xim_handler.im_id, xim_handler.ic_id).ok();
+            } else {
+                log::error!("bug: xim handler not set in reset_ime");
+            }
+            state.ximc = Some(ximc);
+        }
+    }
+
+    pub fn disable_ime(&self) {
+        let Some(client) = self.get_client() else {
+            return;
+        };
+        let mut state = client.0.borrow_mut();
+        state.composing = false;
+        if let Some(mut ximc) = state.ximc.take() {
+            if let Some(xim_handler) = state.xim_handler.as_ref() {
+                let ic_attributes = ximc
+                    .build_ic_attributes()
+                    .push(AttributeName::InputStyle, InputStyle::empty())
+                    .build();
+                ximc.set_ic_values(xim_handler.im_id, xim_handler.ic_id, ic_attributes)
+                    .ok();
+            } else {
+                log::error!("bug: xim handler not set in disable_ime");
+            }
+            state.ximc = Some(ximc);
+        }
+    }
 }
 
 #[derive(Clone)]
