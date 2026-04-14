@@ -56,6 +56,7 @@ commit-info.md
 resources/macos/OnetCli.icns
 
 # vibe coding
+.worktrees/
 .omc/
 .claude/
 .ace-tool/
