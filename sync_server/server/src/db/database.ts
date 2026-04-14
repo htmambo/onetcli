@@ -198,6 +198,11 @@ export class DatabaseClient {
     this.db.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").run(tokenHash);
   }
 
+  deleteSessionsByUserId(userId: string): number {
+    const result = this.db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+    return result.changes;
+  }
+
   deleteExpiredSessions() {
     this.db.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(nowIso());
   }
