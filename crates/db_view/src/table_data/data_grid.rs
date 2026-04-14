@@ -511,16 +511,10 @@ impl DataGrid {
         &mut self,
         column_name: &str,
         sort: ColumnSort,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut App,
     ) {
         if self.config.usage != DataGridUsage::TableData {
-            return;
-        }
-
-        // 跳过 Default 排序（取消排序）
-        if matches!(sort, ColumnSort::Default) {
-            tracing::info!("[SORT] apply_column_sort: skipped (Default) for column={}", column_name);
             return;
         }
 

@@ -2,8 +2,7 @@ use anyhow::Result;
 use db::ColumnInfo;
 use crate::table_data::filter_types::{
     is_datetime_type, is_numeric_type, is_string_type, operators_for_column, uuid_simple,
-    ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue,
-    LogicOperator, SortCondition, SortDirection,
+    ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, LogicOperator,
 };
 use one_ui::edit_table::ColumnSort;
 use gpui::prelude::*;
@@ -1219,20 +1218,24 @@ impl VisualFilterBuilder {
         self.filter_state.to_order_by_clause()
     }
 
-    pub fn add_sort_column(&mut self, column: &str, direction: ColumnSort, cx: &mut Context<Self>) {
-        let sort_dir = match direction {
-            ColumnSort::Ascending => SortDirection::Asc,
-            ColumnSort::Descending => SortDirection::Desc,
-            ColumnSort::Default => return,
-        };
-
+    pub fn add_sort_column(
+        &mut self,
+        column: &str,
+        direction: ColumnSort,
+        _cx: &mut Context<Self>,
+    ) {
         tracing::info!("[SORT] add_sort_column: column={}, dir={:?}", column, direction);
 
-        // 移除该列已有的排序（避免重复）
-        self.filter_state.sorts.retain(|s| s.column != column);
-        self.filter_state.sorts.push(SortCondition::new(column.to_string(), sort_dir));
+        self.filter_state.apply_header_sort(column, direction);
 
-        tracing::info!("[SORT] add_sort_column: sorts now = {:?}", self.filter_state.sorts.iter().map(|s| format!("{} {}", s.column, s.direction.label())).collect::<Vec<_>>());
+        tracing::info!(
+            "[SORT] add_sort_column: sorts now = {:?}",
+            self.filter_state
+                .sorts
+                .iter()
+                .map(|s| format!("{} {}", s.column, s.direction.label()))
+                .collect::<Vec<_>>()
+        );
     }
 
     /// 从 root_items 树同步到 filter_state

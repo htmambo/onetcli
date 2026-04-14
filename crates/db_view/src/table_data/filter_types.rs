@@ -1,6 +1,7 @@
 //! 数据筛选构建器类型定义与 SQL 生成器
 
 use db::ColumnInfo;
+use one_ui::edit_table::ColumnSort;
 use tracing;
 
 /// 筛选操作符
@@ -513,6 +514,20 @@ impl FilterState {
         tracing::info!("[FilterState] to_order_by_clause: {} sorts, ORDER BY=\"{}\"", self.sorts.len(), sql);
         sql
     }
+
+    /// 应用表头点击排序：表头只支持单列三态排序。
+    pub fn apply_header_sort(&mut self, column: &str, direction: ColumnSort) {
+        self.sorts.clear();
+
+        let sort_dir = match direction {
+            ColumnSort::Ascending => SortDirection::Asc,
+            ColumnSort::Descending => SortDirection::Desc,
+            ColumnSort::Default => return,
+        };
+
+        self.sorts
+            .push(SortCondition::new(column.to_string(), sort_dir));
+    }
 }
 
 /// 生成简单 UUID（用于 React/DOM 风格的 key）
@@ -608,6 +623,7 @@ pub fn operators_for_column(column: &ColumnInfo) -> Vec<FilterOperator> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use one_ui::edit_table::ColumnSort;
 
     #[test]
     fn test_single_condition_sql() {
@@ -829,6 +845,28 @@ mod tests {
 
         assert_eq!(state.to_where_clause(), "name LIKE 'A%'");
         assert_eq!(state.to_order_by_clause(), "id ASC");
+    }
+
+    #[test]
+    fn header_sort_replaces_existing_sorts_with_single_column() {
+        let mut state = FilterState::new();
+        state.sorts.push(SortCondition::new("name".to_string(), SortDirection::Asc));
+        state.sorts.push(SortCondition::new("created_at".to_string(), SortDirection::Desc));
+
+        state.apply_header_sort("updated_at", ColumnSort::Descending);
+
+        assert_eq!(state.to_order_by_clause(), "updated_at DESC");
+    }
+
+    #[test]
+    fn header_sort_default_clears_all_sort_conditions() {
+        let mut state = FilterState::new();
+        state.sorts.push(SortCondition::new("name".to_string(), SortDirection::Asc));
+
+        state.apply_header_sort("name", ColumnSort::Default);
+
+        assert!(state.sorts.is_empty());
+        assert_eq!(state.to_order_by_clause(), "");
     }
 
     #[test]
