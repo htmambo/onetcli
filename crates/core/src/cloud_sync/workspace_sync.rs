@@ -5,12 +5,12 @@
 use crate::cloud_sync::engine::SyncEngine;
 use crate::cloud_sync::models::CloudSyncData;
 use crate::cloud_sync::service::{CloudSyncService, SyncError};
-use crate::cloud_sync::sync_type::{PendingDeletionDecision, SyncTypeHandler, SyncableItem};
+use crate::cloud_sync::sync_type::{PendingDeletionDecision, SyncTypeHandler};
 use crate::storage::traits::Repository;
 use crate::storage::{ConnectionRepository, PendingCloudDeletion, Workspace, WorkspaceRepository};
 
 /// 工作空间同步类型处理器
-pub struct WorkspaceSyncType;
+pub(crate) struct WorkspaceSyncType;
 
 impl WorkspaceSyncType {
     fn restore_workspace_after_remote_update(

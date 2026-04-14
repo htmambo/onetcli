@@ -1,28 +1,27 @@
-use anyhow::Result;
-use db::ColumnInfo;
 use crate::table_data::filter_types::{
-    is_datetime_type, is_numeric_type, is_string_type, operators_for_column, uuid_simple,
     ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, LogicOperator,
+    operators_for_column, uuid_simple,
 };
-use one_ui::edit_table::ColumnSort;
+#[cfg(test)]
+use crate::table_data::filter_types::{is_datetime_type, is_numeric_type, is_string_type};
+use db::ColumnInfo;
 use gpui::prelude::*;
 use gpui::{
-    App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task, Window, px,
+    App, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Render, SharedString, Styled, Window, px,
 };
-use gpui_component::input::{CompletionProvider, Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputState};
+use gpui_component::{ActiveTheme, IconName, Sizable, checkbox::Checkbox};
 use gpui_component::{
-    ActiveTheme, checkbox::Checkbox, IconName, Rope, RopeExt, Sizable,
-};
-use gpui_component::{
-    button::{Button, ButtonVariants as _},
-    select::{Select, SelectEvent, SelectItem, SelectState, SearchableVec},
     IndexPath,
+    button::{Button, ButtonVariants as _},
+    select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState},
 };
+#[cfg(test)]
 use lsp_types::{
-    CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
-    Documentation, InsertReplaceEdit, Range,
+    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, InsertReplaceEdit, Range,
 };
+use one_ui::edit_table::ColumnSort;
 
 #[derive(Clone)]
 pub struct TableSchema {
@@ -31,17 +30,7 @@ pub struct TableSchema {
 
 // ========== Completion providers ==========
 
-#[derive(Clone)]
-pub struct WhereCompletionProvider {
-    schema: TableSchema,
-}
-
-impl WhereCompletionProvider {
-    pub fn new(schema: TableSchema) -> Self {
-        Self { schema }
-    }
-}
-
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ValueSuggestionKind {
     General,
@@ -52,6 +41,7 @@ enum ValueSuggestionKind {
     NullOnly,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 enum SuggestionContext<'a> {
     Columns,
@@ -65,65 +55,7 @@ enum SuggestionContext<'a> {
     Logic,
 }
 
-fn extract_current_word(rope: &Rope, offset: usize) -> (String, usize) {
-    let mut start = offset;
-    while start > 0 {
-        let ch = rope.char(start - 1);
-        if !(ch.is_alphanumeric() || ch == '_' || ch == '.') {
-            break;
-        }
-        start -= 1;
-    }
-    (rope.slice(start..offset).to_string().to_uppercase(), start)
-}
-
-fn is_inside_string(rope: &Rope, offset: usize) -> bool {
-    let text = rope.slice(0..offset).to_string();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_char = '\0';
-
-    for ch in text.chars() {
-        if prev_char == '\\' {
-            prev_char = ch;
-            continue;
-        }
-        match ch {
-            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            _ => {}
-        }
-        prev_char = ch;
-    }
-
-    in_single_quote || in_double_quote
-}
-
-fn get_last_token_before(rope: &Rope, offset: usize) -> Option<String> {
-    if offset == 0 {
-        return None;
-    }
-
-    let mut idx = offset;
-    while idx > 0 && rope.char(idx - 1).is_whitespace() {
-        idx -= 1;
-    }
-    if idx == 0 {
-        return None;
-    }
-
-    let mut token_start = idx;
-    while token_start > 0 {
-        let ch = rope.char(token_start - 1);
-        if !(ch.is_alphanumeric() || ch == '_' || ch == '.') {
-            break;
-        }
-        token_start -= 1;
-    }
-    let token = rope.slice(token_start..idx).to_string();
-    if token.is_empty() { None } else { Some(token) }
-}
-
+#[cfg(test)]
 fn tokenize_where_context(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = text.chars().collect();
@@ -204,23 +136,36 @@ fn tokenize_where_context(text: &str) -> Vec<String> {
     tokens
 }
 
+#[cfg(test)]
 fn find_column<'a>(schema: &'a TableSchema, token: &str) -> Option<&'a ColumnInfo> {
-    schema.columns.iter().find(|column| column.name.eq_ignore_ascii_case(token))
+    schema
+        .columns
+        .iter()
+        .find(|column| column.name.eq_ignore_ascii_case(token))
 }
 
+#[cfg(test)]
 fn find_preceding_column<'a>(
     schema: &'a TableSchema,
     tokens: &[String],
     skip_from_end: usize,
 ) -> Option<&'a ColumnInfo> {
     let limit = tokens.len().saturating_sub(skip_from_end);
-    tokens[..limit].iter().rev().find_map(|token| find_column(schema, token))
+    tokens[..limit]
+        .iter()
+        .rev()
+        .find_map(|token| find_column(schema, token))
 }
 
+#[cfg(test)]
 fn token_is_operator(token: &str) -> bool {
-    matches!(token, "=" | "!=" | "<>" | ">" | "<" | ">=" | "<=" | "LIKE" | "IN" | "BETWEEN")
+    matches!(
+        token,
+        "=" | "!=" | "<>" | ">" | "<" | ">=" | "<=" | "LIKE" | "IN" | "BETWEEN"
+    )
 }
 
+#[cfg(test)]
 fn token_is_value(token: &str) -> bool {
     token == "__STRING__"
         || token == ")"
@@ -233,6 +178,7 @@ fn token_is_value(token: &str) -> bool {
         || token.chars().next().is_some_and(|ch| ch.is_ascii_digit())
 }
 
+#[cfg(test)]
 fn infer_suggestion_context<'a>(
     schema: &'a TableSchema,
     tokens: &[String],
@@ -315,11 +261,13 @@ fn infer_suggestion_context<'a>(
     }
 }
 
+#[cfg(test)]
 fn is_boolean_type(data_type: &str) -> bool {
     let data_type = data_type.to_uppercase();
     data_type.contains("BOOL") || data_type == "BOOLEAN" || data_type == "BIT"
 }
 
+#[cfg(test)]
 fn suggest_items(
     schema: &TableSchema,
     current_word: &str,
@@ -358,6 +306,7 @@ fn suggest_items(
     items
 }
 
+#[cfg(test)]
 fn suggest_value_templates(
     column: Option<&ColumnInfo>,
     kind: ValueSuggestionKind,
@@ -417,7 +366,9 @@ fn suggest_value_templates(
     };
 
     for (label, text, doc) in templates {
-        if label.to_uppercase().starts_with(&current_word.to_uppercase())
+        if label
+            .to_uppercase()
+            .starts_with(&current_word.to_uppercase())
             || current_word.is_empty()
         {
             items.push(CompletionItem {
@@ -432,6 +383,7 @@ fn suggest_value_templates(
     }
 }
 
+#[cfg(test)]
 fn suggest_columns(
     schema: &TableSchema,
     current_word: &str,
@@ -462,6 +414,7 @@ fn suggest_columns(
     }
 }
 
+#[cfg(test)]
 fn suggest_operators(
     col: &ColumnInfo,
     current_word: &str,
@@ -519,7 +472,9 @@ fn suggest_operators(
 
     for (label, text, doc) in ops {
         if !current_word.is_empty()
-            && !label.to_uppercase().starts_with(&current_word.to_uppercase())
+            && !label
+                .to_uppercase()
+                .starts_with(&current_word.to_uppercase())
         {
             continue;
         }
@@ -539,10 +494,15 @@ fn suggest_operators(
     }
 }
 
+#[cfg(test)]
 fn add_logic_keywords(current_word: &str, range: Range, items: &mut Vec<CompletionItem>) {
     let keywords = [
         ("AND", "AND ", "Logical AND - both conditions must be true"),
-        ("OR", "OR ", "Logical OR - at least one condition must be true"),
+        (
+            "OR",
+            "OR ",
+            "Logical OR - at least one condition must be true",
+        ),
     ];
 
     for (label, snippet, doc) in &keywords {
@@ -559,6 +519,7 @@ fn add_logic_keywords(current_word: &str, range: Range, items: &mut Vec<Completi
     }
 }
 
+#[cfg(test)]
 fn suggest_is_keywords(current_word: &str, range: Range, items: &mut Vec<CompletionItem>) {
     let keywords = [
         ("NULL", "NULL", "NULL value"),
@@ -579,6 +540,7 @@ fn suggest_is_keywords(current_word: &str, range: Range, items: &mut Vec<Complet
     }
 }
 
+#[cfg(test)]
 fn suggest_not_operators(
     column: Option<&ColumnInfo>,
     current_word: &str,
@@ -616,6 +578,7 @@ fn suggest_not_operators(
     }
 }
 
+#[cfg(test)]
 fn suggest_functions(current_word: &str, range: Range, items: &mut Vec<CompletionItem>) {
     let fns = [
         ("UPPER()", "UPPER()", "Convert to uppercase", "String"),
@@ -623,7 +586,12 @@ fn suggest_functions(current_word: &str, range: Range, items: &mut Vec<Completio
         ("LENGTH()", "LENGTH()", "Get string length", "String"),
         ("TRIM()", "TRIM()", "Remove spaces", "String"),
         ("CONCAT()", "CONCAT(, )", "Concatenate strings", "String"),
-        ("SUBSTRING()", "SUBSTRING(, , )", "Extract substring", "String"),
+        (
+            "SUBSTRING()",
+            "SUBSTRING(, , )",
+            "Extract substring",
+            "String",
+        ),
         ("DATE()", "DATE()", "Extract date part", "Date"),
         ("YEAR()", "YEAR()", "Extract year", "Date"),
         ("MONTH()", "MONTH()", "Extract month", "Date"),
@@ -634,7 +602,9 @@ fn suggest_functions(current_word: &str, range: Range, items: &mut Vec<Completio
     ];
 
     for (label, text, doc, category) in &fns {
-        if label.to_uppercase().starts_with(&current_word.to_uppercase())
+        if label
+            .to_uppercase()
+            .starts_with(&current_word.to_uppercase())
             || current_word.is_empty()
         {
             items.push(CompletionItem {
@@ -650,157 +620,13 @@ fn suggest_functions(current_word: &str, range: Range, items: &mut Vec<Completio
     }
 }
 
+#[cfg(test)]
 fn insert_replace(text: &str, range: Range) -> CompletionTextEdit {
     CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
         new_text: text.into(),
         insert: range,
         replace: range,
     })
-}
-
-impl CompletionProvider for WhereCompletionProvider {
-    fn completions(
-        &self,
-        rope: &Rope,
-        offset: usize,
-        _trigger: CompletionContext,
-        _window: &mut Window,
-        cx: &mut Context<InputState>,
-    ) -> Task<Result<CompletionResponse>> {
-        let rope = rope.clone();
-        let schema = self.schema.clone();
-
-        cx.background_spawn(async move {
-            if is_inside_string(&rope, offset) {
-                return Ok(CompletionResponse::Array(vec![]));
-            }
-
-            let (current_word, start_offset) = extract_current_word(&rope, offset);
-            let start_pos = rope.offset_to_position(start_offset);
-            let end_pos = rope.offset_to_position(offset);
-            let replace_range = Range::new(start_pos, end_pos);
-
-            let items = suggest_items(
-                &schema,
-                current_word.as_str(),
-                replace_range,
-                &rope.slice(0..start_offset).to_string(),
-            );
-
-            Ok(CompletionResponse::Array(items))
-        })
-    }
-
-    fn is_completion_trigger(
-        &self,
-        _offset: usize,
-        new_text: &str,
-        _cx: &mut Context<InputState>,
-    ) -> bool {
-        matches!(new_text, " " | "." | "=" | ">" | "<" | "!" | "(")
-            || new_text
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_')
-    }
-}
-
-// Completion provider for ORDER BY clause
-#[derive(Clone)]
-pub struct OrderByCompletionProvider {
-    schema: TableSchema,
-}
-
-impl OrderByCompletionProvider {
-    pub fn new(schema: TableSchema) -> Self {
-        Self { schema }
-    }
-}
-
-impl CompletionProvider for OrderByCompletionProvider {
-    fn completions(
-        &self,
-        rope: &Rope,
-        offset: usize,
-        _trigger: CompletionContext,
-        _window: &mut Window,
-        cx: &mut Context<InputState>,
-    ) -> Task<Result<CompletionResponse>> {
-        let rope = rope.clone();
-        let schema = self.schema.clone();
-
-        cx.background_spawn(async move {
-            if is_inside_string(&rope, offset) {
-                return Ok(CompletionResponse::Array(vec![]));
-            }
-
-            let (current_word, start_offset) = extract_current_word(&rope, offset);
-            let start_pos = rope.offset_to_position(start_offset);
-            let end_pos = rope.offset_to_position(offset);
-            let replace_range = Range::new(start_pos, end_pos);
-            let mut items = Vec::new();
-            let last_token = get_last_token_before(&rope, start_offset);
-            let after_column = last_token.clone().and_then(|t| {
-                schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(&t))
-            });
-
-            if after_column.is_some() {
-                for (kw, doc) in &[("ASC", "Ascending"), ("DESC", "Descending")] {
-                    items.push(CompletionItem {
-                        label: kw.to_string(),
-                        kind: Some(CompletionItemKind::KEYWORD),
-                        text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
-                            new_text: kw.to_string(),
-                            insert: replace_range,
-                            replace: replace_range,
-                        })),
-                        documentation: Some(Documentation::String(doc.to_string())),
-                        sort_text: Some("0_ORDER_DIR".into()),
-                        ..Default::default()
-                    });
-                }
-            }
-
-            let is_sort = last_token
-                .as_ref()
-                .map(|t| {
-                    let upper = t.to_uppercase();
-                    upper == "ASC" || upper == "DESC"
-                })
-                .unwrap_or(false);
-
-            if is_sort {
-                for col in &schema.columns {
-                    let text = format!(", {}", col.name);
-                    items.push(CompletionItem {
-                        label: text.clone(),
-                        kind: Some(CompletionItemKind::FIELD),
-                        text_edit: Some(insert_replace(&text, replace_range)),
-                        sort_text: Some("1_ORDER_NEXT".into()),
-                        detail: Some("Next ordering field".into()),
-                        ..Default::default()
-                    });
-                }
-            } else {
-                suggest_columns(&schema, &current_word, replace_range, &mut items);
-            }
-
-            Ok(CompletionResponse::Array(items))
-        })
-    }
-
-    fn is_completion_trigger(
-        &self,
-        _offset: usize,
-        new_text: &str,
-        _cx: &mut Context<InputState>,
-    ) -> bool {
-        matches!(new_text, " " | "." | ",")
-            || new_text
-                .chars()
-                .next()
-                .map_or(false, |c| c.is_alphabetic() || c == '_')
-    }
 }
 
 // ========== 可视化筛选构建器 ==========
@@ -814,7 +640,6 @@ pub enum FilterEditorEvent {
 #[derive(Clone, Debug)]
 pub struct FilterColumnItem {
     pub name: String,
-    pub data_type: String,
 }
 
 impl SelectItem for FilterColumnItem {
@@ -908,7 +733,6 @@ impl ConditionRow {
         let enabled = self.enabled && self.is_valid();
 
         ConditionItem {
-            id: self.id.clone(),
             column: self.column.clone(),
             operator: self.operator,
             value,
@@ -953,9 +777,11 @@ pub struct VisualFilterBuilder {
     /// 根级别的筛选项（条件或分组）
     root_items: Vec<FilterItem>,
     /// 列选择器实体，按行 ID 索引
-    column_selects: std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterColumnItem>>>>,
+    column_selects:
+        std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterColumnItem>>>>,
     /// 操作符选择器实体，按行 ID 索引
-    operator_selects: std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterOperatorItem>>>>,
+    operator_selects:
+        std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterOperatorItem>>>>,
     /// 值输入框实体，按行 ID 索引
     value_inputs: std::collections::HashMap<String, Entity<InputState>>,
     /// 范围起始值输入框实体，按行 ID 索引（BETWEEN 时使用）
@@ -988,7 +814,11 @@ fn update_condition_column_in_items(items: &mut Vec<FilterItem>, id: &str, colum
 }
 
 /// 递归查找并更新条件操作符
-fn update_condition_operator_in_items(items: &mut Vec<FilterItem>, id: &str, operator: FilterOperator) -> bool {
+fn update_condition_operator_in_items(
+    items: &mut Vec<FilterItem>,
+    id: &str,
+    operator: FilterOperator,
+) -> bool {
     for item in items.iter_mut() {
         match item {
             FilterItem::Condition(row) if row.id == id => {
@@ -1026,7 +856,11 @@ fn update_condition_value_in_items(items: &mut Vec<FilterItem>, id: &str, value:
 }
 
 /// 递归查找并更新范围起始值
-fn update_condition_value_start_in_items(items: &mut Vec<FilterItem>, id: &str, value: &str) -> bool {
+fn update_condition_value_start_in_items(
+    items: &mut Vec<FilterItem>,
+    id: &str,
+    value: &str,
+) -> bool {
     for item in items.iter_mut() {
         match item {
             FilterItem::Condition(row) if row.id == id => {
@@ -1160,34 +994,6 @@ fn delete_group_from_items(items: &mut Vec<FilterItem>, id: &str) -> bool {
     false
 }
 
-/// 递归收集分组内所有条件行的 ID
-fn collect_condition_ids_from_group(group: &GroupRow) -> Vec<String> {
-    let mut ids = Vec::new();
-    for item in &group.children {
-        match item {
-            FilterItem::Condition(row) => {
-                ids.push(row.id.clone());
-            }
-            FilterItem::Group(nested) => {
-                ids.extend(collect_condition_ids_from_group(nested));
-            }
-        }
-    }
-    ids
-}
-
-/// 递归收集分组内所有嵌套分组的 ID
-fn collect_nested_group_ids_from_group(group: &GroupRow) -> Vec<String> {
-    let mut ids = Vec::new();
-    for item in &group.children {
-        if let FilterItem::Group(nested) = item {
-            ids.push(nested.id.clone());
-            ids.extend(collect_nested_group_ids_from_group(nested));
-        }
-    }
-    ids
-}
-
 impl VisualFilterBuilder {
     pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
         Self {
@@ -1224,7 +1030,11 @@ impl VisualFilterBuilder {
         direction: ColumnSort,
         _cx: &mut Context<Self>,
     ) {
-        tracing::info!("[SORT] add_sort_column: column={}, dir={:?}", column, direction);
+        tracing::info!(
+            "[SORT] add_sort_column: column={}, dir={:?}",
+            column,
+            direction
+        );
 
         self.filter_state.apply_header_sort(column, direction);
 
@@ -1258,7 +1068,6 @@ impl VisualFilterBuilder {
     /// 从 GroupRow 递归构建 FilterGroup
     fn build_filter_group_from_row(&self, row: &GroupRow) -> FilterGroup {
         let mut group = FilterGroup::new(row.logic_operator);
-        group.id = row.id.clone();
         group.enabled = row.enabled;
         for item in &row.children {
             match item {
@@ -1300,7 +1109,6 @@ impl VisualFilterBuilder {
                     .iter()
                     .map(|c| FilterColumnItem {
                         name: c.name.clone(),
-                        data_type: c.data_type.clone(),
                     })
                     .collect()
             })
@@ -1312,25 +1120,32 @@ impl VisualFilterBuilder {
             .map(|i| IndexPath::new(i));
 
         let column_select_entity = cx.new(|cx| {
-            SelectState::new(SearchableVec::new(column_items), selected_col_index, window, cx)
+            SelectState::new(
+                SearchableVec::new(column_items),
+                selected_col_index,
+                window,
+                cx,
+            )
         });
 
         // 订阅列选择事件
         let row_id_clone_for_col = row_id.clone();
-        cx.subscribe(&column_select_entity, move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, _cx| {
-            let SelectEvent::Confirm(value) = event;
-            if let Some(col_name) = value {
-                this.update_condition_column(&row_id_clone_for_col, col_name.clone());
-            }
-        }).detach();
+        cx.subscribe(
+            &column_select_entity,
+            move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, _cx| {
+                let SelectEvent::Confirm(value) = event;
+                if let Some(col_name) = value {
+                    this.update_condition_column(&row_id_clone_for_col, col_name.clone());
+                }
+            },
+        )
+        .detach();
 
         // 创建范围值输入框（BETWEEN 时使用）
-        let value_start_input_entity = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("起始值".to_string())
-        });
-        let value_end_input_entity = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("结束值".to_string())
-        });
+        let value_start_input_entity =
+            cx.new(|cx| InputState::new(window, cx).placeholder("起始值".to_string()));
+        let value_end_input_entity =
+            cx.new(|cx| InputState::new(window, cx).placeholder("结束值".to_string()));
 
         // 观察范围起始值输入变化
         let row_id_clone_for_val_start = row_id.clone();
@@ -1355,13 +1170,25 @@ impl VisualFilterBuilder {
             .as_ref()
             .and_then(|s| s.columns.iter().find(|c| c.name == first_col))
             .map(operators_for_column)
-            .map(|ops| ops.iter().map(|op| FilterOperatorItem { op: *op }).collect())
+            .map(|ops| {
+                ops.iter()
+                    .map(|op| FilterOperatorItem { op: *op })
+                    .collect()
+            })
             .unwrap_or_else(|| {
                 vec![
-                    FilterOperatorItem { op: FilterOperator::Equal },
-                    FilterOperatorItem { op: FilterOperator::NotEqual },
-                    FilterOperatorItem { op: FilterOperator::IsNull },
-                    FilterOperatorItem { op: FilterOperator::IsNotNull },
+                    FilterOperatorItem {
+                        op: FilterOperator::Equal,
+                    },
+                    FilterOperatorItem {
+                        op: FilterOperator::NotEqual,
+                    },
+                    FilterOperatorItem {
+                        op: FilterOperator::IsNull,
+                    },
+                    FilterOperatorItem {
+                        op: FilterOperator::IsNotNull,
+                    },
                 ]
             });
 
@@ -1378,17 +1205,20 @@ impl VisualFilterBuilder {
 
         // 订阅操作符选择事件
         let row_id_clone_for_op = row_id.clone();
-        cx.subscribe(&operator_select_entity, move |this, _, event: &SelectEvent<SearchableVec<FilterOperatorItem>>, _cx| {
-            let SelectEvent::Confirm(value) = event;
-            if let Some(op) = value {
-                this.update_condition_operator(&row_id_clone_for_op, *op);
-            }
-        }).detach();
+        cx.subscribe(
+            &operator_select_entity,
+            move |this, _, event: &SelectEvent<SearchableVec<FilterOperatorItem>>, _cx| {
+                let SelectEvent::Confirm(value) = event;
+                if let Some(op) = value {
+                    this.update_condition_operator(&row_id_clone_for_op, *op);
+                }
+            },
+        )
+        .detach();
 
         // 创建值输入框
-        let value_input_entity = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("输入值...".to_string())
-        });
+        let value_input_entity =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
 
         // 观察值输入变化
         let row_id_clone_for_val = row_id.clone();
@@ -1400,15 +1230,21 @@ impl VisualFilterBuilder {
         });
 
         self.root_items.push(FilterItem::Condition(row));
-        self.column_selects.insert(row_id.clone(), column_select_entity);
-        self.operator_selects.insert(row_id.clone(), operator_select_entity);
+        self.column_selects
+            .insert(row_id.clone(), column_select_entity);
+        self.operator_selects
+            .insert(row_id.clone(), operator_select_entity);
         self.value_inputs.insert(row_id.clone(), value_input_entity);
-        self.value_start_inputs.insert(row_id.clone(), value_start_input_entity);
-        self.value_end_inputs.insert(row_id.clone(), value_end_input_entity);
+        self.value_start_inputs
+            .insert(row_id.clone(), value_start_input_entity);
+        self.value_end_inputs
+            .insert(row_id.clone(), value_end_input_entity);
         // 存储订阅，防止被 drop
         self.value_subscriptions.insert(row_id.clone(), val_sub);
-        self.value_subscriptions.insert(format!("{}_start", row_id), val_start_sub);
-        self.value_subscriptions.insert(format!("{}_end", row_id), val_end_sub);
+        self.value_subscriptions
+            .insert(format!("{}_start", row_id), val_start_sub);
+        self.value_subscriptions
+            .insert(format!("{}_end", row_id), val_end_sub);
         self.sync_filter_state();
         cx.notify();
     }
@@ -1429,18 +1265,21 @@ impl VisualFilterBuilder {
 
     fn add_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut group_row = GroupRow::new(LogicOperator::And);
-        let group_id = group_row.id.clone();
 
         // 创建默认条件
         let (condition_row, column_select_entity, operator_select_entity, value_input_entity) =
             self.create_default_condition(window, cx);
         let condition_id = condition_row.id.clone();
-        group_row.children.push(FilterItem::Condition(condition_row));
+        group_row
+            .children
+            .push(FilterItem::Condition(condition_row));
         self.root_items.push(FilterItem::Group(group_row));
 
         // 存储 UI 组件
-        self.column_selects.insert(condition_id.clone(), column_select_entity);
-        self.operator_selects.insert(condition_id.clone(), operator_select_entity);
+        self.column_selects
+            .insert(condition_id.clone(), column_select_entity);
+        self.operator_selects
+            .insert(condition_id.clone(), operator_select_entity);
         self.value_inputs.insert(condition_id, value_input_entity);
 
         self.sync_filter_state();
@@ -1495,7 +1334,6 @@ impl VisualFilterBuilder {
                     .iter()
                     .map(|c| FilterColumnItem {
                         name: c.name.clone(),
-                        data_type: c.data_type.clone(),
                     })
                     .collect()
             })
@@ -1507,7 +1345,12 @@ impl VisualFilterBuilder {
             .map(|i| IndexPath::new(i));
 
         let column_select_entity = cx.new(|cx| {
-            SelectState::new(SearchableVec::new(column_items), selected_col_index, window, cx)
+            SelectState::new(
+                SearchableVec::new(column_items),
+                selected_col_index,
+                window,
+                cx,
+            )
         });
 
         let operator_items: Vec<FilterOperatorItem> = schema
@@ -1521,9 +1364,7 @@ impl VisualFilterBuilder {
             })
             .unwrap_or_default();
 
-        let selected_op_index = operator_items
-            .iter()
-            .position(|item| item.op == first_op);
+        let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
 
         let operator_select_entity = cx.new(|cx| {
             SelectState::new(
@@ -1534,9 +1375,8 @@ impl VisualFilterBuilder {
             )
         });
 
-        let value_input_entity = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("输入值...".to_string())
-        });
+        let value_input_entity =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
 
         (
             condition_row,
@@ -1546,7 +1386,12 @@ impl VisualFilterBuilder {
         )
     }
 
-    fn add_group_to_group(&mut self, parent_group_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn add_group_to_group(
+        &mut self,
+        parent_group_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(idx) = find_group_mut(&mut self.root_items, parent_group_id) {
             if let FilterItem::Group(parent) = &mut self.root_items[idx] {
                 let schema = self.schema.clone();
@@ -1562,7 +1407,8 @@ impl VisualFilterBuilder {
                     .and_then(|ops| ops.first().copied())
                     .unwrap_or(FilterOperator::Equal);
 
-                let condition_row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
+                let condition_row =
+                    ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
                 let condition_id = condition_row.id.clone();
 
                 let column_items: Vec<FilterColumnItem> = schema
@@ -1572,7 +1418,6 @@ impl VisualFilterBuilder {
                             .iter()
                             .map(|c| FilterColumnItem {
                                 name: c.name.clone(),
-                                data_type: c.data_type.clone(),
                             })
                             .collect()
                     })
@@ -1584,7 +1429,12 @@ impl VisualFilterBuilder {
                     .map(|i| IndexPath::new(i));
 
                 let column_select_entity = cx.new(|cx| {
-                    SelectState::new(SearchableVec::new(column_items), selected_col_index, window, cx)
+                    SelectState::new(
+                        SearchableVec::new(column_items),
+                        selected_col_index,
+                        window,
+                        cx,
+                    )
                 });
 
                 let operator_items: Vec<FilterOperatorItem> = schema
@@ -1598,9 +1448,7 @@ impl VisualFilterBuilder {
                     })
                     .unwrap_or_default();
 
-                let selected_op_index = operator_items
-                    .iter()
-                    .position(|item| item.op == first_op);
+                let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
 
                 let operator_select_entity = cx.new(|cx| {
                     SelectState::new(
@@ -1611,16 +1459,19 @@ impl VisualFilterBuilder {
                     )
                 });
 
-                let value_input_entity = cx.new(|cx| {
-                    InputState::new(window, cx).placeholder("输入值...".to_string())
-                });
+                let value_input_entity =
+                    cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
 
                 let mut group_row = GroupRow::new(LogicOperator::And);
-                group_row.children.push(FilterItem::Condition(condition_row));
+                group_row
+                    .children
+                    .push(FilterItem::Condition(condition_row));
                 parent.children.push(FilterItem::Group(group_row));
 
-                self.column_selects.insert(condition_id.clone(), column_select_entity);
-                self.operator_selects.insert(condition_id.clone(), operator_select_entity);
+                self.column_selects
+                    .insert(condition_id.clone(), column_select_entity);
+                self.operator_selects
+                    .insert(condition_id.clone(), operator_select_entity);
                 self.value_inputs.insert(condition_id, value_input_entity);
 
                 self.collapsed_groups.remove(parent_group_id);
@@ -1631,145 +1482,177 @@ impl VisualFilterBuilder {
     }
 
     /// 添加条件到指定分组内
-    fn add_condition_to_group(&mut self, parent_group_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn add_condition_to_group(
+        &mut self,
+        parent_group_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(idx) = find_group_mut(&mut self.root_items, parent_group_id) {
             if let FilterItem::Group(parent) = &mut self.root_items[idx] {
-            let schema = self.schema.clone();
-            let first_col = schema
-                .as_ref()
-                .and_then(|s| s.columns.first())
-                .map(|c| c.name.clone())
-                .unwrap_or_default();
-            let first_op = schema
-                .as_ref()
-                .and_then(|s| s.columns.first())
-                .map(operators_for_column)
-                .and_then(|ops| ops.first().copied())
-                .unwrap_or(FilterOperator::Equal);
+                let schema = self.schema.clone();
+                let first_col = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.first())
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                let first_op = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.first())
+                    .map(operators_for_column)
+                    .and_then(|ops| ops.first().copied())
+                    .unwrap_or(FilterOperator::Equal);
 
-            let row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
-            let row_id = row.id.clone();
+                let row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
+                let row_id = row.id.clone();
 
-            // 创建列选择器
-            let column_items: Vec<FilterColumnItem> = schema
-                .as_ref()
-                .map(|s| {
-                    s.columns
-                        .iter()
-                        .map(|c| FilterColumnItem {
-                            name: c.name.clone(),
-                            data_type: c.data_type.clone(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                // 创建列选择器
+                let column_items: Vec<FilterColumnItem> = schema
+                    .as_ref()
+                    .map(|s| {
+                        s.columns
+                            .iter()
+                            .map(|c| FilterColumnItem {
+                                name: c.name.clone(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-            let selected_col_index = schema
-                .as_ref()
-                .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
-                .map(|i| IndexPath::new(i));
+                let selected_col_index = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
+                    .map(|i| IndexPath::new(i));
 
-            let column_select_entity = cx.new(|cx| {
-                SelectState::new(SearchableVec::new(column_items), selected_col_index, window, cx)
-            });
-
-            // 订阅列选择事件
-            let row_id_clone = row_id.clone();
-            cx.subscribe(&column_select_entity, move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, _cx| {
-                let SelectEvent::Confirm(value) = event;
-                if let Some(col_name) = value {
-                    this.update_condition_column(&row_id_clone, col_name.clone());
-                }
-            }).detach();
-
-            // 创建范围值输入框
-            let value_start_input_entity = cx.new(|cx| {
-                InputState::new(window, cx).placeholder("起始值".to_string())
-            });
-            let value_end_input_entity = cx.new(|cx| {
-                InputState::new(window, cx).placeholder("结束值".to_string())
-            });
-
-            // 观察范围起始值输入变化
-            let row_id_clone_start = row_id.clone();
-            let value_start_input_clone = value_start_input_entity.clone();
-            let val_start_sub = cx.observe(&value_start_input_entity, move |this, _, cx| {
-                let text = value_start_input_clone.read(cx).text().to_string();
-                this.update_condition_value_start(&row_id_clone_start, text);
-                cx.notify();
-            });
-
-            // 观察范围结束值输入变化
-            let row_id_clone_end = row_id.clone();
-            let value_end_input_clone = value_end_input_entity.clone();
-            let val_end_sub = cx.observe(&value_end_input_entity, move |this, _, cx| {
-                let text = value_end_input_clone.read(cx).text().to_string();
-                this.update_condition_value_end(&row_id_clone_end, text);
-                cx.notify();
-            });
-
-            // 创建操作符选择器
-            let operator_items: Vec<FilterOperatorItem> = schema
-                .as_ref()
-                .and_then(|s| s.columns.iter().find(|c| c.name == first_col))
-                .map(operators_for_column)
-                .map(|ops| ops.iter().map(|op| FilterOperatorItem { op: *op }).collect())
-                .unwrap_or_else(|| {
-                    vec![
-                        FilterOperatorItem { op: FilterOperator::Equal },
-                        FilterOperatorItem { op: FilterOperator::NotEqual },
-                        FilterOperatorItem { op: FilterOperator::IsNull },
-                        FilterOperatorItem { op: FilterOperator::IsNotNull },
-                    ]
+                let column_select_entity = cx.new(|cx| {
+                    SelectState::new(
+                        SearchableVec::new(column_items),
+                        selected_col_index,
+                        window,
+                        cx,
+                    )
                 });
 
-            let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
-
-            let operator_select_entity = cx.new(|cx| {
-                SelectState::new(
-                    SearchableVec::new(operator_items),
-                    selected_op_index.map(|i| IndexPath::new(i)),
-                    window,
-                    cx,
+                // 订阅列选择事件
+                let row_id_clone = row_id.clone();
+                cx.subscribe(
+                    &column_select_entity,
+                    move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, _cx| {
+                        let SelectEvent::Confirm(value) = event;
+                        if let Some(col_name) = value {
+                            this.update_condition_column(&row_id_clone, col_name.clone());
+                        }
+                    },
                 )
-            });
+                .detach();
 
-            // 订阅操作符选择事件
-            let row_id_clone_op = row_id.clone();
-            cx.subscribe(&operator_select_entity, move |this, _, event: &SelectEvent<SearchableVec<FilterOperatorItem>>, _cx| {
-                let SelectEvent::Confirm(value) = event;
-                if let Some(op) = value {
-                    this.update_condition_operator(&row_id_clone_op, *op);
-                }
-            }).detach();
+                // 创建范围值输入框
+                let value_start_input_entity =
+                    cx.new(|cx| InputState::new(window, cx).placeholder("起始值".to_string()));
+                let value_end_input_entity =
+                    cx.new(|cx| InputState::new(window, cx).placeholder("结束值".to_string()));
 
-            // 创建值输入框
-            let value_input_entity = cx.new(|cx| {
-                InputState::new(window, cx).placeholder("输入值...".to_string())
-            });
+                // 观察范围起始值输入变化
+                let row_id_clone_start = row_id.clone();
+                let value_start_input_clone = value_start_input_entity.clone();
+                let val_start_sub = cx.observe(&value_start_input_entity, move |this, _, cx| {
+                    let text = value_start_input_clone.read(cx).text().to_string();
+                    this.update_condition_value_start(&row_id_clone_start, text);
+                    cx.notify();
+                });
 
-            // 观察值输入变化
-            let row_id_clone_val = row_id.clone();
-            let value_input_clone = value_input_entity.clone();
-            let val_sub = cx.observe(&value_input_entity, move |this, _, cx| {
-                let text = value_input_clone.read(cx).text().to_string();
-                this.update_condition_value(&row_id_clone_val, text);
+                // 观察范围结束值输入变化
+                let row_id_clone_end = row_id.clone();
+                let value_end_input_clone = value_end_input_entity.clone();
+                let val_end_sub = cx.observe(&value_end_input_entity, move |this, _, cx| {
+                    let text = value_end_input_clone.read(cx).text().to_string();
+                    this.update_condition_value_end(&row_id_clone_end, text);
+                    cx.notify();
+                });
+
+                // 创建操作符选择器
+                let operator_items: Vec<FilterOperatorItem> = schema
+                    .as_ref()
+                    .and_then(|s| s.columns.iter().find(|c| c.name == first_col))
+                    .map(operators_for_column)
+                    .map(|ops| {
+                        ops.iter()
+                            .map(|op| FilterOperatorItem { op: *op })
+                            .collect()
+                    })
+                    .unwrap_or_else(|| {
+                        vec![
+                            FilterOperatorItem {
+                                op: FilterOperator::Equal,
+                            },
+                            FilterOperatorItem {
+                                op: FilterOperator::NotEqual,
+                            },
+                            FilterOperatorItem {
+                                op: FilterOperator::IsNull,
+                            },
+                            FilterOperatorItem {
+                                op: FilterOperator::IsNotNull,
+                            },
+                        ]
+                    });
+
+                let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
+
+                let operator_select_entity = cx.new(|cx| {
+                    SelectState::new(
+                        SearchableVec::new(operator_items),
+                        selected_op_index.map(|i| IndexPath::new(i)),
+                        window,
+                        cx,
+                    )
+                });
+
+                // 订阅操作符选择事件
+                let row_id_clone_op = row_id.clone();
+                cx.subscribe(
+                    &operator_select_entity,
+                    move |this, _, event: &SelectEvent<SearchableVec<FilterOperatorItem>>, _cx| {
+                        let SelectEvent::Confirm(value) = event;
+                        if let Some(op) = value {
+                            this.update_condition_operator(&row_id_clone_op, *op);
+                        }
+                    },
+                )
+                .detach();
+
+                // 创建值输入框
+                let value_input_entity =
+                    cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
+
+                // 观察值输入变化
+                let row_id_clone_val = row_id.clone();
+                let value_input_clone = value_input_entity.clone();
+                let val_sub = cx.observe(&value_input_entity, move |this, _, cx| {
+                    let text = value_input_clone.read(cx).text().to_string();
+                    this.update_condition_value(&row_id_clone_val, text);
+                    cx.notify();
+                });
+
+                parent.children.push(FilterItem::Condition(row));
+                self.column_selects
+                    .insert(row_id.clone(), column_select_entity);
+                self.operator_selects
+                    .insert(row_id.clone(), operator_select_entity);
+                self.value_inputs.insert(row_id.clone(), value_input_entity);
+                self.value_start_inputs
+                    .insert(row_id.clone(), value_start_input_entity);
+                self.value_end_inputs
+                    .insert(row_id.clone(), value_end_input_entity);
+                self.value_subscriptions.insert(row_id.clone(), val_sub);
+                self.value_subscriptions
+                    .insert(format!("{}_start", row_id), val_start_sub);
+                self.value_subscriptions
+                    .insert(format!("{}_end", row_id), val_end_sub);
+                // 添加条件后展开分组（避免用户看不到刚添加的条件）
+                self.collapsed_groups.remove(parent_group_id);
+                self.sync_filter_state();
                 cx.notify();
-            });
-
-            parent.children.push(FilterItem::Condition(row));
-            self.column_selects.insert(row_id.clone(), column_select_entity);
-            self.operator_selects.insert(row_id.clone(), operator_select_entity);
-            self.value_inputs.insert(row_id.clone(), value_input_entity);
-            self.value_start_inputs.insert(row_id.clone(), value_start_input_entity);
-            self.value_end_inputs.insert(row_id.clone(), value_end_input_entity);
-            self.value_subscriptions.insert(row_id.clone(), val_sub);
-            self.value_subscriptions.insert(format!("{}_start", row_id), val_start_sub);
-            self.value_subscriptions.insert(format!("{}_end", row_id), val_end_sub);
-            // 添加条件后展开分组（避免用户看不到刚添加的条件）
-            self.collapsed_groups.remove(parent_group_id);
-            self.sync_filter_state();
-            cx.notify();
             }
         }
     }
@@ -1843,24 +1726,6 @@ impl VisualFilterBuilder {
         }
     }
 
-    /// 清理分组内所有条件的 UI 资源
-    fn cleanup_group_resources(&mut self, group: &GroupRow) {
-        for item in &group.children {
-            match item {
-                FilterItem::Condition(row) => {
-                    self.column_selects.remove(&row.id);
-                    self.operator_selects.remove(&row.id);
-                    self.value_inputs.remove(&row.id);
-                    self.value_start_inputs.remove(&row.id);
-                    self.value_end_inputs.remove(&row.id);
-                }
-                FilterItem::Group(nested) => {
-                    self.cleanup_group_resources(nested);
-                }
-            }
-        }
-    }
-
     fn toggle_group(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Some(idx) = find_group_mut(&mut self.root_items, id) {
             if let FilterItem::Group(group) = &mut self.root_items[idx] {
@@ -1913,10 +1778,6 @@ impl VisualFilterBuilder {
         cx.notify();
     }
 
-    fn handle_add_condition_click(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.add_condition(_window, cx);
-    }
-
     fn handle_apply_click(&self, cx: &mut Context<Self>) {
         cx.emit(FilterEditorEvent::QueryApply);
     }
@@ -1925,25 +1786,21 @@ impl VisualFilterBuilder {
     fn collect_render_items(&self) -> Vec<RenderItem> {
         let mut items = Vec::new();
         for (idx, item) in self.root_items.iter().enumerate() {
-            items.push(self.collect_items_recursive(item, idx, 0, idx == 0));
+            items.push(self.collect_items_recursive(item, idx, idx == 0));
         }
         items
     }
 
-    fn collect_items_recursive(&self, item: &FilterItem, idx: usize, depth: usize, is_first: bool) -> RenderItem {
+    fn collect_items_recursive(&self, item: &FilterItem, idx: usize, is_first: bool) -> RenderItem {
         match item {
-            FilterItem::Condition(row) => {
-                RenderItem::Condition(RenderConditionRow {
-                    row: row.clone(),
-                    idx,
-                    depth,
-                    is_first,
-                })
-            }
+            FilterItem::Condition(row) => RenderItem::Condition(RenderConditionRow {
+                row: row.clone(),
+                idx,
+            }),
             FilterItem::Group(group) => {
                 let mut children = Vec::new();
                 for (child_idx, child) in group.children.iter().enumerate() {
-                    children.push(self.collect_items_recursive(child, child_idx, depth + 1, child_idx == 0));
+                    children.push(self.collect_items_recursive(child, child_idx, child_idx == 0));
                 }
                 RenderItem::Group {
                     group: group.clone(),
@@ -1956,7 +1813,11 @@ impl VisualFilterBuilder {
     }
 
     /// 渲染条件行
-    fn render_condition_row(&self, cr: &RenderConditionRow, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_condition_row(
+        &self,
+        cr: &RenderConditionRow,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = cx.theme();
         let row = &cr.row;
         let row_id = row.id.clone();
@@ -1978,12 +1839,19 @@ impl VisualFilterBuilder {
                 .px_2()
                 .py_px()
                 .rounded_full()
-                .bg(if logic_is_and { theme.success } else { theme.warning })
+                .bg(if logic_is_and {
+                    theme.success
+                } else {
+                    theme.warning
+                })
                 .text_color(theme.primary_foreground)
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                    this.toggle_condition_logic(&row_id_for_logic, cx);
-                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| {
+                        this.toggle_condition_logic(&row_id_for_logic, cx);
+                    }),
+                )
                 .child(if logic_is_and { "AND" } else { "OR" })
         } else {
             gpui::div().w(px(48.))
@@ -2023,9 +1891,7 @@ impl VisualFilterBuilder {
             gpui::div()
                 .flex_1()
                 .h_7()
-                .when_some(value_input, |el, input| {
-                    el.child(Input::new(input).small())
-                })
+                .when_some(value_input, |el, input| el.child(Input::new(input).small()))
         } else {
             gpui::div().flex_1()
         };
@@ -2037,7 +1903,11 @@ impl VisualFilterBuilder {
             .px_3()
             .py_2()
             .rounded_md()
-            .bg(if is_enabled { theme.secondary } else { theme.muted })
+            .bg(if is_enabled {
+                theme.secondary
+            } else {
+                theme.muted
+            })
             .opacity(if is_enabled { 1.0 } else { 0.6 })
             .child(logic_toggle)
             .child(
@@ -2144,12 +2014,19 @@ impl VisualFilterBuilder {
                                 .px_2()
                                 .py_px()
                                 .rounded_full()
-                                .bg(if logic_is_and { success_color } else { warning_color })
+                                .bg(if logic_is_and {
+                                    success_color
+                                } else {
+                                    warning_color
+                                })
                                 .text_color(primary_fg)
                                 .font_weight(gpui::FontWeight::MEDIUM)
-                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                    this.toggle_group_logic(&group_id_for_logic, cx);
-                                }))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.toggle_group_logic(&group_id_for_logic, cx);
+                                    }),
+                                )
                                 .child(if logic_is_and { "AND" } else { "OR" }),
                         )
                     })
@@ -2168,17 +2045,24 @@ impl VisualFilterBuilder {
                         Button::new(format!("toggle-group-{}", group_id.clone()))
                             .small()
                             .ghost()
-                            .icon(if is_collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
+                            .icon(if is_collapsed {
+                                IconName::ChevronRight
+                            } else {
+                                IconName::ChevronDown
+                            })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.toggle_group_collapse(&group_id_for_collapse, cx);
                             })),
                     )
                     .child(
-                        Checkbox::new(SharedString::from(format!("group-check-{}", group_id.clone())))
-                            .checked(is_enabled)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_group(&group_id_for_toggle, cx);
-                            })),
+                        Checkbox::new(SharedString::from(format!(
+                            "group-check-{}",
+                            group_id.clone()
+                        )))
+                        .checked(is_enabled)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_group(&group_id_for_toggle, cx);
+                        })),
                     )
                     .child(
                         Button::new(format!("add-cond-to-group-{}", group_id.clone()))
@@ -2224,7 +2108,9 @@ impl VisualFilterBuilder {
                 children,
                 is_collapsed,
                 is_first,
-            } => self.render_group(&group, children, is_collapsed, is_first, cx).into_any_element(),
+            } => self
+                .render_group(&group, children, is_collapsed, is_first, cx)
+                .into_any_element(),
         }
     }
 }
@@ -2243,18 +2129,11 @@ enum RenderItem {
 struct RenderConditionRow {
     row: ConditionRow,
     idx: usize,
-    depth: usize,
-    is_first: bool,
 }
 
 impl Render for VisualFilterBuilder {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_filters = !self.root_items.is_empty();
-
-        let logic_label = match self.filter_state.root.logic_operator {
-            LogicOperator::And => "AND",
-            LogicOperator::Or => "OR",
-        };
 
         // 先收集渲染项，避免在闭包中多次访问 cx
         let render_items = self.collect_render_items();
@@ -2270,7 +2149,6 @@ impl Render for VisualFilterBuilder {
         let border_color = theme.border;
         let background_color = theme.background;
         let primary_color = theme.primary;
-        let secondary_color = theme.secondary;
         let muted_foreground_color = theme.muted_foreground;
 
         gpui::div()
@@ -2297,16 +2175,12 @@ impl Render for VisualFilterBuilder {
                             .justify_between()
                             .w_full()
                             .child(
-                                gpui::div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        gpui::div()
-                                            .text_sm()
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .text_color(primary_color)
-                                            .child("WHERE"),
+                                gpui::div().flex().items_center().gap_2().child(
+                                    gpui::div()
+                                        .text_sm()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .text_color(primary_color)
+                                        .child("WHERE"),
                                     // )
                                     // .child(
                                     //     gpui::div()
@@ -2318,7 +2192,7 @@ impl Render for VisualFilterBuilder {
                                     //         .text_color(primary_color)
                                     //         .font_weight(gpui::FontWeight::MEDIUM)
                                     //         .child(logic_label),
-                                    ),
+                                ),
                             )
                             .child(
                                 gpui::div()
@@ -2393,9 +2267,9 @@ pub struct TableFilterEditor {
 impl TableFilterEditor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let inner = cx.new(|cx| VisualFilterBuilder::new(window, cx));
-        let mut this = Self { inner };
+        let this = Self { inner };
         // 转发 inner 的 FilterEditorEvent
-        cx.subscribe(&this.inner, |this, _, evt: &FilterEditorEvent, cx| {
+        cx.subscribe(&this.inner, |_this, _, evt: &FilterEditorEvent, cx| {
             cx.emit(evt.clone());
         })
         .detach();
@@ -2411,11 +2285,13 @@ impl TableFilterEditor {
     }
 
     pub fn set_schema(&mut self, schema: TableSchema, cx: &mut Context<Self>) {
-        self.inner.update(cx, |inner, cx| inner.set_schema(schema, cx));
+        self.inner
+            .update(cx, |inner, cx| inner.set_schema(schema, cx));
     }
 
     pub fn add_sort_column(&mut self, column: &str, direction: ColumnSort, cx: &mut Context<Self>) {
-        self.inner.update(cx, |inner, cx| inner.add_sort_column(column, direction, cx));
+        self.inner
+            .update(cx, |inner, cx| inner.add_sort_column(column, direction, cx));
     }
 }
 
@@ -2426,47 +2302,6 @@ impl Render for TableFilterEditor {
 }
 
 impl EventEmitter<FilterEditorEvent> for TableFilterEditor {}
-
-// ========== 简单文本编辑器（保留）==========
-
-pub struct SimpleCodeEditor {
-    editor: Entity<InputState>,
-    _sub: Subscription,
-}
-
-impl SimpleCodeEditor {
-    pub fn new(editor: Entity<InputState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let _sub = cx.subscribe_in(&editor, window, |_, _, event: &InputEvent, _, cx| {
-            if let InputEvent::Change = event {
-                cx.emit(FilterEditorEvent::QueryApply);
-            }
-        });
-        Self { editor, _sub }
-    }
-
-    pub fn get_text_from_app(&self, app_cx: &App) -> String {
-        self.editor.read(app_cx).text().to_string()
-    }
-}
-
-impl EventEmitter<FilterEditorEvent> for SimpleCodeEditor {}
-
-impl Render for SimpleCodeEditor {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        Input::new(&self.editor).cleanable(true).size_full()
-    }
-}
-
-pub fn create_simple_editor(
-    window: &mut Window,
-    cx: &mut Context<SimpleCodeEditor>,
-) -> SimpleCodeEditor {
-    let editor = cx.new(|cx| {
-        let editor = InputState::new(window, cx).multi_line(true).rows(1).clean_on_escape();
-        editor
-    });
-    SimpleCodeEditor::new(editor, window, cx)
-}
 
 // ========== 测试（保留）==========
 #[cfg(test)]
@@ -2512,15 +2347,10 @@ mod tests {
 
     fn labels_for(text: &str, current_word: &str) -> Vec<String> {
         let zero = lsp_types::Position::new(0, 0);
-        suggest_items(
-            &sample_schema(),
-            current_word,
-            Range::new(zero, zero),
-            text,
-        )
-        .into_iter()
-        .map(|item| item.label)
-        .collect()
+        suggest_items(&sample_schema(), current_word, Range::new(zero, zero), text)
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
     }
 
     #[test]
@@ -2552,10 +2382,7 @@ mod tests {
     #[test]
     fn suggests_is_null_variants() {
         let labels = labels_for("name IS ", "");
-        assert_eq!(
-            labels,
-            vec!["NULL".to_string(), "NOT NULL".to_string()]
-        );
+        assert_eq!(labels, vec!["NULL".to_string(), "NOT NULL".to_string()]);
     }
 
     #[test]

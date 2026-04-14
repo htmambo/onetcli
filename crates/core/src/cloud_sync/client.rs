@@ -9,8 +9,6 @@ use llm_connector::ChatRequest;
 use std::fmt;
 use std::sync::Arc;
 
-use super::blob_vault::BlobVault;
-
 /// 云端 API 错误类型
 #[derive(Debug, Clone)]
 pub enum CloudApiError {
@@ -89,13 +87,6 @@ pub trait CloudApiClient: Send + Sync {
         password: &str,
     ) -> Result<AuthResponse, CloudApiError>;
 
-    /// 使用 OAuth 登录（如 GitHub、Google）
-    async fn sign_in_with_oauth(
-        &self,
-        provider: &str,
-        redirect_url: &str,
-    ) -> Result<OAuthResponse, CloudApiError>;
-
     /// 注册新用户
     async fn sign_up(&self, email: &str, password: &str) -> Result<AuthResponse, CloudApiError>;
 
@@ -156,18 +147,6 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 聊天流
     async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream, CloudApiError>;
-
-    // ========================================================================
-    // Blob 存储（可选实现）
-    // ========================================================================
-
-    /// 将客户端作为 BlobVault 使用
-    ///
-    /// 返回 `Some(&dyn BlobVault)` 表示该客户端支持直接 blob 存储操作（如 WebDAV、S3）。
-    /// 返回 `None` 表示该客户端不支持 blob 操作（如 sync_server REST API）。
-    fn as_blob_vault(&self) -> Option<&dyn BlobVault> {
-        None
-    }
 }
 
 /// 认证响应
@@ -183,13 +162,6 @@ pub struct AuthResponse {
     pub refresh_token: String,
     /// 令牌过期时间（Unix 时间戳）
     pub expires_at: i64,
-}
-
-/// OAuth 响应
-#[derive(Debug, Clone)]
-pub struct OAuthResponse {
-    /// 授权 URL
-    pub auth_url: String,
 }
 
 /// 用户信息

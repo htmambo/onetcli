@@ -171,29 +171,6 @@ pub struct SyncPlan {
     pub conflicts: Vec<SyncConflict>,
 }
 
-impl SyncPlan {
-    /// 检查计划是否为空（无需执行任何操作）
-    pub fn is_empty(&self) -> bool {
-        self.to_upload.is_empty()
-            && self.to_update_cloud.is_empty()
-            && self.to_download.is_empty()
-            && self.to_update_local.is_empty()
-            && self.to_delete_cloud.is_empty()
-            && self.to_delete_local.is_empty()
-            && self.conflicts.is_empty()
-    }
-
-    /// 获取计划中的操作总数
-    pub fn total_operations(&self) -> usize {
-        self.to_upload.len()
-            + self.to_update_cloud.len()
-            + self.to_download.len()
-            + self.to_update_local.len()
-            + self.to_delete_cloud.len()
-            + self.to_delete_local.len()
-    }
-}
-
 // ============================================================================
 // 统一加密同步数据模型
 // ============================================================================

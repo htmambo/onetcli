@@ -77,7 +77,7 @@ pub fn schedule_save(
             .timer(Duration::from_secs(SAVE_DELAY_SECS))
             .await;
 
-        if let Some(t) = cx.update(move |cx| {
+        if let Some(_t) = cx.update(move |cx| {
             let current_state = tab_container.read(cx).dump(cx);
 
             if Some(&current_state) == last_state.as_ref() {
@@ -85,7 +85,7 @@ pub fn schedule_save(
                 return None;
             }
 
-            if let Err(err) = save_tab_state(&current_state) {
+            if let Err(_err) = save_tab_state(&current_state) {
                 // tracing::error!("Failed to save tab state: {:?}", err);
             }
 

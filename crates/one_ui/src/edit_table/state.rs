@@ -1942,19 +1942,6 @@ where
             && (self.selection.ranges.len() > 1
                 || self.selection.ranges.iter().any(|r| !r.is_single()));
 
-        // 计算选区边框（只在选区边界显示，且仅限单元格选择模式）
-        let (border_top, border_bottom, border_left, border_right) =
-            if is_in_selection && row_ix.is_some() {
-                let r = row_ix.unwrap();
-                let top = r == 0 || !self.selection.contains(r - 1, col_ix);
-                let bottom = !self.selection.contains(r + 1, col_ix);
-                let left = col_ix == 0 || !self.selection.contains(r, col_ix - 1);
-                let right = !self.selection.contains(r, col_ix + 1);
-                (top, bottom, left, right)
-            } else {
-                (false, false, false, false)
-            };
-
         // 旧的单选逻辑（向后兼容）
         let is_select_cell = match self.selected_cell {
             None => false,
@@ -2288,13 +2275,11 @@ where
                 })
                 .hover(|this| this.bg(cx.theme().secondary).opacity(7.))
                 .active(|this| this.bg(cx.theme().secondary_active).opacity(1.))
-                .on_click(
-                    cx.listener(move |table, _e: &ClickEvent, window, cx| {
-                        // 点击排序图标：循环切换排序方向
-                        cx.stop_propagation();
-                        table.perform_sort(col_ix, window, cx);
-                    }),
-                )
+                .on_click(cx.listener(move |table, _e: &ClickEvent, window, cx| {
+                    // 点击排序图标：循环切换排序方向
+                    cx.stop_propagation();
+                    table.perform_sort(col_ix, window, cx);
+                }))
                 .child(
                     Icon::new(icon)
                         .size_3()

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::home_tab::HomePage;
 use gpui::{
     App, Context, Entity, InteractiveElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Task, Window, div, px,
+    StatefulInteractiveElement, Styled, Task, Window, div,
 };
 use gpui_component::{
     ActiveTheme, IconName, IndexPath, Sizable,

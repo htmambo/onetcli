@@ -1,48 +1,16 @@
 //! Microsoft OneDrive Blob Vault
 //!
 //! 通过 Microsoft Graph API 存储加密同步数据。
-//!
-//! ## OAuth PKCE 流程
-//! 1. 生成 code_verifier
-//! 2. 计算 code_challenge = BASE64URL(SHA256(verifier))
-//! 3. 打开浏览器到授权 URL
-//! 4. 启动本地回调服务器
-//! 5. 用 code 换 access_token
+//! 授权流程由 `main/src/settings/oauth_dialog.rs` 负责。
 
 use crate::cloud_sync::blob_vault::{Blob, BlobMeta, BlobVault};
 use crate::cloud_sync::client::CloudApiError;
-use crate::cloud_sync::oauth::callback_server::start_callback_server;
-use crate::cloud_sync::oauth::pkce::{generate_code_challenge, generate_code_verifier};
-use crate::cloud_sync::oauth::{OAuthConfig, OAuthTokens};
+use crate::cloud_sync::oauth::OAuthTokens;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-
-/// Microsoft OAuth Token 响应
-#[derive(Debug, Deserialize)]
-struct MsTokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: u64,
-    token_type: String,
-    #[serde(default)]
-    scope: String,
-}
-
-impl MsTokenResponse {
-    fn into_tokens(self) -> OAuthTokens {
-        let expires_at = chrono::Utc::now().timestamp() + self.expires_in as i64;
-        OAuthTokens {
-            access_token: self.access_token,
-            refresh_token: self.refresh_token,
-            token_type: self.token_type,
-            expires_in: Some(self.expires_in),
-            expires_at: Some(expires_at),
-        }
-    }
-}
 
 /// OneDrive 文件响应
 #[derive(Debug, Deserialize)]
@@ -51,53 +19,25 @@ struct DriveItem {
     name: String,
     #[serde(default)]
     size: Option<i64>,
-    #[serde(default)]
-    last_modified_date_time: Option<String>,
 }
 
 /// OneDrive 列出响应
 #[derive(Debug, Deserialize)]
 struct DriveChildrenResponse {
     value: Vec<DriveItem>,
-    #[serde(default)]
-    #[serde(rename = "@odata.nextLink")]
-    next_link: Option<String>,
-}
-
-/// OneDrive 上传会话响应
-#[derive(Debug, Deserialize)]
-struct UploadSessionResponse {
-    pub upload_url: String,
-    pub expiration_date_time: String,
-}
-
-/// Microsoft Graph API 错误
-#[derive(Debug, Deserialize)]
-struct GraphError {
-    error: GraphErrorDetail,
-}
-
-#[derive(Debug, Deserialize)]
-struct GraphErrorDetail {
-    code: String,
-    message: String,
 }
 
 /// OneDrive Blob Vault
 pub struct OneDriveVault {
     http: Arc<dyn HttpClient>,
-    client_id: String,
-    client_secret: Option<String>,
     tokens: Arc<Mutex<Option<OAuthTokens>>>,
     root_id: Arc<Mutex<Option<String>>>,
 }
 
 impl OneDriveVault {
-    pub fn new(http: Arc<dyn HttpClient>, client_id: String) -> Self {
+    pub fn new(http: Arc<dyn HttpClient>) -> Self {
         Self {
             http,
-            client_id,
-            client_secret: None,
             tokens: Arc::new(Mutex::new(None)),
             root_id: Arc::new(Mutex::new(None)),
         }
@@ -107,136 +47,17 @@ impl OneDriveVault {
         *self.tokens.lock().unwrap() = Some(tokens);
         Arc::new(Self {
             http: Arc::clone(&self.http),
-            client_id: self.client_id.clone(),
-            client_secret: self.client_secret.clone(),
-            tokens: Arc::clone(&self.tokens),
-            root_id: Arc::clone(&self.root_id),
-        })
-    }
-
-    pub fn with_secret(&self, secret: String) -> Arc<Self> {
-        Arc::new(Self {
-            http: Arc::clone(&self.http),
-            client_id: self.client_id.clone(),
-            client_secret: Some(secret),
             tokens: Arc::clone(&self.tokens),
             root_id: Arc::clone(&self.root_id),
         })
     }
 
     fn tokens(&self) -> Result<OAuthTokens, CloudApiError> {
-        self.tokens.lock().unwrap().clone().ok_or(CloudApiError::NotAuthenticated)
-    }
-
-    /// 开始 PKCE OAuth 流程
-    pub async fn authenticate(
-        &mut self,
-        config: &OAuthConfig,
-    ) -> Result<OAuthTokens, CloudApiError> {
-        let code_verifier = generate_code_verifier();
-        let code_challenge = generate_code_challenge(&code_verifier);
-        let state = format!("ONetCli_{}", chrono::Utc::now().timestamp_millis());
-
-        // 构建授权 URL
-        let _auth_url = format!(
-            "{}?{}",
-            config.provider.auth_url(),
-            [
-                ("client_id", config.client_id.as_str()),
-                ("response_type", "code"),
-                ("redirect_uri", &config.redirect_uri),
-                ("scope", &config.scopes),
-                ("state", &state),
-                ("code_challenge", &code_challenge),
-                ("code_challenge_method", "S256"),
-            ]
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-            .collect::<Vec<_>>()
-            .join("&")
-        );
-
-        // 启动回调服务器
-        let redirect_port = config
-            .redirect_uri
-            .strip_prefix("http://localhost:")
-            .and_then(|s| s.split('/').next())
-            .and_then(|s| s.parse::<u16>().ok())
-            .unwrap_or(8787);
-
-        let (_port, callback) = start_callback_server(redirect_port, 300)
-            .map_err(|e| CloudApiError::AuthenticationFailed(e.to_string()))?;
-
-        if !callback.is_success() {
-            return Err(CloudApiError::AuthenticationFailed(
-                callback
-                    .error_description
-                    .unwrap_or_else(|| "授权失败".to_string()),
-            ));
-        }
-
-        // 验证 state
-        if callback.state.as_deref() != Some(&state) {
-            return Err(CloudApiError::AuthenticationFailed(
-                "State 不匹配".to_string(),
-            ));
-        }
-
-        // 用 code 换 token
-        let token_url = config.provider.token_url();
-        let code = callback.code;
-
-        let mut body_parts = vec![
-            format!("grant_type=authorization_code"),
-            format!("client_id={}", urlencoding::encode(&config.client_id)),
-            format!("code={}", urlencoding::encode(&code)),
-            format!("redirect_uri={}", urlencoding::encode(&config.redirect_uri)),
-            format!("code_verifier={}", urlencoding::encode(&code_verifier)),
-        ];
-
-        if let Some(ref secret) = config.client_secret {
-            body_parts.push(format!("client_secret={}", urlencoding::encode(secret)));
-        }
-
-        let body = body_parts.join("&");
-
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(token_url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("Accept", "application/json")
-            .body(AsyncBody::from(body.into_bytes()))
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        let response = self
-            .http
-            .send(req)
-            .await
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        let status = response.status();
-        let mut bytes = Vec::new();
-        response
-            .into_body()
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        if !status.is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "OneDrive token 请求失败: {}",
-                String::from_utf8_lossy(&bytes)
-            )));
-        }
-
-        let token_resp: MsTokenResponse =
-            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
-
-        let tokens = token_resp.into_tokens();
-        *self.tokens.lock().unwrap() = Some(tokens.clone());
-        let folder_id = self.get_or_create_vault_folder().await?;
-        *self.root_id.lock().unwrap() = Some(folder_id);
-        Ok(tokens)
+        self.tokens
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(CloudApiError::NotAuthenticated)
     }
 
     /// 获取 vault 文件夹 ID
@@ -296,7 +117,11 @@ impl OneDriveVault {
     }
 
     /// 创建文件夹
-    async fn create_folder(&self, name: &str, parent_id: Option<&str>) -> Result<String, CloudApiError> {
+    async fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<&str>,
+    ) -> Result<String, CloudApiError> {
         let tokens = self.tokens()?;
 
         #[derive(Serialize)]
@@ -363,7 +188,12 @@ impl OneDriveVault {
     }
 
     /// 上传文件
-    async fn upload_file(&self, name: &str, content: &[u8], folder_id: &str) -> Result<BlobMeta, CloudApiError> {
+    async fn upload_file(
+        &self,
+        name: &str,
+        content: &[u8],
+        folder_id: &str,
+    ) -> Result<BlobMeta, CloudApiError> {
         let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -494,7 +324,11 @@ impl OneDriveVault {
     }
 
     /// 查找 vault 文件
-    async fn find_vault_file(&self, folder_id: &str, name: &str) -> Result<Option<DriveItem>, CloudApiError> {
+    async fn find_vault_file(
+        &self,
+        folder_id: &str,
+        name: &str,
+    ) -> Result<Option<DriveItem>, CloudApiError> {
         let tokens = self.tokens()?;
 
         let uri = format!(
@@ -530,7 +364,7 @@ impl OneDriveVault {
     }
 
     /// 列出 vault 中的所有文件
-    pub(crate) async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
+    async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
         let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -589,9 +423,9 @@ impl BlobVault for OneDriveVault {
     async fn download(&self, key: &str) -> Result<Blob, CloudApiError> {
         let folder_id = self.get_or_create_vault_folder().await?;
         let file = self.find_vault_file(&folder_id, key).await?;
-        let item_id = file.map(|f| f.id).ok_or_else(|| {
-            CloudApiError::NotFound(format!("OneDrive 中未找到文件: {}", key))
-        })?;
+        let item_id = file
+            .map(|f| f.id)
+            .ok_or_else(|| CloudApiError::NotFound(format!("OneDrive 中未找到文件: {}", key)))?;
         self.download_file(&item_id).await
     }
 

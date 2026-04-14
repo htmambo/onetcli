@@ -665,7 +665,12 @@ impl Render for CertificateForm {
                                 .text_sm()
                                 .child(t!("CertificateManager.password").to_string()),
                         )
-                        .child(Input::new(&self.password_input).w_full().mask_toggle().disable_ime()),
+                        .child(
+                            Input::new(&self.password_input)
+                                .w_full()
+                                .mask_toggle()
+                                .disable_ime(),
+                        ),
                 )
             })
             .when(selected_kind == CertificateKind::SshPrivateKey, |this| {
@@ -687,7 +692,12 @@ impl Render for CertificateForm {
                                 .text_sm()
                                 .child(t!("CertificateManager.passphrase").to_string()),
                         )
-                        .child(Input::new(&self.passphrase_input).w_full().mask_toggle().disable_ime()),
+                        .child(
+                            Input::new(&self.passphrase_input)
+                                .w_full()
+                                .mask_toggle()
+                                .disable_ime(),
+                        ),
                 )
             })
             .child(

@@ -1,6 +1,6 @@
 use crate::{
-    Placement, Root, dialog::Dialog, input::InputState, notification::Notification, sheet::Sheet,
-    show_system_notification, SystemNotificationOptions,
+    Placement, Root, SystemNotificationOptions, dialog::Dialog, input::InputState,
+    notification::Notification, sheet::Sheet, show_system_notification,
 };
 use gpui::{App, Entity, Window};
 use std::{process::Command, rc::Rc};

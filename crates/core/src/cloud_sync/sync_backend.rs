@@ -50,7 +50,7 @@ pub trait SyncBackend: Send + Sync {
 // ============================================================================
 
 /// sync_server REST API 后端
-pub struct SyncServerBackend;
+pub(crate) struct SyncServerBackend;
 
 #[async_trait]
 impl SyncBackend for SyncServerBackend {
@@ -83,7 +83,7 @@ impl SyncBackend for SyncServerBackend {
 ///
 /// 适用于所有基于文件存储的后端：GitHub Gist、WebDAV、OneDrive、Google Drive 等。
 /// 这些后端通过 `BlobVault` trait 进行文件级操作，不需要 sync_server API。
-pub struct BlobVaultBackend;
+pub(crate) struct BlobVaultBackend;
 
 #[async_trait]
 impl SyncBackend for BlobVaultBackend {

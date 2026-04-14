@@ -28,8 +28,8 @@ use gpui_component::{
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
-    BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, GoogleDriveVault, OneDriveVault,
-    SyncConflict, SyncEngine, UserInfo,
+    BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, GoogleDriveVault,
+    OneDriveVault, SyncConflict, SyncEngine, UserInfo,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
@@ -61,7 +61,7 @@ use crate::home::home_workspace_filter::WorkspaceFilterDelegate;
 use crate::home::workspace_form_window::{WorkspaceFormWindow, WorkspaceFormWindowConfig};
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
-    GlobalCurrentUser, SettingsPanel,
+    GlobalCurrentUser,
 };
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestoreSnapshot};
 
@@ -935,7 +935,7 @@ impl HomePage {
             return None;
         }
 
-        let mut vault = GithubGistVault::new(cx.http_client(), gist_cfg.client_id.clone());
+        let mut vault = GithubGistVault::new(cx.http_client());
         if let Some(gist_id) = gist_cfg.gist_id.clone().filter(|id| !id.is_empty()) {
             vault = vault.with_gist_id(gist_id);
         }
@@ -952,11 +952,7 @@ impl HomePage {
             return None;
         }
 
-        let vault = GoogleDriveVault::new(
-            cx.http_client(),
-            gd_cfg.client_id.clone(),
-            gd_cfg.client_secret.clone(),
-        );
+        let vault = GoogleDriveVault::new(cx.http_client());
         let vault: Arc<GoogleDriveVault> = if let Some(tokens) = gd_cfg.tokens.clone() {
             vault.with_tokens(tokens)
         } else {
@@ -975,7 +971,7 @@ impl HomePage {
             return None;
         }
 
-        let inner = OneDriveVault::new(cx.http_client(), od_cfg.client_id.clone());
+        let inner = OneDriveVault::new(cx.http_client());
         if let Some(tokens) = od_cfg.tokens.clone() {
             Some(inner.with_tokens(tokens))
         } else {
@@ -3333,13 +3329,6 @@ impl HomePage {
         }
     }
 
-    fn connection_list_view_mode_label(view_mode: ConnectionListViewMode) -> String {
-        match view_mode {
-            ConnectionListViewMode::Card => t!("Home.view_mode_card").to_string(),
-            ConnectionListViewMode::List => t!("Home.view_mode_list").to_string(),
-        }
-    }
-
     fn update_connection_list_preferences(
         &mut self,
         update: impl FnOnce(&mut AppSettings),
@@ -5308,47 +5297,45 @@ impl HomePage {
                         )),
                     )
                     .child(
-                            Button::new(SharedString::from(format!(
-                                "list-duplicate-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Copy)
-                            .with_size(Size::Small)
-                            .primary()
-                            .tooltip(t!("Home.duplicate_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    this.duplicate_connection_and_open_editor(
-                                        &duplicate_conn,
-                                        window,
-                                        cx,
-                                    );
-                                },
-                            )),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!(
-                                "list-delete-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Remove)
-                            .with_size(Size::Small)
-                            .danger()
-                            .tooltip(t!("Home.delete_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(conn_id) = delete_conn_id {
-                                        let conn_name = delete_conn_name.clone();
-                                        this.confirm_delete_connection(
-                                            conn_id, conn_name, window, cx,
-                                        );
-                                    }
-                                },
-                            )),
-                        )
+                        Button::new(SharedString::from(format!(
+                            "list-duplicate-conn-{}",
+                            conn.id.unwrap_or(0)
+                        )))
+                        .icon(IconName::Copy)
+                        .with_size(Size::Small)
+                        .primary()
+                        .tooltip(t!("Home.duplicate_connection"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.duplicate_connection_and_open_editor(
+                                    &duplicate_conn,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        )),
                     )
+                    .child(
+                        Button::new(SharedString::from(format!(
+                            "list-delete-conn-{}",
+                            conn.id.unwrap_or(0)
+                        )))
+                        .icon(IconName::Remove)
+                        .with_size(Size::Small)
+                        .danger()
+                        .tooltip(t!("Home.delete_connection"))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                if let Some(conn_id) = delete_conn_id {
+                                    let conn_name = delete_conn_name.clone();
+                                    this.confirm_delete_connection(conn_id, conn_name, window, cx);
+                                }
+                            },
+                        )),
+                    ),
+            )
             .when(is_active, |this| {
                 this.child(
                     div()
@@ -6069,13 +6056,11 @@ impl HomePage {
                                 cx.stop_propagation();
                                 if let Some(conn_id) = delete_conn_id {
                                     let conn_name = delete_conn_name.clone();
-                                    this.confirm_delete_connection(
-                                        conn_id, conn_name, window, cx,
-                                    );
+                                    this.confirm_delete_connection(conn_id, conn_name, window, cx);
                                 }
                             },
                         )),
-                    )
+                    ),
             )
             .when(is_active, |this| {
                 this.child(

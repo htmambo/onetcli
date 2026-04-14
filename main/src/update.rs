@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -29,18 +30,7 @@ struct UpdateDialogInfo {
     release_notes: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct UpdateDownloads {
-    #[serde(default)]
-    #[allow(dead_code)]
-    windows: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    macos: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    linux: Option<String>,
-}
+type UpdateDownloads = BTreeMap<String, String>;
 
 #[derive(Debug, Deserialize)]
 struct UpdateResponse {
@@ -182,26 +172,24 @@ fn select_download_url(
     default_download_url: Option<String>,
 ) -> Option<String> {
     let platform_url = response.downloads.as_ref().and_then(|downloads| {
-        #[cfg(target_os = "windows")]
-        {
-            return downloads.windows.clone();
-        }
-        #[cfg(target_os = "macos")]
-        {
-            return downloads.macos.clone();
-        }
-        #[cfg(target_os = "linux")]
-        {
-            return downloads.linux.clone();
-        }
-        #[allow(unreachable_code)]
-        None
+        CURRENT_DOWNLOAD_PLATFORM
+            .and_then(|platform| downloads.get(platform))
+            .cloned()
     });
 
     platform_url
         .or_else(|| response.download_url.clone())
         .or(default_download_url)
 }
+
+#[cfg(target_os = "windows")]
+const CURRENT_DOWNLOAD_PLATFORM: Option<&str> = Some("windows");
+#[cfg(target_os = "macos")]
+const CURRENT_DOWNLOAD_PLATFORM: Option<&str> = Some("macos");
+#[cfg(target_os = "linux")]
+const CURRENT_DOWNLOAD_PLATFORM: Option<&str> = Some("linux");
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+const CURRENT_DOWNLOAD_PLATFORM: Option<&str> = None;
 
 fn parse_version(value: &str) -> Option<Version> {
     let trimmed = value.trim();
@@ -399,6 +387,7 @@ impl UpdateDialogView {
                         cx.quit();
                     });
                 }
+                #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
                 Ok(UpdateInstallAction::Noop) => {
                     let _ = this.update(cx, |view, cx| {
                         view.applying = false;
@@ -612,14 +601,7 @@ fn download_file_name(version: &str, download_url: &str) -> String {
                 .extension()
                 .map(|ext| ext.to_string_lossy().to_string())
         })
-        .unwrap_or_else(|| {
-            #[cfg(target_os = "windows")]
-            {
-                return "exe".to_string();
-            }
-            #[allow(unreachable_code)]
-            String::new()
-        });
+        .unwrap_or_else(|| default_update_extension().to_string());
 
     let base_name = format!("onetcli-update-{}", version.replace('/', "-"));
     if extension.is_empty() {
@@ -630,40 +612,61 @@ fn download_file_name(version: &str, download_url: &str) -> String {
 }
 
 fn start_install_update(download_path: PathBuf) -> Result<UpdateInstallAction, String> {
-    #[cfg(target_os = "windows")]
-    {
-        spawn_windows_helper(&download_path)?;
-        return Ok(UpdateInstallAction::Quit);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        apply_update_unix(&download_path)?;
-        return Ok(UpdateInstallAction::Quit);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        apply_update_unix(&download_path)?;
-        return Ok(UpdateInstallAction::Quit);
-    }
-
-    #[allow(unreachable_code)]
-    Ok(UpdateInstallAction::Noop)
+    start_install_update_for_platform(&download_path)
 }
 
 fn apply_update_helper(download_path: &Path, target_path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        return apply_update_windows(download_path, target_path);
-    }
+    apply_update_helper_for_platform(download_path, target_path)
+}
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    {
-        return apply_update_unix_with_target(download_path, target_path);
-    }
+#[cfg(target_os = "windows")]
+fn default_update_extension() -> &'static str {
+    "exe"
+}
 
-    #[allow(unreachable_code)]
+#[cfg(not(target_os = "windows"))]
+fn default_update_extension() -> &'static str {
+    ""
+}
+
+#[cfg(target_os = "windows")]
+fn start_install_update_for_platform(download_path: &Path) -> Result<UpdateInstallAction, String> {
+    spawn_windows_helper(download_path)?;
+    Ok(UpdateInstallAction::Quit)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn start_install_update_for_platform(download_path: &Path) -> Result<UpdateInstallAction, String> {
+    apply_update_unix(download_path)?;
+    Ok(UpdateInstallAction::Quit)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn start_install_update_for_platform(_download_path: &Path) -> Result<UpdateInstallAction, String> {
+    Ok(UpdateInstallAction::Noop)
+}
+
+#[cfg(target_os = "windows")]
+fn apply_update_helper_for_platform(
+    download_path: &Path,
+    target_path: &Path,
+) -> Result<(), String> {
+    apply_update_windows(download_path, target_path)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn apply_update_helper_for_platform(
+    download_path: &Path,
+    target_path: &Path,
+) -> Result<(), String> {
+    apply_update_unix_with_target(download_path, target_path)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn apply_update_helper_for_platform(
+    _download_path: &Path,
+    _target_path: &Path,
+) -> Result<(), String> {
     Ok(())
 }
 
@@ -800,6 +803,7 @@ fn format_bytes(value: u64) -> String {
 
 enum UpdateInstallAction {
     Quit,
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     Noop,
 }
 

@@ -2,7 +2,7 @@
 //!
 //! 提供 `SyncableItem` 和 `SyncTypeHandler` 两个核心 trait，
 //! 将不同数据类型的同步逻辑从流程控制中解耦。
-//! 新增同步数据类型只需实现 trait 并通过 `SyncEngine::register_type` 注册即可。
+//! 当前仅供 `one-core` 内部的通用同步流程使用。
 
 use crate::cloud_sync::engine::SyncEngine;
 use crate::cloud_sync::models::CloudSyncData;
@@ -13,7 +13,7 @@ use crate::storage::PendingCloudDeletion;
 ///
 /// 为各类本地数据（如 `StoredConnection`、`Workspace`）提供统一的字段访问接口，
 /// 使通用同步流程无需关心具体数据结构。
-pub trait SyncableItem: Clone + Send + Sync + 'static {
+pub(crate) trait SyncableItem: Clone + Send + Sync + 'static {
     /// 本地数据库 ID
     fn local_id(&self) -> Option<i64>;
     /// 设置本地 ID
@@ -26,11 +26,6 @@ pub trait SyncableItem: Clone + Send + Sync + 'static {
     fn set_cloud_id(&mut self, cloud_id: Option<String>);
     /// 更新时间戳（秒）
     fn updated_at(&self) -> Option<i64>;
-
-    /// 是否启用同步（默认 true）
-    fn is_sync_enabled(&self) -> bool {
-        true
-    }
 
     /// 最后同步时间戳（默认 None，Connection 有此字段）
     fn last_synced_at(&self) -> Option<i64> {
@@ -47,7 +42,7 @@ pub trait SyncableItem: Clone + Send + Sync + 'static {
 ///
 /// 替代原有的 `WorkspaceSyncPlan`，适用于所有简单同步场景。
 #[derive(Debug)]
-pub struct GenericSyncPlan<T: SyncableItem> {
+pub(crate) struct GenericSyncPlan<T: SyncableItem> {
     /// 需要上传的数据项（本地新增）
     pub to_upload: Vec<T>,
     /// 需要更新到云端的数据项 (本地数据, 对应的云端同步数据)
@@ -70,17 +65,15 @@ impl<T: SyncableItem> Default for GenericSyncPlan<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PendingDeletionDecision {
+pub(crate) enum PendingDeletionDecision {
     DeleteCloud,
     DropPending,
-    KeepPending,
 }
 
 /// 数据类型同步处理器
 ///
 /// 封装特定数据类型的存储操作、加解密逻辑和同步回调。
-/// 实现此 trait 后，通过 `SyncEngine::register_type` 注册即可自动接入通用同步流程。
-pub trait SyncTypeHandler: Send + Sync + 'static {
+pub(crate) trait SyncTypeHandler: Send + Sync + 'static {
     type Item: SyncableItem;
 
     // --- 标识 ---

@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 const CONNECTION_QUEUE_KEY: &str = "connection";
 
-pub struct ConnectionSyncHandler;
+pub(crate) struct ConnectionSyncHandler;
 
 impl SyncHandler for ConnectionSyncHandler {
     fn name(&self) -> &'static str {
@@ -29,11 +29,11 @@ impl SyncEngine {
     async fn sync_connections(&self) -> Result<SyncResult, SyncError> {
         let mut result = SyncResult::default();
 
-        let pending_deletions = self.process_pending_deletions().await;
+        let _pending_deletions = self.process_pending_deletions().await;
         // tracing::info!("[同步] 处理待删除列表完成: {} 个", pending_deletions.len());
 
         let mut local_connections = self.get_local_connections()?;
-        let sync_enabled_count = local_connections.iter().filter(|c| c.sync_enabled).count();
+        let _sync_enabled_count = local_connections.iter().filter(|c| c.sync_enabled).count();
         // tracing::info!(
         //     "[同步] 本地连接: {} 个，其中 {} 个启用同步",
         //     local_connections.len(),
@@ -594,7 +594,7 @@ impl SyncEngine {
         for cloud_data in cloud_data_list {
             if !local_cloud_ids.contains(&cloud_data.id) {
                 if pending_cloud_ids.contains(&cloud_data.id) {
-                    let name = cloud_name_map
+                    let _name = cloud_name_map
                         .get(&cloud_data.id)
                         .cloned()
                         .unwrap_or_else(|| cloud_data.id.clone());
@@ -877,7 +877,7 @@ impl SyncEngine {
         }
     }
 
-    pub async fn delete_cloud_connection(&self, cloud_id: &str) -> Result<(), SyncError> {
+    async fn delete_cloud_connection(&self, cloud_id: &str) -> Result<(), SyncError> {
         self.cloud_client
             .delete_sync_data(cloud_id)
             .await
@@ -886,7 +886,7 @@ impl SyncEngine {
         Ok(())
     }
 
-    pub fn delete_local_connection(&self, local_id: i64) -> Result<(), SyncError> {
+    fn delete_local_connection(&self, local_id: i64) -> Result<(), SyncError> {
         let repo = self
             .storage
             .get::<ConnectionRepository>()
@@ -896,30 +896,6 @@ impl SyncEngine {
             .map_err(|e| SyncError::StorageError(e.to_string()))?;
 
         Ok(())
-    }
-
-    pub async fn delete_connection(&self, local_id: i64) -> Result<(), SyncError> {
-        let repo = self
-            .storage
-            .get::<ConnectionRepository>()
-            .ok_or_else(|| SyncError::StorageError("ConnectionRepository not found".to_string()))?;
-
-        let connections = repo
-            .list()
-            .map_err(|e| SyncError::StorageError(e.to_string()))?;
-
-        let conn = connections
-            .iter()
-            .find(|c| c.id == Some(local_id))
-            .ok_or_else(|| SyncError::StorageError(format!("连接 {} 不存在", local_id)))?;
-
-        if let Some(cloud_id) = &conn.cloud_id {
-            if let Err(e) = self.delete_cloud_connection(cloud_id).await {
-                tracing::warn!("[删除] 云端删除失败: {} - {}（继续删除本地）", cloud_id, e);
-            }
-        }
-
-        self.delete_local_connection(local_id)
     }
 
     fn get_pending_deletion_cloud_ids(&self) -> HashSet<String> {
@@ -936,10 +912,10 @@ impl SyncEngine {
 }
 
 /// 已解决的冲突操作
-pub struct ResolvedConflictAction {
-    pub conflict: SyncConflict,
-    pub resolution: ConflictResolution,
-    pub result_connection: Option<StoredConnection>,
+pub(crate) struct ResolvedConflictAction {
+    pub(crate) conflict: SyncConflict,
+    pub(crate) resolution: ConflictResolution,
+    pub(crate) result_connection: Option<StoredConnection>,
 }
 
 fn should_keep_local_connection_on_cloud_delete(item: &StoredConnection) -> bool {
@@ -951,7 +927,7 @@ fn should_keep_local_connection_on_cloud_delete(item: &StoredConnection) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloud_sync::client::{AuthResponse, CloudApiClient, CloudApiError, OAuthResponse};
+    use crate::cloud_sync::client::{AuthResponse, CloudApiClient, CloudApiError};
     use crate::llm::ChatStream;
     use crate::storage::traits::Repository;
     use crate::storage::{ConnectionRepository, ConnectionType};
@@ -972,14 +948,6 @@ mod tests {
             _email: &str,
             _password: &str,
         ) -> Result<AuthResponse, CloudApiError> {
-            Err(CloudApiError::NotAuthenticated)
-        }
-
-        async fn sign_in_with_oauth(
-            &self,
-            _provider: &str,
-            _redirect_url: &str,
-        ) -> Result<OAuthResponse, CloudApiError> {
             Err(CloudApiError::NotAuthenticated)
         }
 

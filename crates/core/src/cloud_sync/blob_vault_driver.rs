@@ -80,7 +80,7 @@ impl SyncEngine {
                 // tracing::info!("[Blob同步] 云端无 bundle，将上传本地数据");
                 None
             }
-            Err(e) => {
+            Err(_e) => {
                 // tracing::warn!("[Blob同步] 下载云端 bundle 失败: {}", e);
                 None
             }
@@ -375,7 +375,7 @@ impl SyncEngine {
         &self,
         vault: &Arc<dyn BlobVault>,
         bundle: SyncBundle,
-        timestamp: i64,
+        _timestamp: i64,
     ) -> Result<usize, SyncError> {
         // 序列化为 JSON 明文直接存储（暂不加密，便于观察验证）
         let plaintext = serde_json::to_string_pretty(&bundle)
@@ -638,17 +638,5 @@ impl SyncEngine {
         }
 
         Ok(())
-    }
-
-    /// 通过 BlobVault 同步单个 handler 的数据（已废弃，保留兼容接口）
-    ///
-    /// 现在使用 bundle 级别的同步，此方法保留以避免编译错误。
-    #[deprecated(since = "0.2.0", note = "使用 bundle 级别的同步替代")]
-    async fn sync_handler_via_blob(
-        &self,
-        _handler: &dyn super::engine::SyncHandler,
-        _vault: &Arc<dyn BlobVault>,
-    ) -> Result<SyncResult, SyncError> {
-        Ok(SyncResult::default())
     }
 }

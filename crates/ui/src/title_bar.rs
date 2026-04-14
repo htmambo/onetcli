@@ -18,6 +18,7 @@ const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 #[cfg(not(target_os = "macos"))]
 const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
 
+#[cfg(any(test, target_os = "linux"))]
 fn desktop_prefers_system_window_controls(
     current_desktop: Option<&str>,
     desktop_session: Option<&str>,

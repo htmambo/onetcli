@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use db_view::set_db_view_settings;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
+    AnyElement, App, AppContext, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
     Pixels, Render, SharedString, StyleRefinement, Styled, Window, WindowAppearance,
     WindowBackgroundAppearance, WindowBounds, div, point, prelude::FluentBuilder, px, size,
@@ -17,9 +17,9 @@ use gpui_component::{
     Sizable, Size, Theme, ThemeMode, WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
-    input::{Input, InputEvent, InputState},
     group_box::GroupBoxVariant,
     h_flex,
+    input::{Input, InputState},
     kbd::Kbd,
     setting::{
         NumberFieldOptions, RenderOptions, SelectIndex, SettingField, SettingGroup, SettingItem,
@@ -46,7 +46,7 @@ use crate::app_init::is_valid_system_hotkey;
 use crate::auth::{PasswordAuthAction, get_auth_service};
 use crate::encourage::render_encourage_section;
 use crate::onetcli_app::GlobalHomePage;
-use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView, oauth_dialog};
+use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView};
 use crate::sync_server_theme;
 
 // ============================================================================
@@ -87,18 +87,12 @@ impl GlobalCurrentUser {
 pub enum SettingsPanelPage {
     #[default]
     General,
-    Certificate,
 }
 
 impl SettingsPanelPage {
     fn select_index(self) -> SelectIndex {
-        match self {
-            Self::General => SelectIndex::default(),
-            Self::Certificate => SelectIndex {
-                page_ix: 3,
-                group_ix: None,
-            },
-        }
+        let _ = self;
+        SelectIndex::default()
     }
 }
 
@@ -110,17 +104,6 @@ struct PendingSettingsPanelPage {
 impl gpui::Global for PendingSettingsPanelPage {}
 
 impl PendingSettingsPanelPage {
-    fn set(page: SettingsPanelPage, cx: &mut App) {
-        if !cx.has_global::<PendingSettingsPanelPage>() {
-            cx.set_global(PendingSettingsPanelPage::default());
-        }
-        if let Some(state) = cx.try_global::<PendingSettingsPanelPage>() {
-            if let Ok(mut guard) = state.page.write() {
-                *guard = Some(page);
-            }
-        }
-    }
-
     fn take(cx: &mut App) -> Option<SettingsPanelPage> {
         if let Some(state) = cx.try_global::<PendingSettingsPanelPage>() {
             if let Ok(mut guard) = state.page.write() {
@@ -572,7 +555,6 @@ fn themed_setting_group(group: SettingGroup, cx: &App) -> SettingGroup {
 
 fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     let blur_enabled = cx.theme().window_blur_enabled;
-    let glass_opacity = AppSettings::global(cx).glass_opacity;
     // Layer 3: 页面标题 - 0.10
     let header_bg = settings_glass_with_offset(cx.theme().secondary, blur_enabled, 0.0, 0.28);
     page.header_style(
@@ -804,19 +786,6 @@ impl AppSettings {
 
     pub fn save(&mut self) {
         self.write_to_disk();
-    }
-
-    fn set_main_window_bounds(&mut self, window_bounds: WindowBounds) -> bool {
-        let Some(next_bounds) = SavedWindowBounds::from_window_bounds(window_bounds) else {
-            return false;
-        };
-
-        if self.main_window_bounds == Some(next_bounds) {
-            return false;
-        }
-
-        self.main_window_bounds = Some(next_bounds);
-        true
     }
 
     pub fn snapshot_main_window_bounds(window: &Window) -> Option<SavedWindowBounds> {
@@ -1090,10 +1059,10 @@ pub struct SettingsPanel {
 }
 
 impl SettingsPanel {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
         let certificate_manager_view = cx.new(|cx| CertificateManagerView::new(cx));
         let llm_providers_view = cx.new(|cx| LlmProvidersView::new(cx));
-        let mut this = Self {
+        let this = Self {
             focus_handle: cx.focus_handle(),
             certificate_manager_view,
             llm_providers_view,
@@ -1113,10 +1082,6 @@ impl SettingsPanel {
         })
         .detach();
         this
-    }
-
-    pub fn request_page(page: SettingsPanelPage, cx: &mut App) {
-        PendingSettingsPanelPage::set(page, cx);
     }
 
     fn apply_requested_page(&mut self, cx: &mut Context<Self>) {
@@ -1337,14 +1302,8 @@ impl SettingsPanel {
                                             "github_gist".into(),
                                             t!("Settings.General.Sync.github_gist_backend").into(),
                                         ),
-                                        (
-                                            "google_drive".into(),
-                                            "Google Drive".into(),
-                                        ),
-                                        (
-                                            "onedrive".into(),
-                                            "OneDrive".into(),
-                                        ),
+                                        ("google_drive".into(), "Google Drive".into()),
+                                        ("onedrive".into(), "OneDrive".into()),
                                     ],
                                     |cx: &App| {
                                         SharedString::from(
@@ -1386,7 +1345,9 @@ impl SettingsPanel {
                             .description(t!("Settings.General.Sync.server_url_desc").to_string()),
                             // 登录/认证表单（仅 sync_server 后端显示）
                             SettingItem::render(
-                                |_opts: &RenderOptions, window: &mut gpui::Window, cx: &mut gpui::App| {
+                                |_opts: &RenderOptions,
+                                 window: &mut gpui::Window,
+                                 cx: &mut gpui::App| {
                                     if AppSettings::global(cx).sync_backend_type != "sync_server" {
                                         return gpui::div().into_any_element();
                                     }
@@ -1725,7 +1686,9 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "google_drive"
                             })
-                            .description("Google Cloud Console 中创建的 OAuth 2.0 Client ID".to_string()),
+                            .description(
+                                "Google Cloud Console 中创建的 OAuth 2.0 Client ID".to_string(),
+                            ),
                             SettingItem::new(
                                 "Google Drive Client Secret",
                                 themed_setting_field(SettingField::input(
@@ -1756,7 +1719,9 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "google_drive"
                             })
-                            .description("Google Cloud Console 中创建的 OAuth 2.0 Client Secret".to_string()),
+                            .description(
+                                "Google Cloud Console 中创建的 OAuth 2.0 Client Secret".to_string(),
+                            ),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
                                  _window: &mut gpui::Window,
@@ -1764,32 +1729,37 @@ impl SettingsPanel {
                                     use gpui_component::button::{
                                         Button, ButtonVariant, ButtonVariants as _,
                                     };
-                                    let config = AppSettings::global(cx)
-                                        .google_drive_config
-                                        .as_ref();
-                                    let client_id = config.map(|c| c.client_id.clone()).unwrap_or_default();
-                                    let client_secret = config.map(|c| c.client_secret.clone()).unwrap_or_default();
+                                    let config =
+                                        AppSettings::global(cx).google_drive_config.as_ref();
+                                    let client_id =
+                                        config.map(|c| c.client_id.clone()).unwrap_or_default();
+                                    let client_secret =
+                                        config.map(|c| c.client_secret.clone()).unwrap_or_default();
                                     if client_id.is_empty() || client_secret.is_empty() {
                                         return gpui::div().into_any_element();
                                     }
-                                    let has_auth = config
-                                        .map(|c| c.tokens.is_some())
-                                        .unwrap_or(false);
+                                    let has_auth =
+                                        config.map(|c| c.tokens.is_some()).unwrap_or(false);
                                     Button::new("gdrive-auth-btn")
                                         .with_variant(if has_auth {
                                             ButtonVariant::Ghost
                                         } else {
                                             ButtonVariant::Primary
                                         })
-                                        .child(if has_auth { "重新授权" } else { "授权 Google Drive" })
+                                        .child(if has_auth {
+                                            "重新授权"
+                                        } else {
+                                            "授权 Google Drive"
+                                        })
                                         .into_any_element()
                                 },
                                 move |window, cx| {
-                                    let config = AppSettings::global(cx)
-                                        .google_drive_config
-                                        .as_ref();
-                                    let client_id = config.map(|c| c.client_id.clone()).unwrap_or_default();
-                                    let client_secret = config.map(|c| c.client_secret.clone()).unwrap_or_default();
+                                    let config =
+                                        AppSettings::global(cx).google_drive_config.as_ref();
+                                    let client_id =
+                                        config.map(|c| c.client_id.clone()).unwrap_or_default();
+                                    let client_secret =
+                                        config.map(|c| c.client_secret.clone()).unwrap_or_default();
                                     if client_id.is_empty() || client_secret.is_empty() {
                                         return;
                                     }
@@ -1840,7 +1810,10 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "onedrive"
                             })
-                            .description("Microsoft Azure App Registration 中的 Application (client) ID".to_string()),
+                            .description(
+                                "Microsoft Azure App Registration 中的 Application (client) ID"
+                                    .to_string(),
+                            ),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
                                  _window: &mut gpui::Window,
@@ -1867,7 +1840,11 @@ impl SettingsPanel {
                                         } else {
                                             ButtonVariant::Primary
                                         })
-                                        .child(if has_auth { "重新授权" } else { "授权 OneDrive" })
+                                        .child(if has_auth {
+                                            "重新授权"
+                                        } else {
+                                            "授权 OneDrive"
+                                        })
                                         .into_any_element()
                                 },
                                 move |window, cx| {
@@ -1880,7 +1857,9 @@ impl SettingsPanel {
                                         return;
                                     }
                                     let dialog_entity = cx.new(|_cx| {
-                                        crate::settings::oauth_dialog::OneDriveAuthDialog::new(client_id)
+                                        crate::settings::oauth_dialog::OneDriveAuthDialog::new(
+                                            client_id,
+                                        )
                                     });
                                     window.open_dialog(cx, move |dialog, _window, _cx| {
                                         dialog
@@ -2262,8 +2241,8 @@ mod tests {
     use super::parse_deepin_theme_appearance;
     use super::{
         AppSettings, SavedWindowBounds, SavedWindowDisplayState,
-        centered_window_bounds_within_visible_area, clamp_glass_opacity,
-        editable_sync_server_url, normalize_sync_server_url,
+        centered_window_bounds_within_visible_area, clamp_glass_opacity, editable_sync_server_url,
+        normalize_sync_server_url,
     };
     use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
@@ -2622,7 +2601,9 @@ impl SyncAuthForm {
 
 /// 在 SyncAuthForm 中执行登录/注册认证
 fn auth_submit(cx: &mut App) {
-    let Some(form) = SyncAuthForm::global(cx) else { return };
+    let Some(form) = SyncAuthForm::global(cx) else {
+        return;
+    };
     let state = form.read(cx);
     let email = state.email_input.read(cx).text().to_string();
     let password = state.password_input.read(cx).text().to_string();
@@ -2632,26 +2613,38 @@ fn auth_submit(cx: &mut App) {
 
     if email.is_empty() {
         form.update(cx, |this, cx| {
-            this.error.update(cx, |v, cx| { *v = Some(t!("Auth.email_required").to_string()); cx.notify(); });
+            this.error.update(cx, |v, cx| {
+                *v = Some(t!("Auth.email_required").to_string());
+                cx.notify();
+            });
         });
         return;
     }
     if password.is_empty() {
         form.update(cx, |this, cx| {
-            this.error.update(cx, |v, cx| { *v = Some(t!("Auth.password_required").to_string()); cx.notify(); });
+            this.error.update(cx, |v, cx| {
+                *v = Some(t!("Auth.password_required").to_string());
+                cx.notify();
+            });
         });
         return;
     }
     if is_sign_up && password != confirm_password {
         form.update(cx, |this, cx| {
-            this.error.update(cx, |v, cx| { *v = Some(t!("Auth.password_mismatch").to_string()); cx.notify(); });
+            this.error.update(cx, |v, cx| {
+                *v = Some(t!("Auth.password_mismatch").to_string());
+                cx.notify();
+            });
         });
         return;
     }
 
     form.update(cx, |this, cx| {
         this.is_submitting = true;
-        this.error.update(cx, |v, cx| { *v = None; cx.notify(); });
+        this.error.update(cx, |v, cx| {
+            *v = None;
+            cx.notify();
+        });
         cx.notify();
     });
 
@@ -2681,7 +2674,10 @@ fn auth_submit(cx: &mut App) {
                 }
                 Err(error) => {
                     tracing::error!("密码登录失败: {}", error);
-                    this.error.update(cx, |v, cx| { *v = Some(error.clone()); cx.notify(); });
+                    this.error.update(cx, |v, cx| {
+                        *v = Some(error.clone());
+                        cx.notify();
+                    });
                 }
             }
         });
@@ -2698,7 +2694,7 @@ fn auth_submit(cx: &mut App) {
 }
 
 /// 渲染已登录用户信息（同步分组内）
-fn render_logged_in_user_sync(user: &UserInfo, cx: &mut App) -> AnyElement {
+fn render_logged_in_user_sync(user: &UserInfo, _cx: &mut App) -> AnyElement {
     let display_name = user.display_name();
     let secondary_identity = user
         .secondary_identity()
@@ -2776,7 +2772,11 @@ fn render_auth_form_sync(window: &mut Window, cx: &mut App) -> AnyElement {
             v_flex()
                 .gap_2()
                 .child(Input::new(&form.read(cx).email_input).w_full())
-                .child(Input::new(&form.read(cx).password_input).w_full().mask_toggle())
+                .child(
+                    Input::new(&form.read(cx).password_input)
+                        .w_full()
+                        .mask_toggle(),
+                )
                 .when(form.read(cx).is_sign_up, |this| {
                     this.child(Input::new(&form.read(cx).confirm_password_input).w_full())
                 }),
@@ -2809,24 +2809,24 @@ fn render_auth_form_sync(window: &mut Window, cx: &mut App) -> AnyElement {
                             move |_, _window, cx: &mut App| {
                                 f.update(cx, |this, cx| {
                                     this.is_sign_up = !this.is_sign_up;
-                                    this.error.update(cx, |v, cx| { *v = None; cx.notify(); });
+                                    this.error.update(cx, |v, cx| {
+                                        *v = None;
+                                        cx.notify();
+                                    });
                                     cx.notify();
                                 });
                             }
                         }),
                 ),
         )
-        .when_some(
-            form.read(cx).error.read(cx).clone(),
-            |this, msg| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .text_color(sync_server_theme::danger())
-                        .child(msg),
-                )
-            },
-        )
+        .when_some(form.read(cx).error.read(cx).clone(), |this, msg| {
+            this.child(
+                div()
+                    .text_xs()
+                    .text_color(sync_server_theme::danger())
+                    .child(msg),
+            )
+        })
         .into_any_element()
 }
 

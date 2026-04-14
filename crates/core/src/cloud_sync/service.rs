@@ -1,10 +1,9 @@
 //! 云同步服务
 
 use crate::cloud_sync::models::*;
-use crate::cloud_sync::queue::{OperationQueue, SyncOperation};
+use crate::cloud_sync::queue::OperationQueue;
 use crate::crypto::{self, CryptoError};
 use crate::storage::{Certificate, CertificateKind, ConnectionType, StoredConnection};
-use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -74,8 +73,6 @@ pub struct CloudSyncService {
     logged_in: bool,
     /// 用户 ID
     user_id: Option<String>,
-    /// 同步状态缓存
-    sync_states: HashMap<i64, SyncState>,
     /// 同步操作队列（按类型分组）
     operation_queues: HashMap<String, OperationQueue>,
 }
@@ -88,23 +85,17 @@ impl CloudSyncService {
             key_version: 0,
             logged_in: false,
             user_id: None,
-            sync_states: HashMap::new(),
             operation_queues: HashMap::new(),
         }
     }
 
     /// 检查是否已解锁
-    pub fn is_unlocked(&self) -> bool {
+    pub(crate) fn is_unlocked(&self) -> bool {
         self.master_key.is_some()
     }
 
-    /// 检查是否已登录
-    pub fn is_logged_in(&self) -> bool {
-        self.logged_in
-    }
-
     /// 获取当前密钥版本
-    pub fn key_version(&self) -> u32 {
+    pub(crate) fn key_version(&self) -> u32 {
         self.key_version
     }
 
@@ -120,15 +111,14 @@ impl CloudSyncService {
         self.user_id = None;
         self.master_key = None;
         self.key_version = 0;
-        self.sync_states.clear();
         self.operation_queues.clear();
     }
 
-    pub fn take_operation_queue(&mut self, key: &str) -> OperationQueue {
+    pub(crate) fn take_operation_queue(&mut self, key: &str) -> OperationQueue {
         self.operation_queues.remove(key).unwrap_or_default()
     }
 
-    pub fn store_operation_queue(&mut self, key: &str, queue: OperationQueue) {
+    pub(crate) fn store_operation_queue(&mut self, key: &str, queue: OperationQueue) {
         if queue.is_empty() {
             self.operation_queues.remove(key);
         } else {
@@ -136,23 +126,11 @@ impl CloudSyncService {
         }
     }
 
-    pub fn enqueue_operations(
-        &mut self,
-        key: &str,
-        operations: impl IntoIterator<Item = SyncOperation>,
-    ) {
-        let queue = self
-            .operation_queues
-            .entry(key.to_string())
-            .or_insert_with(OperationQueue::new);
-        queue.enqueue_all(operations);
-    }
-
     /// 直接设置主密钥（不验证）
     ///
     /// 用于从本地 crypto 模块同步密钥状态，跳过云端验证。
     /// 调用者需确保密钥已通过本地验证。
-    pub fn set_master_key_directly(&mut self, master_key: String) {
+    pub(crate) fn set_master_key_directly(&mut self, master_key: String) {
         self.master_key = Some(master_key);
         // key_version 保持默认或之前的值，实际同步时会从云端更新
     }
@@ -160,7 +138,7 @@ impl CloudSyncService {
     /// 解锁同步服务（验证主密钥）
     ///
     /// 需要先从云端获取 key_verification 数据进行验证
-    pub fn unlock(
+    pub(crate) fn unlock(
         &mut self,
         master_key: &str,
         cloud_config: &CloudUserConfig,
@@ -178,7 +156,10 @@ impl CloudSyncService {
     /// 首次设置主密钥
     ///
     /// 返回需要上传到云端的配置数据
-    pub fn setup_master_key(&mut self, master_key: &str) -> Result<CloudUserConfig, SyncError> {
+    pub(crate) fn setup_master_key(
+        &mut self,
+        master_key: &str,
+    ) -> Result<CloudUserConfig, SyncError> {
         if !self.logged_in {
             return Err(SyncError::NotLoggedIn);
         }
@@ -199,66 +180,6 @@ impl CloudSyncService {
         Ok(config)
     }
 
-    /// 修改主密钥（重新加密所有云端同步数据）
-    ///
-    /// 返回新的用户配置和重新加密的同步数据列表
-    pub fn change_master_key(
-        &mut self,
-        old_key: &str,
-        new_key: &str,
-        cloud_data_list: &[CloudSyncData],
-    ) -> Result<(CloudUserConfig, Vec<CloudSyncData>), SyncError> {
-        // 验证旧密钥
-        if self.master_key.as_deref() != Some(old_key) {
-            return Err(SyncError::InvalidMasterKey);
-        }
-
-        let new_version = self.key_version + 1;
-        let mut re_encrypted_list = Vec::with_capacity(cloud_data_list.len());
-
-        // 重新加密每条同步数据
-        for data in cloud_data_list {
-            let re_encrypted = self.re_encrypt_sync_data(data, old_key, new_key, new_version)?;
-            re_encrypted_list.push(re_encrypted);
-        }
-
-        // 生成新的用户配置
-        let new_verification = crypto::generate_key_verification_v1(new_key);
-        let user_id = self.user_id.clone().unwrap_or_default();
-
-        let new_config = CloudUserConfig {
-            user_id,
-            key_verification: new_verification,
-            key_version: new_version,
-            updated_at: current_timestamp(),
-        };
-
-        // 更新本地状态
-        self.master_key = Some(new_key.to_string());
-        self.key_version = new_version;
-
-        Ok((new_config, re_encrypted_list))
-    }
-
-    /// 获取同步状态
-    pub fn get_sync_state(&self, connection_id: i64) -> Option<&SyncState> {
-        self.sync_states.get(&connection_id)
-    }
-
-    /// 更新同步状态
-    pub fn update_sync_state(&mut self, state: SyncState) {
-        self.sync_states.insert(state.connection_id, state);
-    }
-
-    // ========================================================================
-    // 用户 ID
-    // ========================================================================
-
-    /// 获取用户 ID
-    pub fn user_id(&self) -> Option<&str> {
-        self.user_id.as_deref()
-    }
-
     // ========================================================================
     // 统一 blob 加密/解密（新版 sync_data）
     // ========================================================================
@@ -274,19 +195,19 @@ impl CloudSyncService {
     }
 
     /// 加密整体明文 JSON 为 blob
-    pub fn encrypt_blob(&self, plaintext: &str) -> Result<String, SyncError> {
+    pub(crate) fn encrypt_blob(&self, plaintext: &str) -> Result<String, SyncError> {
         let key = self.select_encrypt_key()?;
         Ok(crypto::encrypt_with_key(plaintext, key))
     }
 
     /// 解密整体 blob 为明文 JSON
-    pub fn decrypt_blob(&self, encrypted: &str) -> Result<String, SyncError> {
+    pub(crate) fn decrypt_blob(&self, encrypted: &str) -> Result<String, SyncError> {
         let key = self.select_encrypt_key()?;
         crypto::decrypt_with_key(encrypted, key).map_err(SyncError::CryptoError)
     }
 
     /// 计算明文数据的 SHA-256 校验和
-    pub fn calculate_blob_checksum(plaintext: &str) -> String {
+    pub(crate) fn calculate_blob_checksum(plaintext: &str) -> String {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(plaintext.as_bytes());
@@ -294,7 +215,7 @@ impl CloudSyncService {
     }
 
     /// 准备上传连接到 sync_data（整体 blob 加密）
-    pub fn prepare_sync_data_upload(
+    pub(crate) fn prepare_sync_data_upload(
         &self,
         conn: &StoredConnection,
         workspace_cloud_id: Option<String>,
@@ -333,7 +254,7 @@ impl CloudSyncService {
     }
 
     /// 准备上传工作空间到 sync_data（整体 blob 加密）
-    pub fn prepare_workspace_sync_data_upload(
+    pub(crate) fn prepare_workspace_sync_data_upload(
         &self,
         ws: &crate::storage::Workspace,
     ) -> Result<CloudSyncData, SyncError> {
@@ -366,7 +287,7 @@ impl CloudSyncService {
     }
 
     /// 准备上传证书到 sync_data（整体 blob 加密）
-    pub fn prepare_certificate_sync_data_upload(
+    pub(crate) fn prepare_certificate_sync_data_upload(
         &self,
         certificate: &Certificate,
     ) -> Result<CloudSyncData, SyncError> {
@@ -405,36 +326,8 @@ impl CloudSyncService {
         })
     }
 
-    /// 准备上传任意可序列化数据到 sync_data（整体 blob 加密）
-    pub fn prepare_generic_sync_data_upload<T: Serialize>(
-        &self,
-        data_type: &str,
-        name: &str,
-        value: &T,
-    ) -> Result<CloudSyncData, SyncError> {
-        let plaintext =
-            serde_json::to_string(value).map_err(|e| SyncError::DataFormatError(e.to_string()))?;
-
-        let checksum = Self::calculate_blob_checksum(&plaintext);
-        let encrypted_data = self.encrypt_blob(&plaintext)?;
-        let key_version = self.key_version();
-
-        Ok(CloudSyncData {
-            id: uuid::Uuid::new_v4().to_string(),
-            owner_id: self.user_id.clone().unwrap_or_default(),
-            data_type: data_type.to_string(),
-            name: name.to_string(),
-            encrypted_data,
-            key_version,
-            checksum,
-            version: 1,
-            updated_at: current_timestamp(),
-            deleted_at: None,
-        })
-    }
-
     /// 解密 sync_data 中的连接数据
-    pub fn decrypt_sync_data_connection(
+    pub(crate) fn decrypt_sync_data_connection(
         &self,
         cloud_data: &CloudSyncData,
     ) -> Result<StoredConnection, SyncError> {
@@ -464,7 +357,7 @@ impl CloudSyncService {
     }
 
     /// 解密 sync_data 中的工作空间数据
-    pub fn decrypt_sync_data_workspace(
+    pub(crate) fn decrypt_sync_data_workspace(
         &self,
         cloud_data: &CloudSyncData,
     ) -> Result<crate::storage::Workspace, SyncError> {
@@ -486,7 +379,7 @@ impl CloudSyncService {
     }
 
     /// 解密 sync_data 中的证书数据
-    pub fn decrypt_sync_data_certificate(
+    pub(crate) fn decrypt_sync_data_certificate(
         &self,
         cloud_data: &CloudSyncData,
     ) -> Result<Certificate, SyncError> {
@@ -513,41 +406,6 @@ impl CloudSyncService {
             created_at: None,
             updated_at: Some(cloud_data.updated_at / 1000),
             owner_id: plain_data.owner_id,
-        })
-    }
-
-    /// 解密 sync_data 中的通用 JSON 数据
-    pub fn decrypt_generic_sync_data<T: DeserializeOwned>(
-        &self,
-        cloud_data: &CloudSyncData,
-    ) -> Result<T, SyncError> {
-        let plaintext = self.decrypt_blob(&cloud_data.encrypted_data)?;
-        serde_json::from_str(&plaintext).map_err(|e| SyncError::DataFormatError(e.to_string()))
-    }
-
-    /// 重新加密同步数据（密钥轮换时使用）
-    pub fn re_encrypt_sync_data(
-        &self,
-        cloud_data: &CloudSyncData,
-        old_key: &str,
-        new_key: &str,
-        new_key_version: u32,
-    ) -> Result<CloudSyncData, SyncError> {
-        let plaintext = crypto::decrypt_with_key(&cloud_data.encrypted_data, old_key)
-            .map_err(SyncError::CryptoError)?;
-        let encrypted_data = crypto::encrypt_with_key(&plaintext, new_key);
-
-        Ok(CloudSyncData {
-            id: cloud_data.id.clone(),
-            owner_id: cloud_data.owner_id.clone(),
-            data_type: cloud_data.data_type.clone(),
-            name: cloud_data.name.clone(),
-            encrypted_data,
-            key_version: new_key_version,
-            checksum: cloud_data.checksum.clone(),
-            version: cloud_data.version,
-            updated_at: current_timestamp(),
-            deleted_at: cloud_data.deleted_at,
         })
     }
 }
@@ -605,15 +463,10 @@ mod tests {
         );
 
         let cloud_data = service
-            .prepare_sync_data_upload(
-                &connection,
-                Some("workspace-cloud-1".to_string()),
-            )
+            .prepare_sync_data_upload(&connection, Some("workspace-cloud-1".to_string()))
             .unwrap();
 
-        let plaintext = service
-            .decrypt_blob(&cloud_data.encrypted_data)
-            .unwrap();
+        let plaintext = service.decrypt_blob(&cloud_data.encrypted_data).unwrap();
         let plain_data: ConnectionPlainData = serde_json::from_str(&plaintext).unwrap();
 
         assert_eq!(

@@ -7,7 +7,7 @@ use crate::crypto;
 use crate::storage::connection::SqliteConnection;
 use crate::storage::manager::{GlobalStorageState, StorageManager, now};
 use crate::storage::models::{
-    Certificate, CertificateKind, KeyValue, apply_certificate_to_connection_snapshot,
+    Certificate, CertificateKind, apply_certificate_to_connection_snapshot,
     detach_certificate_from_connection_snapshot, has_decrypt_failure_in_sensitive_fields,
 };
 use crate::storage::quick_command::QuickCommandRepository;
@@ -700,7 +700,7 @@ impl Repository for ConnectionRepository {
         let sync_enabled = if item.sync_enabled { 1i64 } else { 0i64 };
         let cloud_id = item.cloud_id.clone();
         let last_synced_at = item.last_synced_at;
-                let owner_id = item.owner_id.clone();
+        let owner_id = item.owner_id.clone();
         let ts = now();
 
         let computed_sort_order = self.conn.with_connection(|conn| {
@@ -740,7 +740,7 @@ impl Repository for ConnectionRepository {
         let sync_enabled = if item.sync_enabled { 1i64 } else { 0i64 };
         let cloud_id = item.cloud_id.clone();
         let last_synced_at = item.last_synced_at;
-                let owner_id = item.owner_id.clone();
+        let owner_id = item.owner_id.clone();
         let ts = now();
 
         let (previous_workspace_id, previous_sort_order) = self.conn.with_connection(|conn| {

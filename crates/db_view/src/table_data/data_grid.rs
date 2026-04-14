@@ -8,7 +8,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, IconName, Sizable as _, Size, WindowExt, button::Button,
-    h_flex, menu::PopupMenu, v_flex,
+    h_flex, v_flex,
 };
 use one_ui::edit_table::{Column, EditTable, EditTableEvent, EditTableState};
 use rust_i18n::t;
@@ -23,22 +23,27 @@ use crate::table_data::multi_text_editor::create_multi_text_editor_with_content;
 use crate::table_data::results_delegate::{EditorTableDelegate, RowChange};
 use chrono::Local;
 use db::{
-    ColumnInfo, DbManager, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult,
-    TableCellChange, TableDataRequest, TableRowChange, TableSaveRequest,
+    ColumnInfo, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult, TableCellChange,
+    TableDataRequest, TableRowChange, TableSaveRequest,
 };
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
-use one_core::storage::DatabaseType;
 use one_core::tab_container::TabContainer;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
+
+#[cfg(test)]
+use db::DbManager;
+#[cfg(test)]
+use one_core::storage::DatabaseType;
 
 actions!(
     data_grid,
     [Page500, Page1000, Page2000, Page10000, Page100000]
 );
 
+#[cfg(test)]
 fn build_header_order_by_clause(
     db_manager: &DbManager,
     database_type: DatabaseType,
@@ -362,7 +367,7 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.table,
             window,
-            |this: &mut DataGrid, _, evt: &EditTableEvent, window, cx| {
+            |_this: &mut DataGrid, _, evt: &EditTableEvent, _window, _cx| {
                 if let EditTableEvent::SelectCell(row, col) = evt {
                     trace!("select cell: {:?}", (row, col))
                 }
@@ -375,7 +380,7 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.filter_editor,
             window,
-            |this: &mut DataGrid, _, evt: &FilterEditorEvent, window, cx| {
+            |this: &mut DataGrid, _, evt: &FilterEditorEvent, _window, cx| {
                 if matches!(evt, FilterEditorEvent::QueryApply) {
                     this.load_data_with_clauses(1, cx);
                     cx.notify();
@@ -399,24 +404,6 @@ impl DataGrid {
             "column_visibility:{}:{}:{}",
             self.config.connection_id, self.config.database_name, self.config.table_name
         )
-    }
-
-    fn load_column_visibility(&mut self, cx: &mut Context<Self>) {
-        let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
-        let Some(storage) = storage else { return };
-        let Some(kv_repo) = storage
-            .storage
-            .get::<one_core::storage::KeyValueRepository>()
-        else {
-            return;
-        };
-        let key = self.column_visibility_key();
-        if let Ok(Some(value)) = kv_repo.get_by_key(&key) {
-            if let Ok(hidden) = serde_json::from_str::<Vec<String>>(&value) {
-                self.hidden_columns = hidden.into_iter().map(SharedString::from).collect();
-                self.apply_column_visibility(cx);
-            }
-        }
     }
 
     fn save_column_visibility(&self, cx: &mut App) {
@@ -518,7 +505,11 @@ impl DataGrid {
             return;
         }
 
-        tracing::info!("[SORT] apply_column_sort: column={}, sort={:?}", column_name, sort);
+        tracing::info!(
+            "[SORT] apply_column_sort: column={}, sort={:?}",
+            column_name,
+            sort
+        );
 
         self.filter_editor.update(cx, |editor, cx| {
             editor.add_sort_column(column_name, sort, cx);
@@ -551,8 +542,16 @@ impl DataGrid {
             connection_id,
             database_name,
             table_name,
-            if where_clause.is_empty() { "(none)" } else { &where_clause },
-            if order_by_clause.is_empty() { "(none)" } else { &order_by_clause }
+            if where_clause.is_empty() {
+                "(none)"
+            } else {
+                &where_clause
+            },
+            if order_by_clause.is_empty() {
+                "(none)"
+            } else {
+                &order_by_clause
+            }
         );
 
         self.table.update(cx, |state, cx| {
@@ -2344,7 +2343,7 @@ impl DataGrid {
                     .icon(IconName::ListCheck)
                     .tooltip(t!("TableDataGrid.column_visibility").to_string())
                     .disabled(loading)
-                    .dropdown_menu(move |menu, window, cx| {
+                    .dropdown_menu(move |menu, _window, cx| {
                         let data_grid_weak = data_grid_entity.downgrade();
                         let delegate_read = data_grid_entity.read(cx).table.read(cx);
                         let visible_indices: Vec<usize> =

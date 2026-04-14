@@ -75,52 +75,6 @@ impl FilterOperator {
             Self::Between => "BETWEEN",
         }
     }
-
-    /// 获取适合此操作符的操作符分组
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::Equal
-            | Self::NotEqual
-            | Self::GreaterThan
-            | Self::LessThan
-            | Self::GreaterOrEqual
-            | Self::LessOrEqual => "比较",
-            Self::Like | Self::NotLike => "文本",
-            Self::In | Self::NotIn => "集合",
-            Self::IsNull | Self::IsNotNull => "空值",
-            Self::Between => "范围",
-        }
-    }
-
-    /// 所有操作符（按分组）
-    pub fn all_operators() -> Vec<( &'static str, Vec<FilterOperator>)> {
-        vec![
-            (
-                "比较",
-                vec![
-                    FilterOperator::Equal,
-                    FilterOperator::NotEqual,
-                    FilterOperator::GreaterThan,
-                    FilterOperator::LessThan,
-                    FilterOperator::GreaterOrEqual,
-                    FilterOperator::LessOrEqual,
-                ],
-            ),
-            (
-                "文本",
-                vec![FilterOperator::Like, FilterOperator::NotLike],
-            ),
-            (
-                "集合",
-                vec![FilterOperator::In, FilterOperator::NotIn],
-            ),
-            (
-                "空值",
-                vec![FilterOperator::IsNull, FilterOperator::IsNotNull],
-            ),
-            ("范围", vec![FilterOperator::Between]),
-        ]
-    }
 }
 
 /// 筛选条件的值
@@ -143,7 +97,7 @@ impl Default for FilterValue {
 impl FilterValue {
     /// 转换为 SQL 字面量
     /// 对于 IN 和 BETWEEN，调用方需要负责加括号等格式
-    pub fn to_sql(&self, operator: FilterOperator) -> String {
+    pub fn to_sql(&self, _operator: FilterOperator) -> String {
         match self {
             FilterValue::Single(v) => {
                 if v.is_empty() {
@@ -203,36 +157,6 @@ impl FilterValue {
             }
         }
     }
-
-    /// 从原始输入字符串解析值（根据操作符）
-    pub fn from_input(input: &str, operator: FilterOperator) -> Self {
-        let input = input.trim();
-        if input.is_empty() {
-            return Self::default();
-        }
-
-        match operator {
-            FilterOperator::Between => {
-                // 尝试按 " AND " 分割
-                if let Some((start, end)) = input.split_once(" AND ") {
-                    Self::Range {
-                        start: start.trim().to_string(),
-                        end: end.trim().to_string(),
-                    }
-                } else {
-                    Self::Range {
-                        start: input.to_string(),
-                        end: String::new(),
-                    }
-                }
-            }
-            FilterOperator::In | FilterOperator::NotIn => {
-                // 逗号分隔，保留原始格式
-                Self::List(input.to_string())
-            }
-            _ => Self::Single(input.to_string()),
-        }
-    }
 }
 
 /// 转义 SQL 字符串中的单引号
@@ -266,18 +190,13 @@ impl SortDirection {
 /// 排序条件
 #[derive(Debug, Clone)]
 pub struct SortCondition {
-    pub id: String,
     pub column: String,
     pub direction: SortDirection,
 }
 
 impl SortCondition {
     pub fn new(column: String, direction: SortDirection) -> Self {
-        Self {
-            id: uuid_simple(),
-            column,
-            direction,
-        }
+        Self { column, direction }
     }
 
     pub fn to_sql(&self) -> String {
@@ -288,7 +207,6 @@ impl SortCondition {
 /// 筛选条件项（叶子节点）
 #[derive(Debug, Clone)]
 pub struct ConditionItem {
-    pub id: String,
     pub column: String,
     pub operator: FilterOperator,
     pub value: FilterValue,
@@ -297,42 +215,29 @@ pub struct ConditionItem {
     pub logic_operator: LogicOperator,
 }
 
+#[cfg(test)]
 impl ConditionItem {
-    pub fn new(column: String, operator: FilterOperator, logic_op: LogicOperator) -> Self {
-        Self {
-            id: uuid_simple(),
-            column,
-            operator,
-            value: FilterValue::default(),
-            enabled: true,
-            logic_operator: logic_op,
-        }
-    }
-
     /// 转换为 SQL WHERE 片段（无前导逻辑操作符）
     pub fn to_sql(&self) -> Option<String> {
-        if !self.enabled {
-            return None;
-        }
+        condition_sql_fragment(self)
+    }
+}
 
-        let col = &self.column;
-        let op = self.operator;
-
-        match op {
-            FilterOperator::IsNull => Some(format!("{} IS NULL", col)),
-            FilterOperator::IsNotNull => Some(format!("{} IS NOT NULL", col)),
-            _ => {
-                let value_sql = self.value.to_sql(op);
-                Some(format!("{} {} {}", col, op.to_sql(), value_sql))
-            }
-        }
+fn condition_sql_fragment(condition: &ConditionItem) -> Option<String> {
+    if !condition.enabled {
+        return None;
     }
 
-    /// 转换为 SQL WHERE 片段（已废弃，由 FilterGroup 统一处理逻辑操作符）
-    #[allow(dead_code)]
-    pub fn to_sql_with_logic(&self, _is_first: bool) -> Option<String> {
-        // 已废弃 - FilterGroup::to_sql() 现在统一处理逻辑操作符
-        self.to_sql()
+    let col = &condition.column;
+    let op = condition.operator;
+
+    match op {
+        FilterOperator::IsNull => Some(format!("{} IS NULL", col)),
+        FilterOperator::IsNotNull => Some(format!("{} IS NOT NULL", col)),
+        _ => {
+            let value_sql = condition.value.to_sql(op);
+            Some(format!("{} {} {}", col, op.to_sql(), value_sql))
+        }
     }
 }
 
@@ -350,13 +255,6 @@ impl LogicOperator {
             Self::Or => "OR",
         }
     }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::And => "AND",
-            Self::Or => "OR",
-        }
-    }
 }
 
 /// 子节点（可以是条件或嵌套分组）
@@ -369,7 +267,6 @@ pub enum FilterChild {
 /// 筛选分组（包含多个子条件或嵌套分组）
 #[derive(Debug, Clone)]
 pub struct FilterGroup {
-    pub id: String,
     pub enabled: bool,
     pub logic_operator: LogicOperator,
     pub children: Vec<FilterChild>,
@@ -378,7 +275,6 @@ pub struct FilterGroup {
 impl FilterGroup {
     pub fn new(logic_operator: LogicOperator) -> Self {
         Self {
-            id: uuid_simple(),
             enabled: true,
             logic_operator,
             children: Vec::new(),
@@ -394,15 +290,6 @@ impl FilterGroup {
     pub fn add_group(&mut self, group: FilterGroup) {
         self.children.push(FilterChild::Group(Box::new(group)));
     }
-
-    /// 移除指定 ID 的子节点
-    pub fn remove_child(&mut self, id: &str) {
-        self.children.retain(|child| match child {
-            FilterChild::Condition(c) => c.id != id,
-            FilterChild::Group(g) => g.id != id,
-        });
-    }
-
     /// 转换为 SQL WHERE 片段
     /// 每个条件的 logic_operator 表示它如何连接到前一个条件
     pub fn to_sql(&self) -> Option<String> {
@@ -417,18 +304,8 @@ impl FilterGroup {
         for child in &self.children {
             match child {
                 FilterChild::Condition(c) => {
-                    // 如果条件被禁用，跳过
-                    if !c.enabled {
+                    let Some(cond_sql) = condition_sql_fragment(c) else {
                         continue;
-                    }
-                    // 构建单个条件的 SQL
-                    let cond_sql = match c.operator {
-                        FilterOperator::IsNull => format!("{} IS NULL", c.column),
-                        FilterOperator::IsNotNull => format!("{} IS NOT NULL", c.column),
-                        _ => {
-                            let value_sql = c.value.to_sql(c.operator);
-                            format!("{} {} {}", c.column, c.operator.to_sql(), value_sql)
-                        }
                     };
                     if is_first {
                         result = cond_sql;
@@ -457,10 +334,16 @@ impl FilterGroup {
         }
 
         // 如果只有1个条件，不需要括号
-        if self.children.iter().filter(|c| match c {
-            FilterChild::Condition(c) => c.enabled,
-            FilterChild::Group(g) => g.to_sql().is_some(),
-        }).count() == 1 {
+        if self
+            .children
+            .iter()
+            .filter(|c| match c {
+                FilterChild::Condition(c) => c.enabled,
+                FilterChild::Group(g) => g.to_sql().is_some(),
+            })
+            .count()
+            == 1
+        {
             return Some(result);
         }
 
@@ -506,12 +389,17 @@ impl FilterState {
             tracing::debug!("[FilterState] to_order_by_clause: (no sorts)");
             return String::new();
         }
-        let sql = self.sorts
+        let sql = self
+            .sorts
             .iter()
             .map(|s| s.to_sql())
             .collect::<Vec<_>>()
             .join(", ");
-        tracing::info!("[FilterState] to_order_by_clause: {} sorts, ORDER BY=\"{}\"", self.sorts.len(), sql);
+        tracing::info!(
+            "[FilterState] to_order_by_clause: {} sorts, ORDER BY=\"{}\"",
+            self.sorts.len(),
+            sql
+        );
         sql
     }
 
@@ -540,14 +428,6 @@ pub fn uuid_simple() -> String {
     format!("{:x}", nanos)
 }
 
-/// 用于获取列的数据类型（辅助函数）
-pub fn get_column_data_type(columns: &[ColumnInfo], name: &str) -> Option<String> {
-    columns
-        .iter()
-        .find(|c| c.name.eq_ignore_ascii_case(name))
-        .map(|c| c.data_type.clone())
-}
-
 /// 检测是否为字符串类型
 pub fn is_string_type(data_type: &str) -> bool {
     let dt = data_type.to_uppercase();
@@ -572,8 +452,8 @@ pub fn is_datetime_type(data_type: &str) -> bool {
 
 /// 根据列类型返回适合的操作符
 pub fn operators_for_column(column: &ColumnInfo) -> Vec<FilterOperator> {
-    let dt = column.data_type.to_uppercase();
-    if dt.contains("CHAR") || dt.contains("TEXT") || dt.contains("VARCHAR") {
+    let data_type = column.data_type.as_str();
+    if is_string_type(data_type) {
         vec![
             FilterOperator::Equal,
             FilterOperator::NotEqual,
@@ -584,7 +464,7 @@ pub fn operators_for_column(column: &ColumnInfo) -> Vec<FilterOperator> {
             FilterOperator::IsNull,
             FilterOperator::IsNotNull,
         ]
-    } else if is_numeric_type(&dt) {
+    } else if is_numeric_type(data_type) {
         vec![
             FilterOperator::Equal,
             FilterOperator::NotEqual,
@@ -598,7 +478,7 @@ pub fn operators_for_column(column: &ColumnInfo) -> Vec<FilterOperator> {
             FilterOperator::IsNull,
             FilterOperator::IsNotNull,
         ]
-    } else if is_datetime_type(&dt) {
+    } else if is_datetime_type(data_type) {
         vec![
             FilterOperator::Equal,
             FilterOperator::NotEqual,
@@ -628,7 +508,6 @@ mod tests {
     #[test]
     fn test_single_condition_sql() {
         let cond = ConditionItem {
-            id: "1".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("Alice".to_string()),
@@ -641,7 +520,6 @@ mod tests {
     #[test]
     fn test_is_null_condition() {
         let cond = ConditionItem {
-            id: "2".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::IsNull,
             value: FilterValue::default(),
@@ -654,7 +532,6 @@ mod tests {
     #[test]
     fn test_disabled_condition() {
         let cond = ConditionItem {
-            id: "3".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("Bob".to_string()),
@@ -669,7 +546,6 @@ mod tests {
         let mut group = FilterGroup::new(LogicOperator::And);
         group.enabled = true;
         group.add_condition(ConditionItem {
-            id: "1".to_string(),
             column: "age".to_string(),
             operator: FilterOperator::GreaterThan,
             value: FilterValue::Single("18".to_string()),
@@ -677,7 +553,6 @@ mod tests {
             logic_operator: LogicOperator::And,
         });
         group.add_condition(ConditionItem {
-            id: "2".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Like,
             value: FilterValue::Single("A%".to_string()),
@@ -695,7 +570,6 @@ mod tests {
         let mut group = FilterGroup::new(LogicOperator::Or);
         group.enabled = true;
         group.add_condition(ConditionItem {
-            id: "1".to_string(),
             column: "status".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("active".to_string()),
@@ -703,7 +577,6 @@ mod tests {
             logic_operator: LogicOperator::Or,
         });
         group.add_condition(ConditionItem {
-            id: "2".to_string(),
             column: "status".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("pending".to_string()),
@@ -722,7 +595,6 @@ mod tests {
         let mut group = FilterGroup::new(LogicOperator::And);
         group.enabled = true;
         group.add_condition(ConditionItem {
-            id: "1".to_string(),
             column: "age".to_string(),
             operator: FilterOperator::GreaterThan,
             value: FilterValue::Single("18".to_string()),
@@ -730,7 +602,6 @@ mod tests {
             logic_operator: LogicOperator::And, // 第1个条件的 logic_operator 不使用
         });
         group.add_condition(ConditionItem {
-            id: "2".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Like,
             value: FilterValue::Single("A%".to_string()),
@@ -738,7 +609,6 @@ mod tests {
             logic_operator: LogicOperator::Or, // 第2个条件用 OR
         });
         group.add_condition(ConditionItem {
-            id: "3".to_string(),
             column: "status".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("active".to_string()),
@@ -756,7 +626,6 @@ mod tests {
         let mut inner = FilterGroup::new(LogicOperator::Or);
         inner.enabled = true;
         inner.add_condition(ConditionItem {
-            id: "2".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("Alice".to_string()),
@@ -764,7 +633,6 @@ mod tests {
             logic_operator: LogicOperator::Or,
         });
         inner.add_condition(ConditionItem {
-            id: "3".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("Bob".to_string()),
@@ -775,7 +643,6 @@ mod tests {
         let mut outer = FilterGroup::new(LogicOperator::And);
         outer.enabled = true;
         outer.add_condition(ConditionItem {
-            id: "1".to_string(),
             column: "age".to_string(),
             operator: FilterOperator::GreaterThan,
             value: FilterValue::Single("18".to_string()),
@@ -792,7 +659,6 @@ mod tests {
     #[test]
     fn test_in_operator() {
         let cond = ConditionItem {
-            id: "1".to_string(),
             column: "status".to_string(),
             operator: FilterOperator::In,
             value: FilterValue::List("active, pending".to_string()),
@@ -808,7 +674,6 @@ mod tests {
     #[test]
     fn test_between_operator() {
         let cond = ConditionItem {
-            id: "1".to_string(),
             column: "age".to_string(),
             operator: FilterOperator::Between,
             value: FilterValue::Range {
@@ -818,10 +683,7 @@ mod tests {
             enabled: true,
             logic_operator: LogicOperator::And,
         };
-        assert_eq!(
-            cond.to_sql(),
-            Some("age BETWEEN 18 AND 30".to_string())
-        );
+        assert_eq!(cond.to_sql(), Some("age BETWEEN 18 AND 30".to_string()));
     }
 
     #[test]
@@ -834,14 +696,15 @@ mod tests {
     fn test_filter_state_full() {
         let mut state = FilterState::new();
         state.root.add_condition(ConditionItem {
-            id: "1".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Like,
             value: FilterValue::Single("A%".to_string()),
             enabled: true,
             logic_operator: LogicOperator::And,
         });
-        state.sorts.push(SortCondition::new("id".to_string(), SortDirection::Asc));
+        state
+            .sorts
+            .push(SortCondition::new("id".to_string(), SortDirection::Asc));
 
         assert_eq!(state.to_where_clause(), "name LIKE 'A%'");
         assert_eq!(state.to_order_by_clause(), "id ASC");
@@ -850,8 +713,13 @@ mod tests {
     #[test]
     fn header_sort_replaces_existing_sorts_with_single_column() {
         let mut state = FilterState::new();
-        state.sorts.push(SortCondition::new("name".to_string(), SortDirection::Asc));
-        state.sorts.push(SortCondition::new("created_at".to_string(), SortDirection::Desc));
+        state
+            .sorts
+            .push(SortCondition::new("name".to_string(), SortDirection::Asc));
+        state.sorts.push(SortCondition::new(
+            "created_at".to_string(),
+            SortDirection::Desc,
+        ));
 
         state.apply_header_sort("updated_at", ColumnSort::Descending);
 
@@ -861,7 +729,9 @@ mod tests {
     #[test]
     fn header_sort_default_clears_all_sort_conditions() {
         let mut state = FilterState::new();
-        state.sorts.push(SortCondition::new("name".to_string(), SortDirection::Asc));
+        state
+            .sorts
+            .push(SortCondition::new("name".to_string(), SortDirection::Asc));
 
         state.apply_header_sort("name", ColumnSort::Default);
 
@@ -872,7 +742,6 @@ mod tests {
     #[test]
     fn test_sql_string_escape() {
         let cond = ConditionItem {
-            id: "1".to_string(),
             column: "name".to_string(),
             operator: FilterOperator::Equal,
             value: FilterValue::Single("O'Brien".to_string()),

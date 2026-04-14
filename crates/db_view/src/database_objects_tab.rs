@@ -908,7 +908,7 @@ impl Render for DatabaseObjects {
         );
 
         // Update delegate with current data (no refresh here, only when data actually changes)
-        self.table.update(cx, |state, cx| {
+        self.table.update(cx, |state, _cx| {
             state.delegate_mut().columns = self.columns.clone();
             state.delegate_mut().rows = self.rows.clone();
             state.delegate_mut().filtered_rows = self.filtered_rows.clone();

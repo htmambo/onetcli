@@ -11,7 +11,7 @@ use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     kbd::Kbd, windows_surface_color, windows_surface_opacity, BlinkCursor, Icon, IconName, Root,
-    Sizable, Theme as UiTheme, WindowExt, WindowsSurfaceLayer, SystemNotificationOptions,
+    Sizable, SystemNotificationOptions, Theme as UiTheme, WindowExt, WindowsSurfaceLayer,
 };
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
@@ -362,9 +362,6 @@ pub struct TerminalView {
     font_ligatures_enabled: bool,
     /// 终端退出行为: "prompt" 显示弹窗, "close" 直接关闭
     exit_behavior: String,
-    /// 最近一次同步给 PTY 的焦点状态，用于支持 ReportFocusInOut
-    last_reported_terminal_focus: Option<bool>,
-
     /// 侧边栏面板大小
     sidebar_panel_size: Pixels,
     /// 正在调整大小的面板
@@ -498,13 +495,14 @@ impl TerminalView {
             if window.root::<Root>().is_some() {
                 let error_msg = format!("创建本地终端失败: {}", error);
                 window.show_system_notification(
-                    SystemNotificationOptions::with_id("终端错误", &error_msg, "terminal-init-error"),
+                    SystemNotificationOptions::with_id(
+                        "终端错误",
+                        &error_msg,
+                        "terminal-init-error",
+                    ),
                     cx,
                 );
-                window.push_notification(
-                    Notification::error(error_msg).autohide(true),
-                    cx,
-                );
+                window.push_notification(Notification::error(error_msg).autohide(true), cx);
             } else {
                 tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
             }
@@ -656,7 +654,6 @@ impl TerminalView {
             middle_click_paste: true,
             font_ligatures_enabled: false,
             exit_behavior: "prompt".to_string(),
-            last_reported_terminal_focus: None,
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
             view_bounds: Bounds::default(),
@@ -1500,13 +1497,9 @@ impl TerminalView {
 
     fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let is_focused = self.focus_handle.is_focused(window);
-        let focus_reporting_enabled = {
-            let terminal = self.terminal.read(cx);
-            let mut term = terminal.term().lock();
-            term.is_focused = is_focused;
-            term.mode().contains(TermMode::FOCUS_IN_OUT)
-        };
-
+        let terminal = self.terminal.read(cx);
+        let mut term = terminal.term().lock();
+        term.is_focused = is_focused;
     }
 
     fn show_unbracketed_paste_block_dialog(

@@ -11,7 +11,7 @@ use crate::storage::{
 };
 
 /// 证书同步类型处理器
-pub struct CertificateSyncType;
+pub(crate) struct CertificateSyncType;
 
 impl SyncTypeHandler for CertificateSyncType {
     type Item = Certificate;

@@ -182,7 +182,7 @@ impl SyncServerClient {
     }
 
     /// 返回当前根地址。
-    pub fn base_url(&self) -> String {
+    fn base_url(&self) -> String {
         self.base_url
             .read()
             .map(|value| value.clone())
@@ -715,14 +715,6 @@ impl CloudApiClient for SyncServerClient {
         Err(CloudApiError::AuthenticationFailed(
             Self::extract_error_message(result.err(), "登录失败"),
         ))
-    }
-
-    async fn sign_in_with_oauth(
-        &self,
-        _provider: &str,
-        _redirect_url: &str,
-    ) -> Result<OAuthResponse, CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持 OAuth 登录"))
     }
 
     async fn sign_up(&self, email: &str, password: &str) -> Result<AuthResponse, CloudApiError> {

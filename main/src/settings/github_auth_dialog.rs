@@ -11,7 +11,6 @@ use gpui_component::{
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex, v_flex,
 };
-use smol::Timer;
 
 use crate::setting_tab::AppSettings;
 
@@ -48,8 +47,7 @@ pub struct GithubAuthDialog {
     device_code: Option<String>,
     started: bool,
     url_opened: bool,
-    #[allow(dead_code)]
-    auth_task: Option<Task<()>>,
+    _auth_task: Option<Task<()>>,
 }
 
 impl GithubAuthDialog {
@@ -60,7 +58,7 @@ impl GithubAuthDialog {
             device_code: None,
             started: false,
             url_opened: false,
-            auth_task: None,
+            _auth_task: None,
         }
     }
 
@@ -99,7 +97,7 @@ impl GithubAuthDialog {
             }
         });
 
-        self.auth_task = Some(task);
+        self._auth_task = Some(task);
     }
 
     /// 开始轮询 token（由调用方触发）
@@ -168,7 +166,7 @@ impl GithubAuthDialog {
             }
         });
 
-        self.auth_task = Some(task);
+        self._auth_task = Some(task);
     }
 }
 
@@ -299,37 +297,34 @@ impl Render for GithubAuthDialog {
                 )
                 .into_any_element(),
 
-            AuthState::Success { gist_id } => {
-                let entity = cx.entity();
-                v_flex()
-                    .gap_4()
-                    .p_5()
-                    .w(px(420.))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .text_color(cx.theme().success)
-                            .child("授权成功！"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("Gist ID: {}", gist_id)),
-                    )
-                    .child(
-                        h_flex().justify_end().gap_2().mt_4().child(
-                            Button::new("success-confirm-btn")
-                                .with_variant(ButtonVariant::Primary)
-                                .on_click(move |_, window, cx: &mut App| {
-                                    window.close_dialog(cx);
-                                })
-                                .child("确认"),
-                        ),
-                    )
-                    .into_any_element()
-            }
+            AuthState::Success { gist_id } => v_flex()
+                .gap_4()
+                .p_5()
+                .w(px(420.))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(cx.theme().success)
+                        .child("授权成功！"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("Gist ID: {}", gist_id)),
+                )
+                .child(
+                    h_flex().justify_end().gap_2().mt_4().child(
+                        Button::new("success-confirm-btn")
+                            .with_variant(ButtonVariant::Primary)
+                            .on_click(move |_, window, cx: &mut App| {
+                                window.close_dialog(cx);
+                            })
+                            .child("确认"),
+                    ),
+                )
+                .into_any_element(),
 
             AuthState::Error { message } => {
                 let msg = message.clone();

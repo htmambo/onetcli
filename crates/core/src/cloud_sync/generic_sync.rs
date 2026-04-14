@@ -402,7 +402,6 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
                 }
                 continue;
             }
-            Ok(PendingDeletionDecision::KeepPending) => continue,
             Ok(PendingDeletionDecision::DeleteCloud) => {}
             Err(error) => {
                 tracing::warn!(

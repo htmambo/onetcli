@@ -1,55 +1,21 @@
 //! Google Drive Blob Vault
 //!
 //! 通过 Google Drive API 存储加密同步数据。
-//!
-//! ## OAuth PKCE 流程
-//! 1. 生成 code_verifier
-//! 2. 计算 code_challenge = BASE64URL(SHA256(verifier))
-//! 3. 打开浏览器到授权 URL
-//! 4. 启动本地回调服务器
-//! 5. 用 code 换 access_token
+//! 授权流程由 `main/src/settings/oauth_dialog.rs` 负责。
 
 use crate::cloud_sync::blob_vault::{Blob, BlobMeta, BlobVault};
 use crate::cloud_sync::client::CloudApiError;
-use crate::cloud_sync::oauth::callback_server::start_callback_server;
-use crate::cloud_sync::oauth::pkce::{generate_code_challenge, generate_code_verifier};
-use crate::cloud_sync::oauth::{OAuthConfig, OAuthTokens};
+use crate::cloud_sync::oauth::OAuthTokens;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-/// Google OAuth Token 响应
-#[derive(Debug, Deserialize)]
-struct GoogleTokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: u64,
-    token_type: String,
-    #[serde(default)]
-    id_token: Option<String>,
-}
-
-impl GoogleTokenResponse {
-    fn into_tokens(self) -> OAuthTokens {
-        let expires_at = chrono::Utc::now().timestamp() + self.expires_in as i64;
-        OAuthTokens {
-            access_token: self.access_token,
-            refresh_token: self.refresh_token,
-            token_type: self.token_type,
-            expires_in: Some(self.expires_in),
-            expires_at: Some(expires_at),
-        }
-    }
-}
-
 /// Google Drive 文件响应
 #[derive(Debug, Deserialize)]
 struct DriveFile {
     id: String,
-    name: String,
-    mime_type: String,
     #[serde(default)]
     size: Option<String>,
 }
@@ -58,25 +24,19 @@ struct DriveFile {
 #[derive(Debug, Deserialize)]
 struct DriveListResponse {
     files: Vec<DriveFile>,
-    #[serde(default)]
-    next_page_token: Option<String>,
 }
 
 /// Google Drive Blob Vault
 pub struct GoogleDriveVault {
     http: Arc<dyn HttpClient>,
-    client_id: String,
-    client_secret: String,
     tokens: Arc<Mutex<Option<OAuthTokens>>>,
     folder_id: Arc<Mutex<Option<String>>>,
 }
 
 impl GoogleDriveVault {
-    pub fn new(http: Arc<dyn HttpClient>, client_id: String, client_secret: String) -> Self {
+    pub fn new(http: Arc<dyn HttpClient>) -> Self {
         Self {
             http,
-            client_id,
-            client_secret,
             tokens: Arc::new(Mutex::new(None)),
             folder_id: Arc::new(Mutex::new(None)),
         }
@@ -86,8 +46,6 @@ impl GoogleDriveVault {
         *self.tokens.lock().unwrap() = Some(tokens);
         Arc::new(Self {
             http: Arc::clone(&self.http),
-            client_id: self.client_id.clone(),
-            client_secret: self.client_secret.clone(),
             tokens: Arc::clone(&self.tokens),
             folder_id: Arc::clone(&self.folder_id),
         })
@@ -97,122 +55,17 @@ impl GoogleDriveVault {
         *self.folder_id.lock().unwrap() = Some(folder_id);
         Arc::new(Self {
             http: Arc::clone(&self.http),
-            client_id: self.client_id.clone(),
-            client_secret: self.client_secret.clone(),
             tokens: Arc::clone(&self.tokens),
             folder_id: Arc::clone(&self.folder_id),
         })
     }
 
-    /// 开始 PKCE OAuth 流程
-    pub async fn authenticate(&mut self, config: &OAuthConfig) -> Result<OAuthTokens, CloudApiError> {
-        let code_verifier = generate_code_verifier();
-        let code_challenge = generate_code_challenge(&code_verifier);
-        let state = format!("ONetCli_{}", chrono::Utc::now().timestamp_millis());
-
-        let auth_url = format!(
-            "{}?{}",
-            config.provider.auth_url(),
-            [
-                ("client_id", config.client_id.as_str()),
-                ("response_type", "code"),
-                ("redirect_uri", &config.redirect_uri),
-                ("scope", &config.scopes),
-                ("state", &state),
-                ("code_challenge", &code_challenge),
-                ("code_challenge_method", "S256"),
-            ]
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-            .collect::<Vec<_>>()
-            .join("&")
-        );
-
-        // 启动回调服务器
-        let redirect_port = config
-            .redirect_uri
-            .strip_prefix("http://localhost:")
-            .and_then(|s| s.split('/').next())
-            .and_then(|s| s.parse::<u16>().ok())
-            .unwrap_or(8787);
-
-        let (_port, callback) =
-            start_callback_server(redirect_port, 300)
-                .map_err(|e| CloudApiError::AuthenticationFailed(e.to_string()))?;
-
-        if !callback.is_success() {
-            return Err(CloudApiError::AuthenticationFailed(
-                callback
-                    .error_description
-                    .unwrap_or_else(|| "授权失败".to_string()),
-            ));
-        }
-
-        if callback.state.as_deref() != Some(&state) {
-            return Err(CloudApiError::AuthenticationFailed(
-                "State 不匹配".to_string(),
-            ));
-        }
-
-        let token_url = config.provider.token_url();
-        let code = callback.code;
-
-        let mut body_parts = vec![
-            "grant_type=authorization_code".to_string(),
-            format!("client_id={}", urlencoding::encode(&config.client_id)),
-            format!("code={}", urlencoding::encode(&code)),
-            format!("redirect_uri={}", urlencoding::encode(&config.redirect_uri)),
-            format!("code_verifier={}", urlencoding::encode(&code_verifier)),
-        ];
-
-        if let Some(ref secret) = config.client_secret {
-            body_parts.push(format!("client_secret={}", urlencoding::encode(secret)));
-        }
-
-        let body = body_parts.join("&");
-
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(token_url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("Accept", "application/json")
-            .body(AsyncBody::from(body.into_bytes()))
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        let response = self
-            .http
-            .send(req)
-            .await
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        let status = response.status();
-        let mut bytes = Vec::new();
-        response
-            .into_body()
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        if !status.is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "Google token 请求失败: {}",
-                String::from_utf8_lossy(&bytes)
-            )));
-        }
-
-        let token_resp: GoogleTokenResponse =
-            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
-
-        let tokens = token_resp.into_tokens();
-        *self.tokens.lock().unwrap() = Some(tokens.clone());
-        // 获取或创建 vault 文件夹
-        let folder_id = self.get_or_create_app_folder().await?;
-        *self.folder_id.lock().unwrap() = Some(folder_id);
-        Ok(tokens)
-    }
-
     fn tokens(&self) -> Result<OAuthTokens, CloudApiError> {
-        self.tokens.lock().unwrap().clone().ok_or(CloudApiError::NotAuthenticated)
+        self.tokens
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(CloudApiError::NotAuthenticated)
     }
 
     /// 获取或创建应用专属文件夹
@@ -265,7 +118,11 @@ impl GoogleDriveVault {
     }
 
     /// 创建文件夹
-    async fn create_folder(&self, name: &str, parent_id: Option<&str>) -> Result<String, CloudApiError> {
+    async fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<&str>,
+    ) -> Result<String, CloudApiError> {
         let tokens = self.tokens()?;
 
         #[derive(Serialize)]
@@ -320,7 +177,12 @@ impl GoogleDriveVault {
     }
 
     /// 上传或更新文件
-    async fn upload_file(&self, name: &str, content: &[u8], parent_id: &str) -> Result<BlobMeta, CloudApiError> {
+    async fn upload_file(
+        &self,
+        name: &str,
+        content: &[u8],
+        parent_id: &str,
+    ) -> Result<BlobMeta, CloudApiError> {
         let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -469,7 +331,7 @@ impl GoogleDriveVault {
     }
 
     /// 列出 vault 中的所有文件
-    pub(crate) async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
+    async fn list_vault_files(&self, folder_id: &str) -> Result<Vec<BlobMeta>, CloudApiError> {
         let tokens = self.tokens()?;
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -500,7 +362,9 @@ impl GoogleDriveVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         #[derive(Deserialize)]
-        struct FileListResponse { files: Vec<DriveFile> }
+        struct FileListResponse {
+            files: Vec<DriveFile>,
+        }
         let list: FileListResponse =
             serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
 
@@ -516,7 +380,11 @@ impl GoogleDriveVault {
     }
 
     /// 查找 vault 中指定名称的文件
-    pub(crate) async fn find_vault_file(&self, folder_id: &str, name: &str) -> Result<Option<DriveFile>, CloudApiError> {
+    async fn find_vault_file(
+        &self,
+        folder_id: &str,
+        name: &str,
+    ) -> Result<Option<DriveFile>, CloudApiError> {
         let tokens = self.tokens()?;
 
         let query = format!(

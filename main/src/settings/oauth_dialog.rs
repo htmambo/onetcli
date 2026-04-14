@@ -3,8 +3,8 @@
 //! 通过浏览器完成 OAuth PKCE 授权流程。
 
 use gpui::{
-    http_client::HttpClient, App, Context, Entity, IntoElement, ParentElement, Render, Styled, Task,
-    Window, div, px,
+    App, Context, Entity, IntoElement, ParentElement, Render, Styled, Task, Window, div,
+    http_client::HttpClient, px,
 };
 use gpui_component::{
     ActiveTheme, StyledExt, WindowExt,
@@ -40,8 +40,7 @@ pub struct GoogleDriveAuthDialog {
     client_id: String,
     client_secret: String,
     state: OAuthState,
-    #[allow(dead_code)]
-    auth_task: Option<Task<()>>,
+    _auth_task: Option<Task<()>>,
 }
 
 impl GoogleDriveAuthDialog {
@@ -50,7 +49,7 @@ impl GoogleDriveAuthDialog {
             client_id,
             client_secret,
             state: OAuthState::Building,
-            auth_task: None,
+            _auth_task: None,
         }
     }
 
@@ -59,10 +58,13 @@ impl GoogleDriveAuthDialog {
 
         let verifier = generate_code_verifier();
         let challenge = generate_code_challenge(&verifier);
-        let state = format!("ONetCli_GDrive_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis());
+        let state = format!(
+            "ONetCli_GDrive_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
 
         let url = format!(
             "https://accounts.google.com/o/oauth2/v2/auth\
@@ -130,23 +132,21 @@ impl GoogleDriveAuthDialog {
                     )
                     .await;
 
-                    let _ = this.update(cx, |d, cx| {
-                        match token_result {
-                            Ok(tokens) => {
-                                let settings = AppSettings::global_mut(cx);
-                                let gd = settings
-                                    .google_drive_config
-                                    .get_or_insert_with(GoogleDriveSettings::default);
-                                gd.client_id = client_id;
-                                gd.client_secret = client_secret;
-                                gd.tokens = Some(tokens);
-                                settings.save();
-                                cx.notify();
-                                d.state = OAuthState::Success;
-                            }
-                            Err(e) => {
-                                d.state = OAuthState::Error { message: e };
-                            }
+                    let _ = this.update(cx, |d, cx| match token_result {
+                        Ok(tokens) => {
+                            let settings = AppSettings::global_mut(cx);
+                            let gd = settings
+                                .google_drive_config
+                                .get_or_insert_with(GoogleDriveSettings::default);
+                            gd.client_id = client_id;
+                            gd.client_secret = client_secret;
+                            gd.tokens = Some(tokens);
+                            settings.save();
+                            cx.notify();
+                            d.state = OAuthState::Success;
+                        }
+                        Err(e) => {
+                            d.state = OAuthState::Error { message: e };
                         }
                     });
                 }
@@ -160,7 +160,7 @@ impl GoogleDriveAuthDialog {
             }
         });
 
-        self.auth_task = Some(task);
+        self._auth_task = Some(task);
     }
 }
 
@@ -211,18 +211,14 @@ impl Render for GoogleDriveAuthDialog {
                             .child("授权完成后此窗口将自动确认。"),
                     )
                     .child(
-                        h_flex()
-                            .justify_end()
-                            .gap_2()
-                            .mt_4()
-                            .child(
-                                Button::new("cancel-btn")
-                                    .with_variant(ButtonVariant::Ghost)
-                                    .on_click(|_, window, cx: &mut App| {
-                                        window.close_dialog(cx);
-                                    })
-                                    .child("取消"),
-                            ),
+                        h_flex().justify_end().gap_2().mt_4().child(
+                            Button::new("cancel-btn")
+                                .with_variant(ButtonVariant::Ghost)
+                                .on_click(|_, window, cx: &mut App| {
+                                    window.close_dialog(cx);
+                                })
+                                .child("取消"),
+                        ),
                     )
                     .into_any_element()
             }
@@ -324,8 +320,7 @@ impl Render for GoogleDriveAuthDialog {
 pub struct OneDriveAuthDialog {
     client_id: String,
     state: OAuthState,
-    #[allow(dead_code)]
-    auth_task: Option<Task<()>>,
+    _auth_task: Option<Task<()>>,
 }
 
 impl OneDriveAuthDialog {
@@ -333,7 +328,7 @@ impl OneDriveAuthDialog {
         Self {
             client_id,
             state: OAuthState::Building,
-            auth_task: None,
+            _auth_task: None,
         }
     }
 
@@ -342,10 +337,13 @@ impl OneDriveAuthDialog {
 
         let verifier = generate_code_verifier();
         let challenge = generate_code_challenge(&verifier);
-        let state = format!("ONetCli_ODrive_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis());
+        let state = format!(
+            "ONetCli_ODrive_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
 
         let url = format!(
             "https://login.microsoftonline.com/common/oauth2/v2.0/authorize\
@@ -411,22 +409,20 @@ impl OneDriveAuthDialog {
                     )
                     .await;
 
-                    let _ = this.update(cx, |d, cx| {
-                        match token_result {
-                            Ok(tokens) => {
-                                let settings = AppSettings::global_mut(cx);
-                                let od = settings
-                                    .onedrive_config
-                                    .get_or_insert_with(OneDriveSettings::default);
-                                od.client_id = client_id;
-                                od.tokens = Some(tokens);
-                                settings.save();
-                                cx.notify();
-                                d.state = OAuthState::Success;
-                            }
-                            Err(e) => {
-                                d.state = OAuthState::Error { message: e };
-                            }
+                    let _ = this.update(cx, |d, cx| match token_result {
+                        Ok(tokens) => {
+                            let settings = AppSettings::global_mut(cx);
+                            let od = settings
+                                .onedrive_config
+                                .get_or_insert_with(OneDriveSettings::default);
+                            od.client_id = client_id;
+                            od.tokens = Some(tokens);
+                            settings.save();
+                            cx.notify();
+                            d.state = OAuthState::Success;
+                        }
+                        Err(e) => {
+                            d.state = OAuthState::Error { message: e };
                         }
                     });
                 }
@@ -440,7 +436,7 @@ impl OneDriveAuthDialog {
             }
         });
 
-        self.auth_task = Some(task);
+        self._auth_task = Some(task);
     }
 }
 
@@ -491,18 +487,14 @@ impl Render for OneDriveAuthDialog {
                             .child("授权完成后此窗口将自动确认。"),
                     )
                     .child(
-                        h_flex()
-                            .justify_end()
-                            .gap_2()
-                            .mt_4()
-                            .child(
-                                Button::new("cancel-btn")
-                                    .with_variant(ButtonVariant::Ghost)
-                                    .on_click(|_, window, cx: &mut App| {
-                                        window.close_dialog(cx);
-                                    })
-                                    .child("取消"),
-                            ),
+                        h_flex().justify_end().gap_2().mt_4().child(
+                            Button::new("cancel-btn")
+                                .with_variant(ButtonVariant::Ghost)
+                                .on_click(|_, window, cx: &mut App| {
+                                    window.close_dialog(cx);
+                                })
+                                .child("取消"),
+                        ),
                     )
                     .into_any_element()
             }

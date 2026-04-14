@@ -219,6 +219,7 @@ fn build_window_title(active_tab_title: Option<&str>) -> String {
     }
 }
 
+#[cfg(test)]
 fn build_status_bar_title(active_tab_title: Option<&str>) -> String {
     active_tab_title
         .map(str::trim)
@@ -543,11 +544,11 @@ fn quit_app(cx: &mut App) {
 
     cx.defer(move |cx| {
         // 检查是否还有效（例如窗口可能已被关闭）
-        let Some(close_state) = cx.try_global::<GlobalAppCloseState>().cloned() else {
+        if cx.try_global::<GlobalAppCloseState>().is_none() {
             cx.quit();
             QUITTING.store(false, Ordering::SeqCst);
             return;
-        };
+        }
 
         // 执行窗口更新（此时已不在 dispatch_action 的 update 栈上）
         let should_quit = main_window_handle

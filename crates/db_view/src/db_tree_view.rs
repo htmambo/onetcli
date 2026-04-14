@@ -407,7 +407,7 @@ pub struct DbTreeView {
     // 工作区ID
     workspace_id: Option<i64>,
     // 是否为工作区模式（由外部打开方式决定）
-    is_workspace_mode: bool,
+    _is_workspace_mode: bool,
     // 搜索输入框状态
     search_input: Entity<InputState>,
     // 搜索关键字
@@ -614,7 +614,7 @@ impl DbTreeView {
             expanded_nodes: HashSet::new(),
             connection_name: None,
             workspace_id,
-            is_workspace_mode,
+            _is_workspace_mode: is_workspace_mode,
             search_input,
             search_query: String::new(),
             search_seq: 0,
@@ -630,7 +630,7 @@ impl DbTreeView {
     /// 构建初始的扁平化条目
     fn build_initial_flat_entries(
         db_nodes: &HashMap<String, DbNode>,
-        is_workspace_mode: bool,
+        _is_workspace_mode: bool,
     ) -> Vec<FlatDbEntry> {
         let mut root_nodes: Vec<&DbNode> = db_nodes
             .values()

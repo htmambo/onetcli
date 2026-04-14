@@ -38,8 +38,6 @@ struct GithubDeviceCodeResponse {
     device_code: String,
     user_code: String,
     verification_uri: String,
-    interval: u64,
-    expires_in: u64,
 }
 
 /// GitHub Token 响应
@@ -47,7 +45,6 @@ struct GithubDeviceCodeResponse {
 struct GithubTokenResponse {
     access_token: String,
     token_type: String,
-    scope: String,
     #[serde(default)]
     refresh_token: Option<String>,
 }
@@ -240,10 +237,7 @@ struct GistResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct GistFileResponse {
-    content: Option<String>,
-    filename: String,
-}
+struct GistFileResponse {}
 
 /// 查找用户的 ONetCli-vault gist
 pub async fn find_vault_gist(

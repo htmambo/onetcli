@@ -40,8 +40,6 @@ pub struct CellChange {
 /// Represents the status of a row
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowStatus {
-    /// Original data, unchanged
-    Original,
     /// Newly added row
     New,
     /// Modified row
@@ -870,15 +868,29 @@ impl EditorTableDelegate {
         };
 
         let target = normalize_sort_identifier(&column_name);
-        tracing::info!("[SORT] apply_order_by_clause: looking for column target='{}', sort={:?}", target, sort);
+        tracing::info!(
+            "[SORT] apply_order_by_clause: looking for column target='{}', sort={:?}",
+            target,
+            sort
+        );
         if let Some(column) = self.columns.iter_mut().find(|column| {
             normalize_sort_identifier(column.key.as_ref()) == target
                 || normalize_sort_identifier(column.name.as_ref()) == target
         }) {
-            tracing::info!("[SORT] apply_order_by_clause: MATCHED column '{}'", column.name);
+            tracing::info!(
+                "[SORT] apply_order_by_clause: MATCHED column '{}'",
+                column.name
+            );
             column.sort = Some(sort);
         } else {
-            tracing::info!("[SORT] apply_order_by_clause: NO MATCH for target='{}', columns={:?}", target, self.columns.iter().map(|c| format!("key='{}' name='{}'", c.key, c.name)).collect::<Vec<_>>());
+            tracing::info!(
+                "[SORT] apply_order_by_clause: NO MATCH for target='{}', columns={:?}",
+                target,
+                self.columns
+                    .iter()
+                    .map(|c| format!("key='{}' name='{}'", c.key, c.name))
+                    .collect::<Vec<_>>()
+            );
         }
     }
 
@@ -1308,7 +1320,13 @@ impl EditTableDelegate for EditorTableDelegate {
             return;
         };
 
-        tracing::info!("[SORT] delegate.perform_sort: col_ix={}, real_ix={}, column_name={}, sort={:?}", col_ix, real_ix, column_name, sort);
+        tracing::info!(
+            "[SORT] delegate.perform_sort: col_ix={}, real_ix={}, column_name={}, sort={:?}",
+            col_ix,
+            real_ix,
+            column_name,
+            sort
+        );
 
         // `EditTableState::perform_sort` 会在当前表格实体的 update 闭包中调用 delegate。
         // 如果这里同步触发 `DataGrid::apply_column_sort`，后者会再次更新同一个表格实体，

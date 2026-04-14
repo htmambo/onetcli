@@ -6,10 +6,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260225000001",
         include_str!("../../migrations/20260225000001_init.sql"),
     ),
-    (
-        "20260315000001",
-        "",
-    ),
+    ("20260315000001", ""),
     (
         "20260317000001",
         include_str!("../../migrations/20260317000001_connection_owner.sql"),

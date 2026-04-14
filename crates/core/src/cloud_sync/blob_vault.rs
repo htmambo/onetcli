@@ -6,9 +6,7 @@
 //! ## 设计原则
 //!
 //! - 仅定义文件级操作：上传、下载、删除、列举
-//! - sync_server 实现为 no-op（不支持文件操作，返回 `NotSupported`）
 //! - WebDAV/S3 实现真正的文件操作
-//! - `CloudApiClient::as_blob_vault()` 返回 `Option<&dyn BlobVault>`
 //! - 复用现有 AES-256-GCM 加密基础设施
 
 use crate::cloud_sync::client::CloudApiError;
@@ -56,51 +54,4 @@ pub trait BlobVault: Send + Sync {
 
     /// 获取存储后端类型标识
     fn backend_type(&self) -> &'static str;
-}
-
-// ========================================================================
-// No-op 实现：sync_server 不支持文件操作
-// ========================================================================
-
-/// sync_server 的 BlobVault no-op 实现
-///
-/// sync_server 通过 REST API 管理加密 blob，不支持直接的 文件级操作。
-/// 此实现返回 `CloudApiError::NotSupported`。
-pub struct SyncServerBlobVault;
-
-#[async_trait]
-impl BlobVault for SyncServerBlobVault {
-    async fn upload(&self, _key: &str, _data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "sync_server 不支持文件操作，请使用 REST API 管理同步数据".to_string(),
-        ))
-    }
-
-    async fn download(&self, _key: &str) -> Result<Blob, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "sync_server 不支持文件操作".to_string(),
-        ))
-    }
-
-    async fn delete(&self, _key: &str) -> Result<(), CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "sync_server 不支持文件操作".to_string(),
-        ))
-    }
-
-    async fn exists(&self, _key: &str) -> Result<bool, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "sync_server 不支持文件操作".to_string(),
-        ))
-    }
-
-    async fn list(&self, _prefix: Option<&str>) -> Result<Vec<BlobMeta>, CloudApiError> {
-        Err(CloudApiError::NotSupported(
-            "sync_server 不支持文件操作".to_string(),
-        ))
-    }
-
-    fn backend_type(&self) -> &'static str {
-        "sync_server"
-    }
 }

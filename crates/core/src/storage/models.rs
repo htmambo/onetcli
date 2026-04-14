@@ -730,10 +730,6 @@ impl SyncableItem for Certificate {
         self.updated_at
     }
 
-    fn is_sync_enabled(&self) -> bool {
-        self.sync_enabled
-    }
-
     fn last_synced_at(&self) -> Option<i64> {
         self.last_synced_at
     }
@@ -907,10 +903,6 @@ impl SyncableItem for StoredConnection {
 
     fn updated_at(&self) -> Option<i64> {
         self.updated_at
-    }
-
-    fn is_sync_enabled(&self) -> bool {
-        self.sync_enabled
     }
 
     fn last_synced_at(&self) -> Option<i64> {

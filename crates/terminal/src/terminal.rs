@@ -479,7 +479,7 @@ fn next_local_cwd_file_path() -> std::path::PathBuf {
     ))
 }
 
-#[cfg(any(test, not(target_os = "linux")))]
+#[cfg(test)]
 fn build_local_cwd_tracking_init_command(cwd_file_path: &str) -> String {
     let mut command = format!(
         "ONETCLI_CWD_FILE={}; export ONETCLI_CWD_FILE; ",
@@ -1765,9 +1765,9 @@ mod tests {
     use super::{
         build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
-        next_local_cwd_file_path, note_ssh_user_input, read_local_working_dir,
-        resolve_default_windows_shell_from_env, shell_escape_arg, expand_tilde, LocalPtyBackend,
-        SshProcessState, TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
+        expand_tilde, next_local_cwd_file_path, note_ssh_user_input, read_local_working_dir,
+        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend, SshProcessState,
+        TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
     use alacritty_terminal::tty::Options as PtyOptions;
@@ -1977,7 +1977,10 @@ mod tests {
 
         assert_eq!(expand_tilde("~"), "/home/testuser");
         assert_eq!(expand_tilde("~/projects"), "/home/testuser/projects");
-        assert_eq!(expand_tilde("~/projects/code"), "/home/testuser/projects/code");
+        assert_eq!(
+            expand_tilde("~/projects/code"),
+            "/home/testuser/projects/code"
+        );
         // 非 ~ 路径保持不变
         assert_eq!(expand_tilde("/tmp"), "/tmp");
         assert_eq!(expand_tilde("/var/log"), "/var/log");

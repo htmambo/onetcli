@@ -8,7 +8,7 @@
 //! - 支持冲突检测和多种解决策略
 //! - 提供完整同步和增量同步两种模式
 
-use super::blob_vault::{Blob, BlobMeta, BlobVault};
+use super::blob_vault::BlobVault;
 use super::certificate_sync::CertificateSyncType;
 use super::client::CloudApiClient;
 use super::connection_sync::ConnectionSyncHandler;
@@ -20,8 +20,8 @@ use super::sync_backend::SyncBackend;
 use super::sync_type::SyncTypeHandler;
 use super::workspace_sync::WorkspaceSyncType;
 use crate::crypto;
-use crate::storage::traits::Repository;
 use crate::storage::StorageManager;
+use crate::storage::traits::Repository;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -29,16 +29,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type SyncFuture<'a> = Pin<Box<dyn Future<Output = Result<SyncResult, SyncError>> + Send + 'a>>;
 
-pub trait SyncHandler: Send + Sync {
+pub(crate) trait SyncHandler: Send + Sync {
     fn name(&self) -> &'static str;
     fn sync<'a>(&'a self, engine: &'a SyncEngine) -> SyncFuture<'a>;
 }
 
 /// 泛型桥接器：将 `SyncTypeHandler` 适配为 `SyncHandler`
 ///
-/// 通过 `generic_sync` 通用流程执行同步，使新数据类型只需实现
-/// `SyncTypeHandler` trait 即可接入同步引擎。
-pub struct TypedSyncBridge<H: SyncTypeHandler> {
+/// 通过 `generic_sync` 通用流程执行同步，供 `one-core` 内部的类型化同步使用。
+struct TypedSyncBridge<H: SyncTypeHandler> {
     handler: H,
 }
 
@@ -100,30 +99,6 @@ impl SyncEngine {
         }
     }
 
-    /// 设置冲突解决策略
-    pub fn with_conflict_strategy(mut self, strategy: ConflictResolution) -> Self {
-        self.conflict_strategy = strategy;
-        self
-    }
-
-    pub fn register_handler(&mut self, handler: Box<dyn SyncHandler>) {
-        self.handlers.push(handler);
-    }
-
-    /// 注册一个类型化同步处理器
-    ///
-    /// 通过 `TypedSyncBridge` 适配为 `SyncHandler`，自动接入 `generic_sync` 通用流程。
-    pub fn register_type<H: SyncTypeHandler>(mut self, handler: H) -> Self {
-        self.handlers.push(Box::new(TypedSyncBridge { handler }));
-        self
-    }
-
-    /// 设置 Blob 存储后端
-    pub fn with_blob_vault(mut self, vault: Arc<dyn BlobVault>) -> Self {
-        self.blob_vault = Some(vault);
-        self
-    }
-
     /// 设置可选的 Blob 存储后端
     pub fn with_opt_blob_vault(mut self, vault: Option<Arc<dyn BlobVault>>) -> Self {
         self.blob_vault = vault;
@@ -134,101 +109,6 @@ impl SyncEngine {
     pub fn with_backend(mut self, backend: Arc<dyn SyncBackend>) -> Self {
         self.backend = backend;
         self
-    }
-
-    /// 获取 Blob 存储后端
-    pub fn blob_vault(&self) -> Option<&dyn BlobVault> {
-        self.blob_vault
-            .as_ref()
-            .map(|v| v.as_ref() as &dyn BlobVault)
-    }
-
-    // ========================================================================
-    // Blob Vault 便捷操作（封装加密/解密）
-    // ========================================================================
-
-    /// 通过 BlobVault 上传加密 blob
-    pub async fn upload_blob(
-        &self,
-        key: &str,
-        data: &[u8],
-    ) -> Result<BlobMeta, SyncError> {
-        let vault = self
-            .blob_vault
-            .as_ref()
-            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
-
-        vault
-            .upload(key, data.to_vec())
-            .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))
-    }
-
-    /// 通过 BlobVault 下载并解密 blob
-    pub async fn download_blob(&self, key: &str) -> Result<Blob, SyncError> {
-        let vault = self
-            .blob_vault
-            .as_ref()
-            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
-
-        let blob = vault
-            .download(key)
-            .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
-
-        // 解密 blob 内容
-        let plaintext = {
-            let crypto = self
-                .crypto_service
-                .read()
-                .map_err(|_| SyncError::StorageError("加密服务锁获取失败".to_string()))?;
-            crypto.decrypt_blob(&String::from_utf8_lossy(&blob.data))?
-        };
-
-        Ok(Blob {
-            key: blob.key,
-            data: plaintext.into_bytes(),
-            updated_at: blob.updated_at,
-        })
-    }
-
-    /// 检查 blob 是否存在
-    pub async fn blob_exists(&self, key: &str) -> Result<bool, SyncError> {
-        let vault = self
-            .blob_vault
-            .as_ref()
-            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
-
-        vault
-            .exists(key)
-            .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))
-    }
-
-    /// 删除 blob
-    pub async fn delete_blob(&self, key: &str) -> Result<(), SyncError> {
-        let vault = self
-            .blob_vault
-            .as_ref()
-            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
-
-        vault
-            .delete(key)
-            .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))
-    }
-
-    /// 列举 blob
-    pub async fn list_blobs(&self, prefix: Option<&str>) -> Result<Vec<BlobMeta>, SyncError> {
-        let vault = self
-            .blob_vault
-            .as_ref()
-            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
-
-        vault
-            .list(prefix)
-            .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))
     }
 
     /// 获取当前时间戳（秒）
@@ -609,7 +489,7 @@ impl SyncEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloud_sync::client::{AuthResponse, CloudApiClient, CloudApiError, OAuthResponse};
+    use crate::cloud_sync::client::{AuthResponse, CloudApiClient, CloudApiError};
     use crate::cloud_sync::models::{CloudSyncData, ConflictType, SyncConflict, data_type};
     use crate::llm::ChatStream;
     use crate::storage::traits::Repository;
@@ -634,14 +514,6 @@ mod tests {
             _email: &str,
             _password: &str,
         ) -> Result<AuthResponse, CloudApiError> {
-            Err(CloudApiError::NotAuthenticated)
-        }
-
-        async fn sign_in_with_oauth(
-            &self,
-            _provider: &str,
-            _redirect_url: &str,
-        ) -> Result<OAuthResponse, CloudApiError> {
             Err(CloudApiError::NotAuthenticated)
         }
 

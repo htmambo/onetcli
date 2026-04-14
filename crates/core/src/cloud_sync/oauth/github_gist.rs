@@ -10,40 +10,16 @@
 use crate::cloud_sync::blob_vault::{Blob, BlobMeta, BlobVault};
 use crate::cloud_sync::client::CloudApiError;
 use crate::cloud_sync::oauth::OAuthTokens;
-use crate::cloud_sync::oauth::github_device::GithubOAuthClient;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Gist 文件（创建时用）
-#[derive(Debug, Serialize)]
-struct GistFile {
-    filename: String,
-    content: String,
-}
-
 /// Gist 文件更新（更新时只用 content，不含 filename）
 #[derive(Debug, Serialize)]
 struct GistFileUpdate {
     content: String,
-}
-
-/// Gist 描述
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct GistDescription {
-    #[serde(rename = "type")]
-    gist_type: String,
-}
-
-/// 创建 Gist 请求
-#[derive(Debug, Serialize)]
-struct CreateGistRequest {
-    description: String,
-    #[serde(rename = "public")]
-    is_public: bool,
-    files: std::collections::HashMap<String, GistFile>,
 }
 
 /// 更新 Gist 请求
@@ -66,7 +42,6 @@ struct GistResponse {
 #[derive(Debug, Deserialize)]
 struct GistFileResponse {
     content: Option<String>,
-    filename: String,
 }
 
 /// GitHub Gist 同步配置（持久化到 AppSettings）
@@ -79,17 +54,14 @@ pub struct GithubGistSettings {
 /// GitHub Gist Blob Vault
 pub struct GithubGistVault {
     http: Arc<dyn HttpClient>,
-    client: GithubOAuthClient,
     gist_id: Option<String>,
     tokens: Option<OAuthTokens>,
 }
 
 impl GithubGistVault {
-    pub fn new(http: Arc<dyn HttpClient>, client_id: String) -> Self {
-        let client = GithubOAuthClient::new(Arc::clone(&http), client_id);
+    pub fn new(http: Arc<dyn HttpClient>) -> Self {
         Self {
             http,
-            client,
             gist_id: None,
             tokens: None,
         }
@@ -105,49 +77,8 @@ impl GithubGistVault {
         self
     }
 
-    pub fn gist_id(&self) -> Option<&str> {
-        self.gist_id.as_deref()
-    }
-
-    fn set_gist_id(&mut self, id: String) {
-        self.gist_id = Some(id);
-    }
-
     fn tokens(&self) -> Result<&OAuthTokens, CloudApiError> {
         self.tokens.as_ref().ok_or(CloudApiError::NotAuthenticated)
-    }
-
-    /// 设置 tokens 并自动查找或创建 vault gist
-    pub async fn authenticate(&mut self) -> Result<String, CloudApiError> {
-        // 1. 启动 Device Flow 获取 user_code 和 device_code
-        let resp = self.client.start_device_flow().await?;
-        tracing::info!(
-            "GitHub Device Flow: 打开 {} 并输入代码 {}",
-            resp.verification_uri,
-            resp.user_code
-        );
-
-        // 2. 轮询 token（最大等待约 5 分钟）
-        let interval = 5; // GitHub 默认 interval
-        let max_attempts = 60;
-        let tokens = self
-            .client
-            .poll_for_token(&resp.device_code, interval, max_attempts)
-            .await?;
-        self.tokens = Some(tokens.clone());
-
-        // 3. 查找或创建 vault gist
-        let gist_id = if let Some(id) = self.find_vault_gist(&tokens).await? {
-            tracing::info!("找到现有 vault gist: {}", id);
-            id
-        } else {
-            let id = self.create_vault_gist(&tokens).await?;
-            tracing::info!("创建新 vault gist: {}", id);
-            id
-        };
-
-        self.gist_id = Some(gist_id.clone());
-        Ok(gist_id)
     }
 
     /// 查找 ONetCli-vault gist
@@ -191,60 +122,6 @@ impl GithubGistVault {
             }
         }
         Ok(None)
-    }
-
-    /// 创建 vault gist
-    async fn create_vault_gist(&self, tokens: &OAuthTokens) -> Result<String, CloudApiError> {
-        let mut files = std::collections::HashMap::new();
-        files.insert(
-            "ONetCli-vault.json".to_string(),
-            GistFile {
-                filename: "ONetCli-vault.json".to_string(),
-                content: "{}".to_string(),
-            },
-        );
-
-        let body = serde_json::to_vec(&CreateGistRequest {
-            description: "ONetCli sync vault".to_string(),
-            is_public: false,
-            files,
-        })
-        .map_err(|e| CloudApiError::DataFormatError(e.to_string()))?;
-
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri("https://api.github.com/gists")
-            .header("Authorization", format!("Bearer {}", tokens.access_token))
-            .header("User-Agent", "ONetCli")
-            .header("Accept", "application/vnd.github+json")
-            .header("Content-Type", "application/json")
-            .body(AsyncBody::from(body))
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        let response = self
-            .http
-            .send(req)
-            .await
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        if !response.status().is_success() && response.status() != StatusCode::CREATED {
-            return Err(CloudApiError::ServerError(format!(
-                "创建 gist 失败: HTTP {}",
-                response.status().as_u16()
-            )));
-        }
-
-        let mut bytes = Vec::new();
-        response
-            .into_body()
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
-
-        let gist: GistResponse =
-            serde_json::from_slice(&bytes).map_err(|e| CloudApiError::ParseError(e.to_string()))?;
-
-        Ok(gist.id)
     }
 
     /// 获取 gist 内容
