@@ -25,10 +25,13 @@ use crate::addon::{
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
 use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE,
-    MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE,
 };
-use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
+use one_core::connection_restore::{
+    restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
+    LocalTerminalRestoreState,
+};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
@@ -976,6 +979,57 @@ impl TerminalView {
             sidebar.set_confirm_high_risk_command(enabled, cx);
         });
         cx.notify();
+    }
+
+    pub fn apply_local_restore_state(
+        &mut self,
+        state: &LocalTerminalRestoreState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let font_size = state
+            .font_size
+            .unwrap_or_else(|| f32::from(self.current_theme.font_size));
+        let font_family = state
+            .font_family
+            .as_deref()
+            .filter(|family| !family.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.current_theme.font_family.to_string());
+        let font_ligatures = state.font_ligatures.unwrap_or(self.font_ligatures_enabled);
+        let line_height_scale = state
+            .line_height_scale
+            .unwrap_or(self.current_theme.line_height_scale);
+        let auto_copy = state.auto_copy.unwrap_or(self.auto_copy_on_select);
+        let middle_click_paste = state.middle_click_paste.unwrap_or(self.middle_click_paste);
+        let exit_behavior = state
+            .exit_behavior
+            .as_deref()
+            .unwrap_or(&self.exit_behavior)
+            .to_string();
+
+        self.apply_terminal_settings(
+            font_size,
+            font_family,
+            font_ligatures,
+            line_height_scale,
+            auto_copy,
+            middle_click_paste,
+            false,
+            &exit_behavior,
+            window,
+            cx,
+        );
+
+        if let Some(theme_name) = state.theme_name.as_deref() {
+            if let Some(theme) = TerminalTheme::find_by_name(theme_name) {
+                self.apply_theme(&theme, window, cx);
+            }
+        }
+
+        self.apply_cursor_blink(state.cursor_blink.unwrap_or(false), window, cx);
+        self.apply_confirm_multiline_paste(state.confirm_multiline_paste.unwrap_or(true), cx);
+        self.apply_confirm_high_risk_command(state.confirm_high_risk_command.unwrap_or(true), cx);
     }
 
     pub fn apply_exit_behavior(&mut self, behavior: &str, cx: &mut Context<Self>) {
@@ -2362,14 +2416,15 @@ pub fn build_local_terminal(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<std::sync::Arc<dyn one_core::tab_container::TabContentView>> {
-    let data = &state.data;
-    if data.get("kind").and_then(|v| v.as_str()) != Some("local_terminal") {
+    let payload = restore_payload_from_tab_data(&state.data)?;
+    if payload.kind != ConnectionRestoreKind::LocalTerminal {
         return None;
     }
 
-    let working_dir = data
-        .get("working_dir")
-        .and_then(|v| v.as_str())
+    let local_terminal = payload.local_terminal?;
+    let working_dir = local_terminal
+        .working_dir
+        .as_deref()
         .filter(|s| !s.is_empty())
         // 验证是绝对路径（Windows: 包含 :\ 或 UNC；Unix: 以 / 开头）
         // 相对路径会导致 conPTY/os error 267
@@ -2383,83 +2438,12 @@ pub fn build_local_terminal(
     };
     let view = cx.new(|cx| TerminalView::new(config, window, cx));
 
-    // 从恢复的 tab state 中读取保存的设置；若字段缺失则使用 TerminalView::new() 的默认值
-    let font_size = data
-        .get("font_size")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(f64::from(DEFAULT_FONT_SIZE)) as f32;
-    // font_family 可能为 None（字段完全缺失）或 Some("")（旧数据空值）；两者均视为无有效值，跳过字体设置
-    let font_family = data
-        .get("font_family")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(String::from);
-    let font_ligatures = data
-        .get("font_ligatures")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let line_height_scale = data
-        .get("line_height_scale")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(f64::from(DEFAULT_LINE_HEIGHT_SCALE)) as f32;
-    let auto_copy = data
-        .get("auto_copy")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let middle_click_paste = data
-        .get("middle_click_paste")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let cursor_blink = data
-        .get("cursor_blink")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let confirm_multiline = data
-        .get("confirm_multiline_paste")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let confirm_high_risk = data
-        .get("confirm_high_risk_command")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let exit_behavior = data
-        .get("exit_behavior")
-        .and_then(|v| v.as_str())
-        .unwrap_or("prompt")
-        .to_string();
-    let theme_name = data
-        .get("theme_name")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
     // 注意：不能在 cx.new() 的闭包内调用 view.update()（GPUI 不允许在 entity 构造期间更新自身）。
     // 使用 window.defer() 将设置应用延迟到 entity 构造完成之后，且能获得新鲜的 &mut Window。
     let view_clone = view.clone();
     window.defer(cx, move |window, cx| {
         view_clone.update(cx, |view, cx| {
-            // 仅当有有效 font_family 时才应用字体相关设置，否则保持 TerminalView::new() 的默认行为
-            if let Some(ref family) = font_family {
-                view.apply_terminal_settings(
-                    font_size,
-                    family.clone(),
-                    font_ligatures,
-                    line_height_scale,
-                    auto_copy,
-                    middle_click_paste,
-                    false,
-                    &exit_behavior,
-                    window,
-                    cx,
-                );
-            }
-            if let Some(name) = theme_name {
-                if let Some(theme) = TerminalTheme::find_by_name(&name) {
-                    view.apply_theme(&theme, window, cx);
-                }
-            }
-            view.apply_cursor_blink(cursor_blink, window, cx);
-            view.apply_confirm_multiline_paste(confirm_multiline, cx);
-            view.apply_confirm_high_risk_command(confirm_high_risk, cx);
+            view.apply_local_restore_state(&local_terminal, window, cx);
         });
     });
 
@@ -2534,6 +2518,7 @@ impl TabContent for TerminalView {
                     connection_id: Some(connection_id),
                     workspace_id: None,
                     active_connection_id: None,
+                    local_terminal: None,
                     title: self.title(cx).to_string(),
                 }
                 .into_tab_data()
@@ -2547,29 +2532,35 @@ impl TabContent for TerminalView {
                     connection_id: Some(connection_id),
                     workspace_id: None,
                     active_connection_id: None,
+                    local_terminal: None,
                     title: self.title(cx).to_string(),
                 }
                 .into_tab_data()
             }
             TerminalConnectionKind::Local => {
                 let terminal = self.terminal.read(cx);
-                serde_json::json!({
-                    "kind": "local_terminal",
-                    "working_dir": terminal.latest_working_dir(),
-                    "title": self.title(cx).to_string(),
-                    // 保存字体和行间距设置，恢复时正确应用
-                    "font_size": f32::from(self.current_theme.font_size),
-                    "font_family": self.current_theme.font_family.to_string(),
-                    "font_ligatures": self.font_ligatures_enabled,
-                    "line_height_scale": self.current_theme.line_height_scale,
-                    "cursor_blink": self.cursor_blink_enabled,
-                    "auto_copy": self.auto_copy_on_select,
-                    "middle_click_paste": self.middle_click_paste,
-                    "confirm_multiline_paste": self.confirm_multiline_paste,
-                    "confirm_high_risk_command": self.confirm_high_risk_command,
-                    "exit_behavior": self.exit_behavior,
-                    "theme_name": self.current_theme.name,
-                })
+                ConnectionRestorePayload {
+                    kind: ConnectionRestoreKind::LocalTerminal,
+                    connection_id: None,
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: Some(LocalTerminalRestoreState {
+                        working_dir: terminal.latest_working_dir(),
+                        font_size: Some(f32::from(self.current_theme.font_size)),
+                        font_family: Some(self.current_theme.font_family.to_string()),
+                        font_ligatures: Some(self.font_ligatures_enabled),
+                        line_height_scale: Some(self.current_theme.line_height_scale),
+                        cursor_blink: Some(self.cursor_blink_enabled),
+                        auto_copy: Some(self.auto_copy_on_select),
+                        middle_click_paste: Some(self.middle_click_paste),
+                        confirm_multiline_paste: Some(self.confirm_multiline_paste),
+                        confirm_high_risk_command: Some(self.confirm_high_risk_command),
+                        exit_behavior: Some(self.exit_behavior.clone()),
+                        theme_name: Some(self.current_theme.name.to_string()),
+                    }),
+                    title: self.title(cx).to_string(),
+                }
+                .into_tab_data()
             }
         }
     }

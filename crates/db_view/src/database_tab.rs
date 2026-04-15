@@ -8,12 +8,12 @@ use crate::sidebar::{DatabaseSidebar, DatabaseSidebarEvent};
 use crate::sql_editor_view::SqlEditorTab;
 use db::GlobalDbState;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, Context, Element, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, IntoElement, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, Render, SharedString, Style, Styled, Task, Window,
-    div, prelude::FluentBuilder, px,
+    div, prelude::FluentBuilder, px, AnyElement, App, AppContext, AsyncApp, Axis, Bounds, Context,
+    Element, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement,
+    IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, SharedString,
+    Style, Styled, Task, Window,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, tokens::Radius, v_flex};
+use gpui_component::{h_flex, tokens::Radius, v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{
@@ -26,7 +26,7 @@ use one_core::{
     storage::StoredConnection,
     tab_container::{TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem},
 };
-use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
+use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use uuid::Uuid;
 
@@ -579,6 +579,7 @@ impl TabContent for DatabaseTabView {
             connection_id,
             workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
             active_connection_id: self.active_connection_id,
+            local_terminal: None,
             title: self.title(cx).to_string(),
         }
         .into_tab_data()

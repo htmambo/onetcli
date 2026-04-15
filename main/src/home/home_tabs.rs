@@ -5,6 +5,7 @@ use db_view::database_tab::DatabaseTabView;
 use gpui::AppContext;
 use gpui::{App, BorrowAppContext, Context, Entity, Window};
 use mongodb_view::MongoTabView;
+use one_core::connection_restore::LocalTerminalRestoreState;
 use one_core::storage::{ConnectionType, StoredConnection, Workspace};
 use one_core::tab_container::TabItem;
 use redis_view::RedisTabView;
@@ -331,6 +332,88 @@ impl HomePage {
         self._subscriptions.push(subscription);
     }
 
+    fn next_local_terminal_tab_id_and_index(&self, cx: &App) -> (String, Option<usize>) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0);
+        let tab_id = format!("local-terminal-{}", timestamp);
+        let existing_count = self
+            .tab_container
+            .read(cx)
+            .tabs()
+            .iter()
+            .filter(|tab| {
+                tab.id().starts_with("local-terminal-") || tab.id().starts_with("terminal-")
+            })
+            .count();
+        let tab_index = (existing_count > 0).then_some(existing_count + 1);
+
+        (tab_id, tab_index)
+    }
+
+    fn open_local_terminal_with_state(
+        &mut self,
+        from: &'static str,
+        config: LocalConfig,
+        restore_state: Option<&LocalTerminalRestoreState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (tab_id, tab_index) = self.next_local_terminal_tab_id_and_index(cx);
+        let terminal_view =
+            cx.new(|cx| TerminalView::new_with_index(config, tab_index, window, cx));
+
+        self.setup_terminal_view(&terminal_view, window, cx);
+        if let Some(restore_state) = restore_state {
+            terminal_view.update(cx, |view, cx| {
+                view.apply_local_restore_state(restore_state, window, cx);
+            });
+        }
+
+        self.tab_container.update(cx, |tc, cx| {
+            let tab = TabItem::new(tab_id, from, terminal_view);
+            tc.add_and_activate_tab_with_focus(tab, window, cx);
+        });
+    }
+
+    pub(crate) fn open_local_terminal(
+        &mut self,
+        working_dir: Option<String>,
+        from: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let config = LocalConfig {
+            working_dir,
+            ..Default::default()
+        };
+        self.open_local_terminal_with_state(from, config, None, window, cx);
+    }
+
+    pub(crate) fn restore_local_terminal(
+        &mut self,
+        restore_state: LocalTerminalRestoreState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let working_dir = restore_state
+            .working_dir
+            .as_deref()
+            .filter(|dir| {
+                std::path::Path::new(dir).is_absolute()
+                    || dir.contains(":\\")
+                    || dir.starts_with("\\\\")
+            })
+            .map(str::to_string);
+        let config = LocalConfig {
+            working_dir,
+            ..Default::default()
+        };
+
+        self.open_local_terminal_with_state("terminal", config, Some(&restore_state), window, cx);
+    }
+
     pub(crate) fn apply_terminal_settings_to_all(
         &mut self,
         settings: &AppSettings,
@@ -525,38 +608,7 @@ impl HomePage {
             move |this, _sftp, event: &SftpViewEvent, window, cx| {
                 match event {
                     SftpViewEvent::OpenLocalTerminal { working_dir } => {
-                        // 使用时间戳生成唯一 tab_id，支持打开多个本地终端
-                        let ts = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis())
-                            .unwrap_or(0);
-                        let config = LocalConfig {
-                            working_dir: Some(working_dir.clone()),
-                            ..Default::default()
-                        };
-                        let tab_id = format!("local-terminal-{}", ts);
-                        // 统计已有本地终端数量
-                        let existing = tab_container
-                            .read(cx)
-                            .tabs()
-                            .iter()
-                            .filter(|t| {
-                                t.id().starts_with("local-terminal-")
-                                    || t.id().starts_with("terminal-")
-                            })
-                            .count();
-                        let idx = if existing > 0 {
-                            Some(existing + 1)
-                        } else {
-                            None
-                        };
-                        let terminal_view =
-                            cx.new(|cx| TerminalView::new_with_index(config, idx, window, cx));
-                        this.setup_terminal_view(&terminal_view, window, cx);
-                        tab_container.update(cx, |tc, cx| {
-                            let tab = TabItem::new(tab_id, "terminal", terminal_view);
-                            tc.add_and_activate_tab_with_focus(tab, window, cx);
-                        });
+                        this.open_local_terminal(Some(working_dir.clone()), "terminal", window, cx);
                     }
                     SftpViewEvent::OpenSshTerminal {
                         connection,
@@ -812,39 +864,10 @@ impl HomePage {
     }
 
     pub(crate) fn add_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // 使用时间戳生成唯一 tab_id，支持打开多个本地终端
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let tab_id = format!("terminal-{}", timestamp);
-
-        // 统计已有本地终端数量，计算序号
-        let existing_count = self
-            .tab_container
-            .read(cx)
-            .tabs()
-            .iter()
-            .filter(|t| t.id().starts_with("terminal-") || t.id().starts_with("local-terminal-"))
-            .count();
-        let tab_index = if existing_count > 0 {
-            Some(existing_count + 1)
-        } else {
-            None
-        };
-
-        let tab_container = self.tab_container.clone();
         let home = cx.entity();
         window.defer(cx, move |window, cx| {
             home.update(cx, |this, cx| {
-                let terminal_view = cx.new(|cx| {
-                    TerminalView::new_with_index(LocalConfig::default(), tab_index, window, cx)
-                });
-                this.setup_terminal_view(&terminal_view, window, cx);
-                tab_container.update(cx, |tc, cx| {
-                    let tab = TabItem::new(tab_id, "home", terminal_view);
-                    tc.add_and_activate_tab_with_focus(tab, window, cx);
-                });
+                this.open_local_terminal(None, "home", window, cx);
             });
         });
     }

@@ -2,18 +2,18 @@
 
 use std::ops::Deref;
 
-use crate::GlobalRedisState;
 use crate::key_value_view::KeyValueView;
 use crate::redis_tree_event::RedisEventHandler;
 use crate::redis_tree_view::RedisTreeView;
 use crate::sidebar::{RedisSidebar, RedisSidebarEvent};
+use crate::GlobalRedisState;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, Axis, Bounds, Context, Element, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
+    div, px, App, AppContext, Axis, Bounds, Context, Element, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Point, Render, SharedString, Style, Styled, Subscription, Task, Window,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
+use gpui_component::{h_flex, ActiveTheme, Icon, IconName, Sizable, Size};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::layout::{
@@ -24,7 +24,7 @@ use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem,
 };
-use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
+use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use tracing::warn;
 
 const PANEL_MIN_SIZE: Pixels = px(100.0);
@@ -331,6 +331,7 @@ impl TabContent for RedisTabView {
             connection_id,
             workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
             active_connection_id: self.active_connection_id,
+            local_terminal: None,
             title: self.title(cx).to_string(),
         }
         .into_tab_data()

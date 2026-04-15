@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use ::sysinfo::{Pid, System};
@@ -12,9 +12,11 @@ use crate::saved_connection_picker::TabBarSavedConnectionPicker;
 use crate::setting_tab::{AppSettings, SavedWindowBounds};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
-    Menu, MenuItem, ParentElement, Render, Styled, Task, Window, actions, div, px,
+    actions, div, px, AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Render, Styled, Task, Window,
 };
+#[cfg(target_os = "macos")]
+use gpui::{Menu, MenuItem};
 use gpui_component::WindowExt;
 
 actions!(
@@ -140,13 +142,13 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 use gpui_component::dock::{ClosePanel, ToggleZoom};
-use gpui_component::{ActiveTheme, Icon, IconName, Root, Sizable, h_flex, v_flex};
+use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, IconName, Root, Sizable};
 use one_core::llm::manager::GlobalProviderState;
 use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
-use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save, tab_state_exists};
+use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save};
 use one_core::utils::debouncer::Debouncer;
 use one_core::{PendingChangeLevel, RunningKind, RunningState};
 use reqwest_client::ReqwestClient;
@@ -745,11 +747,7 @@ pub fn init(cx: &mut App) {
         });
     });
 
-    let mut registry = TabContentRegistry::new();
-    registry.register_fn("Terminal".into(), |state, window, cx| {
-        terminal_view::build_local_terminal(state, window, cx)
-    });
-    cx.set_global(registry);
+    cx.set_global(TabContentRegistry::new());
 
     // 设置应用菜单，将 Quit 菜单项映射到 QuitApp action。
     // 这样 Cmd+Q (macOS) 会走 GPUI 的 action 分发系统，触发关闭守卫弹窗。
@@ -833,9 +831,6 @@ impl OnetCliApp {
 
         let registry = cx.global::<TabContentRegistry>().clone();
 
-        // 记录是否有可恢复的标签状态
-        let has_restored_tabs = tab_state_exists();
-
         let saved_active_index = match load_tabs(&tab_container, &registry, window, cx) {
             Ok(active_index) => {
                 tracing::info!("Tab layout loaded successfully");
@@ -846,6 +841,8 @@ impl OnetCliApp {
                 None
             }
         };
+        let restored_tab_count = tab_container.read(cx).tabs().len();
+        let has_restored_tabs = restored_tab_count > 0;
 
         // Set HomePage as the pinned tab (always visible, not scrollable)
         // 先创建 HomePage 以获取待恢复连接快照
@@ -1354,8 +1351,8 @@ impl Render for OnetCliApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppCloseDecision, AppCloseGuard, ConnectionStats, build_status_bar_title,
-        build_window_title,
+        build_status_bar_title, build_window_title, AppCloseDecision, AppCloseGuard,
+        ConnectionStats,
     };
 
     #[test]

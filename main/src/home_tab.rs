@@ -5,16 +5,16 @@ use std::sync::Arc;
 use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Bounds, Context, DragMoveEvent,
-    ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div, px,
+    actions, div, px, AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Bounds, Context,
+    DragMoveEvent, ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity,
+    Window,
 };
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
-    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
-    WindowExt, WindowsSurfaceLayer, app_style,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     glass_sidebar_f64, h_flex,
@@ -24,18 +24,19 @@ use gpui_component::{
     popover::Popover,
     tokens::Radius,
     tooltip::Tooltip,
-    v_flex, windows_surface_color,
+    v_flex, windows_surface_color, ActiveTheme, Disableable, ElementExt, Icon, IconName,
+    InteractiveElementExt, Sizable, Size, WindowExt, WindowsSurfaceLayer,
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
     BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, GoogleDriveVault,
     OneDriveVault, SyncConflict, SyncEngine, UserInfo,
 };
-use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
+use one_core::connection_notifier::{emit_connection_event, get_notifier, ConnectionDataEvent};
 use one_core::crypto;
 use one_core::key_storage;
 use one_core::layout::SIDEBAR_DEFAULT_WIDTH;
-use one_core::popup_window::{PopupWindowOptions, open_popup_window};
+use one_core::popup_window::{open_popup_window, PopupWindowOptions};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
@@ -51,8 +52,8 @@ use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::auth::AuthService;
 use crate::connection_restore::{
-    ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
-    open_connection_restore_dialog, resolve_restore_items,
+    load_pending_connection_restore_snapshot, open_connection_restore_dialog,
+    resolve_restore_items, ResolvedConnectionRestoreItem,
 };
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
@@ -629,75 +630,127 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match item.kind {
+        let ResolvedConnectionRestoreItem {
+            kind,
+            connection,
+            workspace,
+            active_connection_id,
+            local_terminal,
+            ..
+        } = item;
+
+        match kind {
+            ConnectionRestoreKind::LocalTerminal => {
+                if let Some(local_terminal) = local_terminal {
+                    self.restore_local_terminal(local_terminal, window, cx);
+                } else {
+                    tracing::warn!("恢复本地终端时缺少本地终端状态");
+                }
+            }
             ConnectionRestoreKind::SshTerminal => {
-                self.open_ssh_terminal(item.connection, window, cx);
+                if let Some(connection) = connection {
+                    self.open_ssh_terminal(connection, window, cx);
+                } else {
+                    tracing::warn!("恢复 SSH 终端时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::SerialTerminal => {
-                self.open_serial_terminal(item.connection, window, cx);
+                if let Some(connection) = connection {
+                    self.open_serial_terminal(connection, window, cx);
+                } else {
+                    tracing::warn!("恢复串口终端时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::Sftp => {
-                self.open_sftp_view(item.connection, window, cx);
+                if let Some(connection) = connection {
+                    self.open_sftp_view(connection, window, cx);
+                } else {
+                    tracing::warn!("恢复 SFTP 时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::Database => {
-                self.restore_database_tab(
-                    &item.connection,
-                    None,
-                    false,
-                    item.active_connection_id,
-                    window,
-                    cx,
-                );
+                if let Some(connection) = connection {
+                    self.restore_database_tab(
+                        &connection,
+                        None,
+                        false,
+                        active_connection_id,
+                        window,
+                        cx,
+                    );
+                } else {
+                    tracing::warn!("恢复数据库页时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::DatabaseWorkspace => {
-                self.restore_database_tab(
-                    &item.connection,
-                    item.workspace,
-                    true,
-                    item.active_connection_id,
-                    window,
-                    cx,
-                );
+                if let Some(connection) = connection {
+                    self.restore_database_tab(
+                        &connection,
+                        workspace,
+                        true,
+                        active_connection_id,
+                        window,
+                        cx,
+                    );
+                } else {
+                    tracing::warn!("恢复数据库工作区时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::Redis => {
-                self.restore_redis_tab(
-                    item.connection,
-                    None,
-                    false,
-                    item.active_connection_id,
-                    window,
-                    cx,
-                );
+                if let Some(connection) = connection {
+                    self.restore_redis_tab(
+                        connection,
+                        None,
+                        false,
+                        active_connection_id,
+                        window,
+                        cx,
+                    );
+                } else {
+                    tracing::warn!("恢复 Redis 页时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::RedisWorkspace => {
-                self.restore_redis_tab(
-                    item.connection,
-                    item.workspace,
-                    true,
-                    item.active_connection_id,
-                    window,
-                    cx,
-                );
+                if let Some(connection) = connection {
+                    self.restore_redis_tab(
+                        connection,
+                        workspace,
+                        true,
+                        active_connection_id,
+                        window,
+                        cx,
+                    );
+                } else {
+                    tracing::warn!("恢复 Redis 工作区时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::MongoDb => {
-                self.restore_mongodb_tab(
-                    item.connection,
-                    None,
-                    false,
-                    item.active_connection_id,
-                    window,
-                    cx,
-                );
+                if let Some(connection) = connection {
+                    self.restore_mongodb_tab(
+                        connection,
+                        None,
+                        false,
+                        active_connection_id,
+                        window,
+                        cx,
+                    );
+                } else {
+                    tracing::warn!("恢复 MongoDB 页时缺少连接信息");
+                }
             }
             ConnectionRestoreKind::MongoDbWorkspace => {
-                self.restore_mongodb_tab(
-                    item.connection,
-                    item.workspace,
-                    true,
-                    item.active_connection_id,
-                    window,
-                    cx,
-                );
+                if let Some(connection) = connection {
+                    self.restore_mongodb_tab(
+                        connection,
+                        workspace,
+                        true,
+                        active_connection_id,
+                        window,
+                        cx,
+                    );
+                } else {
+                    tracing::warn!("恢复 MongoDB 工作区时缺少连接信息");
+                }
             }
         }
     }

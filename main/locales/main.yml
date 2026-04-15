@@ -1915,6 +1915,10 @@ ConnectionRestore:
     en: SSH Terminal
     zh-CN: SSH 终端
     zh-HK: SSH 終端
+  local_terminal:
+    en: Local Terminal
+    zh-CN: 本地终端
+    zh-HK: 本地終端
   serial_terminal:
     en: Serial Terminal
     zh-CN: 串口终端
@@ -1951,6 +1955,14 @@ ConnectionRestore:
     en: Current Connection
     zh-CN: 当前连接
     zh-HK: 當前連線
+  current_directory:
+    en: Current Directory
+    zh-CN: 当前目录
+    zh-HK: 目前目錄
+  default_directory:
+    en: Default Directory
+    zh-CN: 默认目录
+    zh-HK: 預設目錄
 
 # 新建连接类型
 NewConnection:

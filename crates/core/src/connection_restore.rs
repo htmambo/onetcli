@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storage::{ConnectionType, get_config_dir, now};
+use crate::storage::{get_config_dir, now, ConnectionType};
 use crate::tab_container::TabContainerState;
 
 const CONNECTION_RESTORE_STATE_FILE: &str = "connection_restore_state.json";
@@ -12,6 +12,7 @@ const CONNECTION_RESTORE_STATE_FILE: &str = "connection_restore_state.json";
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionRestoreKind {
+    LocalTerminal,
     SshTerminal,
     SerialTerminal,
     Sftp,
@@ -24,20 +25,21 @@ pub enum ConnectionRestoreKind {
 }
 
 impl ConnectionRestoreKind {
-    pub fn connection_type(&self) -> ConnectionType {
+    pub fn connection_type(&self) -> Option<ConnectionType> {
         match self {
+            ConnectionRestoreKind::LocalTerminal => None,
             ConnectionRestoreKind::SshTerminal | ConnectionRestoreKind::Sftp => {
-                ConnectionType::SshSftp
+                Some(ConnectionType::SshSftp)
             }
-            ConnectionRestoreKind::SerialTerminal => ConnectionType::Serial,
+            ConnectionRestoreKind::SerialTerminal => Some(ConnectionType::Serial),
             ConnectionRestoreKind::Database | ConnectionRestoreKind::DatabaseWorkspace => {
-                ConnectionType::Database
+                Some(ConnectionType::Database)
             }
             ConnectionRestoreKind::Redis | ConnectionRestoreKind::RedisWorkspace => {
-                ConnectionType::Redis
+                Some(ConnectionType::Redis)
             }
             ConnectionRestoreKind::MongoDb | ConnectionRestoreKind::MongoDbWorkspace => {
-                ConnectionType::MongoDB
+                Some(ConnectionType::MongoDB)
             }
         }
     }
@@ -52,7 +54,35 @@ impl ConnectionRestoreKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocalTerminalRestoreState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_ligatures: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height_scale: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_blink: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_copy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middle_click_paste: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_multiline_paste: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_high_risk_command: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_behavior: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectionRestorePayload {
     pub kind: ConnectionRestoreKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,6 +91,8 @@ pub struct ConnectionRestorePayload {
     pub workspace_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_connection_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_terminal: Option<LocalTerminalRestoreState>,
     pub title: String,
 }
 
@@ -70,10 +102,10 @@ impl ConnectionRestorePayload {
             return false;
         }
 
-        if self.kind.is_workspace() {
-            self.workspace_id.is_some()
-        } else {
-            self.connection_id.is_some()
+        match self.kind {
+            ConnectionRestoreKind::LocalTerminal => self.local_terminal.is_some(),
+            _ if self.kind.is_workspace() => self.workspace_id.is_some(),
+            _ => self.connection_id.is_some(),
         }
     }
 
@@ -82,7 +114,7 @@ impl ConnectionRestorePayload {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectionRestoreItem {
     pub snapshot_id: String,
     pub kind: ConnectionRestoreKind,
@@ -92,11 +124,13 @@ pub struct ConnectionRestoreItem {
     pub workspace_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_connection_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_terminal: Option<LocalTerminalRestoreState>,
     pub title: String,
 }
 
 impl ConnectionRestoreItem {
-    pub fn connection_type(&self) -> ConnectionType {
+    pub fn connection_type(&self) -> Option<ConnectionType> {
         self.kind.connection_type()
     }
 
@@ -105,7 +139,7 @@ impl ConnectionRestoreItem {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectionRestoreSnapshot {
     pub version: usize,
     pub saved_at: i64,
@@ -188,6 +222,66 @@ pub fn restore_payload_from_tab_data(data: &Value) -> Option<ConnectionRestorePa
     serde_json::from_value::<ConnectionRestorePayload>(data.clone())
         .ok()
         .filter(ConnectionRestorePayload::is_valid)
+        .or_else(|| {
+            restore_legacy_local_terminal_payload(data).filter(ConnectionRestorePayload::is_valid)
+        })
+}
+
+fn restore_legacy_local_terminal_payload(data: &Value) -> Option<ConnectionRestorePayload> {
+    if data.get("kind").and_then(|value| value.as_str()) != Some("local_terminal") {
+        return None;
+    }
+
+    Some(ConnectionRestorePayload {
+        kind: ConnectionRestoreKind::LocalTerminal,
+        connection_id: None,
+        workspace_id: None,
+        active_connection_id: None,
+        local_terminal: Some(LocalTerminalRestoreState {
+            working_dir: data
+                .get("working_dir")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            font_size: data
+                .get("font_size")
+                .and_then(|value| value.as_f64())
+                .map(|value| value as f32),
+            font_family: data
+                .get("font_family")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            font_ligatures: data.get("font_ligatures").and_then(|value| value.as_bool()),
+            line_height_scale: data
+                .get("line_height_scale")
+                .and_then(|value| value.as_f64())
+                .map(|value| value as f32),
+            cursor_blink: data.get("cursor_blink").and_then(|value| value.as_bool()),
+            auto_copy: data.get("auto_copy").and_then(|value| value.as_bool()),
+            middle_click_paste: data
+                .get("middle_click_paste")
+                .and_then(|value| value.as_bool()),
+            confirm_multiline_paste: data
+                .get("confirm_multiline_paste")
+                .and_then(|value| value.as_bool()),
+            confirm_high_risk_command: data
+                .get("confirm_high_risk_command")
+                .and_then(|value| value.as_bool()),
+            exit_behavior: data
+                .get("exit_behavior")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            theme_name: data
+                .get("theme_name")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+        }),
+        title: data
+            .get("title")
+            .and_then(|value| value.as_str())
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or("Local Terminal")
+            .to_string(),
+    })
 }
 
 pub fn snapshot_from_tab_state(state: &TabContainerState) -> ConnectionRestoreSnapshot {
@@ -202,6 +296,7 @@ pub fn snapshot_from_tab_state(state: &TabContainerState) -> ConnectionRestoreSn
                 connection_id: payload.connection_id,
                 workspace_id: payload.workspace_id,
                 active_connection_id: payload.active_connection_id,
+                local_terminal: payload.local_terminal,
                 title: payload.title,
             })
         })
@@ -234,6 +329,7 @@ mod tests {
             connection_id: Some(42),
             workspace_id: None,
             active_connection_id: None,
+            local_terminal: None,
             title: "服务器".to_string(),
         };
         let invalid_workspace = ConnectionRestorePayload {
@@ -241,6 +337,7 @@ mod tests {
             connection_id: None,
             workspace_id: None,
             active_connection_id: None,
+            local_terminal: None,
             title: "空工作区".to_string(),
         };
         let state = TabContainerState {
@@ -259,6 +356,18 @@ mod tests {
                     data: Value::Null,
                 },
                 TabItemState {
+                    id: "local-terminal-1".into(),
+                    from: "terminal".into(),
+                    key: "Terminal".into(),
+                    data: serde_json::json!({
+                        "kind": "local_terminal",
+                        "working_dir": "/tmp/demo",
+                        "title": "本地终端",
+                        "font_size": 14.0,
+                        "font_family": "JetBrains Mono",
+                    }),
+                },
+                TabItemState {
                     id: "workspace-db".into(),
                     from: "home".into(),
                     key: "Database".into(),
@@ -270,9 +379,18 @@ mod tests {
         };
 
         let snapshot = snapshot_from_tab_state(&state);
-        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items.len(), 2);
         assert_eq!(snapshot.items[0].snapshot_id, "ssh-terminal-42-1");
         assert_eq!(snapshot.items[0].connection_id, Some(42));
+        assert_eq!(snapshot.items[1].snapshot_id, "local-terminal-1");
+        assert_eq!(snapshot.items[1].kind, ConnectionRestoreKind::LocalTerminal);
+        assert_eq!(
+            snapshot.items[1]
+                .local_terminal
+                .as_ref()
+                .and_then(|state| state.working_dir.as_deref()),
+            Some("/tmp/demo")
+        );
     }
 
     #[test]
@@ -282,10 +400,59 @@ mod tests {
             connection_id: None,
             workspace_id: None,
             active_connection_id: Some(7),
+            local_terminal: None,
             title: "Redis 工作区".to_string(),
         };
 
         assert!(!payload.is_valid());
+    }
+
+    #[test]
+    fn 本地终端恢复项仅需本地终端状态() {
+        let payload = ConnectionRestorePayload {
+            kind: ConnectionRestoreKind::LocalTerminal,
+            connection_id: None,
+            workspace_id: None,
+            active_connection_id: None,
+            local_terminal: Some(LocalTerminalRestoreState {
+                working_dir: Some("/tmp".to_string()),
+                font_size: None,
+                font_family: None,
+                font_ligatures: None,
+                line_height_scale: None,
+                cursor_blink: None,
+                auto_copy: None,
+                middle_click_paste: None,
+                confirm_multiline_paste: None,
+                confirm_high_risk_command: None,
+                exit_behavior: None,
+                theme_name: None,
+            }),
+            title: "本地终端".to_string(),
+        };
+
+        assert!(payload.is_valid());
+    }
+
+    #[test]
+    fn 兼容旧版本地终端_tab_state_数据() {
+        let payload = restore_payload_from_tab_data(&serde_json::json!({
+            "kind": "local_terminal",
+            "working_dir": "/tmp/legacy",
+            "title": "Legacy Terminal",
+            "font_size": 13.0,
+        }))
+        .expect("旧版本地终端数据应能转换为恢复载荷");
+
+        assert_eq!(payload.kind, ConnectionRestoreKind::LocalTerminal);
+        assert_eq!(payload.title, "Legacy Terminal");
+        assert_eq!(
+            payload
+                .local_terminal
+                .as_ref()
+                .and_then(|state| state.working_dir.as_deref()),
+            Some("/tmp/legacy")
+        );
     }
 
     #[test]
@@ -298,14 +465,39 @@ mod tests {
         let snapshot = ConnectionRestoreSnapshot {
             version: 1,
             saved_at: 123,
-            items: vec![ConnectionRestoreItem {
-                snapshot_id: "sftp-1-2".to_string(),
-                kind: ConnectionRestoreKind::Sftp,
-                connection_id: Some(1),
-                workspace_id: None,
-                active_connection_id: None,
-                title: "SFTP".to_string(),
-            }],
+            items: vec![
+                ConnectionRestoreItem {
+                    snapshot_id: "sftp-1-2".to_string(),
+                    kind: ConnectionRestoreKind::Sftp,
+                    connection_id: Some(1),
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: None,
+                    title: "SFTP".to_string(),
+                },
+                ConnectionRestoreItem {
+                    snapshot_id: "local-terminal-1".to_string(),
+                    kind: ConnectionRestoreKind::LocalTerminal,
+                    connection_id: None,
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: Some(LocalTerminalRestoreState {
+                        working_dir: Some("/tmp/restore".to_string()),
+                        font_size: Some(15.0),
+                        font_family: Some("JetBrains Mono".to_string()),
+                        font_ligatures: Some(true),
+                        line_height_scale: Some(1.3),
+                        cursor_blink: Some(true),
+                        auto_copy: Some(true),
+                        middle_click_paste: Some(true),
+                        confirm_multiline_paste: Some(true),
+                        confirm_high_risk_command: Some(true),
+                        exit_behavior: Some("prompt".to_string()),
+                        theme_name: Some("OneDark".to_string()),
+                    }),
+                    title: "本地终端".to_string(),
+                },
+            ],
         };
 
         save_connection_restore_snapshot_to_path(&snapshot, &path).expect("写入快照失败");

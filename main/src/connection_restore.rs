@@ -2,25 +2,28 @@ use rust_i18n::t;
 use std::collections::HashSet;
 
 use gpui::{
-    App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window, WindowKind, div, px,
+    div, px, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window,
+    WindowKind,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex, v_flex,
+    h_flex, v_flex, ActiveTheme, Disableable, Sizable, StyledExt, TitleBar,
 };
 use one_core::{
     connection_restore::{
-        ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
         clear_connection_restore_snapshot, load_connection_restore_snapshot,
+        snapshot_from_tab_state, ConnectionRestoreItem, ConnectionRestoreKind,
+        ConnectionRestoreSnapshot, LocalTerminalRestoreState,
     },
     popup_window::{
-        CancelPopup, PopupWindowOptions, open_popup_window_with_should_close,
-        request_popup_window_close,
+        open_popup_window_with_should_close, request_popup_window_close, CancelPopup,
+        PopupWindowOptions,
     },
-    storage::{ConnectionType, StoredConnection, Workspace},
+    storage::{StoredConnection, Workspace},
+    tab_persistence::load_tab_state,
 };
 
 use crate::{home_tab::HomePage, onetcli_app::GlobalMainWindowHandle};
@@ -31,18 +34,44 @@ pub struct ResolvedConnectionRestoreItem {
     pub kind: ConnectionRestoreKind,
     pub title: String,
     pub subtitle: String,
-    pub connection: StoredConnection,
+    pub connection: Option<StoredConnection>,
     pub workspace: Option<Workspace>,
     pub active_connection_id: Option<i64>,
+    pub local_terminal: Option<LocalTerminalRestoreState>,
 }
 
 pub fn load_pending_connection_restore_snapshot() -> Option<ConnectionRestoreSnapshot> {
     match load_connection_restore_snapshot() {
-        Ok(snapshot) if !snapshot.items.is_empty() => Some(snapshot),
-        Ok(_) => None,
+        Ok(mut snapshot) => {
+            merge_tab_state_snapshot_items(&mut snapshot);
+            (!snapshot.items.is_empty()).then_some(snapshot)
+        }
         Err(error) => {
             tracing::warn!("读取连接恢复快照失败：{}", error);
             None
+        }
+    }
+}
+
+fn merge_tab_state_snapshot_items(snapshot: &mut ConnectionRestoreSnapshot) {
+    let Ok(tab_state) = load_tab_state() else {
+        return;
+    };
+
+    let tab_state_snapshot = snapshot_from_tab_state(&tab_state);
+    if tab_state_snapshot.items.is_empty() {
+        return;
+    }
+
+    let mut existing_snapshot_ids = snapshot
+        .items
+        .iter()
+        .map(|item| item.snapshot_id.clone())
+        .collect::<HashSet<_>>();
+
+    for item in tab_state_snapshot.items {
+        if existing_snapshot_ids.insert(item.snapshot_id.clone()) {
+            snapshot.items.push(item);
         }
     }
 }
@@ -70,8 +99,42 @@ fn resolve_restore_item(
     connections: &[StoredConnection],
     workspaces: &[Workspace],
 ) -> Option<ResolvedConnectionRestoreItem> {
+    if item.kind == ConnectionRestoreKind::LocalTerminal {
+        let local_terminal = item.local_terminal.clone()?;
+        let subtitle = if let Some(working_dir) = local_terminal
+            .working_dir
+            .as_deref()
+            .filter(|dir| !dir.trim().is_empty())
+        {
+            format!(
+                "{} · {}：{}",
+                kind_label(item.kind),
+                t!("ConnectionRestore.current_directory"),
+                working_dir
+            )
+        } else {
+            format!(
+                "{} · {}",
+                kind_label(item.kind),
+                t!("ConnectionRestore.default_directory")
+            )
+        };
+
+        return Some(ResolvedConnectionRestoreItem {
+            snapshot_id: item.snapshot_id.clone(),
+            kind: item.kind,
+            title: item.title.clone(),
+            subtitle,
+            connection: None,
+            workspace: None,
+            active_connection_id: None,
+            local_terminal: Some(local_terminal),
+        });
+    }
+
     if item.kind.is_workspace() {
         let workspace_id = item.workspace_id?;
+        let connection_type = item.connection_type()?;
         let workspace = workspaces
             .iter()
             .find(|workspace| workspace.id == Some(workspace_id))
@@ -80,7 +143,7 @@ fn resolve_restore_item(
             .iter()
             .filter(|connection| {
                 connection.workspace_id == Some(workspace_id)
-                    && connection.connection_type == item.connection_type()
+                    && connection.connection_type == connection_type
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -116,8 +179,9 @@ fn resolve_restore_item(
                 t!("ConnectionRestore.workspace_page")
             ),
             active_connection_id: item.active_connection_id.or(preferred_connection.id),
-            connection: preferred_connection,
+            connection: Some(preferred_connection),
             workspace: Some(workspace),
+            local_terminal: None,
         })
     } else {
         let connection_id = item.connection_id?;
@@ -143,23 +207,33 @@ fn resolve_restore_item(
                 connection.name
             ),
             active_connection_id: connection.id,
-            connection,
+            connection: Some(connection),
             workspace,
+            local_terminal: None,
         })
     }
 }
 
 fn kind_label(kind: ConnectionRestoreKind) -> String {
     match kind {
+        ConnectionRestoreKind::LocalTerminal => t!("ConnectionRestore.local_terminal").to_string(),
         ConnectionRestoreKind::SshTerminal => t!("ConnectionRestore.ssh_terminal").to_string(),
-        ConnectionRestoreKind::SerialTerminal => t!("ConnectionRestore.serial_terminal").to_string(),
+        ConnectionRestoreKind::SerialTerminal => {
+            t!("ConnectionRestore.serial_terminal").to_string()
+        }
         ConnectionRestoreKind::Sftp => "SFTP".to_string(),
         ConnectionRestoreKind::Database => t!("ConnectionRestore.database_page").to_string(),
-        ConnectionRestoreKind::DatabaseWorkspace => t!("ConnectionRestore.database_workspace").to_string(),
+        ConnectionRestoreKind::DatabaseWorkspace => {
+            t!("ConnectionRestore.database_workspace").to_string()
+        }
         ConnectionRestoreKind::Redis => t!("ConnectionRestore.redis_page").to_string(),
-        ConnectionRestoreKind::RedisWorkspace => t!("ConnectionRestore.redis_workspace").to_string(),
+        ConnectionRestoreKind::RedisWorkspace => {
+            t!("ConnectionRestore.redis_workspace").to_string()
+        }
         ConnectionRestoreKind::MongoDb => t!("ConnectionRestore.mongodb_page").to_string(),
-        ConnectionRestoreKind::MongoDbWorkspace => t!("ConnectionRestore.mongodb_workspace").to_string(),
+        ConnectionRestoreKind::MongoDbWorkspace => {
+            t!("ConnectionRestore.mongodb_workspace").to_string()
+        }
     }
 }
 
@@ -321,60 +395,66 @@ impl Render for ConnectionRestorePopupView {
         let selected_count = self.selected_snapshot_ids.len();
         let total_count = self.items.len();
         let restoring = self.restoring;
-        let item_views = self
-            .items
-            .iter()
-            .cloned()
-            .map(|item| {
-                let checked = self.selected_snapshot_ids.contains(&item.snapshot_id);
-                let snapshot_id = item.snapshot_id.clone();
-                let view_for_toggle = view.clone();
-                let type_color = match item.connection.connection_type {
-                    ConnectionType::Database => cx.theme().info,
-                    ConnectionType::SshSftp => cx.theme().warning,
-                    ConnectionType::Redis => cx.theme().success,
-                    ConnectionType::MongoDB => cx.theme().danger,
-                    ConnectionType::Serial => cx.theme().muted_foreground,
-                    _ => cx.theme().muted_foreground,
-                };
+        let item_views =
+            self.items
+                .iter()
+                .cloned()
+                .map(|item| {
+                    let checked = self.selected_snapshot_ids.contains(&item.snapshot_id);
+                    let snapshot_id = item.snapshot_id.clone();
+                    let view_for_toggle = view.clone();
+                    let type_color = match item.kind {
+                        ConnectionRestoreKind::LocalTerminal
+                        | ConnectionRestoreKind::SerialTerminal => cx.theme().muted_foreground,
+                        ConnectionRestoreKind::SshTerminal | ConnectionRestoreKind::Sftp => {
+                            cx.theme().warning
+                        }
+                        ConnectionRestoreKind::Database
+                        | ConnectionRestoreKind::DatabaseWorkspace => cx.theme().info,
+                        ConnectionRestoreKind::Redis | ConnectionRestoreKind::RedisWorkspace => {
+                            cx.theme().success
+                        }
+                        ConnectionRestoreKind::MongoDb
+                        | ConnectionRestoreKind::MongoDbWorkspace => cx.theme().danger,
+                    };
 
-                h_flex()
-                    .w_full()
-                    .gap_3()
-                    .items_start()
-                    .p_3()
-                    .block_mouse_except_scroll()
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded_md()
-                    .child(
-                        Checkbox::new(format!("restore-connection-{}", snapshot_id))
-                            .block_mouse_except_scroll()
-                            .checked(checked)
-                            .on_click(move |_, _, cx| {
-                                view_for_toggle.update(cx, |view, cx| {
-                                    if !view.selected_snapshot_ids.insert(snapshot_id.clone()) {
-                                        view.selected_snapshot_ids.remove(&snapshot_id);
-                                    }
-                                    cx.notify();
-                                });
-                            }),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(item.title),
-                            )
-                            .child(div().text_xs().text_color(type_color).child(item.subtitle)),
-                    )
-            })
-            .collect::<Vec<_>>();
+                    h_flex()
+                        .w_full()
+                        .gap_3()
+                        .items_start()
+                        .p_3()
+                        .block_mouse_except_scroll()
+                        .bg(cx.theme().background)
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .rounded_md()
+                        .child(
+                            Checkbox::new(format!("restore-connection-{}", snapshot_id))
+                                .block_mouse_except_scroll()
+                                .checked(checked)
+                                .on_click(move |_, _, cx| {
+                                    view_for_toggle.update(cx, |view, cx| {
+                                        if !view.selected_snapshot_ids.insert(snapshot_id.clone()) {
+                                            view.selected_snapshot_ids.remove(&snapshot_id);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(item.title),
+                                )
+                                .child(div().text_xs().text_color(type_color).child(item.subtitle)),
+                        )
+                })
+                .collect::<Vec<_>>();
 
         v_flex()
             .id("connection-restore-popup")
@@ -453,15 +533,24 @@ impl Render for ConnectionRestorePopupView {
                                                         );
                                                     })
                                             })
-                                            .child(div().text_sm().child(t!("ConnectionRestore.select_all"))),
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .child(t!("ConnectionRestore.select_all")),
+                                            ),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(t!("ConnectionRestore.selected_count")
-                                                .replace("%{selected}", &selected_count.to_string())
-                                                .replace("%{total}", &total_count.to_string())),
+                                            .child(
+                                                t!("ConnectionRestore.selected_count")
+                                                    .replace(
+                                                        "%{selected}",
+                                                        &selected_count.to_string(),
+                                                    )
+                                                    .replace("%{total}", &total_count.to_string()),
+                                            ),
                                     ),
                             )
                             .child(
