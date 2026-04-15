@@ -1361,7 +1361,7 @@ impl SettingsPanel {
                             ),
                             // WebDAV 配置（仅 webdav 后端显示）
                             SettingItem::new(
-                                "WebDAV 地址",
+                                t!("Settings.General.Sync.webdav_endpoint"),
                                 themed_setting_field(SettingField::input(
                                     |cx: &App| {
                                         SharedString::from(
@@ -1386,14 +1386,12 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             })
-                            .description(
-                                "WebDAV 服务器地址，如 https://dav.example.com".to_string(),
-                            ),
+                            .description(t!("Settings.General.Sync.webdav_endpoint_desc").to_string()),
                             SettingItem::new(
-                                "WebDAV 认证方式",
+                                t!("Settings.General.Sync.webdav_auth_type"),
                                 themed_setting_field(SettingField::dropdown(
                                     vec![
-                                        ("basic".into(), "用户名密码".into()),
+                                        ("basic".into(), t!("Settings.General.Sync.webdav_username_password").into()),
                                         ("bearer".into(), "Bearer Token".into()),
                                     ],
                                     |cx: &App| {
@@ -1420,7 +1418,7 @@ impl SettingsPanel {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             }),
                             SettingItem::new(
-                                "WebDAV 用户名",
+                                t!("Settings.General.Sync.webdav_username"),
                                 themed_setting_field(SettingField::input(
                                     |cx: &App| {
                                         SharedString::from(
@@ -1446,7 +1444,7 @@ impl SettingsPanel {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             }),
                             SettingItem::new(
-                                "WebDAV 密码",
+                                t!("Settings.General.Sync.webdav_password"),
                                 themed_setting_field(SettingField::input(
                                     |cx: &App| {
                                         SharedString::from(
@@ -1498,7 +1496,7 @@ impl SettingsPanel {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             }),
                             SettingItem::new(
-                                "WebDAV 存储路径",
+                                t!("Settings.General.Sync.webdav_storage_path"),
                                 themed_setting_field(SettingField::input(
                                     |cx: &App| {
                                         SharedString::from(
@@ -1527,7 +1525,7 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             })
-                            .description("同步文件存放的路径前缀".to_string()),
+                            .description(t!("Settings.General.Sync.webdav_storage_path_desc").to_string()),
                             // GitHub Gist 配置（仅 github_gist 后端显示）
                             SettingItem::new(
                                 t!("Settings.General.Sync.github_client_id"),
@@ -1572,7 +1570,7 @@ impl SettingsPanel {
                                                 .gist_config
                                                 .as_ref()
                                                 .and_then(|c| c.gist_id.clone())
-                                                .unwrap_or_else(|| "未授权".to_string()),
+                                                .unwrap_or_else(|| t!("Settings.General.Sync.gist_not_authorized").to_string()),
                                         )
                                     },
                                     |val: SharedString, cx: &mut App| {
@@ -1581,7 +1579,7 @@ impl SettingsPanel {
                                             .gist_config
                                             .get_or_insert_with(GistSettings::default);
                                         let gist_id = Some(val.to_string())
-                                            .filter(|s| !s.is_empty() && s != "未授权");
+                                            .filter(|s| !s.is_empty() && *s != *t!("Settings.General.Sync.gist_not_authorized"));
                                         if gist_id.is_none() {
                                             gist.tokens = None;
                                         }
@@ -1589,12 +1587,12 @@ impl SettingsPanel {
                                         settings.save();
                                     },
                                 ))
-                                .default_value(SharedString::from("未授权".to_string())),
+                                .default_value(SharedString::from(t!("Settings.General.Sync.gist_not_authorized"))),
                             )
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "github_gist"
                             })
-                            .description("授权成功后自动填充 Gist ID".to_string()),
+                            .description(t!("Settings.General.Sync.gist_id_auto_fill_desc").to_string()),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
                                  _window: &mut gpui::Window,
@@ -1628,9 +1626,9 @@ impl SettingsPanel {
                                                 ButtonVariant::Primary
                                             })
                                             .child(if has_auth {
-                                                "重新授权"
+                                                t!("Settings.General.Sync.reauthorize")
                                             } else {
-                                                "授权 GitHub"
+                                                t!("Settings.General.Sync.authorize_github")
                                             })
                                             .into_any_element()
                                     }
@@ -1646,7 +1644,7 @@ impl SettingsPanel {
                                             cx.new(|_cx| GithubAuthDialog::new(client_id.clone()));
                                         window.open_dialog(cx, move |dialog, _window, _cx| {
                                             dialog
-                                                .title("GitHub 授权".to_string())
+                                                .title(t!("Settings.General.Sync.github_auth_title"))
                                                 .child(dialog_entity.clone())
                                         });
                                     }
@@ -1686,9 +1684,7 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "google_drive"
                             })
-                            .description(
-                                "Google Cloud Console 中创建的 OAuth 2.0 Client ID".to_string(),
-                            ),
+                            .description(t!("Settings.General.Sync.google_drive_client_id_desc").to_string()),
                             SettingItem::new(
                                 "Google Drive Client Secret",
                                 themed_setting_field(SettingField::input(
@@ -1719,9 +1715,7 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "google_drive"
                             })
-                            .description(
-                                "Google Cloud Console 中创建的 OAuth 2.0 Client Secret".to_string(),
-                            ),
+                            .description(t!("Settings.General.Sync.google_drive_client_secret_desc").to_string()),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
                                  _window: &mut gpui::Window,
@@ -1747,9 +1741,9 @@ impl SettingsPanel {
                                             ButtonVariant::Primary
                                         })
                                         .child(if has_auth {
-                                            "重新授权"
+                                            t!("Settings.General.Sync.reauthorize")
                                         } else {
-                                            "授权 Google Drive"
+                                            t!("Settings.General.Sync.authorize_google_drive")
                                         })
                                         .into_any_element()
                                 },
@@ -1771,7 +1765,7 @@ impl SettingsPanel {
                                     });
                                     window.open_dialog(cx, move |dialog, _window, _cx| {
                                         dialog
-                                            .title("Google Drive 授权".to_string())
+                                            .title(t!("Settings.General.Sync.google_drive_auth_title"))
                                             .child(dialog_entity.clone())
                                     });
                                 },
@@ -1811,8 +1805,7 @@ impl SettingsPanel {
                                 AppSettings::global(cx).sync_backend_type == "onedrive"
                             })
                             .description(
-                                "Microsoft Azure App Registration 中的 Application (client) ID"
-                                    .to_string(),
+                                t!("Settings.General.Sync.onedrive_client_id_desc").to_string(),
                             ),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
@@ -1841,9 +1834,9 @@ impl SettingsPanel {
                                             ButtonVariant::Primary
                                         })
                                         .child(if has_auth {
-                                            "重新授权"
+                                            t!("Settings.General.Sync.reauthorize")
                                         } else {
-                                            "授权 OneDrive"
+                                            t!("Settings.General.Sync.authorize_onedrive")
                                         })
                                         .into_any_element()
                                 },
@@ -1863,7 +1856,7 @@ impl SettingsPanel {
                                     });
                                     window.open_dialog(cx, move |dialog, _window, _cx| {
                                         dialog
-                                            .title("OneDrive 授权".to_string())
+                                            .title(t!("Settings.General.Sync.onedrive_auth_title"))
                                             .child(dialog_entity.clone())
                                     });
                                 },

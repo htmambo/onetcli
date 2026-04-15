@@ -33,14 +33,14 @@ impl NewConnectionKind {
         }
     }
 
-    fn category(&self) -> &'static str {
+    fn category(&self) -> String {
         match self {
-            NewConnectionKind::Workspace => "工作区",
+            NewConnectionKind::Workspace => t!("NewConnection.workspace").to_string(),
             NewConnectionKind::Ssh | NewConnectionKind::Terminal | NewConnectionKind::Serial => {
-                "终端"
+                t!("NewConnection.terminal").to_string()
             }
-            NewConnectionKind::Redis | NewConnectionKind::MongoDB => "NoSQL",
-            NewConnectionKind::Database(_) => "数据库",
+            NewConnectionKind::Redis | NewConnectionKind::MongoDB => "NoSQL".to_string(),
+            NewConnectionKind::Database(_) => t!("NewConnection.database").to_string(),
         }
     }
 

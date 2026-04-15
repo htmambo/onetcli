@@ -1,3 +1,4 @@
+use rust_i18n::t;
 use std::collections::HashSet;
 
 use gpui::{
@@ -109,7 +110,11 @@ fn resolve_restore_item(
             snapshot_id: item.snapshot_id.clone(),
             kind: item.kind,
             title: item.title.clone(),
-            subtitle: format!("{} · 工作区页", kind_label(item.kind)),
+            subtitle: format!(
+                "{} · {}",
+                kind_label(item.kind),
+                t!("ConnectionRestore.workspace_page")
+            ),
             active_connection_id: item.active_connection_id.or(preferred_connection.id),
             connection: preferred_connection,
             workspace: Some(workspace),
@@ -131,7 +136,12 @@ fn resolve_restore_item(
             snapshot_id: item.snapshot_id.clone(),
             kind: item.kind,
             title: item.title.clone(),
-            subtitle: format!("{} · 当前连接：{}", kind_label(item.kind), connection.name),
+            subtitle: format!(
+                "{} · {}：{}",
+                kind_label(item.kind),
+                t!("ConnectionRestore.current_connection"),
+                connection.name
+            ),
             active_connection_id: connection.id,
             connection,
             workspace,
@@ -139,17 +149,17 @@ fn resolve_restore_item(
     }
 }
 
-fn kind_label(kind: ConnectionRestoreKind) -> &'static str {
+fn kind_label(kind: ConnectionRestoreKind) -> String {
     match kind {
-        ConnectionRestoreKind::SshTerminal => "SSH 终端",
-        ConnectionRestoreKind::SerialTerminal => "串口终端",
-        ConnectionRestoreKind::Sftp => "SFTP",
-        ConnectionRestoreKind::Database => "数据库连接页",
-        ConnectionRestoreKind::DatabaseWorkspace => "数据库工作区页",
-        ConnectionRestoreKind::Redis => "Redis 连接页",
-        ConnectionRestoreKind::RedisWorkspace => "Redis 工作区页",
-        ConnectionRestoreKind::MongoDb => "MongoDB 连接页",
-        ConnectionRestoreKind::MongoDbWorkspace => "MongoDB 工作区页",
+        ConnectionRestoreKind::SshTerminal => t!("ConnectionRestore.ssh_terminal").to_string(),
+        ConnectionRestoreKind::SerialTerminal => t!("ConnectionRestore.serial_terminal").to_string(),
+        ConnectionRestoreKind::Sftp => "SFTP".to_string(),
+        ConnectionRestoreKind::Database => t!("ConnectionRestore.database_page").to_string(),
+        ConnectionRestoreKind::DatabaseWorkspace => t!("ConnectionRestore.database_workspace").to_string(),
+        ConnectionRestoreKind::Redis => t!("ConnectionRestore.redis_page").to_string(),
+        ConnectionRestoreKind::RedisWorkspace => t!("ConnectionRestore.redis_workspace").to_string(),
+        ConnectionRestoreKind::MongoDb => t!("ConnectionRestore.mongodb_page").to_string(),
+        ConnectionRestoreKind::MongoDbWorkspace => t!("ConnectionRestore.mongodb_workspace").to_string(),
     }
 }
 
@@ -169,7 +179,7 @@ pub fn open_connection_restore_dialog(
 
     open_popup_window_with_should_close(
         window,
-        PopupWindowOptions::new("恢复连接")
+        PopupWindowOptions::new(t!("ConnectionRestore.title"))
             .size(f32::from(layout.width), f32::from(layout.height))
             .min_width(520.0)
             .min_height(420.0)
@@ -389,7 +399,7 @@ impl Render for ConnectionRestorePopupView {
                                     .flex_1()
                                     .text_sm()
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child("恢复连接"),
+                                    .child(t!("ConnectionRestore.title")),
                             ),
                     )
                     .child(
@@ -397,7 +407,7 @@ impl Render for ConnectionRestorePopupView {
                             div()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("检测到上次退出前仍有打开的连接页，请选择要恢复的项。"),
+                                .child(t!("ConnectionRestore.description")),
                         ),
                     )
                     .child(
@@ -443,15 +453,15 @@ impl Render for ConnectionRestorePopupView {
                                                         );
                                                     })
                                             })
-                                            .child(div().text_sm().child("全选")),
+                                            .child(div().text_sm().child(t!("ConnectionRestore.select_all"))),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(format!(
-                                                "已选择 {selected_count} / {total_count}"
-                                            )),
+                                            .child(t!("ConnectionRestore.selected_count")
+                                                .replace("%{selected}", &selected_count.to_string())
+                                                .replace("%{total}", &total_count.to_string())),
                                     ),
                             )
                             .child(
@@ -477,7 +487,7 @@ impl Render for ConnectionRestorePopupView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("可取消勾选后仅恢复部分连接"),
+                                    .child(t!("ConnectionRestore.partial_restore_hint")),
                             )
                             .child(
                                 h_flex()
@@ -487,7 +497,7 @@ impl Render for ConnectionRestorePopupView {
                                         Button::new("connection-restore-skip")
                                             .small()
                                             .with_variant(app_style::secondary_button_variant(cx))
-                                            .label("跳过")
+                                            .label(t!("ConnectionRestore.skip"))
                                             .disabled(restoring)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.on_skip(window, cx);
@@ -498,9 +508,9 @@ impl Render for ConnectionRestorePopupView {
                                             .small()
                                             .with_variant(app_style::primary_button_variant(cx))
                                             .label(if restoring {
-                                                "恢复中..."
+                                                t!("ConnectionRestore.restoring")
                                             } else {
-                                                "恢复所选"
+                                                t!("ConnectionRestore.restore_selected")
                                             })
                                             .disabled(selected_count == 0 || restoring)
                                             .on_click(cx.listener(|this, _, window, cx| {

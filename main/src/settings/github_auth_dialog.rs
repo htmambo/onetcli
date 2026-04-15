@@ -11,6 +11,7 @@ use gpui_component::{
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex, v_flex,
 };
+use rust_i18n::t;
 
 use crate::setting_tab::AppSettings;
 
@@ -185,7 +186,7 @@ impl Render for GithubAuthDialog {
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("正在启动授权流程..."),
+                        .child(t!("OAuth.starting")),
                 )
                 .into_any_element(),
 
@@ -204,12 +205,12 @@ impl Render for GithubAuthDialog {
                     .gap_4()
                     .p_5()
                     .w(px(420.))
-                    .child(div().text_sm().font_semibold().child("GitHub 授权"))
+                    .child(div().text_sm().font_semibold().child(t!("OAuth.github_auth")))
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("请在浏览器中打开链接并输入验证码："),
+                            .child(t!("OAuth.browser_open_link_code")),
                     )
                     .child(
                         h_flex()
@@ -233,7 +234,7 @@ impl Render for GithubAuthDialog {
                                             ));
                                         }
                                     })
-                                    .child("复制验证码"),
+                                    .child(t!("OAuth.copy_code")),
                             ),
                     )
                     .child(
@@ -255,7 +256,7 @@ impl Render for GithubAuthDialog {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("授权成功后点击下方按钮确认"),
+                            .child(t!("OAuth.click_confirm_after_auth")),
                     )
                     .child(
                         h_flex()
@@ -268,7 +269,7 @@ impl Render for GithubAuthDialog {
                                     .on_click(|_, window, cx: &mut App| {
                                         window.close_dialog(cx);
                                     })
-                                    .child("取消"),
+                                    .child(t!("Common.cancel")),
                             )
                             .child(
                                 Button::new("confirm-btn")
@@ -278,7 +279,7 @@ impl Render for GithubAuthDialog {
                                             d.start_poll(cx.entity(), cx);
                                         });
                                     })
-                                    .child("完成授权"),
+                                    .child(t!("OAuth.complete_auth")),
                             ),
                     )
                     .into_any_element()
@@ -288,12 +289,12 @@ impl Render for GithubAuthDialog {
                 .gap_4()
                 .p_5()
                 .w(px(420.))
-                .child(div().text_sm().font_semibold().child("等待授权确认..."))
+                .child(div().text_sm().font_semibold().child(t!("OAuth.waiting_for_auth_confirm")))
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("已在浏览器中完成授权？正在确认... (最多等待 5 分钟)"),
+                        .child(t!("OAuth.browser_auth_confirm")),
                 )
                 .into_any_element(),
 
@@ -306,7 +307,7 @@ impl Render for GithubAuthDialog {
                         .text_sm()
                         .font_semibold()
                         .text_color(cx.theme().success)
-                        .child("授权成功！"),
+                        .child(t!("OAuth.auth_success")),
                 )
                 .child(
                     div()
@@ -321,7 +322,7 @@ impl Render for GithubAuthDialog {
                             .on_click(move |_, window, cx: &mut App| {
                                 window.close_dialog(cx);
                             })
-                            .child("确认"),
+                            .child(t!("Common.confirm")),
                     ),
                 )
                 .into_any_element(),
@@ -337,7 +338,7 @@ impl Render for GithubAuthDialog {
                             .text_sm()
                             .font_semibold()
                             .text_color(cx.theme().danger)
-                            .child("授权失败"),
+                            .child(t!("OAuth.auth_failed")),
                     )
                     .child(
                         div()

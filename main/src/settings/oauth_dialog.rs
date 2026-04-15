@@ -11,6 +11,7 @@ use gpui_component::{
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex, v_flex,
 };
+use rust_i18n::t;
 use std::sync::Arc;
 
 use crate::setting_tab::{AppSettings, GoogleDriveSettings, OneDriveSettings};
@@ -102,7 +103,7 @@ impl GoogleDriveAuthDialog {
                     if !callback.is_success() {
                         let msg = callback
                             .error_description
-                            .unwrap_or_else(|| "授权失败".to_string());
+                            .unwrap_or_else(|| t!("OAuth.auth_failed").to_string());
                         let _ = this.update(cx, |d, _| {
                             d.state = OAuthState::Error { message: msg };
                         });
@@ -177,7 +178,7 @@ impl Render for GoogleDriveAuthDialog {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("正在启动授权流程..."),
+                            .child(t!("OAuth.starting")),
                     )
                     .into_any_element()
             }
@@ -187,12 +188,12 @@ impl Render for GoogleDriveAuthDialog {
                     .gap_4()
                     .p_5()
                     .w(px(420.))
-                    .child(div().text_sm().font_semibold().child("Google Drive 授权"))
+                    .child(div().text_sm().font_semibold().child(t!("OAuth.google_drive_auth")))
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("点击下方按钮在浏览器中打开授权页面："),
+                            .child(t!("OAuth.open_browser_prompt")),
                     )
                     .child(
                         h_flex().gap_2().child(
@@ -201,14 +202,14 @@ impl Render for GoogleDriveAuthDialog {
                                 .on_click(move |_, _, cx: &mut App| {
                                     cx.open_url(&url);
                                 })
-                                .child("打开授权页面"),
+                                .child(t!("OAuth.open_auth_page")),
                         ),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("授权完成后此窗口将自动确认。"),
+                            .child(t!("OAuth.auth_complete_auto_confirm")),
                     )
                     .child(
                         h_flex().justify_end().gap_2().mt_4().child(
@@ -217,7 +218,7 @@ impl Render for GoogleDriveAuthDialog {
                                 .on_click(|_, window, cx: &mut App| {
                                     window.close_dialog(cx);
                                 })
-                                .child("取消"),
+                                .child(t!("Common.cancel")),
                         ),
                     )
                     .into_any_element()
@@ -226,12 +227,12 @@ impl Render for GoogleDriveAuthDialog {
                 .gap_4()
                 .p_5()
                 .w(px(420.))
-                .child(div().text_sm().font_semibold().child("正在获取访问权限..."))
+                .child(div().text_sm().font_semibold().child(t!("OAuth.getting_access")))
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("完成授权后正在交换访问令牌..."),
+                        .child(t!("OAuth.exchanging_token")),
                 )
                 .into_any_element(),
             OAuthState::Success => v_flex()
@@ -243,13 +244,13 @@ impl Render for GoogleDriveAuthDialog {
                         .text_sm()
                         .font_semibold()
                         .text_color(cx.theme().success)
-                        .child("授权成功！"),
+                        .child(t!("OAuth.auth_success")),
                 )
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Google Drive 已成功连接。"),
+                        .child(t!("OAuth.google_drive_connected")),
                 )
                 .child(
                     h_flex().justify_end().gap_2().mt_4().child(
@@ -258,7 +259,7 @@ impl Render for GoogleDriveAuthDialog {
                             .on_click(|_, window, cx: &mut App| {
                                 window.close_dialog(cx);
                             })
-                            .child("确认"),
+                            .child(t!("Common.confirm")),
                     ),
                 )
                 .into_any_element(),
@@ -273,7 +274,7 @@ impl Render for GoogleDriveAuthDialog {
                             .text_sm()
                             .font_semibold()
                             .text_color(cx.theme().danger)
-                            .child("授权失败"),
+                            .child(t!("OAuth.auth_failed")),
                     )
                     .child(
                         div()
@@ -292,7 +293,7 @@ impl Render for GoogleDriveAuthDialog {
                                     .on_click(|_, window, cx: &mut App| {
                                         window.close_dialog(cx);
                                     })
-                                    .child("关闭"),
+                                    .child(t!("Common.close")),
                             )
                             .child(
                                 Button::new("retry-btn")
@@ -303,7 +304,7 @@ impl Render for GoogleDriveAuthDialog {
                                             d.start_auth(cx.entity(), cx);
                                         });
                                     })
-                                    .child("重试"),
+                                    .child(t!("Common.retry")),
                             ),
                     )
                     .into_any_element()
@@ -380,7 +381,7 @@ impl OneDriveAuthDialog {
                     if !callback.is_success() {
                         let msg = callback
                             .error_description
-                            .unwrap_or_else(|| "授权失败".to_string());
+                            .unwrap_or_else(|| t!("OAuth.auth_failed").to_string());
                         let _ = this.update(cx, |d, _| {
                             d.state = OAuthState::Error { message: msg };
                         });
@@ -453,7 +454,7 @@ impl Render for OneDriveAuthDialog {
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("正在启动授权流程..."),
+                            .child(t!("OAuth.starting")),
                     )
                     .into_any_element()
             }
@@ -463,12 +464,12 @@ impl Render for OneDriveAuthDialog {
                     .gap_4()
                     .p_5()
                     .w(px(420.))
-                    .child(div().text_sm().font_semibold().child("OneDrive 授权"))
+                    .child(div().text_sm().font_semibold().child(t!("OAuth.onedrive_auth")))
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("点击下方按钮在浏览器中打开授权页面："),
+                            .child(t!("OAuth.open_browser_prompt")),
                     )
                     .child(
                         h_flex().gap_2().child(
@@ -477,14 +478,14 @@ impl Render for OneDriveAuthDialog {
                                 .on_click(move |_, _, cx: &mut App| {
                                     cx.open_url(&url);
                                 })
-                                .child("打开授权页面"),
+                                .child(t!("OAuth.open_auth_page")),
                         ),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child("授权完成后此窗口将自动确认。"),
+                            .child(t!("OAuth.auth_complete_auto_confirm")),
                     )
                     .child(
                         h_flex().justify_end().gap_2().mt_4().child(
@@ -493,7 +494,7 @@ impl Render for OneDriveAuthDialog {
                                 .on_click(|_, window, cx: &mut App| {
                                     window.close_dialog(cx);
                                 })
-                                .child("取消"),
+                                .child(t!("Common.cancel")),
                         ),
                     )
                     .into_any_element()
@@ -502,12 +503,12 @@ impl Render for OneDriveAuthDialog {
                 .gap_4()
                 .p_5()
                 .w(px(420.))
-                .child(div().text_sm().font_semibold().child("正在获取访问权限..."))
+                .child(div().text_sm().font_semibold().child(t!("OAuth.getting_access")))
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("完成授权后正在交换访问令牌..."),
+                        .child(t!("OAuth.exchanging_token")),
                 )
                 .into_any_element(),
             OAuthState::Success => v_flex()
@@ -519,13 +520,13 @@ impl Render for OneDriveAuthDialog {
                         .text_sm()
                         .font_semibold()
                         .text_color(cx.theme().success)
-                        .child("授权成功！"),
+                        .child(t!("OAuth.auth_success")),
                 )
                 .child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("OneDrive 已成功连接。"),
+                        .child(t!("OAuth.onedrive_connected")),
                 )
                 .child(
                     h_flex().justify_end().gap_2().mt_4().child(
@@ -534,7 +535,7 @@ impl Render for OneDriveAuthDialog {
                             .on_click(|_, window, cx: &mut App| {
                                 window.close_dialog(cx);
                             })
-                            .child("确认"),
+                            .child(t!("Common.confirm")),
                     ),
                 )
                 .into_any_element(),
@@ -549,7 +550,7 @@ impl Render for OneDriveAuthDialog {
                             .text_sm()
                             .font_semibold()
                             .text_color(cx.theme().danger)
-                            .child("授权失败"),
+                            .child(t!("OAuth.auth_failed")),
                     )
                     .child(
                         div()
@@ -568,7 +569,7 @@ impl Render for OneDriveAuthDialog {
                                     .on_click(|_, window, cx: &mut App| {
                                         window.close_dialog(cx);
                                     })
-                                    .child("关闭"),
+                                    .child(t!("Common.close")),
                             )
                             .child(
                                 Button::new("retry-btn")
@@ -579,7 +580,7 @@ impl Render for OneDriveAuthDialog {
                                             d.start_auth(cx.entity(), cx);
                                         });
                                     })
-                                    .child("重试"),
+                                    .child(t!("Common.retry")),
                             ),
                     )
                     .into_any_element()
