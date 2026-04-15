@@ -21,6 +21,7 @@ use gpui_component::{
     scroll::{ScrollableMask, Scrollbar},
     v_flex,
 };
+use rust_i18n::t;
 
 gpui::actions!(
     edit_table_internal,
@@ -2370,14 +2371,21 @@ where
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("Selected {} / {}", selected_count, total_count)),
+                            .child(
+                                t!(
+                                    "EditTable.filter_selected_count",
+                                    selected = selected_count,
+                                    total = total_count
+                                )
+                                .to_string(),
+                            ),
                     )
                     .child(
                         h_flex()
                             .gap_1()
                             .child(
                                 Button::new("filter-select-all")
-                                    .label("Select All")
+                                    .label(t!("EditTable.filter_select_all").to_string())
                                     .ghost()
                                     .with_size(Size::XSmall)
                                     .on_click({
@@ -2393,7 +2401,7 @@ where
                             )
                             .child(
                                 Button::new("filter-deselect-all")
-                                    .label("Clear")
+                                    .label(t!("EditTable.filter_clear").to_string())
                                     .ghost()
                                     .with_size(Size::XSmall)
                                     .on_click({

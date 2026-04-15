@@ -174,7 +174,11 @@ pub struct ConnectionStats {
     pub sql_chat: usize,
 }
 
-impl ConnectionStats {}
+impl ConnectionStats {
+    fn total(&self) -> usize {
+        self.db + self.redis + self.mongo + self.ssh + self.sftp + self.sql_chat
+    }
+}
 
 /// 从 TabContainer 统计各类型连接数
 fn count_connection_stats(tab_container: &TabContainer, cx: &App) -> ConnectionStats {
@@ -1208,6 +1212,7 @@ impl OnetCliApp {
         // 获取各类型连接统计
         let tab_container = self.tab_container.read(cx);
         let conn_stats = count_connection_stats(&tab_container, cx);
+        let total_connections = conn_stats.total();
 
         h_flex()
             .id("global-status-bar")
@@ -1242,24 +1247,22 @@ impl OnetCliApp {
                 h_flex()
                     .items_center()
                     .gap_4()
-                    // 连接统计：总数(Terminal:数量/Redis:数量/Mongo:数量/HardDrive:数量)
-                    .child(Self::render_connection_stats(
-                        conn_stats.ssh
-                            + conn_stats.db
-                            + conn_stats.redis
-                            + conn_stats.mongo
-                            + conn_stats.sftp
-                            + conn_stats.sql_chat,
-                        conn_stats.ssh,
-                        conn_stats.db,
-                        conn_stats.redis,
-                        conn_stats.mongo,
-                        conn_stats.sftp,
-                        conn_stats.sql_chat,
-                        cx,
-                    ))
-                    // 分隔
-                    .child(div().h(px(12.0)).w(px(1.0)).bg(cx.theme().border))
+                    .when(total_connections > 0, |this| {
+                        this
+                            // 连接统计：总数(Terminal:数量/Redis:数量/Mongo:数量/HardDrive:数量)
+                            .child(Self::render_connection_stats(
+                                total_connections,
+                                conn_stats.ssh,
+                                conn_stats.db,
+                                conn_stats.redis,
+                                conn_stats.mongo,
+                                conn_stats.sftp,
+                                conn_stats.sql_chat,
+                                cx,
+                            ))
+                            // 分隔
+                            .child(div().h(px(12.0)).w(px(1.0)).bg(cx.theme().border))
+                    })
                     // 内存: 图标 + 已用/总量(应用)
                     .child(
                         h_flex()
@@ -1350,7 +1353,10 @@ impl Render for OnetCliApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppCloseDecision, AppCloseGuard, build_status_bar_title, build_window_title};
+    use super::{
+        AppCloseDecision, AppCloseGuard, ConnectionStats, build_status_bar_title,
+        build_window_title,
+    };
 
     #[test]
     fn 活动标签存在时拼接应用名和标签名() {
@@ -1367,6 +1373,21 @@ mod tests {
     fn 状态栏标题在空值时回退到应用名() {
         assert_eq!(build_status_bar_title(Some("  ")), "OnetCli");
         assert_eq!(build_status_bar_title(None), "OnetCli");
+    }
+
+    #[test]
+    fn 连接统计总数会汇总所有标签类型() {
+        let stats = ConnectionStats {
+            db: 2,
+            redis: 1,
+            mongo: 3,
+            ssh: 4,
+            sftp: 5,
+            sql_chat: 6,
+        };
+
+        assert_eq!(stats.total(), 21);
+        assert_eq!(ConnectionStats::default().total(), 0);
     }
 
     #[test]
