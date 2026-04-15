@@ -308,6 +308,7 @@ impl DatabaseObjects {
                         this.db_node_type = db_node_type;
                         this.selected_indices.clear();
                         this.sync_table_delegate(cx);
+                        cx.emit(TabContentEvent::StateChanged);
                         cx.notify();
                     })
                     .ok();
@@ -438,6 +439,7 @@ impl DatabaseObjects {
                         }
                         this.selected_indices.clear();
                         this.sync_table_delegate(cx);
+                        cx.emit(TabContentEvent::StateChanged);
                         cx.notify();
                     })
                     .ok();
@@ -746,6 +748,75 @@ impl DatabaseObjects {
 }
 
 impl DatabaseObjects {
+    fn tab_title_key(db_node_type: DbNodeType) -> &'static str {
+        match db_node_type {
+            DbNodeType::Connection => "Connection.connection_list",
+            DbNodeType::Database => "Database.database",
+            DbNodeType::Schema => "Schema.schema",
+            DbNodeType::TablesFolder | DbNodeType::Table => "DbTree.Tables",
+            DbNodeType::ColumnsFolder | DbNodeType::Column => "DbTree.Columns",
+            DbNodeType::IndexesFolder | DbNodeType::Index => "DbTree.Indexes",
+            DbNodeType::ForeignKeysFolder | DbNodeType::ForeignKey => "DbTree.ForeignKeys",
+            DbNodeType::TriggersFolder | DbNodeType::Trigger => "DbTree.Triggers",
+            DbNodeType::ChecksFolder | DbNodeType::Check => "DbTree.Checks",
+            DbNodeType::ViewsFolder | DbNodeType::View => "DbTree.Views",
+            DbNodeType::FunctionsFolder | DbNodeType::Function => "DbTree.Functions",
+            DbNodeType::ProceduresFolder | DbNodeType::Procedure => "DbTree.Procedures",
+            DbNodeType::SequencesFolder | DbNodeType::Sequence => "DbTree.Sequences",
+            DbNodeType::QueriesFolder | DbNodeType::NamedQuery => "Query.query_list",
+        }
+    }
+
+    fn tab_title_base(db_node_type: DbNodeType) -> String {
+        t!(Self::tab_title_key(db_node_type)).to_string()
+    }
+
+    fn should_show_database_name_in_title(db_node_type: DbNodeType) -> bool {
+        matches!(
+            db_node_type,
+            DbNodeType::Table | DbNodeType::View | DbNodeType::NamedQuery
+        )
+    }
+
+    fn compose_tab_title(
+        db_node_type: DbNodeType,
+        base_title: &str,
+        database_name: Option<&str>,
+    ) -> String {
+        if !Self::should_show_database_name_in_title(db_node_type) {
+            return base_title.to_string();
+        }
+
+        let database_name = database_name.map(str::trim).filter(|name| !name.is_empty());
+
+        match database_name {
+            Some(database_name) => format!("{}@{}", base_title, database_name),
+            None => base_title.to_string(),
+        }
+    }
+
+    fn tab_title(&self) -> String {
+        let base_title = Self::tab_title_base(self.db_node_type);
+        let database_name = self
+            .current_node
+            .as_ref()
+            .and_then(|node| node.get_database_name());
+
+        Self::compose_tab_title(self.db_node_type, &base_title, database_name.as_deref())
+    }
+
+    fn tab_width_size_for(db_node_type: DbNodeType) -> Size {
+        if Self::should_show_database_name_in_title(db_node_type) {
+            Size::Medium
+        } else {
+            Size::XSmall
+        }
+    }
+
+    fn tab_width_size(&self) -> Size {
+        Self::tab_width_size_for(self.db_node_type)
+    }
+
     fn batch_action_for_event(event: &DatabaseObjectsEvent) -> Option<DatabaseObjectsBatchAction> {
         match event {
             DatabaseObjectsEvent::DeleteConnection { .. } => {
@@ -978,6 +1049,7 @@ impl Clone for DatabaseObjects {
 }
 
 impl EventEmitter<DatabaseObjectsEvent> for DatabaseObjects {}
+impl EventEmitter<TabContentEvent> for DatabaseObjects {}
 
 impl Focusable for DatabaseObjects {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -987,13 +1059,20 @@ impl Focusable for DatabaseObjects {
 
 pub struct DatabaseObjectsPanel {
     database_objects: Entity<DatabaseObjects>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl DatabaseObjectsPanel {
     pub fn new(workspace: Option<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let database_objects = cx.new(|cx| DatabaseObjects::new(workspace, window, cx));
+        let state_sub = cx.subscribe(&database_objects, |_this, _, _: &TabContentEvent, cx| {
+            cx.emit(TabContentEvent::StateChanged);
+        });
 
-        Self { database_objects }
+        Self {
+            database_objects,
+            _subscriptions: vec![state_sub],
+        }
     }
 
     pub fn database_objects(&self) -> &Entity<DatabaseObjects> {
@@ -1037,7 +1116,18 @@ impl TabContent for DatabaseObjectsPanel {
         "DatabaseObjects"
     }
 
-    fn title(&self, _cx: &App) -> SharedString {
+    fn title(&self, cx: &App) -> SharedString {
+        let database_objects = self.database_objects.read(cx);
+        let title = database_objects.tab_title();
+        if !title.trim().is_empty() {
+            return SharedString::from(title);
+        }
+
+        let loaded_title = database_objects.loaded_data.read(cx).title.clone();
+        if !loaded_title.trim().is_empty() {
+            return loaded_title.into();
+        }
+
         SharedString::from(t!("DatabaseObjects.title"))
     }
 
@@ -1045,8 +1135,9 @@ impl TabContent for DatabaseObjectsPanel {
         false
     }
 
-    fn width_size(&self, _cx: &App) -> Option<Size> {
-        Some(Size::XSmall)
+    fn width_size(&self, cx: &App) -> Option<Size> {
+        let database_objects = self.database_objects.read(cx);
+        Some(database_objects.tab_width_size())
     }
 }
 
@@ -1054,6 +1145,89 @@ impl Clone for DatabaseObjectsPanel {
     fn clone(&self) -> Self {
         Self {
             database_objects: self.database_objects.clone(),
+            _subscriptions: vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DatabaseObjects;
+    use db::DbNodeType;
+    use gpui_component::Size;
+
+    #[test]
+    fn tab_title_key_distinguishes_database_and_table_lists() {
+        assert_eq!(
+            DatabaseObjects::tab_title_key(DbNodeType::Database),
+            "Database.database"
+        );
+        assert_eq!(
+            DatabaseObjects::tab_title_key(DbNodeType::Table),
+            "DbTree.Tables"
+        );
+    }
+
+    #[test]
+    fn compose_tab_title_appends_database_name_for_table_like_views() {
+        let table_title = DatabaseObjects::tab_title_base(DbNodeType::Table);
+        let view_title = DatabaseObjects::tab_title_base(DbNodeType::View);
+        let query_list_title = DatabaseObjects::tab_title_base(DbNodeType::NamedQuery);
+
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(DbNodeType::Table, &table_title, Some("analytics")),
+            format!("{table_title}@analytics")
+        );
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(DbNodeType::View, &view_title, Some("analytics")),
+            format!("{view_title}@analytics")
+        );
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(
+                DbNodeType::NamedQuery,
+                &query_list_title,
+                Some("analytics")
+            ),
+            format!("{query_list_title}@analytics")
+        );
+    }
+
+    #[test]
+    fn compose_tab_title_keeps_generic_titles_for_other_node_types() {
+        let connection_list_title = DatabaseObjects::tab_title_base(DbNodeType::Connection);
+        let database_title = DatabaseObjects::tab_title_base(DbNodeType::Database);
+
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(
+                DbNodeType::Connection,
+                &connection_list_title,
+                Some("demo")
+            ),
+            connection_list_title
+        );
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(DbNodeType::Database, &database_title, Some("demo")),
+            database_title
+        );
+    }
+
+    #[test]
+    fn database_scoped_titles_use_medium_tab_width() {
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::Table),
+            Size::Medium
+        );
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::View),
+            Size::Medium
+        );
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::NamedQuery),
+            Size::Medium
+        );
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::Database),
+            Size::XSmall
+        );
     }
 }
