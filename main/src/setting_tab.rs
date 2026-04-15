@@ -38,7 +38,9 @@ use one_core::utils::auto_save_config::AutoSaveConfig;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use terminal_view::{
-    DEFAULT_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
+    DEFAULT_LINE_HEIGHT_SCALE, DEFAULT_RECOVERY_SCROLLBACK_LINES, MAX_LINE_HEIGHT_SCALE,
+    MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
+    set_recovery_scrollback_lines,
 };
 use tracing::{error, info};
 
@@ -334,6 +336,8 @@ pub struct AppSettings {
     pub terminal_theme: String,
     #[serde(default)]
     pub terminal_cursor_blink: bool,
+    #[serde(default = "default_terminal_recovery_scrollback_lines")]
+    pub terminal_recovery_scrollback_lines: f64,
     #[serde(default = "default_true")]
     pub terminal_confirm_multiline_paste: bool,
     #[serde(default = "default_true")]
@@ -512,6 +516,10 @@ fn default_terminal_theme() -> String {
     "ocean".to_string()
 }
 
+fn default_terminal_recovery_scrollback_lines() -> f64 {
+    DEFAULT_RECOVERY_SCROLLBACK_LINES as f64
+}
+
 fn default_true() -> bool {
     true
 }
@@ -679,6 +687,7 @@ impl Default for AppSettings {
             terminal_sync_path_with_terminal: false,
             terminal_theme: default_terminal_theme(),
             terminal_cursor_blink: false,
+            terminal_recovery_scrollback_lines: default_terminal_recovery_scrollback_lines(),
             terminal_confirm_multiline_paste: default_true(),
             terminal_confirm_high_risk_command: default_true(),
             terminal_exit_behavior: default_terminal_exit_behavior(),
@@ -941,10 +950,17 @@ impl AppSettings {
     pub fn apply(&self, cx: &mut App) {
         gpui_component::set_locale(&self.locale);
         self.apply_theme_preferences(None, cx);
+        set_recovery_scrollback_lines(cx, self.normalized_terminal_recovery_scrollback_lines());
 
         // 同步自动保存配置
         self.sync_auto_save_config(cx);
         self.sync_db_view_settings(cx);
+    }
+
+    fn normalized_terminal_recovery_scrollback_lines(&self) -> usize {
+        self.terminal_recovery_scrollback_lines
+            .clamp(0.0, MAX_RECOVERY_SCROLLBACK_LINES as f64)
+            .round() as usize
     }
 
     /// 同步自动保存配置到全局状态
@@ -993,6 +1009,8 @@ pub fn init_settings(cx: &mut App) {
 }
 
 fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
+    set_recovery_scrollback_lines(cx, settings.normalized_terminal_recovery_scrollback_lines());
+
     let Some(home) = cx.try_global::<GlobalHomePage>() else {
         return;
     };
@@ -1386,12 +1404,18 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             })
-                            .description(t!("Settings.General.Sync.webdav_endpoint_desc").to_string()),
+                            .description(
+                                t!("Settings.General.Sync.webdav_endpoint_desc").to_string(),
+                            ),
                             SettingItem::new(
                                 t!("Settings.General.Sync.webdav_auth_type"),
                                 themed_setting_field(SettingField::dropdown(
                                     vec![
-                                        ("basic".into(), t!("Settings.General.Sync.webdav_username_password").into()),
+                                        (
+                                            "basic".into(),
+                                            t!("Settings.General.Sync.webdav_username_password")
+                                                .into(),
+                                        ),
                                         ("bearer".into(), "Bearer Token".into()),
                                     ],
                                     |cx: &App| {
@@ -1525,7 +1549,9 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "webdav"
                             })
-                            .description(t!("Settings.General.Sync.webdav_storage_path_desc").to_string()),
+                            .description(
+                                t!("Settings.General.Sync.webdav_storage_path_desc").to_string(),
+                            ),
                             // GitHub Gist 配置（仅 github_gist 后端显示）
                             SettingItem::new(
                                 t!("Settings.General.Sync.github_client_id"),
@@ -1570,7 +1596,10 @@ impl SettingsPanel {
                                                 .gist_config
                                                 .as_ref()
                                                 .and_then(|c| c.gist_id.clone())
-                                                .unwrap_or_else(|| t!("Settings.General.Sync.gist_not_authorized").to_string()),
+                                                .unwrap_or_else(|| {
+                                                    t!("Settings.General.Sync.gist_not_authorized")
+                                                        .to_string()
+                                                }),
                                         )
                                     },
                                     |val: SharedString, cx: &mut App| {
@@ -1578,8 +1607,13 @@ impl SettingsPanel {
                                         let gist = settings
                                             .gist_config
                                             .get_or_insert_with(GistSettings::default);
-                                        let gist_id = Some(val.to_string())
-                                            .filter(|s| !s.is_empty() && *s != *t!("Settings.General.Sync.gist_not_authorized"));
+                                        let gist_id = Some(val.to_string()).filter(|s| {
+                                            !s.is_empty()
+                                                && *s
+                                                    != *t!(
+                                                        "Settings.General.Sync.gist_not_authorized"
+                                                    )
+                                        });
                                         if gist_id.is_none() {
                                             gist.tokens = None;
                                         }
@@ -1587,12 +1621,18 @@ impl SettingsPanel {
                                         settings.save();
                                     },
                                 ))
-                                .default_value(SharedString::from(t!("Settings.General.Sync.gist_not_authorized"))),
+                                .default_value(
+                                    SharedString::from(t!(
+                                        "Settings.General.Sync.gist_not_authorized"
+                                    )),
+                                ),
                             )
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "github_gist"
                             })
-                            .description(t!("Settings.General.Sync.gist_id_auto_fill_desc").to_string()),
+                            .description(
+                                t!("Settings.General.Sync.gist_id_auto_fill_desc").to_string(),
+                            ),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
                                  _window: &mut gpui::Window,
@@ -1644,7 +1684,9 @@ impl SettingsPanel {
                                             cx.new(|_cx| GithubAuthDialog::new(client_id.clone()));
                                         window.open_dialog(cx, move |dialog, _window, _cx| {
                                             dialog
-                                                .title(t!("Settings.General.Sync.github_auth_title"))
+                                                .title(t!(
+                                                    "Settings.General.Sync.github_auth_title"
+                                                ))
                                                 .child(dialog_entity.clone())
                                         });
                                     }
@@ -1684,7 +1726,9 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "google_drive"
                             })
-                            .description(t!("Settings.General.Sync.google_drive_client_id_desc").to_string()),
+                            .description(
+                                t!("Settings.General.Sync.google_drive_client_id_desc").to_string(),
+                            ),
                             SettingItem::new(
                                 "Google Drive Client Secret",
                                 themed_setting_field(SettingField::input(
@@ -1715,7 +1759,10 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).sync_backend_type == "google_drive"
                             })
-                            .description(t!("Settings.General.Sync.google_drive_client_secret_desc").to_string()),
+                            .description(
+                                t!("Settings.General.Sync.google_drive_client_secret_desc")
+                                    .to_string(),
+                            ),
                             SettingItem::action_button(
                                 |_opts: &RenderOptions,
                                  _window: &mut gpui::Window,
@@ -1765,7 +1812,9 @@ impl SettingsPanel {
                                     });
                                     window.open_dialog(cx, move |dialog, _window, _cx| {
                                         dialog
-                                            .title(t!("Settings.General.Sync.google_drive_auth_title"))
+                                            .title(t!(
+                                                "Settings.General.Sync.google_drive_auth_title"
+                                            ))
                                             .child(dialog_entity.clone())
                                     });
                                 },
@@ -1996,6 +2045,31 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Terminal.middle_click_paste_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.recovery_scrollback_lines"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 0.0,
+                                        max: MAX_RECOVERY_SCROLLBACK_LINES as f64,
+                                        step: 100.0,
+                                    },
+                                    |cx: &App| {
+                                        AppSettings::global(cx).terminal_recovery_scrollback_lines
+                                    },
+                                    |val: f64, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.terminal_recovery_scrollback_lines = val;
+                                        settings.save();
+                                        let settings_snapshot = settings.clone();
+                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.terminal_recovery_scrollback_lines),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.recovery_scrollback_lines_desc")
+                                    .to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Terminal.exit_behavior"),

@@ -361,8 +361,19 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) {
         let (tab_id, tab_index) = self.next_local_terminal_tab_id_and_index(cx);
-        let terminal_view =
-            cx.new(|cx| TerminalView::new_with_index(config, tab_index, window, cx));
+        let terminal_view = if let Some(restore_state) = restore_state.cloned() {
+            cx.new(|cx| {
+                TerminalView::new_restored_local_with_index(
+                    config,
+                    restore_state,
+                    tab_index,
+                    window,
+                    cx,
+                )
+            })
+        } else {
+            cx.new(|cx| TerminalView::new_with_index(config, tab_index, window, cx))
+        };
 
         self.setup_terminal_view(&terminal_view, window, cx);
         if let Some(restore_state) = restore_state {

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::storage::{get_config_dir, now, ConnectionType};
+use crate::storage::{ConnectionType, get_config_dir, now};
 use crate::tab_container::TabContainerState;
 
 const CONNECTION_RESTORE_STATE_FILE: &str = "connection_restore_state.json";
@@ -58,6 +58,8 @@ impl ConnectionRestoreKind {
 pub struct LocalTerminalRestoreState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffer_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -242,6 +244,10 @@ fn restore_legacy_local_terminal_payload(data: &Value) -> Option<ConnectionResto
                 .get("working_dir")
                 .and_then(|value| value.as_str())
                 .map(str::to_string),
+            buffer_content: data
+                .get("buffer_content")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
             font_size: data
                 .get("font_size")
                 .and_then(|value| value.as_f64())
@@ -416,6 +422,7 @@ mod tests {
             active_connection_id: None,
             local_terminal: Some(LocalTerminalRestoreState {
                 working_dir: Some("/tmp".to_string()),
+                buffer_content: None,
                 font_size: None,
                 font_family: None,
                 font_ligatures: None,
@@ -483,6 +490,7 @@ mod tests {
                     active_connection_id: None,
                     local_terminal: Some(LocalTerminalRestoreState {
                         working_dir: Some("/tmp/restore".to_string()),
+                        buffer_content: Some("ls\r\nREADME.md".to_string()),
                         font_size: Some(15.0),
                         font_family: Some("JetBrains Mono".to_string()),
                         font_ligatures: Some(true),

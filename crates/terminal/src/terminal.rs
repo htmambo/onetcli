@@ -11,8 +11,10 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::cell::{Flags, LineLength};
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty::{self, Options as PtyOptions};
+use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
@@ -93,6 +95,64 @@ enum SshProcessState {
 
 const DEFAULT_COLS: usize = 80;
 const DEFAULT_ROWS: usize = 24;
+pub const DEFAULT_RECOVERY_SCROLLBACK_LINES: usize = 2000;
+pub const MAX_RECOVERY_SCROLLBACK_LINES: usize = 5000;
+const HISTORY_RESTORED_BANNER: &str =
+    "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n";
+
+fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
+    lines.min(MAX_RECOVERY_SCROLLBACK_LINES)
+}
+
+fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) -> Option<String> {
+    let max_lines = normalize_recovery_scrollback_lines(max_lines);
+    if max_lines == 0 || term.mode().contains(TermMode::ALT_SCREEN) {
+        return None;
+    }
+
+    let history_size = term.history_size();
+    let screen_lines = term.screen_lines();
+    let columns = term.columns();
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for line_idx in 0..(history_size + screen_lines) {
+        let grid_line = Line((line_idx as i32) - (history_size as i32));
+        let row = &term.grid()[grid_line];
+        let line_length = row.line_length();
+
+        if line_length.0 > 0 {
+            current_line.extend(row[..line_length].iter().map(|cell| cell.c));
+        }
+
+        let is_wrapline = columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
+        if is_wrapline {
+            continue;
+        }
+
+        lines.push(current_line.trim_end_matches(' ').to_string());
+        current_line.clear();
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line.trim_end_matches(' ').to_string());
+    }
+
+    while matches!(lines.last(), Some(last) if last.is_empty()) {
+        lines.pop();
+    }
+
+    if lines.len() > max_lines {
+        lines = lines.split_off(lines.len() - max_lines);
+    }
+
+    (!lines.is_empty()).then(|| lines.join("\r\n"))
+}
+
+fn replay_term_output(term: &Arc<FairMutex<Term<GpuiEventProxy>>>, data: &[u8]) {
+    let mut processor: Processor<StdSyncHandler> = Processor::new();
+    processor.advance(&mut *term.lock(), data);
+}
 
 /// 将路径安全地转为 POSIX shell 单参数，避免命令注入。
 pub(crate) fn shell_escape_arg(arg: &str) -> String {
@@ -735,7 +795,24 @@ impl Terminal {
         config: LocalConfig,
         cx: &mut Context<Self>,
     ) -> (Self, Option<String>) {
-        match Self::new_local(config, cx) {
+        match Self::new_local_with_recovery(config, None, cx) {
+            Ok(terminal) => (terminal, None),
+            Err(error) => {
+                let message = error.to_string();
+                (
+                    Self::new_local_disconnected(message.clone(), cx),
+                    Some(message),
+                )
+            }
+        }
+    }
+
+    pub fn new_local_with_recovery_or_disconnected(
+        config: LocalConfig,
+        recovery_content: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> (Self, Option<String>) {
+        match Self::new_local_with_recovery(config, recovery_content, cx) {
             Ok(terminal) => (terminal, None),
             Err(error) => {
                 let message = error.to_string();
@@ -749,6 +826,14 @@ impl Terminal {
 
     /// 创建本地终端
     pub fn new_local(config: LocalConfig, cx: &mut Context<Self>) -> Result<Self> {
+        Self::new_local_with_recovery(config, None, cx)
+    }
+
+    pub fn new_local_with_recovery(
+        config: LocalConfig,
+        recovery_content: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
@@ -758,6 +843,11 @@ impl Terminal {
             env,
             cwd_file,
         } = config;
+
+        if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
+            replay_term_output(&term, content.as_bytes());
+            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes());
+        }
 
         let pty_options = PtyOptions {
             shell: build_local_shell(shell),
@@ -1697,30 +1787,12 @@ impl Terminal {
     /// 捕获整个终端内容（完整 grid 缓冲区 + 回滚历史）为纯文本
     pub fn visible_content(&self) -> String {
         let term = self.term.lock();
-        let history_size = term.history_size();
-        let screen_lines = term.screen_lines();
-        let _cols = term.columns();
+        serialize_term_for_recovery(&term, 500).unwrap_or_default()
+    }
 
-        let mut lines = Vec::new();
-
-        // 遍历整个 grid：从最旧的回滚行到最新屏幕行
-        for line_idx in 0..(history_size + screen_lines) {
-            let grid_line = Line((line_idx as i32) - (history_size as i32));
-            let row = &term.grid()[grid_line];
-            let text: String = row[..].iter().map(|cell| cell.c).collect();
-            let trimmed = text.trim_end().to_string();
-            if !trimmed.is_empty() {
-                lines.push(trimmed);
-            }
-        }
-
-        // 限制输出大小（最多 500 行，保留最新内容）
-        const MAX_LINES: usize = 500;
-        if lines.len() > MAX_LINES {
-            lines = lines[lines.len() - MAX_LINES..].to_vec();
-        }
-
-        lines.join("\n")
+    pub fn recovery_content(&self, max_lines: usize) -> Option<String> {
+        let term = self.term.lock();
+        serialize_term_for_recovery(&term, max_lines)
     }
 
     // ========== 滚动操作 ==========
@@ -1904,6 +1976,45 @@ mod tests {
 
         terminal.ssh_process_state.set(SshProcessState::Idle);
         assert!(!terminal.has_running_processes());
+    }
+
+    #[test]
+    fn serialize_term_for_recovery_keeps_recent_scrollback() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (term, _event_proxy, _colors) =
+            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
+
+        super::replay_term_output(&term, b"line-1\r\nline-2\r\nline-3\r\n");
+
+        let serialized =
+            super::serialize_term_for_recovery(&term.lock(), 2).expect("应能生成恢复文本");
+        assert_eq!(serialized, "line-2\r\nline-3");
+    }
+
+    #[test]
+    fn serialize_term_for_recovery_skips_alt_screen() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (term, _event_proxy, _colors) =
+            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
+
+        super::replay_term_output(&term, b"\x1b[?1049hfullscreen");
+
+        assert_eq!(super::serialize_term_for_recovery(&term.lock(), 100), None);
+    }
+
+    #[test]
+    fn replay_term_output_supports_history_restored_banner() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (term, _event_proxy, _colors) =
+            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
+
+        super::replay_term_output(&term, b"echo hello");
+        super::replay_term_output(&term, super::HISTORY_RESTORED_BANNER.as_bytes());
+
+        let visible = super::serialize_term_for_recovery(&term.lock(), 20)
+            .expect("应能序列化带提示语的恢复内容");
+        assert!(visible.contains("echo hello"));
+        assert!(visible.contains("历史记录已恢复"));
     }
 
     #[test]

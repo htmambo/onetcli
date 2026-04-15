@@ -42,6 +42,7 @@ use rust_i18n::t;
 use std::ops::Deref;
 use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
+    DEFAULT_RECOVERY_SCROLLBACK_LINES,
 };
 use terminal::LocalConfig;
 
@@ -135,6 +136,110 @@ fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
 
 const DEFAULT_COLS: usize = 80;
 const DEFAULT_ROWS: usize = 24;
+
+#[derive(Clone, Copy)]
+struct TerminalRecoverySettings {
+    scrollback_lines: usize,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TerminalRecoverySaveOverrides {
+    scrollback_lines: Option<usize>,
+    max_chars: Option<usize>,
+}
+
+impl Default for TerminalRecoverySettings {
+    fn default() -> Self {
+        Self {
+            scrollback_lines: DEFAULT_RECOVERY_SCROLLBACK_LINES,
+        }
+    }
+}
+
+impl Global for TerminalRecoverySettings {}
+impl Global for TerminalRecoverySaveOverrides {}
+
+fn configured_recovery_scrollback_lines(cx: &App) -> usize {
+    if let Some(lines) = cx
+        .try_global::<TerminalRecoverySaveOverrides>()
+        .and_then(|overrides| overrides.scrollback_lines)
+    {
+        return lines;
+    }
+
+    cx.try_global::<TerminalRecoverySettings>()
+        .map(|settings| settings.scrollback_lines)
+        .unwrap_or(DEFAULT_RECOVERY_SCROLLBACK_LINES)
+}
+
+fn configured_recovery_max_chars(cx: &App) -> Option<usize> {
+    cx.try_global::<TerminalRecoverySaveOverrides>()
+        .and_then(|overrides| overrides.max_chars)
+}
+
+fn trim_recovery_content_to_recent_chars(
+    content: Option<String>,
+    max_chars: Option<usize>,
+) -> Option<String> {
+    let content = content?;
+    let Some(max_chars) = max_chars else {
+        return Some(content);
+    };
+
+    if max_chars == 0 {
+        return None;
+    }
+
+    let char_count = content.chars().count();
+    if char_count <= max_chars {
+        return Some(content);
+    }
+
+    let start = content
+        .char_indices()
+        .rev()
+        .nth(max_chars.saturating_sub(1))
+        .map(|(idx, _)| idx)
+        .unwrap_or(content.len());
+
+    Some(content[start..].to_string())
+}
+
+pub fn set_recovery_scrollback_lines(cx: &mut App, scrollback_lines: usize) {
+    let settings = TerminalRecoverySettings { scrollback_lines };
+    if cx.has_global::<TerminalRecoverySettings>() {
+        *cx.global_mut::<TerminalRecoverySettings>() = settings;
+    } else {
+        cx.set_global(settings);
+    }
+}
+
+pub fn with_recovery_snapshot_overrides<R>(
+    cx: &mut App,
+    scrollback_lines: Option<usize>,
+    max_chars: Option<usize>,
+    f: impl FnOnce(&mut App) -> R,
+) -> R {
+    let previous = cx
+        .try_global::<TerminalRecoverySaveOverrides>()
+        .copied()
+        .unwrap_or_default();
+    let overrides = TerminalRecoverySaveOverrides {
+        scrollback_lines,
+        max_chars,
+    };
+
+    if cx.has_global::<TerminalRecoverySaveOverrides>() {
+        *cx.global_mut::<TerminalRecoverySaveOverrides>() = overrides;
+    } else {
+        cx.set_global(overrides);
+    }
+
+    let result = f(cx);
+
+    *cx.global_mut::<TerminalRecoverySaveOverrides>() = previous;
+    result
+}
 
 fn take_whole_scroll_lines(scroll_lines_accumulated: &mut f32) -> i32 {
     let lines = scroll_lines_accumulated.trunc() as i32;
@@ -264,6 +369,13 @@ enum ResizingPanel {
 }
 
 pub fn init(cx: &mut App) {
+    if !cx.has_global::<TerminalRecoverySettings>() {
+        cx.set_global(TerminalRecoverySettings::default());
+    }
+    if !cx.has_global::<TerminalRecoverySaveOverrides>() {
+        cx.set_global(TerminalRecoverySaveOverrides::default());
+    }
+
     cx.bind_keys([
         KeyBinding::new("tab", SendTab, Some(TERMINAL_CONTEXT)),
         KeyBinding::new("shift-tab", SendShiftTab, Some(TERMINAL_CONTEXT)),
@@ -495,6 +607,47 @@ impl TerminalView {
 
         if let Some(error) = init_error.borrow_mut().take() {
             // 窗口初始化期间（如标签页恢复）Root 尚未设置，跳过通知以避免崩溃
+            if window.root::<Root>().is_some() {
+                let error_msg = format!("创建本地终端失败: {}", error);
+                window.show_system_notification(
+                    SystemNotificationOptions::with_id(
+                        "终端错误",
+                        &error_msg,
+                        "terminal-init-error",
+                    ),
+                    cx,
+                );
+                window.push_notification(Notification::error(error_msg).autohide(true), cx);
+            } else {
+                tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
+            }
+        }
+
+        view
+    }
+
+    pub fn new_restored_local_with_index(
+        config: LocalConfig,
+        restore_state: LocalTerminalRestoreState,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let init_error = Rc::new(RefCell::new(None));
+        let init_error_clone = init_error.clone();
+        let recovery_content = restore_state.buffer_content.clone();
+        let terminal = cx.new(move |cx| {
+            let (terminal, error) = Terminal::new_local_with_recovery_or_disconnected(
+                config,
+                recovery_content.as_deref(),
+                cx,
+            );
+            *init_error_clone.borrow_mut() = error;
+            terminal
+        });
+        let view = Self::new_with_terminal(terminal, None, None, true, tab_index, window, cx);
+
+        if let Some(error) = init_error.borrow_mut().take() {
             if window.root::<Root>().is_some() {
                 let error_msg = format!("创建本地终端失败: {}", error);
                 window.show_system_notification(
@@ -2436,7 +2589,15 @@ pub fn build_local_terminal(
         working_dir,
         ..Default::default()
     };
-    let view = cx.new(|cx| TerminalView::new(config, window, cx));
+    let view = cx.new(|cx| {
+        TerminalView::new_restored_local_with_index(
+            config,
+            local_terminal.clone(),
+            None,
+            window,
+            cx,
+        )
+    });
 
     // 注意：不能在 cx.new() 的闭包内调用 view.update()（GPUI 不允许在 entity 构造期间更新自身）。
     // 使用 window.defer() 将设置应用延迟到 entity 构造完成之后，且能获得新鲜的 &mut Window。
@@ -2539,6 +2700,10 @@ impl TabContent for TerminalView {
             }
             TerminalConnectionKind::Local => {
                 let terminal = self.terminal.read(cx);
+                let buffer_content = trim_recovery_content_to_recent_chars(
+                    terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
+                    configured_recovery_max_chars(cx),
+                );
                 ConnectionRestorePayload {
                     kind: ConnectionRestoreKind::LocalTerminal,
                     connection_id: None,
@@ -2546,6 +2711,7 @@ impl TabContent for TerminalView {
                     active_connection_id: None,
                     local_terminal: Some(LocalTerminalRestoreState {
                         working_dir: terminal.latest_working_dir(),
+                        buffer_content,
                         font_size: Some(f32::from(self.current_theme.font_size)),
                         font_family: Some(self.current_theme.font_family.to_string()),
                         font_ligatures: Some(self.font_ligatures_enabled),
@@ -3087,8 +3253,8 @@ mod tests {
     use super::{
         alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
         has_unterminated_shell_quote, multiline_non_empty_line_count, preserve_theme_typography,
-        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, TerminalView,
-        UnbracketedPasteHazard,
+        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
+        trim_recovery_content_to_recent_chars, TerminalView, UnbracketedPasteHazard,
     };
     use crate::theme::TerminalTheme;
     use gpui::{AppContext, SharedString, TestAppContext};
@@ -3166,6 +3332,23 @@ mod tests {
         assert_eq!(
             detect_unbracketed_paste_hazard("printf 'hello\nworld"),
             Some(UnbracketedPasteHazard::UnterminatedQuote)
+        );
+    }
+
+    #[test]
+    fn trim_recovery_content_keeps_recent_utf8_chars() {
+        let content = Some("第一行\n第二行\n第三行".to_string());
+        assert_eq!(
+            trim_recovery_content_to_recent_chars(content, Some(3)).as_deref(),
+            Some("第三行")
+        );
+    }
+
+    #[test]
+    fn trim_recovery_content_zero_limit_drops_content() {
+        assert_eq!(
+            trim_recovery_content_to_recent_chars(Some("hello".to_string()), Some(0)),
+            None
         );
     }
 

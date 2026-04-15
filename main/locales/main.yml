@@ -988,6 +988,14 @@ Settings:
         en: Paste clipboard content with middle mouse button
         zh-CN: 使用鼠标中键粘贴剪贴板内容
         zh-HK: 使用滑鼠中鍵貼上剪貼簿內容
+      recovery_scrollback_lines:
+        en: Restored history lines
+        zh-CN: 恢复历史行数
+        zh-HK: 恢復歷史行數
+      recovery_scrollback_lines_desc:
+        en: Limit how many recent local terminal lines are saved for restore prompts (0-5000)
+        zh-CN: 限制本地终端在恢复弹窗中可恢复的最近历史行数（0-5000）
+        zh-HK: 限制本地終端在恢復彈窗中可恢復的最近歷史行數（0-5000）
       exit_behavior:
         en: Exit behavior
         zh-CN: 退出行为

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ::sysinfo::{Pid, System};
@@ -12,8 +12,8 @@ use crate::saved_connection_picker::TabBarSavedConnectionPicker;
 use crate::setting_tab::{AppSettings, SavedWindowBounds};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    actions, div, px, AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Render, Styled, Task, Window,
+    AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
+    ParentElement, Render, Styled, Task, Window, actions, div, px,
 };
 #[cfg(target_os = "macos")]
 use gpui::{Menu, MenuItem};
@@ -142,7 +142,7 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 use gpui_component::dock::{ClosePanel, ToggleZoom};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, IconName, Root, Sizable};
+use gpui_component::{ActiveTheme, Icon, IconName, Root, Sizable, h_flex, v_flex};
 use one_core::llm::manager::GlobalProviderState;
 use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
@@ -153,11 +153,16 @@ use one_core::utils::debouncer::Debouncer;
 use one_core::{PendingChangeLevel, RunningKind, RunningState};
 use reqwest_client::ReqwestClient;
 use rust_i18n::t;
+use terminal_view::with_recovery_snapshot_overrides;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const APP_WINDOW_TITLE: &str = "OnetCli";
 const GLOBAL_STATUS_BAR_HEIGHT: f32 = 28.0;
+const BACKGROUND_RECOVERY_SAVE_INTERVAL_SECS: u64 = 30;
+const BACKGROUND_TERMINAL_RECOVERY_SCROLLBACK_LINES: usize = 200;
+const BACKGROUND_TERMINAL_RECOVERY_MAX_CHARS: usize = 128 * 1024;
+const WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS: usize = 256 * 1024;
 
 /// 连接类型统计
 #[derive(Default, Clone)]
@@ -765,7 +770,9 @@ pub fn init(cx: &mut App) {
 pub struct OnetCliApp {
     tab_container: Entity<TabContainer>,
     last_layout_state: Option<TabContainerState>,
+    last_background_recovery_state: Option<TabContainerState>,
     _save_layout_task: Option<Task<()>>,
+    _background_recovery_task: Option<Task<()>>,
     pending_window_bounds: Option<SavedWindowBounds>,
     window_bounds_save_debouncer: Arc<Debouncer>,
     _save_window_bounds_task: Option<Task<()>>,
@@ -954,7 +961,12 @@ impl OnetCliApp {
         cx.on_app_quit({
             let tab_container = tab_container.clone();
             move |_, cx| {
-                let state = tab_container.read(cx).dump(cx);
+                let state = with_recovery_snapshot_overrides(
+                    cx,
+                    None,
+                    Some(WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS),
+                    |cx| tab_container.read(cx).dump(cx),
+                );
                 if let Err(err) = save_tab_state(&state) {
                     tracing::error!("退出时保存标签状态失败：{:?}", err);
                 }
@@ -977,17 +989,21 @@ impl OnetCliApp {
         })
         .detach();
 
-        Self {
+        let mut this = Self {
             tab_container,
             last_layout_state: None,
+            last_background_recovery_state: None,
             _save_layout_task: None,
+            _background_recovery_task: None,
             pending_window_bounds: AppSettings::snapshot_main_window_bounds(window),
             window_bounds_save_debouncer: Arc::new(Debouncer::new(Duration::from_millis(
                 WINDOW_BOUNDS_SAVE_DEBOUNCE_MS,
             ))),
             _save_window_bounds_task: None,
             window_title: String::new(),
-        }
+        };
+        this.ensure_background_recovery_loop(cx);
+        this
     }
 
     fn save_layout(&mut self, cx: &mut App) {
@@ -996,6 +1012,53 @@ impl OnetCliApp {
             &mut self.last_layout_state,
             cx,
         ));
+    }
+
+    fn ensure_background_recovery_loop(&mut self, cx: &mut Context<Self>) {
+        if self._background_recovery_task.is_some() {
+            return;
+        }
+
+        self._background_recovery_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(BACKGROUND_RECOVERY_SAVE_INTERVAL_SECS))
+                    .await;
+
+                let keep_running = this
+                    .update(cx, |this, cx| {
+                        this.save_background_recovery_state(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+
+                if !keep_running {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn save_background_recovery_state(&mut self, cx: &mut Context<Self>) {
+        let state = with_recovery_snapshot_overrides(
+            cx,
+            Some(BACKGROUND_TERMINAL_RECOVERY_SCROLLBACK_LINES),
+            Some(BACKGROUND_TERMINAL_RECOVERY_MAX_CHARS),
+            |cx| self.tab_container.read(cx).dump(cx),
+        );
+
+        if Some(&state) == self.last_background_recovery_state.as_ref() {
+            return;
+        }
+
+        match save_tab_state(&state) {
+            Ok(()) => {
+                self.last_background_recovery_state = Some(state);
+            }
+            Err(err) => {
+                tracing::warn!("后台保存恢复状态失败：{:?}", err);
+            }
+        }
     }
 
     fn stage_window_bounds(&mut self, next_bounds: SavedWindowBounds) -> bool {
@@ -1351,8 +1414,8 @@ impl Render for OnetCliApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_status_bar_title, build_window_title, AppCloseDecision, AppCloseGuard,
-        ConnectionStats,
+        AppCloseDecision, AppCloseGuard, ConnectionStats, build_status_bar_title,
+        build_window_title,
     };
 
     #[test]
