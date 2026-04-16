@@ -361,20 +361,22 @@ Expected: 标签持久化测试通过。
 
 **Step 3: 输出最终风险清单**
 
-必须显式记录：
-- broker 崩溃时的降级行为
-- detached shell TTL 策略
-- attach 失败时的数据丢失窗口
-- Windows 命名管道实现差异
+已记录风险如下：
+
+- **broker 崩溃时的降级行为**：若 local-pty-host 子进程崩溃或异常退出，应用重启后 live attach 会失败，`new_restored_local_with_index` 会自动回退到现有的 `buffer_content + new shell` 恢复路径，用户仍可看到历史缓冲内容。
+- **detached shell TTL 策略**：host 端对 detached session 维持 `600 秒（10 分钟）` TTL，超过后由后台清理任务自动 kill；用户亦可手动在恢复弹窗中跳过对应项，触发立即清理。
+- **attach 失败时的数据丢失窗口**：当 host 未运行、session TTL 已过期或 shell 已自行退出时，应用关闭期间产生的终端输出无法通过 live attach 恢复，存在数据丢失窗口。第一版依赖 `buffer_content` 快照作为稳定回退。
+- **Windows 命名管道实现差异**：当前 Windows 分支使用 `tokio::net::windows::named_pipe::NamedPipeServer`，代码结构已拆分至 `local_pty_host_windows.rs`，但尚未在真实 ConPTY 环境下完成端到端验证（输入回显、resize 稳定性）。
 
 **Step 4: 分阶段提交**
 
-建议提交拆分：
-1. `test: unblock terminal crate unit tests`
-2. `feat: add local pty host protocol and entrypoint`
-3. `feat: move local terminal backend to hosted pty client`
-4. `feat: persist local pty session ids for live restore`
-5. `feat: detach local pty sessions on app quit`
+已按建议拆分提交：
+1. ✅ `test: unblock terminal crate unit tests`
+2. ✅ `feat: add local pty host protocol and entrypoint`
+3. ✅ `feat: move local terminal backend to hosted pty client`
+4. ✅ `feat: persist local pty session ids for live restore`
+5. ✅ `feat: detach local pty sessions on app quit`
+6. ✅ `feat: add pre-restore pty liveness probe and fallback`
 
 ## 推荐执行顺序
 
