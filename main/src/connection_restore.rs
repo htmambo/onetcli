@@ -264,6 +264,12 @@ fn kind_label(kind: ConnectionRestoreKind) -> String {
     }
 }
 
+/// No-op on non-Unix platforms.
+#[cfg(not(unix))]
+pub fn probe_pty_sessions(_items: &mut [ResolvedConnectionRestoreItem]) {}
+
+/// Probes active PTY sessions and updates item preferences accordingly.
+#[cfg(unix)]
 pub fn probe_pty_sessions(items: &mut [ResolvedConnectionRestoreItem]) {
     use std::time::Duration;
     use terminal::{LocalPtyClient, LocalPtyHostEvent, LocalPtyHostRequest};

@@ -46,9 +46,12 @@ use crate::history::{
     push_rich_history_entry, HistoryEntry, ShellHistoryFormat, PERSISTED_HISTORY_LIMIT,
     SESSION_HISTORY_LIMIT,
 };
+#[cfg(unix)]
 use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
+#[cfg(unix)]
 use crate::local_pty_protocol::LocalPtyHostEvent;
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
+#[cfg(unix)]
 use anyhow::Context as _;
 
 use crate::{
@@ -131,6 +134,7 @@ fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
 
 /// 判断是否使用 hosted 本地 PTY 模式。
 /// 通过环境变量 `ONETCLI_HOSTED_LOCAL_PTY` 控制，默认关闭（fallback 到旧实现）。
+#[cfg(unix)]
 fn use_hosted_local_pty() -> bool {
     std::env::var("ONETCLI_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
 }
@@ -1134,6 +1138,7 @@ impl Terminal {
         recovery_content: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
+        #[cfg(unix)]
         if use_hosted_local_pty() {
             return Self::new_local_hosted(config, recovery_content, cx);
         }
@@ -1203,6 +1208,7 @@ impl Terminal {
         })
     }
 
+    #[cfg(unix)]
     fn new_local_hosted(
         config: LocalConfig,
         recovery_content: Option<&str>,
@@ -1299,6 +1305,7 @@ impl Terminal {
         })
     }
 
+    #[cfg(unix)]
     pub fn new_local_hosted_attach(
         config: LocalConfig,
         session_id: String,

@@ -773,8 +773,9 @@ impl TerminalView {
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
         let recovery_content = restore_state.buffer_content.clone();
-        let pty_session_id = restore_state.pty_session_id.clone();
+        let _pty_session_id = restore_state.pty_session_id.clone();
         let terminal = cx.new(move |cx| {
+            #[cfg(unix)]
             if let Some(session_id) = pty_session_id.clone() {
                 match Terminal::new_local_hosted_attach(config.clone(), session_id, cx) {
                     Ok(terminal) => return terminal,

@@ -16,7 +16,7 @@ pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("无效的 named pipe 路径"))?;
 
-    let listener = ServerOptions::new()
+    let mut listener = ServerOptions::new()
         .create(pipe_name)
         .context("创建 Windows Named Pipe Server 失败")?;
     tracing::info!(endpoint = %pipe_name, "local-pty-host Windows listener 已启动");

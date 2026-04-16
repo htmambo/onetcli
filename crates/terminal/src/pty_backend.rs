@@ -113,6 +113,7 @@ pub enum PtyCommand {
 /// 当 alacritty_terminal 处理 DA 查询等序列时，会生成 PtyWrite 事件，
 /// 需要通过此通道将响应写回终端。
 #[derive(Clone)]
+#[allow(dead_code)]
 enum PtyWriteBack {
     /// 本地 PTY：通过 EventLoopSender 写回
     Local(EventLoopSender),
@@ -302,6 +303,7 @@ impl GpuiEventProxy {
     }
 
     /// 设置 Hosted 本地 PTY 回写通道
+    #[allow(dead_code)]
     pub(crate) fn set_hosted_write_back(
         &self,
         sender: UnboundedSender<LocalPtyHostRequest>,
