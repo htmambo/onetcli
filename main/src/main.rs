@@ -46,6 +46,19 @@ fn main() {
         onetcli_app::init(cx);
 
         setting_tab::init_settings(cx);
+
+        // 异步加载 themes/ 目录下的外部主题文件，并在加载完成后重新应用当前主题配置
+        if let Err(err) = gpui_component::ThemeRegistry::watch_dir(
+            std::path::PathBuf::from("./themes"),
+            cx,
+            |cx| {
+                let settings = AppSettings::global(cx).clone();
+                settings.apply_theme_preferences(None, cx);
+            },
+        ) {
+            tracing::error!("Failed to watch themes directory: {}", err);
+        }
+
         let db_state = GlobalDbState::new();
         db_state.start_cleanup_task(cx);
         cx.set_global(db_state);

@@ -16,7 +16,8 @@ use gpui::{
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, LEFT_PANEL_ALPHA_OFFSET,
-    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, TitleBar, WindowExt,
+    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, ThemeRegistry,
+    TitleBar, WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -444,6 +445,16 @@ pub struct AppSettings {
     pub terminal_middle_click_paste: bool,
     #[serde(default)]
     pub terminal_sync_path_with_terminal: bool,
+    #[serde(default = "default_theme_name")]
+    pub theme_name: String,
+    #[serde(default = "default_scrollbar_show")]
+    pub scrollbar_show: String,
+    #[serde(default = "default_mono_font_family")]
+    pub mono_font_family: String,
+    #[serde(default = "default_radius")]
+    pub radius: f64,
+    #[serde(default = "default_true")]
+    pub shadow: bool,
     #[serde(default = "default_terminal_theme")]
     pub terminal_theme: String,
     #[serde(default)]
@@ -626,6 +637,28 @@ fn default_terminal_line_height_scale() -> f64 {
     DEFAULT_LINE_HEIGHT_SCALE as f64
 }
 
+fn default_theme_name() -> String {
+    "Default Light".to_string()
+}
+
+fn default_scrollbar_show() -> String {
+    "hover".to_string()
+}
+
+fn default_mono_font_family() -> String {
+    if cfg!(target_os = "macos") {
+        "Menlo".to_string()
+    } else if cfg!(target_os = "windows") {
+        "Consolas".to_string()
+    } else {
+        "DejaVu Sans Mono".to_string()
+    }
+}
+
+fn default_radius() -> f64 {
+    6.0
+}
+
 fn default_terminal_theme() -> String {
     "ocean".to_string()
 }
@@ -800,6 +833,11 @@ impl Default for AppSettings {
             terminal_enable_autocomplete: default_true(),
             terminal_middle_click_paste: default_true(),
             terminal_sync_path_with_terminal: false,
+            theme_name: default_theme_name(),
+            scrollbar_show: default_scrollbar_show(),
+            mono_font_family: default_mono_font_family(),
+            radius: default_radius(),
+            shadow: true,
             terminal_theme: default_terminal_theme(),
             terminal_cursor_blink: false,
             terminal_recovery_scrollback_lines: default_terminal_recovery_scrollback_lines(),
@@ -1033,7 +1071,7 @@ impl AppSettings {
         }
     }
 
-    fn resolve_system_appearance(window: Option<&Window>, cx: &mut App) -> WindowAppearance {
+    pub fn resolve_system_appearance(window: Option<&Window>, cx: &mut App) -> WindowAppearance {
         #[cfg(target_os = "linux")]
         if let Some(appearance) = resolve_linux_window_appearance_override() {
             return appearance;
@@ -1047,10 +1085,72 @@ impl AppSettings {
     pub fn apply_theme_preferences(&self, window: Option<&mut Window>, cx: &mut App) {
         let appearance = Self::resolve_system_appearance(window.as_deref(), cx);
         let mode = self.effective_theme_mode(appearance);
+
+        // 当 effective mode 改变时，如果当前 theme_name 不匹配新模式，
+        // 尝试找同名变体（Light <-> Dark），找不到则回退到默认主题。
+        if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(self.theme_name.as_str()) {
+            if theme_config.mode != mode {
+                let fallback = Self::find_matching_theme_name(&self.theme_name, mode, cx)
+                    .unwrap_or_else(|| {
+                        if mode.is_dark() {
+                            ThemeRegistry::global(cx).default_dark_theme().name.to_string()
+                        } else {
+                            ThemeRegistry::global(cx).default_light_theme().name.to_string()
+                        }
+                    });
+                AppSettings::global_mut(cx).theme_name = fallback;
+                AppSettings::global_mut(cx).save();
+            }
+        }
+
         Theme::set_window_surface_preferences(self.enable_glass_effect, self.glass_opacity, cx);
         Theme::change(mode, window, cx);
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
+        self.apply_misc_appearance_preferences(cx);
         self.apply_window_background_preferences(cx);
+    }
+
+    fn find_matching_theme_name(current: &str, mode: ThemeMode, cx: &App) -> Option<String> {
+        if let Some(theme) = ThemeRegistry::global(cx).get_by_name(current) {
+            if theme.mode == mode {
+                return Some(current.to_string());
+            }
+        }
+
+        let candidate = if mode.is_dark() {
+            current.replace("Light", "Dark")
+        } else {
+            current.replace("Dark", "Light")
+        };
+
+        if let Some(theme) = ThemeRegistry::global(cx).themes().get(candidate.as_str()) {
+            if theme.mode == mode {
+                return Some(candidate);
+            }
+        }
+
+        None
+    }
+
+    fn apply_misc_appearance_preferences(&self, cx: &mut App) {
+        if let Some(theme_config) =
+            ThemeRegistry::global(cx).themes().get(self.theme_name.as_str()).cloned()
+        {
+            Theme::global_mut(cx).apply_config(&theme_config);
+        }
+
+        let scrollbar_show = match self.scrollbar_show.as_str() {
+            "scrolling" => gpui_component::scroll::ScrollbarShow::Scrolling,
+            "always" => gpui_component::scroll::ScrollbarShow::Always,
+            _ => gpui_component::scroll::ScrollbarShow::Hover,
+        };
+
+        let theme = Theme::global_mut(cx);
+        theme.scrollbar_show = scrollbar_show;
+        theme.mono_font_family = self.mono_font_family.clone().into();
+        theme.radius = px(self.radius as f32);
+        theme.radius_lg = px((self.radius + 2.0) as f32);
+        theme.shadow = self.shadow;
     }
 
     fn apply_window_background_preferences(&self, cx: &mut App) {
@@ -1112,7 +1212,8 @@ impl AppSettings {
 }
 
 pub fn init_settings(cx: &mut App) {
-    let settings = AppSettings::load();
+    let mut settings = AppSettings::load();
+    migrate_legacy_theme_state(&mut settings);
     let initial_sync_server_url = settings.sync_server_url.clone();
     terminal_view::init_settings(cx, Some(legacy_terminal_settings(&settings)));
     // 初始化自动保存配置全局状态
@@ -1123,6 +1224,33 @@ pub fn init_settings(cx: &mut App) {
     settings.apply(cx);
     cx.set_global(settings);
     let _ = get_auth_service(cx).update_sync_server_url(&initial_sync_server_url);
+}
+
+fn migrate_legacy_theme_state(settings: &mut AppSettings) {
+    const LEGACY_STATE_FILE: &str = "target/state.json";
+    if settings.theme_name != default_theme_name() && settings.scrollbar_show != default_scrollbar_show() {
+        return;
+    }
+    let Ok(content) = std::fs::read_to_string(LEGACY_STATE_FILE) else {
+        return;
+    };
+    #[derive(Debug, Clone, serde::Deserialize)]
+    struct LegacyState {
+        theme: Option<String>,
+        scrollbar_show: Option<String>,
+    }
+    if let Ok(legacy) = serde_json::from_str::<LegacyState>(&content) {
+        if settings.theme_name == default_theme_name() {
+            if let Some(theme) = legacy.theme.filter(|t| !t.is_empty()) {
+                settings.theme_name = theme;
+            }
+        }
+        if settings.scrollbar_show == default_scrollbar_show() {
+            if let Some(sb) = legacy.scrollbar_show.filter(|t| !t.is_empty()) {
+                settings.scrollbar_show = sb;
+            }
+        }
+    }
 }
 
 fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
@@ -1440,6 +1568,155 @@ impl SettingsPanel {
                                 .default_value(default_settings.font_size),
                             )
                             .description(t!("Settings.General.Font.font_size_desc").to_string()),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.theme_name"),
+                                themed_setting_field(SettingField::dropdown(
+                                    {
+                                        let current_mode = Theme::global(cx).mode;
+                                        ThemeRegistry::global(cx)
+                                            .themes()
+                                            .values()
+                                            .filter(|t| t.mode == current_mode)
+                                            .map(|t| (t.name.clone(), t.name.clone()))
+                                            .collect::<Vec<_>>()
+                                    },
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).theme_name.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.theme_name = val.to_string();
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.theme_name.clone()),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.theme_name_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.scrollbar_show"),
+                                themed_setting_field(SettingField::dropdown(
+                                    vec![
+                                        (
+                                            "scrolling".into(),
+                                            t!("Settings.General.Appearance.scrollbar_show_scrolling")
+                                                .into(),
+                                        ),
+                                        (
+                                            "hover".into(),
+                                            t!("Settings.General.Appearance.scrollbar_show_hover")
+                                                .into(),
+                                        ),
+                                        (
+                                            "always".into(),
+                                            t!("Settings.General.Appearance.scrollbar_show_always")
+                                                .into(),
+                                        ),
+                                    ],
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).scrollbar_show.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.scrollbar_show = val.to_string();
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.scrollbar_show.clone()),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.scrollbar_show_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.shadow"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).shadow,
+                                    |val: bool, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.shadow = val;
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                )
+                                .default_value(default_settings.shadow),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.shadow_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.radius"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 0.0,
+                                        max: 24.0,
+                                        step: 1.0,
+                                    },
+                                    |cx: &App| AppSettings::global(cx).radius,
+                                    |val: f64, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.radius = val.max(0.0);
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.radius),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.radius_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.mono_font_family"),
+                                themed_setting_field(SettingField::dropdown(
+                                    vec![
+                                        ("Menlo".into(), "Menlo".into()),
+                                        ("Consolas".into(), "Consolas".into()),
+                                        ("DejaVu Sans Mono".into(), "DejaVu Sans Mono".into()),
+                                        ("JetBrains Mono".into(), "JetBrains Mono".into()),
+                                        ("Fira Code".into(), "Fira Code".into()),
+                                        ("Source Code Pro".into(), "Source Code Pro".into()),
+                                    ],
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).mono_font_family.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.mono_font_family = val.to_string();
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                ))
+                                .default_value(
+                                    SharedString::from(default_settings.mono_font_family.clone()),
+                                ),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.mono_font_family_desc")
+                                    .to_string(),
+                            ),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Sync.group_title"))
@@ -2468,7 +2745,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::parse_deepin_theme_appearance;
     use super::{
-        AppSettings, SavedWindowBounds, SavedWindowDisplayState,
+        AppSettings, GlobalProxySettings, ProxyType, SavedWindowBounds, SavedWindowDisplayState,
         centered_window_bounds_within_visible_area, clamp_glass_opacity, editable_sync_server_url,
         normalize_sync_server_url,
     };
@@ -2675,6 +2952,89 @@ mod tests {
             parse_deepin_theme_appearance("(<\'hazy-color.light\'>,)"),
             Some(WindowAppearance::Light)
         );
+    }
+
+    #[test]
+    fn global_proxy_settings_build_proxy_url_without_auth() {
+        let settings = GlobalProxySettings {
+            enabled: true,
+            proxy_type: ProxyType::Socks5,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            username: String::new(),
+            password: String::new(),
+        };
+
+        let proxy_url = settings
+            .to_proxy_url()
+            .expect("代理 URL 应构建成功")
+            .expect("启用代理时应返回 URL");
+
+        assert_eq!(proxy_url.as_str(), "socks5://127.0.0.1:7890");
+    }
+
+    #[test]
+    fn global_proxy_settings_build_proxy_url_with_auth() {
+        let settings = GlobalProxySettings {
+            enabled: true,
+            proxy_type: ProxyType::Http,
+            host: "proxy.example.com".to_string(),
+            port: 8080,
+            username: "demo-user".to_string(),
+            password: "demo-pass".to_string(),
+        };
+
+        let proxy_url = settings
+            .to_proxy_url()
+            .expect("代理 URL 应构建成功")
+            .expect("启用代理时应返回 URL");
+
+        assert_eq!(
+            proxy_url.as_str(),
+            "http://demo-user:demo-pass@proxy.example.com:8080/"
+        );
+    }
+
+    #[test]
+    fn disabled_global_proxy_settings_return_none() {
+        let settings = GlobalProxySettings {
+            enabled: false,
+            ..GlobalProxySettings::default()
+        };
+
+        let proxy_url = settings.to_proxy_url().expect("禁用代理时不应返回错误");
+
+        assert!(proxy_url.is_none());
+    }
+
+    #[test]
+    fn global_proxy_settings_validate_required_fields() {
+        let settings = GlobalProxySettings {
+            enabled: true,
+            proxy_type: ProxyType::Https,
+            host: String::new(),
+            port: 0,
+            username: String::new(),
+            password: String::new(),
+        };
+
+        let err = settings.validate().expect_err("缺少主机和端口时应校验失败");
+
+        assert!(err.contains("主机"));
+    }
+
+    #[test]
+    fn legacy_terminal_settings_maps_terminal_fields() {
+        let settings = AppSettings::default();
+        let legacy = super::legacy_terminal_settings(&settings);
+
+        assert_eq!(legacy.font_size, settings.terminal_font_size as f32);
+        assert_eq!(legacy.auto_copy, settings.terminal_auto_copy);
+        assert_eq!(
+            legacy.enable_autocomplete,
+            settings.terminal_enable_autocomplete
+        );
+        assert_eq!(legacy.theme, settings.terminal_theme);
     }
 }
 
@@ -3747,93 +4107,7 @@ fn render_shortcuts_section(cx: &App) -> gpui::AnyElement {
     container.into_any_element()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{AppSettings, GlobalProxySettings, ProxyType};
 
-    #[test]
-    fn global_proxy_settings_build_proxy_url_without_auth() {
-        let settings = GlobalProxySettings {
-            enabled: true,
-            proxy_type: ProxyType::Socks5,
-            host: "127.0.0.1".to_string(),
-            port: 7890,
-            username: String::new(),
-            password: String::new(),
-        };
-
-        let proxy_url = settings
-            .to_proxy_url()
-            .expect("代理 URL 应构建成功")
-            .expect("启用代理时应返回 URL");
-
-        assert_eq!(proxy_url.as_str(), "socks5://127.0.0.1:7890");
-    }
-
-    #[test]
-    fn global_proxy_settings_build_proxy_url_with_auth() {
-        let settings = GlobalProxySettings {
-            enabled: true,
-            proxy_type: ProxyType::Http,
-            host: "proxy.example.com".to_string(),
-            port: 8080,
-            username: "demo-user".to_string(),
-            password: "demo-pass".to_string(),
-        };
-
-        let proxy_url = settings
-            .to_proxy_url()
-            .expect("代理 URL 应构建成功")
-            .expect("启用代理时应返回 URL");
-
-        assert_eq!(
-            proxy_url.as_str(),
-            "http://demo-user:demo-pass@proxy.example.com:8080/"
-        );
-    }
-
-    #[test]
-    fn disabled_global_proxy_settings_return_none() {
-        let settings = GlobalProxySettings {
-            enabled: false,
-            ..GlobalProxySettings::default()
-        };
-
-        let proxy_url = settings.to_proxy_url().expect("禁用代理时不应返回错误");
-
-        assert!(proxy_url.is_none());
-    }
-
-    #[test]
-    fn global_proxy_settings_validate_required_fields() {
-        let settings = GlobalProxySettings {
-            enabled: true,
-            proxy_type: ProxyType::Https,
-            host: String::new(),
-            port: 0,
-            username: String::new(),
-            password: String::new(),
-        };
-
-        let err = settings.validate().expect_err("缺少主机和端口时应校验失败");
-
-        assert!(err.contains("主机"));
-    }
-
-    #[test]
-    fn legacy_terminal_settings_maps_terminal_fields() {
-        let settings = AppSettings::default();
-        let legacy = super::legacy_terminal_settings(&settings);
-
-        assert_eq!(legacy.font_size, settings.terminal_font_size as f32);
-        assert_eq!(legacy.auto_copy, settings.terminal_auto_copy);
-        assert_eq!(
-            legacy.enable_autocomplete,
-            settings.terminal_enable_autocomplete
-        );
-        assert_eq!(legacy.theme, settings.terminal_theme);
-    }
-}
 
 /// GitHub 开源地址
 const GITHUB_URL: &str = "https://github.com/feigeCode/onetcli";

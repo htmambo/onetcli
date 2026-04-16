@@ -797,9 +797,11 @@ impl SettingsPanel {
         let muted = cx.theme().muted;
         let muted_fg = cx.theme().muted_foreground;
 
-        // 预先收集所有主题项
+        // 预先收集所有主题项（仅显示与应用当前模式匹配的主题）
+        let mode_is_dark = cx.theme().mode.is_dark();
         let theme_items: Vec<AnyElement> = TerminalTheme::all()
             .into_iter()
+            .filter(|theme| theme.variant.matches(mode_is_dark))
             .map(|theme| self.render_theme_item(theme, cx))
             .collect();
 

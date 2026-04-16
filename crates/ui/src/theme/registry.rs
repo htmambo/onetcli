@@ -121,6 +121,11 @@ impl ThemeRegistry {
         &self.themes
     }
 
+    /// Find a theme by name (case-sensitive).
+    pub fn get_by_name(&self, name: &str) -> Option<&Rc<ThemeConfig>> {
+        self.themes.get(name)
+    }
+
     /// Returns a sorted list of themes.
     pub fn sorted_themes(&self) -> Vec<&Rc<ThemeConfig>> {
         let mut themes = self.themes.values().collect::<Vec<_>>();

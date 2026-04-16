@@ -110,7 +110,13 @@ fn language_menu(_: &App) -> MenuItem {
 }
 
 fn theme_menu(cx: &App) -> MenuItem {
-    let themes = ThemeRegistry::global(cx).sorted_themes();
+    let mode = cx.theme().mode;
+    let mut themes = ThemeRegistry::global(cx)
+        .sorted_themes()
+        .into_iter()
+        .filter(|t| t.mode == mode)
+        .collect::<Vec<_>>();
+    themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     let current_name = cx.theme().theme_name();
     MenuItem::Submenu(Menu {
         name: "Theme".into(),

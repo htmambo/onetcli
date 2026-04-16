@@ -118,6 +118,12 @@ pub const DEFAULT_RECOVERY_SCROLLBACK_LINES: usize = 2000;
 pub const MAX_RECOVERY_SCROLLBACK_LINES: usize = 5000;
 const HISTORY_RESTORED_BANNER: &str =
     "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n";
+const HISTORY_RESTORED_BANNER_COMPACT: &str = "*历史记录已恢复";
+
+fn is_history_restored_banner_line(line: &str) -> bool {
+    let compact: String = line.chars().filter(|ch| !ch.is_whitespace()).collect();
+    compact == HISTORY_RESTORED_BANNER_COMPACT
+}
 
 fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
     lines.min(MAX_RECOVERY_SCROLLBACK_LINES)
@@ -147,7 +153,19 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
         let line_length = row.line_length();
 
         if line_length.0 > 0 {
-            current_line.extend(row[..line_length].iter().map(|cell| cell.c));
+            for cell in row[..line_length].iter() {
+                if cell
+                    .flags
+                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+
+                current_line.push(cell.c);
+                if let Some(zerowidth) = cell.zerowidth() {
+                    current_line.extend(zerowidth.iter().copied());
+                }
+            }
         }
 
         let is_wrapline = columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
@@ -162,6 +180,9 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
     if !current_line.is_empty() {
         lines.push(current_line.trim_end_matches(' ').to_string());
     }
+
+    // 过滤掉恢复 banner 及其空行，避免每次恢复后 banner 被累积。
+    lines.retain(|s| !s.is_empty() && !is_history_restored_banner_line(s));
 
     while matches!(lines.last(), Some(last) if last.is_empty()) {
         lines.pop();
@@ -2646,6 +2667,19 @@ mod tests {
     }
 
     #[test]
+    fn serialize_term_for_recovery_preserves_wide_chars_without_extra_spaces() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (term, _event_proxy, _colors) =
+            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
+
+        super::replay_term_output(&term, "历史记录已恢复".as_bytes(), None);
+
+        let visible = super::serialize_term_for_recovery(&term.lock(), 20)
+            .expect("应能序列化宽字符文本");
+        assert_eq!(visible, "历史记录已恢复");
+    }
+
+    #[test]
     fn replay_term_output_supports_history_restored_banner() {
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (term, _event_proxy, _colors) =
@@ -2656,8 +2690,7 @@ mod tests {
 
         let visible = super::serialize_term_for_recovery(&term.lock(), 20)
             .expect("应能序列化带提示语的恢复内容");
-        assert!(visible.contains("echo hello"));
-        assert!(visible.contains("历史记录已恢复"));
+        assert_eq!(visible, "echo hello");
     }
 
     #[test]

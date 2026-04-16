@@ -682,6 +682,58 @@ Settings:
         en: Adjust the translucency of the main surfaces independently from the blur effect
         zh-CN: 独立调整主界面表面的透明程度，不受毛玻璃开关影响
         zh-HK: 獨立調整主介面表面的透明程度，不受毛玻璃開關影響
+      theme_name:
+        en: Color Theme
+        zh-CN: 配色主题
+        zh-HK: 配色主題
+      theme_name_desc:
+        en: Select a color theme for the application interface
+        zh-CN: 选择应用界面的配色主题
+        zh-HK: 選擇應用介面的配色主題
+      scrollbar_show:
+        en: Scrollbar Visibility
+        zh-CN: 滚动条显示
+        zh-HK: 滾動條顯示
+      scrollbar_show_desc:
+        en: Control when scrollbars are visible in the interface
+        zh-CN: 控制界面中滚动条的显示时机
+        zh-HK: 控制介面中滾動條的顯示時機
+      scrollbar_show_scrolling:
+        en: While Scrolling
+        zh-CN: 滚动时
+        zh-HK: 滾動時
+      scrollbar_show_hover:
+        en: On Hover
+        zh-CN: 悬停时
+        zh-HK: 懸停時
+      scrollbar_show_always:
+        en: Always
+        zh-CN: 始终显示
+        zh-HK: 始終顯示
+      shadow:
+        en: Shadow Effects
+        zh-CN: 阴影效果
+        zh-HK: 陰影效果
+      shadow_desc:
+        en: Enable shadow effects for UI elements such as inputs and buttons
+        zh-CN: 为输入框、按钮等 UI 元素启用阴影效果
+        zh-HK: 為輸入框、按鈕等 UI 元素啟用陰影效果
+      radius:
+        en: Corner Radius
+        zh-CN: 圆角大小
+        zh-HK: 圓角大小
+      radius_desc:
+        en: Adjust the border radius of general UI elements (0-24)
+        zh-CN: 调整普通 UI 元素的圆角大小（0-24）
+        zh-HK: 調整普通 UI 元素的圓角大小（0-24）
+      mono_font_family:
+        en: Monospace Font
+        zh-CN: 等宽字体
+        zh-HK: 等寬字型
+      mono_font_family_desc:
+        en: Select the monospace font used for code and terminal-like content
+        zh-CN: 选择用于代码和类终端内容的等宽字体
+        zh-HK: 選擇用於代碼和類終端內容的等寬字型
 
     Sync:
       group_title:

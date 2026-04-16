@@ -16,6 +16,28 @@
 
 use gpui::{rgb, Hsla, Pixels, SharedString};
 
+/// 终端主题配色类型
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ThemeVariant {
+    /// 暗色主题
+    Dark,
+    /// 亮色主题
+    Light,
+    /// 中性配色，两种模式均可选
+    Neutral,
+}
+
+impl ThemeVariant {
+    /// 判断当前变体是否与给定模式匹配
+    pub(crate) fn matches(&self, mode_is_dark: bool) -> bool {
+        match self {
+            Self::Dark => mode_is_dark,
+            Self::Light => !mode_is_dark,
+            Self::Neutral => true,
+        }
+    }
+}
+
 /// 默认字体大小
 pub const DEFAULT_FONT_SIZE: f32 = 13.0;
 /// 最小字体大小
@@ -60,6 +82,8 @@ pub struct TerminalColors {
 pub struct TerminalTheme {
     /// 主题名称
     pub name: &'static str,
+    /// 配色类型（影响过滤显示逻辑）
+    pub variant: ThemeVariant,
     /// 前景色（文字颜色）
     pub foreground: Hsla,
     /// 背景色
@@ -161,6 +185,7 @@ impl TerminalTheme {
     /// 创建带有默认字体配置的主题
     fn with_default_font(
         name: &'static str,
+        variant: ThemeVariant,
         foreground: Hsla,
         background: Hsla,
         cursor: Hsla,
@@ -168,6 +193,7 @@ impl TerminalTheme {
     ) -> Self {
         Self {
             name,
+            variant,
             foreground,
             background,
             cursor,
@@ -183,6 +209,7 @@ impl TerminalTheme {
     pub fn midnight() -> Self {
         Self::with_default_font(
             "midnight",
+            ThemeVariant::Dark,
             rgb(0xE4E4E4).into(),
             rgb(0x1E1E1E).into(),
             rgb(0xFFFFFF).into(),
@@ -194,6 +221,7 @@ impl TerminalTheme {
     pub fn daylight() -> Self {
         Self::with_default_font(
             "daylight",
+            ThemeVariant::Light,
             rgb(0x2E3436).into(),
             rgb(0xFFFFFF).into(),
             rgb(0x000000).into(),
@@ -205,6 +233,7 @@ impl TerminalTheme {
     pub fn ink() -> Self {
         Self::with_default_font(
             "ink",
+            ThemeVariant::Dark,
             rgb(0xCECDC3).into(),
             rgb(0x100F0F).into(),
             rgb(0xDA702C).into(),
@@ -216,6 +245,7 @@ impl TerminalTheme {
     pub fn paper() -> Self {
         Self::with_default_font(
             "paper",
+            ThemeVariant::Light,
             rgb(0x100F0F).into(),
             rgb(0xFFFCF0).into(),
             rgb(0xDA702C).into(),
@@ -227,6 +257,7 @@ impl TerminalTheme {
     pub fn ocean() -> Self {
         Self::with_default_font(
             "ocean",
+            ThemeVariant::Dark,
             rgb(0xDCD7BA).into(),
             rgb(0x1F1F28).into(),
             rgb(0xC8C093).into(),
@@ -238,6 +269,7 @@ impl TerminalTheme {
     pub fn obsidian() -> Self {
         Self::with_default_font(
             "obsidian",
+            ThemeVariant::Dark,
             rgb(0xC5C9C5).into(),
             rgb(0x181616).into(),
             rgb(0xC8C093).into(),
@@ -249,6 +281,7 @@ impl TerminalTheme {
     pub fn lotus() -> Self {
         Self::with_default_font(
             "lotus",
+            ThemeVariant::Light,
             rgb(0x545464).into(),
             rgb(0xF2ECBC).into(),
             rgb(0x43436C).into(),
@@ -260,6 +293,7 @@ impl TerminalTheme {
     pub fn neon_blue() -> Self {
         Self::with_default_font(
             "neon_blue",
+            ThemeVariant::Dark,
             rgb(0x00D9FF).into(),
             rgb(0x0A0E14).into(),
             rgb(0xFFFFFF).into(),
@@ -271,6 +305,7 @@ impl TerminalTheme {
     pub fn matrix() -> Self {
         Self::with_default_font(
             "matrix",
+            ThemeVariant::Dark,
             rgb(0x00FF41).into(),
             rgb(0x0D0D0D).into(),
             rgb(0xFFFFFF).into(),
@@ -282,6 +317,7 @@ impl TerminalTheme {
     pub fn crimson() -> Self {
         Self::with_default_font(
             "crimson",
+            ThemeVariant::Dark,
             rgb(0xFF5555).into(),
             rgb(0x1A0A0A).into(),
             rgb(0xFFFFFF).into(),
