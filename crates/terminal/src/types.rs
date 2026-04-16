@@ -2,15 +2,25 @@ use std::{env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// 终端关闭模式
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalCloseMode {
+    /// 直接终止 PTY / 子进程
+    Kill,
+    /// 仅断开连接，保留 PTY 会话供后续恢复
+    Detach,
+}
+
 /// Terminal backend trait - abstracts local PTY and SSH backends
 pub trait TerminalBackend: Send {
     fn write(&self, data: Vec<u8>);
     fn resize(&self, size: TerminalSize);
-    fn shutdown(&self);
+    fn close(&self, mode: TerminalCloseMode);
 }
 
 /// Local terminal configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalConfig {
     /// Shell command (default: system default shell)
     pub shell: Option<String>,

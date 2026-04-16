@@ -9,7 +9,7 @@ use std::thread;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{TerminalBackend, TerminalSize};
+use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
 /// 从 PowerShell/pwsh 窗口标题中提取工作目录
 ///
@@ -240,8 +240,14 @@ impl TerminalBackend for LocalPtyBackend {
         let _ = self.event_loop_sender.send(Msg::Resize(window_size));
     }
 
-    fn shutdown(&self) {
-        LocalPtyBackend::shutdown(self);
+    fn close(&self, mode: TerminalCloseMode) {
+        match mode {
+            TerminalCloseMode::Kill => LocalPtyBackend::shutdown(self),
+            TerminalCloseMode::Detach => {
+                // 本地 PTY 旧后端直接在 UI 进程内运行，detach 语义与 kill 相同。
+                LocalPtyBackend::shutdown(self)
+            }
+        }
     }
 }
 

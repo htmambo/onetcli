@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 
-use crate::{LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalEvent, TerminalSize};
+use crate::{LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent, TerminalSize};
 pub use ssh::{
     JumpServerConnectConfig, ProxyConnectConfig, ProxyType, PtyConfig, SshAuth, SshConnectConfig,
     SshConnectionStage,
@@ -1729,10 +1729,15 @@ impl Terminal {
             compose_ssh_init_commands(self.ssh_base_init_commands.as_deref(), enabled);
     }
 
-    /// 关闭终端
+    /// 关闭终端（默认 Kill 模式，兼容旧调用）
     pub fn shutdown(&self) {
+        self.close(TerminalCloseMode::Kill);
+    }
+
+    /// 按指定模式关闭终端
+    pub fn close(&self, mode: TerminalCloseMode) {
         if let Some(ref backend) = self.backend {
-            backend.shutdown();
+            backend.close(mode);
         }
     }
 

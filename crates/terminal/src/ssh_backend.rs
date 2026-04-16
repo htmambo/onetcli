@@ -13,7 +13,7 @@ use ssh::{
 };
 
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
-use crate::{TerminalBackend, TerminalSize};
+use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
 const SSH_PROMPT_READY_MARKER: &[u8] = b"\x1b]1337;OnetcliPromptReady=1\x07";
 
@@ -305,7 +305,7 @@ impl TerminalBackend for SshBackend {
         let _ = self.command_tx.send(SshCommand::Resize(size));
     }
 
-    fn shutdown(&self) {
+    fn close(&self, _mode: TerminalCloseMode) {
         let _ = self.command_tx.send(SshCommand::Shutdown);
     }
 }

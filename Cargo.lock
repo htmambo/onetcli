@@ -10721,6 +10721,7 @@ dependencies = [
  "libc",
  "one-core",
  "serde",
+ "serde_json",
  "serialport",
  "ssh",
  "tokio",

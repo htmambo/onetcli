@@ -10,7 +10,7 @@ use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use one_core::storage::models::SerialParams;
 
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
-use crate::{TerminalBackend, TerminalSize};
+use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
 enum SerialCommand {
     Write(Vec<u8>),
@@ -135,7 +135,7 @@ impl TerminalBackend for SerialBackend {
         // 串口无 PTY 尺寸概念，resize 为空操作
     }
 
-    fn shutdown(&self) {
+    fn close(&self, _mode: TerminalCloseMode) {
         let _ = self.command_tx.send(SerialCommand::Shutdown);
     }
 }
@@ -269,7 +269,7 @@ mod tests {
                     "通过 SerialBackend 写入的数据不匹配"
                 );
                 println!("[PASS] SerialBackend::write() 通过虚拟串口成功发送数据");
-                backend.shutdown();
+                backend.close(TerminalCloseMode::Kill);
                 drop(peer);
             }
             Err(e) => {
@@ -325,7 +325,7 @@ mod tests {
                 }
                 assert!(got_wakeup, "应收到 Wakeup 事件");
                 println!("[PASS] SerialBackend 读取线程成功接收对端数据并触发 Wakeup 事件");
-                backend.shutdown();
+                backend.close(TerminalCloseMode::Kill);
                 drop(writer);
             }
             Err(e) => {
