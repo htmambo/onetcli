@@ -636,7 +636,16 @@ impl TerminalView {
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
         let recovery_content = restore_state.buffer_content.clone();
+        let pty_session_id = restore_state.pty_session_id.clone();
         let terminal = cx.new(move |cx| {
+            if let Some(session_id) = pty_session_id.clone() {
+                match Terminal::new_local_hosted_attach(config.clone(), session_id, cx) {
+                    Ok(terminal) => return terminal,
+                    Err(e) => {
+                        tracing::warn!("live attach 失败，回退到 buffer 恢复: {}", e);
+                    }
+                }
+            }
             let (terminal, error) = Terminal::new_local_with_recovery_or_disconnected(
                 config,
                 recovery_content.as_deref(),
@@ -2704,6 +2713,8 @@ impl TabContent for TerminalView {
                     terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
                     configured_recovery_max_chars(cx),
                 );
+                let pty_session_id = terminal.local_pty_session_id().map(str::to_string);
+                let prefer_live_restore = pty_session_id.is_some().then_some(true);
                 ConnectionRestorePayload {
                     kind: ConnectionRestoreKind::LocalTerminal,
                     connection_id: None,
@@ -2712,6 +2723,8 @@ impl TabContent for TerminalView {
                     local_terminal: Some(LocalTerminalRestoreState {
                         working_dir: terminal.latest_working_dir(),
                         buffer_content,
+                        pty_session_id,
+                        prefer_live_restore,
                         font_size: Some(f32::from(self.current_theme.font_size)),
                         font_family: Some(self.current_theme.font_family.to_string()),
                         font_ligatures: Some(self.font_ligatures_enabled),

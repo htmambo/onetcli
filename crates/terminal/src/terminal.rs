@@ -700,6 +700,8 @@ pub struct Terminal {
 
     /// 连接类型
     connection_kind: TerminalConnectionKind,
+    /// Hosted 本地 PTY 的 session id（供恢复使用）
+    local_pty_session_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -797,6 +799,7 @@ impl Terminal {
             ssh_base_init_commands: None,
             init_commands: None,
             connection_kind: TerminalConnectionKind::Local,
+            local_pty_session_id: None,
         }
     }
 
@@ -915,6 +918,7 @@ impl Terminal {
             ssh_base_init_commands: None,
             init_commands: None,
             connection_kind: TerminalConnectionKind::Local,
+            local_pty_session_id: None,
         })
     }
 
@@ -971,7 +975,7 @@ impl Terminal {
         })
         .detach();
 
-        let local_backend = LocalPtyClientBackend::new(request_tx, session_id, child_pid);
+        let local_backend = LocalPtyClientBackend::new(request_tx, session_id.clone(), child_pid);
         let local_shell_pid = local_backend.child_pid();
         #[cfg(not(target_os = "linux"))]
         let local_cwd_file = {
@@ -1017,6 +1021,104 @@ impl Terminal {
             ssh_base_init_commands: None,
             init_commands: None,
             connection_kind: TerminalConnectionKind::Local,
+            local_pty_session_id: Some(session_id),
+        })
+    }
+
+    pub fn new_local_hosted_attach(
+        config: LocalConfig,
+        session_id: String,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
+        let (term, event_proxy, _colors) =
+            Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+
+        let mut client = LocalPtyClient::connect().context("连接 local-pty-host 失败")?;
+        let size = TerminalSize {
+            rows: DEFAULT_ROWS as u16,
+            cols: DEFAULT_COLS as u16,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let child_pid = client
+            .attach_sync(session_id.clone(), size)
+            .context("hosted local PTY attach 失败")?;
+        let (request_tx, mut host_event_rx) = client.split();
+
+        let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> = request_tx.clone();
+        event_proxy.set_hosted_write_back(writeback_tx, session_id.clone());
+
+        let term_for_host = term.clone();
+        let host_event_tx = event_tx.clone();
+        cx.spawn(async move |_, cx| {
+            while let Some(event) = host_event_rx.recv().await {
+                match event {
+                    LocalPtyHostEvent::Output { data, .. } => {
+                        replay_term_output(&term_for_host, &data);
+                        let _ = host_event_tx.send(TerminalEvent::Wakeup);
+                    }
+                    LocalPtyHostEvent::Exited { exit_code, .. } => {
+                        let _ = host_event_tx.send(TerminalEvent::ChildExit(exit_code));
+                    }
+                    LocalPtyHostEvent::Error { message, .. } => {
+                        tracing::error!("hosted local PTY error: {message}");
+                    }
+                    _ => {}
+                }
+            }
+            cx.background_executor().spawn(async move {}).detach();
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+
+        let local_backend = LocalPtyClientBackend::new(request_tx, session_id.clone(), child_pid);
+        let local_shell_pid = local_backend.child_pid();
+        #[cfg(not(target_os = "linux"))]
+        let local_cwd_file = {
+            let cwd_file_path = config
+                .cwd_file
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(next_local_cwd_file_path);
+            let _ = std::fs::write(&cwd_file_path, "");
+            Some(cwd_file_path)
+        };
+        #[cfg(target_os = "linux")]
+        let local_cwd_file = {
+            let _ = config.cwd_file;
+            None
+        };
+
+        Self::spawn_event_loop(event_rx, cx);
+        #[cfg(target_os = "macos")]
+        Self::spawn_local_process_tree_settler(cx);
+
+        Ok(Self {
+            term,
+            backend: Some(Box::new(local_backend)),
+            title: String::new(),
+            current_working_dir: config.working_dir,
+            local_shell_pid,
+            local_cwd_file,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(false),
+            child_exited: None,
+            connection_state: ConnectionState::Connected,
+            connection_status_message: None,
+            connection_wait_started_at: None,
+            cols: DEFAULT_COLS,
+            rows: DEFAULT_ROWS,
+            ssh_config: None,
+            ssh_process_state: Cell::new(SshProcessState::Unknown),
+            serial_params: None,
+            event_tx: Some(event_tx),
+            event_proxy: Some(event_proxy),
+            connection_id: None,
+            connection_name: None,
+            ssh_base_init_commands: None,
+            init_commands: None,
+            connection_kind: TerminalConnectionKind::Local,
+            local_pty_session_id: Some(session_id),
         })
     }
 
@@ -1156,6 +1258,7 @@ impl Terminal {
             ssh_base_init_commands,
             init_commands,
             connection_kind: TerminalConnectionKind::Ssh,
+            local_pty_session_id: None,
         }
     }
 
@@ -1205,6 +1308,7 @@ impl Terminal {
             ssh_base_init_commands: None,
             init_commands: None,
             connection_kind: TerminalConnectionKind::Serial,
+            local_pty_session_id: None,
         }
     }
 
@@ -1713,6 +1817,11 @@ impl Terminal {
         self.current_working_dir.clone()
     }
 
+    /// 获取 hosted 本地 PTY 的 session id（如果有）。
+    pub fn local_pty_session_id(&self) -> Option<&str> {
+        self.local_pty_session_id.as_deref()
+    }
+
     /// 获取工作目录的显示形式，将 `~` 替换为实际 home 路径。
     pub fn working_dir_display(&self) -> Option<String> {
         self.latest_working_dir().map(|path| expand_tilde(&path))
@@ -2087,6 +2196,7 @@ mod tests {
             ssh_base_init_commands: None,
             init_commands: None,
             connection_kind: TerminalConnectionKind::Ssh,
+            local_pty_session_id: None,
         };
         assert!(terminal.has_running_processes());
 

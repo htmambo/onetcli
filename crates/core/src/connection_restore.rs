@@ -61,6 +61,10 @@ pub struct LocalTerminalRestoreState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buffer_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pty_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefer_live_restore: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
@@ -248,6 +252,8 @@ fn restore_legacy_local_terminal_payload(data: &Value) -> Option<ConnectionResto
                 .get("buffer_content")
                 .and_then(|value| value.as_str())
                 .map(str::to_string),
+            pty_session_id: None,
+            prefer_live_restore: None,
             font_size: data
                 .get("font_size")
                 .and_then(|value| value.as_f64())
@@ -423,6 +429,8 @@ mod tests {
             local_terminal: Some(LocalTerminalRestoreState {
                 working_dir: Some("/tmp".to_string()),
                 buffer_content: None,
+                pty_session_id: None,
+                prefer_live_restore: None,
                 font_size: None,
                 font_family: None,
                 font_ligatures: None,
@@ -463,6 +471,52 @@ mod tests {
     }
 
     #[test]
+    fn 本地终端快照支持_pty_session_id_往返() {
+        let path = temp_path("pty-session-id");
+        if path.exists() {
+            std::fs::remove_file(&path).expect("测试前清理临时文件失败");
+        }
+
+        let snapshot = ConnectionRestoreSnapshot {
+            version: 1,
+            saved_at: 456,
+            items: vec![ConnectionRestoreItem {
+                snapshot_id: "local-hosted-1".to_string(),
+                kind: ConnectionRestoreKind::LocalTerminal,
+                connection_id: None,
+                workspace_id: None,
+                active_connection_id: None,
+                local_terminal: Some(LocalTerminalRestoreState {
+                    working_dir: Some("/tmp".to_string()),
+                    buffer_content: Some("echo hello".to_string()),
+                    pty_session_id: Some("local-pty-uuid-123".to_string()),
+                    prefer_live_restore: Some(true),
+                    font_size: None,
+                    font_family: None,
+                    font_ligatures: None,
+                    line_height_scale: None,
+                    cursor_blink: None,
+                    auto_copy: None,
+                    middle_click_paste: None,
+                    confirm_multiline_paste: None,
+                    confirm_high_risk_command: None,
+                    exit_behavior: None,
+                    theme_name: None,
+                }),
+                title: "Hosted Terminal".to_string(),
+            }],
+        };
+
+        save_connection_restore_snapshot_to_path(&snapshot, &path).expect("写入快照失败");
+        let loaded = load_connection_restore_snapshot_from_path(&path).expect("读取快照失败");
+        let local = loaded.items[0].local_terminal.as_ref().unwrap();
+        assert_eq!(local.pty_session_id.as_deref(), Some("local-pty-uuid-123"));
+        assert_eq!(local.prefer_live_restore, Some(true));
+
+        std::fs::remove_file(&path).expect("测试后清理临时文件失败");
+    }
+
+    #[test]
     fn 快照文件支持读写往返() {
         let path = temp_path("roundtrip");
         if path.exists() {
@@ -491,6 +545,8 @@ mod tests {
                     local_terminal: Some(LocalTerminalRestoreState {
                         working_dir: Some("/tmp/restore".to_string()),
                         buffer_content: Some("ls\r\nREADME.md".to_string()),
+                        pty_session_id: None,
+                        prefer_live_restore: None,
                         font_size: Some(15.0),
                         font_family: Some("JetBrains Mono".to_string()),
                         font_ligatures: Some(true),
