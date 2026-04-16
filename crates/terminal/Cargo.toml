@@ -17,6 +17,9 @@ alacritty_terminal.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+portable-pty = "0.9.0"
 serialport = { workspace = true }
 
 

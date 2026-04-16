@@ -31,6 +31,15 @@ fn main() {
         return;
     }
 
+    if std::env::args().any(|arg| arg == "--local-pty-host") {
+        let rt = tokio::runtime::Runtime::new().expect("创建 Tokio runtime 失败");
+        if let Err(e) = rt.block_on(terminal::run_local_pty_host()) {
+            eprintln!("local-pty-host 启动失败: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let app = Application::new()
         .with_assets(Assets)
         .with_quit_mode(QuitMode::LastWindowClosed);
