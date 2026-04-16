@@ -196,6 +196,9 @@ pub trait TabContent: EventEmitter<TabContentEvent> + Render + Focusable {
     fn dump(&self, cx: &App) -> serde_json::Value {
         serde_json::Value::Null
     }
+
+    /// 在应用退出前调用，允许 tab 执行 detach 等轻量清理操作。
+    fn prepare_for_app_quit(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 }
 
 // ============================================================================
@@ -217,6 +220,7 @@ pub trait TabContentView: 'static + Send + Sync {
     fn on_deactivate(&self, window: &mut Window, cx: &mut App);
     fn try_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool>;
     fn force_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool>;
+    fn prepare_for_app_quit(&self, tab_id: &str, window: &mut Window, cx: &mut App);
     fn running_state(&self, cx: &App) -> Option<RunningState>;
     fn has_pending_changes(&self, cx: &App) -> bool;
     fn pending_change_level(&self, cx: &App) -> Option<PendingChangeLevel>;
@@ -273,6 +277,11 @@ impl<T: TabContent> TabContentView for Entity<T> {
     fn force_close(&self, tab_id: &str, window: &mut Window, cx: &mut App) -> Task<bool> {
         let tab_id = tab_id.to_string();
         self.update(cx, |this, cx| this.force_close(&tab_id, window, cx))
+    }
+
+    fn prepare_for_app_quit(&self, tab_id: &str, window: &mut Window, cx: &mut App) {
+        let _ = tab_id;
+        self.update(cx, |this, cx| this.prepare_for_app_quit(window, cx));
     }
 
     fn running_state(&self, cx: &App) -> Option<RunningState> {

@@ -142,6 +142,24 @@ impl LocalPtyClient {
     }
 }
 
+/// 同步向 host 发送 KillDetached 请求，忽略所有错误（用于恢复跳过时的清理）。
+pub fn kill_detached_sessions(session_ids: Vec<String>) {
+    if session_ids.is_empty() {
+        return;
+    }
+    let Ok(stream) = connect_with_retry() else {
+        return;
+    };
+    let request = LocalPtyHostRequest::KillDetached { session_ids };
+    let Ok(json) = serde_json::to_string(&request) else {
+        return;
+    };
+    let mut stream = stream;
+    let _ = stream.write_all(json.as_bytes());
+    let _ = stream.write_all(b"\n");
+    let _ = stream.flush();
+}
+
 fn ensure_host_running() -> Result<()> {
     let endpoint = local_pty_endpoint();
     if endpoint_exists_and_alive(&endpoint) {

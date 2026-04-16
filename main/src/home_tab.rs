@@ -575,6 +575,9 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(ref snapshot) = self.pending_connection_restore_snapshot {
+            self.kill_skipped_pty_sessions(snapshot, None);
+        }
         self.clear_connection_restore_state();
 
         // 跳过时恢复到标签恢复前的原始活动标签
@@ -609,6 +612,9 @@ impl HomePage {
             .iter()
             .cloned()
             .collect::<HashSet<_>>();
+
+        self.kill_skipped_pty_sessions(&snapshot, Some(&selected_snapshot_ids));
+
         let resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
 
         // 仅清理状态，不涉及标签页操作（避免嵌套 update 导致 panic）
@@ -622,6 +628,24 @@ impl HomePage {
         }
 
         cx.notify();
+    }
+
+    fn kill_skipped_pty_sessions(
+        &self,
+        snapshot: &one_core::connection_restore::ConnectionRestoreSnapshot,
+        selected_ids: Option<&std::collections::HashSet<String>>,
+    ) {
+        use one_core::connection_restore::ConnectionRestoreKind;
+        let session_ids: Vec<String> = snapshot
+            .items
+            .iter()
+            .filter(|item| item.kind == ConnectionRestoreKind::LocalTerminal)
+            .filter(|item| selected_ids.map_or(true, |ids| !ids.contains(&item.snapshot_id)))
+            .filter_map(|item| item.local_terminal.as_ref()?.pty_session_id.clone())
+            .collect();
+        if !session_ids.is_empty() {
+            terminal::kill_detached_sessions(session_ids);
+        }
     }
 
     fn restore_connection_restore_item(

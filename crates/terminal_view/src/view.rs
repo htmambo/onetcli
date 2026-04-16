@@ -477,6 +477,8 @@ pub struct TerminalView {
     font_ligatures_enabled: bool,
     /// 终端退出行为: "prompt" 显示弹窗, "close" 直接关闭
     exit_behavior: String,
+    /// 应用退出标记，避免重复 kill 已 detach 的 hosted PTY
+    app_quitting: bool,
     /// 侧边栏面板大小
     sidebar_panel_size: Pixels,
     /// 正在调整大小的面板
@@ -819,6 +821,7 @@ impl TerminalView {
             middle_click_paste: true,
             font_ligatures_enabled: false,
             exit_behavior: "prompt".to_string(),
+            app_quitting: false,
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
             view_bounds: Bounds::default(),
@@ -2751,7 +2754,9 @@ impl TabContent for TerminalView {
         cx: &mut Context<Self>,
     ) -> Task<bool> {
         if !self.has_blocking_terminal_activity(cx) {
-            self.shutdown_for_close(cx);
+            if !self.app_quitting {
+                self.shutdown_for_close(cx);
+            }
             return Task::ready(true);
         }
 
@@ -2810,8 +2815,17 @@ impl TabContent for TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<bool> {
-        self.shutdown_for_close(cx);
+        if !self.app_quitting {
+            self.shutdown_for_close(cx);
+        }
         Task::ready(true)
+    }
+
+    fn prepare_for_app_quit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.app_quitting = true;
+        self.terminal.update(cx, |terminal, _| {
+            terminal.close(terminal::TerminalCloseMode::Detach);
+        });
     }
 
     fn running_state(&self, cx: &App) -> Option<RunningState> {
