@@ -275,10 +275,22 @@ impl TerminalBackend for LocalPtyBackend {
 /// 将 alacritty 事件转换为 TerminalEvent 并发送，
 /// 同时处理 PtyWrite 等需要回写 PTY 的事件
 #[derive(Clone)]
+/// 本地 PTY 的 cwd 跟踪状态（cwd_file + last_cwd 合一）
+#[derive(Default)]
+struct CwdTracker {
+    /// cwd 跟踪文件路径
+    file: Option<std::path::PathBuf>,
+    /// 上次读取到的 cwd（用于去重）
+    last: Option<String>,
+}
+
+#[derive(Clone)]
 pub struct GpuiEventProxy {
     event_tx: UnboundedSender<TerminalEvent>,
     /// PtyWrite 回写通道（在后端创建后设置）
     write_back: Arc<std::sync::Mutex<Option<PtyWriteBack>>>,
+    /// 本地 PTY 的 cwd 跟踪状态（Arc 共享，所有克隆共用同一份）
+    cwd_tracker: Arc<std::sync::Mutex<CwdTracker>>,
 }
 
 impl GpuiEventProxy {
@@ -286,7 +298,55 @@ impl GpuiEventProxy {
         Self {
             event_tx,
             write_back: Arc::new(std::sync::Mutex::new(None)),
+            cwd_tracker: Arc::new(std::sync::Mutex::new(CwdTracker::default())),
         }
+    }
+
+    /// 设置本地 PTY 的 cwd 跟踪文件路径，启动独立轮询
+    pub fn set_cwd_file(&self, path: std::path::PathBuf) {
+        let mut tracker = self.cwd_tracker.lock().unwrap();
+        tracker.file = Some(path.clone());
+        tracker.last = None; // 重置，强制下次触发
+
+        // 启动独立轮询线程（Wakeup 不可靠，需要自己轮询）
+        let event_tx = self.event_tx.clone();
+        let cwd_tracker = self.cwd_tracker.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let file_path = {
+                    let tracker = cwd_tracker.lock().unwrap();
+                    match tracker.file.as_ref() {
+                        Some(f) => f.clone(),
+                        None => {
+                            return;
+                        }
+                    }
+                };
+                match std::fs::read_to_string(&file_path) {
+                    Ok(cwd) => {
+                        let cwd = cwd.trim().to_string();
+                        if cwd.is_empty() {
+                            continue;
+                        }
+                        let should_notify = {
+                        let mut tracker = cwd_tracker.lock().unwrap();
+                        if tracker.last.as_ref() != Some(&cwd) {
+                            tracker.last = Some(cwd.clone());
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if should_notify {
+                        let _ = event_tx.send(TerminalEvent::WorkingDirChanged(cwd));
+                    }
+                    }
+                    Err(_) => {
+                    }
+                }
+            }
+        });
     }
 
     /// 设置回写通道
@@ -337,7 +397,26 @@ impl EventListener for GpuiEventProxy {
                 self.write_back(text.into_bytes());
                 return;
             }
-            AlacTermEvent::Wakeup => TerminalEvent::Wakeup,
+            AlacTermEvent::Wakeup => {
+                // 检测本地 PTY 的 cwd 变化（通过 cwd_file 轮询）
+                {
+                    let mut tracker = self.cwd_tracker.lock().unwrap();
+                    if let Some(ref cwd_file) = tracker.file {
+                        match std::fs::read_to_string(cwd_file) {
+                            Ok(cwd_raw) => {
+                                let cwd = cwd_raw.trim().to_string();
+                                if !cwd.is_empty() && tracker.last.as_ref() != Some(&cwd) {
+                                    tracker.last = Some(cwd.clone());
+                                    let _ = self.event_tx.send(TerminalEvent::WorkingDirChanged(cwd));
+                                }
+                            }
+                            Err(_) => {
+                            }
+                        }
+                    }
+                }
+                TerminalEvent::Wakeup
+            }
             AlacTermEvent::Title(title) => {
                 // 尝试从标题中提取工作目录
                 // PowerShell 格式: "PS C:\path\to\dir" 或 "PS ~/path"

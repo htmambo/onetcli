@@ -174,9 +174,24 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
     (!lines.is_empty()).then(|| lines.join("\r\n"))
 }
 
-fn replay_term_output(term: &Arc<FairMutex<Term<GpuiEventProxy>>>, data: &[u8]) {
+fn replay_term_output(
+    term: &Arc<FairMutex<Term<GpuiEventProxy>>>,
+    data: &[u8],
+    osc_tx: Option<&UnboundedSender<TerminalEvent>>,
+) {
     let mut processor: Processor<StdSyncHandler> = Processor::new();
     processor.advance(&mut *term.lock(), data);
+
+    // 从 PTY 输出中实时解析 OSC 7，触发路径更新
+    // 与 SSH 后端等价：每次收到 PTY 数据就检查 OSC 7
+    if let Some(tx) = osc_tx {
+        use crate::osc::extract_osc_events;
+        for osc_event in extract_osc_events(data) {
+            if let crate::osc::OscEvent::WorkingDirChanged(path) = osc_event {
+                let _ = tx.send(TerminalEvent::WorkingDirChanged(path));
+            }
+        }
+    }
 }
 
 /// 将路径安全地转为 POSIX shell 单参数，避免命令注入。
@@ -721,18 +736,18 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
 
         let script = integration_path.display();
 
-        // .zshenv — 恢复原始 ZDOTDIR 并 source 用户的 .zshenv
-        let zshenv = "ZDOTDIR=\"${_ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
-                       [[ -f \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\n";
-        let _ = fs::write(zsh_dir.join(".zshenv"), zshenv);
-
-        // .zshrc — 恢复 ZDOTDIR，source 用户 .zshrc，再 source 集成脚本
-        let zshrc = format!(
+        // .zshenv — 恢复原始 ZDOTDIR，source 用户 .zshenv，再 source 集成脚本
+        // 注意：macOS alacritty 用 `login ... /bin/zsh -fc "exec ..."` 启动 shell，
+        // -c 命令使 shell 为 non-interactive，.zshrc 不会加载。
+        // .zshenv 在所有模式下都会加载，所以集成脚本要在这里 source。
+        // 脚本内部有 [[ $- != *i* ]] 守卫，非交互环境会提前返回。
+        let zshenv = format!(
             "ZDOTDIR=\"${{_ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
-             [[ -f \"$ZDOTDIR/.zshrc\" ]] && source \"$ZDOTDIR/.zshrc\"\n\
+             [[ -f \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\n\
+             [[ -f \"$HOME/.zshenv\" ]] && source \"$HOME/.zshenv\"\n\
              source \"{script}\"\n"
         );
-        let _ = fs::write(zsh_dir.join(".zshrc"), zshrc);
+        let _ = fs::write(zsh_dir.join(".zshenv"), zshenv);
 
         let orig = std::env::var("ZDOTDIR").unwrap_or_default();
         extra_env.push(("_ONETCLI_ORIG_ZDOTDIR".into(), orig));
@@ -1085,6 +1100,10 @@ impl Terminal {
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
         let (config, local_cwd_file) = prepare_local_shell_launch(config);
+        // 设置 cwd 跟踪文件，让 GpuiEventProxy 在 Wakeup 时自动检测路径变化
+        if let Some(ref path) = local_cwd_file {
+            event_proxy.set_cwd_file(path.clone());
+        }
         let LocalConfig {
             shell,
             shell_args,
@@ -1095,8 +1114,8 @@ impl Terminal {
         let history_shell = shell.clone();
 
         if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
-            replay_term_output(&term, content.as_bytes());
-            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes());
+            replay_term_output(&term, content.as_bytes(), None);
+            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
         }
 
         let pty_options = PtyOptions {
@@ -1158,8 +1177,8 @@ impl Terminal {
         let initial_working_dir = config.working_dir.clone();
 
         if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
-            replay_term_output(&term, content.as_bytes());
-            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes());
+            replay_term_output(&term, content.as_bytes(), None);
+            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
         }
 
         let mut client = LocalPtyClient::connect().context("连接 local-pty-host 失败")?;
@@ -1185,7 +1204,7 @@ impl Terminal {
             while let Some(event) = host_event_rx.recv().await {
                 match event {
                     LocalPtyHostEvent::Output { data, .. } => {
-                        replay_term_output(&term_for_host, &data);
+                        replay_term_output(&term_for_host, &data, Some(&host_event_tx));
                         let _ = host_event_tx.send(TerminalEvent::Wakeup);
                     }
                     LocalPtyHostEvent::Exited { exit_code, .. } => {
@@ -1272,7 +1291,7 @@ impl Terminal {
             while let Some(event) = host_event_rx.recv().await {
                 match event {
                     LocalPtyHostEvent::Output { data, .. } => {
-                        replay_term_output(&term_for_host, &data);
+                        replay_term_output(&term_for_host, &data, Some(&host_event_tx));
                         let _ = host_event_tx.send(TerminalEvent::Wakeup);
                     }
                     LocalPtyHostEvent::Exited { exit_code, .. } => {
@@ -2533,7 +2552,7 @@ mod tests {
         let (term, _event_proxy, _colors) =
             super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
 
-        super::replay_term_output(&term, b"line-1\r\nline-2\r\nline-3\r\n");
+        super::replay_term_output(&term, b"line-1\r\nline-2\r\nline-3\r\n", None);
 
         let serialized =
             super::serialize_term_for_recovery(&term.lock(), 2).expect("应能生成恢复文本");
@@ -2546,7 +2565,7 @@ mod tests {
         let (term, _event_proxy, _colors) =
             super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
 
-        super::replay_term_output(&term, b"\x1b[?1049hfullscreen");
+        super::replay_term_output(&term, b"\x1b[?1049hfullscreen", None);
 
         assert_eq!(super::serialize_term_for_recovery(&term.lock(), 100), None);
     }
@@ -2557,8 +2576,8 @@ mod tests {
         let (term, _event_proxy, _colors) =
             super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
 
-        super::replay_term_output(&term, b"echo hello");
-        super::replay_term_output(&term, super::HISTORY_RESTORED_BANNER.as_bytes());
+        super::replay_term_output(&term, b"echo hello", None);
+        super::replay_term_output(&term, super::HISTORY_RESTORED_BANNER.as_bytes(), None);
 
         let visible = super::serialize_term_for_recovery(&term.lock(), 20)
             .expect("应能序列化带提示语的恢复内容");
