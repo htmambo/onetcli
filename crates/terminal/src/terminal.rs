@@ -38,6 +38,9 @@ use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
 use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
+use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
+use crate::local_pty_protocol::LocalPtyHostEvent;
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 
 use crate::{LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent, TerminalSize};
@@ -102,6 +105,12 @@ const HISTORY_RESTORED_BANNER: &str =
 
 fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
     lines.min(MAX_RECOVERY_SCROLLBACK_LINES)
+}
+
+/// 判断是否使用 hosted 本地 PTY 模式。
+/// 通过环境变量 `ONETCLI_HOSTED_LOCAL_PTY` 控制，默认关闭（fallback 到旧实现）。
+fn use_hosted_local_pty() -> bool {
+    std::env::var("ONETCLI_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
 }
 
 fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) -> Option<String> {
@@ -834,6 +843,10 @@ impl Terminal {
         recovery_content: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
+        if use_hosted_local_pty() {
+            return Self::new_local_hosted(config, recovery_content, cx);
+        }
+
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
@@ -865,10 +878,6 @@ impl Terminal {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(next_local_cwd_file_path);
             let _ = std::fs::write(&cwd_file_path, "");
-            // local_backend.write(
-            //     build_local_cwd_tracking_init_command(&cwd_file_path.to_string_lossy())
-            //         .into_bytes(),
-            // );
             Some(cwd_file_path)
         };
         #[cfg(target_os = "linux")]
@@ -901,6 +910,108 @@ impl Terminal {
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None, // 本地终端的 event_proxy 已在 LocalPtyBackend 中设置
+            connection_id: None,
+            connection_name: None,
+            ssh_base_init_commands: None,
+            init_commands: None,
+            connection_kind: TerminalConnectionKind::Local,
+        })
+    }
+
+    fn new_local_hosted(
+        config: LocalConfig,
+        recovery_content: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
+        let (term, event_proxy, _colors) =
+            Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+
+        if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
+            replay_term_output(&term, content.as_bytes());
+            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes());
+        }
+
+        let mut client = LocalPtyClient::connect().context("连接 local-pty-host 失败")?;
+        let size = TerminalSize {
+            rows: DEFAULT_ROWS as u16,
+            cols: DEFAULT_COLS as u16,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let (session_id, child_pid) = client
+            .spawn_sync(config.clone(), size)
+            .context("hosted local PTY spawn 失败")?;
+        let (request_tx, mut host_event_rx) = client.split();
+
+        // 设置 PtyWrite 回写通道
+        let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> = request_tx.clone();
+        event_proxy.set_hosted_write_back(writeback_tx, session_id.clone());
+
+        let term_for_host = term.clone();
+        let host_event_tx = event_tx.clone();
+        cx.spawn(async move |_, cx| {
+            while let Some(event) = host_event_rx.recv().await {
+                match event {
+                    LocalPtyHostEvent::Output { data, .. } => {
+                        replay_term_output(&term_for_host, &data);
+                        let _ = host_event_tx.send(TerminalEvent::Wakeup);
+                    }
+                    LocalPtyHostEvent::Exited { exit_code, .. } => {
+                        let _ = host_event_tx.send(TerminalEvent::ChildExit(exit_code));
+                    }
+                    LocalPtyHostEvent::Error { message, .. } => {
+                        tracing::error!("hosted local PTY error: {message}");
+                    }
+                    _ => {}
+                }
+            }
+            cx.background_executor().spawn(async move {}).detach();
+            Ok::<_, anyhow::Error>(())
+        })
+        .detach();
+
+        let local_backend = LocalPtyClientBackend::new(request_tx, session_id, child_pid);
+        let local_shell_pid = local_backend.child_pid();
+        #[cfg(not(target_os = "linux"))]
+        let local_cwd_file = {
+            let cwd_file_path = config
+                .cwd_file
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(next_local_cwd_file_path);
+            let _ = std::fs::write(&cwd_file_path, "");
+            Some(cwd_file_path)
+        };
+        #[cfg(target_os = "linux")]
+        let local_cwd_file = {
+            let _ = config.cwd_file;
+            None
+        };
+
+        Self::spawn_event_loop(event_rx, cx);
+        #[cfg(target_os = "macos")]
+        Self::spawn_local_process_tree_settler(cx);
+
+        Ok(Self {
+            term,
+            backend: Some(Box::new(local_backend)),
+            title: String::new(),
+            current_working_dir: config.working_dir,
+            local_shell_pid,
+            local_cwd_file,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(false),
+            child_exited: None,
+            connection_state: ConnectionState::Connected,
+            connection_status_message: None,
+            connection_wait_started_at: None,
+            cols: DEFAULT_COLS,
+            rows: DEFAULT_ROWS,
+            ssh_config: None,
+            ssh_process_state: Cell::new(SshProcessState::Unknown),
+            serial_params: None,
+            event_tx: Some(event_tx),
+            event_proxy: Some(event_proxy),
             connection_id: None,
             connection_name: None,
             ssh_base_init_commands: None,

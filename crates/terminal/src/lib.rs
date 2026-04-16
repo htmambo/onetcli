@@ -1,3 +1,4 @@
+pub mod local_pty_client;
 pub mod local_pty_host;
 pub mod local_pty_host_unix;
 #[cfg(windows)]

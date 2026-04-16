@@ -9,6 +9,7 @@ use std::thread;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::local_pty_protocol::LocalPtyHostRequest;
 use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
 /// 从 PowerShell/pwsh 窗口标题中提取工作目录
@@ -107,6 +108,11 @@ enum PtyWriteBack {
     Local(EventLoopSender),
     /// SSH：通过 UnboundedSender 写回
     Ssh(UnboundedSender<Vec<u8>>),
+    /// Hosted 本地 PTY：通过 host client 回写
+    Hosted {
+        sender: UnboundedSender<LocalPtyHostRequest>,
+        session_id: String,
+    },
 }
 
 impl PtyWriteBack {
@@ -117,6 +123,12 @@ impl PtyWriteBack {
             }
             PtyWriteBack::Ssh(sender) => {
                 let _ = sender.send(data);
+            }
+            PtyWriteBack::Hosted { sender, session_id } => {
+                let _ = sender.send(LocalPtyHostRequest::Input {
+                    session_id: session_id.clone(),
+                    data,
+                });
             }
         }
     }
@@ -277,6 +289,15 @@ impl GpuiEventProxy {
     /// 设置 SSH 回写通道
     pub(crate) fn set_ssh_write_back(&self, sender: UnboundedSender<Vec<u8>>) {
         self.set_write_back(PtyWriteBack::Ssh(sender));
+    }
+
+    /// 设置 Hosted 本地 PTY 回写通道
+    pub(crate) fn set_hosted_write_back(
+        &self,
+        sender: UnboundedSender<LocalPtyHostRequest>,
+        session_id: String,
+    ) {
+        self.set_write_back(PtyWriteBack::Hosted { sender, session_id });
     }
 
     fn write_back(&self, data: Vec<u8>) {
