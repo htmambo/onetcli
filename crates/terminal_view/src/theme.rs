@@ -14,7 +14,10 @@
 //! - 在 `muted` 上使用 `foreground` 或 `muted_foreground`
 //! - 在 `accent` 上使用 `accent_foreground`
 
-use gpui::{rgb, Hsla, Pixels, SharedString};
+use gpui::{rgb, Hsla, Pixels, Rgba, SharedString};
+
+// 包含由 build.rs 生成的 tabby 配色方案
+include!(concat!(env!("OUT_DIR"), "/tabby_themes.rs"));
 
 /// 终端主题配色类型
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +53,107 @@ pub const DEFAULT_LINE_HEIGHT_SCALE: f32 = 1.4;
 pub const MIN_LINE_HEIGHT_SCALE: f32 = 1.0;
 /// 最大行高比例
 pub const MAX_LINE_HEIGHT_SCALE: f32 = 2.5;
+
+/// ANSI 16 色调色板（color0-color15）
+///
+/// 用于终端程序输出着色（ls --color, git diff, bat 等）。
+/// 通过 OSC 4 序列注入到终端。
+#[derive(Clone, Debug)]
+pub struct AnsiPalette {
+    pub color0: Rgba,  // black
+    pub color1: Rgba,  // red
+    pub color2: Rgba,  // green
+    pub color3: Rgba,  // yellow
+    pub color4: Rgba,  // blue
+    pub color5: Rgba,  // magenta
+    pub color6: Rgba,  // cyan
+    pub color7: Rgba,  // white
+    pub color8: Rgba,  // bright black
+    pub color9: Rgba,  // bright red
+    pub color10: Rgba, // bright green
+    pub color11: Rgba, // bright yellow
+    pub color12: Rgba, // bright blue
+    pub color13: Rgba, // bright magenta
+    pub color14: Rgba, // bright cyan
+    pub color15: Rgba, // bright white
+}
+
+impl PartialEq for AnsiPalette {
+    fn eq(&self, other: &Self) -> bool {
+        self.color0 == other.color0
+            && self.color1 == other.color1
+            && self.color2 == other.color2
+            && self.color3 == other.color3
+            && self.color4 == other.color4
+            && self.color5 == other.color5
+            && self.color6 == other.color6
+            && self.color7 == other.color7
+            && self.color8 == other.color8
+            && self.color9 == other.color9
+            && self.color10 == other.color10
+            && self.color11 == other.color11
+            && self.color12 == other.color12
+            && self.color13 == other.color13
+            && self.color14 == other.color14
+            && self.color15 == other.color15
+    }
+}
+
+impl Eq for AnsiPalette {}
+
+impl Default for AnsiPalette {
+    fn default() -> Self {
+        Self {
+            color0: rgb(0x00_00_00),
+            color1: rgb(0xcc_00_00),
+            color2: rgb(0x4e_c9_b0),
+            color3: rgb(0xc5_8a_23),
+            color4: rgb(0x56_6d_c5),
+            color5: rgb(0xc6_00_8b),
+            color6: rgb(0xce_8e_4f),
+            color7: rgb(0xe5_e5_e5),
+            color8: rgb(0x66_66_66),
+            color9: rgb(0xff_66_66),
+            color10: rgb(0x99_ff_66),
+            color11: rgb(0xff_ff_66),
+            color12: rgb(0x66_66_ff),
+            color13: rgb(0xff_66_ff),
+            color14: rgb(0x66_ff_ff),
+            color15: rgb(0xff_ff_ff),
+        }
+    }
+}
+
+impl AnsiPalette {
+    /// 生成 OSC 4 序列，将调色板应用到终端
+    ///
+    /// 格式：\x1b]4;{index};rgb:{r}/{g}/{b}\x07
+    /// 这是设置 ANSI 调色板的标准 VT100/xterm 方式。
+    pub fn to_osc4_sequence(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(16 * 32);
+        for (i, color) in self.to_array().iter().enumerate() {
+            let r = (color.r * 255.0) as u8;
+            let g = (color.g * 255.0) as u8;
+            let b = (color.b * 255.0) as u8;
+            // OSC 4: set color {i} to rgb:{r}/{g}/{b}
+            buf.extend_from_slice(b"\x1b]4;");
+            buf.extend_from_slice(i.to_string().as_bytes());
+            buf.extend_from_slice(b";rgb:");
+            buf.extend_from_slice(format!("{:02x}/{:02x}/{:02x}", r, g, b).as_bytes());
+            buf.push(b'\x07'); // ST (String Terminator)
+        }
+        buf
+    }
+
+    /// 转换为 Rgba 数组
+    fn to_array(&self) -> [Rgba; 16] {
+        [
+            self.color0, self.color1, self.color2, self.color3, self.color4, self.color5,
+            self.color6, self.color7, self.color8, self.color9, self.color10, self.color11,
+            self.color12, self.color13, self.color14, self.color15,
+        ]
+    }
+}
 
 /// 终端主题配色（用于侧边栏等 UI 组件）
 ///
@@ -92,6 +196,8 @@ pub struct TerminalTheme {
     pub cursor: Hsla,
     /// 选中区域颜色
     pub selection: Hsla,
+    /// ANSI 16 色调色板
+    pub ansi_palette: AnsiPalette,
     /// 主字体
     pub font_family: SharedString,
     /// 字体大小
@@ -112,6 +218,7 @@ impl PartialEq for TerminalTheme {
             && self.font_family == other.font_family
             && self.font_size == other.font_size
             && self.line_height_scale == other.line_height_scale
+            && self.ansi_palette == other.ansi_palette
     }
 }
 
@@ -166,9 +273,9 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
 }
 
 impl TerminalTheme {
-    /// 获取所有可用主题
+    /// 获取所有可用主题（包括内置主题和 tabby 导入的主题）
     pub fn all() -> Vec<Self> {
-        vec![
+        let mut themes = vec![
             Self::midnight(),
             Self::daylight(),
             Self::ink(),
@@ -179,10 +286,20 @@ impl TerminalTheme {
             Self::neon_blue(),
             Self::matrix(),
             Self::crimson(),
-        ]
+        ];
+
+        // 添加 tabby 导入的主题（排除与内置重名的）
+        let built_in_names: std::collections::HashSet<_> =
+            themes.iter().map(|t| t.name.to_lowercase()).collect();
+        for tabby_theme in tabby_all() {
+            if !built_in_names.contains(&tabby_theme.name.to_lowercase()) {
+                themes.push(tabby_theme);
+            }
+        }
+        themes
     }
 
-    /// 创建带有默认字体配置的主题
+    /// 创建带有默认 ANSI 调色板的主题（用于内置主题）
     fn with_default_font(
         name: &'static str,
         variant: ThemeVariant,
@@ -198,6 +315,32 @@ impl TerminalTheme {
             background,
             cursor,
             selection,
+            ansi_palette: AnsiPalette::default(),
+            font_family: default_monospace_font().into(),
+            font_size: gpui::px(DEFAULT_FONT_SIZE),
+            font_fallbacks: default_font_fallbacks(),
+            line_height_scale: DEFAULT_LINE_HEIGHT_SCALE,
+        }
+    }
+
+    /// 创建带有自定义 ANSI 调色板的主题（用于 tabby 导入的主题）
+    fn with_palette(
+        name: &'static str,
+        variant: ThemeVariant,
+        foreground: Hsla,
+        background: Hsla,
+        cursor: Hsla,
+        selection: Hsla,
+        ansi_palette: AnsiPalette,
+    ) -> Self {
+        Self {
+            name,
+            variant,
+            foreground,
+            background,
+            cursor,
+            selection,
+            ansi_palette,
             font_family: default_monospace_font().into(),
             font_size: gpui::px(DEFAULT_FONT_SIZE),
             font_fallbacks: default_font_fallbacks(),
@@ -369,8 +512,8 @@ impl TerminalTheme {
 
         if self.is_dark() {
             // 深色主题：略微增加亮度，降低饱和度，模拟毛玻璃效果
-            self.background.s *= 1.0;
-            self.background.l = (self.background.l - 0.08).min(1.0);
+            self.background.s *= 0.85;
+            self.background.l = (self.background.l + 0.08).min(1.0);
         } else {
             self.background.s *= 0.72;
             self.background.l = (self.background.l + 0.08).min(1.0);
@@ -560,6 +703,7 @@ mod tests {
         assert_eq!(tuned.foreground, theme.foreground);
         assert_eq!(tuned.cursor, theme.cursor);
         assert_eq!(tuned.selection, theme.selection);
+        assert_eq!(tuned.ansi_palette, theme.ansi_palette);
     }
 
     #[test]

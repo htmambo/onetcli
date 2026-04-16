@@ -24,8 +24,9 @@ pub use terminal::terminal::{
 };
 pub use terminal::terminal::{DEFAULT_RECOVERY_SCROLLBACK_LINES, MAX_RECOVERY_SCROLLBACK_LINES};
 pub use theme::{
-    default_font_fallbacks, TerminalTheme, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE,
-    MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    default_font_fallbacks, AnsiPalette, TerminalTheme, DEFAULT_FONT_SIZE,
+    DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE,
 };
 pub use view::{
     build_local_terminal, init, set_recovery_scrollback_lines, with_recovery_snapshot_overrides,

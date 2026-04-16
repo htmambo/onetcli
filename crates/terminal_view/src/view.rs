@@ -1648,6 +1648,13 @@ impl TerminalView {
         if self.current_theme == next_theme {
             return;
         }
+
+        // 如果 ANSI 调色板发生了变化，发送 OSC 4 序列来应用新调色板
+        if self.current_theme.ansi_palette != next_theme.ansi_palette {
+            let osc_seq = next_theme.ansi_palette.to_osc4_sequence();
+            self.terminal.read(cx).write(&osc_seq);
+        }
+
         self.current_theme = next_theme;
         self.font_size = self.current_theme.font_size;
         self.line_height = self.current_theme.line_height();
