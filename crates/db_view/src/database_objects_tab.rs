@@ -717,6 +717,24 @@ impl DatabaseObjects {
                 let query_id = row_data.get(1).cloned().unwrap_or_default();
                 metadata.insert("query_name".to_string(), name.clone());
                 metadata.insert("query_id".to_string(), query_id.clone());
+
+                // 重建 file_path 以支持双击打开查询
+                if let Ok(queries_dir) = get_queries_dir() {
+                    let db_name = if database.is_empty() {
+                        current_node.get_database_name().unwrap_or_default()
+                    } else {
+                        database.clone()
+                    };
+                    let file_path = queries_dir
+                        .join(database_type.as_str())
+                        .join(&connection_id)
+                        .join(&db_name)
+                        .join(format!("{}.sql", name));
+                    if let Some(path_str) = file_path.to_str() {
+                        metadata.insert("file_path".to_string(), path_str.to_string());
+                    }
+                }
+
                 (
                     format!("{}:queries:{}", connection_id, query_id),
                     DbNodeType::NamedQuery,
