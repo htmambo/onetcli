@@ -240,12 +240,12 @@ fn frost_color(color: Hsla, mode: ThemeMode, intensity: f32) -> Hsla {
     let intensity = intensity.clamp(0.0, 1.0);
     if mode.is_dark() {
         color
-            .saturation((color.s * (1.0 - 0.55 * intensity)).clamp(0.0, 1.0))
-            .lightness((color.l + 0.12 * intensity).clamp(0.0, 1.0))
+            .saturation((color.s * (1.0 - 0.20 * intensity)).clamp(0.0, 1.0))
+            .lightness((color.l + 0.04 * intensity).clamp(0.0, 1.0))
     } else {
         color
-            .saturation((color.s * (1.0 - 0.35 * intensity)).clamp(0.0, 1.0))
-            .lightness((color.l + 0.06 * intensity).clamp(0.0, 1.0))
+            .saturation((color.s * (1.0 - 0.10 * intensity)).clamp(0.0, 1.0))
+            .lightness((color.l + 0.02 * intensity).clamp(0.0, 1.0))
     }
 }
 

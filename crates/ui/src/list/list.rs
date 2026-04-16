@@ -506,6 +506,7 @@ where
             .flex_grow()
             .relative()
             .size_full()
+            .bg(cx.theme().colors.list)
             .when_some(self.options.max_height, |this, h| this.max_h(h))
             .overflow_hidden()
             .when(items_count == 0, |this| {
@@ -538,7 +539,12 @@ where
 
                                         div().children(match entry {
                                             RowEntry::Entry(index) => Some(
-                                                list.render_list_item(index, window, cx)
+                                                div()
+                                                    .w_full()
+                                                    .when(index.row % 2 == 1, |this| {
+                                                        this.bg(cx.theme().colors.list_even)
+                                                    })
+                                                    .child(list.render_list_item(index, window, cx))
                                                     .into_any_element(),
                                             ),
                                             RowEntry::SectionHeader(section_ix) => list

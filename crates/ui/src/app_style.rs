@@ -1,6 +1,6 @@
 use std::sync::{LazyLock, RwLock};
 
-use gpui::{App, Hsla, StyleRefinement, Styled, rgb, white};
+use gpui::{App, Hsla, StyleRefinement, Styled};
 
 use crate::{
     Theme, ThemeColor,
@@ -62,15 +62,15 @@ pub fn text_soft() -> Hsla {
 }
 
 pub fn accent() -> Hsla {
-    rgb(0x00d9a3).into()
+    active_theme().success
 }
 
 pub fn accent_hover() -> Hsla {
-    rgb(0x10b981).into()
+    active_theme().success_hover
 }
 
 pub fn accent_active() -> Hsla {
-    rgb(0x059669).into()
+    active_theme().success_active
 }
 
 pub fn accent_dim() -> Hsla {
@@ -135,11 +135,11 @@ pub fn footer_style() -> StyleRefinement {
 pub fn primary_button_variant(cx: &App) -> ButtonVariant {
     ButtonVariant::Custom(
         ButtonCustomVariant::new(cx)
-            .color(accent())
-            .foreground(white())
-            .border(accent().opacity(0.4))
-            .hover(accent_hover())
-            .active(accent_active())
+            .color(cx.theme().primary)
+            .foreground(cx.theme().primary_foreground)
+            .border(cx.theme().primary.opacity(0.4))
+            .hover(cx.theme().primary_hover)
+            .active(cx.theme().primary_active)
             .shadow(true),
     )
 }

@@ -14,7 +14,7 @@ use gpui_component::{
     scroll::ScrollbarShow,
 };
 
-use crate::{SelectFont, SelectRadius, SelectScrollbarShow, ToggleListActiveHighlight, app_menus};
+use crate::{SelectFont, SelectRadius, SelectScrollbarShow, app_menus};
 
 pub struct AppTitleBar {
     app_menu_bar: Entity<AppMenuBar>,
@@ -142,16 +142,6 @@ impl FontSizeSelector {
         window.refresh();
     }
 
-    fn on_toggle_list_active_highlight(
-        &mut self,
-        _: &ToggleListActiveHighlight,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let theme = Theme::global_mut(cx);
-        theme.list.active_highlight = !theme.list.active_highlight;
-        window.refresh();
-    }
 }
 
 impl Render for FontSizeSelector {
@@ -167,13 +157,12 @@ impl Render for FontSizeSelector {
             .on_action(cx.listener(Self::on_select_font))
             .on_action(cx.listener(Self::on_select_radius))
             .on_action(cx.listener(Self::on_select_scrollbar_show))
-            .on_action(cx.listener(Self::on_toggle_list_active_highlight))
             .child(
                 Button::new("btn")
                     .small()
                     .ghost()
                     .icon(IconName::Settings2)
-                    .dropdown_menu(move |this, _, cx| {
+                    .dropdown_menu(move |this, _, _cx| {
                         this.scrollable(true)
                             .check_side(Side::Right)
                             .max_h(px(480.))
@@ -213,11 +202,6 @@ impl Render for FontSizeSelector {
                                 Box::new(SelectScrollbarShow(ScrollbarShow::Always)),
                             )
                             .separator()
-                            .menu_with_check(
-                                "List Active Highlight",
-                                cx.theme().list.active_highlight,
-                                Box::new(ToggleListActiveHighlight),
-                            )
                     })
                     .anchor(Corner::TopRight),
             )

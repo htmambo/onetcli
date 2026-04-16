@@ -1651,15 +1651,9 @@ where
                 // Note: Don't show row selection if a cell is selected
                 .when_some(self.selected_row, |this, _| {
                     this.when(is_selected && self.selection_mode.is_row(), |this| {
-                        this.map(|this| {
-                            if cx.theme().list.active_highlight {
-                                this.bg(cx.theme().table_active)
-                                    .border_1()
-                                    .border_color(cx.theme().table_active_border)
-                            } else {
-                                this.bg(cx.theme().accent)
-                            }
-                        })
+                        this.bg(cx.theme().table_active)
+                            .border_1()
+                            .border_color(cx.theme().table_active_border)
                     })
                 })
                 // Row right click row style

@@ -1,10 +1,8 @@
 use crate::{
     highlighter::HighlightTheme,
-    list::ListSettings,
     notification::NotificationSettings,
     scroll::ScrollbarShow,
     sheet::SheetSettings,
-    tokens::color::semantic::{SemanticColorsDark, SemanticColorsLight},
 };
 use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
 use schemars::JsonSchema;
@@ -143,17 +141,11 @@ pub struct Theme {
     pub tile_shadow: bool,
     /// The border radius of the tile panel, default is 0px.
     pub tile_radius: Pixels,
-    /// The list settings.
-    pub list: ListSettings,
     /// The sheet settings.
     pub sheet: SheetSettings,
 }
 
-/// Dark 模式语义色静态实例
-static SEMANTIC_DARK: SemanticColorsDark = SemanticColorsDark;
 
-/// Light 模式语义色静态实例
-static SEMANTIC_LIGHT: SemanticColorsLight = SemanticColorsLight;
 
 impl Default for Theme {
     fn default() -> Self {
@@ -304,9 +296,9 @@ impl Theme {
     #[inline(always)]
     pub fn semantic(&self) -> SemanticColorsRef<'_> {
         if self.is_dark() {
-            SemanticColorsRef::Dark(&SEMANTIC_DARK)
+            SemanticColorsRef::Dark(&self.colors)
         } else {
-            SemanticColorsRef::Light(&SEMANTIC_LIGHT)
+            SemanticColorsRef::Light(&self.colors)
         }
     }
 }
@@ -337,7 +329,6 @@ impl From<&ThemeColor> for Theme {
             tile_grid_size: px(8.),
             tile_shadow: true,
             tile_radius: px(0.),
-            list: ListSettings::default(),
             colors: *colors,
             light_theme: Rc::new(ThemeConfig::default()),
             dark_theme: Rc::new(ThemeConfig::default()),

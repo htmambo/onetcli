@@ -63,7 +63,7 @@ impl Render for DragPanel {
             .rounded(cx.theme().radius)
             .text_color(cx.theme().tab_foreground)
             .bg(cx.theme().tab_active)
-            .opacity(0.75)
+            .opacity(0.90)
             .child(self.panel.title(window, cx))
     }
 }

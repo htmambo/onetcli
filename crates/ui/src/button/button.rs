@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Colorize as _, Disableable, FocusableExt as _, Icon, IconName, Selectable,
+    ActiveTheme, Disableable, FocusableExt as _, Icon, IconName, Selectable,
     Sizable, Size, StyleSized, StyledExt, button::ButtonIcon, h_flex, tooltip::Tooltip,
 };
 use gpui::{
@@ -790,7 +790,13 @@ impl ButtonVariant {
                     cx.theme().primary_hover
                 }
             }
-            Self::Secondary => cx.theme().secondary_hover,
+            Self::Secondary => {
+                if outline {
+                    cx.theme().secondary.opacity(0.1)
+                } else {
+                    cx.theme().secondary_hover
+                }
+            }
             Self::Danger => {
                 if outline {
                     cx.theme().danger.opacity(0.1)
@@ -826,13 +832,7 @@ impl ButtonVariant {
                     colors.hover
                 }
             }
-            Self::Ghost => {
-                if cx.theme().mode.is_dark() {
-                    cx.theme().secondary.lighten(0.1).opacity(0.8)
-                } else {
-                    cx.theme().secondary.darken(0.1).opacity(0.8)
-                }
-            }
+            Self::Ghost => cx.theme().secondary_hover,
             Self::Link => cx.theme().transparent,
             Self::Text => cx.theme().transparent,
         };
@@ -865,13 +865,7 @@ impl ButtonVariant {
                 }
             }
             Self::Secondary => cx.theme().secondary_active,
-            Self::Ghost => {
-                if cx.theme().mode.is_dark() {
-                    cx.theme().secondary.lighten(0.2).opacity(0.8)
-                } else {
-                    cx.theme().secondary.darken(0.2).opacity(0.8)
-                }
-            }
+            Self::Ghost => cx.theme().secondary_active,
             Self::Danger => {
                 if outline {
                     cx.theme().danger_active.opacity(0.1)
@@ -945,7 +939,7 @@ impl ButtonVariant {
         let fg = match self {
             Self::Link => cx.theme().link_active,
             Self::Text => cx.theme().foreground.opacity(0.7),
-            _ => self.text_color(false, cx),
+            _ => self.text_color(outline, cx),
         };
         let underline = self.underline(cx);
         let shadow = self.shadow(outline, cx);
@@ -967,7 +961,7 @@ impl ButtonVariant {
             Self::Warning => cx.theme().warning.opacity(0.15),
             Self::Success => cx.theme().success.opacity(0.15),
             Self::Info => cx.theme().info.opacity(0.15),
-            Self::Secondary => cx.theme().secondary.opacity(1.5),
+            Self::Secondary => cx.theme().secondary.opacity(0.15),
             Self::Custom(style) => style.color.opacity(0.15),
         };
         let fg = cx.theme().muted_foreground.opacity(0.5);

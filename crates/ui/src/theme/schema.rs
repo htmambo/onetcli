@@ -608,8 +608,13 @@ impl ThemeColor {
         apply_color!(slider_thumb, fallback = self.primary_foreground);
         apply_color!(switch, fallback = self.secondary_active);
         apply_color!(switch_thumb, fallback = self.background);
-        apply_color!(tab, fallback = self.background);
-        apply_color!(tab_active, fallback = self.background);
+        if config.mode.is_dark() {
+            apply_color!(tab, fallback = self.background);
+            apply_color!(tab_active, fallback = self.secondary);
+        } else {
+            apply_color!(tab, fallback = self.secondary);
+            apply_color!(tab_active, fallback = self.background);
+        }
         apply_color!(tab_active_foreground, fallback = self.foreground);
         apply_color!(tab_bar, fallback = self.background);
         apply_color!(tab_bar_segmented, fallback = self.secondary);
