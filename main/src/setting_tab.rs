@@ -1088,19 +1088,25 @@ impl AppSettings {
 
         // 当 effective mode 改变时，如果当前 theme_name 不匹配新模式，
         // 尝试找同名变体（Light <-> Dark），找不到则回退到默认主题。
-        if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(self.theme_name.as_str()) {
+        let effective_theme_name = if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(self.theme_name.as_str()) {
             if theme_config.mode != mode {
-                let fallback = Self::find_matching_theme_name(&self.theme_name, mode, cx)
+                Self::find_matching_theme_name(&self.theme_name, mode, cx)
                     .unwrap_or_else(|| {
                         if mode.is_dark() {
                             ThemeRegistry::global(cx).default_dark_theme().name.to_string()
                         } else {
                             ThemeRegistry::global(cx).default_light_theme().name.to_string()
                         }
-                    });
-                AppSettings::global_mut(cx).theme_name = fallback;
-                AppSettings::global_mut(cx).save();
+                    })
+            } else {
+                self.theme_name.clone()
             }
+        } else {
+            self.theme_name.clone()
+        };
+
+        if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(effective_theme_name.as_str()).cloned() {
+            Theme::global_mut(cx).apply_config(&theme_config);
         }
 
         Theme::set_window_surface_preferences(self.enable_glass_effect, self.glass_opacity, cx);
@@ -1108,6 +1114,7 @@ impl AppSettings {
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
         self.apply_misc_appearance_preferences(cx);
         self.apply_window_background_preferences(cx);
+        cx.refresh_windows();
     }
 
     fn find_matching_theme_name(current: &str, mode: ThemeMode, cx: &App) -> Option<String> {
@@ -1133,12 +1140,6 @@ impl AppSettings {
     }
 
     fn apply_misc_appearance_preferences(&self, cx: &mut App) {
-        if let Some(theme_config) =
-            ThemeRegistry::global(cx).themes().get(self.theme_name.as_str()).cloned()
-        {
-            Theme::global_mut(cx).apply_config(&theme_config);
-        }
-
         let scrollbar_show = match self.scrollbar_show.as_str() {
             "scrolling" => gpui_component::scroll::ScrollbarShow::Scrolling,
             "always" => gpui_component::scroll::ScrollbarShow::Always,

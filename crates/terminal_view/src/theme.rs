@@ -296,6 +296,8 @@ impl TerminalTheme {
                 themes.push(tabby_theme);
             }
         }
+        // 按名称字母顺序排列
+        themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         themes
     }
 

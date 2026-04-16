@@ -191,6 +191,7 @@ impl SettingsStory {
 
                                     Theme::global_mut(cx).mode = mode;
                                     Theme::change(mode, None, cx);
+                                    cx.refresh_windows();
                                 },
                             )
                             .default_value(default_settings.theme_preference_value()),
