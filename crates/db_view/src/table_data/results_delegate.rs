@@ -1818,7 +1818,7 @@ impl EditTableDelegate for EditorTableDelegate {
                         return;
                     };
                     if let Err(error) = data_grid.update(cx, |grid, cx| {
-                        grid.refresh_data(cx);
+                        grid.request_refresh(window, cx);
                     }) {
                         tracing::error!("Failed to refresh data grid: {}", error);
                         window

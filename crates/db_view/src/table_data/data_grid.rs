@@ -40,7 +40,7 @@ use one_core::storage::DatabaseType;
 
 actions!(
     data_grid,
-    [Page500, Page1000, Page2000, Page10000, Page100000]
+    [Page100, Page200, Page300, Page500, Page1000]
 );
 
 #[cfg(test)]
@@ -225,6 +225,18 @@ enum ExportFormat {
     InsertSql,
 }
 
+#[derive(Clone)]
+enum ReloadAction {
+    ApplyFilters,
+    ApplySort {
+        column_name: String,
+        sort: ColumnSort,
+    },
+    RefreshCurrent,
+    LoadPage(usize),
+    ChangePageSize(usize),
+}
+
 impl ExportFormat {
     fn extension(self) -> &'static str {
         match self {
@@ -380,9 +392,9 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.filter_editor,
             window,
-            |this: &mut DataGrid, _, evt: &FilterEditorEvent, _window, cx| {
+            |this: &mut DataGrid, _, evt: &FilterEditorEvent, window, cx| {
                 if matches!(evt, FilterEditorEvent::QueryApply) {
-                    this.load_data_with_clauses(1, cx);
+                    this.request_reload_action(ReloadAction::ApplyFilters, window, cx);
                     cx.notify();
                 }
             },
@@ -498,7 +510,7 @@ impl DataGrid {
         &mut self,
         column_name: &str,
         sort: ColumnSort,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) {
         if self.config.usage != DataGridUsage::TableData {
@@ -511,11 +523,95 @@ impl DataGrid {
             sort
         );
 
-        self.filter_editor.update(cx, |editor, cx| {
-            editor.add_sort_column(column_name, sort, cx);
-        });
+        self.request_reload_action(
+            ReloadAction::ApplySort {
+                column_name: column_name.to_string(),
+                sort,
+            },
+            window,
+            cx,
+        );
+    }
 
-        self.load_data_with_clauses(1, cx);
+    fn commit_active_cell_edit(&self, window: &mut Window, cx: &mut App) {
+        // 先提交当前编辑中的单元格，避免未提交输入绕过未保存检查。
+        self.table.update(cx, |state, cx| {
+            state.commit_cell_edit(window, cx);
+        });
+    }
+
+    fn request_reload_action(&self, action: ReloadAction, window: &mut Window, cx: &mut App) {
+        self.commit_active_cell_edit(window, cx);
+
+        if self.config.usage != DataGridUsage::TableData || !self.has_unsaved_changes(cx) {
+            self.execute_reload_action(action, cx);
+            return;
+        }
+
+        self.confirm_discard_and_reload(action, window, cx);
+    }
+
+    fn confirm_discard_and_reload(&self, action: ReloadAction, window: &mut Window, cx: &mut App) {
+        let data_grid = self.clone();
+        let title = format!(
+            "{} {}.{}",
+            t!("Common.refresh"),
+            self.config.database_name,
+            self.config.table_name
+        );
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let data_grid = data_grid.clone();
+            let action = action.clone();
+
+            dialog
+                .title(title.clone())
+                .overlay_closable(false)
+                .close_button(true)
+                .footer(move |_ok, _cancel, _window, _cx| {
+                    let data_grid = data_grid.clone();
+                    let action = action.clone();
+
+                    vec![
+                        Button::new("cancel")
+                            .label(t!("Common.cancel").to_string())
+                            .on_click(move |_, window: &mut Window, cx| {
+                                window.close_dialog(cx);
+                            })
+                            .into_any_element(),
+                        Button::new("discard")
+                            .label(t!("Common.discard").to_string())
+                            .on_click(move |_, window: &mut Window, cx| {
+                                window.close_dialog(cx);
+                                data_grid.revert_changes(cx);
+                                data_grid.execute_reload_action(action.clone(), cx);
+                            })
+                            .into_any_element(),
+                    ]
+                })
+                .child(t!("Table.unsaved_changes_prompt").to_string())
+        });
+    }
+
+    fn execute_reload_action(&self, action: ReloadAction, cx: &mut App) {
+        match action {
+            ReloadAction::ApplyFilters => self.load_data_with_clauses(1, cx),
+            ReloadAction::ApplySort { column_name, sort } => {
+                self.filter_editor.update(cx, |editor, cx| {
+                    editor.add_sort_column(&column_name, sort, cx);
+                });
+                self.load_data_with_clauses(1, cx);
+            }
+            ReloadAction::RefreshCurrent => self.refresh_data(cx),
+            ReloadAction::LoadPage(page) => self.load_data_with_clauses(page, cx),
+            ReloadAction::ChangePageSize(new_size) => {
+                self.table_data_info.update(cx, |info, cx| {
+                    info.page_size = new_size;
+                    cx.notify();
+                });
+                self.load_data_with_clauses(1, cx);
+            }
+        }
     }
 
     // ========== 数据加载 ==========
@@ -729,6 +825,10 @@ impl DataGrid {
             return;
         }
         self.handle_refresh(cx);
+    }
+
+    pub fn request_refresh(&self, window: &mut Window, cx: &mut App) {
+        self.request_reload_action(ReloadAction::RefreshCurrent, window, cx);
     }
 
     pub fn open_large_text_editor(&self, window: &mut Window, cx: &mut App) {
@@ -1132,14 +1232,14 @@ impl DataGrid {
         .detach();
     }
 
-    fn handle_prev_page(&self, cx: &mut App) {
+    fn handle_prev_page(&self, window: &mut Window, cx: &mut App) {
         let page = self.table_data_info.read(cx).current_page;
         if page > 1 {
-            self.load_data_with_clauses(page - 1, cx);
+            self.request_reload_action(ReloadAction::LoadPage(page - 1), window, cx);
         }
     }
 
-    fn handle_next_page(&self, cx: &mut App) {
+    fn handle_next_page(&self, window: &mut Window, cx: &mut App) {
         let info = self.table_data_info.read(cx);
         let page = info.current_page;
         let total = info.total_count;
@@ -1150,41 +1250,52 @@ impl DataGrid {
         }
         let total_pages = total.div_ceil(page_size);
         if page < total_pages {
-            self.load_data_with_clauses(page + 1, cx);
+            self.request_reload_action(ReloadAction::LoadPage(page + 1), window, cx);
         }
     }
 
-    fn handle_page_size_change(&self, new_size: usize, cx: &mut App) {
-        self.table_data_info.update(cx, |info, cx| {
-            info.page_size = new_size;
-            cx.notify();
-        });
-        self.load_data_with_clauses(1, cx);
+    fn handle_page_size_change(&self, new_size: usize, window: &mut Window, cx: &mut App) {
+        self.request_reload_action(ReloadAction::ChangePageSize(new_size), window, cx);
     }
 
-    fn handle_page_change_500(&mut self, _: &Page500, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(500, cx)
+    fn handle_page_change_500(&mut self, _: &Page500, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_page_size_change(500, window, cx)
     }
 
-    fn handle_page_change_1000(&mut self, _: &Page1000, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(1000, cx)
-    }
-
-    fn handle_page_change_2000(&mut self, _: &Page2000, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(2000, cx)
-    }
-
-    fn handle_page_change_10000(&mut self, _: &Page10000, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(10000, cx)
-    }
-
-    fn handle_page_change_100000(
+    fn handle_page_change_100(
         &mut self,
-        _: &Page100000,
-        _: &mut Window,
+        _: &Page100,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_page_size_change(100000, cx)
+        self.handle_page_size_change(100, window, cx)
+    }
+
+    fn handle_page_change_200(
+        &mut self,
+        _: &Page200,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_page_size_change(200, window, cx)
+    }
+
+    fn handle_page_change_300(
+        &mut self,
+        _: &Page300,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_page_size_change(300, window, cx)
+    }
+
+    fn handle_page_change_1000(
+        &mut self,
+        _: &Page1000,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_page_size_change(1000, window, cx)
     }
 
     fn handle_add_row(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1255,28 +1366,28 @@ impl DataGrid {
     fn handle_toolbar_refresh(
         &mut self,
         _: &ClickEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_refresh(cx);
+        self.request_refresh(window, cx);
     }
 
     fn handle_prev_page_click(
         &mut self,
         _: &ClickEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_prev_page(cx);
+        self.handle_prev_page(window, cx);
     }
 
     fn handle_next_page_click(
         &mut self,
         _: &ClickEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_next_page(cx);
+        self.handle_next_page(window, cx);
     }
 
     // ========== 大文本编辑器 ==========
@@ -2640,11 +2751,11 @@ impl DataGrid {
                             .with_size(Size::Small)
                             .label(label)
                             .dropdown_menu_with_anchor(Corner::TopRight, move |menu, _, _| {
-                                menu.menu("500", Box::new(Page500))
+                                menu.menu("100", Box::new(Page100))
+                                    .menu("200", Box::new(Page200))
+                                    .menu("300", Box::new(Page300))
+                                    .menu("500", Box::new(Page500))
                                     .menu("1000", Box::new(Page1000))
-                                    .menu("2000", Box::new(Page2000))
-                                    .menu("10000", Box::new(Page10000))
-                                    .menu("100000", Box::new(Page100000))
                             })
                     })
                     .child(
@@ -2704,11 +2815,11 @@ impl Render for DataGrid {
 
         v_flex()
             .when(is_table_data, |this| {
-                this.on_action(cx.listener(Self::handle_page_change_500))
+                this.on_action(cx.listener(Self::handle_page_change_100))
+                    .on_action(cx.listener(Self::handle_page_change_200))
+                    .on_action(cx.listener(Self::handle_page_change_300))
+                    .on_action(cx.listener(Self::handle_page_change_500))
                     .on_action(cx.listener(Self::handle_page_change_1000))
-                    .on_action(cx.listener(Self::handle_page_change_2000))
-                    .on_action(cx.listener(Self::handle_page_change_10000))
-                    .on_action(cx.listener(Self::handle_page_change_100000))
             })
             .size_full()
             .gap_0()
