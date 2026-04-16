@@ -1109,6 +1109,12 @@ impl AppSettings {
             Theme::global_mut(cx).apply_config(&theme_config);
         }
 
+        // 如果有效主题名与当前设置不同（模式切换导致主题名改变），同步更新设置
+        if effective_theme_name != self.theme_name {
+            AppSettings::global_mut(cx).theme_name = effective_theme_name.clone();
+            AppSettings::global_mut(cx).save();
+        }
+
         Theme::set_window_surface_preferences(self.enable_glass_effect, self.glass_opacity, cx);
         Theme::change(mode, window, cx);
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
