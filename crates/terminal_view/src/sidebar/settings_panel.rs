@@ -5,15 +5,14 @@
 use gpui::prelude::FluentBuilder;
 use gpui::FontWeight;
 use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window,
+    div, px, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
-    scroll::ScrollableElement,
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
     v_flex, ActiveTheme, Icon, IconName, Sizable, Size,
@@ -69,6 +68,8 @@ pub struct SettingsPanel {
     line_height_input_state: Entity<InputState>,
     /// 字体选择状态
     font_select_state: Entity<SelectState<Vec<SharedString>>>,
+    /// 主题选择状态
+    theme_select_state: Entity<SelectState<Vec<SharedString>>>,
     /// 当前主题
     current_theme: TerminalTheme,
     /// 字体大小输入变更抑制
@@ -140,6 +141,21 @@ impl SettingsPanel {
 
         let font_select_state =
             cx.new(|cx| SelectState::new(fonts, selected_index, window, cx).searchable(true));
+
+        // 主题选择列表
+        let mode_is_dark = cx.theme().mode.is_dark();
+        let all_themes: Vec<TerminalTheme> =
+            TerminalTheme::all().into_iter().filter(|t| t.variant.matches(mode_is_dark)).collect();
+        let theme_names: Vec<SharedString> = all_themes
+            .iter()
+            .map(|t| SharedString::from(t.name))
+            .collect();
+        let selected_theme_index = all_themes
+            .iter()
+            .position(|t| t.name == initial_theme.name)
+            .map(|i| gpui_component::IndexPath::default().row(i));
+        let theme_select_state =
+            cx.new(|cx| SelectState::new(theme_names, selected_theme_index, window, cx).searchable(true));
 
         let mut subscriptions = Vec::new();
 
@@ -260,11 +276,26 @@ impl SettingsPanel {
             },
         ));
 
+        // 订阅主题选择事件
+        let all_themes_for_sub = all_themes.clone();
+        subscriptions.push(cx.subscribe_in(
+            &theme_select_state,
+            window,
+            move |this, _state, event: &SelectEvent<Vec<SharedString>>, _window, cx| {
+                if let SelectEvent::Confirm(Some(name)) = event {
+                    if let Some(theme) = all_themes_for_sub.iter().find(|t| SharedString::from(t.name) == *name) {
+                        this.set_theme(theme.clone(), cx);
+                    }
+                }
+            },
+        ));
+
         Self {
             search_input_state,
             font_size_input_state,
             line_height_input_state,
             font_select_state,
+            theme_select_state,
             current_theme: initial_theme.clone(),
             suppress_font_size_change: false,
             suppress_line_height_change: false,
@@ -308,6 +339,12 @@ impl SettingsPanel {
         let font_family = theme.font_family.clone();
         self.font_select_state.update(cx, |state, cx| {
             state.set_selected_value(&font_family, window, cx);
+        });
+
+        // 更新主题选择
+        let theme_name = SharedString::from(theme.name);
+        self.theme_select_state.update(cx, |state, cx| {
+            state.set_selected_value(&theme_name, window, cx);
         });
 
         self.current_theme = theme;
@@ -458,67 +495,6 @@ impl SettingsPanel {
                         .child(t!("Settings.search_hint")),
                 ),
         )
-    }
-
-    /// 渲染主题项
-    fn render_theme_item(&self, theme: TerminalTheme, cx: &mut Context<Self>) -> AnyElement {
-        let current_theme_name = self.current_theme.name;
-        let is_current = current_theme_name == theme.name;
-        let theme_for_click = theme.clone();
-        let accent = cx.theme().accent;
-        let accent_fg = cx.theme().accent_foreground;
-        let muted = cx.theme().muted;
-        let border = cx.theme().border;
-        let theme_i18n_key = format!("Theme.{}", theme.name);
-        let theme_display_name = t!(&theme_i18n_key).to_string();
-
-        div()
-            .id(SharedString::from(format!("theme-{}", theme.name)))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_3()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .cursor_pointer()
-            .when(is_current, |style| style.bg(accent).text_color(accent_fg))
-            .when(!is_current, |style| style.hover(|s| s.bg(muted)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _window, cx| {
-                    this.set_theme(theme_for_click.clone(), cx);
-                }),
-            )
-            // 颜色预览
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded_md()
-                            .bg(theme.background)
-                            .border_1()
-                            .border_color(border),
-                    )
-                    .child(
-                        div()
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded_md()
-                            .bg(theme.foreground)
-                            .border_1()
-                            .border_color(border),
-                    ),
-            )
-            // 主题名称
-            .child(div().flex_1().text_sm().child(theme_display_name))
-            .when(is_current, |item| {
-                item.child(Icon::new(IconName::Check).with_size(Size::Small))
-            })
-            .into_any_element()
     }
 
     /// 渲染字体设置区域
@@ -792,18 +768,10 @@ impl SettingsPanel {
     }
 
     /// 渲染主题选择区域
-    fn render_theme_section(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_theme_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
-        let muted = cx.theme().muted;
         let muted_fg = cx.theme().muted_foreground;
-
-        // 预先收集所有主题项（仅显示与应用当前模式匹配的主题）
-        let mode_is_dark = cx.theme().mode.is_dark();
-        let theme_items: Vec<AnyElement> = TerminalTheme::all()
-            .into_iter()
-            .filter(|theme| theme.variant.matches(mode_is_dark))
-            .map(|theme| self.render_theme_item(theme, cx))
-            .collect();
+        let fg = cx.theme().foreground;
 
         v_flex()
             .gap_3()
@@ -818,14 +786,10 @@ impl SettingsPanel {
                     .child(t!("Settings.theme").to_uppercase()),
             )
             .child(
-                div()
-                    .id("theme-list-scroll")
-                    .max_h(px(300.0))
-                    .overflow_y_scrollbar()
-                    .rounded_md()
-                    .bg(muted)
-                    .p_1()
-                    .children(theme_items),
+                Select::new(&self.theme_select_state)
+                    .small()
+                    .text_color(fg)
+                    .placeholder(t!("Settings.select_theme_placeholder")),
             )
     }
 }

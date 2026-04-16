@@ -79,7 +79,12 @@ where
                             }),
                     )
                 });
-                menu
+                // 超过 20 项时启用滚动
+                if dropdown_options.len() > 20 {
+                    menu.scrollable(true)
+                } else {
+                    menu
+                }
             })
             .into_any_element()
     }

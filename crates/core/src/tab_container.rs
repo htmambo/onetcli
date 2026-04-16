@@ -885,8 +885,10 @@ impl ListDelegate for TabListDelegate {
             ix.row
         };
         let (tab_index, title, icon, closeable) = self.filtered_tabs.get(tab_row)?.clone();
-        let active_index = self.container.read(cx).active_index();
-        let is_active = tab_index == active_index;
+        let container = self.container.read(cx);
+        let active_index = container.active_index();
+        let is_active =
+            is_regular_tab_active(tab_index, active_index, container.is_pinned_tab_active());
 
         Some(TabListPopoverItem::Tab(TabListItem::new(
             tab_index,
@@ -975,6 +977,10 @@ fn inactive_tab_background_alpha(surface_opacity: f32, tab_bar_alpha: f32) -> f3
 
 fn hover_tab_background_alpha(inactive_alpha: f32) -> f32 {
     (inactive_alpha + 0.08).clamp(0.0, 1.0)
+}
+
+fn is_regular_tab_active(tab_index: usize, active_index: usize, pinned_tab_active: bool) -> bool {
+    !pinned_tab_active && tab_index == active_index
 }
 
 fn with_alpha(color: gpui::Hsla, alpha: f32) -> gpui::Hsla {
@@ -1139,6 +1145,12 @@ impl TabContainer {
     /// Activate the pinned tab (deactivate regular tabs visually).
     pub fn activate_pinned_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.pinned_tab.is_some() {
+            // Deactivate the previously active regular tab
+            if !self.pinned_tab_active {
+                if let Some(old_tab) = self.tabs.get(self.active_index) {
+                    old_tab.content().on_deactivate(window, cx);
+                }
+            }
             self.pinned_tab_active = true;
             if let Some(pinned) = &self.pinned_tab {
                 pinned.content().focus_handle(cx).focus(window, cx);
@@ -2384,7 +2396,8 @@ impl TabContainer {
                         let title = tab.content().title(cx);
                         let icon = tab.content().icon(cx);
                         let closeable = tab.content().closeable(cx);
-                        let is_active = idx == active_index;
+                        let is_active =
+                            is_regular_tab_active(idx, active_index, self.pinned_tab_active);
                         let view_clone = view.clone();
                         let title_clone = title.clone();
                         let tab_width = self.get_tab_width(tab, cx);
@@ -2866,8 +2879,9 @@ impl Render for TabContainer {
 mod tests {
     use super::{
         TabBarDragPlan, build_tab_bar_drag_plan, inactive_tab_background_alpha,
-        should_render_windows_drag_spacer, should_suppress_duplicate_status_summary,
-        tab_bar_background_alpha, uses_manual_window_move,
+        is_regular_tab_active, should_render_windows_drag_spacer,
+        should_suppress_duplicate_status_summary, tab_bar_background_alpha,
+        uses_manual_window_move,
     };
 
     #[test]
@@ -2939,6 +2953,13 @@ mod tests {
     fn inactive_tab_alpha_整体不透明时加_point_two() {
         assert_eq!(inactive_tab_background_alpha(0.4, 1.0), 0.6);
         assert_eq!(inactive_tab_background_alpha(0.84, 1.0), 1.0);
+    }
+
+    #[test]
+    fn pinned_tab_active时普通tab不应同时处于激活态() {
+        assert!(!is_regular_tab_active(2, 2, true));
+        assert!(is_regular_tab_active(2, 2, false));
+        assert!(!is_regular_tab_active(1, 2, false));
     }
 
     #[test]

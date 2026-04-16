@@ -1580,12 +1580,14 @@ impl SettingsPanel {
                                 themed_setting_field(SettingField::dropdown(
                                     {
                                         let current_mode = Theme::global(cx).mode;
-                                        ThemeRegistry::global(cx)
+                                        let mut themes: Vec<_> = ThemeRegistry::global(cx)
                                             .themes()
                                             .values()
                                             .filter(|t| t.mode == current_mode)
                                             .map(|t| (t.name.clone(), t.name.clone()))
-                                            .collect::<Vec<_>>()
+                                            .collect();
+                                        themes.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                                        themes
                                     },
                                     |cx: &App| {
                                         SharedString::from(
@@ -2435,6 +2437,42 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Terminal.line_height_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.color_scheme"),
+                                SettingField::dropdown(
+                                    {
+                                        let mode_is_dark = Theme::global(cx).mode.is_dark();
+                                        let mut themes: Vec<_> = TerminalTheme::all()
+                                            .into_iter()
+                                            .filter(|t| t.variant.is_dark() == mode_is_dark)
+                                            .map(|t| {
+                                                let n = SharedString::from(t.name);
+                                                (n.clone(), n)
+                                            })
+                                            .collect();
+                                        themes.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                                        themes
+                                    },
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).terminal_theme.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.terminal_theme = val.to_string();
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                    },
+                                )
+                                .default_value(default_settings.terminal_theme.clone()),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.color_scheme_desc").to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Terminal.auto_copy"),

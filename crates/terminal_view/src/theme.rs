@@ -31,6 +31,11 @@ pub enum ThemeVariant {
 }
 
 impl ThemeVariant {
+    /// 判断是否为暗色变体
+    pub fn is_dark(&self) -> bool {
+        matches!(self, Self::Dark)
+    }
+
     /// 判断当前变体是否与给定模式匹配
     pub(crate) fn matches(&self, mode_is_dark: bool) -> bool {
         match self {

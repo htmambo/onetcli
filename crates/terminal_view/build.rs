@@ -60,6 +60,20 @@ struct SchemeMeta {
 fn parse_scheme(path: &Path) -> Option<SchemeMeta> {
     let content = fs::read_to_string(path).ok()?;
     let name = path.file_name()?.to_str()?.to_string();
+
+    // 第一遍：收集所有 #define 宏定义
+    let mut macros: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("#define ") {
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            if parts.len() >= 2 {
+                macros.insert(parts[0].to_string(), parts[1].to_string());
+            }
+        }
+    }
+
+    // 第二遍：解析键值对，将宏引用替换为实际值
     let mut foreground = String::new();
     let mut background = String::new();
     let mut cursor = String::new();
@@ -84,51 +98,61 @@ fn parse_scheme(path: &Path) -> Option<SchemeMeta> {
 
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with('!') || line.is_empty() {
+        if line.starts_with('!') || line.is_empty() || line.starts_with("#define") {
             continue;
         }
+
+        let resolve = |raw: &str| -> String {
+            let raw = raw.trim();
+            if is_valid_hex(raw) {
+                raw.to_string()
+            } else {
+                macros.get(raw).cloned().unwrap_or_else(|| raw.to_string())
+            }
+        };
+
         if let Some(val) = line.strip_prefix("*.foreground:") {
-            foreground = val.trim().to_string();
+            foreground = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.background:") {
-            background = val.trim().to_string();
+            background = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.cursorColor:") {
-            cursor = val.trim().to_string();
+            cursor = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color0:") {
-            colors[0] = val.trim().to_string();
+            colors[0] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color1:") {
-            colors[1] = val.trim().to_string();
+            colors[1] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color2:") {
-            colors[2] = val.trim().to_string();
+            colors[2] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color3:") {
-            colors[3] = val.trim().to_string();
+            colors[3] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color4:") {
-            colors[4] = val.trim().to_string();
+            colors[4] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color5:") {
-            colors[5] = val.trim().to_string();
+            colors[5] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color6:") {
-            colors[6] = val.trim().to_string();
+            colors[6] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color7:") {
-            colors[7] = val.trim().to_string();
+            colors[7] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color8:") {
-            colors[8] = val.trim().to_string();
+            colors[8] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color9:") {
-            colors[9] = val.trim().to_string();
+            colors[9] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color10:") {
-            colors[10] = val.trim().to_string();
+            colors[10] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color11:") {
-            colors[11] = val.trim().to_string();
+            colors[11] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color12:") {
-            colors[12] = val.trim().to_string();
+            colors[12] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color13:") {
-            colors[13] = val.trim().to_string();
+            colors[13] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color14:") {
-            colors[14] = val.trim().to_string();
+            colors[14] = resolve(val);
         } else if let Some(val) = line.strip_prefix("*.color15:") {
-            colors[15] = val.trim().to_string();
+            colors[15] = resolve(val);
         }
     }
 
-    // 过滤掉使用 #define 宏引用的方案（仅接受直接的十六进制值）
+    // 过滤掉缺少必要颜色的方案
     if foreground.is_empty()
         || background.is_empty()
         || colors[0].is_empty()

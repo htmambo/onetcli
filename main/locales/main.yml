@@ -606,6 +606,88 @@ Settings:
     zh-CN: 设置
     zh-HK: 設定
 
+  # 通用设置项
+  search_placeholder:
+    en: "Search settings..."
+    zh-CN: 搜索设置...
+    zh-HK: 搜尋設定...
+  search:
+    en: Search
+    zh-CN: 搜索
+    zh-HK: 搜尋
+  search_hint:
+    en: Use / to search, Enter to jump to next
+    zh-CN: 使用 / 搜索，Enter 跳转到下一个
+    zh-HK: 使用 / 搜尋，Enter 跳轉到下一個
+  font_size:
+    en: Font Size
+    zh-CN: 字体大小
+    zh-HK: 字型大小
+  font_family:
+    en: Font Family
+    zh-CN: 字体
+    zh-HK: 字型
+  select_font_placeholder:
+    en: Select a font
+    zh-CN: 选择字体
+    zh-HK: 選擇字型
+  select_theme_placeholder:
+    en: Select a color scheme
+    zh-CN: 选择配色方案
+    zh-HK: 選擇配色方案
+  line_height:
+    en: Line Height
+    zh-CN: 行间距
+    zh-HK: 行距
+  cursor:
+    en: Cursor
+    zh-CN: 光标
+    zh-HK: 光標
+  cursor_blink:
+    en: Cursor Blink
+    zh-CN: 光标闪烁
+    zh-HK: 光標閃爍
+  safety:
+    en: Safety
+    zh-CN: 安全
+    zh-HK: 安全
+  confirm_multiline_paste:
+    en: Confirm multi-line paste
+    zh-CN: 多行粘贴确认
+    zh-HK: 多行貼上確認
+  confirm_high_risk_command:
+    en: Confirm high-risk commands
+    zh-CN: 高危命令确认
+    zh-HK: 高危命令確認
+  auto_copy:
+    en: Auto copy on select
+    zh-CN: 选中自动复制
+    zh-HK: 選中自動複製
+  autocomplete:
+    en: Autocomplete
+    zh-CN: 自动补全
+    zh-HK: 自動補全
+  middle_click_paste:
+    en: Middle-click paste
+    zh-CN: 中键粘贴
+    zh-HK: 中鍵貼上
+  file_manager_section:
+    en: File Manager
+    zh-CN: 文件管理器
+    zh-HK: 檔案管理器
+  sync_path_with_terminal:
+    en: Sync path with terminal
+    zh-CN: 与终端同步路径
+    zh-HK: 與終端同步路徑
+  sync_path_help:
+    en: Automatically sync current directory with the terminal
+    zh-CN: 自动与终端同步当前目录
+    zh-HK: 自動與終端同步當前目錄
+  theme:
+    en: Theme
+    zh-CN: 主题
+    zh-HK: 主題
+
   # 通用设置组
   General:
     title:
@@ -930,6 +1012,14 @@ Settings:
         en: Adjust terminal line height scale (1.0-2.5)
         zh-CN: 调整终端行间距比例（1.0-2.5）
         zh-HK: 調整終端行距比例（1.0-2.5）
+      color_scheme:
+        en: Color Scheme
+        zh-CN: 配色方案
+        zh-HK: 配色方案
+      color_scheme_desc:
+        en: Terminal color scheme
+        zh-CN: 终端配色方案
+        zh-HK: 終端配色方案
       auto_copy:
         en: Auto copy on select
         zh-CN: 选中自动复制
