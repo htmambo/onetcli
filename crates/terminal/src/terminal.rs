@@ -1100,10 +1100,6 @@ impl Terminal {
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
         let (config, local_cwd_file) = prepare_local_shell_launch(config);
-        // 设置 cwd 跟踪文件，让 GpuiEventProxy 在 Wakeup 时自动检测路径变化
-        if let Some(ref path) = local_cwd_file {
-            event_proxy.set_cwd_file(path.clone());
-        }
         let LocalConfig {
             shell,
             shell_args,
