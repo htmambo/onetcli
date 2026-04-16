@@ -18,6 +18,11 @@ use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
 const SSH_PROMPT_READY_MARKER: &[u8] = b"\x1b]1337;OnetcliPromptReady=1\x07";
 
+fn contains_prompt_ready_marker(data: &[u8]) -> bool {
+    data.windows(SSH_PROMPT_READY_MARKER.len())
+        .any(|window| window == SSH_PROMPT_READY_MARKER)
+}
+
 /// 从终端数据中提取当前工作目录
 ///
 /// 支持多种协议:
@@ -25,11 +30,41 @@ const SSH_PROMPT_READY_MARKER: &[u8] = b"\x1b]1337;OnetcliPromptReady=1\x07";
 /// - OSC 1337: `\x1b]1337;CurrentDir=/path\x07`（可能无 \x07）
 /// - OSC 2/1332: `\x1b]2;user@host:/path\x07`
 /// - OSC 1: `\x1b]1;/path\x07`
-fn extract_cwd(data: &[u8]) -> Option<String> {
+fn normalize_ssh_working_dir(path: impl AsRef<str>, home_dir: Option<&str>) -> Option<String> {
+    let path = path.as_ref().trim();
+    if path.is_empty() {
+        return None;
+    }
+
+    if let Some(home_dir) = home_dir {
+        let home_dir = home_dir.trim_end_matches('/');
+        if path == "~" {
+            return Some(home_dir.to_string());
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            return Some(format!("{home_dir}/{rest}"));
+        }
+    }
+
+    Some(path.to_string())
+}
+
+fn extract_cwd(data: &[u8], home_dir: Option<&str>) -> Option<String> {
+    if let Some(path) = extract_osc_events(data)
+        .into_iter()
+        .find_map(|event| match event {
+            OscEvent::WorkingDirChanged(path) => normalize_ssh_working_dir(path, home_dir),
+            _ => None,
+        })
+    {
+        return Some(path);
+    }
+
     if let Ok(text) = std::str::from_utf8(data) {
-        // OSC 1337: CurrentDir 属性（可能没有 \x07 终止符）
-        if let Some(pos) = text.find("\x1b]1337;CurrentDir=") {
-            let after = &text[pos + 17..];
+        // 兼容极端情况下未完整终止的 CurrentDir 属性
+        const CURRENT_DIR_MARKER: &str = "\x1b]1337;CurrentDir=";
+        if let Some(pos) = text.find(CURRENT_DIR_MARKER) {
+            let after = &text[pos + CURRENT_DIR_MARKER.len()..];
             let end_pos = after
                 .find('\x07')
                 .or_else(|| after.find('\r'))
@@ -37,26 +72,7 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
                 .unwrap_or(after.len());
             let path = after[..end_pos].trim();
             if !path.is_empty() {
-                return Some(path.to_string());
-            }
-        }
-
-        // OSC 7: file:// URI (格式: file://<hostname>/<path>，hostname 可能为空)
-        if let Some(pos) = text.find("\x1b]7;") {
-            // \x1b + ] + 7 + ; = 4 bytes, skip all 4
-            let after = &text[pos + 4..];
-            if let Some(end) = after.find('\x07') {
-                let uri = &after[..end];
-                // 跳过 file:// 后，找第二个 /（如果有的话），其后的内容即为路径
-                // 格式: file://[<hostname>]/<path>
-                if let Some(path_start) = uri.find("://") {
-                    if let Some(path_pos) = uri[path_start + 3..].find('/') {
-                        let path = &uri[path_start + 3 + path_pos..];
-                        if !path.is_empty() {
-                            return Some(percent_decode(path));
-                        }
-                    }
-                }
+                return normalize_ssh_working_dir(path, home_dir);
             }
         }
 
@@ -70,9 +86,8 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
                     let path_start = at + colon + 1;
                     if path_start < title.len() {
                         let path = &title[path_start..];
-                        // ~ 需要 shell 展开，SFTP 客户端无法处理，只接受绝对路径
-                        if path.starts_with('/') {
-                            return Some(path.to_string());
+                        if path.starts_with('/') || path == "~" || path.starts_with("~/") {
+                            return normalize_ssh_working_dir(path, home_dir);
                         }
                     }
                 }
@@ -84,41 +99,12 @@ fn extract_cwd(data: &[u8]) -> Option<String> {
             let after = &text[pos + 4..];
             let end_pos = after.find('\x07').unwrap_or(after.len());
             let path = after[..end_pos].trim();
-            // ~ 需要 shell 展开，SFTP 客户端无法处理，只接受绝对路径
-            if path.starts_with('/') {
-                return Some(path.to_string());
+            if path.starts_with('/') || path == "~" || path.starts_with("~/") {
+                return normalize_ssh_working_dir(path, home_dir);
             }
         }
     }
     None
-}
-
-fn percent_decode(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if hex.len() == 2 {
-                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                    result.push(byte as char);
-                    continue;
-                }
-            }
-            result.push('%');
-            result.push_str(&hex);
-        } else if ch == '+' {
-            result.push(' ');
-        } else {
-            result.push(ch);
-        }
-    }
-    result
-}
-
-fn contains_prompt_ready_marker(data: &[u8]) -> bool {
-    data.windows(SSH_PROMPT_READY_MARKER.len())
-        .any(|window| window == SSH_PROMPT_READY_MARKER)
 }
 
 fn shell_single_quote(input: &str) -> String {
@@ -134,6 +120,7 @@ struct ShellIntegrationSetup {
     home_dir: String,
     session_dir: String,
     login_shell: Option<String>,
+    env_file: Option<String>,
 }
 
 fn remote_session_key(connection_id: Option<i64>) -> String {
@@ -146,6 +133,13 @@ fn shell_basename(shell: &str) -> &str {
     shell.rsplit('/').next().unwrap_or(shell)
 }
 
+fn is_posix_shell(shell: &str) -> bool {
+    matches!(
+        shell,
+        "sh" | "dash" | "ash" | "ksh" | "mksh" | "pdksh" | "oksh" | "yash"
+    )
+}
+
 fn extract_marker_value(output: &str, marker: &str) -> Option<String> {
     output
         .lines()
@@ -154,20 +148,26 @@ fn extract_marker_value(output: &str, marker: &str) -> Option<String> {
 
 fn build_shell_integration_setup_script(
     script: &str,
+    posix_script: &str,
     session_key: &str,
     success_marker: &str,
     home_marker: &str,
     session_marker: &str,
     shell_marker: &str,
+    env_marker: &str,
 ) -> String {
     let script = shell_single_quote(script);
+    let posix_script = shell_single_quote(posix_script);
     let integration_source =
         format!("$HOME/.config/onetcli/sessions/{session_key}/shell_integration.sh");
+    let posix_integration_source =
+        format!("$HOME/.config/onetcli/sessions/{session_key}/shell_integration_posix.sh");
     let session_key = shell_double_quote(session_key);
     let success_marker = shell_single_quote(success_marker);
     let home_marker = shell_single_quote(home_marker);
     let session_marker = shell_single_quote(session_marker);
     let shell_marker = shell_single_quote(shell_marker);
+    let env_marker = shell_single_quote(env_marker);
     let zshenv = shell_single_quote(
         "ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
          [[ -f \"$ZDOTDIR/.zshenv\" ]] && . \"$ZDOTDIR/.zshenv\"\n",
@@ -181,51 +181,68 @@ fn build_shell_integration_setup_script(
         "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
              . \"{integration_source}\"\n"
     ));
+    let posix_env = shell_single_quote(&format!(
+        "[ -n \"${{ONETCLI_ORIG_ENV:-}}\" ] && [ \"${{ONETCLI_ORIG_ENV}}\" != \"$ENV\" ] && [ -f \"${{ONETCLI_ORIG_ENV}}\" ] && . \"${{ONETCLI_ORIG_ENV}}\"\n\
+             [ -z \"${{ONETCLI_ORIG_ENV:-}}\" ] && [ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"\n\
+             . \"{posix_integration_source}\"\n"
+    ));
 
     format!(
         concat!(
             "set -e\n",
             "session_dir=\"$HOME/.config/onetcli/sessions/{session_key}\"\n",
             "integration_path=\"$session_dir/shell_integration.sh\"\n",
+            "posix_integration_path=\"$session_dir/shell_integration_posix.sh\"\n",
             "zsh_dir=\"$session_dir/zsh\"\n",
             "bash_dir=\"$session_dir/bash\"\n",
-            "mkdir -p \"$zsh_dir\" \"$bash_dir\"\n",
+            "posix_dir=\"$session_dir/posix\"\n",
+            "mkdir -p \"$zsh_dir\" \"$bash_dir\" \"$posix_dir\"\n",
             "printf %s {script} > \"$integration_path\"\n",
+            "printf %s {posix_script} > \"$posix_integration_path\"\n",
             "printf %s {zshenv} > \"$zsh_dir/.zshenv\"\n",
             "printf %s {zshrc} > \"$zsh_dir/.zshrc\"\n",
             "printf %s {bashrc} > \"$bash_dir/.bashrc\"\n",
+            "printf %s {posix_env} > \"$posix_dir/.shrc\"\n",
             "printf '%s%s\\n' {home_marker} \"$HOME\"\n",
             "printf '%s%s\\n' {session_marker} \"$session_dir\"\n",
             "printf '%s%s\\n' {shell_marker} \"${{SHELL:-}}\"\n",
+            "printf '%s%s\\n' {env_marker} \"${{ENV:-}}\"\n",
             "printf '%s\\n' {success_marker}\n"
         ),
         session_key = session_key,
         script = script,
+        posix_script = posix_script,
         zshenv = zshenv,
         zshrc = zshrc,
         bashrc = bashrc,
+        posix_env = posix_env,
         success_marker = success_marker,
         home_marker = home_marker,
         session_marker = session_marker,
         shell_marker = shell_marker,
+        env_marker = env_marker,
     )
 }
 
 fn build_shell_integration_setup_command(
     script: &str,
+    posix_script: &str,
     session_key: &str,
     success_marker: &str,
     home_marker: &str,
     session_marker: &str,
     shell_marker: &str,
+    env_marker: &str,
 ) -> String {
     let script = build_shell_integration_setup_script(
         script,
+        posix_script,
         session_key,
         success_marker,
         home_marker,
         session_marker,
         shell_marker,
+        env_marker,
     );
     format!("sh -c {}", shell_single_quote(&script))
 }
@@ -286,8 +303,9 @@ impl SshBackend {
             progress(stage);
         })
         .await?;
-        let mut channel =
+        let (mut channel, setup) =
             Self::prepare_ssh_channel(&mut client, &pty_config, connection_id).await?;
+        let remote_home_dir = setup.home_dir;
 
         // ③ init_commands 改为等 shell ready 后发送
         let pending_init = init_commands;
@@ -301,8 +319,9 @@ impl SshBackend {
         tokio::spawn(async move {
             let mut shutdown = false;
             let mut processor: Processor<StdSyncHandler> = Processor::new();
-            // 用来判断 shell 是否已经 ready（收到第一个 133;B 后才发 init_commands）
-            let mut shell_ready = false;
+            // init_commands 在收到第一个远程输出时立即发送，不依赖 shell_integration.sh。
+            // 这确保即使远端 shell 不是 bash/zsh，SshPromptReady hook 仍有机会被安装。
+            let mut shell_ready = true;
             let mut init_sent = false;
             // 缓冲跨包的 OSC 序列，避免 marker 被拆分时检测失败
             let mut osc_buffer: Vec<u8> = Vec::new();
@@ -346,7 +365,7 @@ impl SshBackend {
                             | Some(ChannelEvent::ExtendedData { data, .. }) => {
                                 osc_buffer.extend_from_slice(&data);
 
-                                if let Some(path) = extract_cwd(&osc_buffer) {
+                                if let Some(path) = extract_cwd(&osc_buffer, Some(&remote_home_dir)) {
                                     let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
                                 }
                                 if contains_prompt_ready_marker(&osc_buffer) {
@@ -361,7 +380,11 @@ impl SshBackend {
                                     );
                                     match osc_event {
                                         OscEvent::WorkingDirChanged(path) => {
-                                            let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
+                                            if let Some(path) =
+                                                normalize_ssh_working_dir(path, Some(&remote_home_dir))
+                                            {
+                                                let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
+                                            }
                                         }
                                         OscEvent::PromptStart => {
                                             let _ = event_tx.send(TerminalEvent::PromptStart);
@@ -376,6 +399,11 @@ impl SshBackend {
                                         }
                                         OscEvent::CommandStart => {
                                             // 133;C: 命令开始执行
+                                            // 注意：不发送 TerminalEvent，因为 bash DEBUG trap
+                                            // 会在 PS1 的命令 substitution 中误触发，导致
+                                            // ssh_process_state 卡在 Busy。
+                                            // Busy 状态由 Terminal::write 中的 note_ssh_user_input
+                                            // （检测换行符）来驱动即可。
                                         }
                                         OscEvent::CommandFinished { exit_code } => {
                                             // 133;D: 命令执行完毕
@@ -441,7 +469,7 @@ impl SshBackend {
         client: &mut C,
         pty_config: &PtyConfig,
         connection_id: Option<i64>,
-    ) -> anyhow::Result<C::Channel> {
+    ) -> anyhow::Result<(C::Channel, ShellIntegrationSetup)> {
         let mut setup_channel = client.open_channel().await?;
         let setup_result =
             Self::run_shell_integration_setup(&mut setup_channel, connection_id).await;
@@ -450,7 +478,7 @@ impl SshBackend {
 
         let mut channel = client.open_channel().await?;
         Self::start_interactive_shell(&mut channel, pty_config, &setup).await?;
-        Ok(channel)
+        Ok((channel, setup))
     }
 
     /// 在 PTY 之前写入 integration 脚本。
@@ -459,17 +487,21 @@ impl SshBackend {
         connection_id: Option<i64>,
     ) -> anyhow::Result<ShellIntegrationSetup> {
         const SCRIPT: &str = include_str!("shell_integration.sh");
+        const POSIX_SCRIPT: &str = include_str!("shell_integration_posix.sh");
         const SUCCESS_MARKER: &str = "__ONETCLI_SETUP_OK__";
         const HOME_MARKER: &str = "__ONETCLI_HOME__=";
         const SESSION_MARKER: &str = "__ONETCLI_SESSION_DIR__=";
         const SHELL_MARKER: &str = "__ONETCLI_LOGIN_SHELL__=";
+        const ENV_MARKER: &str = "__ONETCLI_ENV__=";
         let cmd = build_shell_integration_setup_command(
             SCRIPT,
+            POSIX_SCRIPT,
             &remote_session_key(connection_id),
             SUCCESS_MARKER,
             HOME_MARKER,
             SESSION_MARKER,
             SHELL_MARKER,
+            ENV_MARKER,
         );
 
         channel.exec(&cmd).await?;
@@ -503,10 +535,13 @@ impl SshBackend {
                         .ok_or_else(|| anyhow::anyhow!("missing setup session directory marker"))?;
                     let login_shell = extract_marker_value(&output, SHELL_MARKER)
                         .filter(|value| !value.trim().is_empty());
+                    let env_file = extract_marker_value(&output, ENV_MARKER)
+                        .filter(|value| !value.trim().is_empty());
                     return Ok(ShellIntegrationSetup {
                         home_dir,
                         session_dir,
                         login_shell,
+                        env_file,
                     });
                 }
                 _ => {}
@@ -526,11 +561,15 @@ impl SshBackend {
 
         match setup.login_shell.as_deref().map(shell_basename) {
             Some("zsh") => {
-                channel
-                    .set_env("ZDOTDIR", &format!("{}/zsh", setup.session_dir))
-                    .await?;
                 channel.request_pty(pty_config).await?;
-                channel.request_shell().await?;
+                let shell_path = setup.login_shell.as_deref().unwrap_or("zsh");
+                let zsh_dir = format!("{}/zsh", setup.session_dir);
+                let command = format!(
+                    "ZDOTDIR={} exec {} -il",
+                    shell_single_quote(&zsh_dir),
+                    shell_single_quote(shell_path)
+                );
+                channel.exec(&command).await?;
             }
             Some("bash") => {
                 channel.request_pty(pty_config).await?;
@@ -541,6 +580,18 @@ impl SshBackend {
                     shell_single_quote(shell_path),
                     shell_single_quote(&bash_rc)
                 );
+                channel.exec(&command).await?;
+            }
+            Some(shell) if is_posix_shell(shell) => {
+                if let Some(env_file) = setup.env_file.as_deref() {
+                    channel.set_env("ONETCLI_ORIG_ENV", env_file).await?;
+                }
+                channel
+                    .set_env("ENV", &format!("{}/posix/.shrc", setup.session_dir))
+                    .await?;
+                channel.request_pty(pty_config).await?;
+                let shell_path = setup.login_shell.as_deref().unwrap_or("sh");
+                let command = format!("exec {} -i", shell_single_quote(shell_path));
                 channel.exec(&command).await?;
             }
             _ => {
@@ -747,12 +798,8 @@ mod tests {
             vec![
                 ChannelOp::SetEnv("ONETCLI_SHELL_INTEGRATION".into(), "1".into()),
                 ChannelOp::SetEnv("ONETCLI_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::SetEnv(
-                    "ZDOTDIR".into(),
-                    "/tmp/home/.config/onetcli/sessions/42/zsh".into(),
-                ),
                 ChannelOp::RequestPty,
-                ChannelOp::RequestShell,
+                ChannelOp::Exec,
             ]
         );
     }
@@ -796,6 +843,48 @@ mod tests {
             Some(ChannelOp::Exec) => {}
             other => panic!("expected bash interactive channel to exec wrapper, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn prepare_ssh_channel_execs_posix_wrapper_after_pty() {
+        let (setup_channel, setup_state) = MockChannel::new(
+            [
+                ChannelEvent::Data(
+                    b"__ONETCLI_HOME__=/tmp/home\n__ONETCLI_SESSION_DIR__=/tmp/home/.config/onetcli/sessions/42\n__ONETCLI_LOGIN_SHELL__=/bin/dash\n__ONETCLI_ENV__=/tmp/home/.kshrc\n__ONETCLI_SETUP_OK__\n"
+                        .to_vec(),
+                ),
+                ChannelEvent::ExitStatus(0),
+            ],
+            true,
+        );
+        let (interactive_channel, interactive_state) = MockChannel::new([], false);
+        let mut client = MockClient::new([setup_channel, interactive_channel]);
+
+        let result =
+            SshBackend::prepare_ssh_channel(&mut client, &PtyConfig::default(), Some(42)).await;
+
+        assert!(
+            result.is_ok(),
+            "posix shell wrapper 应通过独立交互 channel 启动"
+        );
+        assert_eq!(
+            recorded_ops(&setup_state),
+            vec![ChannelOp::Exec, ChannelOp::Close]
+        );
+        assert_eq!(
+            recorded_ops(&interactive_state),
+            vec![
+                ChannelOp::SetEnv("ONETCLI_SHELL_INTEGRATION".into(), "1".into()),
+                ChannelOp::SetEnv("ONETCLI_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
+                ChannelOp::SetEnv("ONETCLI_ORIG_ENV".into(), "/tmp/home/.kshrc".into()),
+                ChannelOp::SetEnv(
+                    "ENV".into(),
+                    "/tmp/home/.config/onetcli/sessions/42/posix/.shrc".into(),
+                ),
+                ChannelOp::RequestPty,
+                ChannelOp::Exec,
+            ]
+        );
     }
 
     #[tokio::test]
@@ -847,13 +936,16 @@ mod tests {
         fs::write(&bashrc_path, "# user bashrc\n").expect("应写入用户 bashrc");
         fs::write(&zshrc_path, "# user zshrc\n").expect("应写入用户 zshrc");
         let script = "echo 'quoted'\nPS1='prompt'\n";
+        let posix_script = "echo 'posix prompt'\n";
         let command = build_shell_integration_setup_script(
             script,
+            posix_script,
             "42",
             "__TEST_OK__",
             "__HOME__=",
             "__SESSION__=",
             "__SHELL__=",
+            "__ENV__=",
         );
 
         let output = Command::new("sh")
@@ -861,6 +953,7 @@ mod tests {
             .arg(&command)
             .env("HOME", &home_dir)
             .env("SHELL", "/bin/zsh")
+            .env("ENV", "/tmp/original-env")
             .output()
             .expect("应能执行本地 shell setup 命令");
 
@@ -871,9 +964,14 @@ mod tests {
         );
         let session_dir = home_dir.join(".config/onetcli/sessions/42");
         let integration_path = session_dir.join("shell_integration.sh");
+        let posix_integration_path = session_dir.join("shell_integration_posix.sh");
         assert_eq!(
             fs::read_to_string(&integration_path).expect("应写入 integration 文件"),
             script
+        );
+        assert_eq!(
+            fs::read_to_string(&posix_integration_path).expect("应写入 posix integration 文件"),
+            posix_script
         );
         assert!(
             session_dir.join("zsh/.zshenv").is_file(),
@@ -887,6 +985,10 @@ mod tests {
             session_dir.join("bash/.bashrc").is_file(),
             "应写入 bash session wrapper"
         );
+        assert!(
+            session_dir.join("posix/.shrc").is_file(),
+            "应写入 posix shell wrapper"
+        );
         assert_eq!(
             fs::read_to_string(&bashrc_path).expect("应保留用户 bashrc"),
             "# user bashrc\n"
@@ -898,7 +1000,7 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).trim(),
             format!(
-                "__HOME__={}\n__SESSION__={}\n__SHELL__=/bin/zsh\n__TEST_OK__",
+                "__HOME__={}\n__SESSION__={}\n__SHELL__=/bin/zsh\n__ENV__=/tmp/original-env\n__TEST_OK__",
                 home_dir.display(),
                 session_dir.display()
             )
@@ -922,19 +1024,33 @@ mod tests {
     }
 
     #[test]
-    fn extract_osc_events_keeps_command_recording_between_prompt_events() {
-        let events = extract_osc_events(
-            b"\x1b]133;A\x07\x1b]1337;Command=Z2l0IHN0YXR1cw==\x07\x1b]133;D;0\x07",
-        );
+    fn extract_cwd_supports_internal_current_dir_marker() {
+        let data = b"\x1b]1337;CurrentDir=/srv/demo\x07";
 
-        assert!(matches!(events.first(), Some(OscEvent::PromptStart)));
-        assert!(
-            matches!(events.get(1), Some(OscEvent::CommandRecorded(cmd)) if cmd == "git status")
+        assert_eq!(
+            extract_cwd(data, Some("/home/demo")).as_deref(),
+            Some("/srv/demo")
         );
-        assert!(matches!(
-            events.get(2),
-            Some(OscEvent::CommandFinished { exit_code: 0 })
-        ));
+    }
+
+    #[test]
+    fn extract_cwd_expands_tilde_title_with_remote_home() {
+        let data = b"\x1b]2;demo@example:~\x07";
+
+        assert_eq!(
+            extract_cwd(data, Some("/home/demo")).as_deref(),
+            Some("/home/demo")
+        );
+    }
+
+    #[test]
+    fn extract_cwd_expands_tilde_subdir_title_with_remote_home() {
+        let data = b"\x1b]2;demo@example:~/workspace\x07";
+
+        assert_eq!(
+            extract_cwd(data, Some("/home/demo")).as_deref(),
+            Some("/home/demo/workspace")
+        );
     }
 
     #[test]
@@ -952,6 +1068,22 @@ mod tests {
         assert!(!contains_prompt_ready_marker(&buffer));
         buffer.extend_from_slice(b"1\x07world");
         assert!(contains_prompt_ready_marker(&buffer));
+    }
+
+    #[test]
+    fn extract_osc_events_keeps_command_recording_between_prompt_events() {
+        let events = extract_osc_events(
+            b"\x1b]133;A\x07\x1b]1337;Command=Z2l0IHN0YXR1cw==\x07\x1b]133;D;0\x07",
+        );
+
+        assert!(matches!(events.first(), Some(OscEvent::PromptStart)));
+        assert!(
+            matches!(events.get(1), Some(OscEvent::CommandRecorded(cmd)) if cmd == "git status")
+        );
+        assert!(matches!(
+            events.get(2),
+            Some(OscEvent::CommandFinished { exit_code: 0 })
+        ));
     }
 }
 

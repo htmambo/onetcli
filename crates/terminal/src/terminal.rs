@@ -217,9 +217,6 @@ fn build_cd_command(dir: &str) -> String {
     format!("cd -- {}", shell_escape_arg(dir))
 }
 
-const OSC7_PROMPT_COMMAND: &str = r#"printf "\033]7;file://%s%s\007" "${HOSTNAME:-}" "$PWD""#;
-const SSH_PROMPT_READY_COMMAND: &str = r#"printf "\033]1337;OnetcliPromptReady=1\007""#;
-const SSH_PROMPT_HOOK_NAME: &str = "onetcli_prompt_hook";
 fn build_ssh_base_init_commands(
     working_dir: Option<&str>,
     default_directory: Option<&str>,
@@ -241,6 +238,10 @@ fn build_ssh_base_init_commands(
     (!commands.is_empty()).then(|| commands.join("\n"))
 }
 
+const OSC7_PROMPT_COMMAND: &str = r#"printf "\033]7;file://%s%s\007" "${HOSTNAME:-}" "$PWD""#;
+const SSH_PROMPT_READY_COMMAND: &str = r#"printf "\033]1337;OnetcliPromptReady=1\007""#;
+const SSH_PROMPT_HOOK_NAME: &str = "onetcli_prompt_hook";
+
 fn compose_ssh_init_commands(
     base_init_commands: Option<&str>,
     sync_path_with_terminal: bool,
@@ -254,17 +255,6 @@ fn compose_ssh_init_commands(
     commands.push(build_ssh_prompt_hook_command(sync_path_with_terminal));
 
     (!commands.is_empty()).then(|| commands.join("\n"))
-}
-
-fn build_ssh_init_commands(
-    working_dir: Option<&str>,
-    default_directory: Option<&str>,
-    init_script: Option<&str>,
-    sync_path_with_terminal: bool,
-) -> Option<String> {
-    let base_init_commands =
-        build_ssh_base_init_commands(working_dir, default_directory, init_script);
-    compose_ssh_init_commands(base_init_commands.as_deref(), sync_path_with_terminal)
 }
 
 fn build_ssh_prompt_hook_command(sync_path_with_terminal: bool) -> String {
@@ -291,6 +281,17 @@ fi; \
         hook_name = SSH_PROMPT_HOOK_NAME,
         hook_body = hook_body,
     )
+}
+
+fn build_ssh_init_commands(
+    working_dir: Option<&str>,
+    default_directory: Option<&str>,
+    init_script: Option<&str>,
+    sync_path_with_terminal: bool,
+) -> Option<String> {
+    let base_init_commands =
+        build_ssh_base_init_commands(working_dir, default_directory, init_script);
+    compose_ssh_init_commands(base_init_commands.as_deref(), sync_path_with_terminal)
 }
 
 fn normalize_working_dir(path: &str) -> Option<String> {
@@ -554,10 +555,32 @@ fn note_ssh_user_input(
         return;
     }
 
-    let should_mark_busy = matches!(ssh_process_state.get(), SshProcessState::Busy)
-        || data.iter().any(|byte| matches!(*byte, b'\r' | b'\n'));
+    let has_newline = data.iter().any(|byte| matches!(*byte, b'\r' | b'\n'));
+    let should_mark_busy =
+        matches!(ssh_process_state.get(), SshProcessState::Busy) || has_newline;
     if should_mark_busy {
+        tracing::warn!(
+            target: "terminal.ssh",
+            has_newline,
+            data_len = data.len(),
+            data = %String::from_utf8_lossy(data).trim(),
+            "SSH user input -> Busy"
+        );
         ssh_process_state.set(SshProcessState::Busy);
+    }
+}
+
+fn note_ssh_prompt_idle(
+    connection_kind: TerminalConnectionKind,
+    ssh_process_state: &Cell<SshProcessState>,
+) {
+    if connection_kind == TerminalConnectionKind::Ssh {
+        tracing::warn!(
+            target: "terminal.ssh",
+            prev_state = ?ssh_process_state.get(),
+            "SSH prompt idle -> Idle"
+        );
+        ssh_process_state.set(SshProcessState::Idle);
     }
 }
 
@@ -926,6 +949,9 @@ pub struct Terminal {
     ssh_config: Option<SshTerminalConfig>,
     /// SSH 会话的远端进程状态，由 prompt hook 与用户输入共同驱动。
     ssh_process_state: Cell<SshProcessState>,
+    /// 是否已从远端收到过 OSC 133;A/B prompt 事件。
+    /// 用于防御 shell integration 不工作时的永久 Busy 误报。
+    ssh_prompt_detected: bool,
     /// 串口参数（用于重连）
     serial_params: Option<SerialParams>,
     /// 事件发送器（用于 SSH 重连）
@@ -1036,6 +1062,7 @@ impl Terminal {
             rows: DEFAULT_ROWS,
             ssh_config: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1147,6 +1174,7 @@ impl Terminal {
             rows: DEFAULT_ROWS,
             ssh_config: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None, // 本地终端的 event_proxy 已在 LocalPtyBackend 中设置
@@ -1242,6 +1270,7 @@ impl Terminal {
             rows: DEFAULT_ROWS,
             ssh_config: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1330,6 +1359,7 @@ impl Terminal {
             rows: DEFAULT_ROWS,
             ssh_config: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1349,6 +1379,16 @@ impl Terminal {
         cx: &mut Context<Self>,
         working_dir: Option<&str>,
         sync_path_with_terminal: bool,
+    ) -> Self {
+        Self::new_ssh_with_recovery(conn, cx, working_dir, sync_path_with_terminal, None)
+    }
+
+    pub fn new_ssh_with_recovery(
+        conn: StoredConnection,
+        cx: &mut Context<Self>,
+        working_dir: Option<&str>,
+        sync_path_with_terminal: bool,
+        recovery_content: Option<&str>,
     ) -> Self {
         let ssh_params = conn
             .to_ssh_params()
@@ -1432,6 +1472,12 @@ impl Terminal {
 
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
+        let initial_working_dir = working_dir.map(str::to_string);
+
+        if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
+            replay_term_output(&term, content.as_bytes(), None);
+            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
+        }
         let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
 
         Self::spawn_disconnect_handler(disconnect_rx, cx);
@@ -1453,7 +1499,7 @@ impl Terminal {
             term,
             backend: None,
             title: String::new(),
-            current_working_dir: None,
+            current_working_dir: initial_working_dir,
             local_shell_pid: None,
             local_cwd_file: None,
             #[cfg(target_os = "macos")]
@@ -1468,6 +1514,7 @@ impl Terminal {
             rows,
             ssh_config: Some(config),
             ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1519,6 +1566,7 @@ impl Terminal {
             rows: DEFAULT_ROWS,
             ssh_config: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
             serial_params: Some(serial_params),
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1809,6 +1857,7 @@ impl Terminal {
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
                 self.ssh_process_state.set(SshProcessState::Unknown);
+                tracing::debug!(target: "terminal.ssh", "SSH connected, ssh_process_state = Unknown");
                 self.set_connection_active(true, cx);
                 // 连接后重新调整终端大小
                 self.term.lock().resize(TermDimensions {
@@ -1970,10 +2019,19 @@ impl Terminal {
                 cx.emit(TerminalModelEvent::Wakeup);
             }
             TerminalEvent::PromptStart => {
+                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
+                self.ssh_prompt_detected = true;
                 cx.emit(TerminalModelEvent::PromptStart);
             }
             TerminalEvent::InputStart => {
+                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
+                self.ssh_prompt_detected = true;
                 cx.emit(TerminalModelEvent::InputStart);
+            }
+            TerminalEvent::CommandStart => {
+                // 不直接修改 ssh_process_state，因为 bash DEBUG trap
+                // 可能在 PS1 的命令 substitution 中误触发。
+                // Busy 状态由 note_ssh_user_input（检测换行符）驱动。
             }
             TerminalEvent::TitleChanged(title) => {
                 self.title = title.clone();
@@ -1997,7 +2055,7 @@ impl Terminal {
                 cx.emit(TerminalModelEvent::WorkingDirChanged(path));
             }
             TerminalEvent::SshPromptReady => {
-                self.ssh_process_state.set(SshProcessState::Idle);
+                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
             }
             TerminalEvent::CommandFinished { exit_code } => {
                 // 命令执行完毕（OSC 133;D）— 将退出码记录到最后一条历史条目
@@ -2005,6 +2063,7 @@ impl Terminal {
                 if let Some(last) = self.session_history.back_mut() {
                     last.exit_code = Some(exit_code);
                 }
+                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
             }
             TerminalEvent::CommandRecorded(command) => {
                 self.record_history_entry(&command, cx);
@@ -2064,11 +2123,26 @@ impl Terminal {
         }
 
         if self.connection_kind == TerminalConnectionKind::Ssh {
-            return matches!(self.connection_state, ConnectionState::Connected)
+            let result = matches!(self.connection_state, ConnectionState::Connected)
                 && self.ssh_process_state.get() == SshProcessState::Busy;
+            if result {
+                tracing::warn!(
+                    target: "terminal.ssh",
+                    connection_state = ?self.connection_state,
+                    ssh_process_state = ?self.ssh_process_state.get(),
+                    ssh_prompt_detected = self.ssh_prompt_detected,
+                    "SSH has_running_processes = true (blocking close)"
+                );
+            }
+            return result;
         }
 
         false
+    }
+
+    /// 获取 SSH prompt 检测状态（用于诊断 shell integration 是否生效）。
+    pub fn ssh_prompt_detected(&self) -> bool {
+        self.ssh_prompt_detected
     }
 
     /// 获取连接状态
@@ -2269,7 +2343,8 @@ impl Terminal {
 
     /// 更新 SSH 终端的路径同步设置。
     ///
-    /// 路径同步由 shell 集成脚本发出 OSC 7，这里保留接口以兼容设置同步流程。
+    /// SSH 路径事件由远端 shell integration 发出的 OSC 7/133 驱动。
+    /// 这里保留接口以兼容设置同步流程。
     pub fn set_sync_path_with_terminal(&mut self, _enabled: bool) {
         if self.connection_kind != TerminalConnectionKind::Ssh {
             return;
@@ -2389,16 +2464,15 @@ mod tests {
     use super::{
         build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
-        expand_tilde, next_local_cwd_file_path, note_ssh_user_input, read_local_working_dir,
-        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend, SshProcessState,
-        TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
+        expand_tilde, next_local_cwd_file_path, note_ssh_prompt_idle, note_ssh_user_input,
+        read_local_working_dir, resolve_default_windows_shell_from_env, shell_escape_arg,
+        SshProcessState, TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
         push_history_entry, HistoryEntry, ShellHistoryFormat,
     };
-    use alacritty_terminal::tty::Options as PtyOptions;
     #[cfg(target_os = "macos")]
     use gpui::{AppContext, TestAppContext};
     use std::cell::Cell;
@@ -2432,17 +2506,17 @@ mod tests {
     }
 
     #[test]
-    fn build_ssh_init_commands_ignores_sync_path_switch_for_script_integration() {
+    fn build_ssh_init_commands_keep_base_commands_for_all_sync_modes() {
         let enabled = build_ssh_init_commands(None, Some("/tmp"), Some("echo ready"), true)
             .expect("启用路径同步时应生成初始化命令");
-        assert!(enabled.contains(OSC7_PROMPT_COMMAND));
-        assert!(enabled.contains(SSH_PROMPT_READY_COMMAND));
+        assert!(enabled.contains("cd -- '/tmp'"));
+        assert!(enabled.contains("echo ready"));
 
         let disabled = build_ssh_init_commands(None, Some("/tmp"), Some("echo ready"), false)
             .expect("禁用路径同步时仍应保留其它初始化命令");
-        assert!(!disabled.contains(OSC7_PROMPT_COMMAND));
-        assert!(disabled.contains(SSH_PROMPT_READY_COMMAND));
+        assert!(disabled.contains("cd -- '/tmp'"));
         assert!(disabled.contains("echo ready"));
+        assert_eq!(enabled, disabled);
     }
 
     #[test]
@@ -2503,6 +2577,18 @@ mod tests {
     }
 
     #[test]
+    fn ssh_prompt_lifecycle_marks_idle_for_ssh_only() {
+        let state = Cell::new(SshProcessState::Busy);
+
+        note_ssh_prompt_idle(TerminalConnectionKind::Ssh, &state);
+        assert_eq!(state.get(), SshProcessState::Idle);
+
+        state.set(SshProcessState::Busy);
+        note_ssh_prompt_idle(TerminalConnectionKind::Local, &state);
+        assert_eq!(state.get(), SshProcessState::Busy);
+    }
+
+    #[test]
     fn ssh_terminal_running_processes_follow_remote_state() {
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (term, _event_proxy, _colors) =
@@ -2525,6 +2611,7 @@ mod tests {
             rows: super::DEFAULT_ROWS,
             ssh_config: None,
             ssh_process_state: Cell::new(SshProcessState::Busy),
+            ssh_prompt_detected: true,
             serial_params: None,
             event_tx: None,
             event_proxy: None,

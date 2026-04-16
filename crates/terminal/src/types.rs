@@ -105,6 +105,7 @@ impl Default for TerminalSize {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
     use super::default_env;
 
     #[cfg(target_os = "macos")]

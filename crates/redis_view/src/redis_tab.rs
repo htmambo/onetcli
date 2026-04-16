@@ -332,6 +332,7 @@ impl TabContent for RedisTabView {
             workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
             active_connection_id: self.active_connection_id,
             local_terminal: None,
+            ssh_terminal: None,
             title: self.title(cx).to_string(),
         }
         .into_tab_data()

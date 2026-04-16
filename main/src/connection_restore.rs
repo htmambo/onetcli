@@ -14,7 +14,7 @@ use gpui_component::{
 use one_core::{
     connection_restore::{
         ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
-        LocalTerminalRestoreState, clear_connection_restore_snapshot,
+        LocalTerminalRestoreState, SshTerminalRestoreState, clear_connection_restore_snapshot,
         load_connection_restore_snapshot, snapshot_from_tab_state,
     },
     popup_window::{
@@ -37,6 +37,7 @@ pub struct ResolvedConnectionRestoreItem {
     pub workspace: Option<Workspace>,
     pub active_connection_id: Option<i64>,
     pub local_terminal: Option<LocalTerminalRestoreState>,
+    pub ssh_terminal: Option<SshTerminalRestoreState>,
 }
 
 pub fn load_pending_connection_restore_snapshot() -> Option<ConnectionRestoreSnapshot> {
@@ -128,6 +129,7 @@ fn resolve_restore_item(
             workspace: None,
             active_connection_id: None,
             local_terminal: Some(local_terminal),
+            ssh_terminal: None,
         });
     }
 
@@ -181,6 +183,7 @@ fn resolve_restore_item(
             connection: Some(preferred_connection),
             workspace: Some(workspace),
             local_terminal: None,
+            ssh_terminal: None,
         })
     } else {
         let connection_id = item.connection_id?;
@@ -194,21 +197,46 @@ fn resolve_restore_item(
                 .find(|workspace| workspace.id == Some(workspace_id))
                 .cloned()
         });
+        let subtitle = if item.kind == ConnectionRestoreKind::SshTerminal {
+            if let Some(working_dir) = item
+                .ssh_terminal
+                .as_ref()
+                .and_then(|state| state.working_dir.as_deref())
+                .filter(|dir| !dir.trim().is_empty())
+            {
+                format!(
+                    "{} · {}：{}",
+                    kind_label(item.kind),
+                    t!("ConnectionRestore.current_directory"),
+                    working_dir
+                )
+            } else {
+                format!(
+                    "{} · {}：{}",
+                    kind_label(item.kind),
+                    t!("ConnectionRestore.current_connection"),
+                    connection.name
+                )
+            }
+        } else {
+            format!(
+                "{} · {}：{}",
+                kind_label(item.kind),
+                t!("ConnectionRestore.current_connection"),
+                connection.name
+            )
+        };
 
         Some(ResolvedConnectionRestoreItem {
             snapshot_id: item.snapshot_id.clone(),
             kind: item.kind,
             title: item.title.clone(),
-            subtitle: format!(
-                "{} · {}：{}",
-                kind_label(item.kind),
-                t!("ConnectionRestore.current_connection"),
-                connection.name
-            ),
+            subtitle,
             active_connection_id: connection.id,
             connection: Some(connection),
             workspace,
             local_terminal: None,
+            ssh_terminal: item.ssh_terminal.clone(),
         })
     }
 }

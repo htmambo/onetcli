@@ -3999,6 +3999,7 @@ impl TabContent for SftpView {
             workspace_id: None,
             active_connection_id: None,
             local_terminal: None,
+            ssh_terminal: None,
             title: self.title(cx).to_string(),
         }
         .into_tab_data()

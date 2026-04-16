@@ -89,6 +89,14 @@ pub struct LocalTerminalRestoreState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SshTerminalRestoreState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffer_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectionRestorePayload {
     pub kind: ConnectionRestoreKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,6 +107,8 @@ pub struct ConnectionRestorePayload {
     pub active_connection_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_terminal: Option<LocalTerminalRestoreState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_terminal: Option<SshTerminalRestoreState>,
     pub title: String,
 }
 
@@ -132,6 +142,8 @@ pub struct ConnectionRestoreItem {
     pub active_connection_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_terminal: Option<LocalTerminalRestoreState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_terminal: Option<SshTerminalRestoreState>,
     pub title: String,
 }
 
@@ -287,6 +299,7 @@ fn restore_legacy_local_terminal_payload(data: &Value) -> Option<ConnectionResto
                 .and_then(|value| value.as_str())
                 .map(str::to_string),
         }),
+        ssh_terminal: None,
         title: data
             .get("title")
             .and_then(|value| value.as_str())
@@ -309,6 +322,7 @@ pub fn snapshot_from_tab_state(state: &TabContainerState) -> ConnectionRestoreSn
                 workspace_id: payload.workspace_id,
                 active_connection_id: payload.active_connection_id,
                 local_terminal: payload.local_terminal,
+                ssh_terminal: payload.ssh_terminal,
                 title: payload.title,
             })
         })
@@ -342,6 +356,10 @@ mod tests {
             workspace_id: None,
             active_connection_id: None,
             local_terminal: None,
+            ssh_terminal: Some(SshTerminalRestoreState {
+                working_dir: Some("/srv/demo".to_string()),
+                buffer_content: Some("pwd\r\n/srv/demo".to_string()),
+            }),
             title: "服务器".to_string(),
         };
         let invalid_workspace = ConnectionRestorePayload {
@@ -350,6 +368,7 @@ mod tests {
             workspace_id: None,
             active_connection_id: None,
             local_terminal: None,
+            ssh_terminal: None,
             title: "空工作区".to_string(),
         };
         let state = TabContainerState {
@@ -394,6 +413,13 @@ mod tests {
         assert_eq!(snapshot.items.len(), 2);
         assert_eq!(snapshot.items[0].snapshot_id, "ssh-terminal-42-1");
         assert_eq!(snapshot.items[0].connection_id, Some(42));
+        assert_eq!(
+            snapshot.items[0]
+                .ssh_terminal
+                .as_ref()
+                .and_then(|state| state.working_dir.as_deref()),
+            Some("/srv/demo")
+        );
         assert_eq!(snapshot.items[1].snapshot_id, "local-terminal-1");
         assert_eq!(snapshot.items[1].kind, ConnectionRestoreKind::LocalTerminal);
         assert_eq!(
@@ -413,6 +439,7 @@ mod tests {
             workspace_id: None,
             active_connection_id: Some(7),
             local_terminal: None,
+            ssh_terminal: None,
             title: "Redis 工作区".to_string(),
         };
 
@@ -443,6 +470,7 @@ mod tests {
                 exit_behavior: None,
                 theme_name: None,
             }),
+            ssh_terminal: None,
             title: "本地终端".to_string(),
         };
 
@@ -503,6 +531,7 @@ mod tests {
                     exit_behavior: None,
                     theme_name: None,
                 }),
+                ssh_terminal: None,
                 title: "Hosted Terminal".to_string(),
             }],
         };
@@ -534,7 +563,21 @@ mod tests {
                     workspace_id: None,
                     active_connection_id: None,
                     local_terminal: None,
+                    ssh_terminal: None,
                     title: "SFTP".to_string(),
+                },
+                ConnectionRestoreItem {
+                    snapshot_id: "ssh-terminal-1".to_string(),
+                    kind: ConnectionRestoreKind::SshTerminal,
+                    connection_id: Some(9),
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: None,
+                    ssh_terminal: Some(SshTerminalRestoreState {
+                        working_dir: Some("/srv/app".to_string()),
+                        buffer_content: Some("ls\r\napp.log".to_string()),
+                    }),
+                    title: "SSH".to_string(),
                 },
                 ConnectionRestoreItem {
                     snapshot_id: "local-terminal-1".to_string(),
@@ -559,6 +602,7 @@ mod tests {
                         exit_behavior: Some("prompt".to_string()),
                         theme_name: Some("OneDark".to_string()),
                     }),
+                    ssh_terminal: None,
                     title: "本地终端".to_string(),
                 },
             ],

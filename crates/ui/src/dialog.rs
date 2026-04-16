@@ -366,12 +366,11 @@ impl RenderOnce for Dialog {
                         let on_cancel = on_cancel.clone();
                         let on_close = on_close.clone();
                         move |_, window, cx| {
-                            if !on_cancel(&ClickEvent::default(), window, cx) {
-                                return;
-                            }
-
+                            let proceed = on_cancel(&ClickEvent::default(), window, cx);
                             window.close_dialog(cx);
-                            on_close(&ClickEvent::default(), window, cx);
+                            if proceed {
+                                on_close(&ClickEvent::default(), window, cx);
+                            }
                         }
                     })
                     .into_any_element()

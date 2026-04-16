@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn test_shadow_token_values() {
-        let (blur, offset, _spread, alpha) = ShadowToken::None.values();
+        let (_blur, _offset, _spread, _alpha) = ShadowToken::None.values();
         assert!((f32::from(blur) - 0.0).abs() < 0.001);
 
         let (blur, offset, _spread, _alpha) = ShadowToken::Sm.values();

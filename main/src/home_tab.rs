@@ -660,6 +660,7 @@ impl HomePage {
             workspace,
             active_connection_id,
             local_terminal,
+            ssh_terminal,
             ..
         } = item;
 
@@ -673,7 +674,12 @@ impl HomePage {
             }
             ConnectionRestoreKind::SshTerminal => {
                 if let Some(connection) = connection {
-                    self.open_ssh_terminal(connection, window, cx);
+                    self.open_ssh_terminal_with_state(
+                        connection,
+                        ssh_terminal.as_ref(),
+                        window,
+                        cx,
+                    );
                 } else {
                     tracing::warn!("恢复 SSH 终端时缺少连接信息");
                 }

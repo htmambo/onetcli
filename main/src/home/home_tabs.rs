@@ -5,7 +5,7 @@ use db_view::database_tab::DatabaseTabView;
 use gpui::AppContext;
 use gpui::{App, BorrowAppContext, Context, Entity, Window};
 use mongodb_view::MongoTabView;
-use one_core::connection_restore::LocalTerminalRestoreState;
+use one_core::connection_restore::{LocalTerminalRestoreState, SshTerminalRestoreState};
 use one_core::storage::{ConnectionType, StoredConnection, Workspace};
 use one_core::tab_container::TabItem;
 use redis_view::RedisTabView;
@@ -514,6 +514,16 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_ssh_terminal_with_state(conn, None, window, cx);
+    }
+
+    pub(crate) fn open_ssh_terminal_with_state(
+        &mut self,
+        conn: StoredConnection,
+        restore_state: Option<&SshTerminalRestoreState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let conn_id = conn.id.unwrap_or(0);
         // 使用时间戳生成唯一 tab_id，支持同一连接打开多个 SSH 终端
         let timestamp = std::time::SystemTime::now()
@@ -537,9 +547,37 @@ impl HomePage {
             None
         };
         let sync_path = Self::terminal_sync_path_enabled(cx);
+        let working_dir = restore_state
+            .and_then(|state| state.working_dir.as_deref())
+            .filter(|dir| {
+                std::path::Path::new(dir).is_absolute()
+                    || dir.contains(":\\")
+                    || dir.starts_with("\\\\")
+            })
+            .map(str::to_string);
+        let recovery_content = restore_state.and_then(|state| state.buffer_content.clone());
 
         let terminal_view = cx.new(|cx| {
-            TerminalView::new_ssh_with_index(conn, tab_index, window, cx, None, sync_path)
+            if let Some(recovery_content) = recovery_content.clone() {
+                TerminalView::new_restored_ssh_with_index(
+                    conn.clone(),
+                    working_dir.as_deref(),
+                    Some(recovery_content),
+                    tab_index,
+                    window,
+                    cx,
+                    sync_path,
+                )
+            } else {
+                TerminalView::new_ssh_with_index(
+                    conn.clone(),
+                    tab_index,
+                    window,
+                    cx,
+                    working_dir.as_deref(),
+                    sync_path,
+                )
+            }
         });
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);

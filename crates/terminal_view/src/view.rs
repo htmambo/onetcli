@@ -35,7 +35,7 @@ use crate::theme::{
 };
 use one_core::connection_restore::{
     restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
-    LocalTerminalRestoreState,
+    LocalTerminalRestoreState, SshTerminalRestoreState,
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
@@ -830,6 +830,37 @@ impl TerminalView {
         let stored_conn = conn.clone();
         let terminal =
             cx.new(|cx| Terminal::new_ssh(conn, cx, working_dir, sync_path_with_terminal));
+        Self::new_with_terminal(
+            terminal,
+            connection_id,
+            Some(stored_conn),
+            sync_path_with_terminal,
+            tab_index,
+            window,
+            cx,
+        )
+    }
+
+    pub fn new_restored_ssh_with_index(
+        conn: StoredConnection,
+        working_dir: Option<&str>,
+        recovery_content: Option<String>,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        sync_path_with_terminal: bool,
+    ) -> Self {
+        let connection_id = conn.id;
+        let stored_conn = conn.clone();
+        let terminal = cx.new(|cx| {
+            Terminal::new_ssh_with_recovery(
+                conn,
+                cx,
+                working_dir,
+                sync_path_with_terminal,
+                recovery_content.as_deref(),
+            )
+        });
         Self::new_with_terminal(
             terminal,
             connection_id,
@@ -3509,12 +3540,25 @@ impl TabContent for TerminalView {
                 let Some(connection_id) = self.connection_id(cx) else {
                     return JsonValue::Null;
                 };
+                let terminal = self.terminal.read(cx);
+                let working_dir = terminal.latest_working_dir();
+                let buffer_content = trim_recovery_content_to_recent_chars(
+                    terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
+                    configured_recovery_max_chars(cx),
+                );
+                let ssh_terminal = (working_dir.is_some() || buffer_content.is_some()).then_some(
+                    SshTerminalRestoreState {
+                        working_dir,
+                        buffer_content,
+                    },
+                );
                 ConnectionRestorePayload {
                     kind: ConnectionRestoreKind::SshTerminal,
                     connection_id: Some(connection_id),
                     workspace_id: None,
                     active_connection_id: None,
                     local_terminal: None,
+                    ssh_terminal,
                     title: self.title(cx).to_string(),
                 }
                 .into_tab_data()
@@ -3529,6 +3573,7 @@ impl TabContent for TerminalView {
                     workspace_id: None,
                     active_connection_id: None,
                     local_terminal: None,
+                    ssh_terminal: None,
                     title: self.title(cx).to_string(),
                 }
                 .into_tab_data()
@@ -3563,6 +3608,7 @@ impl TabContent for TerminalView {
                         exit_behavior: Some(self.exit_behavior.clone()),
                         theme_name: Some(self.current_theme.name.to_string()),
                     }),
+                    ssh_terminal: None,
                     title: self.title(cx).to_string(),
                 }
                 .into_tab_data()
@@ -3582,6 +3628,15 @@ impl TabContent for TerminalView {
             }
             return Task::ready(true);
         }
+
+        // Dialog will be shown — log state for debugging
+        let term = self.terminal.read(cx);
+        tracing::warn!(
+            target: "terminal.ssh",
+            connection_state = ?term.connection_state(),
+            ssh_prompt_detected = term.ssh_prompt_detected(),
+            "SSH try_close: showing running process dialog"
+        );
 
         let view = cx.entity().clone();
         let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
@@ -4112,22 +4167,24 @@ impl Element for ResizeEventHandler {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::TerminalView;
     use super::{
         alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
         has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
-        history_prompt_overlay_bounds, multiline_non_empty_line_count,
+        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars, TerminalView, UnbracketedPasteHazard,
+        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
-    use gpui::{
-        px, size, AppContext, Bounds, Keystroke, MouseButton, Point, SharedString, TestAppContext,
-    };
+    #[cfg(target_os = "macos")]
+    use gpui::TestAppContext;
+    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{

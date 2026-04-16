@@ -3,8 +3,9 @@ use crate::{
     notification::Notification, sheet::Sheet, show_system_notification,
 };
 use gpui::{App, Entity, Window};
-use std::{process::Command, rc::Rc};
+use std::rc::Rc;
 
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MacTitlebarDoubleClickAction {
     None,
@@ -12,6 +13,7 @@ enum MacTitlebarDoubleClickAction {
     Zoom,
 }
 
+#[cfg(target_os = "macos")]
 fn resolve_macos_titlebar_double_click_action(
     action_on_double_click: Option<&str>,
     miniaturize_on_double_click: Option<&str>,
@@ -45,6 +47,7 @@ fn resolve_macos_titlebar_double_click_action(
 
 #[cfg(target_os = "macos")]
 fn read_global_defaults(key: &str) -> Option<String> {
+    use std::process::Command;
     let output = Command::new("defaults")
         .args(["read", "-g", key])
         .output()
@@ -245,6 +248,7 @@ impl WindowExt for Window {
 }
 
 #[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use super::{MacTitlebarDoubleClickAction, resolve_macos_titlebar_double_click_action};
 

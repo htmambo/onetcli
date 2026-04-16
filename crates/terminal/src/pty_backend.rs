@@ -79,6 +79,8 @@ pub enum TerminalEvent {
     PromptStart,
     /// shell prompt 已渲染完成，进入可输入状态（OSC 133;B）
     InputStart,
+    /// 命令开始执行（OSC 133;C）
+    CommandStart,
     /// 终端标题已更改
     TitleChanged(String),
     /// 终端响铃
@@ -91,7 +93,7 @@ pub enum TerminalEvent {
     ClipboardLoad(ClipboardType),
     /// 远程工作目录变更（OSC 7）
     WorkingDirChanged(String),
-    /// SSH 远端 shell 已回到提示符，可视为空闲态
+    /// SSH 远端 shell 已回到提示符，可视为空闲态（向后兼容 fallback）
     SshPromptReady,
     /// 命令执行完毕（OSC 133;D）
     CommandFinished { exit_code: i32 },

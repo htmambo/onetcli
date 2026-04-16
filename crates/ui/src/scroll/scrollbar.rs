@@ -27,7 +27,7 @@ const MIN_THUMB_SIZE: f32 = 48.;
 /// 空闲状态：滚动条静置时只显示细长滑块，宽度 2px
 const THUMB_WIDTH: Pixels = px(2.);
 /// 空闲状态滑块的圆角半径（2px / 2 = 1px）
-const THUMB_RADIUS: Pixels = px(2. / 2.);
+const THUMB_RADIUS: Pixels = px(1.);
 /// 空闲状态滑块距滚动条边缘的距离，决定滑块在滚动条槽内的位置
 const THUMB_INSET: Pixels = px(4.);
 
@@ -35,7 +35,7 @@ const THUMB_INSET: Pixels = px(4.);
 /// 激活状态：鼠标悬停或拖拽时滑块变宽（4px），更易操作
 const THUMB_ACTIVE_WIDTH: Pixels = px(4.);
 /// 激活状态滑块的圆角半径（4px / 2 = 2px）
-const THUMB_ACTIVE_RADIUS: Pixels = px(4. / 2.);
+const THUMB_ACTIVE_RADIUS: Pixels = px(2.);
 /// 激活状态滑块距滚动条边缘的距离
 const THUMB_ACTIVE_INSET: Pixels = px(4.);
 
