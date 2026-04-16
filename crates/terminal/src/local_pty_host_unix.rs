@@ -5,7 +5,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
 
-use crate::local_pty_host::{dispatch_request, mark_session_detached, subscribe_output, SessionRegistry};
+use crate::local_pty_host::{
+    dispatch_request, mark_session_detached, subscribe_exit, subscribe_output, SessionRegistry,
+};
 use crate::local_pty_protocol::{local_pty_endpoint, LocalPtyHostEvent, LocalPtyHostRequest};
 
 pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
@@ -34,6 +36,7 @@ async fn handle_client(registry: Arc<SessionRegistry>, stream: UnixStream) {
     let mut lines = BufReader::new(reader).lines();
     let mut active_session: Option<String> = None;
     let mut output_rx: Option<broadcast::Receiver<Vec<u8>>> = None;
+    let mut exit_rx: Option<broadcast::Receiver<LocalPtyHostEvent>> = None;
 
     loop {
         tokio::select! {
@@ -57,6 +60,7 @@ async fn handle_client(registry: Arc<SessionRegistry>, stream: UnixStream) {
                             LocalPtyHostRequest::Attach { session_id, .. } => {
                                 active_session = Some(session_id.clone());
                                 output_rx = subscribe_output(&registry, session_id).await;
+                                exit_rx = subscribe_exit(&registry, session_id).await;
                             }
                             LocalPtyHostRequest::Spawn { .. } => {
                                 active_session = None;
@@ -83,6 +87,20 @@ async fn handle_client(registry: Arc<SessionRegistry>, stream: UnixStream) {
                     let event = LocalPtyHostEvent::Output {
                         session_id: session_id.clone(),
                         data,
+                    };
+                    if write_event(&mut writer, event).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            Some(event) = async { exit_rx.as_mut()?.recv().await.ok() } => {
+                if let Some(ref session_id) = active_session {
+                    let event = match event {
+                        LocalPtyHostEvent::Exited { exit_code, .. } => LocalPtyHostEvent::Exited {
+                            session_id: session_id.clone(),
+                            exit_code,
+                        },
+                        other => other,
                     };
                     if write_event(&mut writer, event).await.is_err() {
                         break;

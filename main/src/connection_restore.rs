@@ -2,25 +2,24 @@ use rust_i18n::t;
 use std::collections::HashSet;
 
 use gpui::{
-    div, px, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window,
-    WindowKind,
+    App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    Pixels, Render, Size, StatefulInteractiveElement as _, Styled, Window, WindowKind, div, px,
 };
 use gpui_component::{
-    app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex, v_flex, ActiveTheme, Disableable, Sizable, StyledExt, TitleBar,
+    h_flex, v_flex,
 };
 use one_core::{
     connection_restore::{
-        clear_connection_restore_snapshot, load_connection_restore_snapshot,
-        snapshot_from_tab_state, ConnectionRestoreItem, ConnectionRestoreKind,
-        ConnectionRestoreSnapshot, LocalTerminalRestoreState,
+        ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
+        LocalTerminalRestoreState, clear_connection_restore_snapshot,
+        load_connection_restore_snapshot, snapshot_from_tab_state,
     },
     popup_window::{
-        open_popup_window_with_should_close, request_popup_window_close, CancelPopup,
-        PopupWindowOptions,
+        CancelPopup, PopupWindowOptions, open_popup_window_with_should_close,
+        request_popup_window_close,
     },
     storage::{StoredConnection, Workspace},
     tab_persistence::load_tab_state,
@@ -263,7 +262,11 @@ pub fn probe_pty_sessions(items: &mut [ResolvedConnectionRestoreItem]) {
     };
 
     for item in items.iter_mut() {
-        let Some(ref session_id) = item.local_terminal.as_ref().and_then(|l| l.pty_session_id.clone()) else {
+        let Some(ref session_id) = item
+            .local_terminal
+            .as_ref()
+            .and_then(|l| l.pty_session_id.clone())
+        else {
             continue;
         };
         let _ = client.send_request(LocalPtyHostRequest::Query {

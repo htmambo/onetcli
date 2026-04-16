@@ -5,16 +5,16 @@ use std::sync::Arc;
 use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    actions, div, px, AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Bounds, Context,
-    DragMoveEvent, ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity,
-    Window,
+    AnyElement, App, AppContext, AsyncApp, BorrowAppContext, Bounds, Context, DragMoveEvent,
+    ElementId, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div, px,
 };
 use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
-    app_style,
+    ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
+    WindowExt, WindowsSurfaceLayer, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     glass_sidebar_f64, h_flex,
@@ -24,19 +24,18 @@ use gpui_component::{
     popover::Popover,
     tokens::Radius,
     tooltip::Tooltip,
-    v_flex, windows_surface_color, ActiveTheme, Disableable, ElementExt, Icon, IconName,
-    InteractiveElementExt, Sizable, Size, WindowExt, WindowsSurfaceLayer,
+    v_flex, windows_surface_color,
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
     BlobVault, CloudSyncService, ConflictResolution, GithubGistVault, GoogleDriveVault,
     OneDriveVault, SyncConflict, SyncEngine, UserInfo,
 };
-use one_core::connection_notifier::{emit_connection_event, get_notifier, ConnectionDataEvent};
+use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
 use one_core::key_storage;
 use one_core::layout::SIDEBAR_DEFAULT_WIDTH;
-use one_core::popup_window::{open_popup_window, PopupWindowOptions};
+use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
@@ -51,8 +50,8 @@ use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::auth::AuthService;
 use crate::connection_restore::{
-    load_pending_connection_restore_snapshot, open_connection_restore_dialog,
-    resolve_restore_items, ResolvedConnectionRestoreItem,
+    ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
+    open_connection_restore_dialog, resolve_restore_items,
 };
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_new_connection::NewConnectionDelegate;
@@ -542,7 +541,8 @@ impl HomePage {
             return;
         };
 
-        let mut resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
+        let mut resolved_items =
+            resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
         crate::connection_restore::probe_pty_sessions(&mut resolved_items);
         if resolved_items.is_empty() {
             // 避免在 render 阶段直接清理状态，延后到窗口事件循环中执行。

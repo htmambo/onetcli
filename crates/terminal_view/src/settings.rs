@@ -128,7 +128,10 @@ fn terminal_settings_path() -> anyhow::Result<PathBuf> {
     Ok(config_dir.join(TERMINAL_SETTINGS_FILE))
 }
 
-fn resolve_initial_settings(path: &Path, legacy_seed: Option<TerminalSettings>) -> TerminalSettings {
+fn resolve_initial_settings(
+    path: &Path,
+    legacy_seed: Option<TerminalSettings>,
+) -> TerminalSettings {
     if let Some(settings) = load_settings_from_path(path) {
         return settings;
     }

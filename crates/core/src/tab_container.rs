@@ -328,6 +328,10 @@ impl From<&dyn TabContentView> for AnyView {
     }
 }
 
+fn should_suppress_duplicate_status_summary(content_key: &str) -> bool {
+    content_key != "Terminal"
+}
+
 impl PartialEq for dyn TabContentView {
     fn eq(&self, other: &Self) -> bool {
         self.view() == other.view()
@@ -1744,15 +1748,14 @@ impl TabContainer {
     }
 
     pub fn current_status_summary(&self, cx: &App) -> Option<SharedString> {
-        let current_title = self.current_title(cx);
-        let summary = if self.pinned_tab_active {
-            self.pinned_tab
-                .as_ref()
-                .and_then(|tab| tab.content().status_summary(cx))
+        let current_tab = if self.pinned_tab_active {
+            self.pinned_tab.as_ref()
         } else {
             self.active_tab()
-                .and_then(|tab| tab.content().status_summary(cx))
         }?;
+        let current_title = current_tab.content().title(cx);
+        let content_key = current_tab.content().content_key(cx);
+        let summary = current_tab.content().status_summary(cx)?;
 
         let summary_text = summary.to_string();
         let normalized_summary = summary_text.trim();
@@ -1760,11 +1763,8 @@ impl TabContainer {
             return None;
         }
 
-        if current_title
-            .as_ref()
-            .map(|title| title.to_string())
-            .map(|title| title.trim().eq(normalized_summary))
-            .unwrap_or(false)
+        if should_suppress_duplicate_status_summary(content_key)
+            && current_title.to_string().trim().eq(normalized_summary)
         {
             return None;
         }
@@ -2866,7 +2866,8 @@ impl Render for TabContainer {
 mod tests {
     use super::{
         TabBarDragPlan, build_tab_bar_drag_plan, inactive_tab_background_alpha,
-        should_render_windows_drag_spacer, tab_bar_background_alpha, uses_manual_window_move,
+        should_render_windows_drag_spacer, should_suppress_duplicate_status_summary,
+        tab_bar_background_alpha, uses_manual_window_move,
     };
 
     #[test]
@@ -2938,5 +2939,15 @@ mod tests {
     fn inactive_tab_alpha_整体不透明时加_point_two() {
         assert_eq!(inactive_tab_background_alpha(0.4, 1.0), 0.6);
         assert_eq!(inactive_tab_background_alpha(0.84, 1.0), 1.0);
+    }
+
+    #[test]
+    fn terminal_status_summary_不做标题去重() {
+        assert!(!should_suppress_duplicate_status_summary("Terminal"));
+    }
+
+    #[test]
+    fn 非_terminal_status_summary_仍做标题去重() {
+        assert!(should_suppress_duplicate_status_summary("Database"));
     }
 }

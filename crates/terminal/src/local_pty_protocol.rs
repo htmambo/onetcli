@@ -151,7 +151,9 @@ mod tests {
         };
         let bytes = serde_json::to_vec(&req).unwrap();
         let restored: LocalPtyHostRequest = serde_json::from_slice(&bytes).unwrap();
-        assert!(matches!(restored, LocalPtyHostRequest::Query { session_id } if session_id.is_empty()));
+        assert!(
+            matches!(restored, LocalPtyHostRequest::Query { session_id } if session_id.is_empty())
+        );
     }
 
     #[test]

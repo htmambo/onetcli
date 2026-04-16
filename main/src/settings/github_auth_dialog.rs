@@ -205,7 +205,12 @@ impl Render for GithubAuthDialog {
                     .gap_4()
                     .p_5()
                     .w(px(420.))
-                    .child(div().text_sm().font_semibold().child(t!("OAuth.github_auth")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(t!("OAuth.github_auth")),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -289,7 +294,12 @@ impl Render for GithubAuthDialog {
                 .gap_4()
                 .p_5()
                 .w(px(420.))
-                .child(div().text_sm().font_semibold().child(t!("OAuth.waiting_for_auth_confirm")))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(t!("OAuth.waiting_for_auth_confirm")),
+                )
                 .child(
                     div()
                         .text_sm()

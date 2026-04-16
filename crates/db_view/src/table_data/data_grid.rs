@@ -38,10 +38,7 @@ use db::DbManager;
 #[cfg(test)]
 use one_core::storage::DatabaseType;
 
-actions!(
-    data_grid,
-    [Page100, Page200, Page300, Page500, Page1000]
-);
+actions!(data_grid, [Page100, Page200, Page300, Page500, Page1000]);
 
 #[cfg(test)]
 fn build_header_order_by_clause(
@@ -1262,30 +1259,15 @@ impl DataGrid {
         self.handle_page_size_change(500, window, cx)
     }
 
-    fn handle_page_change_100(
-        &mut self,
-        _: &Page100,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_page_change_100(&mut self, _: &Page100, window: &mut Window, cx: &mut Context<Self>) {
         self.handle_page_size_change(100, window, cx)
     }
 
-    fn handle_page_change_200(
-        &mut self,
-        _: &Page200,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_page_change_200(&mut self, _: &Page200, window: &mut Window, cx: &mut Context<Self>) {
         self.handle_page_size_change(200, window, cx)
     }
 
-    fn handle_page_change_300(
-        &mut self,
-        _: &Page300,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_page_change_300(&mut self, _: &Page300, window: &mut Window, cx: &mut Context<Self>) {
         self.handle_page_size_change(300, window, cx)
     }
 

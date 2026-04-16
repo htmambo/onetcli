@@ -1599,6 +1599,7 @@ impl TerminalView {
                     sidebar.set_file_manager_initial_dir(path.clone(), cx);
                     sidebar.sync_file_manager_path(path, cx);
                 });
+                cx.emit(TabContentEvent::StateChanged);
                 cx.notify();
             }
         }
@@ -3655,8 +3656,17 @@ impl TabContent for TerminalView {
             return None;
         }
         let title = self.title(cx);
-        let activity = t!("RunningState.terminal.activity").into();
-        RunningState::terminal(title, activity)
+        let connection_kind = self.terminal.read(cx).connection_kind();
+        match connection_kind {
+            TerminalConnectionKind::Ssh => {
+                let activity = t!("RunningState.ssh.activity").into();
+                RunningState::ssh(title, activity)
+            }
+            _ => {
+                let activity = t!("RunningState.terminal.activity").into();
+                RunningState::terminal(title, activity)
+            }
+        }
     }
 }
 
@@ -4116,8 +4126,7 @@ mod tests {
     use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
     use gpui::{
-        px, size, AppContext, Bounds, Keystroke, MouseButton, Point, SharedString,
-        TestAppContext,
+        px, size, AppContext, Bounds, Keystroke, MouseButton, Point, SharedString, TestAppContext,
     };
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
@@ -4125,9 +4134,9 @@ mod tests {
         thread,
         time::{Duration, Instant},
     };
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
-    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {

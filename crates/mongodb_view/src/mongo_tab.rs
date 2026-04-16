@@ -4,11 +4,11 @@ use std::ops::Deref;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, App, AppContext, Axis, Bounds, Context, Element, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Pixels, Point, Render, SharedString, Style, Styled, Subscription, Task, Window,
+    App, AppContext, Axis, Bounds, Context, Element, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
 };
-use gpui_component::{h_flex, ActiveTheme, Icon, IconName, Sizable, Size};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
@@ -16,14 +16,14 @@ use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem,
 };
-use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
+use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use tracing::warn;
 
+use crate::GlobalMongoState;
 use crate::collection_view::CollectionView;
 use crate::mongo_tree_event::MongoEventHandler;
 use crate::mongo_tree_view::MongoTreeView;
 use crate::sidebar::{MongoSidebar, MongoSidebarEvent};
-use crate::GlobalMongoState;
 use one_core::layout::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
 };

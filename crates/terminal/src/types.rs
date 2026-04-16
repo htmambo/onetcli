@@ -24,6 +24,9 @@ pub trait TerminalBackend: Send {
 pub struct LocalConfig {
     /// Shell command (default: system default shell)
     pub shell: Option<String>,
+    /// Shell extra arguments (for hosted local PTY injection, etc.)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shell_args: Vec<String>,
     /// Working directory
     pub working_dir: Option<String>,
     /// Environment variables
@@ -36,6 +39,7 @@ impl Default for LocalConfig {
     fn default() -> Self {
         Self {
             shell: None,
+            shell_args: Vec::new(),
             working_dir: default_working_dir(),
             env: default_env(),
             cwd_file: None,

@@ -161,7 +161,8 @@ fn build_shell_integration_setup_script(
     shell_marker: &str,
 ) -> String {
     let script = shell_single_quote(script);
-    let integration_source = format!("$HOME/.config/onetcli/sessions/{session_key}/shell_integration.sh");
+    let integration_source =
+        format!("$HOME/.config/onetcli/sessions/{session_key}/shell_integration.sh");
     let session_key = shell_double_quote(session_key);
     let success_marker = shell_single_quote(success_marker);
     let home_marker = shell_single_quote(home_marker);
@@ -171,19 +172,15 @@ fn build_shell_integration_setup_script(
         "ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
          [[ -f \"$ZDOTDIR/.zshenv\" ]] && . \"$ZDOTDIR/.zshenv\"\n",
     );
-    let zshrc = shell_single_quote(
-        &format!(
-            "ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
+    let zshrc = shell_single_quote(&format!(
+        "ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
              [[ -f \"$ZDOTDIR/.zshrc\" ]] && . \"$ZDOTDIR/.zshrc\"\n\
              . \"{integration_source}\"\n"
-        ),
-    );
-    let bashrc = shell_single_quote(
-        &format!(
-            "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
+    ));
+    let bashrc = shell_single_quote(&format!(
+        "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
              . \"{integration_source}\"\n"
-        ),
-    );
+    ));
 
     format!(
         concat!(
@@ -222,15 +219,14 @@ fn build_shell_integration_setup_command(
     session_marker: &str,
     shell_marker: &str,
 ) -> String {
-    let script =
-        build_shell_integration_setup_script(
-            script,
-            session_key,
-            success_marker,
-            home_marker,
-            session_marker,
-            shell_marker,
-        );
+    let script = build_shell_integration_setup_script(
+        script,
+        session_key,
+        success_marker,
+        home_marker,
+        session_marker,
+        shell_marker,
+    );
     format!("sh -c {}", shell_single_quote(&script))
 }
 
@@ -290,7 +286,8 @@ impl SshBackend {
             progress(stage);
         })
         .await?;
-        let mut channel = Self::prepare_ssh_channel(&mut client, &pty_config, connection_id).await?;
+        let mut channel =
+            Self::prepare_ssh_channel(&mut client, &pty_config, connection_id).await?;
 
         // ③ init_commands 改为等 shell ready 后发送
         let pending_init = init_commands;
@@ -307,6 +304,8 @@ impl SshBackend {
             // 用来判断 shell 是否已经 ready（收到第一个 133;B 后才发 init_commands）
             let mut shell_ready = false;
             let mut init_sent = false;
+            // 缓冲跨包的 OSC 序列，避免 marker 被拆分时检测失败
+            let mut osc_buffer: Vec<u8> = Vec::new();
 
             loop {
                 tokio::select! {
@@ -345,14 +344,16 @@ impl SshBackend {
                         match event {
                             Some(ChannelEvent::Data(data))
                             | Some(ChannelEvent::ExtendedData { data, .. }) => {
-                                if let Some(path) = extract_cwd(&data) {
+                                osc_buffer.extend_from_slice(&data);
+
+                                if let Some(path) = extract_cwd(&osc_buffer) {
                                     let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
                                 }
-                                if contains_prompt_ready_marker(&data) {
+                                if contains_prompt_ready_marker(&osc_buffer) {
                                     let _ = event_tx.send(TerminalEvent::SshPromptReady);
                                 }
                                 // 解析所有 OSC 事件
-                                for osc_event in extract_osc_events(&data) {
+                                for osc_event in extract_osc_events(&osc_buffer) {
                                     tracing::debug!(
                                         target: "terminal.history_prompt.osc",
                                         event = ?osc_event,
@@ -388,6 +389,16 @@ impl SshBackend {
                                             );
                                         }
                                     }
+                                }
+
+                                // 截断已处理的完整序列，保留可能的未完整前缀
+                                if let Some(last_terminator) = osc_buffer.iter().rposition(|&b| b == b'\x07').or_else(|| {
+                                    osc_buffer.windows(2).rposition(|w| w == b"\x1b\\").map(|i| i + 1)
+                                }) {
+                                    osc_buffer.drain(..=last_terminator);
+                                }
+                                if osc_buffer.len() > 4096 {
+                                    osc_buffer.clear();
                                 }
 
                                 // shell ready 后发送 init_commands（只发一次）
@@ -508,9 +519,7 @@ impl SshBackend {
         pty_config: &PtyConfig,
         setup: &ShellIntegrationSetup,
     ) -> anyhow::Result<()> {
-        channel
-            .set_env("ONETCLI_SHELL_INTEGRATION", "1")
-            .await?;
+        channel.set_env("ONETCLI_SHELL_INTEGRATION", "1").await?;
         channel
             .set_env("ONETCLI_ORIG_ZDOTDIR", &setup.home_dir)
             .await?;
@@ -766,7 +775,10 @@ mod tests {
         let result =
             SshBackend::prepare_ssh_channel(&mut client, &PtyConfig::default(), Some(42)).await;
 
-        assert!(result.is_ok(), "bash shell wrapper 应通过独立交互 channel 启动");
+        assert!(
+            result.is_ok(),
+            "bash shell wrapper 应通过独立交互 channel 启动"
+        );
         assert_eq!(
             recorded_ops(&setup_state),
             vec![ChannelOp::Exec, ChannelOp::Close]
@@ -924,6 +936,23 @@ mod tests {
             Some(OscEvent::CommandFinished { exit_code: 0 })
         ));
     }
+
+    #[test]
+    fn prompt_ready_marker_detection_matches_embedded_osc() {
+        assert!(contains_prompt_ready_marker(
+            b"hello\x1b]1337;OnetcliPromptReady=1\x07world"
+        ));
+        assert!(!contains_prompt_ready_marker(b"hello world"));
+    }
+
+    #[test]
+    fn prompt_ready_marker_detects_across_packet_boundaries() {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(b"hello\x1b]1337;OnetcliPromptReady=");
+        assert!(!contains_prompt_ready_marker(&buffer));
+        buffer.extend_from_slice(b"1\x07world");
+        assert!(contains_prompt_ready_marker(&buffer));
+    }
 }
 
 impl TerminalBackend for SshBackend {
@@ -942,18 +971,5 @@ impl TerminalBackend for SshBackend {
 
     fn close(&self, _mode: TerminalCloseMode) {
         let _ = self.command_tx.send(SshCommand::Shutdown);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::contains_prompt_ready_marker;
-
-    #[test]
-    fn prompt_ready_marker_detection_matches_embedded_osc() {
-        assert!(contains_prompt_ready_marker(
-            b"hello\x1b]1337;OnetcliPromptReady=1\x07world"
-        ));
-        assert!(!contains_prompt_ready_marker(b"hello world"));
     }
 }

@@ -24,11 +24,11 @@ use one_core::storage::models::{
 use std::cell::Cell;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::collections::HashSet;
-#[cfg(any(test, not(target_os = "linux")))]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(any(test, not(target_os = "linux")))]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -41,15 +41,15 @@ use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
 use std::path::Path;
 
-use anyhow::Context as _;
-use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
-use crate::local_pty_protocol::LocalPtyHostEvent;
 use crate::history::{
     collect_history_search_results, collect_history_suggestions_with_cwd, parse_shell_history,
     push_rich_history_entry, HistoryEntry, ShellHistoryFormat, PERSISTED_HISTORY_LIMIT,
     SESSION_HISTORY_LIMIT,
 };
+use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
+use crate::local_pty_protocol::LocalPtyHostEvent;
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
+use anyhow::Context as _;
 
 use crate::{
     LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent,
@@ -563,6 +563,21 @@ fn next_local_cwd_file_path() -> std::path::PathBuf {
     ))
 }
 
+#[cfg(not(target_os = "linux"))]
+fn init_local_cwd_file(cwd_file: Option<String>) -> Option<PathBuf> {
+    let cwd_file_path = cwd_file
+        .map(PathBuf::from)
+        .unwrap_or_else(next_local_cwd_file_path);
+    let _ = std::fs::write(&cwd_file_path, "");
+    Some(cwd_file_path)
+}
+
+#[cfg(target_os = "linux")]
+fn init_local_cwd_file(cwd_file: Option<String>) -> Option<PathBuf> {
+    let _ = cwd_file;
+    None
+}
+
 #[cfg(test)]
 fn build_local_cwd_tracking_init_command(cwd_file_path: &str) -> String {
     let mut command = format!(
@@ -755,6 +770,21 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
 fn prepare_shell_integration(_shell: Option<&str>) -> (Vec<(String, String)>, Vec<String>) {
     // Windows 暂不支持 Shell Integration
     (vec![], vec![])
+}
+
+fn prepare_local_shell_launch(mut config: LocalConfig) -> (LocalConfig, Option<PathBuf>) {
+    let local_cwd_file = init_local_cwd_file(config.cwd_file.clone());
+    let (integration_env, shell_args) = prepare_shell_integration(config.shell.as_deref());
+    config.env.extend(integration_env);
+    config.shell_args.extend(shell_args);
+
+    if let Some(path) = local_cwd_file.as_ref().and_then(|path| path.to_str()) {
+        config
+            .env
+            .push(("ONETCLI_CWD_FILE".to_string(), path.to_string()));
+    }
+
+    (config, local_cwd_file)
 }
 
 fn history_file_candidates(preferred_shell: Option<&str>) -> Vec<(PathBuf, ShellHistoryFormat)> {
@@ -1054,20 +1084,15 @@ impl Terminal {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+        let (config, local_cwd_file) = prepare_local_shell_launch(config);
         let LocalConfig {
             shell,
+            shell_args,
             working_dir,
             env,
-            cwd_file,
+            cwd_file: _,
         } = config;
         let history_shell = shell.clone();
-
-        // 准备 Shell Integration 环境（写入集成脚本、生成 wrapper 配置）
-        let (integration_env, shell_args) = prepare_shell_integration(shell.as_deref());
-
-        // 合并用户环境变量与 Shell Integration 环境变量
-        let mut env_pairs = env;
-        env_pairs.extend(integration_env);
 
         if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
             replay_term_output(&term, content.as_bytes());
@@ -1077,26 +1102,13 @@ impl Terminal {
         let pty_options = PtyOptions {
             shell: build_local_shell(shell, shell_args),
             working_directory: working_dir.clone().map(Into::into),
-            env: env_pairs.into_iter().collect(),
+            env: env.into_iter().collect(),
             drain_on_exit: true,
             #[cfg(target_os = "windows")]
             escape_args: true,
         };
         let local_backend = LocalPtyBackend::new(term.clone(), event_proxy, pty_options)?;
         let local_shell_pid = local_backend.child_pid();
-        #[cfg(not(target_os = "linux"))]
-        let local_cwd_file = {
-            let cwd_file_path = cwd_file
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(next_local_cwd_file_path);
-            let _ = std::fs::write(&cwd_file_path, "");
-            Some(cwd_file_path)
-        };
-        #[cfg(target_os = "linux")]
-        let local_cwd_file = {
-            let _ = cwd_file;
-            None
-        };
 
         Self::spawn_event_loop(event_rx, cx);
         #[cfg(target_os = "macos")]
@@ -1141,7 +1153,9 @@ impl Terminal {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+        let (config, local_cwd_file) = prepare_local_shell_launch(config);
         let history_shell = config.shell.clone();
+        let initial_working_dir = config.working_dir.clone();
 
         if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
             replay_term_output(&term, content.as_bytes());
@@ -1161,7 +1175,8 @@ impl Terminal {
         let (request_tx, mut host_event_rx) = client.split();
 
         // 设置 PtyWrite 回写通道
-        let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> = request_tx.clone();
+        let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> =
+            request_tx.clone();
         event_proxy.set_hosted_write_back(writeback_tx, session_id.clone());
 
         let term_for_host = term.clone();
@@ -1189,20 +1204,6 @@ impl Terminal {
 
         let local_backend = LocalPtyClientBackend::new(request_tx, session_id.clone(), child_pid);
         let local_shell_pid = local_backend.child_pid();
-        #[cfg(not(target_os = "linux"))]
-        let local_cwd_file = {
-            let cwd_file_path = config
-                .cwd_file
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(next_local_cwd_file_path);
-            let _ = std::fs::write(&cwd_file_path, "");
-            Some(cwd_file_path)
-        };
-        #[cfg(target_os = "linux")]
-        let local_cwd_file = {
-            let _ = config.cwd_file;
-            None
-        };
 
         Self::spawn_event_loop(event_rx, cx);
         #[cfg(target_os = "macos")]
@@ -1213,7 +1214,7 @@ impl Terminal {
             term,
             backend: Some(Box::new(local_backend)),
             title: String::new(),
-            current_working_dir: config.working_dir,
+            current_working_dir: initial_working_dir,
             local_shell_pid,
             local_cwd_file,
             #[cfg(target_os = "macos")]
@@ -1261,7 +1262,8 @@ impl Terminal {
             .context("hosted local PTY attach 失败")?;
         let (request_tx, mut host_event_rx) = client.split();
 
-        let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> = request_tx.clone();
+        let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> =
+            request_tx.clone();
         event_proxy.set_hosted_write_back(writeback_tx, session_id.clone());
 
         let term_for_host = term.clone();
@@ -1289,20 +1291,7 @@ impl Terminal {
 
         let local_backend = LocalPtyClientBackend::new(request_tx, session_id.clone(), child_pid);
         let local_shell_pid = local_backend.child_pid();
-        #[cfg(not(target_os = "linux"))]
-        let local_cwd_file = {
-            let cwd_file_path = config
-                .cwd_file
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(next_local_cwd_file_path);
-            let _ = std::fs::write(&cwd_file_path, "");
-            Some(cwd_file_path)
-        };
-        #[cfg(target_os = "linux")]
-        let local_cwd_file = {
-            let _ = config.cwd_file;
-            None
-        };
+        let local_cwd_file = init_local_cwd_file(config.cwd_file.clone());
 
         Self::spawn_event_loop(event_rx, cx);
         #[cfg(target_os = "macos")]
@@ -1937,6 +1926,23 @@ impl Terminal {
         }
     }
 
+    fn sync_local_working_dir(&mut self, cx: &mut Context<Self>) {
+        if self.connection_kind != TerminalConnectionKind::Local {
+            return;
+        }
+
+        let Some(path) = self.latest_working_dir() else {
+            return;
+        };
+
+        if self.current_working_dir.as_deref() == Some(path.as_str()) {
+            return;
+        }
+
+        self.current_working_dir = Some(path.clone());
+        cx.emit(TerminalModelEvent::WorkingDirChanged(path));
+    }
+
     fn handle_terminal_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
         tracing::debug!(
             target: "terminal.history_prompt.osc",
@@ -1945,6 +1951,7 @@ impl Terminal {
         );
         match event {
             TerminalEvent::Wakeup => {
+                self.sync_local_working_dir(cx);
                 cx.emit(TerminalModelEvent::Wakeup);
             }
             TerminalEvent::PromptStart => {
@@ -2368,17 +2375,17 @@ mod tests {
         build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
         expand_tilde, next_local_cwd_file_path, note_ssh_user_input, read_local_working_dir,
-        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend,
-        SshProcessState, TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
+        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend, SshProcessState,
+        TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
-    use alacritty_terminal::tty::Options as PtyOptions;
-    #[cfg(target_os = "macos")]
-    use gpui::{AppContext, TestAppContext};
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
         push_history_entry, HistoryEntry, ShellHistoryFormat,
     };
+    use alacritty_terminal::tty::Options as PtyOptions;
+    #[cfg(target_os = "macos")]
+    use gpui::{AppContext, TestAppContext};
     use std::cell::Cell;
     use std::collections::VecDeque;
     use std::fs;
@@ -2509,6 +2516,8 @@ mod tests {
             connection_id: None,
             connection_name: None,
             init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Ssh,
             local_pty_session_id: None,
         };
@@ -2619,6 +2628,50 @@ mod tests {
         assert!(command.contains("precmd_functions+=(onetcli_cwd_write)"));
         assert!(command.contains("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null"));
         assert!(command.contains("PROMPT_COMMAND='pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null'"));
+    }
+
+    #[test]
+    fn prepare_local_shell_launch_injects_zsh_shell_integration_env() {
+        let config = super::LocalConfig {
+            shell: Some("/bin/zsh".into()),
+            ..super::LocalConfig::default()
+        };
+
+        let (config, cwd_file) = super::prepare_local_shell_launch(config);
+
+        assert!(cwd_file.is_some());
+        assert!(config
+            .env
+            .iter()
+            .any(|(key, value)| key == "ONETCLI_SHELL_INTEGRATION" && value == "1"));
+        assert!(config.env.iter().any(|(key, value)| {
+            key == "ONETCLI_CWD_FILE"
+                && cwd_file
+                    .as_ref()
+                    .is_some_and(|path| value == &path.to_string_lossy())
+        }));
+        assert!(config.env.iter().any(|(key, _)| key == "ZDOTDIR"));
+        assert!(config.shell_args.is_empty());
+    }
+
+    #[test]
+    fn prepare_local_shell_launch_injects_bash_rcfile_args() {
+        let config = super::LocalConfig {
+            shell: Some("/bin/bash".into()),
+            ..super::LocalConfig::default()
+        };
+
+        let (config, _cwd_file) = super::prepare_local_shell_launch(config);
+
+        assert_eq!(
+            config.shell_args.first().map(String::as_str),
+            Some("--rcfile")
+        );
+        assert_eq!(config.shell_args.len(), 2);
+        assert!(config
+            .env
+            .iter()
+            .any(|(key, value)| key == "ONETCLI_SHELL_INTEGRATION" && value == "1"));
     }
 
     #[test]

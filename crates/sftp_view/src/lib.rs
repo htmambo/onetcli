@@ -9,11 +9,12 @@ pub use file_list_panel::{
 };
 
 use gpui::{
-    actions, div, prelude::*, px, App, AsyncApp, Context, Entity, EventEmitter, ExternalPaths,
-    FocusHandle, Focusable, FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString,
-    Styled, WeakEntity, Window,
+    App, AsyncApp, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
+    FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
+    actions, div, prelude::*, px,
 };
 use gpui_component::{
+    ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowExt,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
@@ -23,8 +24,9 @@ use gpui_component::{
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowExt,
+    v_flex,
 };
+use one_core::RunningState;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
@@ -32,7 +34,6 @@ use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
-use one_core::RunningState;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};
@@ -42,8 +43,8 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 

@@ -9,8 +9,7 @@ use anyhow::{Context, Result};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::local_pty_protocol::{
-    local_pty_endpoint, LocalPtyHostEvent, LocalPtyHostRequest,
-    LocalPtySessionId,
+    local_pty_endpoint, LocalPtyHostEvent, LocalPtyHostRequest, LocalPtySessionId,
 };
 use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
@@ -29,9 +28,7 @@ impl LocalPtyClient {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<LocalPtyHostEvent>();
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<LocalPtyHostRequest>();
 
-        let read_stream = stream
-            .try_clone()
-            .context("克隆 UnixStream 失败")?;
+        let read_stream = stream.try_clone().context("克隆 UnixStream 失败")?;
         let write_stream = Arc::new(Mutex::new(stream));
 
         let io_handle = std::thread::spawn(move || {
@@ -102,7 +99,10 @@ impl LocalPtyClient {
             .send(LocalPtyHostRequest::Spawn { config, size })
             .map_err(|_| anyhow::anyhow!("host client 通道已关闭"))?;
         match self.recv_event(Duration::from_secs(5)) {
-            Some(LocalPtyHostEvent::Spawned { session_id, child_pid }) => Ok((session_id, child_pid)),
+            Some(LocalPtyHostEvent::Spawned {
+                session_id,
+                child_pid,
+            }) => Ok((session_id, child_pid)),
             Some(LocalPtyHostEvent::Error { message, .. }) => anyhow::bail!(message),
             _ => anyhow::bail!("等待 Spawned 响应超时"),
         }
@@ -263,7 +263,10 @@ mod tests {
 
         let result = tokio::task::spawn_blocking(|| {
             let mut client = LocalPtyClient::connect()?;
-            client.spawn_sync(crate::LocalConfig::default(), crate::TerminalSize::default())
+            client.spawn_sync(
+                crate::LocalConfig::default(),
+                crate::TerminalSize::default(),
+            )
         })
         .await
         .unwrap();

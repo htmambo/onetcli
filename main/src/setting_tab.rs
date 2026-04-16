@@ -7,14 +7,16 @@ use db_view::set_db_view_settings;
 use gpui::http_client::{AsyncBody, Method, Request, Url};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke,
-    ParentElement, Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window,
-    WindowAppearance, WindowBackgroundAppearance, WindowBounds, div, point, px, size,
+    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
+    Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, div, point, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
+    ActiveTheme, Disableable, Icon, IconName, IndexPath, LEFT_PANEL_ALPHA_OFFSET,
+    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, TitleBar, WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -29,8 +31,7 @@ use gpui_component::{
     },
     switch::Switch,
     tokens::Radius,
-    v_flex, ActiveTheme, Disableable, Icon, IconName, IndexPath, LEFT_PANEL_ALPHA_OFFSET,
-    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, TitleBar, WindowExt,
+    v_flex,
 };
 use one_core::certificate_manager::CertificateManagerView;
 use one_core::cloud_sync::{
@@ -38,7 +39,7 @@ use one_core::cloud_sync::{
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::llm::manager::GlobalProviderState;
-use one_core::popup_window::{open_popup_window, PopupWindowOptions};
+use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::manager::get_config_dir;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
@@ -408,7 +409,7 @@ impl GlobalProxySettings {
         }
 
         Ok(Some(url))
-}
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,15 +1,15 @@
 use gpui::{
-    div, prelude::*, px, uniform_list, App, Bounds, Context, DragMoveEvent, Empty, Entity,
-    EntityId, FocusHandle, Focusable, IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent,
-    ParentElement, Pixels, Render, SharedString, Styled, UniformListScrollHandle, Window,
+    App, Bounds, Context, DragMoveEvent, Empty, Entity, EntityId, FocusHandle, Focusable,
+    IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, Pixels, Render,
+    SharedString, Styled, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 use gpui_component::{
-    h_flex,
+    ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     scroll::{Scrollbar, ScrollbarShow},
     tooltip::Tooltip,
-    v_flex, ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable,
+    v_flex,
 };
 use rust_i18n::t;
 use std::collections::HashSet;

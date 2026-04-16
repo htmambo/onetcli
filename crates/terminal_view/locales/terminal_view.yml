@@ -585,6 +585,11 @@ RunningState:
       en: "Process is running"
       zh-CN: "进程正在运行"
       zh-HK: "進程正在運行"
+  ssh:
+    activity:
+      en: "Process is running"
+      zh-CN: "进程正在运行"
+      zh-HK: "進程正在運行"
 
 TerminalCloseDialog:
   running_process_close_title:

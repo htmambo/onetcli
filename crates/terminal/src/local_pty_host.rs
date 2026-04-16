@@ -11,8 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     local_pty_protocol::{
-        local_pty_pid_file, LocalPtyHostEvent, LocalPtyHostRequest,
-        LocalPtySessionId,
+        local_pty_pid_file, LocalPtyHostEvent, LocalPtyHostRequest, LocalPtySessionId,
     },
     TerminalCloseMode, TerminalSize,
 };
@@ -27,6 +26,7 @@ struct SessionHandle {
     input_tx: mpsc::UnboundedSender<Vec<u8>>,
     resize_tx: mpsc::UnboundedSender<TerminalSize>,
     output_tx: broadcast::Sender<Vec<u8>>,
+    exit_tx: broadcast::Sender<LocalPtyHostEvent>,
     attached: Arc<RwLock<bool>>,
     last_detached_at: Arc<RwLock<Option<Instant>>>,
     shutdown_tx: mpsc::UnboundedSender<()>,
@@ -48,7 +48,10 @@ impl SessionRegistry {
     }
 
     async fn insert(&self, handle: SessionHandle) {
-        self.sessions.write().await.insert(handle.session_id.clone(), handle);
+        self.sessions
+            .write()
+            .await
+            .insert(handle.session_id.clone(), handle);
     }
 
     async fn remove(&self, session_id: &str) -> Option<SessionHandle> {
@@ -127,16 +130,18 @@ async fn handle_request(
     request: LocalPtyHostRequest,
 ) -> Option<LocalPtyHostEvent> {
     match request {
-        LocalPtyHostRequest::Spawn { config, size } => match spawn_session(registry, config, size).await {
-            Ok(handle) => Some(LocalPtyHostEvent::Spawned {
-                session_id: handle.session_id,
-                child_pid: handle.child_pid,
-            }),
-            Err(e) => Some(LocalPtyHostEvent::Error {
-                session_id: None,
-                message: e.to_string(),
-            }),
-        },
+        LocalPtyHostRequest::Spawn { config, size } => {
+            match spawn_session(registry, config, size).await {
+                Ok(handle) => Some(LocalPtyHostEvent::Spawned {
+                    session_id: handle.session_id,
+                    child_pid: handle.child_pid,
+                }),
+                Err(e) => Some(LocalPtyHostEvent::Error {
+                    session_id: None,
+                    message: e.to_string(),
+                }),
+            }
+        }
         LocalPtyHostRequest::Attach { session_id, size } => {
             match attach_session(registry, &session_id, size).await {
                 Ok(handle) => Some(LocalPtyHostEvent::Attached {
@@ -211,12 +216,11 @@ async fn spawn_session(
         pixel_width: size.pixel_width,
         pixel_height: size.pixel_height,
     };
-    let pair = pty_system
-        .openpty(pty_size)
-        .context("打开 PTY 失败")?;
+    let pair = pty_system.openpty(pty_size).context("打开 PTY 失败")?;
 
     let shell = config.shell.clone().unwrap_or_else(|| default_shell());
     let mut cmd = CommandBuilder::new(&shell);
+    cmd.args(&config.shell_args);
     if let Some(dir) = &config.working_dir {
         cmd.cwd(dir);
     }
@@ -234,9 +238,11 @@ async fn spawn_session(
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let (resize_tx, mut resize_rx) = mpsc::unbounded_channel::<TerminalSize>();
     let (output_tx, _output_rx) = broadcast::channel::<Vec<u8>>(HOST_FRAME_CAPACITY);
+    let (exit_tx, _exit_rx) = broadcast::channel::<LocalPtyHostEvent>(1);
     let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
 
     let _output_tx_for_task = output_tx.clone();
+    let exit_tx_for_task = exit_tx.clone();
     let mut master_writer = pair
         .master
         .take_writer()
@@ -297,6 +303,11 @@ async fn spawn_session(
                 }
             }
         }
+
+        let _ = exit_tx_for_task.send(LocalPtyHostEvent::Exited {
+            session_id: session_id_for_task,
+            exit_code: 0,
+        });
     });
 
     let handle = SessionHandle {
@@ -305,6 +316,7 @@ async fn spawn_session(
         input_tx,
         resize_tx,
         output_tx,
+        exit_tx,
         attached: Arc::new(RwLock::new(true)),
         last_detached_at: Arc::new(RwLock::new(None)),
         shutdown_tx,
@@ -360,7 +372,21 @@ pub(crate) async fn subscribe_output(
     registry: &SessionRegistry,
     session_id: &str,
 ) -> Option<broadcast::Receiver<Vec<u8>>> {
-    registry.get(session_id).await.map(|h| h.output_tx.subscribe())
+    registry
+        .get(session_id)
+        .await
+        .map(|h| h.output_tx.subscribe())
+}
+
+// 供传输层调用：获取 session 的 exit 事件 receiver
+pub(crate) async fn subscribe_exit(
+    registry: &SessionRegistry,
+    session_id: &str,
+) -> Option<broadcast::Receiver<LocalPtyHostEvent>> {
+    registry
+        .get(session_id)
+        .await
+        .map(|h| h.exit_tx.subscribe())
 }
 
 // 供传输层调用：处理单个请求

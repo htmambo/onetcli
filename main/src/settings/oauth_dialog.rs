@@ -188,7 +188,12 @@ impl Render for GoogleDriveAuthDialog {
                     .gap_4()
                     .p_5()
                     .w(px(420.))
-                    .child(div().text_sm().font_semibold().child(t!("OAuth.google_drive_auth")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(t!("OAuth.google_drive_auth")),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -227,7 +232,12 @@ impl Render for GoogleDriveAuthDialog {
                 .gap_4()
                 .p_5()
                 .w(px(420.))
-                .child(div().text_sm().font_semibold().child(t!("OAuth.getting_access")))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(t!("OAuth.getting_access")),
+                )
                 .child(
                     div()
                         .text_sm()
@@ -464,7 +474,12 @@ impl Render for OneDriveAuthDialog {
                     .gap_4()
                     .p_5()
                     .w(px(420.))
-                    .child(div().text_sm().font_semibold().child(t!("OAuth.onedrive_auth")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(t!("OAuth.onedrive_auth")),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -503,7 +518,12 @@ impl Render for OneDriveAuthDialog {
                 .gap_4()
                 .p_5()
                 .w(px(420.))
-                .child(div().text_sm().font_semibold().child(t!("OAuth.getting_access")))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(t!("OAuth.getting_access")),
+                )
                 .child(
                     div()
                         .text_sm()

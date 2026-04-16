@@ -180,11 +180,7 @@ impl Item {
                 SubItem::Tutorial,
                 SubItem::Changelog,
             ],
-            Self::Settings => vec![
-                SubItem::General,
-                SubItem::Billing,
-                SubItem::Limits,
-            ],
+            Self::Settings => vec![SubItem::General, SubItem::Billing, SubItem::Limits],
             _ => Vec::new(),
         }
     }

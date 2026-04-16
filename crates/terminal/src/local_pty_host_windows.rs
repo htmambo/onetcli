@@ -5,7 +5,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::broadcast;
 
-use crate::local_pty_host::{dispatch_request, mark_session_detached, subscribe_output, SessionRegistry};
+use crate::local_pty_host::{
+    dispatch_request, mark_session_detached, subscribe_output, SessionRegistry,
+};
 use crate::local_pty_protocol::{local_pty_endpoint, LocalPtyHostEvent, LocalPtyHostRequest};
 
 pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
