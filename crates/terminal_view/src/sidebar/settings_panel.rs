@@ -10,14 +10,13 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
-    button::{Button, ButtonVariant, ButtonVariants},
-    dialog::DialogButtonProps,
+    button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
     scroll::ScrollableElement,
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
-    v_flex, ActiveTheme, Icon, IconName, Sizable, Size, WindowExt,
+    v_flex, ActiveTheme, Icon, IconName, Sizable, Size,
 };
 use rust_i18n::t;
 
@@ -52,6 +51,8 @@ pub enum SettingsPanelEvent {
     ConfirmHighRiskCommandChanged(bool),
     /// 选中自动复制开关
     AutoCopyChanged(bool),
+    /// 自动补全开关
+    AutocompleteChanged(bool),
     /// 中键粘贴开关
     MiddleClickPasteChanged(bool),
     /// 路径同步开关变更
@@ -82,6 +83,8 @@ pub struct SettingsPanel {
     confirm_high_risk_command: bool,
     /// 选中自动复制
     auto_copy: bool,
+    /// 自动补全
+    autocomplete_enabled: bool,
     /// 中键粘贴
     middle_click_paste: bool,
     /// 路径与终端同步开关
@@ -99,6 +102,7 @@ impl SettingsPanel {
         initial_theme: &TerminalTheme,
         has_file_manager: bool,
         auto_copy: bool,
+        autocomplete_enabled: bool,
         middle_click_paste: bool,
         sync_path: bool,
         window: &mut Window,
@@ -268,6 +272,7 @@ impl SettingsPanel {
             confirm_multiline_paste: true,
             confirm_high_risk_command: true,
             auto_copy,
+            autocomplete_enabled,
             middle_click_paste,
             sync_path,
             has_file_manager,
@@ -311,6 +316,11 @@ impl SettingsPanel {
 
     pub fn set_auto_copy(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.auto_copy = enabled;
+        cx.notify();
+    }
+
+    pub fn set_autocomplete_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.autocomplete_enabled = enabled;
         cx.notify();
     }
 
@@ -622,6 +632,7 @@ impl SettingsPanel {
         let confirm_multiline = self.confirm_multiline_paste;
         let confirm_high_risk = self.confirm_high_risk_command;
         let auto_copy = self.auto_copy;
+        let autocomplete_enabled = self.autocomplete_enabled;
         let middle_click_paste = self.middle_click_paste;
 
         v_flex()
@@ -700,6 +711,21 @@ impl SettingsPanel {
                         h_flex()
                             .items_center()
                             .justify_between()
+                            .child(div().text_sm().child(t!("Settings.autocomplete")))
+                            .child(
+                                Switch::new("terminal-autocomplete-switch")
+                                    .checked(autocomplete_enabled)
+                                    .small()
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        this.autocomplete_enabled = *checked;
+                                        cx.emit(SettingsPanelEvent::AutocompleteChanged(*checked));
+                                    })),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .justify_between()
                             .child(div().text_sm().child(t!("Settings.middle_click_paste")))
                             .child(
                                 Switch::new("middle-click-paste-switch")
@@ -750,49 +776,17 @@ impl SettingsPanel {
                                 Switch::new("sync-path-switch")
                                     .checked(sync_path)
                                     .small()
-                                    .on_click(cx.listener(|this, checked: &bool, window, cx| {
-                                        if *checked {
-                                            let entity = cx.entity().clone();
-                                            window.open_dialog(cx, move |dialog, _window, _cx| {
-                                                let entity = entity.clone();
-                                                dialog
-                                                    .confirm()
-                                                    .title(
-                                                        t!("Settings.sync_path_confirm_title")
-                                                            .to_string(),
-                                                    )
-                                                    .child(div().text_sm().child(t!(
-                                                        "Settings.sync_path_confirm_message"
-                                                    )))
-                                                    .button_props(
-                                                        DialogButtonProps::default()
-                                                            .ok_text(
-                                                                t!("Settings.sync_path_confirm_ok")
-                                                                    .to_string(),
-                                                            )
-                                                            .ok_variant(ButtonVariant::Primary)
-                                                            .cancel_text(
-                                                                t!("Common.cancel").to_string(),
-                                                            ),
-                                                    )
-                                                    .on_ok(move |_, _window, cx| {
-                                                        entity.update(cx, |this, cx| {
-                                                            this.sync_path = true;
-                                                            cx.emit(
-                                                                SettingsPanelEvent::SyncPathChanged(
-                                                                    true,
-                                                                ),
-                                                            );
-                                                        });
-                                                        true
-                                                    })
-                                            });
-                                        } else {
-                                            this.sync_path = false;
-                                            cx.emit(SettingsPanelEvent::SyncPathChanged(false));
-                                        }
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        this.sync_path = *checked;
+                                        cx.emit(SettingsPanelEvent::SyncPathChanged(*checked));
                                     })),
                             ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted_fg)
+                            .child(t!("Settings.sync_path_help")),
                     ),
             )
     }

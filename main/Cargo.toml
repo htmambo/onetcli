@@ -1,6 +1,6 @@
 [package]
 name = "main"
-version = "0.2.3"
+version = "0.2.5"
 publish.workspace = true
 edition.workspace = true
 
@@ -36,6 +36,7 @@ reqwest_client.workspace = true
 db.workspace = true
 sysinfo = "0.37"
 global-hotkey.workspace = true
+sha2 = { workspace = true }
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1"
 

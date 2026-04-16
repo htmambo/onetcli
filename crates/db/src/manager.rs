@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Macro to reduce boilerplate for plugin operations with session management
 macro_rules! with_plugin_session {
@@ -385,10 +385,10 @@ impl ConnectionManager {
             {
                 session.mark_in_use();
 
-                // trace!(
-                //     "Reusing session: {} (database: {:?})",
-                //     session.session_id, config.database
-                // );
+                debug!(
+                    "Reusing session: {} (database: {:?})",
+                    session.session_id, config.database
+                );
                 return Ok(Some(session.session_id.clone()));
             }
         }
@@ -447,7 +447,7 @@ impl ConnectionManager {
                     Ok(_) => {
                         // Check passed (consistent or updated), release normally
                         session.release();
-                        // trace!("Session {} released", session_id);
+                        debug!("Session {} released", session_id);
                         return Ok(());
                     }
                     Err(e) => {

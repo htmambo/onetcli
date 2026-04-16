@@ -4,6 +4,8 @@ pub mod local_pty_host_unix;
 #[cfg(windows)]
 pub mod local_pty_host_windows;
 pub mod local_pty_protocol;
+pub mod history;
+pub mod osc;
 pub mod pty_backend;
 pub mod serial_backend;
 pub mod ssh_backend;

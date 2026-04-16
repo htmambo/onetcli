@@ -183,6 +183,7 @@ impl HomePage {
             let font_ligatures = settings.terminal_font_ligatures;
             let line_height_scale = settings.terminal_line_height_scale as f32;
             let auto_copy = settings.terminal_auto_copy;
+            let autocomplete_enabled = settings.terminal_enable_autocomplete;
             let middle_click_paste = settings.terminal_middle_click_paste;
             let sync_path = settings.terminal_sync_path_with_terminal;
             let cursor_blink = settings.terminal_cursor_blink;
@@ -198,6 +199,7 @@ impl HomePage {
                     font_ligatures,
                     line_height_scale,
                     auto_copy,
+                    autocomplete_enabled,
                     middle_click_paste,
                     sync_path,
                     &exit_behavior,
@@ -436,6 +438,7 @@ impl HomePage {
         let font_ligatures = settings.terminal_font_ligatures;
         let line_height_scale = settings.terminal_line_height_scale as f32;
         let auto_copy = settings.terminal_auto_copy;
+        let autocomplete_enabled = settings.terminal_enable_autocomplete;
         let middle_click_paste = settings.terminal_middle_click_paste;
         let sync_path = settings.terminal_sync_path_with_terminal;
         let exit_behavior = settings.terminal_exit_behavior.clone();
@@ -448,6 +451,7 @@ impl HomePage {
                         font_ligatures,
                         line_height_scale,
                         auto_copy,
+                        autocomplete_enabled,
                         middle_click_paste,
                         sync_path,
                         &exit_behavior,
@@ -537,7 +541,6 @@ impl HomePage {
         let terminal_view = cx.new(|cx| {
             TerminalView::new_ssh_with_index(conn, tab_index, window, cx, None, sync_path)
         });
-        self.setup_terminal_view(&terminal_view, window, cx);
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);
@@ -573,7 +576,6 @@ impl HomePage {
 
         let terminal_view =
             cx.new(|cx| TerminalView::new_serial_with_index(conn, tab_index, window, cx));
-        self.setup_terminal_view(&terminal_view, window, cx);
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "serial", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);
@@ -657,7 +659,6 @@ impl HomePage {
                                 sync_path,
                             )
                         });
-                        this.setup_terminal_view(&terminal_view, window, cx);
                         tab_container.update(cx, |tc, cx| {
                             let tab = TabItem::new(tab_id, "ssh", terminal_view);
                             tc.add_and_activate_tab_with_focus(tab, window, cx);

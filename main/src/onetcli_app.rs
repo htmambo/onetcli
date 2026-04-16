@@ -9,7 +9,7 @@ use smol::Timer;
 
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
 use crate::saved_connection_picker::TabBarSavedConnectionPicker;
-use crate::setting_tab::{AppSettings, SavedWindowBounds};
+use crate::setting_tab::{AppSettings, SavedWindowBounds, build_app_http_client};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
@@ -151,7 +151,6 @@ use one_core::tab_container::{
 use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save};
 use one_core::utils::debouncer::Debouncer;
 use one_core::{PendingChangeLevel, RunningKind, RunningState};
-use reqwest_client::ReqwestClient;
 use rust_i18n::t;
 use terminal_view::with_recovery_snapshot_overrides;
 use tracing_subscriber::layer::SubscriberExt;
@@ -621,8 +620,8 @@ pub fn init(cx: &mut App) {
         .with(tracing_subscriber::fmt::layer())
         .with(env_filter)
         .init();
-    let http_client =
-        std::sync::Arc::new(ReqwestClient::user_agent("one-hub").expect("HTTP 客户端初始化失败"));
+    let settings = AppSettings::load();
+    let http_client = build_app_http_client(&settings.global_proxy).expect("HTTP 客户端初始化失败");
     cx.set_http_client(http_client);
     gpui_component::init(cx);
     one_core::init(cx);
@@ -850,7 +849,6 @@ impl OnetCliApp {
         };
         let restored_tab_count = tab_container.read(cx).tabs().len();
         let has_restored_tabs = restored_tab_count > 0;
-
         // Set HomePage as the pinned tab (always visible, not scrollable)
         // 先创建 HomePage 以获取待恢复连接快照
         let home_page = cx.new(|cx| HomePage::new(tab_container.clone(), window, cx));

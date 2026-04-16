@@ -75,6 +75,10 @@ fn strip_ansi(s: &str) -> String {
 pub enum TerminalEvent {
     /// 终端内容已更新，需要重新渲染
     Wakeup,
+    /// shell 开始渲染新的 prompt（OSC 133;A）
+    PromptStart,
+    /// shell prompt 已渲染完成，进入可输入状态（OSC 133;B）
+    InputStart,
     /// 终端标题已更改
     TitleChanged(String),
     /// 终端响铃
@@ -89,6 +93,10 @@ pub enum TerminalEvent {
     WorkingDirChanged(String),
     /// SSH 远端 shell 已回到提示符，可视为空闲态
     SshPromptReady,
+    /// 命令执行完毕（OSC 133;D）
+    CommandFinished { exit_code: i32 },
+    /// 记录 shell 实际执行过的命令
+    CommandRecorded(String),
 }
 
 /// Commands from UI layer to PTY backend

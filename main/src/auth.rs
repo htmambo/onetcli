@@ -3,6 +3,7 @@
 //! 提供云端认证集成，包括登录、登出、会话持久化等功能。
 
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::App;
@@ -62,36 +63,14 @@ pub fn check_and_reset_session_expired() -> bool {
 
 /// 认证服务，管理云端客户端和用户状态
 pub struct AuthService {
-    cloud_client: Arc<SyncServerClient>,
+    cloud_client: RwLock<Arc<SyncServerClient>>,
 }
 
 impl AuthService {
-    /// 获取云端 API 客户端
-    ///
-    /// 用于访问云端数据同步功能。
-    pub fn cloud_client(&self) -> Arc<dyn CloudApiClient> {
-        self.cloud_client.clone()
-    }
-
-    /// 使用配置和 HttpClient 创建认证服务
-    fn new_with_http(http: Arc<dyn HttpClient>, _cx: &App) -> Self {
-        let settings = AppSettings::load();
-        let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
-        if SyncServerClient::is_valid_base_url(&sync_server_base_url) {
-            info!("认证服务使用 sync_server 后端: {}", sync_server_base_url);
-        } else {
-            warn!("未配置有效的 sync_server 地址，认证和同步请求可能失败");
-        }
-        let cloud_client = Arc::new(SyncServerClient::new(
-            SyncServerClientConfig {
-                base_url: sync_server_base_url,
-            },
-            http,
-        ));
-
+    fn configure_client(cloud_client: &Arc<SyncServerClient>) {
         // 设置会话过期回调：刷新 token 失败时通过静态标志通知 UI
         let callback: SessionExpiredCallback = Arc::new(|| {
-            tracing::warn!("会话已过期，需要重新登录");
+            warn!("会话已过期，需要重新登录");
             SESSION_EXPIRED.store(true, Ordering::SeqCst);
         });
         cloud_client.set_session_expired_callback(callback);
@@ -109,13 +88,67 @@ impl AuthService {
                 auth_resp.user_id, auth_resp.expires_at
             );
         }));
+    }
 
-        Self { cloud_client }
+    fn current_client(&self) -> Arc<SyncServerClient> {
+        self.cloud_client
+            .read()
+            .expect("AuthService client lock poisoned")
+            .clone()
+    }
+
+    /// 获取云端 API 客户端
+    ///
+    /// 用于访问云端数据同步功能。
+    pub fn cloud_client(&self) -> Arc<dyn CloudApiClient> {
+        self.current_client()
+    }
+
+    /// 使用配置和 HttpClient 创建认证服务
+    fn new_with_http(http: Arc<dyn HttpClient>, _cx: &App) -> Self {
+        let settings = AppSettings::load();
+        let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
+        if SyncServerClient::is_valid_base_url(&sync_server_base_url) {
+            info!("认证服务使用 sync_server 后端: {}", sync_server_base_url);
+        } else {
+            warn!("未配置有效的 sync_server 地址，认证和同步请求可能失败");
+        }
+        let cloud_client = Arc::new(SyncServerClient::new(
+            SyncServerClientConfig {
+                base_url: sync_server_base_url,
+            },
+            http,
+        ));
+        Self::configure_client(&cloud_client);
+
+        Self {
+            cloud_client: RwLock::new(cloud_client),
+        }
+    }
+
+    pub fn replace_http_client(&self, http: Arc<dyn HttpClient>) {
+        let settings = AppSettings::load();
+        let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
+        let next_client = Arc::new(SyncServerClient::new(
+            SyncServerClientConfig {
+                base_url: sync_server_base_url,
+            },
+            http,
+        ));
+        Self::configure_client(&next_client);
+
+        if let Some((access_token, refresh_token, user_id, expires_at)) = load_auth_data() {
+            next_client.set_auth_with_expiry(access_token, refresh_token, user_id, expires_at);
+        }
+
+        if let Ok(mut guard) = self.cloud_client.write() {
+            *guard = next_client;
+        }
     }
 
     /// 检查是否已配置有效的 sync_server 地址。
     pub fn has_valid_sync_server_url(&self) -> bool {
-        self.cloud_client.has_valid_base_url()
+        self.current_client().has_valid_base_url()
     }
 
     /// 返回“必须先配置同步地址”的提示文案。
@@ -135,12 +168,12 @@ impl AuthService {
     /// 更新 sync_server 地址，返回值表示是否发生变化。
     pub fn update_sync_server_url(&self, value: &str) -> bool {
         let normalized = SyncServerClient::normalize_base_url(value);
-        let changed = self.cloud_client.set_base_url(&normalized);
+        let changed = self.current_client().set_base_url(&normalized);
         if !changed {
             return false;
         }
 
-        self.cloud_client.clear_auth();
+        self.current_client().clear_auth();
         clear_auth_data();
 
         if !SyncServerClient::is_valid_base_url(&normalized) {
@@ -184,7 +217,7 @@ impl AuthService {
             needs_refresh
         );
 
-        let cloud_client = self.cloud_client();
+        let cloud_client = self.current_client();
 
         if needs_refresh {
             info!("访问令牌需要刷新: now={} expires_at={}", now, expires_at);
@@ -209,7 +242,7 @@ impl AuthService {
                     Err(error) => {
                         if error.is_auth_error() {
                             warn!("令牌刷新认证失败，清除本地认证数据: {}", error);
-                            self.cloud_client.clear_auth();
+                            cloud_client.clear_auth();
                             clear_auth_data();
                             return None;
                         }
@@ -235,7 +268,7 @@ impl AuthService {
                 return None;
             }
         } else {
-            self.cloud_client.set_auth_with_expiry(
+            cloud_client.set_auth_with_expiry(
                 access_token,
                 refresh_token.clone(),
                 user_id,
@@ -251,14 +284,14 @@ impl AuthService {
             }
             Ok(None) => {
                 warn!("恢复会话失败: 用户信息为空，清除本地认证数据");
-                self.cloud_client.clear_auth();
+                cloud_client.clear_auth();
                 clear_auth_data();
                 None
             }
             Err(error) => {
                 if error.is_auth_error() {
                     warn!("恢复会话失败: 认证错误，清除本地认证数据: {}", error);
-                    self.cloud_client.clear_auth();
+                    cloud_client.clear_auth();
                     clear_auth_data();
                 } else {
                     warn!("恢复会话失败: 获取用户信息错误（保留本地数据）: {}", error);
@@ -272,7 +305,7 @@ impl AuthService {
     pub async fn sign_out(&self) {
         info!("用户登出");
         let _ = self.cloud_client().sign_out().await;
-        self.cloud_client.clear_auth();
+        self.current_client().clear_auth();
         clear_auth_data();
     }
 

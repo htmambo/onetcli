@@ -26,6 +26,9 @@ use std::cell::Cell;
 use std::collections::HashSet;
 #[cfg(any(test, not(target_os = "linux")))]
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::VecDeque;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -36,14 +39,23 @@ use std::env;
 #[cfg(any(test, target_os = "windows"))]
 use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Context as _;
 use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
 use crate::local_pty_protocol::LocalPtyHostEvent;
+use crate::history::{
+    collect_history_search_results, collect_history_suggestions_with_cwd, parse_shell_history,
+    push_rich_history_entry, HistoryEntry, ShellHistoryFormat, PERSISTED_HISTORY_LIMIT,
+    SESSION_HISTORY_LIMIT,
+};
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 
-use crate::{LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent, TerminalSize};
+use crate::{
+    LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent,
+    TerminalSize,
+};
+use ssh::{ChannelEvent, RusshClient, SshChannel, SshClient};
 pub use ssh::{
     JumpServerConnectConfig, ProxyConnectConfig, ProxyType, PtyConfig, SshAuth, SshConnectConfig,
     SshConnectionStage,
@@ -54,6 +66,10 @@ pub use ssh::{
 pub enum TerminalModelEvent {
     /// 终端内容已更新，需要重新渲染
     Wakeup,
+    /// shell 开始渲染新的 prompt（OSC 133;A）
+    PromptStart,
+    /// shell prompt 已渲染完成，用户可以输入（OSC 133;B）
+    InputStart,
     /// 终端标题已更改
     TitleChanged(String),
     /// 终端响铃
@@ -189,7 +205,6 @@ fn build_cd_command(dir: &str) -> String {
 const OSC7_PROMPT_COMMAND: &str = r#"printf "\033]7;file://%s%s\007" "${HOSTNAME:-}" "$PWD""#;
 const SSH_PROMPT_READY_COMMAND: &str = r#"printf "\033]1337;OnetcliPromptReady=1\007""#;
 const SSH_PROMPT_HOOK_NAME: &str = "onetcli_prompt_hook";
-
 fn build_ssh_base_init_commands(
     working_dir: Option<&str>,
     default_directory: Option<&str>,
@@ -624,7 +639,7 @@ fn resolve_default_windows_shell_from_env(
 }
 
 #[cfg(target_os = "windows")]
-fn build_local_shell(shell: Option<String>) -> Option<tty::Shell> {
+fn build_local_shell(shell: Option<String>, _extra_args: Vec<String>) -> Option<tty::Shell> {
     let program = shell.unwrap_or_else(|| {
         resolve_default_windows_shell_from_env(
             env::var_os("PATH").as_deref(),
@@ -638,8 +653,191 @@ fn build_local_shell(shell: Option<String>) -> Option<tty::Shell> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn build_local_shell(shell: Option<String>) -> Option<tty::Shell> {
-    shell.map(|program| tty::Shell::new(program, vec![]))
+fn build_local_shell(shell: Option<String>, extra_args: Vec<String>) -> Option<tty::Shell> {
+    if extra_args.is_empty() {
+        shell.map(|program| tty::Shell::new(program, vec![]))
+    } else {
+        // 有额外参数（如 --rcfile）时需显式指定 shell 程序
+        let program = shell.or_else(|| std::env::var("SHELL").ok())?;
+        Some(tty::Shell::new(program, extra_args))
+    }
+}
+
+/// 准备本地终端的 Shell Integration 环境
+///
+/// 将 `shell_integration.sh` 写入进程级临时目录 `/tmp/onetcli-<pid>/`，
+/// 仅对当前 OnetCli 进程内的终端会话生效，不污染全局配置。
+/// 返回 `(额外环境变量, shell 额外参数)`。
+#[cfg(not(target_os = "windows"))]
+fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec<String>) {
+    // 使用进程级临时目录，确保不影响其他会话或工具
+    let session_dir = std::env::temp_dir().join(format!("onetcli-{}", std::process::id()));
+    if fs::create_dir_all(&session_dir).is_err() {
+        tracing::warn!(
+            "无法创建临时目录 {}，跳过 Shell Integration",
+            session_dir.display()
+        );
+        return (vec![], vec![]);
+    }
+
+    // 写入 shell_integration.sh（含交互式守卫，不影响 rsync/scp 等非交互通道）
+    let integration_path = session_dir.join("shell_integration.sh");
+    if let Err(e) = fs::write(&integration_path, include_str!("shell_integration.sh")) {
+        tracing::warn!("写入 shell_integration.sh 失败: {e}");
+        return (vec![], vec![]);
+    }
+
+    let mut extra_env: Vec<(String, String)> =
+        vec![("ONETCLI_SHELL_INTEGRATION".into(), "1".into())];
+    let mut extra_args: Vec<String> = Vec::new();
+
+    // 判断 shell 类型：优先用显式参数，否则读 $SHELL
+    let shell_name = shell
+        .map(|s| s.to_ascii_lowercase())
+        .or_else(|| std::env::var("SHELL").ok().map(|s| s.to_ascii_lowercase()))
+        .unwrap_or_default();
+
+    if shell_name.contains("zsh") {
+        // zsh: 通过 ZDOTDIR 注入集成脚本
+        let zsh_dir = session_dir.join("zsh");
+        if fs::create_dir_all(&zsh_dir).is_err() {
+            return (extra_env, extra_args);
+        }
+
+        let script = integration_path.display();
+
+        // .zshenv — 恢复原始 ZDOTDIR 并 source 用户的 .zshenv
+        let zshenv = "ZDOTDIR=\"${_ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
+                       [[ -f \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\n";
+        let _ = fs::write(zsh_dir.join(".zshenv"), zshenv);
+
+        // .zshrc — 恢复 ZDOTDIR，source 用户 .zshrc，再 source 集成脚本
+        let zshrc = format!(
+            "ZDOTDIR=\"${{_ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
+             [[ -f \"$ZDOTDIR/.zshrc\" ]] && source \"$ZDOTDIR/.zshrc\"\n\
+             source \"{script}\"\n"
+        );
+        let _ = fs::write(zsh_dir.join(".zshrc"), zshrc);
+
+        let orig = std::env::var("ZDOTDIR").unwrap_or_default();
+        extra_env.push(("_ONETCLI_ORIG_ZDOTDIR".into(), orig));
+        extra_env.push(("ZDOTDIR".into(), zsh_dir.display().to_string()));
+
+        tracing::debug!(
+            "已配置 zsh Shell Integration (ZDOTDIR={})",
+            zsh_dir.display()
+        );
+    } else if shell_name.contains("bash") {
+        // bash: 通过 --rcfile 注入集成脚本
+        let bash_rc = session_dir.join("bash_integration.sh");
+        let script = integration_path.display();
+        let content = format!(
+            "[[ -f \"$HOME/.bashrc\" ]] && source \"$HOME/.bashrc\"\n\
+             source \"{script}\"\n"
+        );
+        let _ = fs::write(&bash_rc, content);
+
+        extra_args.push("--rcfile".into());
+        extra_args.push(bash_rc.display().to_string());
+
+        tracing::debug!(
+            "已配置 bash Shell Integration (--rcfile={})",
+            bash_rc.display()
+        );
+    } else {
+        tracing::debug!("未知 shell 类型 '{shell_name}'，跳过 Shell Integration 注入");
+    }
+
+    (extra_env, extra_args)
+}
+
+#[cfg(target_os = "windows")]
+fn prepare_shell_integration(_shell: Option<&str>) -> (Vec<(String, String)>, Vec<String>) {
+    // Windows 暂不支持 Shell Integration
+    (vec![], vec![])
+}
+
+fn history_file_candidates(preferred_shell: Option<&str>) -> Vec<(PathBuf, ShellHistoryFormat)> {
+    let Some(home_dir) = dirs::home_dir() else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    let lower_shell = preferred_shell.unwrap_or_default().to_ascii_lowercase();
+    let prefer_zsh = lower_shell.contains("zsh");
+
+    let bash = (home_dir.join(".bash_history"), ShellHistoryFormat::Bash);
+    let zsh = (home_dir.join(".zsh_history"), ShellHistoryFormat::Zsh);
+
+    if prefer_zsh {
+        candidates.push(bash);
+        candidates.push(zsh);
+    } else {
+        candidates.push(zsh);
+        candidates.push(bash);
+    }
+
+    candidates
+}
+
+fn load_local_history(preferred_shell: Option<&str>) -> Vec<String> {
+    history_file_candidates(preferred_shell)
+        .into_iter()
+        .filter_map(|(path, format)| fs::read_to_string(path).ok().map(|text| (text, format)))
+        .flat_map(|(text, format)| parse_shell_history(&text, format))
+        .collect()
+}
+
+fn build_remote_history_load_command() -> String {
+    [
+        "sh -lc",
+        "'",
+        "if [ -f \"$HOME/.bash_history\" ]; then tail -n 512 \"$HOME/.bash_history\" 2>/dev/null || true; fi;",
+        "printf \"\\n__ONETCLI_HISTORY_SPLIT__\\n\";",
+        "if [ -f \"$HOME/.zsh_history\" ]; then tail -n 512 \"$HOME/.zsh_history\" 2>/dev/null || true; fi",
+        "'",
+    ]
+    .join(" ")
+}
+
+fn parse_remote_history_output(output: &str) -> Vec<String> {
+    let (bash_history, zsh_history) = output
+        .split_once("\n__ONETCLI_HISTORY_SPLIT__\n")
+        .unwrap_or((output, ""));
+
+    let mut commands = parse_shell_history(bash_history, ShellHistoryFormat::Bash);
+    commands.extend(parse_shell_history(zsh_history, ShellHistoryFormat::Zsh));
+    commands
+}
+
+async fn load_ssh_history(config: SshConnectConfig) -> anyhow::Result<Vec<String>> {
+    let mut client = RusshClient::connect(config).await?;
+    let mut channel = client.open_channel().await?;
+    let command = build_remote_history_load_command();
+    channel.exec(&command).await?;
+
+    let mut stdout = Vec::new();
+    let mut exit_code = None;
+
+    loop {
+        match channel.recv().await {
+            Some(ChannelEvent::Data(data)) => stdout.extend(data),
+            Some(ChannelEvent::ExitStatus(code)) => exit_code = Some(code),
+            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) | None => break,
+            _ => {}
+        }
+    }
+
+    let _ = channel.close().await;
+    let _ = client.disconnect().await;
+
+    if let Some(code) = exit_code {
+        anyhow::ensure!(code == 0, "ssh history loader exited with status {code}");
+    }
+
+    Ok(parse_remote_history_output(&String::from_utf8_lossy(
+        &stdout,
+    )))
 }
 
 /// 终端模型 Entity
@@ -693,10 +891,12 @@ pub struct Terminal {
     connection_id: Option<i64>,
     /// 连接名称
     connection_name: Option<String>,
-    /// SSH 基础初始化命令（不含 OSC7，用于运行时重建）
-    ssh_base_init_commands: Option<String>,
     /// 初始化命令（连接成功后执行）
     init_commands: Option<String>,
+    /// 当前 OnetCli 会话内记录的命令历史（富条目，含 frecency 元数据）
+    session_history: VecDeque<HistoryEntry>,
+    /// 从 shell 历史文件加载的持久化历史
+    persisted_history: Vec<String>,
 
     /// 连接类型
     connection_kind: TerminalConnectionKind,
@@ -796,8 +996,9 @@ impl Terminal {
             event_proxy: None,
             connection_id: None,
             connection_name: None,
-            ssh_base_init_commands: None,
             init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: None,
         }
@@ -859,6 +1060,14 @@ impl Terminal {
             env,
             cwd_file,
         } = config;
+        let history_shell = shell.clone();
+
+        // 准备 Shell Integration 环境（写入集成脚本、生成 wrapper 配置）
+        let (integration_env, shell_args) = prepare_shell_integration(shell.as_deref());
+
+        // 合并用户环境变量与 Shell Integration 环境变量
+        let mut env_pairs = env;
+        env_pairs.extend(integration_env);
 
         if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
             replay_term_output(&term, content.as_bytes());
@@ -866,9 +1075,9 @@ impl Terminal {
         }
 
         let pty_options = PtyOptions {
-            shell: build_local_shell(shell),
+            shell: build_local_shell(shell, shell_args),
             working_directory: working_dir.clone().map(Into::into),
-            env: env.into_iter().collect(),
+            env: env_pairs.into_iter().collect(),
             drain_on_exit: true,
             #[cfg(target_os = "windows")]
             escape_args: true,
@@ -892,6 +1101,7 @@ impl Terminal {
         Self::spawn_event_loop(event_rx, cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
+        Self::spawn_local_history_loader(history_shell.as_deref(), cx);
 
         Ok(Self {
             term,
@@ -915,8 +1125,9 @@ impl Terminal {
             event_proxy: None, // 本地终端的 event_proxy 已在 LocalPtyBackend 中设置
             connection_id: None,
             connection_name: None,
-            ssh_base_init_commands: None,
             init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: None,
         })
@@ -930,6 +1141,7 @@ impl Terminal {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+        let history_shell = config.shell.clone();
 
         if let Some(content) = recovery_content.filter(|content| !content.trim().is_empty()) {
             replay_term_output(&term, content.as_bytes());
@@ -995,6 +1207,7 @@ impl Terminal {
         Self::spawn_event_loop(event_rx, cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
+        Self::spawn_local_history_loader(history_shell.as_deref(), cx);
 
         Ok(Self {
             term,
@@ -1018,8 +1231,9 @@ impl Terminal {
             event_proxy: Some(event_proxy),
             connection_id: None,
             connection_name: None,
-            ssh_base_init_commands: None,
             init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: Some(session_id),
         })
@@ -1033,6 +1247,7 @@ impl Terminal {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+        let history_shell = config.shell.clone();
 
         let mut client = LocalPtyClient::connect().context("连接 local-pty-host 失败")?;
         let size = TerminalSize {
@@ -1092,6 +1307,7 @@ impl Terminal {
         Self::spawn_event_loop(event_rx, cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
+        Self::spawn_local_history_loader(history_shell.as_deref(), cx);
 
         Ok(Self {
             term,
@@ -1115,8 +1331,9 @@ impl Terminal {
             event_proxy: Some(event_proxy),
             connection_id: None,
             connection_name: None,
-            ssh_base_init_commands: None,
             init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: Some(session_id),
         })
@@ -1148,11 +1365,6 @@ impl Terminal {
         };
 
         // 构建初始化命令
-        let ssh_base_init_commands = build_ssh_base_init_commands(
-            working_dir,
-            ssh_params.default_directory.as_deref(),
-            ssh_params.init_script.as_deref(),
-        );
         let init_commands = build_ssh_init_commands(
             working_dir,
             ssh_params.default_directory.as_deref(),
@@ -1225,11 +1437,13 @@ impl Terminal {
             term.clone(),
             event_proxy.clone(),
             event_tx.clone(),
+            conn.id,
             Some(disconnect_tx),
             init_commands.clone(),
             cx,
         );
         Self::spawn_connection_status_tick(cx);
+        Self::spawn_ssh_history_loader(config.ssh_config.clone(), cx);
 
         Self {
             term,
@@ -1255,8 +1469,9 @@ impl Terminal {
             event_proxy: Some(event_proxy),
             connection_id: conn.id,
             connection_name: Some(conn.name),
-            ssh_base_init_commands,
             init_commands,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Ssh,
             local_pty_session_id: None,
         }
@@ -1305,8 +1520,9 @@ impl Terminal {
             event_proxy: None,
             connection_id: conn.id,
             connection_name: Some(conn.name),
-            ssh_base_init_commands: None,
             init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
             connection_kind: TerminalConnectionKind::Serial,
             local_pty_session_id: None,
         }
@@ -1333,6 +1549,31 @@ impl Terminal {
         );
         let colors = term.colors().clone();
         (Arc::new(FairMutex::new(term)), event_proxy, colors)
+    }
+
+    fn spawn_local_history_loader(preferred_shell: Option<&str>, cx: &mut Context<Self>) {
+        let preferred_shell = preferred_shell.map(str::to_string);
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let history = load_local_history(preferred_shell.as_deref());
+            let _ = this.update(cx, |terminal, cx| {
+                terminal.set_persisted_history(history, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn spawn_ssh_history_loader(config: SshConnectConfig, cx: &mut Context<Self>) {
+        let task = Tokio::spawn(cx, async move { load_ssh_history(config).await });
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let Ok(Ok(history)) = task.await else {
+                return;
+            };
+            let _ = this.update(cx, |terminal, cx| {
+                terminal.set_persisted_history(history, cx);
+            });
+        })
+        .detach();
     }
 
     fn spawn_event_loop(mut event_rx: UnboundedReceiver<TerminalEvent>, cx: &mut Context<Self>) {
@@ -1483,6 +1724,7 @@ impl Terminal {
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_proxy: GpuiEventProxy,
         event_tx: UnboundedSender<TerminalEvent>,
+        connection_id: Option<i64>,
         on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
         init_commands: Option<String>,
         cx: &mut Context<Self>,
@@ -1512,6 +1754,7 @@ impl Terminal {
             SshBackend::connect_with_progress(
                 config.ssh_config,
                 config.pty_config,
+                connection_id,
                 term,
                 event_proxy,
                 event_tx,
@@ -1669,10 +1912,46 @@ impl Terminal {
         }
     }
 
+    fn record_history_entry(&mut self, command: &str, cx: &mut Context<Self>) {
+        let entry =
+            HistoryEntry::new(command.to_string()).with_cwd(self.current_working_dir.clone());
+        if push_rich_history_entry(&mut self.session_history, entry, SESSION_HISTORY_LIMIT) {
+            cx.emit(TerminalModelEvent::Wakeup);
+        }
+    }
+
+    fn set_persisted_history(&mut self, history: Vec<String>, cx: &mut Context<Self>) {
+        let history = history
+            .into_iter()
+            .filter_map(|command| crate::history::normalize_history_command(&command))
+            .rev()
+            .take(PERSISTED_HISTORY_LIMIT)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+
+        if self.persisted_history != history {
+            self.persisted_history = history;
+            cx.emit(TerminalModelEvent::Wakeup);
+        }
+    }
+
     fn handle_terminal_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
+        tracing::debug!(
+            target: "terminal.history_prompt.osc",
+            event = ?event,
+            "terminal model handling terminal event"
+        );
         match event {
             TerminalEvent::Wakeup => {
                 cx.emit(TerminalModelEvent::Wakeup);
+            }
+            TerminalEvent::PromptStart => {
+                cx.emit(TerminalModelEvent::PromptStart);
+            }
+            TerminalEvent::InputStart => {
+                cx.emit(TerminalModelEvent::InputStart);
             }
             TerminalEvent::TitleChanged(title) => {
                 self.title = title.clone();
@@ -1697,6 +1976,16 @@ impl Terminal {
             }
             TerminalEvent::SshPromptReady => {
                 self.ssh_process_state.set(SshProcessState::Idle);
+            }
+            TerminalEvent::CommandFinished { exit_code } => {
+                // 命令执行完毕（OSC 133;D）— 将退出码记录到最后一条历史条目
+                tracing::debug!("命令执行完毕，退出码: {}", exit_code);
+                if let Some(last) = self.session_history.back_mut() {
+                    last.exit_code = Some(exit_code);
+                }
+            }
+            TerminalEvent::CommandRecorded(command) => {
+                self.record_history_entry(&command, cx);
             }
         }
     }
@@ -1827,6 +2116,24 @@ impl Terminal {
         self.latest_working_dir().map(|path| expand_tilde(&path))
     }
 
+    pub fn history_suggestions(&self, prefix: &str, limit: usize) -> Vec<String> {
+        collect_history_suggestions_with_cwd(
+            &self.session_history,
+            &self.persisted_history,
+            prefix,
+            limit,
+            self.current_working_dir.as_deref(),
+        )
+    }
+
+    pub fn history_search_results(&self, query: &str, limit: usize) -> Vec<String> {
+        collect_history_search_results(&self.session_history, &self.persisted_history, query, limit)
+    }
+
+    pub fn record_command(&mut self, command: &str, cx: &mut Context<Self>) {
+        self.record_history_entry(command, cx);
+    }
+
     /// 获取 SSH 连接配置（仅 SSH 终端）
     pub fn ssh_config(&self) -> Option<&SshTerminalConfig> {
         self.ssh_config.as_ref()
@@ -1907,6 +2214,7 @@ impl Terminal {
                 self.term.clone(),
                 event_proxy,
                 event_tx,
+                self.connection_id,
                 Some(disconnect_tx),
                 self.init_commands.clone(),
                 cx,
@@ -1939,14 +2247,11 @@ impl Terminal {
 
     /// 更新 SSH 终端的路径同步设置。
     ///
-    /// 更新 `init_commands` 以影响后续新建连接或重连。
-    pub fn set_sync_path_with_terminal(&mut self, enabled: bool) {
+    /// 路径同步由 shell 集成脚本发出 OSC 7，这里保留接口以兼容设置同步流程。
+    pub fn set_sync_path_with_terminal(&mut self, _enabled: bool) {
         if self.connection_kind != TerminalConnectionKind::Ssh {
             return;
         }
-
-        self.init_commands =
-            compose_ssh_init_commands(self.ssh_base_init_commands.as_deref(), enabled);
     }
 
     /// 关闭终端（默认 Kill 模式，兼容旧调用）
@@ -2063,14 +2368,19 @@ mod tests {
         build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
         expand_tilde, next_local_cwd_file_path, note_ssh_user_input, read_local_working_dir,
-        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend, SshProcessState,
-        TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
+        resolve_default_windows_shell_from_env, shell_escape_arg, LocalPtyBackend,
+        SshProcessState, TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
     use alacritty_terminal::tty::Options as PtyOptions;
     #[cfg(target_os = "macos")]
     use gpui::{AppContext, TestAppContext};
+    use crate::history::{
+        collect_history_suggestions, normalize_history_command, parse_shell_history,
+        push_history_entry, HistoryEntry, ShellHistoryFormat,
+    };
     use std::cell::Cell;
+    use std::collections::VecDeque;
     use std::fs;
     #[cfg(target_os = "linux")]
     use std::path::Path;
@@ -2100,7 +2410,7 @@ mod tests {
     }
 
     #[test]
-    fn build_ssh_init_commands_respects_sync_path_switch() {
+    fn build_ssh_init_commands_ignores_sync_path_switch_for_script_integration() {
         let enabled = build_ssh_init_commands(None, Some("/tmp"), Some("echo ready"), true)
             .expect("启用路径同步时应生成初始化命令");
         assert!(enabled.contains(OSC7_PROMPT_COMMAND));
@@ -2138,6 +2448,11 @@ mod tests {
                 .contains(SSH_PROMPT_READY_COMMAND),
             "关闭路径同步时仍应注入 SSH 空闲探针"
         );
+
+        let with_base = compose_ssh_init_commands(Some("echo ready"), true)
+            .expect("带基础命令时应继续注入 SSH prompt hook");
+        assert!(with_base.contains("echo ready"));
+        assert!(with_base.contains(SSH_PROMPT_HOOK_NAME));
     }
 
     #[test]
@@ -2193,7 +2508,6 @@ mod tests {
             event_proxy: None,
             connection_id: None,
             connection_name: None,
-            ssh_base_init_commands: None,
             init_commands: None,
             connection_kind: TerminalConnectionKind::Ssh,
             local_pty_session_id: None,
@@ -2554,7 +2868,7 @@ mod tests {
     fn macos_idle_local_terminal_has_no_blocking_processes() {
         let config = super::LocalConfig::default();
         let pty_options = PtyOptions {
-            shell: super::build_local_shell(config.shell),
+            shell: super::build_local_shell(config.shell, vec![]),
             working_directory: config.working_dir.clone().map(Into::into),
             env: config.env.into_iter().collect(),
             drain_on_exit: true,
@@ -2582,7 +2896,7 @@ mod tests {
     fn macos_local_terminal_detects_blocking_process_after_command() {
         let config = super::LocalConfig::default();
         let pty_options = PtyOptions {
-            shell: super::build_local_shell(config.shell),
+            shell: super::build_local_shell(config.shell, vec![]),
             working_directory: config.working_dir.clone().map(Into::into),
             env: config.env.into_iter().collect(),
             drain_on_exit: true,
@@ -2721,6 +3035,67 @@ mod tests {
             terminal.shutdown()
         });
         cx.run_until_parked();
+    }
+
+    #[test]
+    fn normalize_history_command_trims_and_rejects_blank_input() {
+        assert_eq!(
+            normalize_history_command("  git status  "),
+            Some("git status".to_string())
+        );
+        assert_eq!(normalize_history_command("   "), None);
+        assert_eq!(normalize_history_command("\n\t"), None);
+    }
+
+    #[test]
+    fn parse_shell_history_supports_zsh_extended_format() {
+        let commands = parse_shell_history(
+            ": 1710000000:0;git status\n: 1710000001:0;cargo test\n",
+            ShellHistoryFormat::Zsh,
+        );
+
+        assert_eq!(commands, vec!["git status", "cargo test"]);
+    }
+
+    #[test]
+    fn push_history_entry_dedupes_adjacent_duplicates() {
+        let mut entries = VecDeque::new();
+        push_history_entry(&mut entries, "git status", 5);
+        push_history_entry(&mut entries, "git status", 5);
+        push_history_entry(&mut entries, "cargo test", 5);
+
+        let commands: Vec<_> = entries.iter().map(|e| e.command.as_str()).collect();
+        assert_eq!(commands, vec!["git status", "cargo test"]);
+    }
+
+    #[test]
+    fn collect_history_suggestions_prioritizes_session_history() {
+        let session: VecDeque<HistoryEntry> = ["git status", "git stash", "cargo test"]
+            .iter()
+            .map(|c| HistoryEntry::new(c.to_string()))
+            .collect();
+        let persisted = vec![
+            "git status".to_string(),
+            "git switch main".to_string(),
+            "git commit".to_string(),
+        ];
+
+        let matches = collect_history_suggestions(&session, &persisted, "git s", 4);
+
+        // session 中的结果优先（frecency 更高），且去重
+        assert!(matches.contains(&"git stash".to_string()));
+        assert!(matches.contains(&"git status".to_string()));
+        assert!(matches.contains(&"git switch main".to_string()));
+    }
+
+    #[test]
+    fn collect_history_suggestions_skips_empty_prefix() {
+        let session: VecDeque<HistoryEntry> = [HistoryEntry::new("git status".to_string())].into();
+        let persisted = vec!["git switch".to_string()];
+
+        let matches = collect_history_suggestions(&session, &persisted, "   ", 5);
+
+        assert!(matches.is_empty());
     }
 }
 

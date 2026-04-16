@@ -289,100 +289,6 @@ Home:
     en: "Failed to duplicate connection: %{error}"
     zh-CN: "复制连接失败：%{error}"
     zh-HK: "複製連線失敗：%{error}"
-  team_badge:
-    en: Team
-    zh-CN: 团队
-    zh-HK: 團隊
-
-# 鼓励作者
-Encourage:
-  title:
-    en: "❤️ Support Author"
-    zh-CN: "❤️ 支持作者"
-    zh-HK: "❤️ 支持作者"
-  button_label:
-    en: Support Author
-    zh-CN: 支持作者
-    zh-HK: 支持作者
-  intro_line1:
-    en: OnetCli is maintained by one person.
-    zh-CN: OnetCli 由个人长期维护。
-    zh-HK: OnetCli 由個人長期維護。
-  intro_line2:
-    en: If it saved you time, feel free to support in a way you are comfortable with ❤️
-    zh-CN: 如果它帮你节省了时间，欢迎用你觉得舒服的方式支持我 ❤️
-    zh-HK: 如果它幫你節省了時間，歡迎用你覺得舒服的方式支持我 ❤️
-  intro_line3:
-    en: No support is totally fine.
-    zh-CN: 不支持也完全没关系。
-    zh-HK: 不支持也完全沒關係。
-  wechat_label:
-    en: WeChat Pay
-    zh-CN: 微信支付
-    zh-HK: 微信支付
-  alipay_label:
-    en: Alipay
-    zh-CN: 支付宝
-    zh-HK: 支付寶
-  paypal_label:
-    en: PayPal
-    zh-CN: PayPal
-    zh-HK: PayPal
-  usage_title:
-    en: "Your support will be used for:"
-    zh-CN: "你的支持将用于："
-    zh-HK: "你的支持將用於："
-  usage_item1:
-    en: Cloud services and infrastructure
-    zh-CN: 云端服务与基础设施
-    zh-HK: 雲端服務與基礎設施
-  usage_item2:
-    en: New features and experience improvements
-    zh-CN: 新功能与体验优化
-    zh-HK: 新功能與體驗優化
-  usage_item3:
-    en: Long-term maintenance
-    zh-CN: 长期维护
-    zh-HK: 長期維護
-  alt_support_title:
-    en: "If you cannot sponsor, that's okay:"
-    zh-CN: "不方便赞助也没关系："
-    zh-HK: "不方便贊助也沒關係："
-  alt_support_item1:
-    en: "⭐ Star the project"
-    zh-CN: "⭐ Star 项目"
-    zh-HK: "⭐ Star 專案"
-  alt_support_item2:
-    en: "💬 Suggestions / Bug reports"
-    zh-CN: "💬 提建议 / 报 Bug"
-    zh-HK: "💬 提建議 / 報 Bug"
-  alt_support_item3:
-    en: "📣 Recommend to friends"
-    zh-CN: "📣 推荐给朋友"
-    zh-HK: "📣 推薦給朋友"
-  footer_notice:
-    en: All features remain fully available without support; sponsorship does not unlock or restrict anything.
-    zh-CN: 所有功能对未支持用户完全开放，赞助不会解锁或限制任何功能。
-    zh-HK: 所有功能對未支持用戶完全開放，贊助不會解鎖或限制任何功能。
-
-# 团队同步
-TeamSync:
-  personal:
-    en: Personal
-    zh-CN: 个人
-    zh-HK: 個人
-  select_team:
-    en: Team
-    zh-CN: 团队
-    zh-HK: 團隊
-  team_label:
-    en: Team
-    zh-CN: 团队归属
-    zh-HK: 團隊歸屬
-  no_permission:
-    en: No edit permission
-    zh-CN: 无编辑权限
-    zh-HK: 無編輯權限
 
 # 用户认证
 Auth:
@@ -980,6 +886,14 @@ Settings:
         en: Automatically copy selected terminal text
         zh-CN: 选中文本后自动复制到剪贴板
         zh-HK: 選中文本後自動複製到剪貼簿
+      autocomplete:
+        en: Terminal autocomplete
+        zh-CN: 终端自动补全
+        zh-HK: 終端自動補全
+      autocomplete_desc:
+        en: Show history suggestions and search completion in supported terminals
+        zh-CN: 在支持的终端中显示历史建议和搜索补全
+        zh-HK: 在支援的終端中顯示歷史建議和搜尋補全
       middle_click_paste:
         en: Middle click paste
         zh-CN: 中键粘贴
@@ -1059,6 +973,102 @@ Settings:
         en: "Maximum number of undo steps for data editing (0 to disable)"
         zh-CN: 数据编辑的最大撤销步数（设为0则禁用逐步撤销）
         zh-HK: 資料編輯的最大撤銷步數（設為0則停用逐步撤銷）
+
+    Update:
+      group_title:
+        en: Update
+        zh-CN: 更新
+        zh-HK: 更新
+      auto_update:
+        en: Auto Update Check
+        zh-CN: 自动检查更新
+        zh-HK: 自動檢查更新
+      auto_update_desc:
+        en: Automatically check for updates when the application starts
+        zh-CN: 应用启动时自动检查新版本
+        zh-HK: 應用啟動時自動檢查新版本
+      check_now:
+        en: Check for Updates
+        zh-CN: 检查更新
+        zh-HK: 檢查更新
+      check_now_desc:
+        en: Manually check
+        zh-CN: 立即手动检查
+        zh-HK: 立即手動檢查
+
+    Proxy:
+      group_title:
+        en: Proxy
+        zh-CN: 代理
+        zh-HK: 代理
+      title:
+        en: Global Proxy
+        zh-CN: 全局代理
+        zh-HK: 全局代理
+      description:
+        en: Configure a shared network proxy for HTTP requests across the app
+        zh-CN: 为应用内 HTTP 请求配置统一代理
+        zh-HK: 為應用內 HTTP 請求配置統一代理
+      open:
+        en: Configure
+        zh-CN: 配置
+        zh-HK: 配置
+      dialog_title:
+        en: Global Proxy Settings
+        zh-CN: 全局代理设置
+        zh-HK: 全局代理設置
+      dialog_desc:
+        en: Set one shared proxy endpoint for update checks, authentication, cloud sync, and other HTTP requests.
+        zh-CN: 为更新检查、认证、云同步及其他 HTTP 请求统一配置代理出口。
+        zh-HK: 為更新檢查、認證、雲同步及其他 HTTP 請求統一配置代理出口。
+      enable:
+        en: Enable Global Proxy
+        zh-CN: 启用全局代理
+        zh-HK: 啟用全局代理
+      type:
+        en: Proxy Type
+        zh-CN: 代理类型
+        zh-HK: 代理類型
+      host:
+        en: Host
+        zh-CN: 代理地址
+        zh-HK: 代理地址
+      port:
+        en: Port
+        zh-CN: 端口
+        zh-HK: 端口
+      username:
+        en: Username
+        zh-CN: 用户名（可选）
+        zh-HK: 用戶名（可選）
+      password:
+        en: Password
+        zh-CN: 密码（可选）
+        zh-HK: 密碼（可選）
+      username_placeholder:
+        en: proxy-user
+        zh-CN: proxy-user
+        zh-HK: proxy-user
+      password_placeholder:
+        en: proxy-password
+        zh-CN: proxy-password
+        zh-HK: proxy-password
+      test:
+        en: Test Connection
+        zh-CN: 测试连接
+        zh-HK: 測試連接
+      testing:
+        en: Testing...
+        zh-CN: 测试中...
+        zh-HK: 測試中...
+      test_success:
+        en: Proxy connection test passed
+        zh-CN: 代理连接测试成功
+        zh-HK: 代理連接測試成功
+      save_success:
+        en: Global proxy settings applied
+        zh-CN: 全局代理设置已生效
+        zh-HK: 全局代理設置已生效
 
   # 快捷键
   Shortcuts:
@@ -1334,6 +1344,30 @@ Update:
     en: 正在下载更新，请稍后关闭。
     zh-CN: 正在下载更新，请稍后关闭。
     zh-HK: 正在下載更新，請稍後關閉。
+  network_check_failed:
+    en: Network check failed
+    zh-CN: 网络检查失败
+    zh-HK: 網絡檢查失敗
+  network_unreachable:
+    en: Unable to connect to the update server. Please check your network connection.
+    zh-CN: 无法连接到更新服务器，请检查网络连接。
+    zh-HK: 無法連接到更新伺服器，請檢查網絡連接。
+  github_service_unavailable:
+    en: GitHub service is temporarily unavailable, please try again later.
+    zh-CN: GitHub 服务暂时不可用，请稍后重试。
+    zh-HK: GitHub 服務暫時不可用，請稍後重試。
+  already_up_to_date:
+    en: You are already on the latest version.
+    zh-CN: 当前已经是最新版本。
+    zh-HK: 當前已經是最新版本。
+  check_failed:
+    en: Update check failed
+    zh-CN: 检查更新失败
+    zh-HK: 檢查更新失敗
+  open_release_page:
+    en: Open release page to download manually
+    zh-CN: 打开发布页面手动下载
+    zh-HK: 打開發布頁面手動下載
 
 
 # LLM 提供商

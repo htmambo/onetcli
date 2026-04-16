@@ -411,6 +411,10 @@ Settings:
     en: Auto copy on select
     zh-CN: 选中自动复制
     zh-HK: 選中自動複製
+  autocomplete:
+    en: Terminal autocomplete
+    zh-CN: 终端自动补全
+    zh-HK: 終端自動補全
   middle_click_paste:
     en: Middle click paste
     zh-CN: 中键粘贴
@@ -451,6 +455,10 @@ Settings:
     en: Close tab directly
     zh-CN: 直接关闭标签
     zh-HK: 直接關閉標籤
+  sync_path_help:
+    en: Automatically sync the current SSH working directory to the file manager through the shell integration script.
+    zh-CN: 通过 Shell 集成脚本自动将当前 SSH 工作目录同步到文件管理器。
+    zh-HK: 透過 Shell 整合腳本自動將目前 SSH 工作目錄同步到文件管理器。
 
 # 右键菜单
 ContextMenu:
@@ -1072,14 +1080,3 @@ Conflict:
     en: "%{name} and %{count} other files"
     zh-CN: "%{name} 等 %{count} 个文件"
     zh-HK: "%{name} 等 %{count} 個文件"
-
-# 团队同步
-TeamSync:
-  personal:
-    en: Personal
-    zh-CN: 个人
-    zh-HK: 個人
-  team_label:
-    en: Team
-    zh-CN: 团队归属
-    zh-HK: 團隊歸屬

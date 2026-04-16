@@ -46,7 +46,6 @@ use one_core::storage::{
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use redis_view::{RedisFormWindow, RedisFormWindowConfig};
 use rust_i18n::t;
-use terminal_view::TerminalView;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
@@ -233,6 +232,7 @@ pub struct HomePage {
     pub(crate) workspaces: Vec<Workspace>,
     pub(crate) connections: Vec<StoredConnection>,
     pub(crate) tab_container: Entity<TabContainer>,
+    pub(crate) terminal_views: Vec<WeakEntity<terminal_view::TerminalView>>,
     search_input: Entity<InputState>,
     search_query: Entity<String>,
     pub(crate) editing_connection_id: Option<i64>,
@@ -242,7 +242,6 @@ pub struct HomePage {
     pub(crate) workspace_filter_open: bool,
     workspace_filter_list: Option<Entity<ListState<WorkspaceFilterDelegate>>>,
     pub(crate) _subscriptions: Vec<Subscription>,
-    pub(crate) terminal_views: Vec<WeakEntity<TerminalView>>,
     /// 云同步服务
     cloud_sync_service: Arc<std::sync::RwLock<CloudSyncService>>,
     /// 云端加载错误信息
@@ -331,6 +330,7 @@ impl HomePage {
             workspaces: Vec::new(),
             connections: Vec::new(),
             tab_container,
+            terminal_views: Vec::new(),
             search_input,
             search_query,
             editing_connection_id: None,
@@ -340,7 +340,6 @@ impl HomePage {
             workspace_filter_open: false,
             workspace_filter_list: None,
             _subscriptions: Vec::new(),
-            terminal_views: Vec::new(),
             cloud_sync_service: Arc::new(std::sync::RwLock::new(CloudSyncService::new())),
             cloud_error: None,
             sync_feedback: None,
@@ -6210,6 +6209,28 @@ fn compare_workspaces(
         ConnectionListSortOrder::Ascending => cmp,
         ConnectionListSortOrder::Descending => cmp.reverse(),
     }
+}
+
+/// 生成复制连接的唯一名称
+fn generate_duplicate_name(
+    original_name: &str,
+    existing_names: &std::collections::HashSet<String>,
+) -> String {
+    let base_name = format!("{} (副本)", original_name);
+
+    if !existing_names.contains(&base_name) {
+        return base_name;
+    }
+
+    // 如果基础名称已存在，添加数字序号
+    for i in 2..100 {
+        let name = format!("{} (副本 {})", original_name, i);
+        if !existing_names.contains(&name) {
+            return name;
+        }
+    }
+
+    base_name
 }
 
 fn compare_connections(

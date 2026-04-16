@@ -6,8 +6,6 @@ mod auth;
 
 mod app_init;
 mod connection_restore;
-mod encourage;
-
 mod home;
 mod home_tab;
 mod onetcli_app;
