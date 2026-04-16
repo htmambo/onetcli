@@ -81,7 +81,7 @@ impl LocalPtyClient {
     }
 
     /// 消费下一个 host 事件（阻塞）。
-    fn recv_event(&mut self, timeout: Duration) -> Option<LocalPtyHostEvent> {
+    pub fn recv_event(&mut self, timeout: Duration) -> Option<LocalPtyHostEvent> {
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
             if let Ok(event) = self.event_rx.try_recv() {
@@ -125,6 +125,13 @@ impl LocalPtyClient {
             Some(LocalPtyHostEvent::Error { message, .. }) => anyhow::bail!(message),
             _ => anyhow::bail!("等待 Attached 响应超时"),
         }
+    }
+
+    /// 发送单个请求（不消费 client）。
+    pub fn send_request(&self, request: LocalPtyHostRequest) -> Result<()> {
+        self.request_tx
+            .send(request)
+            .map_err(|_| anyhow::anyhow!("host client 通道已关闭"))
     }
 
     /// 将 client 拆分为请求发送端和事件接收端，用于后续异步处理。

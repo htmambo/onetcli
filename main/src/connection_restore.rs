@@ -237,6 +237,48 @@ fn kind_label(kind: ConnectionRestoreKind) -> String {
     }
 }
 
+pub fn probe_pty_sessions(items: &mut [ResolvedConnectionRestoreItem]) {
+    use std::time::Duration;
+    use terminal::{LocalPtyClient, LocalPtyHostEvent, LocalPtyHostRequest};
+
+    let has_sessions = items.iter().any(|item| {
+        item.local_terminal
+            .as_ref()
+            .and_then(|l| l.pty_session_id.as_ref())
+            .is_some()
+    });
+    if !has_sessions {
+        return;
+    }
+
+    let Ok(mut client) = LocalPtyClient::connect() else {
+        for item in items.iter_mut() {
+            if let Some(ref mut local) = item.local_terminal {
+                if local.pty_session_id.is_some() {
+                    local.prefer_live_restore = Some(false);
+                }
+            }
+        }
+        return;
+    };
+
+    for item in items.iter_mut() {
+        let Some(ref session_id) = item.local_terminal.as_ref().and_then(|l| l.pty_session_id.clone()) else {
+            continue;
+        };
+        let _ = client.send_request(LocalPtyHostRequest::Query {
+            session_id: session_id.clone(),
+        });
+        let alive = matches!(
+            client.recv_event(Duration::from_millis(500)),
+            Some(LocalPtyHostEvent::Attached { .. })
+        );
+        if let Some(ref mut local) = item.local_terminal {
+            local.prefer_live_restore = Some(alive);
+        }
+    }
+}
+
 pub fn open_connection_restore_dialog(
     home_page: Entity<HomePage>,
     items: Vec<ResolvedConnectionRestoreItem>,

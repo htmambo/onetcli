@@ -14,6 +14,7 @@ pub use pty_backend::{GpuiEventProxy, TerminalEvent};
 pub use serial_backend::SerialBackend;
 pub use ssh_backend::SshBackend;
 pub use terminal::TerminalScrollProxy;
-pub use local_pty_client::kill_detached_sessions;
+pub use local_pty_client::{kill_detached_sessions, LocalPtyClient};
 pub use local_pty_host::run_local_pty_host;
+pub use local_pty_protocol::{LocalPtyHostEvent, LocalPtyHostRequest};
 pub use types::{LocalConfig, TerminalBackend, TerminalCloseMode, TerminalSize};

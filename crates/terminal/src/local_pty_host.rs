@@ -177,7 +177,10 @@ async fn handle_request(
         LocalPtyHostRequest::Query { session_id } => {
             let exists = registry.get(&session_id).await.is_some();
             if exists {
-                None // Query 成功时静默，不返回事件；失败时由调用方超时处理
+                Some(LocalPtyHostEvent::Attached {
+                    session_id,
+                    child_pid: None,
+                })
             } else {
                 Some(LocalPtyHostEvent::Error {
                     session_id: Some(session_id),

@@ -543,7 +543,8 @@ impl HomePage {
             return;
         };
 
-        let resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
+        let mut resolved_items = resolve_restore_items(&snapshot, &self.connections, &self.workspaces);
+        crate::connection_restore::probe_pty_sessions(&mut resolved_items);
         if resolved_items.is_empty() {
             // 避免在 render 阶段直接清理状态，延后到窗口事件循环中执行。
             self.connection_restore_prompt_opened = true;
