@@ -73,7 +73,7 @@ pub fn handle_update_command() -> bool {
     }
 
     let Some(download_path) = args.next().map(PathBuf::from) else {
-        eprintln!("缺少更新包路径");
+        tracing::error!("缺少更新包路径");
         return true;
     };
 
@@ -84,7 +84,7 @@ pub fn handle_update_command() -> bool {
         .unwrap_or_else(|| download_path.clone());
 
     if let Err(err) = apply_update_helper(&download_path, &target_path) {
-        eprintln!("更新失败: {}", err);
+        tracing::error!("更新失败: {}", err);
     }
 
     true

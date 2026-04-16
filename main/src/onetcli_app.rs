@@ -602,7 +602,7 @@ fn request_app_close_without_window(cx: &mut App) -> bool {
         AppCloseDecision::Allow | AppCloseDecision::ForceClose => true,
         AppCloseDecision::Ignore => false,
         AppCloseDecision::Prompt => {
-            eprintln!(
+            tracing::warn!(
                 "Cannot quit: {} running task(s) detected. Please close running tasks first.",
                 running_states.len()
             );

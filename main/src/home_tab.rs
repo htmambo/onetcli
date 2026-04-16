@@ -6211,28 +6211,6 @@ fn compare_workspaces(
     }
 }
 
-/// 生成复制连接的唯一名称
-fn generate_duplicate_name(
-    original_name: &str,
-    existing_names: &std::collections::HashSet<String>,
-) -> String {
-    let base_name = format!("{} (副本)", original_name);
-
-    if !existing_names.contains(&base_name) {
-        return base_name;
-    }
-
-    // 如果基础名称已存在，添加数字序号
-    for i in 2..100 {
-        let name = format!("{} (副本 {})", original_name, i);
-        if !existing_names.contains(&name) {
-            return name;
-        }
-    }
-
-    base_name
-}
-
 fn compare_connections(
     a: &StoredConnection,
     b: &StoredConnection,

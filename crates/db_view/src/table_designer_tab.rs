@@ -3600,7 +3600,7 @@ mod tests {
                 || sql.contains("CHANGE COLUMN")
                 || sql.contains("sp_rename");
             assert!(has_rename, "[{:?}] 应包含重命名SQL: {sql}", database_type);
-            println!("[{:?}] SQL: {}", database_type, sql);
+            tracing::debug!("[{:?}] SQL: {}", database_type, sql);
         }
     }
 
@@ -3652,7 +3652,7 @@ mod tests {
         let plugin = PostgresPlugin::new();
         let sql = plugin.build_alter_table_sql_with_renames(&original, &current, &renames);
 
-        println!("Type case mismatch SQL: {}", sql);
+        tracing::debug!("Type case mismatch SQL: {}", sql);
 
         // 关键断言：不应包含 DROP COLUMN "name"
         assert!(
