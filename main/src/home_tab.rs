@@ -14,7 +14,7 @@ use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
-    WindowExt, WindowsSurfaceLayer, app_style,
+    StyledExt, WindowExt, WindowsSurfaceLayer, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     glass_sidebar_f64, h_flex,
@@ -2623,18 +2623,6 @@ impl HomePage {
             windows_opacity,
             WindowsSurfaceLayer::ContentSection,
         );
-        let toolbar_input_bg = windows_surface_color(
-            macos_home_glass(
-                cx.theme().input_background(),
-                blur_enabled,
-                0.10,
-                glass_opacity,
-            ),
-            blur_enabled,
-            windows_opacity,
-            WindowsSurfaceLayer::ContentCard,
-        );
-
         let workspace_filter_open = self.workspace_filter_open;
         let workspace_filter =
             self.render_workspace_filter_popover(workspace_filter_open, window, cx);
@@ -2852,8 +2840,7 @@ impl HomePage {
                         Input::new(&self.search_input)
                             .cleanable(true)
                             .w(px(240.0))
-                            .bg(toolbar_input_bg)
-                            .border_color(cx.theme().border.opacity(0.62)),
+                            .refine_style(&app_style::control_style()),
                     )
                     .child(
                         Button::new("connection-sort-field-button")
