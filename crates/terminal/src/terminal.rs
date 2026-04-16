@@ -238,13 +238,12 @@ fn build_ssh_base_init_commands(
     (!commands.is_empty()).then(|| commands.join("\n"))
 }
 
-const OSC7_PROMPT_COMMAND: &str = r#"printf "\033]7;file://%s%s\007" "${HOSTNAME:-}" "$PWD""#;
 const SSH_PROMPT_READY_COMMAND: &str = r#"printf "\033]1337;OnetcliPromptReady=1\007""#;
 const SSH_PROMPT_HOOK_NAME: &str = "onetcli_prompt_hook";
 
 fn compose_ssh_init_commands(
     base_init_commands: Option<&str>,
-    sync_path_with_terminal: bool,
+    _sync_path_with_terminal: bool,
 ) -> Option<String> {
     let mut commands = Vec::new();
 
@@ -252,19 +251,14 @@ fn compose_ssh_init_commands(
         commands.push(base_commands.to_string());
     }
 
-    commands.push(build_ssh_prompt_hook_command(sync_path_with_terminal));
+    // Fallback: 如果远端 shell_integration.sh 因环境原因未生效，
+    // init_commands 中注入的轻量 hook 仍能确保进程状态在回到 prompt 时被重置为 Idle。
+    commands.push(build_ssh_prompt_hook_command());
 
     (!commands.is_empty()).then(|| commands.join("\n"))
 }
 
-fn build_ssh_prompt_hook_command(sync_path_with_terminal: bool) -> String {
-    let mut hook_body = Vec::new();
-    if sync_path_with_terminal {
-        hook_body.push(OSC7_PROMPT_COMMAND);
-    }
-    hook_body.push(SSH_PROMPT_READY_COMMAND);
-    let hook_body = hook_body.join("; ");
-
+fn build_ssh_prompt_hook_command() -> String {
     // 仅在函数未定义时才注册（避免重复注册和可见输出）。
     // 使用 type 内置命令检测函数，比环境变量守卫更简洁可靠。
     format!(
@@ -279,7 +273,7 @@ PROMPT_COMMAND='{hook_name}'${{PROMPT_COMMAND:+\";$PROMPT_COMMAND\"}}; export PR
 fi; \
 }}",
         hook_name = SSH_PROMPT_HOOK_NAME,
-        hook_body = hook_body,
+        hook_body = SSH_PROMPT_READY_COMMAND,
     )
 }
 
@@ -2466,7 +2460,7 @@ mod tests {
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
         expand_tilde, next_local_cwd_file_path, note_ssh_prompt_idle, note_ssh_user_input,
         read_local_working_dir, resolve_default_windows_shell_from_env, shell_escape_arg,
-        SshProcessState, TerminalConnectionKind, OSC7_PROMPT_COMMAND, SSH_PROMPT_HOOK_NAME,
+        SshProcessState, TerminalConnectionKind, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
@@ -2535,7 +2529,6 @@ mod tests {
         let commands =
             compose_ssh_init_commands(None, true).expect("启用同步时应生成 SSH prompt hook");
         assert!(commands.contains(SSH_PROMPT_HOOK_NAME));
-        assert!(commands.contains(OSC7_PROMPT_COMMAND));
         assert!(commands.contains(SSH_PROMPT_READY_COMMAND));
 
         assert!(
@@ -2553,11 +2546,10 @@ mod tests {
 
     #[test]
     fn ssh_prompt_hook_command_supports_zsh_and_bash_style_hooks() {
-        let commands = build_ssh_prompt_hook_command(true);
+        let commands = build_ssh_prompt_hook_command();
         assert!(commands.contains("precmd_functions"));
         assert!(commands.contains("PROMPT_COMMAND"));
         assert!(commands.contains(SSH_PROMPT_HOOK_NAME));
-        assert!(commands.contains(OSC7_PROMPT_COMMAND));
         assert!(commands.contains(SSH_PROMPT_READY_COMMAND));
     }
 
