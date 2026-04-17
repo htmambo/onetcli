@@ -370,15 +370,15 @@ impl GlobalProxySettings {
         }
 
         if self.host.trim().is_empty() {
-            return Err("代理主机不能为空".to_string());
+            return Err(t!("Settings.proxy.validation_host_empty").to_string());
         }
 
         if self.port == 0 {
-            return Err("代理端口不能为空".to_string());
+            return Err(t!("Settings.proxy.validation_port_empty").to_string());
         }
 
         if self.username.trim().is_empty() && !self.password.is_empty() {
-            return Err("填写代理密码时必须同时填写用户名".to_string());
+            return Err(t!("Settings.proxy.validation_password_requires_username").to_string());
         }
 
         Ok(())
@@ -397,16 +397,16 @@ impl GlobalProxySettings {
             self.host.trim(),
             self.port
         );
-        let mut url = Url::parse(&base).map_err(|err| format!("代理地址格式不正确: {}", err))?;
+        let mut url = Url::parse(&base).map_err(|err| t!("Settings.proxy.validation_url_format", error = err))?;
 
         if !self.username.trim().is_empty() {
             url.set_username(self.username.trim())
-                .map_err(|_| "代理用户名格式不正确".to_string())?;
+                .map_err(|_| t!("Settings.proxy.validation_username_format"))?;
         }
 
         if !self.password.is_empty() {
             url.set_password(Some(&self.password))
-                .map_err(|_| "代理密码格式不正确".to_string())?;
+                .map_err(|_| t!("Settings.proxy.validation_password_format"))?;
         }
 
         Ok(Some(url))

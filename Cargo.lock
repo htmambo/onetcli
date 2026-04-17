@@ -10791,6 +10791,7 @@ dependencies = [
  "libc",
  "one-core",
  "portable-pty",
+ "rust-i18n",
  "serde",
  "serde_json",
  "serialport",

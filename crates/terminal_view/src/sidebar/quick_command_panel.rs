@@ -434,7 +434,7 @@ impl QuickCommandPanel {
             )
             .child(
                 Button::new("cancel-add")
-                    .label("Cancel")
+                    .label(t!("Common.cancel").to_string())
                     .ghost()
                     .xsmall()
                     .tooltip(t!("QuickCommand.cancel_tooltip").to_string())
@@ -448,7 +448,7 @@ impl QuickCommandPanel {
             )
             .child(
                 Button::new("confirm-add")
-                    .label("Add")
+                    .label(t!("Common.add").to_string())
                     .primary()
                     .xsmall()
                     .tooltip(t!("QuickCommand.confirm_add_tooltip").to_string())

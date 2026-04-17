@@ -1,3 +1,5 @@
+rust_i18n::i18n!("terminal", fallback = "en");
+
 pub mod history;
 #[cfg(unix)]
 pub mod local_pty_client;

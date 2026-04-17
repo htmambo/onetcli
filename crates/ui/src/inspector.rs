@@ -7,6 +7,7 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Subscription, Task, Window, actions, div,
     inspector_reflection::FunctionReflection, prelude::FluentBuilder, px,
 };
+use rust_i18n::t;
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, Diagnostic,
     DiagnosticSeverity, Position, TextEdit,
@@ -425,7 +426,7 @@ impl Render for DivInspector {
                                 .justify_between()
                                 .gap_x_2()
                                 .child("Rust Styles")
-                                .child(Button::new("rust-reset").label("Reset").small().on_click(
+                                .child(Button::new("rust-reset").label(t!("Inspector.reset_rust")).small().on_click(
                                     cx.listener(|this, _, window, cx| {
                                         this.reset_style(window, cx);
                                     }),
@@ -453,7 +454,7 @@ impl Render for DivInspector {
                             h_flex()
                                 .gap_x_2()
                                 .child(div().flex_1().child("JSON Styles"))
-                                .child(Button::new("json-reset").label("Reset").small().on_click(
+                                .child(Button::new("json-reset").label(t!("Inspector.reset_json")).small().on_click(
                                     cx.listener(|this, _, window, cx| {
                                         this.reset_style(window, cx);
                                     }),

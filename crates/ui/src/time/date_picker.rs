@@ -527,7 +527,7 @@ impl RenderOnce for DatePicker {
                                                     Button::new("ok")
                                                         .small()
                                                         .primary()
-                                                        .label("OK")
+                                                        .label(t!("DatePicker.ok"))
                                                         .on_click(window.listener_for(
                                                             &self.state,
                                                             |this, _, window, cx| {
@@ -539,7 +539,7 @@ impl RenderOnce for DatePicker {
                                                     Button::new("cancel")
                                                         .small()
                                                         .ghost()
-                                                        .label("Cancel")
+                                                        .label(t!("DatePicker.cancel"))
                                                         .on_click(window.listener_for(
                                                             &self.state,
                                                             |this, _, window, cx| {

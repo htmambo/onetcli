@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 # Async runtime
 tokio = { workspace = true }
+rust-i18n = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
 one-core = { workspace = true }

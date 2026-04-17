@@ -65,6 +65,10 @@ Common:
     en: None
     zh-CN: 无
     zh-HK: 無
+  add:
+    en: Add
+    zh-CN: 添加
+    zh-HK: 添加
   close:
     en: Close
     zh-CN: 关闭

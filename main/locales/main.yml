@@ -1214,7 +1214,31 @@ Settings:
       save_success:
         en: Global proxy settings applied
         zh-CN: 全局代理设置已生效
-        zh-HK: 全局代理設置已生效
+        zh-HK: 全局代理设置已生效
+      validation_host_empty:
+        en: Proxy host cannot be empty
+        zh-CN: 代理主机不能为空
+        zh-HK: 代理主機不能為空
+      validation_port_empty:
+        en: Proxy port cannot be empty
+        zh-CN: 代理端口不能为空
+        zh-HK: 代理埠不能為空
+      validation_password_requires_username:
+        en: Proxy password requires a username
+        zh-CN: 填写代理密码时必须同时填写用户名
+        zh-HK: 填寫代理密碼時必須同時填寫使用者名稱
+      validation_url_format:
+        en: "Invalid proxy URL format: %{error}"
+        zh-CN: "代理地址格式不正确: %{error}"
+        zh-HK: "代理地址格式不正確: %{error}"
+      validation_username_format:
+        en: Invalid proxy username format
+        zh-CN: 代理用户名格式不正确
+        zh-HK: 代理使用者名稱格式不正確
+      validation_password_format:
+        en: Invalid proxy password format
+        zh-CN: 代理密码格式不正确
+        zh-HK: 代理密碼格式不正確
 
   # 快捷键
   Shortcuts:
