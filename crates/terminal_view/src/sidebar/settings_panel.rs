@@ -6,7 +6,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::FontWeight;
 use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
+    Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
@@ -16,7 +16,6 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
     notification::Notification,
-    scroll::ScrollableElement,
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
     try_parse_color, v_flex, ActiveTheme, Colorize, Icon, IconName, Sizable, Size, WindowExt,
