@@ -29,8 +29,9 @@ use super::util::{UpdateInstallAction, format_bytes};
 
 const DOWNLOAD_PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub(super) fn show_update_dialog(info: UpdateDialogInfo, cx: &mut App) {
+pub(super) fn show_update_dialog(info: UpdateDialogInfo, window: &mut Window, cx: &mut App) {
     open_popup_window(
+        window,
         PopupWindowOptions::new(t!("Update.title").to_string())
             .size(480.0, 260.0)
             .min_width(420.0)

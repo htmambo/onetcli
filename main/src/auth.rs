@@ -1,35 +1,28 @@
 //! 用户认证模块
 //!
-//! 提供 Supabase 认证集成，包括登录、登出、会话持久化等功能。
+//! 提供云端认证集成，包括登录、登出、会话持久化等功能。
 
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use gpui::App;
 use gpui::http_client::HttpClient;
-use gpui::prelude::FluentBuilder;
-use gpui::{
-    App, AppContext as _, AsyncApp, Context, Entity, FontWeight, ParentElement, Styled, Window, px,
-};
 
 /// 全局静态会话过期标志
 ///
-/// 用于在 SupabaseClient 的回调中（无法访问 GPUI 全局状态时）通知 UI 层会话已过期。
+/// 用于在客户端回调中（无法访问 GPUI 全局状态时）通知 UI 层会话已过期。
 /// UI 层定期检查此标志，若为 true 则弹出登录对话框。
 static SESSION_EXPIRED: AtomicBool = AtomicBool::new(false);
-use gpui_component::button::Button;
-use gpui_component::dialog::DialogButtonProps;
-use gpui_component::{
-    ActiveTheme, Disableable, Sizable, WindowExt, h_flex,
-    input::{Input, InputState},
-    v_flex,
-};
 use one_core::cloud_sync::{
-    CloudApiClient, UserInfo,
-    supabase::{SessionExpiredCallback, SupabaseClient, SupabaseConfig},
+    AuthResponse, CloudApiClient, CloudApiError, SessionExpiredCallback, UserInfo,
+    sync_server::{SyncServerClient, SyncServerConfig as SyncServerClientConfig},
 };
 use rust_i18n::t;
 use tracing::{info, warn};
+
+use crate::setting_tab::AppSettings;
+
 // ============================================================================
 // 全局认证服务
 // ============================================================================
@@ -42,13 +35,8 @@ impl gpui::Global for GlobalAuthService {}
 
 /// 初始化全局认证服务
 pub fn init(cx: &mut App) {
-    let config = one_core::config::SupabaseConfig::get();
-    let supabase_config = SupabaseConfig {
-        project_url: config.project_url,
-        api_key: config.api_key,
-    };
     let http = cx.http_client();
-    let service = Arc::new(AuthService::new_with_http(supabase_config, http, cx));
+    let service = Arc::new(AuthService::new_with_http(http, cx));
     cx.set_global(GlobalAuthService(service));
 }
 
@@ -73,20 +61,22 @@ pub fn check_and_reset_session_expired() -> bool {
 // 认证服务
 // ============================================================================
 
-/// 认证服务，管理 Supabase 客户端和用户状态
+/// 认证服务，管理云端客户端和用户状态
 pub struct AuthService {
-    config: SupabaseConfig,
-    client: RwLock<Arc<SupabaseClient>>,
+    cloud_client: RwLock<Arc<SyncServerClient>>,
 }
 
 impl AuthService {
-    fn configure_client(client: &Arc<SupabaseClient>) {
+    fn configure_client(cloud_client: &Arc<SyncServerClient>) {
+        // 设置会话过期回调：刷新 token 失败时通过静态标志通知 UI
         let callback: SessionExpiredCallback = Arc::new(|| {
             warn!("会话已过期，需要重新登录");
             SESSION_EXPIRED.store(true, Ordering::SeqCst);
         });
-        client.set_session_expired_callback(callback);
-        client.set_token_refreshed_callback(Arc::new(|auth_resp| {
+        cloud_client.set_session_expired_callback(callback);
+
+        // 设置 token 刷新回调：确保自动刷新后的最新 refresh token 能落盘持久化
+        cloud_client.set_token_refreshed_callback(Arc::new(|auth_resp| {
             save_auth_data(
                 &auth_resp.access_token,
                 &auth_resp.refresh_token,
@@ -100,8 +90,8 @@ impl AuthService {
         }));
     }
 
-    fn current_client(&self) -> Arc<SupabaseClient> {
-        self.client
+    fn current_client(&self) -> Arc<SyncServerClient> {
+        self.cloud_client
             .read()
             .expect("AuthService client lock poisoned")
             .clone()
@@ -109,62 +99,99 @@ impl AuthService {
 
     /// 获取云端 API 客户端
     ///
-    /// 用于访问云端数据同步功能（如 list_connections）。
-    pub fn cloud_client(&self) -> Arc<SupabaseClient> {
+    /// 用于访问云端数据同步功能。
+    pub fn cloud_client(&self) -> Arc<dyn CloudApiClient> {
         self.current_client()
     }
 
     /// 使用配置和 HttpClient 创建认证服务
-    fn new_with_http(config: SupabaseConfig, http: Arc<dyn HttpClient>, _cx: &App) -> Self {
-        let client = Arc::new(SupabaseClient::new(config.clone(), http));
-        Self::configure_client(&client);
+    fn new_with_http(http: Arc<dyn HttpClient>, _cx: &App) -> Self {
+        let settings = AppSettings::load();
+        let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
+        if SyncServerClient::is_valid_base_url(&sync_server_base_url) {
+            info!("认证服务使用 sync_server 后端: {}", sync_server_base_url);
+        } else {
+            warn!("未配置有效的 sync_server 地址，认证和同步请求可能失败");
+        }
+        let cloud_client = Arc::new(SyncServerClient::new(
+            SyncServerClientConfig {
+                base_url: sync_server_base_url,
+            },
+            http,
+        ));
+        Self::configure_client(&cloud_client);
 
         Self {
-            config,
-            client: RwLock::new(client),
+            cloud_client: RwLock::new(cloud_client),
         }
     }
 
     pub fn replace_http_client(&self, http: Arc<dyn HttpClient>) {
-        let previous_client = self.current_client();
-        let next_client = Arc::new(SupabaseClient::new(self.config.clone(), http));
+        let settings = AppSettings::load();
+        let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
+        let next_client = Arc::new(SyncServerClient::new(
+            SyncServerClientConfig {
+                base_url: sync_server_base_url,
+            },
+            http,
+        ));
         Self::configure_client(&next_client);
 
-        let persisted_auth = load_auth_data();
-        let access_token = previous_client.access_token_for_rebuild().or_else(|| {
-            persisted_auth
-                .as_ref()
-                .map(|(access, _, _, _)| access.clone())
-        });
-        let refresh_token = previous_client.refresh_token_for_rebuild().or_else(|| {
-            persisted_auth
-                .as_ref()
-                .map(|(_, refresh, _, _)| refresh.clone())
-        });
-        let user_id = previous_client.user_id_for_rebuild().or_else(|| {
-            persisted_auth
-                .as_ref()
-                .map(|(_, _, user_id, _)| user_id.clone())
-        });
-        let expires_at = previous_client.expires_at_for_rebuild().or_else(|| {
-            persisted_auth
-                .as_ref()
-                .map(|(_, _, _, expires_at)| *expires_at)
-        });
-
-        if let (Some(access_token), Some(refresh_token), Some(user_id), Some(expires_at)) =
-            (access_token, refresh_token, user_id, expires_at)
-        {
+        if let Some((access_token, refresh_token, user_id, expires_at)) = load_auth_data() {
             next_client.set_auth_with_expiry(access_token, refresh_token, user_id, expires_at);
         }
 
-        if let Ok(mut guard) = self.client.write() {
+        if let Ok(mut guard) = self.cloud_client.write() {
             *guard = next_client;
         }
     }
 
+    /// 检查是否已配置有效的 sync_server 地址。
+    pub fn has_valid_sync_server_url(&self) -> bool {
+        self.current_client().has_valid_base_url()
+    }
+
+    /// 返回“必须先配置同步地址”的提示文案。
+    pub fn sync_server_url_required_message(&self) -> String {
+        t!("Auth.sync_server_url_required").to_string()
+    }
+
+    /// 确保当前已配置有效的 sync_server 地址。
+    pub fn ensure_sync_server_url_configured(&self) -> Result<(), String> {
+        if self.has_valid_sync_server_url() {
+            Ok(())
+        } else {
+            Err(self.sync_server_url_required_message())
+        }
+    }
+
+    /// 更新 sync_server 地址，返回值表示是否发生变化。
+    pub fn update_sync_server_url(&self, value: &str) -> bool {
+        let normalized = SyncServerClient::normalize_base_url(value);
+        let changed = self.current_client().set_base_url(&normalized);
+        if !changed {
+            return false;
+        }
+
+        self.current_client().clear_auth();
+        clear_auth_data();
+
+        if !SyncServerClient::is_valid_base_url(&normalized) {
+            //     info!("sync_server 地址已更新: {}", normalized);
+            // } else {
+            warn!("sync_server 地址已更新，但当前值无效: {}", normalized);
+        }
+
+        true
+    }
+
     /// 尝试恢复会话
     pub async fn try_restore_session(&self) -> Option<UserInfo> {
+        if let Err(message) = self.ensure_sync_server_url_configured() {
+            warn!("跳过恢复会话：{}", message);
+            return None;
+        }
+
         info!("开始尝试恢复会话");
         let auth_data = load_auth_data();
         let Some((access_token, refresh_token, user_id, expires_at)) = auth_data else {
@@ -176,7 +203,6 @@ impl AuthService {
             user_id, expires_at
         );
 
-        // 检查令牌是否已过期（提前 60 秒刷新）
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -191,15 +217,15 @@ impl AuthService {
             needs_refresh
         );
 
+        let cloud_client = self.current_client();
+
         if needs_refresh {
             info!("访问令牌需要刷新: now={} expires_at={}", now, expires_at);
-            // 令牌已过期或即将过期，必须刷新（网络错误时重试最多 3 次）
             const MAX_RETRIES: u32 = 3;
             let mut last_error = None;
             for attempt in 1..=MAX_RETRIES {
-                match self.current_client().refresh_token(&refresh_token).await {
+                match cloud_client.refresh_token(&refresh_token).await {
                     Ok(auth_resp) => {
-                        // refresh_token 内部已调用 set_auth_with_expiry 更新内存状态
                         save_auth_data(
                             &auth_resp.access_token,
                             &auth_resp.refresh_token,
@@ -213,38 +239,36 @@ impl AuthService {
                         last_error = None;
                         break;
                     }
-                    Err(e) => {
-                        if e.is_auth_error() {
-                            // 认证错误，清除本地数据，不再重试
-                            warn!("令牌刷新认证失败，清除本地认证数据: {}", e);
+                    Err(error) => {
+                        if error.is_auth_error() {
+                            warn!("令牌刷新认证失败，清除本地认证数据: {}", error);
+                            cloud_client.clear_auth();
                             clear_auth_data();
                             return None;
                         }
-                        // 网络等临时性错误，重试
+
                         warn!(
                             "令牌刷新失败（第 {}/{} 次），稍后重试: {}",
-                            attempt, MAX_RETRIES, e
+                            attempt, MAX_RETRIES, error
                         );
-                        last_error = Some(e);
+                        last_error = Some(error);
                         if attempt < MAX_RETRIES {
-                            // 指数退避：1s, 2s
                             smol::Timer::after(std::time::Duration::from_secs(attempt as u64))
                                 .await;
                         }
                     }
                 }
             }
-            if let Some(e) = last_error {
-                // 重试耗尽但非认证错误，保留本地数据，下次启动再尝试
+
+            if let Some(error) = last_error {
                 warn!(
                     "令牌刷新重试耗尽，保留本地认证数据，本次跳过恢复会话: {}",
-                    e
+                    error
                 );
                 return None;
             }
         } else {
-            // 令牌未过期，先设置 auth state（含 expires_at）
-            self.current_client().set_auth_with_expiry(
+            cloud_client.set_auth_with_expiry(
                 access_token,
                 refresh_token.clone(),
                 user_id,
@@ -253,25 +277,24 @@ impl AuthService {
             info!("访问令牌有效（剩余 {}s），已设置认证状态", expires_at - now);
         }
 
-        // 获取用户信息
-        match self.current_client().get_current_user().await {
+        match cloud_client.get_current_user().await {
             Ok(Some(user)) => {
                 info!("恢复会话成功: user_id={} email={}", user.id, user.email);
                 Some(user)
             }
             Ok(None) => {
                 warn!("恢复会话失败: 用户信息为空，清除本地认证数据");
+                cloud_client.clear_auth();
                 clear_auth_data();
                 None
             }
-            Err(e) => {
-                if e.is_auth_error() {
-                    // 认证错误，清除本地数据
-                    warn!("恢复会话失败: 认证错误，清除本地认证数据: {}", e);
+            Err(error) => {
+                if error.is_auth_error() {
+                    warn!("恢复会话失败: 认证错误，清除本地认证数据: {}", error);
+                    cloud_client.clear_auth();
                     clear_auth_data();
                 } else {
-                    // 网络等临时性错误，保留本地数据
-                    warn!("恢复会话失败: 获取用户信息错误（保留本地数据）: {}", e);
+                    warn!("恢复会话失败: 获取用户信息错误（保留本地数据）: {}", error);
                 }
                 None
             }
@@ -281,44 +304,69 @@ impl AuthService {
     /// 登出
     pub async fn sign_out(&self) {
         info!("用户登出");
-        let _ = self.current_client().sign_out().await;
+        let _ = self.cloud_client().sign_out().await;
+        self.current_client().clear_auth();
         clear_auth_data();
     }
 
-    /// 发送 OTP 验证码到邮箱
-    pub async fn send_otp(&self, email: &str) -> Result<(), String> {
-        self.current_client()
-            .sign_in_with_otp(email)
-            .await
-            .map_err(|e| e.to_string())
+    async fn finish_auth(&self, auth_resp: AuthResponse) -> Result<UserInfo, String> {
+        save_auth_data(
+            &auth_resp.access_token,
+            &auth_resp.refresh_token,
+            &auth_resp.user_id,
+            auth_resp.expires_at,
+        );
+
+        match self.cloud_client().get_current_user().await {
+            Ok(Some(user)) => Ok(user),
+            Ok(None) => {
+                let email = auth_resp.email;
+                Ok(UserInfo {
+                    id: auth_resp.user_id,
+                    email: email.clone(),
+                    nickname: Some(email),
+                    username: None,
+                    avatar_url: None,
+                    created_at: 0,
+                })
+            }
+            Err(error) => Err(error.to_string()),
+        }
     }
 
-    /// 验证 OTP 验证码并登录
-    pub async fn verify_otp(&self, email: &str, token: &str) -> Result<UserInfo, String> {
-        match self.current_client().verify_otp(email, token).await {
-            Ok(auth_resp) => {
-                save_auth_data(
-                    &auth_resp.access_token,
-                    &auth_resp.refresh_token,
-                    &auth_resp.user_id,
-                    auth_resp.expires_at,
-                );
+    /// 使用邮箱密码登录
+    pub async fn login_with_password(
+        &self,
+        email: &str,
+        password: &str,
+    ) -> Result<UserInfo, String> {
+        self.ensure_sync_server_url_configured()?;
+        let auth_resp = self
+            .cloud_client()
+            .sign_in_with_password(email, password)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.finish_auth(auth_resp).await
+    }
 
-                // 获取完整用户信息
-                match self.current_client().get_current_user().await {
-                    Ok(Some(user)) => Ok(user),
-                    Ok(None) => Ok(UserInfo {
-                        id: auth_resp.user_id,
-                        email: auth_resp.email,
-                        username: None,
-                        avatar_url: None,
-                        created_at: 0,
-                    }),
-                    Err(e) => Err(e.to_string()),
+    /// 使用邮箱密码注册
+    pub async fn sign_up_with_password(
+        &self,
+        email: &str,
+        password: &str,
+    ) -> Result<UserInfo, String> {
+        self.ensure_sync_server_url_configured()?;
+        let auth_resp = self
+            .cloud_client()
+            .sign_up(email, password)
+            .await
+            .map_err(|error| match error {
+                CloudApiError::EmailConfirmationRequired(email) => {
+                    t!("Auth.email_confirmation_required", email = email).to_string()
                 }
-            }
-            Err(e) => Err(e.to_string()),
-        }
+                other => other.to_string(),
+            })?;
+        self.finish_auth(auth_resp).await
     }
 }
 
@@ -353,7 +401,7 @@ pub fn save_auth_data(access_token: &str, refresh_token: &str, user_id: &str, ex
                     expires_at,
                     path.display()
                 ),
-                Err(e) => warn!("认证数据保存失败: {}", e),
+                Err(error) => warn!("认证数据保存失败: {}", error),
             }
         }
     } else {
@@ -365,10 +413,10 @@ pub fn save_auth_data(access_token: &str, refresh_token: &str, user_id: &str, ex
 pub fn load_auth_data() -> Option<(String, String, String, i64)> {
     let path = get_auth_file_path()?;
     let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(e) => {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                warn!("读取认证数据失败: {} path={}", e, path.display());
+        Ok(content) => content,
+        Err(error) => {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                warn!("读取认证数据失败: {} path={}", error, path.display());
             }
             return None;
         }
@@ -378,7 +426,6 @@ pub fn load_auth_data() -> Option<(String, String, String, i64)> {
     let access_token = data.get("access_token")?.as_str()?.to_string();
     let refresh_token = data.get("refresh_token")?.as_str()?.to_string();
     let user_id = data.get("user_id")?.as_str()?.to_string();
-    // 兼容旧数据：如果没有 expires_at，默认为 0（会触发刷新）
     let expires_at = data.get("expires_at").and_then(|v| v.as_i64()).unwrap_or(0);
 
     info!(
@@ -397,9 +444,9 @@ pub fn clear_auth_data() {
     if let Some(path) = get_auth_file_path() {
         match std::fs::remove_file(&path) {
             Ok(()) => info!("本地认证数据已清除: path={}", path.display()),
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!("清除本地认证数据失败: {}", e);
+            Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    warn!("清除本地认证数据失败: {}", error);
                 }
             }
         }
@@ -410,287 +457,9 @@ pub fn clear_auth_data() {
 // 登录/注册对话框
 // ============================================================================
 
-/// 倒计时秒数常量
-const COUNTDOWN_SECONDS: u32 = 60;
-
-/// 显示 OTP 认证对话框
-///
-/// 使用 OTP（一次性验证码）方式登录：
-/// 1. 用户输入邮箱，点击「发送验证码」按钮
-/// 2. 按钮进入倒计时，用户输入收到的验证码
-/// 3. 点击「登录」完成验证
-pub fn show_auth_dialog<V: 'static>(
-    window: &mut Window,
-    cx: &mut Context<V>,
-    view: Entity<V>,
-    on_submit: impl Fn(&mut V, String, String, &mut Context<V>) + 'static,
-) {
-    let email_input =
-        cx.new(|cx| InputState::new(window, cx).placeholder(t!("Auth.email_placeholder")));
-    let otp_input =
-        cx.new(|cx| InputState::new(window, cx).placeholder(t!("Auth.otp_placeholder")));
-    let error_message = cx.new(|_| Option::<String>::None);
-    // 倒计时剩余秒数，0 表示未在倒计时
-    let countdown_state = cx.new(|_| 0u32);
-    let sending_state = cx.new(|_| false);
-    // 是否已经发送过验证码（用于显示提示文字）
-    let otp_sent_state = cx.new(|_| false);
-
-    let email_for_ok = email_input.clone();
-    let otp_for_ok = otp_input.clone();
-    let error_for_ok = error_message.clone();
-
-    let email_for_render = email_input.clone();
-    let otp_for_render = otp_input.clone();
-    let error_for_render = error_message.clone();
-    let countdown_for_render = countdown_state.clone();
-    let sending_for_render = sending_state.clone();
-    let otp_sent_for_render = otp_sent_state.clone();
-
-    let on_submit = std::rc::Rc::new(on_submit);
-    let on_submit_clone = on_submit.clone();
-
-    window.open_dialog(cx, move |dialog, _window, cx| {
-        let email_ok = email_for_ok.clone();
-        let otp_ok = otp_for_ok.clone();
-        let error_ok = error_for_ok.clone();
-
-        let email_render = email_for_render.clone();
-        let otp_render = otp_for_render.clone();
-        let error_render = error_for_render.clone();
-        let countdown_render = countdown_for_render.clone();
-        let sending_render = sending_for_render.clone();
-        let otp_sent_render = otp_sent_for_render.clone();
-
-        let on_submit_ok = on_submit_clone.clone();
-        let view_clone = view.clone();
-
-        let countdown_val = *countdown_render.read(cx);
-        let is_sending = *sending_render.read(cx);
-        let has_sent = *otp_sent_render.read(cx);
-
-        // 发送验证码按钮文案
-        let send_button_label = if is_sending {
-            t!("Auth.sending_otp").to_string()
-        } else if countdown_val > 0 {
-            format!("{}s", countdown_val)
-        } else if has_sent {
-            t!("Auth.resend_otp").to_string()
-        } else {
-            t!("Auth.send_otp").to_string()
-        };
-
-        let send_button_disabled = is_sending || countdown_val > 0;
-
-        dialog
-            .title(t!("Auth.login"))
-            .width(px(400.))
-            .confirm()
-            .button_props(DialogButtonProps::default().ok_text(t!("Auth.login")))
-            .on_ok(move |_, _window, cx| {
-                let email = email_ok.read(cx).text().to_string();
-                let otp = otp_ok.read(cx).text().to_string();
-
-                if email.is_empty() {
-                    error_ok.update(cx, |msg, cx| {
-                        *msg = Some(t!("Auth.email_required").to_string());
-                        cx.notify();
-                    });
-                    return false;
-                }
-
-                if otp.is_empty() {
-                    error_ok.update(cx, |msg, cx| {
-                        *msg = Some(t!("Auth.otp_required").to_string());
-                        cx.notify();
-                    });
-                    return false;
-                }
-
-                // 触发验证回调
-                view_clone.update(cx, |this, cx| {
-                    on_submit_ok(this, email, otp, cx);
-                });
-                true
-            })
-            .child(
-                v_flex()
-                    .gap_4()
-                    .p_4()
-                    // 邮箱输入
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                gpui::div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Auth.email").to_string()),
-                            )
-                            .child(Input::new(&email_render)),
-                    )
-                    // 验证码输入 + 发送按钮
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(
-                                gpui::div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(t!("Auth.otp_code").to_string()),
-                            )
-                            .child(
-                                h_flex().gap_2().child(
-                                    Input::new(&otp_render).flex_1(),
-                                ).child({
-                                    let email_for_send = email_render.clone();
-                                    let error_for_send = error_render.clone();
-                                    let sending_for_send = sending_render.clone();
-                                    let countdown_for_send = countdown_render.clone();
-                                    let otp_sent_for_send = otp_sent_render.clone();
-
-                                    Button::new("send-otp")
-                                        .xsmall()
-                                        .label(send_button_label)
-                                        .disabled(send_button_disabled)
-                                        .on_click(move |_, _window, cx| {
-                                            let email =
-                                                email_for_send.read(cx).text().to_string();
-                                            if email.is_empty() {
-                                                error_for_send.update(cx, |msg, cx| {
-                                                    *msg = Some(
-                                                        t!("Auth.email_required").to_string(),
-                                                    );
-                                                    cx.notify();
-                                                });
-                                                return;
-                                            }
-
-                                            // 标记发送中
-                                            sending_for_send.update(cx, |s, cx| {
-                                                *s = true;
-                                                cx.notify();
-                                            });
-
-                                            let auth = get_auth_service(cx);
-                                            let error_update = error_for_send.clone();
-                                            let sending_update = sending_for_send.clone();
-                                            let countdown_update = countdown_for_send.clone();
-                                            let otp_sent_update = otp_sent_for_send.clone();
-
-                                            cx.spawn(async move |cx: &mut AsyncApp| {
-                                                let result = auth.send_otp(&email).await;
-                                                cx.update(|cx| {
-                                                    sending_update.update(cx, |s, cx| {
-                                                        *s = false;
-                                                        cx.notify();
-                                                    });
-
-                                                    match result {
-                                                        Ok(()) => {
-                                                            // 标记已发送
-                                                            otp_sent_update.update(
-                                                                cx,
-                                                                |sent, cx| {
-                                                                    *sent = true;
-                                                                    cx.notify();
-                                                                },
-                                                            );
-                                                            // 启动倒计时
-                                                            countdown_update.update(
-                                                                cx,
-                                                                |c, cx| {
-                                                                    *c = COUNTDOWN_SECONDS;
-                                                                    cx.notify();
-                                                                },
-                                                            );
-                                                            // 清除错误
-                                                            error_update.update(
-                                                                cx,
-                                                                |msg, cx| {
-                                                                    *msg = None;
-                                                                    cx.notify();
-                                                                },
-                                                            );
-                                                            // 每秒递减倒计时
-                                                            let cd = countdown_update.clone();
-                                                            cx.spawn(
-                                                                async move |cx: &mut AsyncApp| {
-                                                                    for _ in
-                                                                        0..COUNTDOWN_SECONDS
-                                                                    {
-                                                                        cx.background_spawn(
-                                                                            async {
-                                                                                smol::Timer::after(std::time::Duration::from_secs(1)).await;
-                                                                            },
-                                                                        )
-                                                                        .await;
-                                                                        let should_stop =
-                                                                            cx.update(|cx| {
-                                                                                let mut stop =
-                                                                                    false;
-                                                                                cd.update(
-                                                                                    cx,
-                                                                                    |c, cx| {
-                                                                                        if *c
-                                                                                            > 0
-                                                                                        {
-                                                                                            *c -=
-                                                                                                1;
-                                                                                        }
-                                                                                        if *c
-                                                                                            == 0
-                                                                                        {
-                                                                                            stop = true;
-                                                                                        }
-                                                                                        cx.notify();
-                                                                                    },
-                                                                                );
-                                                                                stop
-                                                                            });
-                                                                        if should_stop {
-                                                                            break;
-                                                                        }
-                                                                    }
-                                                                },
-                                                            )
-                                                            .detach();
-                                                        }
-                                                        Err(e) => {
-                                                            error_update.update(
-                                                                cx,
-                                                                |msg, cx| {
-                                                                    *msg = Some(e);
-                                                                    cx.notify();
-                                                                },
-                                                            );
-                                                        }
-                                                    }
-                                                });
-                                            })
-                                            .detach();
-                                        })
-                                }),
-                            ),
-                    )
-                    // 已发送提示
-                    .when(has_sent, |this| {
-                        this.child(
-                            gpui::div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("Auth.otp_sent_hint").to_string()),
-                        )
-                    })
-                    // 错误信息
-                    .when_some(error_render.read(cx).clone(), |this, msg| {
-                        this.child(
-                            gpui::div()
-                                .text_sm()
-                                .text_color(cx.theme().danger)
-                                .child(msg),
-                        )
-                    }),
-            )
-    });
+/// 密码认证动作
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordAuthAction {
+    Login,
+    SignUp,
 }

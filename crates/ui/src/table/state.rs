@@ -1144,12 +1144,6 @@ where
                                 return;
                             }
 
-                            // sync col widths into real widths
-                            // TODO: Consider to remove this, this may not need now.
-                            // for (_, col_group) in view.col_groups.iter_mut().enumerate() {
-                            //     col_group.width = col_group.bounds.size.width;
-                            // }
-
                             let ix = *ix;
                             view.resizing_col = Some(ix);
 
@@ -1493,30 +1487,19 @@ where
                                                         row_ix, col_ix, window, cx,
                                                     ))
                                                     .when(is_cell_selected, |this| {
-                                                        this.child(
-                                                            div()
-                                                                .absolute()
-                                                                .inset_0()
-                                                                .bg(cx.theme().table_active)
-                                                                .border_1()
-                                                                .border_color(
-                                                                    cx.theme().table_active_border,
-                                                                ),
-                                                        )
+                                                        this.bg(cx.theme().table_active)
+                                                            .border_1()
+                                                            .border_color(
+                                                                cx.theme().table_active_border,
+                                                            )
                                                     })
                                                     .when(
                                                         is_cell_right_clicked && !is_cell_selected,
                                                         |this| {
-                                                            this.child(
-                                                                div()
-                                                                    .absolute()
-                                                                    .inset_0()
-                                                                    .border_1()
-                                                                    .border_color(
-                                                                        cx.theme()
-                                                                            .table_active_border
-                                                                            .opacity(0.5),
-                                                                    ),
+                                                            this.border_1().border_color(
+                                                                cx.theme()
+                                                                    .table_active_border
+                                                                    .opacity(0.5),
                                                             )
                                                         },
                                                     )
@@ -1612,32 +1595,20 @@ where
                                                             row_ix, col_ix, window, cx,
                                                         ))
                                                         .when(is_cell_selected, |this| {
-                                                            this.child(
-                                                                div()
-                                                                    .absolute()
-                                                                    .inset_0()
-                                                                    .bg(cx.theme().table_active)
-                                                                    .border_1()
-                                                                    .border_color(
-                                                                        cx.theme()
-                                                                            .table_active_border,
-                                                                    ),
-                                                            )
+                                                            this.bg(cx.theme().table_active)
+                                                                .border_1()
+                                                                .border_color(
+                                                                    cx.theme().table_active_border,
+                                                                )
                                                         })
                                                         .when(
                                                             is_cell_right_clicked
                                                                 && !is_cell_selected,
                                                             |this| {
-                                                                this.child(
-                                                                    div()
-                                                                        .absolute()
-                                                                        .inset_0()
-                                                                        .border_1()
-                                                                        .border_color(
-                                                                            cx.theme()
-                                                                                .table_active_border
-                                                                                .opacity(0.5),
-                                                                        ),
+                                                                this.border_1().border_color(
+                                                                    cx.theme()
+                                                                        .table_active_border
+                                                                        .opacity(0.5),
                                                                 )
                                                             },
                                                         )
@@ -1680,37 +1651,14 @@ where
                 // Note: Don't show row selection if a cell is selected
                 .when_some(self.selected_row, |this, _| {
                     this.when(is_selected && self.selection_mode.is_row(), |this| {
-                        this.map(|this| {
-                            if cx.theme().list.active_highlight {
-                                this.border_color(gpui::transparent_white()).child(
-                                    div()
-                                        .top(if row_ix == 0 { px(0.) } else { px(-1.) })
-                                        .left(px(0.))
-                                        .right(px(0.))
-                                        .bottom(px(-1.))
-                                        .absolute()
-                                        .bg(cx.theme().table_active)
-                                        .border_1()
-                                        .border_color(cx.theme().table_active_border),
-                                )
-                            } else {
-                                this.bg(cx.theme().accent)
-                            }
-                        })
+                        this.bg(cx.theme().table_active)
+                            .border_1()
+                            .border_color(cx.theme().table_active_border)
                     })
                 })
                 // Row right click row style
                 .when(self.right_clicked_row == Some(row_ix), |this| {
-                    this.border_color(gpui::transparent_white()).child(
-                        div()
-                            .top(if row_ix == 0 { px(0.) } else { px(-1.) })
-                            .left(px(0.))
-                            .right(px(0.))
-                            .bottom(px(-1.))
-                            .absolute()
-                            .border_1()
-                            .border_color(cx.theme().selection),
-                    )
+                    this.border_1().border_color(cx.theme().selection)
                 })
                 .on_mouse_down(
                     MouseButton::Right,

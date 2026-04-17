@@ -415,20 +415,13 @@ impl AiChatPanel {
                     Some(r) => r,
                     None => return,
                 };
-                let mut list = match repo.list() {
-                    Ok(all) => all.into_iter().filter(|p| p.enabled).collect::<Vec<_>>(),
+                match repo.list() {
+                    Ok(all) => all
+                        .into_iter()
+                        .filter(|provider| provider.is_runtime_available())
+                        .collect::<Vec<_>>(),
                     Err(_) => Vec::new(),
-                };
-                if is_logged_in {
-                    if let Ok(onet) = repo.ensure_onetcli_provider() {
-                        if !list.iter().any(|p| p.id == onet.id) {
-                            list.insert(0, onet);
-                        }
-                    }
-                } else {
-                    list.retain(|p| !p.is_builtin());
                 }
-                list
             };
 
             let _ = cx.update(|cx| {

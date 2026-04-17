@@ -2,37 +2,42 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, WeakEntity, Window,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     radio::Radio,
-    select::{Select, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
+    spinner::Spinner,
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Disableable, Sizable, Size, TitleBar,
+    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::certificate_manager::open_certificate_manager_popup;
+use one_core::certificate_notifier::{
+    get_notifier as get_certificate_notifier, CertificateDataEvent,
+};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
-    JumpServerConfig, ProxyConfig, ProxyType as StorageProxyType, SshAuthMethod, SshParams,
-    StoredConnection, Workspace,
+    Certificate, CertificateReference, CertificateRepository, JumpServerConfig, ProxyConfig,
+    ProxyType as StorageProxyType, SshAuthMethod, SshParams, StoredConnection, Workspace,
 };
 use rust_i18n::t;
 use ssh::{
-    JumpServerConnectConfig, ProxyConnectConfig, ProxyType, RusshClient, SshAuth, SshClient,
-    SshConnectConfig,
+    format_connection_progress_message, JumpServerConnectConfig, ProxyConnectConfig, ProxyType,
+    RusshClient, SshAuth, SshClient, SshConnectConfig, SshConnectionStage,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct SshFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -70,32 +75,32 @@ impl SelectItem for WorkspaceSelectItem {
 }
 
 #[derive(Clone, Default, PartialEq)]
-struct TeamSelectItem {
-    id: Option<String>,
-    name: String,
+struct CertificateSelectItem {
+    id: Option<i64>,
+    label: String,
 }
 
-impl TeamSelectItem {
-    fn personal() -> Self {
+impl CertificateSelectItem {
+    fn none() -> Self {
         Self {
             id: None,
-            name: t!("TeamSync.personal").to_string(),
+            label: t!("SSH.certificate_none").to_string(),
         }
     }
 
-    fn from_team(team: &TeamOption) -> Self {
+    fn from_certificate(certificate: &Certificate) -> Self {
         Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
+            id: certificate.id,
+            label: format!("{} · {}", certificate.name, certificate.kind.label()),
         }
     }
 }
 
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
+impl SelectItem for CertificateSelectItem {
+    type Value = Option<i64>;
 
     fn title(&self) -> SharedString {
-        self.name.clone().into()
+        self.label.clone().into()
     }
 
     fn value(&self) -> &Self::Value {
@@ -122,10 +127,11 @@ pub struct SshFormWindow {
     password_input: Entity<InputState>,
     key_path_input: Entity<InputState>,
     passphrase_input: Entity<InputState>,
+    certificates: Vec<Certificate>,
+    credential_select: Entity<SelectState<Vec<CertificateSelectItem>>>,
 
     auth_method: AuthMethodSelection,
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
 
     // 跳板机设置
     enable_jump_server: bool,
@@ -146,10 +152,13 @@ pub struct SshFormWindow {
     connect_timeout_input: Entity<InputState>,
     keepalive_interval_input: Entity<InputState>,
     keepalive_max_input: Entity<InputState>,
+    enable_legacy_kex: bool,
 
     // 初始化
     init_script_input: Entity<InputState>,
     default_directory_input: Entity<InputState>,
+    sftp_local_directory_input: Entity<InputState>,
+    sftp_remote_directory_input: Entity<InputState>,
 
     // 其他设置
     remark_input: Entity<InputState>,
@@ -160,7 +169,10 @@ pub struct SshFormWindow {
     sync_enabled: bool,
 
     is_testing: bool,
+    test_status_message: Option<String>,
+    test_started_at: Option<Instant>,
     test_result: Option<Result<(), String>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -227,6 +239,20 @@ impl SshFormWindow {
                 .placeholder(t!("SSH.passphrase_placeholder"))
                 .masked(true)
         });
+        let certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+        let mut certificate_items = vec![CertificateSelectItem::none()];
+        certificate_items.extend(
+            certificates
+                .iter()
+                .map(CertificateSelectItem::from_certificate),
+        );
+        let credential_select =
+            cx.new(|cx| SelectState::new(certificate_items, Some(Default::default()), window, cx));
 
         // 跳板机设置
         let jump_host_input =
@@ -286,6 +312,12 @@ impl SshFormWindow {
         let default_directory_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("SSH.default_directory_placeholder"))
         });
+        let sftp_local_directory_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("SSH.sftp_local_directory_placeholder"))
+        });
+        let sftp_remote_directory_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("SSH.sftp_remote_directory_placeholder"))
+        });
 
         // 其他设置
         let remark_input = cx.new(|cx| {
@@ -304,23 +336,21 @@ impl SshFormWindow {
         let workspace_select =
             cx.new(|cx| SelectState::new(workspace_items, Some(Default::default()), window, cx));
 
-        let mut team_items = vec![TeamSelectItem::personal()];
-        team_items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-        let team_select =
-            cx.new(|cx| SelectState::new(team_items, Some(Default::default()), window, cx));
-
         let mut auth_method = AuthMethodSelection::Password;
         let mut workspace_id: Option<i64> = None;
         let mut enable_jump_server = false;
         let mut enable_proxy = false;
         let mut proxy_type = ProxyTypeSelection::default();
+        let mut enable_legacy_kex = false;
         let mut sync_enabled = true; // 默认启用云同步
+        let mut editing_credential_ref: Option<CertificateReference> = None;
 
         if let Some(ref conn) = config.editing_connection {
             // 加载同步状态
             sync_enabled = conn.sync_enabled;
 
             if let Ok(params) = conn.to_ssh_params() {
+                editing_credential_ref = params.credential_ref.clone();
                 name_input.update(cx, |s, cx| s.set_value(&conn.name, window, cx));
                 host_input.update(cx, |s, cx| s.set_value(&params.host, window, cx));
                 port_input.update(cx, |s, cx| {
@@ -343,11 +373,11 @@ impl SshFormWindow {
                             passphrase_input.update(cx, |s, cx| s.set_value(pass, window, cx));
                         }
                     }
-                    SshAuthMethod::Agent => {
-                        auth_method = AuthMethodSelection::Agent;
-                    }
                     SshAuthMethod::AutoPublicKey => {
                         auth_method = AuthMethodSelection::AutoPublicKey;
+                    }
+                    SshAuthMethod::Agent => {
+                        auth_method = AuthMethodSelection::Agent;
                     }
                 }
 
@@ -364,6 +394,7 @@ impl SshFormWindow {
                     keepalive_max_input
                         .update(cx, |s, cx| s.set_value(&max.to_string(), window, cx));
                 }
+                enable_legacy_kex = params.enable_legacy_kex;
 
                 // 加载初始化设置
                 if let Some(ref dir) = params.default_directory {
@@ -371,6 +402,12 @@ impl SshFormWindow {
                 }
                 if let Some(ref script) = params.init_script {
                     init_script_input.update(cx, |s, cx| s.set_value(script, window, cx));
+                }
+                if let Some(ref dir) = params.sftp_local_directory {
+                    sftp_local_directory_input.update(cx, |s, cx| s.set_value(dir, window, cx));
+                }
+                if let Some(ref dir) = params.sftp_remote_directory {
+                    sftp_remote_directory_input.update(cx, |s, cx| s.set_value(dir, window, cx));
                 }
 
                 // 加载跳板机设置
@@ -405,13 +442,6 @@ impl SshFormWindow {
             }
             workspace_id = conn.workspace_id;
 
-            // 加载团队归属
-            if let Some(ref team_id) = conn.team_id {
-                team_select.update(cx, |select, cx| {
-                    select.set_selected_value(&Some(team_id.clone()), window, cx);
-                });
-            }
-
             // 加载备注
             if let Some(ref remark) = conn.remark {
                 remark_input.update(cx, |s, cx| s.set_value(remark, window, cx));
@@ -424,7 +454,7 @@ impl SshFormWindow {
             });
         }
 
-        Self {
+        let mut view = Self {
             focus_handle: cx.focus_handle(),
             title,
             is_editing,
@@ -439,9 +469,10 @@ impl SshFormWindow {
             password_input,
             key_path_input,
             passphrase_input,
+            certificates,
+            credential_select,
             auth_method,
             workspace_select,
-            team_select,
             enable_jump_server,
             jump_host_input,
             jump_port_input,
@@ -456,14 +487,45 @@ impl SshFormWindow {
             connect_timeout_input,
             keepalive_interval_input,
             keepalive_max_input,
+            enable_legacy_kex,
             init_script_input,
             default_directory_input,
+            sftp_local_directory_input,
+            sftp_remote_directory_input,
             remark_input,
             last_tested_signature: None,
             sync_enabled,
             is_testing: false,
+            test_status_message: None,
+            test_started_at: None,
             test_result: None,
+            _subscriptions: Vec::new(),
+        };
+
+        cx.subscribe_in(
+            &view.credential_select,
+            window,
+            |this, _select, event: &SelectEvent<Vec<CertificateSelectItem>>, window, cx| {
+                let SelectEvent::Confirm(_) = event;
+                this.sync_selected_certificate_inputs(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+
+        if let Some(notifier) = get_certificate_notifier(cx) {
+            view._subscriptions.push(cx.subscribe_in(
+                &notifier,
+                window,
+                |this, _, _event: &CertificateDataEvent, window, cx| {
+                    this.reload_certificates(window, cx);
+                },
+            ));
         }
+
+        view.restore_selected_certificate(editing_credential_ref.as_ref(), window, cx);
+        view.sync_selected_certificate_inputs(window, cx);
+        view
     }
 
     fn get_workspace_id(&self, cx: &App) -> Option<i64> {
@@ -474,15 +536,105 @@ impl SshFormWindow {
             .flatten()
     }
 
-    fn get_team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
+    fn restore_selected_certificate(
+        &mut self,
+        reference: Option<&CertificateReference>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(reference) = reference else {
+            return;
+        };
+
+        let selected_id = self
+            .certificates
+            .iter()
+            .find(|certificate| reference.matches_certificate(certificate))
+            .and_then(|certificate| certificate.id);
+
+        self.credential_select.update(cx, |select, cx| {
+            select.set_selected_value(&selected_id, window, cx);
+        });
+    }
+
+    fn selected_certificate(&self, cx: &App) -> Option<Certificate> {
+        let selected_id = self
+            .credential_select
             .read(cx)
             .selected_value()
             .cloned()
-            .flatten()
+            .flatten();
+
+        self.certificates
+            .iter()
+            .find(|certificate| certificate.id == selected_id)
+            .cloned()
+    }
+
+    fn reload_certificates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_id = self
+            .credential_select
+            .read(cx)
+            .selected_value()
+            .cloned()
+            .flatten();
+
+        self.certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+
+        let mut items = vec![CertificateSelectItem::none()];
+        items.extend(
+            self.certificates
+                .iter()
+                .map(CertificateSelectItem::from_certificate),
+        );
+
+        self.credential_select.update(cx, |select, cx| {
+            select.set_items(items, window, cx);
+            select.set_selected_value(&selected_id, window, cx);
+        });
+
+        self.sync_selected_certificate_inputs(window, cx);
+        cx.notify();
+    }
+
+    fn sync_selected_certificate_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(certificate) = self.selected_certificate(cx) else {
+            return;
+        };
+
+        let username = certificate.username().unwrap_or("").to_string();
+        self.username_input
+            .update(cx, |state, cx| state.set_value(username, window, cx));
+
+        match certificate.kind {
+            one_core::storage::CertificateKind::UsernamePassword => {
+                self.auth_method = AuthMethodSelection::Password;
+                let password = certificate.password().unwrap_or("").to_string();
+                self.password_input.update(cx, |state, cx| {
+                    state.set_value(password, window, cx);
+                });
+            }
+            one_core::storage::CertificateKind::SshPrivateKey => {
+                self.auth_method = AuthMethodSelection::PrivateKey;
+                let key_path = certificate.key_path().unwrap_or("").to_string();
+                let passphrase = certificate.passphrase().unwrap_or("").to_string();
+                self.key_path_input.update(cx, |state, cx| {
+                    state.set_value(key_path, window, cx);
+                });
+                self.passphrase_input.update(cx, |state, cx| {
+                    state.set_value(passphrase, window, cx);
+                });
+            }
+        }
     }
 
     fn build_ssh_params(&self, cx: &App) -> Option<SshParams> {
+        let selected_certificate = self.selected_certificate(cx);
         let host = self.host_input.read(cx).text().to_string();
         let port: u16 = self
             .port_input
@@ -491,34 +643,49 @@ impl SshFormWindow {
             .to_string()
             .parse()
             .unwrap_or(22);
-        let username = self.username_input.read(cx).text().to_string();
+        let username = selected_certificate
+            .as_ref()
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
+            .unwrap_or_else(|| self.username_input.read(cx).text().to_string());
 
         if host.is_empty() || username.is_empty() {
             return None;
         }
 
-        let auth_method = match self.auth_method {
-            AuthMethodSelection::Password => {
-                let password = self.password_input.read(cx).text().to_string();
-                SshAuthMethod::Password { password }
+        let auth_method = if let Some(certificate) = &selected_certificate {
+            match certificate.kind {
+                one_core::storage::CertificateKind::UsernamePassword => SshAuthMethod::Password {
+                    password: certificate.password().unwrap_or("").to_string(),
+                },
+                one_core::storage::CertificateKind::SshPrivateKey => SshAuthMethod::PrivateKey {
+                    key_path: certificate.key_path().unwrap_or("").to_string(),
+                    passphrase: certificate.passphrase().map(|s| s.to_string()),
+                },
             }
-            AuthMethodSelection::PrivateKey => {
-                let key_path = self.key_path_input.read(cx).text().to_string();
-                let passphrase = {
-                    let p = self.passphrase_input.read(cx).text().to_string();
-                    if p.is_empty() {
-                        None
-                    } else {
-                        Some(p)
-                    }
-                };
-                SshAuthMethod::PrivateKey {
-                    key_path,
-                    passphrase,
+        } else {
+            match self.auth_method {
+                AuthMethodSelection::Password => {
+                    let password = self.password_input.read(cx).text().to_string();
+                    SshAuthMethod::Password { password }
                 }
+                AuthMethodSelection::PrivateKey => {
+                    let key_path = self.key_path_input.read(cx).text().to_string();
+                    let passphrase = {
+                        let p = self.passphrase_input.read(cx).text().to_string();
+                        if p.is_empty() {
+                            None
+                        } else {
+                            Some(p)
+                        }
+                    };
+                    SshAuthMethod::PrivateKey {
+                        key_path,
+                        passphrase,
+                    }
+                }
+                AuthMethodSelection::Agent => SshAuthMethod::Agent,
+                AuthMethodSelection::AutoPublicKey => SshAuthMethod::AutoPublicKey,
             }
-            AuthMethodSelection::Agent => SshAuthMethod::Agent,
-            AuthMethodSelection::AutoPublicKey => SshAuthMethod::AutoPublicKey,
         };
 
         // 高级设置
@@ -559,6 +726,22 @@ impl SshFormWindow {
                 None
             } else {
                 Some(s)
+            }
+        };
+        let sftp_local_directory = {
+            let d = self.sftp_local_directory_input.read(cx).text().to_string();
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
+            }
+        };
+        let sftp_remote_directory = {
+            let d = self.sftp_remote_directory_input.read(cx).text().to_string();
+            if d.is_empty() {
+                None
+            } else {
+                Some(d)
             }
         };
 
@@ -640,11 +823,17 @@ impl SshFormWindow {
             port,
             username,
             auth_method,
+            credential_ref: selected_certificate
+                .as_ref()
+                .map(CertificateReference::from_certificate),
             connect_timeout,
             keepalive_interval,
             keepalive_max,
+            enable_legacy_kex: self.enable_legacy_kex,
             default_directory,
             init_script,
+            sftp_local_directory,
+            sftp_remote_directory,
             jump_server,
             proxy,
         })
@@ -711,6 +900,7 @@ impl SshFormWindow {
             timeout: params.connect_timeout.map(Duration::from_secs),
             keepalive_interval: params.keepalive_interval.map(Duration::from_secs),
             keepalive_max: params.keepalive_max,
+            enable_legacy_kex: params.enable_legacy_kex,
             jump_server,
             proxy,
         }
@@ -719,22 +909,50 @@ impl SshFormWindow {
     fn on_test(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(params) = self.build_ssh_params(cx) else {
             self.last_tested_signature = None;
+            self.test_status_message = None;
+            self.test_started_at = None;
             self.test_result = Some(Err(t!("SSH.validation_error").to_string()));
             cx.notify();
             return;
         };
 
-        self.is_testing = true;
-        self.last_tested_signature = None;
-        self.test_result = None;
-        cx.notify();
-
         let signature = build_connection_test_signature(&params);
         let config = self.build_ssh_connect_config(&params);
+        let initial_status = SshConnectionStage::initial_for_config(&config).description();
+        let (progress_tx, mut progress_rx) =
+            tokio::sync::mpsc::unbounded_channel::<SshConnectionStage>();
+
+        self.is_testing = true;
+        self.last_tested_signature = None;
+        self.test_status_message = Some(initial_status);
+        self.test_started_at = Some(Instant::now());
+        self.test_result = None;
+        cx.notify();
+        Self::spawn_test_status_tick(cx);
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            while let Some(stage) = progress_rx.recv().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.is_testing {
+                            this.test_status_message = Some(stage.description());
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let spawn_result = Tokio::spawn_result(cx, async move {
-                let mut client = RusshClient::connect(config).await?;
+                let mut client = RusshClient::connect_with_progress(config, move |stage| {
+                    let _ = progress_tx.send(stage);
+                })
+                .await?;
                 client.disconnect().await?;
                 Ok::<(), anyhow::Error>(())
             })
@@ -748,6 +966,8 @@ impl SshFormWindow {
             let _ = this.update(cx, |this, cx| {
                 this.is_testing = false;
                 this.last_tested_signature = test_result.as_ref().ok().map(|_| signature.clone());
+                this.test_status_message = None;
+                this.test_started_at = None;
                 this.test_result = Some(test_result);
                 cx.notify();
             });
@@ -792,7 +1012,6 @@ impl SshFormWindow {
         let workspace_id = self.get_workspace_id(cx);
         let mut conn = StoredConnection::new_ssh(name, params, workspace_id);
         conn.sync_enabled = self.sync_enabled; // 设置同步状态
-        conn.team_id = self.get_team_id(cx);
         if !self.is_editing {
             conn.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
         }
@@ -813,7 +1032,6 @@ impl SshFormWindow {
             .storage
             .clone();
         let is_editing = self.is_editing;
-
         let result: Result<StoredConnection, anyhow::Error> = (|| {
             let repo = storage
                 .get::<one_core::storage::ConnectionRepository>()
@@ -858,6 +1076,17 @@ impl SshFormWindow {
         window.remove_window();
     }
 
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
+    }
+
     fn render_form_row(&self, label: &str, child: impl IntoElement) -> impl IntoElement {
         h_flex()
             .gap_3()
@@ -867,6 +1096,7 @@ impl SshFormWindow {
                     .w(px(100.0))
                     .text_sm()
                     .text_right()
+                    .text_color(app_style::text_muted())
                     .child(label.to_string()),
             )
             .child(div().flex_1().child(child))
@@ -875,13 +1105,33 @@ impl SshFormWindow {
     /// 渲染基本信息标签页
     fn render_basic_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let auth_method = self.auth_method;
+        let use_certificate = self.selected_certificate(cx).is_some();
 
         v_flex()
             .gap_2()
-            .child(self.render_form_row(&t!("SSH.name"), Input::new(&self.name_input)))
-            .child(self.render_form_row(&t!("SSH.host"), Input::new(&self.host_input)))
-            .child(self.render_form_row(&t!("SSH.port"), Input::new(&self.port_input)))
-            .child(self.render_form_row(&t!("SSH.username"), Input::new(&self.username_input)))
+            .child(self.render_form_row(
+                &t!("SSH.name"),
+                self.styled_input(Input::new(&self.name_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.host"),
+                self.styled_input(Input::new(&self.host_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.port"),
+                self.styled_input(Input::new(&self.port_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.certificate"),
+                self.styled_select(Select::new(&self.credential_select).w_full()),
+            ))
+            .child(
+                self.render_form_row(
+                    &t!("SSH.username"),
+                    self.styled_input(Input::new(&self.username_input))
+                        .disabled(use_certificate),
+                ),
+            )
             .child(
                 self.render_form_row(
                     &t!("SSH.auth_method"),
@@ -891,6 +1141,7 @@ impl SshFormWindow {
                             Radio::new("password")
                                 .label(t!("SSH.password").to_string())
                                 .checked(auth_method == AuthMethodSelection::Password)
+                                .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::Password;
                                     cx.notify();
@@ -900,6 +1151,7 @@ impl SshFormWindow {
                             Radio::new("private-key")
                                 .label(t!("SSH.private_key").to_string())
                                 .checked(auth_method == AuthMethodSelection::PrivateKey)
+                                .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::PrivateKey;
                                     cx.notify();
@@ -909,6 +1161,7 @@ impl SshFormWindow {
                             Radio::new("agent")
                                 .label(t!("SSH.agent").to_string())
                                 .checked(auth_method == AuthMethodSelection::Agent)
+                                .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::Agent;
                                     cx.notify();
@@ -918,6 +1171,7 @@ impl SshFormWindow {
                             Radio::new("auto-publickey")
                                 .label(t!("SSH.auto_publickey").to_string())
                                 .checked(auth_method == AuthMethodSelection::AutoPublicKey)
+                                .disabled(use_certificate)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.auth_method = AuthMethodSelection::AutoPublicKey;
                                     cx.notify();
@@ -925,38 +1179,46 @@ impl SshFormWindow {
                         ),
                 ),
             )
+            .when(auth_method == AuthMethodSelection::AutoPublicKey, |this| {
+                this.child(
+                    div()
+                        .pl_4()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("SSH.auto_publickey_hint").to_string()),
+                )
+            })
             .when(auth_method == AuthMethodSelection::Password, |this| {
-                this.child(self.render_form_row(
-                    &t!("SSH.password"),
-                    Input::new(&self.password_input).mask_toggle(),
-                ))
+                this.child(
+                    self.render_form_row(
+                        &t!("SSH.password"),
+                        self.styled_input(Input::new(&self.password_input))
+                            .mask_toggle()
+                            .disable_ime()
+                            .disabled(use_certificate),
+                    ),
+                )
             })
             .when(auth_method == AuthMethodSelection::PrivateKey, |this| {
                 this.child(
-                    self.render_form_row(&t!("SSH.key_path"), Input::new(&self.key_path_input)),
+                    self.render_form_row(
+                        &t!("SSH.key_path"),
+                        self.styled_input(Input::new(&self.key_path_input))
+                            .disabled(use_certificate),
+                    ),
                 )
-                .child(self.render_form_row(
-                    &t!("SSH.passphrase"),
-                    Input::new(&self.passphrase_input).mask_toggle(),
-                ))
-            })
-            .when(auth_method == AuthMethodSelection::AutoPublicKey, |this| {
-                this.child(
-                    h_flex().justify_center().child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(t!("SSH.auto_publickey_hint").to_string()),
+                .child(
+                    self.render_form_row(
+                        &t!("SSH.passphrase"),
+                        self.styled_input(Input::new(&self.passphrase_input))
+                            .mask_toggle()
+                            .disable_ime()
+                            .disabled(use_certificate),
                     ),
                 )
             })
             .child(self.render_form_row(
                 &t!("SSH.workspace"),
-                Select::new(&self.workspace_select).w_full(),
-            ))
-            .child(self.render_form_row(
-                &t!("TeamSync.team_label"),
-                Select::new(&self.team_select).w_full(),
+                self.styled_select(Select::new(&self.workspace_select).w_full()),
             ))
             .child(
                 self.render_form_row(
@@ -974,7 +1236,7 @@ impl SshFormWindow {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(app_style::text_muted())
                                 .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
                         ),
                 ),
@@ -987,11 +1249,20 @@ impl SshFormWindow {
             .gap_2()
             .child(self.render_form_row(
                 &t!("SSH.default_directory"),
-                Input::new(&self.default_directory_input),
+                self.styled_input(Input::new(&self.default_directory_input)),
             ))
-            .child(
-                self.render_form_row(&t!("SSH.init_script"), Input::new(&self.init_script_input)),
-            )
+            .child(self.render_form_row(
+                &t!("SSH.init_script"),
+                self.styled_input(Input::new(&self.init_script_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.sftp_local_directory"),
+                self.styled_input(Input::new(&self.sftp_local_directory_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("SSH.sftp_remote_directory"),
+                self.styled_input(Input::new(&self.sftp_remote_directory_input)),
+            ))
     }
 
     /// 渲染跳板机标签页
@@ -1012,20 +1283,26 @@ impl SshFormWindow {
                 ),
             )
             .when(enable_jump, |this| {
-                this.child(
-                    self.render_form_row(&t!("SSH.jump_host"), Input::new(&self.jump_host_input)),
-                )
-                .child(
-                    self.render_form_row(&t!("SSH.jump_port"), Input::new(&self.jump_port_input)),
-                )
+                this.child(self.render_form_row(
+                    &t!("SSH.jump_host"),
+                    self.styled_input(Input::new(&self.jump_host_input)),
+                ))
+                .child(self.render_form_row(
+                    &t!("SSH.jump_port"),
+                    self.styled_input(Input::new(&self.jump_port_input)),
+                ))
                 .child(self.render_form_row(
                     &t!("SSH.jump_username"),
-                    Input::new(&self.jump_username_input),
+                    self.styled_input(Input::new(&self.jump_username_input)),
                 ))
-                .child(self.render_form_row(
-                    &t!("SSH.jump_password"),
-                    Input::new(&self.jump_password_input).mask_toggle(),
-                ))
+                .child(
+                    self.render_form_row(
+                        &t!("SSH.jump_password"),
+                        self.styled_input(Input::new(&self.jump_password_input))
+                            .mask_toggle()
+                            .disable_ime(),
+                    ),
+                )
             })
     }
 
@@ -1073,46 +1350,95 @@ impl SshFormWindow {
                             ),
                     ),
                 )
-                .child(
-                    self.render_form_row(&t!("SSH.proxy_host"), Input::new(&self.proxy_host_input)),
-                )
-                .child(
-                    self.render_form_row(&t!("SSH.proxy_port"), Input::new(&self.proxy_port_input)),
-                )
+                .child(self.render_form_row(
+                    &t!("SSH.proxy_host"),
+                    self.styled_input(Input::new(&self.proxy_host_input)),
+                ))
+                .child(self.render_form_row(
+                    &t!("SSH.proxy_port"),
+                    self.styled_input(Input::new(&self.proxy_port_input)),
+                ))
                 .child(self.render_form_row(
                     &t!("SSH.proxy_username"),
-                    Input::new(&self.proxy_username_input),
+                    self.styled_input(Input::new(&self.proxy_username_input)),
                 ))
-                .child(self.render_form_row(
-                    &t!("SSH.proxy_password"),
-                    Input::new(&self.proxy_password_input).mask_toggle(),
-                ))
+                .child(
+                    self.render_form_row(
+                        &t!("SSH.proxy_password"),
+                        self.styled_input(Input::new(&self.proxy_password_input))
+                            .mask_toggle()
+                            .disable_ime(),
+                    ),
+                )
             })
     }
 
     /// 渲染高级设置标签页
-    fn render_advanced_tab(&self) -> impl IntoElement {
+    fn render_advanced_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_2()
             .child(self.render_form_row(
                 &t!("SSH.connect_timeout"),
-                Input::new(&self.connect_timeout_input),
+                self.styled_input(Input::new(&self.connect_timeout_input)),
             ))
             .child(self.render_form_row(
                 &t!("SSH.keepalive_interval"),
-                Input::new(&self.keepalive_interval_input),
+                self.styled_input(Input::new(&self.keepalive_interval_input)),
             ))
             .child(self.render_form_row(
                 &t!("SSH.keepalive_max"),
-                Input::new(&self.keepalive_max_input),
+                self.styled_input(Input::new(&self.keepalive_max_input)),
             ))
+            .child(
+                self.render_form_row(
+                    &t!("SSH.enable_legacy_kex"),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Checkbox::new("enable-legacy-kex")
+                                .checked(self.enable_legacy_kex)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.enable_legacy_kex = !this.enable_legacy_kex;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(app_style::text_muted())
+                                .child(t!("SSH.enable_legacy_kex_hint").to_string()),
+                        ),
+                ),
+            )
     }
 
     /// 渲染其他设置标签页
     fn render_other_tab(&self) -> impl IntoElement {
-        v_flex()
-            .gap_2()
-            .child(self.render_form_row(&t!("SSH.remark"), Input::new(&self.remark_input)))
+        v_flex().gap_2().child(self.render_form_row(
+            &t!("SSH.remark"),
+            self.styled_input(Input::new(&self.remark_input)),
+        ))
+    }
+
+    fn spawn_test_status_tick(cx: &mut Context<Self>) {
+        let entity = cx.entity().downgrade();
+        cx.spawn(async move |_, cx: &mut AsyncApp| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let keep_running = entity
+                .update(cx, |this, cx| {
+                    if this.is_testing && this.test_started_at.is_some() {
+                        cx.notify();
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if !keep_running {
+                break;
+            }
+        })
+        .detach();
     }
 }
 
@@ -1126,18 +1452,55 @@ impl Render for SshFormWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_testing = self.is_testing;
         let active_tab = self.active_tab;
+        let test_status_message = self
+            .test_status_message
+            .clone()
+            .unwrap_or_else(|| t!("Connection.testing").to_string());
+        let test_status_message = format_connection_progress_message(
+            &test_status_message,
+            self.test_started_at
+                .map(|started_at| started_at.elapsed().as_secs())
+                .unwrap_or(0),
+        );
+
+        let test_status_element = is_testing.then(|| {
+            h_flex()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .border_1()
+                .border_color(app_style::border())
+                .bg(app_style::panel_bg())
+                .child(Spinner::new().small())
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(app_style::text_muted())
+                        .child(test_status_message),
+                )
+        });
 
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::accent_dim_strong())
                     .text_sm()
-                    .text_color(cx.theme().success)
+                    .text_color(app_style::accent())
                     .child(t!("SSH.test_success").to_string()),
             ),
             Some(Err(e)) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::danger_dim())
                     .text_sm()
-                    .text_color(cx.theme().danger)
+                    .text_color(app_style::danger())
                     .child(e.clone()),
             ),
             None => None,
@@ -1146,36 +1509,48 @@ impl Render for SshFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(app_style::page_bg())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text_primary())
+                            .child(self.title.clone()),
+                    ),
             )
             // TabBar
             .child(
-                div().flex().justify_center().px_3().pt_2().child(
-                    TabBar::new("ssh-form-tabs")
-                        .with_size(Size::Small)
-                        .underline()
-                        .selected_index(active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .child(Tab::new().label(t!("SSH.tab_basic").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_init").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_jump_server").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_proxy").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_advanced").to_string()))
-                        .child(Tab::new().label(t!("SSH.tab_other").to_string())),
+                div().flex().justify_center().px_4().pt_3().pb_1().child(
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::panel_bg())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("ssh-form-tabs")
+                                .with_size(Size::Small)
+                                .underline()
+                                .selected_index(active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .child(Tab::new().label(t!("SSH.tab_basic").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_init").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_jump_server").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_proxy").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_advanced").to_string()))
+                                .child(Tab::new().label(t!("SSH.tab_other").to_string())),
+                        ),
                 ),
             )
             // 标签页内容
@@ -1183,18 +1558,27 @@ impl Render for SshFormWindow {
                 div()
                     .id("ssh-form-content")
                     .flex_1()
-                    .p_3()
+                    .mx_4()
+                    .mb_4()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
+                    .p_4()
                     .overflow_y_scroll()
                     .child(match active_tab {
                         0 => self.render_basic_tab(cx).into_any_element(),
                         1 => self.render_init_tab().into_any_element(),
                         2 => self.render_jump_server_tab(cx).into_any_element(),
                         3 => self.render_proxy_tab(cx).into_any_element(),
-                        4 => self.render_advanced_tab().into_any_element(),
+                        4 => self.render_advanced_tab(cx).into_any_element(),
                         5 => self.render_other_tab().into_any_element(),
                         _ => div().into_any_element(),
                     }),
             )
+            .when_some(test_status_element, |this, elem| {
+                this.child(h_flex().justify_center().pb_2().child(elem))
+            })
             // 测试结果
             .when_some(test_result_element, |this, elem| {
                 this.child(h_flex().justify_center().pb_2().child(elem))
@@ -1207,19 +1591,30 @@ impl Render for SshFormWindow {
                     .px_6()
                     .py_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_cancel(window, cx);
                             })),
                     )
                     .child(
+                        Button::new("manage-certificates")
+                            .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
+                            .label(t!("SSH.manage_certificates").to_string())
+                            .on_click(cx.listener(|_, _, window, cx| {
+                                open_certificate_manager_popup(window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(if is_testing {
                                 t!("Connection.testing").to_string()
                             } else {
@@ -1233,7 +1628,7 @@ impl Render for SshFormWindow {
                     .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.ok").to_string())
                             .disabled(is_testing)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1255,11 +1650,15 @@ mod tests {
             port: 22,
             username: "root".to_string(),
             auth_method: SshAuthMethod::Agent,
+            credential_ref: None,
             connect_timeout: Some(30),
             keepalive_interval: Some(60),
             keepalive_max: Some(3),
+            enable_legacy_kex: false,
             default_directory: Some("/tmp".to_string()),
             init_script: Some("pwd".to_string()),
+            sftp_local_directory: None,
+            sftp_remote_directory: None,
             jump_server: None,
             proxy: None,
         }

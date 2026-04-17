@@ -2,7 +2,7 @@ use crate::{ColorName, Sizable, Size, StyledExt, theme::ActiveTheme as _};
 use gpui::{
     AbsoluteLength, AnyElement, App, Hsla, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative, rems,
-    transparent_white,
+
 };
 
 /// The variant of the Tag.
@@ -234,7 +234,7 @@ impl Styled for Tag {
 impl RenderOnce for Tag {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let bg = if self.outline {
-            transparent_white()
+            cx.theme().transparent
         } else {
             self.variant.bg(cx)
         };

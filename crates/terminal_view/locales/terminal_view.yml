@@ -45,6 +45,10 @@ Theme:
 
 # 通用文本
 Common:
+  settings:
+    en: Settings
+    zh-CN: 设置
+    zh-HK: 設定
   ok:
     en: OK
     zh-CN: 确定
@@ -107,6 +111,14 @@ SSH:
     en: Port
     zh-CN: 端口
     zh-HK: 端口
+  certificate:
+    en: Certificate
+    zh-CN: 证书
+    zh-HK: 憑證
+  certificate_none:
+    en: Do not use certificate
+    zh-CN: 不使用证书
+    zh-HK: 不使用憑證
   username:
     en: Username
     zh-CN: 用户名
@@ -135,6 +147,10 @@ SSH:
     en: Auto Public Key
     zh-CN: 自动公钥认证
     zh-HK: 自動公鑰認證
+  auto_publickey_hint:
+    en: Try SSH Agent first, then default private keys under ~/.ssh.
+    zh-CN: 将优先尝试 SSH Agent，若不可用则尝试 ~/.ssh 下的默认私钥。
+    zh-HK: 將優先嘗試 SSH Agent，若不可用則嘗試 ~/.ssh 下的預設私鑰。
   key_path:
     en: Key Path
     zh-CN: 密钥路径
@@ -155,34 +171,14 @@ SSH:
     en: Authentication Method
     zh-CN: 认证方式
     zh-HK: 認證方式
-  auto_publickey_hint:
-    en: Try SSH Agent first, then default private keys under ~/.ssh.
-    zh-CN: 将优先尝试 SSH Agent，若不可用则尝试 ~/.ssh 下的默认私钥。
-    zh-HK: 將優先嘗試 SSH Agent，若不可用則嘗試 ~/.ssh 下的預設私鑰。
-  auto_publickey_next_step:
-    en: Please load SSH Agent or switch to "Private Key" mode to specify a key file manually
-    zh-CN: 请加载 SSH Agent，或切换为「私钥文件」模式手动指定私钥
-    zh-HK: 請加載 SSH Agent，或切換為「私鑰文件」模式手動指定私鑰
-  test_required_before_save:
-    en: Please test the current SSH configuration before saving.
-    zh-CN: 保存前请先测试当前 SSH 配置。
-    zh-HK: 儲存前請先測試當前 SSH 配置。
-  retest_after_change:
-    en: SSH configuration changed. Please test again before saving.
-    zh-CN: SSH 配置已变更，请重新测试后再保存。
-    zh-HK: SSH 配置已變更，請重新測試後再儲存。
-  save_failed:
-    en: "Failed to save SSH connection: %{error}"
-    zh-CN: "保存 SSH 连接失败：%{error}"
-    zh-HK: "儲存 SSH 連線失敗：%{error}"
-  save_while_testing:
-    en: Please wait for connection testing to complete.
-    zh-CN: 请等待连接测试完成后再保存。
-    zh-HK: 請等待連線測試完成後再儲存。
   workspace:
     en: Workspace
     zh-CN: 工作区
     zh-HK: 工作區
+  manage_certificates:
+    en: Manage Certificates
+    zh-CN: 管理证书
+    zh-HK: 管理憑證
   validation_error:
     en: Please fill in all required fields
     zh-CN: 请填写所有必填字段
@@ -191,6 +187,22 @@ SSH:
     en: Connection test successful
     zh-CN: 连接测试成功
     zh-HK: 連線測試成功
+  save_failed:
+    en: "Failed to save SSH connection: %{error}"
+    zh-CN: 保存 SSH 连接失败：%{error}
+    zh-HK: 保存 SSH 連線失敗：%{error}
+  save_while_testing:
+    en: Please wait for the connection test to finish before saving
+    zh-CN: 请等待连接测试完成后再保存
+    zh-HK: 請等待連線測試完成後再保存
+  test_required_before_save:
+    en: Please complete a successful connection test before saving
+    zh-CN: 请先完成一次成功的连接测试再保存
+    zh-HK: 請先完成一次成功的連線測試再保存
+  retest_after_change:
+    en: Connection parameters changed, please test again before saving
+    zh-CN: 连接参数已变更，请重新测试后再保存
+    zh-HK: 連線參數已變更，請重新測試後再保存
   # 标签页
   tab_basic:
     en: Basic
@@ -279,6 +291,14 @@ SSH:
     en: Keepalive Max
     zh-CN: 最大心跳次数
     zh-HK: 最大心跳次數
+  enable_legacy_kex:
+    en: Legacy SSH Compatibility
+    zh-CN: 旧版 SSH 协商兼容模式
+    zh-HK: 舊版 SSH 協商相容模式
+  enable_legacy_kex_hint:
+    en: Enable only for old SSH servers that fail negotiation and only support legacy SHA1-based KEX or CBC ciphers.
+    zh-CN: 仅在旧 SSH 服务端协商失败、且只支持老旧 SHA1 类 KEX 或 CBC cipher 时启用。
+    zh-HK: 僅在舊 SSH 伺服器協商失敗、且只支援舊式 SHA1 類 KEX 或 CBC cipher 時啟用。
   # 初始化
   init_script:
     en: Init Script
@@ -296,6 +316,22 @@ SSH:
     en: Default working directory
     zh-CN: 默认工作目录
     zh-HK: 默認工作目錄
+  sftp_local_directory:
+    en: SFTP Local Directory
+    zh-CN: SFTP 本地目录
+    zh-HK: SFTP 本地目錄
+  sftp_local_directory_placeholder:
+    en: Leave empty to use home directory
+    zh-CN: 留空则使用主目录
+    zh-HK: 留空則使用主目錄
+  sftp_remote_directory:
+    en: SFTP Remote Directory
+    zh-CN: SFTP 远程目录
+    zh-HK: SFTP 遠端目錄
+  sftp_remote_directory_placeholder:
+    en: Leave empty to use server default directory
+    zh-CN: 留空则使用服务器默认目录
+    zh-HK: 留空則使用伺服器預設目錄
   # 其他设置
   remark:
     en: Remark
@@ -319,6 +355,38 @@ ConnectionForm:
 
 # 设置面板
 Settings:
+  search:
+    en: Search
+    zh-CN: 搜索
+    zh-HK: 搜尋
+  search_placeholder:
+    en: Search...
+    zh-CN: 搜索...
+    zh-HK: 搜尋...
+  search_hint:
+    en: Press Enter for next, Shift+Enter for previous
+    zh-CN: 回车搜索下一个，Shift+回车搜索上一个
+    zh-HK: 按 Enter 搜尋下一個，Shift+Enter 搜尋上一個
+  font_size:
+    en: Font Size
+    zh-CN: 字号
+    zh-HK: 字體大小
+  font_family:
+    en: Font Family
+    zh-CN: 字体
+    zh-HK: 字體
+  line_height:
+    en: Line Height
+    zh-CN: 行间距
+    zh-HK: 行距
+  select_font_placeholder:
+    en: Select font...
+    zh-CN: 选择字体...
+    zh-HK: 選擇字體...
+  theme:
+    en: Theme
+    zh-CN: 主题
+    zh-HK: 主題
   cursor:
     en: Cursor
     zh-CN: 光标
@@ -359,6 +427,34 @@ Settings:
     en: Sync path with terminal
     zh-CN: 路径与终端同步
     zh-HK: 路徑與終端同步
+  sync_path_confirm_title:
+    en: Enable Path Sync
+    zh-CN: 开启路径同步
+    zh-HK: 開啟路徑同步
+  sync_path_confirm_message:
+    en: "Enabling this will inject an OSC 7 sequence (PROMPT_COMMAND) into the shell at connection startup to sync the working directory with the file manager. The command will be visible in the terminal. This setting will take effect on the next reconnection."
+    zh-CN: 开启后将在连接启动时向 Shell 注入 OSC 7 序列（PROMPT_COMMAND），用于将工作目录同步到文件管理器。该命令会在终端中可见。此设置将在下次重新连接后生效。
+    zh-HK: 開啟後將在連接啟動時向 Shell 注入 OSC 7 序列（PROMPT_COMMAND），用於將工作目錄同步到文件管理器。該命令會在終端中可見。此設置將在下次重新連接後生效。
+  sync_path_confirm_ok:
+    en: Enable
+    zh-CN: 开启
+    zh-HK: 開啟
+  session_section:
+    en: SESSION
+    zh-CN: 会话
+    zh-HK: 工作階段
+  exit_behavior_desc:
+    en: "When shell exits with 'exit' command"
+    zh-CN: 当 Shell 通过 exit 命令退出时
+    zh-HK: 當 Shell 通過 exit 命令退出時
+  exit_behavior_prompt:
+    en: Show confirmation dialog
+    zh-CN: 显示确认弹窗
+    zh-HK: 顯示確認彈窗
+  exit_behavior_close:
+    en: Close tab directly
+    zh-CN: 直接关闭标签
+    zh-HK: 直接關閉標籤
   sync_path_help:
     en: Automatically sync the current SSH working directory to the file manager through the shell integration script.
     zh-CN: 通过 Shell 集成脚本自动将当前 SSH 工作目录同步到文件管理器。
@@ -692,6 +788,31 @@ TerminalView:
     en: Paste preview
     zh-CN: 粘贴预览
     zh-HK: 貼上預覽
+RunningState:
+  terminal:
+    activity:
+      en: "Process is running"
+      zh-CN: "进程正在运行"
+      zh-HK: "進程正在運行"
+  ssh:
+    activity:
+      en: "Process is running"
+      zh-CN: "进程正在运行"
+      zh-HK: "進程正在運行"
+
+TerminalCloseDialog:
+  running_process_close_title:
+    en: Close Terminal
+    zh-CN: 关闭终端
+    zh-HK: 關閉終端
+  running_process_close_message:
+    en: There are still running processes in this terminal. Do you want to close anyway?
+    zh-CN: 终端中仍有进程正在运行，确定要关闭吗？
+    zh-HK: 終端中仍有進程正在運行，確定要關閉嗎？
+  running_process_close_ok:
+    en: Close Anyway
+    zh-CN: 仍然关闭
+    zh-HK: 仍然關閉
 
 TerminalSidebar:
   paste_to_terminal:
@@ -918,8 +1039,46 @@ Serial:
     zh-CN: macOS 不支持虚拟串口(pty)，请使用真实串口设备。
     zh-HK: macOS 不支持虛擬串口(pty)，請使用真實串口設備。
 
+# 本地终端状态
+LocalTerminal:
+  connection_lost:
+    en: Connection Lost
+    zh-CN: 连接已断开
+    zh-HK: 連接已斷開
+  disconnected:
+    en: Terminal initialization failed.
+    zh-CN: 终端初始化失败。
+    zh-HK: 終端初始化失敗。
+  session_ended:
+    en: Session ended.
+    zh-CN: 会话已结束。
+    zh-HK: 工作階段已結束。
+  will_close_hint:
+    en: "Click 'Close' to exit."
+    zh-CN: 点击"关闭"退出。
+    zh-HK: 點擊"關閉"退出。
+
+# 终端
+Terminal:
+  shell_still_running_title:
+    en: Shell Still Running
+    zh-CN: Shell 仍在运行
+    zh-HK: Shell 仍在運行
+  shell_still_running_message:
+    en: There's a process still running in this terminal. Do you want to force close it?
+    zh-CN: 终端中仍有任务正在执行。确定要强制关闭吗？
+    zh-HK: 終端中仍有任務正在執行。確定要強制關閉嗎？
+  force_close:
+    en: Force Close
+    zh-CN: 强制关闭
+    zh-HK: 強制關閉
+
 # SSH 会话状态
 SshSession:
+  reconnect:
+    en: Reconnect
+    zh-CN: 重新连接
+    zh-HK: 重新連接
   connecting:
     en: Connecting...
     zh-CN: 连接中...
@@ -936,10 +1095,14 @@ SshSession:
     en: The SSH session has been disconnected.
     zh-CN: SSH 会话已断开连接。
     zh-HK: SSH 工作階段已斷開連接。
-  reconnect:
-    en: Reconnect
-    zh-CN: 重新连接
-    zh-HK: 重新連接
+  session_ended:
+    en: Session ended.
+    zh-CN: 会话已结束。
+    zh-HK: 工作階段已結束。
+  will_close_hint:
+    en: "Click 'Close' to exit."
+    zh-CN: 点击"关闭"退出。
+    zh-HK: 點擊"關閉"退出。
 
 # 文件管理器
 FileManager:
@@ -1131,14 +1294,3 @@ Conflict:
     en: "%{name} and %{count} other files"
     zh-CN: "%{name} 等 %{count} 个文件"
     zh-HK: "%{name} 等 %{count} 個文件"
-
-# 团队同步
-TeamSync:
-  personal:
-    en: Personal
-    zh-CN: 个人
-    zh-HK: 個人
-  team_label:
-    en: Team
-    zh-CN: 团队归属
-    zh-HK: 團隊歸屬

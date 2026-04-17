@@ -10,7 +10,9 @@ use lsp_types::{CompletionItem, CompletionTextEdit};
 
 const MAX_MENU_WIDTH: Pixels = px(320.);
 const MAX_MENU_HEIGHT: Pixels = px(240.);
+const MIN_MENU_HEIGHT: Pixels = px(96.);
 const POPOVER_GAP: Pixels = px(4.);
+const SNAP_TO_EDGE: Pixels = px(8.);
 
 use crate::{
     ActiveTheme, IndexPath, Selectable, actions, h_flex,
@@ -20,6 +22,7 @@ use crate::{
     },
     label::Label,
     list::{List, ListDelegate, ListEvent, ListState},
+    scroll::ScrollableElement as _,
 };
 
 struct ContextMenuDelegate {
@@ -368,7 +371,7 @@ impl CompletionMenu {
         cx.notify();
     }
 
-    fn origin(&self, cx: &App) -> Option<Point<Pixels>> {
+    fn origin(&self, cx: &App) -> Option<(Point<Pixels>, Pixels)> {
         let editor = self.editor.read(cx);
         let Some(last_layout) = editor.last_layout.as_ref() else {
             return None;
@@ -379,10 +382,37 @@ impl CompletionMenu {
 
         let scroll_origin = self.editor.read(cx).scroll_handle.offset();
 
-        Some(
+        Some((
             scroll_origin + cursor_origin - editor.input_bounds.origin
                 + Point::new(-px(4.), last_layout.line_height + px(4.)),
-        )
+            last_layout.line_height,
+        ))
+    }
+
+    fn menu_layout(
+        &self,
+        pos: Point<Pixels>,
+        line_height: Pixels,
+        window: &Window,
+        cx: &App,
+    ) -> (Pixels, Pixels, Pixels) {
+        let abs_pos = self.editor.read(cx).input_bounds.origin + pos;
+        let window_size = window.bounds().size;
+
+        let max_width =
+            MAX_MENU_WIDTH.min((window_size.width - abs_pos.x - SNAP_TO_EDGE).max(px(120.)));
+
+        let top_space = (abs_pos.y - line_height - POPOVER_GAP - SNAP_TO_EDGE).max(px(0.));
+        let bottom_space = (window_size.height - abs_pos.y - SNAP_TO_EDGE).max(px(0.));
+        let open_upward = bottom_space < MIN_MENU_HEIGHT && top_space > bottom_space;
+        let max_height = if open_upward { top_space } else { bottom_space }.min(MAX_MENU_HEIGHT);
+        let menu_y = if open_upward {
+            pos.y - line_height - POPOVER_GAP - max_height
+        } else {
+            pos.y
+        };
+
+        (menu_y, max_width, max_height)
     }
 }
 
@@ -397,7 +427,7 @@ impl Render for CompletionMenu {
             return Empty.into_any_element();
         }
 
-        let Some(pos) = self.origin(cx) else {
+        let Some((pos, line_height)) = self.origin(cx) else {
             return Empty.into_any_element();
         };
 
@@ -408,8 +438,11 @@ impl Render for CompletionMenu {
             .selected_item()
             .and_then(|item| item.documentation.clone());
 
-        let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - pos.x);
         let abs_pos = self.editor.read(cx).input_bounds.origin + pos;
+        let (menu_y, max_width, max_height) = self.menu_layout(pos, line_height, window, cx);
+        if max_height <= px(0.) {
+            return Empty.into_any_element();
+        }
         let vertical_layout =
             abs_pos.x + MAX_MENU_WIDTH + POPOVER_GAP + MAX_MENU_WIDTH + POPOVER_GAP
                 > window.bounds().size.width;
@@ -418,7 +451,7 @@ impl Render for CompletionMenu {
             div()
                 .absolute()
                 .left(pos.x)
-                .top(pos.y)
+                .top(menu_y)
                 .flex()
                 .flex_row()
                 .gap(POPOVER_GAP)
@@ -428,7 +461,7 @@ impl Render for CompletionMenu {
                     editor_popover("completion-menu", cx)
                         .max_w(max_width)
                         .min_w(px(120.))
-                        .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT)),
+                        .child(List::new(&self.list).max_h(max_height)),
                 )
                 .when_some(selected_documentation, |this, documentation| {
                     let mut doc = match documentation {
@@ -443,6 +476,8 @@ impl Render for CompletionMenu {
                         div().child(
                             editor_popover("completion-menu", cx)
                                 .w(MAX_MENU_WIDTH)
+                                .max_h(max_height)
+                                .overflow_y_scrollbar()
                                 .px_2()
                                 .child(render_markdown("doc", doc, window, cx)),
                         ),

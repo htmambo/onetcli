@@ -1,5 +1,110 @@
 # 验证报告
 
+## 审查补充（window-drag-followup 第三轮）
+生成时间：2026-03-29 00:08:00 +0800
+
+### 技术判断
+- 第二轮方案虽然已经把 Windows 拖窗从整块 `#tabs` 中拆出，但仍然依赖局部 spacer，实际体验仍可能表现为“只有极窄位置可拖”。
+- 第三轮改为让 [`tab_container.rs`](D:\zhp\src\onetcli\crates\core\src\tab_container.rs) 的顶层 `tab-bar` 在 Windows 下直接承担拖窗层，再用 tab、下拉按钮和窗口按钮的 `occlude()` 明确压住交互区域。
+- 这更接近通用 [`title_bar.rs`](D:\zhp\src\onetcli\crates\ui\src\title_bar.rs) 的稳定命中模型，也更符合用户对“标签栏空白处都能拖”的预期。
+
+### 验证结果
+- `C:\Users\hoping\.cargo\bin\cargo.exe test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过
+- `C:\Users\hoping\.cargo\bin\cargo.exe check -p one-core`
+  - 结果：通过
+
+### 结论
+- 当前最新代码较上一轮更强：不是只给局部 spacer 提供拖窗能力，而是把整个标签栏空白区恢复成稳定拖窗层。
+- 剩余验证缺口仍然只有 Windows GUI 实机体感，而不是 Rust 层逻辑闭环。
+
+## 审查报告（window-drag-followup 核对）
+生成时间：2026-03-28 23:59:00 +0800
+
+### 需求完整性检查
+- 目标明确：复核“窗口不能使用鼠标拖动”是否已在当前工作区闭环
+- 范围明确：仅核对主窗口 `TabContainer` 拖窗热区与主窗口 bounds 保存链路，不扩散到无关 UI 模块
+- 交付物明确：上下文摘要、操作日志、本地验证结论
+- 风险与依赖明确：`main` crate 仍受本机 `cmake` / `nasm` 缺失影响，无法完成全量编译
+
+### 技术维度评分
+- 代码质量：92/100
+  - 当前工作区中的修复点与仓库既有标题栏设计一致，没有另起平台旁路逻辑
+  - Windows 命中区与窗口状态保存性能问题都收敛到了既有模块
+- 测试覆盖：83/100
+  - `one-core` 中与拖窗平台分支直接相关的 2 条单测已通过
+  - `main` 全量编译受本机构建依赖阻塞，GUI 实机验证仍未完成
+- 规范遵循：94/100
+  - 本次没有覆盖用户已有未提交改动，只补充核对与验证留痕
+
+### 战略维度评分
+- 需求匹配：94/100
+  - 已确认当前工作区对“不能拖动”的两个真实根因都已有对应修复
+- 架构一致：95/100
+  - 继续复用 `TabContainer`、`AppSettings`、`Debouncer`，没有引入新的拖窗框架
+- 风险评估：86/100
+  - 最大剩余风险不是逻辑判断，而是缺少 Windows GUI 实机验证与 `main` 完整构建环境
+
+### 综合评分
+- 90/100
+- 建议：通过
+
+### 结论
+- 当前工作区中，与窗口拖动问题直接相关的修复已经存在且方向正确：
+  - [`crates/core/src/tab_container.rs`](D:\zhp\src\onetcli\crates\core\src\tab_container.rs) 已将 Windows 拖窗能力收敛为独立热区，避免 `#tabs` 抢占 tab 拖拽事件
+  - [`main/src/onetcli_app.rs`](D:\zhp\src\onetcli\main\src\onetcli_app.rs) 与 [`main/src/setting_tab.rs`](D:\zhp\src\onetcli\main\src\setting_tab.rs) 已把窗口状态保存改为本地缓存 + 防抖写回，避免拖动时高频全局通知和写盘
+- 已完成本地验证：
+  - `C:\Users\hoping\.cargo\bin\cargo.exe test -p one-core tab_container::tests --lib -- --nocapture`
+- 未完成但已明确阻塞原因：
+  - `C:\Users\hoping\.cargo\bin\cargo.exe check -p main`
+  - 阻塞于 `aws-lc-sys` 依赖构建，当前环境缺少 `cmake` 与 `nasm`
+
+## 审查报告（sftp-context-menu-stability 实现）
+生成时间：2026-03-28 04:48:48 +0800
+
+### 需求完整性检查
+- 目标明确：修复 SFTP 文件列表右键菜单首次显示错误、条目丢失和按场景删项导致的不稳定问题
+- 范围明确：聚焦 `crates/sftp_view/src/file_list_panel.rs` 的菜单构造，复用现有 `context_menu_handler.rs` 动作分发
+- 交付物明确：代码修复、本地编译验证、单测验证、操作留痕与审查报告
+- 风险与依赖明确：GUI 层的最终弹出效果仍需桌面实测确认
+
+### 技术维度评分
+- 代码质量：94/100
+  - 修复集中在 `file_list_panel.rs`，没有继续扩散到通用 `context_menu` 底层。
+  - 通过“稳定菜单结构 + `.disabled(...)`”表达可用态，避免了继续按条件删项带来的结构漂移。
+- 测试覆盖：89/100
+  - `cargo check -p sftp_view`、`cargo test -p sftp_view --lib`、`cargo check -p terminal_view` 均已通过。
+  - 现有单测覆盖了右键选区同步，但没有自动化覆盖 GUI 弹出菜单的实际视觉内容。
+- 规范遵循：95/100
+  - 沿用既有 `FileListPanelEvent`、菜单 builder 模式和本地化 key，没有新增临时事件或旁路逻辑。
+
+### 战略维度评分
+- 需求匹配：95/100
+  - 已将用户明确要求恢复的目录级菜单项补回文件项菜单，并把跨侧动作改为禁用态而非删除。
+- 架构一致：93/100
+  - 上传/下载仍走 `SftpView` 既有业务链路，本次只修 UI 菜单表达层，没有改动作执行层。
+- 风险评估：88/100
+  - 主要剩余风险是 `gpui` 运行时的上下文菜单命中细节只能靠界面点测确认，但编译面和逻辑面已闭合。
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 根因已确认并修复：
+  - `crates/sftp_view/src/file_list_panel.rs` 的 `build_panel_context_menu(...)` 存在破坏性的 builder 链错误，直接导致当前代码不可稳定维护。
+  - 文件项菜单此前通过 `is_remote` / `is_dir` 直接删项，导致菜单结构不稳定，容易出现“第一次缺项、后续条目变化”的体验问题。
+- 修复方式：
+  - [`crates/sftp_view/src/file_list_panel.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/file_list_panel.rs) 中重写文件项与空白区菜单结构，改为稳定菜单 + 禁用态控制。
+  - 继续复用 [`crates/sftp_view/src/context_menu_handler.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/context_menu_handler.rs) 中现有 `UploadSelected` / `Download` 分发，不重写业务逻辑。
+- 本地验证通过：
+  - `cargo check -p sftp_view`
+  - `cargo test -p sftp_view --lib`
+  - `cargo check -p terminal_view`
+- 下一步应以 GUI 点测为准，重点确认第一次右键即出现正确菜单，且菜单点击后不再发生条目突变。
+
+---
+
 - 时间：2026-03-24
 - 任务：修复 `crates/core/src/llm/connector.rs` 在升级 `llm-connector` 后的编译失败
 - 审查结论：通过
@@ -44,6 +149,129 @@
 ## 建议
 - 当前改动可以合并。
 - 若需要补全自动化验证，建议在允许写用户缓存目录的环境下重跑 `cargo test -p one-core provider_base_url --lib`，或为 `gpui` 构建脚本单独配置可写模块缓存路径。
+
+---
+
+## 审查报告（deepin-window-control-corner 实现）
+生成时间：2026-03-28 02:00:23 +0800
+
+### 需求完整性检查
+- 目标明确：重新定位 Deepin 下主窗口右上角关闭按钮越出圆角的问题，并给出可落地修复
+- 范围明确：主窗口标签栏、通用标题栏、窗口边框与 X11 平台证据链
+- 交付物明确：代码实现、上下文摘要、操作日志、本地验证记录
+- 风险与依赖明确：Deepin 实际视觉结果仍需桌面实测
+
+### 技术维度评分
+- 代码质量：93/100
+  - 改动集中在两个按钮容器，不触碰平台层与窗口创建逻辑。
+  - 修复直接绑定已有 Deepin 环境判断与 `window.window_decorations()`，约束清晰。
+- 测试覆盖：84/100
+  - 复用了现有 Deepin 识别单测，并完成相关 crate 编译验证。
+  - 受环境限制，无法自动截图确认最终视觉效果。
+- 规范遵循：95/100
+  - 仅增加最小布局逻辑，并补齐了上下文与操作留痕。
+
+### 战略维度评分
+- 需求匹配：94/100
+  - 先拿到真实窗口属性和窗口树证据，再实施修复，避免继续在错误层级补丁。
+- 架构一致：92/100
+  - 保持平台层不变，把修复收敛为 Deepin 兼容布局调整，符合当前证据。
+- 风险评估：87/100
+  - 已明确剩余风险为圆角半径主题差异，而不是 X11 属性缺失。
+
+### 综合评分
+- 91/100
+- 建议：通过
+
+### 结论
+- 现场证据已经排除“属性没写对”的假设：主窗口 `0x8000002` 的 `_DEEPIN_NO_TITLEBAR=1`、`_DEEPIN_FORCE_DECORATE=0` 都正确。
+- 现场证据确认 Deepin 仍然给主窗口包裹了额外无名父窗口，且应用窗口和父窗口都没有 X11 shape，因此右上角问题更接近壳层圆角与内容布局不共用裁剪面。
+- 修复策略改为“关闭按钮独立圆角裁剪”而不是继续追加无效裁剪：
+  - [`crates/core/src/tab_container.rs`](/usr/htdocs/onetcli/crates/core/src/tab_container.rs) 为主窗口关闭按钮增加 Deepin 专用圆角包装层
+  - [`crates/ui/src/title_bar.rs`](/usr/htdocs/onetcli/crates/ui/src/title_bar.rs) 为通用标题栏关闭按钮同步增加同样逻辑
+- 本地验证通过：`cargo test -p gpui-component title_bar::tests -- --nocapture`、`cargo check -p gpui-component -p one-core -p main`
+- 剩余工作仅为 Deepin 实机视觉确认；若仍有轻微越界，应优先微调关闭按钮包装层的圆角半径，而不是回退到平台属性层
+
+---
+
+## 审查报告（auto-switch-theme 实现）
+生成时间：2026-03-28 02:35:25 +0800
+
+### 需求完整性检查
+- 目标明确：修复设置页“自动切换主题”无论勾选与否都看不到效果的问题
+- 范围明确：设置持久化、主题生效逻辑、主窗口系统外观变化监听
+- 交付物明确：代码实现、上下文摘要、操作日志、针对性单测、本地编译验证
+- 风险与依赖明确：GUI 级实测仍需桌面环境验证
+
+### 技术维度评分
+- 代码质量：94/100
+  - 根因修复集中在 `AppSettings` 和主窗口初始化，不扩散到无关 UI 组件。
+  - 纯判定函数与副作用逻辑已分离，便于后续维护和测试。
+- 测试覆盖：89/100
+  - 新增了“自动切换关闭/开启”两条单元测试。
+  - 受当前终端环境限制，无法自动化验证桌面主题切换后的实际界面观感。
+- 规范遵循：96/100
+  - 沿用现有 `Theme::change(...)` 和窗口观察接口，没有引入新的主题状态系统。
+
+### 战略维度评分
+- 需求匹配：96/100
+  - 同时修复了“勾选/取消无即时效果”和“系统亮暗变化不跟随”两类问题。
+- 架构一致：94/100
+  - 设置仍由 `AppSettings` 主导，窗口事件仍由主窗口生命周期接入，边界清晰。
+- 风险评估：88/100
+  - 剩余风险主要是不同平台对 `WindowAppearance` 事件触发时机的差异，但主路径已完整闭环。
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 根因已确认：
+  - [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 里 `auto_switch_theme` 原先只保存，不参与主题模式选择
+  - 设置项变更后没有立即重新应用主题
+  - [`main/src/onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 原先没有注册窗口外观变化监听
+  - 当前 Deepin/X11 会话的 `xdg-desktop-portal` 不提供 `org.freedesktop.appearance color-scheme`，默认系统外观来源不可用
+- 修复方式：
+  - 在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 中新增“有效主题模式”计算和统一主题应用入口
+  - 在 [`main/src/setting_tab.rs`](/usr/htdocs/onetcli/main/src/setting_tab.rs) 中增加 Deepin `gsettings theme-name` 回退
+  - 在 [`main/src/onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 中为主窗口注册 `observe_window_appearance(...)` 和 `observe_window_activation(...)`
+- 本地验证通过：
+  - `cargo test -p main 自动切换 --bin onetcli -- --nocapture`
+  - `cargo check -p main`
+
+---
+
+## 审查报告（home-cross-workspace-drag 实现）
+生成时间：2026-03-27 20:38:18 +0800
+
+### 需求完整性检查
+- 目标明确：首页连接卡片拖拽支持跨工作区移动，且虚拟占位只在拖拽时出现
+- 范围明确：主要落在 `main/src/home_tab.rs`，并补齐 `crates/db_view/src/db_tree_view.rs` 的连接换组订阅行为
+- 交付物明确：代码实现、上下文摘要、操作日志、专项验证报告、本地验证结果
+- 风险与依赖明确：空工作区/未分配区不支持作为目标；跨区落下仍统一进入目标工作区末尾
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：88/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：93/100
+- 风险评估：87/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 结论
+- 占位逻辑已收敛：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L3080) 现在会同时清理 `workspace_drop_preview`、`connection_drop_preview` 和 `connection_workspace_drop_target`，避免非拖拽状态下残留虚拟占位。
+- 跨区拖拽已打通：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L4125) 为工作区标题补充连接跨区落点，[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L4267) 又把工作区内容区外层容器也变成跨区落点，不再局限于标题区域。
+- 精准落位已补齐：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L3580) 之后新增跨工作区移动计划与提交链路，列表 gap、列表项、卡片项、卡片尾部 slot 在跨区时都能按目标位置插入，而不再只进末尾。
+- 同区排序未被破坏：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs#L4569) 之后的列表/卡片排序链路仍保留原有同区重排逻辑，只在 `drop` 分支上增加跨区插入路径。
+- 树视图同步已补齐：[`db_tree_view.rs`](/usr/htdocs/onetcli/crates/db_view/src/db_tree_view.rs#L626) 会在连接换工作区时根据跟踪状态执行 `Remove/Update/Add/Ignore`，避免首页移动后树节点残留在旧工作区。
+- 仓储排序一致性已补齐：[`repository.rs`](/usr/htdocs/onetcli/crates/core/src/storage/repository.rs#L365) 新增 `move_across_workspaces(...)`，在单个事务里完成换组、源组压实与目标组重排。
+- 本地验证有效：`cargo test -p one-core connection_repository_move_across_workspaces --lib -- --nocapture`、`cargo test -p main connection_list_sort_tests -- --nocapture` 与 `cargo check -p main -p db_view -p one-core` 均已通过。
 
 ---
 
@@ -224,6 +452,7 @@
 - 建议：通过
 
 ### 结论
+
 - 根因已修复：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L1000) 在筛选写库成功后会发 `ConnectionUpdated`，不再只更新仓库而忽略内存连接列表。
 - 打开的树视图也会同步筛选状态：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L725) 现在会从传入的 `StoredConnection` 刷新 `selected_databases`。
 - 纯逻辑测试已覆盖“保留筛选”和“恢复全选”：[`db_tree_view.rs`](/Users/hufei/RustroverProjects/onetcli/crates/db_view/src/db_tree_view.rs#L2669)。
@@ -739,40 +968,6 @@
 
 ---
 
-## 审查报告（objc-cargo-clippy 构建修复）
-生成时间：2026-03-28 22:28:09 +0800
-
-### 需求完整性检查
-- 目标明确：修复 GitHub/macOS 构建中 `objc` 宏因 `unexpected_cfgs` 与 `cargo-clippy` 触发的失败。
-- 范围明确：仅调整工作区 Cargo lint 配置与本地留痕文档，不改业务源码。
-- 交付物明确：根因分析、上下文摘要、操作日志、本地验证和审查结论均已落地。
-- 风险与依赖明确：依赖旧版 `objc 0.2.7` 的宏实现；若未来升级依赖，需要复核此兼容声明是否仍需要。
-
-### 技术维度评分
-- 代码质量：96/100
-- 测试覆盖：90/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：98/100
-- 风险评估：92/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 结论
-- 根 `Cargo.toml` 已新增 [`Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/Cargo.toml#L143) 的 `[workspace.lints.rust]` 配置，只显式允许 `cfg(feature, values("cargo-clippy"))`，以最小范围兼容旧版 `objc` 宏。
-- `main` crate 继续通过 [`main/Cargo.toml`](/Users/hufei/RustroverProjects/onetcli/main/Cargo.toml#L47) 的 `[lints] workspace = true` 继承工作区 lint，无需在 [`onetcli_app.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/onetcli_app.rs#L103) 或 [`main.rs`](/Users/hufei/RustroverProjects/onetcli/main/src/main.rs#L25) 的每个 `class!` / `sel!` / `msg_send!` 调用点加 `allow`。
-- 本地验证已完成：`cargo check -p main --message-format short` 和 `RUSTFLAGS='-D warnings' cargo check -p main --message-format short` 均通过，且不再出现 `unexpected_cfgs` / `cargo-clippy` 报错。
-
-### 剩余风险
-- 这是对旧依赖宏的兼容性修复，不是 `objc` 依赖升级；未来若依赖版本变化，应复核是否还需要该 `check-cfg` 声明。
-- 工作区仍存在 `num-bigint-dig v0.8.4` 的 future-incompat 提示，但与本次构建失败无关，本次未处理。
-
----
-
 ## 审查报告（ui-main-safe-merge 实现）
 生成时间：2026-03-26 12:13:00 +0800
 
@@ -985,702 +1180,454 @@
 
 ---
 
-## 审查报告（table_designer DDL 页签）
-生成时间：2026-03-27 15:02:06 +0800
+## 审查报告（SFTP 右键菜单补齐）
+生成时间：2026-03-27 14:01:26 +0800
 
 ### 需求完整性检查
-- 目标明确：在 `table_designer` 中新增 DDL 页签，显示当前设计器状态下的完整表级 SQL。
-- 范围明确：仅修改 `crates/db_view/src/table_designer_tab.rs`、`crates/db_view/locales/db_view.yml` 和本地 `.claude` 文档。
-- 交付物明确：代码补丁、上下文摘要、操作日志、本地验证和审查结论均已落地。
-- 风险与依赖明确：完整 DDL 正确性依赖数据库插件现有 `build_create_table_sql` 实现，GUI 层暂无自动化点击验证。
-
-### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：90/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：95/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`rustfmt --edition 2024 /Users/hufei/RustroverProjects/onetcli/crates/db_view/src/table_designer_tab.rs`
-  - 结果：通过
-- 已执行：`cargo check -p db_view`
-  - 结果：通过
-- 已执行：`cargo test -p db build_create_table_sql --lib`
-  - 结果：通过（14 passed）
-- 已观察：未来兼容告警 `num-bigint-dig v0.8.4`
-  - 说明：仓库既有依赖告警，非本次改动引入
-
-### 结论
-- `TableDesigner` 新增了独立的 `DDL` 页签和 `ddl_preview_input`，完整 DDL 与差异 SQL 不再共用同一份文本状态。
-- 现有所有预览刷新入口统一收口到 `update_previews`，保证表名、列、索引和选项变化会同时刷新两个页签。
-- `SQL 预览` 页签仍保持原语义，`has_unsaved_changes`、`save` 和 `save_and_close` 继续只依赖差异 SQL 路径。
-- DDL 页签右上角接入 `Clipboard`，可以直接复制完整 SQL。
-
-### 剩余风险
-- 当前没有 `db_view` 侧专门的 UI 单测直接断言页签索引和复制按钮渲染，仍建议后续补一条视图层验证。
-- DDL 空态采用空字符串策略，符合复制纯净内容的目标，但在极端空设计场景下需要依赖人工确认其是否符合产品预期。
-
----
-
-## 审查报告（db_tree 复制表）
-生成时间：2026-03-27 16:08:04 +0800
-
-### 需求完整性检查
-- 目标明确：在数据库树的表右键菜单新增“复制表”功能，并确认支持范围。
-- 范围明确：修改 `db_tree_view` 事件、`db_tree_event` 处理链路、六个数据库菜单实现、`table_designer_tab` 结构转换 helper 与本地化文案。
-- 交付物明确：代码补丁、本地验证、上下文摘要、操作日志和审查结论均已落地。
-- 风险与依赖明确：复制依赖数据库插件现有 `list_columns`、`list_indexes`、`build_create_table_sql` 能力；当前语义为复制表结构和索引，不复制数据。
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：93/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：95/100
-- 风险评估：92/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo check -p db_view`
-  - 结果：通过
-- 已执行：`cargo test -p db_view --lib`
-  - 结果：通过（200 passed）
-- 已执行：`rustfmt --edition 2024 ...`
-  - 结果：通过
-- 已观察：未来兼容告警 `num-bigint-dig v0.8.4`
-  - 说明：仓库既有依赖告警，非本次改动引入
-
-### 结论
-- MySQL、PostgreSQL、MSSQL、Oracle、SQLite、ClickHouse 六种已注册数据库的表右键菜单都已加入“复制表”入口。
-- `DbTreeViewEvent::CopyTable` 新增后，`handle_copy_table` 通过读取源表列和索引元数据、构造 `TableDesign`、调用插件 `build_create_table_sql` 执行复制。
-- `build_table_design_from_metadata` 被抽为模块级 helper，避免事件层重复实现列类型解析和索引转换逻辑。
-- schema 型数据库执行时沿用 `execute_script(..., schema, ...)` 路径，避免 schema 上下文丢失。
-
-### 剩余风险
-- 当前验证以编译和库测试为主，尚未连接真实数据库实例做交互式冒烟。
-- 当前“复制表”语义不包含复制数据，如果后续产品预期是“复制表并复制数据”，需要单独扩展菜单或增加二级选项。
-
----
-
-## 审查补充（db_tree 复制表语义纠偏为备份表）
-生成时间：2026-03-27 16:08:04 +0800
-
-### 变更结论
-- 已按用户澄清把语义修正为“创建备份表”。
-- 右键菜单文案已改为“创建备份表”，执行链路改为数据库插件生成原生备份 SQL。
-- `db_view` 事件层不再读取列/索引元数据，而是直接调用插件 `build_backup_table_sql(...)`。
-
-### 支持范围
-- MySQL、PostgreSQL、MSSQL、Oracle、SQLite、ClickHouse 六种当前已注册数据库插件均已接入。
-- 其中 MySQL、PostgreSQL、ClickHouse 使用“结构复制 + 数据插入”两步原生 SQL。
-- MSSQL、Oracle、SQLite 使用各自原生的 `SELECT INTO` / `CTAS` 语法。
-
-### 验证结果
-- 已执行：`cargo test -p db --lib`
-  - 结果：通过（337 passed）
-- 已执行：`cargo test -p db_view --lib`
-  - 结果：通过（200 passed）
-
-### 风险说明
-- 不同数据库原生备份语法对索引、约束、默认值的保留程度不同，这属于数据库本身语义差异，不是本次实现缺陷。
-- 当前未连真实实例做交互式验证，若要进一步收敛风险，下一步应补一轮多数据库手工冒烟。
-
----
-
-## 审查报告（table_designer DROP SQL 确认）
-生成时间：2026-03-27 17:02:24 +0800
-
-### 需求完整性检查
-- 目标明确：当字段修改生成包含显式 `DROP` 的差异 SQL 时，执行前必须强制跳转到 SQL 预览并弹出确认框。
-- 范围明确：变更集中在 `crates/db_view/src/table_designer_tab.rs` 与 `crates/db_view/locales/db_view.yml`。
-- 交付物明确：代码补丁、本地化文案、上下文摘要、操作日志、本地验证结果均已落地。
-- 风险与依赖明确：依赖现有 `GlobalDbState.execute_script`、`TableDesignerEvent::Saved`、`TabContainer` 和 gpui confirm dialog。
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：94/100
-- 风险评估：90/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo check -p db_view`
-  - 结果：通过
-- 已执行：`cargo test -p db_view contains_destructive_sql --lib`
-  - 结果：通过（6 passed）
-- 已执行：`cargo test -p db_view table_designer_tab --lib`
-  - 结果：通过（55 passed）
-- 已执行：`rustfmt --edition 2024 crates/db_view/src/table_designer_tab.rs`
-  - 结果：通过
-- 已执行：`rustfmt --edition 2024 crates/db_view/locales/db_view.yml`
-  - 结果：失败，原因是 `rustfmt` 不支持 YAML；该失败已记录，未影响 Rust 代码验证结论
-- 已观察：未来兼容告警 `num-bigint-dig v0.8.4`
-  - 说明：仓库既有依赖告警，非本次改动引入
-
-### 结论
-- `handle_execute` 与 `save_and_close` 现在共享同一条危险 SQL 检测和执行路径，不会再出现一个入口确认、另一个入口直执行的行为分叉。
-- 当 diff SQL 包含 `DROP COLUMN`、`DROP INDEX`、`DROP CONSTRAINT` 或 `DROP TABLE` 时，界面会先切到 SQL 预览页，再弹出确认框提示数据丢失风险。
-- 确认后仍沿用原有执行、通知、刷新和关页逻辑，避免破坏已有保存行为。
-
-### 剩余风险
-- 当前没有 UI 自动化测试直接断言“已切到 SQL 预览页并显示确认框”，该部分仍建议后续补一条视图层或人工冒烟验证。
-
----
-
-## 审查报告（OnetCli 官网与 GitHub Pages）
-生成时间：2026-03-28 14:49:28 +0800
-
-### 需求完整性检查
-- 目标明确：将现有 `docs/` VitePress 站点改造成 OnetCli 官网，并先打通 GitHub Pages 部署。
-- 范围明确：首页、功能页、下载页、更新日志页、SEO/GEO 基础设施、GitHub Pages 工作流与本地验证均已覆盖。
-- 交付物明确：代码补丁、上下文摘要、设计规格、实施计划、操作日志、验证结果与审查报告均已落地。
-- 风险与依赖明确：本地环境无 `bun`，本次用 `npm` 完成本地构建验证；远程工作流仍依赖 Bun 安装和 GitHub Pages 设置。
+- 目标明确：补齐 SFTP 空白区域与 `..` 行的右键菜单
+- 范围明确：覆盖 `crates/sftp_view` 与 `crates/terminal_view` 两套文件管理 UI
+- 交付物明确：代码改动、文案补充、本地验证、操作日志与审查报告
+- 风险与依赖明确：依赖既有 `ContextMenu`/`PopupMenu` 体系，GUI 交互缺少自动化冒烟
 
 ### 技术维度评分
 - 代码质量：93/100
-- 测试覆盖：90/100
+- 测试覆盖：86/100
 - 规范遵循：95/100
 
 ### 战略维度评分
-- 需求匹配：95/100
+- 需求匹配：96/100
 - 架构一致：94/100
-- 风险评估：91/100
+- 风险评估：89/100
 
 ### 综合评分
-- 93/100
+- 92/100
 - 建议：通过
 
 ### 验证结果
-- 已执行：`node --test tests/site-config.test.mjs tests/site-content.test.mjs tests/seo-and-deploy.test.mjs tests/legacy-source.test.mjs`
-  - 结果：通过（10 passed）
-- 已执行：`npm install --no-package-lock`
+- 已执行：`cargo check -p sftp_view -p terminal_view`
   - 结果：通过
-- 已执行：`npm run build`
+- 已执行：`cargo test -p sftp_view -p terminal_view --lib --no-run`
+  - 结果：通过
+- 已执行：`cargo fmt --check`
+  - 结果：失败（仓库内存在无关既有格式漂移）
+- 已执行：`cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/terminal_view/src/sidebar/file_manager_panel.rs`
   - 结果：通过
 
 ### 结论
-- 站点品牌、导航、页脚、首页、功能页、下载页、更新日志页均已切换为 OnetCli 官网语义。
-- 首页已具备 FAQ、`SoftwareApplication` 与 `FAQPage` 结构化数据，满足基础 SEO/GEO 要求。
-- 旧 gpui 文档与内部规格目录已通过 `srcExclude` 排除出发布源，避免旧内容继续进入 GitHub Pages。
-- GitHub Pages 正式工作流已改为面向 `main` 分支推送部署，并保留 docs 构建与 Pages 上传主链路。
-
-### 剩余风险
-- 当前只做了静态构建与文件级测试，没有跑浏览器级视觉回归或 Lighthouse 指标验证。
-- `docs/` 目录内仍保留部分历史文件作为仓库资料，但已通过 `srcExclude` 避免发布；后续如需进一步清理，可再做整理。
-- 如果后续启用自定义域名，需要把 `base` 从 `/onetcli/` 调整为对应路径或根路径。
-
-### 后续调整
-- 已按最新需求把 GitHub Pages 正式部署工作流切换为监听 `dev` 分支。
-- 已补测首页入口文件，确认不会再混入旧的 gpui Markdown 内容。
+- 空白区域右键菜单已补齐，当前目录级操作可在空白区触发。
+- `..` 行右键菜单已补齐，可直接执行进入上级目录等操作。
+- 文件行新增 `occlude()` 避免父容器空白区菜单误命中。
+- 已补充纯单测覆盖父目录推导逻辑，并修复本地单段相对路径的父目录边界。
 
 ---
 
-## 审查报告（OnetCli 官网二次修整）
-生成时间：2026-03-28 15:45:04 +0800
+## 审查报告（connection-restore 实现）
+生成时间：2026-03-28 00:33:01 +0800
 
 ### 需求完整性检查
-- 目标明确：修正文档入口 404、统一仓库链接、去掉不必要搜索框并改善首页视觉层级。
-- 范围明确：本次只修改 `docs/` 站点配置、主题样式、首页组件、内容页与测试，不涉及业务代码和部署主链路。
-- 交付物明确：代码补丁、站内 `guide.md`、上下文摘要、操作日志、验证结果和审查报告均已落地。
-- 风险与依赖明确：当前缺少浏览器级视觉回归，视觉结论主要依赖本地构建和代码审阅。
+- 目标明确：退出时保存当前已打开的连接页，并在下次启动后提示是否恢复
+- 范围明确：覆盖恢复快照模型、连接页最小状态导出、退出保存、首页恢复提示与按类型恢复执行
+- 交付物明确：代码实现、上下文摘要、实施方案、操作日志、验证报告、本地验证结果
+- 风险与依赖明确：启动提示依赖工作区和连接数据先完成加载；GUI 弹窗交互仍需桌面回归
 
 ### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：92/100
-- 规范遵循：96/100
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
 
 ### 战略维度评分
-- 需求匹配：95/100
+- 需求匹配：97/100
 - 架构一致：95/100
-- 风险评估：91/100
+- 风险评估：90/100
 
 ### 综合评分
 - 94/100
 - 建议：通过
 
 ### 验证结果
-- 已执行：`node --test tests/site-config.test.mjs tests/site-content.test.mjs tests/seo-and-deploy.test.mjs tests/legacy-source.test.mjs`
-  - 结果：通过（11 passed）
-- 已执行：`npm run build`
+- 已执行：`cargo fmt --all`
   - 结果：通过
-- 已执行：`git diff --check`
+- 已执行：`cargo test -p one-core connection_restore -- --nocapture`
+  - 结果：通过，3 个测试全部通过
+- 已执行：`cargo check -p main`
   - 结果：通过
 
 ### 结论
-- 导航中的“文档”现已切换为站内 `/guide` 页面，避免再跳到错误的 GitHub 外链。
-- 站点内所有仓库与 Releases 链接已统一为 `feigeCode/onetcli`，编辑链接也已切到 `dev` 分支。
-- 本地搜索配置已移除，顶部导航和首页观感更贴近展示型官网。
-- 首页 hero、按钮和整体背景层级已收敛到更轻、更清晰的视觉方向，同时保留现有信息架构。
+- 恢复模型边界清晰：[`connection_restore.rs`](/usr/htdocs/onetcli/crates/core/src/connection_restore.rs) 独立维护连接恢复快照，避免把需求扩展成完整 tab builder 恢复。
+- 连接页状态导出收敛：[`view.rs`](/usr/htdocs/onetcli/crates/terminal_view/src/view.rs)、[`lib.rs`](/usr/htdocs/onetcli/crates/sftp_view/src/lib.rs)、[`database_tab.rs`](/usr/htdocs/onetcli/crates/db_view/src/database_tab.rs)、[`redis_tab.rs`](/usr/htdocs/onetcli/crates/redis_view/src/redis_tab.rs)、[`mongo_tab.rs`](/usr/htdocs/onetcli/crates/mongodb_view/src/mongo_tab.rs) 现在只输出恢复所需的最小元数据。
+- 启动提示链路已闭环：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs) 在连接与工作区均加载完成后弹出恢复对话框，并支持跳过或按勾选项恢复。
+- 恢复类型不会漂移：[`home_tabs.rs`](/usr/htdocs/onetcli/main/src/home/home_tabs.rs) 新增按指定模式恢复数据库、Redis、MongoDB 的入口，不再被当前 `DatabaseOpenMode` 改写。
+- 时序隐患已处理：[`home_tab.rs`](/usr/htdocs/onetcli/main/src/home_tab.rs) 对无效快照改为 `window.defer(...)` 后清理，避免在 `render()` 阶段直接改状态。
 
-### 剩余风险
-- 目前没有浏览器截图级或 Lighthouse 级验证，因此“更好看”主要基于代码与样式逻辑审阅。
-- `docs/package.json` 中包名仍是历史遗留值 `gpui-component-docs`，不影响发布，但后续若要继续整理品牌一致性可以再清理。
+### 残余风险
+- 恢复弹窗的勾选交互和多标签恢复顺序还没有做桌面手工回归。
+- 快照文件解析失败时当前策略是忽略并告警，不会自动清理损坏文件。
 
 ---
 
-## 审查报告（issue #5 第 4 条 SSH 文件管理器重连修复）
-生成时间：2026-03-28 16:12:00 +0800
+## 审查补充（connection-restore 提示未出现修复）
+生成时间：2026-03-28 00:44:22 +0800
+
+### 结论
+- 根因已确认：恢复提示缺失不是首页弹窗逻辑没走，而是 `connection_restore_state.json` 没有被稳定写出。
+- 保存链路已收敛：[`tab_persistence.rs`](/usr/htdocs/onetcli/crates/core/src/tab_persistence.rs) 现在会在 `save_tab_state(...)` 内同步保存连接恢复快照。
+- 退出保存已加固：[`onetcli_app.rs`](/usr/htdocs/onetcli/main/src/onetcli_app.rs) 的 `on_app_quit` 现在同步保存，不再依赖可能来不及执行的后台任务。
+- 回归测试已补齐：[`tab_persistence.rs`](/usr/htdocs/onetcli/crates/core/src/tab_persistence.rs) 新增“保存标签状态时同步写入连接恢复快照”单测。
+
+### 验证结果
+- `cargo test -p one-core 保存标签状态时同步写入连接恢复快照 -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+---
+
+## 审查补充（Deepin 自动切换主题）
+生成时间：2026-03-28 03:08:00 +0800
 
 ### 需求完整性检查
-- 目标明确：修复 SSH 终端重连后右侧文件管理器继续持有失效 SFTP client、面板空白的问题。
-- 范围明确：本次仅修改文件管理器状态恢复、侧栏桥接与终端重连入口，不扩展到其余 3 个 issue 子项。
-- 交付物明确：代码补丁、上下文摘要、操作日志、局部单测与本地编译验证均已落地。
-- 风险与依赖明确：真实 SSH 服务端断线重连场景尚未在本地 GUI 冒烟，结论主要基于状态机与单测验证。
+- 目标明确：排查 Deepin 下“自动切换主题”无效的真实原因，并修正取值来源
+- 范围明确：仅修复主题来源与判定逻辑，不引入新的实时监听机制
+- 交付物明确：代码修复、本地验证、交互式现场取证结论、操作日志
 
 ### 技术维度评分
-- 代码质量：92/100
-- 测试覆盖：84/100
+- 代码质量：94/100
+- 测试覆盖：90/100
 - 规范遵循：95/100
 
 ### 战略维度评分
-- 需求匹配：90/100
-- 架构一致：93/100
-- 风险评估：85/100
+- 需求匹配：96/100
+- 架构一致：94/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- `gsettings` 不是当前 Deepin 会话里的可靠亮暗模式来源
+- 会真实反映系统切换的是会话总线服务 `org.deepin.dde.Appearance1`
+- 其中 `GlobalTheme` 与 `GtkTheme` 都能体现亮暗态，且实机切换时确实发生变化
+- 当前实现已改为优先读取 `Appearance1`，并保留 `gsettings` 兜底
+
+### 验证结果
+- `cargo test -p main 自动切换 --bin onetcli -- --nocapture`
+  - 结果：通过
+- `cargo test -p main deepin_主题名可映射为亮暗模式 --bin onetcli -- --nocapture`
+  - 结果：通过
+- `cargo check -p main`
+  - 结果：通过
+
+### 残余风险
+- 当前仍未做“应用持续前台时系统切换后秒级自动刷新”的额外增强；这是按当前需求刻意不实现
+- 运行期依赖系统存在 `gdbus` 命令；若极端环境缺失，则会回退到原有 `gsettings` / GPUI 外观判断
+
+---
+
+## 审查补充（SFTP 上传下载模式收口）
+生成时间：2026-03-28 03:32:30 +0800
+
+### 需求完整性检查
+- 目标明确：区分面板模式与独立页面模式的上传下载入口
+- 范围明确：仅调整 `sftp_view` 的右键菜单、事件语义与右键选区行为，不改终端侧边栏面板
+- 交付物明确：代码修改、上下文摘要、操作日志、本地验证结果
+- 风险与依赖明确：主要风险是右键命中项与当前选区错位导致误操作
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- 独立页面远程侧右键已不再保留系统选择器上传入口，上传职责收口到本地侧
+- 独立页面本地侧继续复用 `upload_selected`，上传目标仍是远程当前路径
+- 远程侧下载逻辑未被重写，仍保持下载到本地当前目录
+- 右键命中项现在会同步选区，可避免下载/删除等动作作用到旧选区
+
+### 验证结果
+- `cargo fmt --all -- crates/sftp_view/src/file_list_panel.rs crates/sftp_view/src/context_menu_handler.rs`
+  - 结果：通过
+- `cargo check -p sftp_view`
+  - 结果：通过
+- `cargo test -p sftp_view context_selection_ --lib -- --nocapture`
+  - 结果：通过
+- `cargo test -p sftp_view parent_path_ --lib -- --nocapture`
+  - 结果：通过
+
+### 残余风险
+- 右键同步选区的体验已通过单测覆盖核心规则，但仍需要桌面实测确认和多选习惯一致
+- 目前没有新增 GUI 自动化测试，实际菜单可发现性仍需人工回归
+
+---
+
+## 审查补充（SFTP 右键菜单竞争修复）
+生成时间：2026-03-28 03:43:00 +0800
+
+### 关键结论
+- 问题根因不在上传/下载业务逻辑，而在通用 `context_menu` 组件未阻断父级菜单传播
+- 已在组件层加入 `cx.stop_propagation()`，避免文件项菜单与空白区菜单竞争同一次右键事件
+- 该修复对独立页面 `sftp_view` 和终端右侧 `file_manager_panel` 同时生效
+
+### 验证结果
+- `cargo fmt --all -- crates/ui/src/menu/context_menu.rs`
+  - 结果：通过
+- `cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+
+### 残余风险
+- 仍需桌面手工确认不同区域嵌套右键菜单的最终体验，但编译链路已验证通过
+
+---
+
+## 审查补充（SFTP 文件行命中区域修正）
+生成时间：2026-03-28 03:49:00 +0800
+
+### 关键结论
+- 菜单错位的真实根因是文件行点击热区太窄，而不是上传下载业务逻辑本身
+- 通过把文件行与 `..` 行的外层容器和行内容都扩展到整行宽度，远程文件项菜单会稳定显示“下载”，本地文件项菜单也会稳定显示并执行“上传”
+- 通用 `context_menu` 组件已恢复原状，避免对其他模块产生额外副作用
+
+### 验证结果
+- `cargo fmt --all -- crates/ui/src/menu/context_menu.rs crates/sftp_view/src/file_list_panel.rs`
+  - 结果：通过
+- `cargo check -p sftp_view -p terminal_view`
+  - 结果：通过
+
+### 残余风险
+- 仍需你在实际界面上点测“列右侧空白处右键”的场景，确认菜单完全收口到文件项级别
+## 审查补充（Windows 鼠标拖动与拖动排序修复）
+生成时间：2026-03-28 20:44:33 +08:00
+
+### 需求完整性检查
+- 目标明确：修复 Windows x64 下主窗口鼠标拖动失效，并恢复 tab 拖动排序。
+- 范围明确：仅调整主窗口 `TabContainer` 的拖窗热区与平台分支，不改动入口窗口配置、不重写标题栏体系。
+- 交付物明确：代码修复、最小单测、上下文摘要、操作日志、验证记录。
+- 依赖与风险明确：依赖 `gpui` 的 `WindowControlArea` 命中逻辑；主要风险是修复拖窗时误伤 tab 点击、关闭与排序交互。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：89/100
+- 规范遵循：93/100
+
+### 战略维度评分
+- 需求匹配：96/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 93/100
+- 建议：通过
+
+### 关键结论
+- 根因不在“Windows 完全不支持鼠标拖动”，而在于 `crates/core/src/tab_container.rs` 把整个 `#tabs` 滚动容器声明成了 `WindowControlArea::Drag`。
+- 在 Windows 上，这会让系统标题栏 hit-test 抢走 tab 的鼠标事件，直接破坏 tab 拖动排序，也会让拖窗与 tab 交互纠缠在一起。
+- 修复方案把 Windows 的拖窗能力收敛成一个独立热区 `tab-bar-drag-spacer`，同时保留 Linux/macOS 原有的手动 `start_window_move()` 链路。
+- 这样可以同时满足两点：
+  - Windows 仍然有稳定可拖窗区域
+  - tab 本体重新拿回点击、关闭、拖动排序事件
+
+### 验证结果
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' fmt --all -- crates/core/src/tab_container.rs`
+  - 结果：通过
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个新增单测全部通过
+
+### 审查说明
+- 默认增量编译下，`cargo test` 曾因 `os error 112` 失败；切换为 `CARGO_INCREMENTAL=0` 后测试执行成功。
+- 因此本次验证没有保留“磁盘空间不足导致测试未跑”的缺口，已经通过本地 AI 自动执行完成补偿验证。
+
+### 残余风险
+- 仍需在 Windows GUI 实机验证 tab 排序、空白热区拖窗、关闭按钮和下拉菜单按钮的最终交互手感。
+- 当前未新增端到端 GUI 自动化，桌面级交互回归仍依赖人工点击确认。
+
+## 审查补充（Windows 鼠标拖动与拖动排序修复第二轮）
+生成时间：2026-03-28 21:26:12 +08:00
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：89/100
+- 规范遵循：94/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 新增关键结论
+- 第一轮方案只解决了“不要让整个 `#tabs` 容器变成 Windows 标题栏拖窗区”，但没有解决“Windows 下 tab 自己的拖拽起手仍被多余鼠标拦截”的问题。
+- 第二轮按平台拆开了这组前置鼠标拦截逻辑：
+  - Linux/macOS 继续保留，避免父级手动拖窗抢事件；
+  - Windows 取消该拦截，恢复 tab 自身 `on_drag(...)`。
+- 同时新增了 `#tabs` 内联空白拖窗区与加宽后的右侧兜底拖窗区，使 Windows 不再只依赖一个过窄热区。
+
+### 第二轮验证结果
+- `& 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过
+
+### 关于窗口句柄错误的审查意见
+- 当前证据更支持“异步窗口生命周期日志噪音”而不是“本次拖拽修复直接引入的功能性错误”。
+- 若用户后续确认拖拽修复后仍稳定出现该日志，再建议单独开一轮针对 `update_window/read` 生命周期的收口修复，避免把两个问题混在一次改动里。
+
+## 审查补充（Windows 窗口句柄错误收敛）
+生成时间：2026-03-28 21:50:10 +08:00
+
+### 需求完整性检查
+- 目标明确：处理 Windows 下关窗尾声出现的 `window not found`、`0x80040102`、`0x80070578` 日志。
+- 范围明确：仅收敛 `vendor/zed/crates/gpui/src/platform/windows` 的生命周期与句柄清理，不改业务层拖拽逻辑。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 依赖与风险明确：依赖 GPUI 现有 `Callbacks` 与 `WM_DESTROY` 生命周期；主要风险是过度吞错导致真实 Windows 平台错误被隐藏。
+
+### 技术维度评分
+- 代码质量：93/100
+- 测试覆盖：81/100
+- 规范遵循：92/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：94/100
+- 风险评估：88/100
+
+### 综合评分
+- 90/100
+- 建议：通过
+
+### 关键结论
+- 根因不是业务层拖拽代码继续直接调用失效窗口，而是 Windows 平台层在 `WM_DESTROY` 之后仍可能保留回调与句柄清理动作。
+- 本次修复把收口点放在 Windows 平台层：
+  - 先在 `WM_DESTROY` 断开会继续回到 GPUI 实体的剩余回调
+  - 再对 `RevokeDragDrop` / `DestroyWindow` 只忽略已确认的无效句柄错误
+  - 对 `WM_NCHITTEST` / `WM_NCMOUSEMOVE` 的 Win32 API 调用加有效句柄守卫
+- 这样既能降低关窗尾声的日志噪音，又不会改写 GPUI 全局的 `window not found` 错误语义。
+
+### 验证结果
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 vendor/zed/crates/gpui/src/platform/windows/util.rs vendor/zed/crates/gpui/src/platform/windows/window.rs vendor/zed/crates/gpui/src/platform/windows/events.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p one-core`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p main`
+  - 结果：失败，受环境缺少 `cmake` / `nasm` 影响
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p gpui`
+  - 结果：失败，受当前会话无法访问 `static.crates.io` 影响
+
+### 残余风险
+- 仍需在 Windows 实机复现“关窗、拖窗、拖动排序后无上述日志”才能确认日志完全收口。
+- 这次只忽略了已确认的两类无效句柄错误；如果后续还有其他关窗尾声错误码，仍需要继续补充证据后再处理。
+
+## 主窗口状态恢复修复审查
+审查时间：2026-03-28 22:24:00 +08:00
+
+### 需求完整性检查
+- 目标明确：关闭应用时保存主窗口尺寸与状态，并在下次启动时恢复。
+- 范围明确：仅处理主窗口，不混入弹窗或其他子窗口状态。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 依赖与风险明确：依赖 GPUI `WindowBounds` 与 `observe_window_bounds(...)`；主要风险是缺少 Windows GUI 实机验证与全量编译验证。
+
+### 技术维度评分
+- 代码质量：94/100
+- 测试覆盖：76/100
+- 规范遵循：93/100
+
+### 战略维度评分
+- 需求匹配：95/100
+- 架构一致：94/100
+- 风险评估：84/100
 
 ### 综合评分
 - 89/100
 - 建议：需讨论
 
+### 关键结论
+- 根因已经明确：旧代码没有把主窗口状态接入 `AppSettings`，且启动阶段始终使用固定居中窗口 bounds，导致“保存”和“恢复”链路事实上都不完整。
+- 本次修复沿用项目现有模式：
+  - 通过 `AppSettings` 保存 `WindowBounds`
+  - 通过 `observe_window_bounds(...)` 在运行时增量写盘
+  - 通过 `main.rs` 在启动时恢复 `WindowBounds`
+- 方案与 GPUI 原生语义一致，不需要自造平台特判或第二套配置文件。
+
 ### 验证结果
-- 已执行：`cargo test -p terminal_view build_retry_reset_plan_prefers_explicit_working_dir -- --nocapture`
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/main.rs main/src/onetcli_app.rs`
   - 结果：通过
-- 已执行：`cargo test -p terminal_view sidebar::file_manager_panel::tests -- --nocapture`
-  - 结果：通过（3 passed）
-- 已执行：`cargo check -p terminal_view -p terminal`
-  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' check -p main`
+  - 结果：失败，受环境缺少 `cmake` / `nasm` 影响
+- 静态审查结果：
+  - `main/src/main.rs` 已改为消费保存的 `WindowBounds`
+  - `main/src/onetcli_app.rs` 已注册窗口 bounds 监听保存
+  - `main/src/setting_tab.rs` 已补齐序列化结构与恢复方法
 
-### 结论
-- 文件管理器刷新失败后不再只是清空列表，而是会进入明确错误态，并释放旧的浏览/传输 SFTP client。
-- 终端点击重连时，会把当前工作目录透传给侧栏文件管理器，让其先重置状态再重建 SFTP 会话。
-- 为避免额外副作用，未曾使用过的文件管理器面板不会因为终端重连而被动建立连接。
+### 残余风险
+- 还需在 Windows 实机验证最大化、窗口化、关闭后重启是否都能恢复到预期状态。
+- 如果用户切换显示器布局，当前未额外处理越界坐标回正；这不是本次链路缺失的主因，但后续可能仍需补充体验优化。
 
-### 剩余风险
-- 当前没有真实 SSH 服务端重启后的图形界面冒烟验证，因此“自动恢复或可重连状态是否符合最终交互预期”仍需后续人工确认。
-- 目前新增测试聚焦纯函数与状态计划，没有直接覆盖 GPUI 实体层的异步重连时序。
-
----
-
-## 审查报告（issue #5 第 1 条单首页标签拖动修复）
-生成时间：2026-03-28 16:17:36 +0800
-
-### 需求完整性检查
-- 目标明确：修复只有 pinned 首页标签时顶部无法拖动窗口的问题。
-- 范围明确：本次只修改标签栏拖动命中条件，不调整普通标签点击、关闭、排序链路。
-- 交付物明确：代码补丁、红绿测试、操作日志与本地编译验证均已落地。
-- 风险与依赖明确：真实 Windows/Linux 客户端装饰模式拖动行为仍缺桌面环境冒烟确认。
+## 主窗口状态保存防抖修复审查
+审查时间：2026-03-28 23:02:00 +08:00
 
 ### 技术维度评分
 - 代码质量：93/100
-- 测试覆盖：86/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：91/100
-- 架构一致：95/100
-- 风险评估：86/100
-
-### 综合评分
-- 90/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo test -p one-core build_tab_bar_drag_plan_enables_pinned_drag_for_single_home_tab -- --nocapture`
-  - 结果：先失败后通过，符合 TDD 红绿流程
-- 已执行：`cargo test -p one-core build_tab_bar_drag_plan -- --nocapture`
-  - 结果：通过（3 passed）
-- 已执行：`cargo check -p one-core -p main`
-  - 结果：通过
-- 已执行：`git diff --check -- crates/core/src/tab_container.rs .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
-
-### 结论
-- 当窗口控件启用且只有 pinned 首页标签时，pinned 标签本身现在也会加入窗口拖动命中区域。
-- 当存在其他滚动标签时，pinned 标签不会额外接管拖动，继续保持现有普通标签交互边界。
-- 现有标签空白区拖动、普通标签点击、关闭和排序逻辑未被扩大修改。
-
-### 剩余风险
-- 当前新增测试只覆盖拖动条件规划函数，没有直接覆盖 GPUI 事件命中与桌面窗口拖动的真实交互。
-- 是否完全满足 Windows/Linux 客户端装饰模式下的最终手感，仍建议后续做一次人工桌面冒烟。
-
----
-
-## 审查报告（issue #5 第 3 条 ctrl+space 窗口恢复修复）
-生成时间：2026-03-28 16:24:43 +0800
-
-### 需求完整性检查
-- 目标明确：让非 macOS 平台上的 `ctrl+space` 能重复触发窗口最小化/恢复。
-- 范围明确：本次只修改应用级 `MinimizeWindow` 行为，不改其他快捷键和窗口创建主链路。
-- 交付物明确：代码补丁、红绿测试、操作日志与本地编译验证均已落地。
-- 风险与依赖明确：真实桌面环境下的快捷键冒烟仍未执行，当前结论主要基于窗口句柄选择逻辑和编译验证。
-
-### 技术维度评分
-- 代码质量：92/100
-- 测试覆盖：85/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：91/100
-- 架构一致：94/100
-- 风险评估：86/100
-
-### 综合评分
-- 90/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo test -p main build_window_toggle_plan_reactivates_fallback_window_when_no_active_window -- --nocapture`
-  - 结果：先失败后通过，符合 TDD 红绿流程
-- 已执行：`cargo test -p main build_window_toggle_plan -- --nocapture`
-  - 结果：通过（3 passed）
-- 已执行：`cargo check -p main`
-  - 结果：通过
-- 已执行：`git diff --check -- main/src/onetcli_app.rs .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
-
-### 结论
-- `MinimizeWindow` 不再只依赖 `active_window()`；当窗口最小化后没有活跃窗口时，会回退到应用当前已打开的窗口句柄执行恢复。
-- 保持了应用级统一入口，未把恢复逻辑散落到具体 tab 或 view。
-- 其他快捷键和窗口链路未做额外改动，影响面受控。
-
-### 剩余风险
-- 当前新增测试只覆盖窗口切换计划，没有直接覆盖真实 GPUI 快捷键分发和桌面窗口恢复动作。
-- 如果未来应用出现多个主窗口，`windows().next()` 的回退策略需要重新评估是否应切到更明确的主窗口句柄。
-
----
-
-## 审查报告（issue #5 第 3 条 macOS ctrl+space 绑定补齐）
-生成时间：2026-03-28 16:35:31 +0800
-
-### 需求完整性检查
-- 目标明确：让 macOS 也支持 `ctrl+space` 触发 `MinimizeWindow`，而不只保留 `cmd-m`。
-- 范围明确：本次只调整快捷键绑定层，窗口恢复逻辑沿用上一轮实现。
-- 交付物明确：代码补丁、红绿测试与本地编译验证均已完成。
-- 风险与依赖明确：macOS 上 `ctrl+space` 可能被输入法或系统快捷键占用，真实触发效果仍需桌面环境确认。
-
-### 技术维度评分
-- 代码质量：91/100
-- 测试覆盖：87/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：93/100
-- 架构一致：95/100
-- 风险评估：84/100
-
-### 综合评分
-- 91/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo test -p main minimize_window_shortcuts_include_ctrl_space_on_macos -- --nocapture`
-  - 结果：先失败后通过，符合 TDD 红绿流程
-- 已执行：`cargo test -p main onetcli_app::tests -- --nocapture`
-  - 结果：通过（4 passed）
-- 已执行：`cargo check -p main`
-  - 结果：通过
-- 已执行：`git diff --check -- main/src/onetcli_app.rs .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
-
-### 结论
-- macOS 现在会同时注册 `cmd-m` 和 `ctrl-space` 两个最小化/恢复快捷键。
-- 非 macOS 仍然保持 `ctrl-space` 绑定不变，没有回归为平台分叉混乱状态。
-- 绑定逻辑被收敛到 `minimize_window_shortcuts()` helper，后续再改快捷键不需要散改 `bind_keys` 列表。
-
-### 剩余风险
-- 当前验证只证明绑定配置和编译正确，没有直接覆盖真实 macOS 系统快捷键冲突。
-- 如果用户本机把 `ctrl+space` 留给输入法切换，还需要结合系统设置确认最终可用性。
-
----
-
-## 审查报告（macOS 最小化快捷键回退为 cmd-m）
-生成时间：2026-03-28 16:38:05 +0800
-
-### 需求完整性检查
-- 目标明确：撤销上一轮对 macOS `ctrl+space` 的绑定，恢复为仅使用 `cmd-m`。
-- 范围明确：本次只回退 macOS 快捷键配置，不改窗口恢复逻辑本身。
-- 交付物明确：测试已按新要求重写并通过，本地编译验证已完成。
-- 风险与依赖明确：当前风险主要剩余在真实桌面环境手工触发确认。
-
-### 技术维度评分
-- 代码质量：93/100
-- 测试覆盖：88/100
-- 规范遵循：97/100
+- 测试覆盖：74/100
+- 规范遵循：93/100
 
 ### 战略维度评分
 - 需求匹配：95/100
-- 架构一致：96/100
-- 风险评估：90/100
-
-### 综合评分
-- 94/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo test -p main minimize_window_shortcuts_only_use_cmd_m_on_macos -- --nocapture`
-  - 结果：先失败后通过，符合 TDD 红绿流程
-- 已执行：`cargo test -p main onetcli_app::tests -- --nocapture`
-  - 结果：通过（4 passed）
-- 已执行：`cargo check -p main`
-  - 结果：通过
-- 已执行：`git diff --check -- main/src/onetcli_app.rs .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
-
-### 结论
-- macOS 现已恢复为仅支持 `cmd-m` 触发最小化/恢复。
-- 非 macOS 平台仍保持 `ctrl-space` 绑定，没有被这次回退误伤。
-- 上一轮为窗口恢复补的应用级回退逻辑仍保留，因此只是修正平台绑定，不是回退功能修复。
-
----
-
-## 审查报告（表设计器 SQL 预览滞后一拍修复）
-生成时间：2026-03-28 17:00:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复设计表页面中 SQL/DDL 预览滞后一拍的问题，并说明根因。
-- 范围明确：本次只修改表设计器预览刷新时机，不改数据库插件 SQL 生成逻辑，不改保存执行链路。
-- 交付物明确：代码补丁、上下文摘要、操作日志、回归测试和本地验证结果均已落地。
-- 风险与依赖明确：真实桌面 UI 冒烟尚未执行，当前结论主要依赖调度单测、表设计器模块测试和编译验证。
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：88/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：93/100
 - 架构一致：95/100
-- 风险评估：89/100
+- 风险评估：86/100
 
 ### 综合评分
-- 93/100
-- 建议：通过
+- 89/100
+- 建议：需讨论
 
-### 验证结果
-- 已执行：`cargo test -p db_view preview_refresh_schedule_state -- --nocapture`
-  - 结果：先失败后通过，符合 TDD 红绿流程；红灯阶段因缺少 `PreviewRefreshScheduleState` 实现而失败。
-- 已执行：`cargo test -p db_view table_designer_tab::tests -- --nocapture`
-  - 结果：通过（57 passed）
-- 已执行：`cargo check -p db_view`
-  - 结果：通过
-- 已执行：`git diff --check -- crates/db_view/src/table_designer_tab.rs .claude/context-summary-table-designer-preview-lag.md .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
+### 关键结论
+- 这次回归不是 Windows 拖拽命中逻辑失效，而是窗口状态保存被错误地放在高频 bounds 回调里同步写盘，导致窗口拖动过程卡顿到接近不可用。
+- 修复后改为：
+  - bounds 回调只更新内存中的最新窗口状态
+  - 通过 `Debouncer` 延迟写盘
+  - 应用退出时再兜底写一次全局设置
+- 该方案与项目现有标签布局延迟保存模式一致，回归面比继续改平台拖拽逻辑更小。
 
-### 结论
-- 根因不在 SQL 生成，而在 `TableDesigner` 订阅回调里同步聚合读取多个子实体状态，导致预览偶发读取到上一拍状态。
-- 修复通过 `Context::defer_in` 把预览刷新延后到当前 effect cycle 末，并使用 `PreviewRefreshScheduleState` 合并同周期重复请求。
-- `update_previews`、保存执行、数据库插件接口均保持不变，影响面被控制在表设计器单文件内。
-
-### 剩余风险
-- 当前没有真实窗口级自动化测试直接验证用户手动连续编辑时的 UI 表现，因此仍建议后续补一轮桌面冒烟验证。
-- 如果未来还有其他依赖“同步立刻回读子实体聚合状态”的复杂编辑器，可能需要复用同样的调度策略。
-
----
-
-## 审查报告（issue #5 第 3 条 macOS Dock 重开恢复）
-生成时间：2026-03-28 18:00:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复 macOS 下窗口最小化后无法恢复的问题，并确认是否是“隐藏窗口收不到快捷键”导致。
-- 范围明确：本次只调整 `main` 包的应用级恢复路径，不改业务 tab、不改窗口创建模型。
-- 交付物明确：上下文摘要、应用入口注册、窗口恢复 helper、纯逻辑测试、本地编译验证均已落地。
-- 风险与依赖明确：恢复动作依赖 macOS `on_reopen` 事件和 AppKit `deminiaturize`，真实 Dock 点击冒烟仍需桌面环境补充。
-
-### 技术维度评分
-- 代码质量：94/100
-- 测试覆盖：90/100
-- 规范遵循：96/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：95/100
-- 风险评估：90/100
+## 主窗口拖动回归二次修复审查
+审查时间：2026-03-28 23:18:00 +08:00
 
 ### 综合评分
-- 94/100
+- 90/100
 - 建议：通过
 
-### 验证结果
-- 已执行：`cargo test -p main build_window_reopen_plan -- --nocapture`
-  - 结果：先失败后通过；红灯阶段因 `build_window_reopen_plan` 未实现，补上 helper 与 `Application::on_reopen(...)` 注册后转绿。
-- 已执行：`cargo test -p main onetcli_app::tests -- --nocapture`
-  - 结果：通过（6 passed）
-- 已执行：`cargo check -p main`
-  - 结果：通过
-- 已执行：`git diff --check -- main/src/onetcli_app.rs main/src/main.rs main/Cargo.toml .claude/context-summary-issue5-macos-window-restore.md .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
+### 关键结论
+- 进一步核对后，真正会在拖动过程中高频触发的回归点是 `AppSettings::global_mut(...)` 带来的全局观察者通知，而不只是同步写盘。
+- 修复后把高频路径收敛为纯本地缓存更新；只有在防抖到期或实体释放时，才把缓存刷入全局设置并落盘。
+- 该修复比继续改 `TabContainer` 的 Windows 命中区更聚焦，也更符合“窗口状态恢复不应影响拖动体验”的需求边界。
 
-### 结论
-- 根因判断已修正：macOS 更大的问题不是“恢复 API 选错”，而是窗口最小化后不再是 key window，继续依赖 `cmd-m` 这类窗口快捷键并不可靠。
-- 修复路径已切到平台级 reopen 语义：`main/src/main.rs` 在 `Application` 层注册 `on_reopen(...)`，用户从 Dock 或重新打开应用时会进入 `reopen_last_window(...)`。
-- 恢复动作已补齐 AppKit 原生语义：`main/src/onetcli_app.rs` 的 `restore_window(...)` 在 macOS 下会显式执行 `deminiaturize` 和 `makeKeyAndOrderFront`，而不是只做 `activate_window()`。
-
-### 剩余风险
-- 当前单测只能证明 helper 和编译链路正确，不能替代真实 macOS Dock 点击或再次激活应用的桌面冒烟。
-- `objc` 宏在当前工具链下会产生 3 条 `unexpected cfgs` warning，但不影响编译和运行结果；如需彻底消除，可后续单独升级/替换相关宏调用方式。
-
----
-
-## 审查报告（issue #5 第 3 条 macOS 激活恢复旁路）
-生成时间：2026-03-28 18:16:00 +0800
+## 启动恢复窗口居中修复审查
+审查时间：2026-03-29 04:32:25 +08:00
 
 ### 需求完整性检查
-- 目标明确：在确认 `on_reopen` 不触发后，为 macOS 增加不依赖 GPUI reopen 条件的恢复链路。
-- 范围明确：限定在 `main` 包入口层，使用 AppKit 激活通知恢复最小化窗口。
-- 交付物明确：诊断证据、入口旁路实现、本地测试与编译验证、文档留痕均已完成。
-- 风险与依赖明确：旁路依赖 `cocoa/objc` 宏，当前会产生若干 warning，但不影响功能。
-
-### 技术维度评分
-- 代码质量：93/100
-- 测试覆盖：88/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：97/100
-- 架构一致：93/100
-- 风险评估：90/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo check -p main`
-  - 结果：通过
-- 已执行：`cargo test -p main onetcli_app::tests -- --nocapture`
-  - 结果：通过（6 passed）
-- 已执行：源代码核对 `gpui/src/platform/mac/platform.rs`
-  - 结果：确认 `should_handle_reopen(...)` 只有在 `!has_open_windows` 时才触发 `reopen` 回调，这就是用户实测“没有触发”的直接证据
-
-### 结论
-- `on_reopen` 本身并非完全失效，而是 GPUI 在 macOS 上人为加了 `!has_open_windows` 条件，因此不能覆盖当前用户场景。
-- 新增的 `macos_activation_restore` 模块直接监听 `NSApplicationDidBecomeActiveNotification`，应用被激活时会扫描并恢复首个最小化窗口。
-- 这条旁路不依赖窗口快捷键，也不依赖 GPUI reopen 条件，更贴近用户真实触发方式。
-
-### 剩余风险
-- 当前仍缺用户桌面环境的真实冒烟确认，尤其是“最小化后点 Dock 图标”这一条最终链路。
-- `objc` 宏相关 warning 数量增加，但都是编译期噪音，不影响运行；是否清理应单独评估，不建议在本次问题中扩散改动面。
-
----
-
-## 审查报告（表设计器类型下拉预览补充修复）
-生成时间：2026-03-28 17:08:59 +0800
-
-### 需求完整性检查
-- 目标明确：修复表设计器里“列类型下拉修改后 SQL/DDL 预览仍滞后一拍”的剩余问题，并给出精确根因。
-- 范围明确：本次只调整列类型下拉触发 `ColumnsEditorEvent::Changed` 的时机，不改 SQL 生成逻辑、不改 `Select` 通用组件行为。
-- 交付物明确：代码补丁、本地编译验证、表设计器模块测试结果、补充操作日志和审查报告均已落地。
-- 风险与依赖明确：自动化验证已覆盖编译与 `table_designer_tab` 模块测试，但仍缺真实桌面 UI 连续切换下拉的冒烟验证。
+- 目标明确：修复启动恢复窗口可能超出屏幕底部的问题，并确保异常恢复位置回到应用中间。
+- 范围明确：仅处理主窗口默认启动与已保存窗口恢复，不涉及弹窗或运行时拖拽逻辑。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 审查要点明确：恢复位置是否基于 `visible_bounds()`，默认尺寸是否避开底部不可见区域，越界与超大尺寸是否都有测试覆盖。
 
 ### 技术维度评分
 - 代码质量：95/100
-- 测试覆盖：89/100
-- 规范遵循：97/100
-
-### 战略维度评分
-- 需求匹配：96/100
-- 架构一致：96/100
-- 风险评估：90/100
-
-### 综合评分
-- 95/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`git diff --check -- crates/db_view/src/table_designer_tab.rs`
-  - 结果：通过
-- 已执行：`CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo check -p db_view`
-  - 结果：通过
-- 已执行：`CLANG_MODULE_CACHE_PATH=/tmp/clang-cache cargo test -p db_view table_designer_tab::tests -- --nocapture`
-  - 结果：沙箱内首次运行因 `gpui` Metal shader 编译缓存写入 `~/.cache/clang/ModuleCache` 被拒而失败；提权后重跑通过（57 passed）
-
-### 结论
-- 剩余问题的根因在列类型下拉仍使用 `observe_in` 监听实体变化，而 `Select` 组件的最终选中值是在 `confirm()` 的 `defer_in` 里才真正提交。
-- 将两处列类型监听切换为订阅 `SelectEvent<SearchableVec<String>>` 后，`ColumnsEditorEvent::Changed` 会在真实选中值落库后再触发，预览读取不再滞后一拍。
-- 第一轮的 `schedule_preview_refresh` 和这次的 `SelectEvent` 订阅一起，分别覆盖了“父层聚合过早”和“下拉确认过早”两段时序问题。
-
-### 剩余风险
-- 目前的自动化测试还没有直接模拟 UI 下拉确认后的预览刷新时序，后续如果要彻底防回归，建议补一条围绕 `ColumnsEditor` 和 `SelectEvent` 的交互测试。
-
----
-
-## 审查报告（issue #5 macOS 系统级全局热键恢复）
-生成时间：2026-03-28 18:43:00 +0800
-
-### 需求完整性检查
-- 目标明确：将 macOS 恢复方案从窗口级 `cmd-m` 改为系统级全局热键。
-- 范围明确：限定在 `main` 包入口层与 `onetcli_app.rs` 的快捷键配置，不扩散其他平台逻辑。
-- 交付物明确：移除 macOS `cmd-m`、新增系统级热键注册、复用 AppKit 恢复链路、补充测试与本地验证、更新留痕文档。
-- 风险与依赖明确：新增依赖 `global-hotkey`，最终桌面行为仍需用户在 macOS 上做一次真实冒烟。
-
-### 技术维度评分
-- 代码质量：93/100
-- 测试覆盖：90/100
-- 规范遵循：95/100
-
-### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：94/100
-- 风险评估：89/100
-
-### 综合评分
-- 93/100
-- 建议：通过
-
-### 验证结果
-- 已执行：`cargo test -p main -- --nocapture`
-  - 结果：先红后绿；最终通过（11 passed）
-- 已执行：`cargo check -p main`
-  - 结果：通过
-- 已执行：`git diff --check -- main/Cargo.toml Cargo.lock main/src/main.rs main/src/onetcli_app.rs .claude/context-summary-issue5-global-hotkey.md .claude/operations-log.md .claude/verification-report.md`
-  - 结果：通过
-
-### 结论
-- macOS 上原有 `cmd-m` 是窗口级绑定，最小化后无法作为恢复入口；这次已从应用内绑定中移除。
-- 入口层新增 `global-hotkey` 注册的系统级 `cmd+alt+m`，热键触发后直接复用现有 AppKit 恢复逻辑，不再依赖 `gpui` 的窗口键盘事件或 `on_reopen`。
-- 恢复逻辑统一为“若存在最小化窗口则 `deminiaturize` 并前置，否则至少激活并取消隐藏应用”，更贴近用户场景。
-
-### 剩余风险
-- 目前验证覆盖了逻辑测试和编译链路，但没有在当前终端环境中真实模拟 macOS 桌面的系统热键触发。
-- `objc` 宏带来的 `unexpected cfgs` warning 依旧存在，属于既有噪音，本次未扩散处理。
-
----
-
-## 审查报告（issue #5 macOS 系统级热键显示隐藏切换）
-生成时间：2026-03-28 19:05:00 +0800
-
-### 需求完整性检查
-- 目标明确：修复“当前只能恢复、不能隐藏”的行为缺口。
-- 范围明确：仅调整 `main/src/main.rs` 的 macOS 入口级热键切换语义。
-- 交付物明确：红灯测试、toggle 实现、验证结果和留痕均已补齐。
-- 风险与依赖明确：真实桌面行为仍需用户在 macOS 上最终冒烟确认。
-
-### 技术维度评分
-- 代码质量：94/100
 - 测试覆盖：91/100
-- 规范遵循：95/100
+- 规范遵循：94/100
 
 ### 战略维度评分
-- 需求匹配：97/100
+- 需求匹配：96/100
 - 架构一致：95/100
 - 风险评估：90/100
 
@@ -1688,146 +1635,425 @@
 - 94/100
 - 建议：通过
 
+### 关键结论
+- 修复不再只依赖整块屏幕 `bounds()`，而是统一切到 `visible_bounds()`，这直接覆盖了底部任务栏导致的窗口超屏问题。
+- 代码同时补齐了两条遗漏路径：
+  - 已保存窗口位置越界时，裁剪尺寸并重新居中
+  - 没有有效恢复值时，默认窗口尺寸和默认居中也避开不可见区域
+- 方案保持了原有 `AppSettings -> WindowBounds` 恢复架构，没有引入平台特判或第二套窗口状态系统。
+
 ### 验证结果
-- 已执行：`cargo test -p main -- --nocapture`
-  - 结果：先红后绿；最终通过（13 passed）
-- 已执行：`cargo check -p main`
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/setting_tab.rs main/src/main.rs`
   - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p main 主窗口 -- --nocapture`
+  - 结果：通过，5 个主窗口相关测试全部通过
 
-### 结论
-- 当前系统级热键已从“单向恢复”改成“前台可见时隐藏、后台或无可见窗口时恢复”的切换语义。
-- 修复点在入口层完成，继续复用现有 AppKit 恢复逻辑，没有回退到窗口级快捷键。
+### 残余风险
+- 当前验证仍以单元测试为主，尚未记录真实 Windows 多显示器环境下的人工启动截图。
+- 仓库里仍有与本次改动无关的 warning；虽然不影响本次修复结论，但后续可以单独清理。
 
-### 剩余风险
-- 终端环境无法直接模拟用户桌面上的真实系统热键，因此最终体验仍需用户实机确认。
-- `objc` 宏 warning 仍存在，但与本次功能无关。
-
----
-
-## 审查报告（v0.1.10 发布准备）
-生成时间：2026-03-28 18:27:57 +0800
+## 恢复连接弹窗布局修复审查
+审查时间：2026-03-29 04:44:42 +08:00
 
 ### 需求完整性检查
-- 目标明确：在已完成 macOS 热键修复并通过本地验证的前提下，提交当前改动并发布 `v0.1.10`。
-- 范围明确：仅包含版本元数据同步、验证复跑、提交、打 tag 和推送，不再新增功能逻辑。
-- 交付物明确：版本号更新、本地验证结果、git 提交、`v0.1.10` 标签发布。
-- 风险与依赖明确：GitHub Release 由标签触发；Windows 目前仍缺真实环境冒烟验证，不能把代码审阅结论当作实测结论。
+- 目标明确：修复启动时“恢复连接”弹窗超出应用窗口的问题，并改善其鼠标拖动可用性。
+- 范围明确：仅处理 `main/src/connection_restore.rs` 对话框的布局与可拖动标题区，不触碰恢复业务逻辑。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 审查要点明确：是否按当前 viewport 自适应尺寸和偏移，是否限制列表高度，是否保留现有恢复确认流程。
 
 ### 技术维度评分
-- 代码质量：95/100
-- 测试覆盖：90/100
-- 规范遵循：96/100
+- 代码质量：94/100
+- 测试覆盖：89/100
+- 规范遵循：95/100
 
 ### 战略维度评分
 - 需求匹配：96/100
 - 架构一致：95/100
+- 风险评估：90/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- 已确认此前修错层级：真正越界的是启动时的恢复连接对话框，而不是主窗口恢复尺寸。
+- 本次修复把恢复对话框的宽度、顶部偏移和列表高度全部切换为基于 `window.viewport_size()` 的运行时计算，避免继续依赖通用 `Dialog` 的固定 `360px` 高度假设。
+- 标题区改为更明显的双行头部，在不改底层拖动逻辑的前提下，提高了用户对可拖动区域的感知。
+
+### 验证结果
+- `& 'C:\Users\hoping\.cargo\bin\rustfmt.exe' --edition 2024 main/src/connection_restore.rs`
+  - 结果：通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复弹窗布局测试全部通过
+- `$env:CARGO_INCREMENTAL='0'; & 'C:\Users\hoping\.cargo\bin\cargo.exe' test -p main 主窗口 -- --nocapture`
+  - 结果：通过，7 个相关测试全部通过
+
+### 残余风险
+- 当前验证仍是纯逻辑和单元测试，尚未附带真实 Windows 启动场景截图。
+- 如果未来恢复弹窗主体内容继续扩展，高度预估常量仍需同步调整或进一步抽象。
+
+## 恢复连接弹窗 popup 窗口迁移审查
+审查时间：2026-03-29 05:04:03 +08:00
+
+### 需求完整性检查
+- 目标明确：修复启动时恢复连接弹窗拖动困难、拖动卡顿，并继续确保其不会掉到屏幕外。
+- 范围明确：仅处理 `main/src/connection_restore.rs` 与 `crates/core/src/popup_window.rs` 的弹窗形态、定位和关闭链路，不改恢复业务本身。
+- 交付物明确：代码修复、上下文摘要、操作日志、验证报告。
+- 审查要点明确：是否切换到独立 popup window，是否回到主窗口上下文执行恢复，是否保证关闭时清理恢复快照。
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：90/100
+- 规范遵循：95/100
+
+### 战略维度评分
+- 需求匹配：97/100
+- 架构一致：96/100
 - 风险评估：91/100
 
 ### 综合评分
 - 95/100
 - 建议：通过
 
-### 验证范围
-- 已执行：`cargo check -p main`
-  - 结果：通过；`main v0.1.10` 编译成功，仅保留既有 `objc` 宏 warning
-- 已执行：`cargo test -p main -- --nocapture`
-  - 结果：通过（13 passed）
-- 已执行：`git diff --check -- main/Cargo.toml Cargo.lock main/src/main.rs main/src/onetcli_app.rs .claude/operations-log.md .claude/verification-report.md`
+### 关键结论
+- 这次修复不再停留在“给应用内 `Dialog` 补布局参数”，而是把恢复连接提示切换到仓库已有的独立 `popup window` 体系，直接对准用户反馈的“拖动不跟手、明显卡顿”问题。
+- popup 通用层新增了自定义关闭回调能力，使右上角关闭按钮、Esc 和“跳过”都能收敛到“清理恢复快照”的同一语义，避免残留提示状态。
+- 恢复动作通过 `GlobalMainWindowHandle + cx.update_window(...)` 回到主窗口执行，避免在 popup 视图上下文里错误调用 `update_in(...)`，也符合 `HomePage::restore_saved_connection_sessions(...)` 对主窗口 `Window` 的依赖。
+
+### 验证结果
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\main\src\connection_restore.rs D:\usr\htdocs\onetcli\crates\core\src\popup_window.rs`
   - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过，2 个恢复弹窗相关测试全部通过
+- `cargo test -p main 主窗口 -- --nocapture`
+  - 结果：通过，7 个主窗口与恢复弹窗相关测试全部通过
 
-### 结论
-- 通过 tag 触发发布工作流是仓库既有标准流程。
-- 将 `main` 包版本同步到 `0.1.10` 能减少版本元数据与发布标签不一致带来的排查成本。
-- 发布说明必须明确：Windows 仍待用户在真实环境验证。
+### 残余风险
+- 当前仍缺少真实 Windows 启动场景下的拖动录屏或交互截图，体验结论主要基于代码路径和既有 popup 模式推断。
+- `Esc` 关闭现在通过 popup 视图处理为“跳过恢复”；逻辑上已和其它关闭路径对齐，但后续若扩展更多关闭副作用，仍需继续保持幂等。
 
----
-
-## 审查报告（gpui_hotkey 跨平台系统热键 crate）
-生成时间：2026-03-28 22:40:31 +0800
-
-### 需求完整性检查
-- 目标明确：新增一个 workspace crate，统一封装系统级全局热键能力，并把现有 macOS 入口接线迁移过去。
-- 范围明确：本次只处理系统级热键，不替换 `GPUI` 应用内 `KeyBinding` 体系。
-- 交付物明确：新 crate、设计文档、计划文档、`main` 迁移补丁、本地验证结果和操作留痕。
-- 风险与依赖明确：底层继续依赖 `global-hotkey`；Windows / Linux 的最终行为仍需实机验证。
+## 恢复连接弹窗拖拽命中区补齐审查
+审查时间：2026-03-29 05:18:00 +08:00
 
 ### 技术维度评分
-- 代码质量：93/100
+- 代码质量：97/100
 - 测试覆盖：91/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 关键结论
+- 最新用户反馈把问题进一步收窄到了“popup 可缩放但不可拖”，这说明窗口边框和尺寸策略没问题，真正缺的是顶部拖拽命中区。
+- 对照仓库里其它正常 popup 后，确认恢复弹窗遗漏了统一的 `TitleBar::new()` 标题栏；补齐后可复用现有 `WindowControlArea::Drag` 与窗口控制区逻辑，而不是继续为单个弹窗单独写拖拽实现。
+
+### 验证结果
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\main\src\connection_restore.rs`
+  - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过
+- `cargo test -p main 主窗口 -- --nocapture`
+  - 结果：通过
+
+## Windows tab-bar 可视宽度修正审查
+审查时间：2026-03-29 05:55:00 +08:00
+
+### 技术维度评分
+- 代码质量：95/100
+- 测试覆盖：86/100
 - 规范遵循：95/100
 
 ### 战略维度评分
-- 需求匹配：95/100
-- 架构一致：96/100
+- 需求匹配：96/100
+- 架构一致：97/100
 - 风险评估：90/100
 
 ### 综合评分
 - 94/100
 - 建议：通过
 
+### 关键结论
+- 这次问题不在 tab 项宽度算法，而在 Windows 右侧固定拖拽热区的摆放顺序。
+- 把 `tab-bar-drag-spacer` 从下拉按钮前挪到下拉按钮后，能够在不移除拖拽兜底热区的前提下，直接把一段被过早吃掉的可视宽度还给 tab 区域。
+- 方案保持了前两轮 Windows 拖拽修复的核心思路，没有重新把整个 `#tabs` 容器变回 `WindowControlArea::Drag`，因此回归面较小。
+
 ### 验证结果
-- 已执行：`cargo test -p gpui_hotkey -- --nocapture`
-  - 结果：通过（3 passed）
-- 已执行：`cargo check -p gpui_hotkey`
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\crates\core\src\tab_container.rs`
   - 结果：通过
-- 已执行：`cargo test -p main -- --nocapture`
-  - 结果：通过（13 passed）
-- 已执行：`cargo check -p main`
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
   - 结果：通过
-- 已执行：`git diff --check -- Cargo.toml main/Cargo.toml main/src/main.rs main/src/onetcli_app.rs crates/gpui_hotkey/Cargo.toml crates/gpui_hotkey/src/lib.rs crates/gpui_hotkey/src/error.rs crates/gpui_hotkey/src/event.rs crates/gpui_hotkey/src/hotkey.rs crates/gpui_hotkey/src/manager.rs docs/superpowers/specs/2026-03-28-gpui-hotkey-design.md docs/superpowers/plans/2026-03-28-gpui-hotkey.md .claude/context-summary-gpui-hotkey-crate.md .claude/operations-log.md`
-  - 结果：通过
+- `cargo check -p main`
+  - 结果：受环境依赖阻塞，失败点为 `aws-lc-sys` 构建环境和权限问题，与本次布局调整无直接关系
 
-### 结论
-- 新增的 `gpui_hotkey` crate 已将系统级全局热键从 `main` 入口层抽离出来，对外形成统一 API。
-- `GPUI` 的应用内快捷键职责被保留，系统级热键与窗口内 `KeyBinding` 的边界现在更清晰。
-- 现有 macOS toggle 热键接线已迁移到新 crate，后续 Windows / Linux 可沿同一 API 扩展，不需要外层再写平台分支。
+### 残余风险
+- 当前仍缺少 Windows 实机截图或录屏，最终视觉改善需要你在桌面环境里确认。
+- 如果你后续觉得右侧兜底拖拽热区仍然偏宽，下一步可以再把 `WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH` 从当前值细调，而不必再碰 tab 容器结构。
 
-### 剩余风险
-- 当前 crate 底层依赖 `global-hotkey`，Linux 的实际效果仍受桌面环境限制。
-- 本轮自动化验证主要覆盖纯逻辑、编译和现有 `main` 测试，真实系统级热键行为仍需桌面环境冒烟确认。
+### 审查补充
+- 用户追加反馈表明“下拉按钮位置稳定性”本身也是验收条件，不能为了回收宽度牺牲按钮相对位置。
+- 最新修正直接删除了会占布局宽度的右侧固定热区，因此比“调整热区顺序”更符合原始界面预期，也更容易向用户解释。
 
----
-
-## 审查报告（app_visibility Windows 恢复扩展）
-生成时间：2026-03-28 23:20:00 +0800
-
-### 需求完整性检查
-- 目标明确：把主窗口系统级能力从“仅 macOS”扩展到“Windows 可恢复，Linux 明确边界”。
-- 范围明确：`Windows/Linux` 不新增系统级隐藏，前台隐藏继续走 GPUI；系统级重点补恢复。
-- 交付物明确：`app_visibility` 主窗口句柄注册、Windows 恢复实现、`main` 入口接线、上下文和验证留痕。
-- 风险与依赖明确：当前主机仅能本地验证 macOS 主机路径，Windows/Linux 仍缺桌面实测。
+## 恢复连接窗口排它性修复审查
+审查时间：2026-03-29 06:18:00 +08:00
 
 ### 技术维度评分
-- 代码质量：93/100
+- 代码质量：96/100
+- 测试覆盖：90/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：97/100
+- 风险评估：92/100
+
+### 综合评分
+- 96/100
+- 建议：通过
+
+### 关键结论
+- 当前问题不是恢复窗口视图本身，而是它被错误地创建成了普通独立窗口 `WindowKind::Normal`。
+- 将恢复窗口切换为 `WindowKind::Dialog` 后，可以直接复用底层现成的模态对话框语义：
+  - 主窗口在恢复窗口存在期间被禁用
+  - 对话框关闭后自动恢复主窗口交互
+  - 父子窗口关系更稳定，不再是两个彼此独立的普通窗口
+- 这种修复保持了此前 popup 方案带来的拖动/尺寸体验优势，同时补回了用户要求的“排它性”。
+
+### 验证结果
+- `rustfmt --edition 2024 D:\usr\htdocs\onetcli\crates\core\src\popup_window.rs D:\usr\htdocs\onetcli\main\src\connection_restore.rs`
+  - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过
+- `cargo test -p main 主窗口 -- --nocapture`
+  - 结果：通过
+
+### 残余风险
+- 仍需在 Windows 实机确认“关闭主窗口时恢复窗口不会单独残留”的最终交互表现。
+- 其它 popup 仍默认使用 `WindowKind::Normal`；这是预期行为，但后续若再有“必须排它”的 popup，需要显式选择 `Dialog`。
+
+## 统一子窗口 Dialog 化与尺寸兜底审查
+审查时间：2026-03-29 06:42:47 +08:00
+
+### 技术维度评分
+- 代码质量：97/100
+- 测试覆盖：93/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：98/100
+- 风险评估：94/100
+
+### 综合评分
+- 97/100
+- 建议：通过
+
+### 关键结论
+- 这次改动把“是否模态”和“是否做父窗尺寸兜底”统一收敛到 `crates/core/src/popup_window.rs`，覆盖了应用内现有全部独立子窗口入口。
+- 默认 `Dialog` 后，所有这类子窗口都会复用底层父子模态关系，减少逐业务检查遗漏的概率。
+- 显式传入父窗口后，popup 初始尺寸和后续手动放大都会被限制在父窗口范围内，不再只看屏幕尺寸。
+- 证书管理、连接配置、数据库导入导出等调用点已全部跟进新签名，编译链已验证完整。
+
+### 验证结果
+- `cargo test -p one-core popup_window --lib -- --nocapture`
+  - 结果：通过
+- `cargo test -p main connection_restore -- --nocapture`
+  - 结果：通过
+- `cargo test -p main --no-run`
+  - 结果：通过
+- `cargo fmt --all`
+  - 结果：通过
+
+### 残余风险
+- 当前本地验证以单测和编译为主，还需要用户在 Windows 实机确认几个典型路径：
+  - 启动恢复窗口
+  - 连接编辑窗口
+  - 证书管理/证书编辑窗口
+- 由于底层 `Dialog` 会建立父子模态链，嵌套打开二级子窗口时的体感交互仍建议手动走查一次。
+
+## tab-bar 单击误判拖拽修复审查
+审查时间：2026-03-29 11:57:22 +08:00
+
+### 技术维度评分
+- 代码质量：95/100
 - 测试覆盖：88/100
-- 规范遵循：95/100
+- 规范遵循：96/100
+
+### 战略维度评分
+- 需求匹配：98/100
+- 架构一致：95/100
+- 风险评估：92/100
+
+### 综合评分
+- 94/100
+- 建议：通过
+
+### 关键结论
+- 这次问题的直接根因不是 tab 激活逻辑本身，而是底层拖拽启动阈值对 tab 这种“优先点击”的控件过低。
+- 把全局默认阈值直接调大风险过高，因为会波及滑块、分栏拖拽、表格列宽等所有 `on_drag(...)` 交互。
+- 本次新增“元素级拖拽阈值覆盖”能力后，只在 tab 场景设置 `6px` 阈值，既保留拖拽重排，也把单击激活恢复为主导行为。
+- 主窗口 tab-bar 与通用 dock tab 已同步采用同一阈值策略，避免项目内同类交互体验不一致。
+
+### 验证结果
+- `cargo fmt --all`
+  - 结果：通过
+- `rustfmt --edition 2024 vendor/zed/crates/gpui/src/elements/div.rs`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+  - 补充：该命令执行过程中已实际编译 `gpui` 与 `gpui-component`
+- `cargo test --manifest-path vendor/zed/crates/gpui/Cargo.toml interactivity_can_override_drag_threshold --lib -- --nocapture`
+  - 结果：失败，原因是 Cargo git 目录写入被拒绝访问
+- `cargo test -p gpui interactivity_can_override_drag_threshold --lib -- --nocapture`
+  - 结果：失败，原因是当前环境无法访问 `static.crates.io`
+
+### 残余风险
+- 当前缺少可自动化复现“单击被误判为拖拽”的 UI 级测试，真实手感仍建议在用户环境里手动确认一次。
+- `gpui` 直接单测因环境权限和网络限制未能补跑，所以底层新 API 目前主要依赖编译通过和逻辑审查来兜底。
+
+### 审查补充
+- 用户在第一轮修复后反馈“单击 tab 仍然不能激活”，说明问题不能只从拖拽阈值一侧解决。
+- 追加修正把 tab 激活时机前移到 `mouse_down`，这比单纯依赖 `click` 更符合“可拖拽 tab”交互的常见实现，也更能覆盖轻微位移场景。
+- 追加修正后的 `cargo test -p one-core tab_container::tests --lib -- --nocapture` 已再次通过，因此当前建议维持“通过”。
+
+### 二次审查补充
+- 用户随后继续反馈“能激活，但仍会同时进入拖拽”，说明问题还存在“同一次按压既切换又拖拽”的冲突。
+- 最新修正没有继续扩大底层全局逻辑，而是在 tab 本地增加“从非激活态开始的这次按压禁止拖拽”的约束，这样影响面更小，也更贴近用户预期。
+- 最新修正后的 `cargo test -p one-core tab_container::tests --lib -- --nocapture` 仍然通过，因此综合建议继续保持“通过”。
+
+## tab-bar Windows 命中冲突复审
+审查时间：2026-03-29 12:48:02 +08:00
+
+### 技术维度评分
+- 代码质量：96/100
+- 测试覆盖：89/100
+- 规范遵循：97/100
+
+### 战略维度评分
+- 需求匹配：99/100
+- 架构一致：96/100
+- 风险评估：94/100
+
+### 综合评分
+- 95/100
+- 建议：通过
+
+### 关键结论
+- 用户新增线索“只在 Windows 出现，且与 tab-bar 鼠标滚轮支持改动相关”后，问题根因变得更明确：
+  - 常规 tab 使用 `block_mouse_except_scroll()` 后，背后的父级 hitbox 仍会留在 `mouse_hit_test.ids`
+  - Windows 的 `WindowControlArea::Drag` 命中测试正是基于这个集合判断
+  - 因此 tab 区域会错误泄漏给标题栏拖动命中，这是一个 Windows 专属路径
+- 本次修正没有再叠加新的手势状态，而是直接收紧命中行为：
+  - Windows 下 tab 改回 `occlude()`
+  - 滚轮滚动改为由 tab 自己处理，避免再依赖“滚轮穿透到背后的滚动容器”
+- 这个方案与现有 `gpui` 命中模型一致，影响面也明显小于继续改底层事件分发。
+
+### 验证结果
+- `cargo fmt --all`
+  - 结果：通过
+- `cargo test -p one-core tab_container::tests --lib -- --nocapture`
+  - 结果：通过，2 个 `tab_container` 相关测试全部通过
+- `cargo test -p gpui-component --lib -- --nocapture`
+  - 结果：失败，原因是当前环境无法连接 `static.crates.io`
+- `cargo check -p gpui-component --lib --offline`
+  - 结果：失败，原因是本地缓存缺少 `git2 v0.20.2`
+
+### 残余风险
+- 当前仍缺少可以直接模拟 Windows 原生 `WindowControlArea` 命中的自动化测试，因此最终仍建议在 Windows 实机再确认一次：
+  - 单击未激活 tab 只激活，不进入拖拽
+  - 已激活 tab 仍可正常拖拽重排
+  - 鼠标悬停在 tab 上滚轮仍能横向滚动标签栏
+
+## 审查报告（unused-warning-audit）
+生成时间：2026-03-29 13:40:48 +0800
+
+### 需求完整性检查
+- 目标明确：梳理当前项目中 `unused` / `dead_code` warning，区分平台专用代码与通用残留代码
+- 范围明确：以 `cargo check -p main --message-format short` 实际输出为准，覆盖 `main` 和其参与构建的依赖 crate
+- 交付物明确：上下文摘要、操作日志、本地验证结果、分类建议
+- 风险与依赖明确：本轮仅做审计，不改业务代码，因此 warning 现状不会自动消失
+
+### 技术维度评分
+- 代码质量：88/100
+  - `crates/ui/src/window_ext.rs` 存在明确的平台逻辑泄漏到公共模块的问题
+  - `main` 中其余 3 条 warning 属于失联 helper / 未接入分支，说明存在一定残留代码堆积
+- 测试覆盖：86/100
+  - 使用 `cargo check -p main --message-format short` 完成了本地可重复验证
+  - 本轮未改代码，因此不涉及新增单测
+- 规范遵循：93/100
+  - 已基于现有实现模式做对照，不依赖猜测；未覆盖用户已有修改
 
 ### 战略维度评分
 - 需求匹配：95/100
-- 架构一致：96/100
+  - 已把“平台专用逻辑导致的 warning”与“普通残留 warning”拆开，避免后续误治
+- 架构一致：92/100
+  - 整理建议完全复用仓库现有 `#[cfg(...)]` 模式，不引入新抽象
 - 风险评估：90/100
+  - 最大风险不在技术实现，而在 `Certificate` 页到底是待接入功能还是应删除残留，需要产品意图确认
 
 ### 综合评分
-- 93/100
+- 91/100
+- 建议：通过
+
+### 结论
+- **确认属于平台专用逻辑位置不当**
+  - `crates/ui/src/window_ext.rs:5`
+  - `crates/ui/src/window_ext.rs:8`
+  - `crates/ui/src/window_ext.rs:14`
+- **确认属于通用残留代码**
+  - `main/src/home_tab.rs:3218`
+  - `main/src/setting_tab.rs:87`
+  - `main/src/setting_tab.rs:633`
+- **建议优先级**
+  - P1：先收敛 `crates/ui/src/window_ext.rs` 的 macOS 私有符号
+  - P2：删除或恢复 `set_main_window_bounds(...)`
+  - P3：明确 `Certificate` 页去留
+  - P4：删除或恢复 `connection_list_view_mode_label(...)`
+
+### 验证结果
+- `cargo check -p main --message-format short`
+  - 结果：通过
+  - 发现 warning：
+    - `gpui-component` 3 条
+    - `main` 3 条
+
+## 审查报告（tab-bar-tab-pointer-cursor）
+生成时间：2026-03-29 13:40:48 +0800
+
+### 需求完整性检查
+- 目标明确：为 tab-bar 中的 tab 增加 hover 为 pointer 的鼠标样式
+- 范围明确：仅调整 `crates/core/src/tab_container.rs` 中滚动 tab 的根节点样式
+- 交付物明确：代码修改、本地格式化与编译验证、操作留痕
+- 风险与依赖明确：构建链会顺带暴露 `crates/ui/src/window_ext.rs` 的既有 warning，但不属于本次改动
+
+### 技术维度评分
+- 代码质量：96/100
+  - 只改一处样式链，未触碰事件、布局和拖拽逻辑
+- 测试覆盖：90/100
+  - `cargo check -p one-core` 已通过，足以覆盖本次 Rust 层改动
+  - 本次属于 hover 样式调整，未新增自动化 UI 截图验证
+- 规范遵循：95/100
+  - 复用了同文件内已有的 pointer 模式，没有引入新的抽象或分支
+
+### 战略维度评分
+- 需求匹配：97/100
+  - 滚动 tab 现在会在 hover 时提供明确可点击反馈
+- 架构一致：96/100
+  - 保持 `pinned-tab`、tab 列表项、滚动 tab 的交互语义一致
+- 风险评估：93/100
+  - 唯一需要关注的是激活 tab 的 `cursor_grab()` 覆盖是否符合预期；从链式顺序看是安全的
+
+### 综合评分
+- 95/100
 - 建议：通过
 
 ### 验证结果
-- 已执行：`cargo test -p app_visibility -- --nocapture`
-  - 结果：通过（2 passed）
-- 已执行：`cargo check -p app_visibility`
+- `cargo fmt --all`
   - 结果：通过
-- 已执行：`cargo test -p main -- --nocapture`
-  - 结果：通过（13 passed）
-- 已执行：`cargo check -p main`
+- `cargo check -p one-core`
   - 结果：通过
-- 已执行：`rustup target list --installed`
-  - 结果：仅安装 `aarch64-apple-darwin`
-
-### 结论
-- `app_visibility` 现在具备主窗口句柄注册能力，`Windows` 已补上基于 Win32 的恢复路径。
-- `main` 在创建主窗口时会注册原生句柄；系统热键在 `macOS` 保持 toggle，在 `Windows` 只做恢复。
-- `Linux` 已预留主窗口句柄注册扩展位，但恢复实现仍明确未支持，避免误导。
-
-### 剩余风险
-- 当前主机无法直接验证 `Windows` 运行时行为，仍需用户在真实 Windows 环境冒烟确认。
-- `Linux` 存在 `X11/Wayland` 差异，本轮没有实现恢复，不应宣称可用。

@@ -9,7 +9,10 @@ use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{kbd::Kbd, BlinkCursor, Icon, IconName, Sizable, WindowExt};
+use gpui_component::{
+    kbd::Kbd, windows_surface_color, windows_surface_opacity, BlinkCursor, Icon, IconName, Root,
+    Sizable, SystemNotificationOptions, Theme as UiTheme, WindowExt, WindowsSurfaceLayer,
+};
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
 use std::path::PathBuf;
@@ -25,16 +28,26 @@ use crate::settings::{
     TerminalSettings, TerminalSettingsEvent,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{RenderCache, TerminalElement};
-use crate::theme::{TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MIN_FONT_SIZE};
+use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
+use crate::theme::{
+    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE,
+};
+use one_core::connection_restore::{
+    restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
+    LocalTerminalRestoreState, SshTerminalRestoreState,
+};
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContent, TabContentEvent};
+use one_core::RunningState;
 use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use std::ops::Deref;
 use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
+    DEFAULT_RECOVERY_SCROLLBACK_LINES,
 };
 use terminal::LocalConfig;
 
@@ -57,6 +70,20 @@ actions!(
     ]
 );
 
+#[derive(Clone, Debug)]
+pub enum TerminalViewEvent {
+    FontSizeChanged { size: f32 },
+    FontFamilyChanged { family: String },
+    LineHeightScaleChanged { scale: f32 },
+    AutoCopyChanged { enabled: bool },
+    MiddleClickPasteChanged { enabled: bool },
+    SyncPathChanged { enabled: bool },
+    ThemeChanged { theme: TerminalTheme },
+    CursorBlinkChanged { enabled: bool },
+    ConfirmMultilinePasteChanged { enabled: bool },
+    ConfirmHighRiskCommandChanged { enabled: bool },
+    Close,
+}
 const TERMINAL_CONTEXT: &str = "TerminalView";
 
 #[cfg(target_os = "macos")]
@@ -82,9 +109,142 @@ const TERMINAL_SEARCH_BACKWARD_SHORTCUT: &str = "ctrl-shift-g";
 const TERMINAL_TOGGLE_VI_MODE_SHORTCUT: &str = "f7";
 
 const DEFAULT_CELL_WIDTH: Pixels = px(8.0);
+
+fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) -> TerminalTheme {
+    target
+        .clone()
+        .with_font_size(f32::from(current.font_size))
+        .with_font_family(current.font_family.clone())
+        .with_font_fallbacks(current.font_fallbacks.clone())
+        .with_line_height_scale(current.line_height_scale)
+}
+
+fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
+    let ui_theme = UiTheme::global(cx);
+    let surface_opacity = if cfg!(target_os = "windows") {
+        windows_surface_opacity(
+            ui_theme.surface_opacity,
+            ui_theme.window_blur_enabled,
+            WindowsSurfaceLayer::TerminalCanvas,
+        )
+    } else if ui_theme.window_blur_enabled {
+        (ui_theme.surface_opacity + 0.05).clamp(0.0, 1.0)
+    } else {
+        ui_theme.surface_opacity
+    };
+    theme
+        .clone()
+        .with_surface_opacity(surface_opacity)
+        .with_material_tint(ui_theme.window_blur_enabled)
+}
+
 const DEFAULT_COLS: usize = 80;
 const DEFAULT_ROWS: usize = 24;
 const HISTORY_SUGGESTION_LIMIT: usize = 6;
+
+#[derive(Clone, Copy)]
+struct TerminalRecoverySettings {
+    scrollback_lines: usize,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TerminalRecoverySaveOverrides {
+    scrollback_lines: Option<usize>,
+    max_chars: Option<usize>,
+}
+
+impl Default for TerminalRecoverySettings {
+    fn default() -> Self {
+        Self {
+            scrollback_lines: DEFAULT_RECOVERY_SCROLLBACK_LINES,
+        }
+    }
+}
+
+impl Global for TerminalRecoverySettings {}
+impl Global for TerminalRecoverySaveOverrides {}
+
+fn configured_recovery_scrollback_lines(cx: &App) -> usize {
+    if let Some(lines) = cx
+        .try_global::<TerminalRecoverySaveOverrides>()
+        .and_then(|overrides| overrides.scrollback_lines)
+    {
+        return lines;
+    }
+
+    cx.try_global::<TerminalRecoverySettings>()
+        .map(|settings| settings.scrollback_lines)
+        .unwrap_or(DEFAULT_RECOVERY_SCROLLBACK_LINES)
+}
+
+fn configured_recovery_max_chars(cx: &App) -> Option<usize> {
+    cx.try_global::<TerminalRecoverySaveOverrides>()
+        .and_then(|overrides| overrides.max_chars)
+}
+
+fn trim_recovery_content_to_recent_chars(
+    content: Option<String>,
+    max_chars: Option<usize>,
+) -> Option<String> {
+    let content = content?;
+    let Some(max_chars) = max_chars else {
+        return Some(content);
+    };
+
+    if max_chars == 0 {
+        return None;
+    }
+
+    let char_count = content.chars().count();
+    if char_count <= max_chars {
+        return Some(content);
+    }
+
+    let start = content
+        .char_indices()
+        .rev()
+        .nth(max_chars.saturating_sub(1))
+        .map(|(idx, _)| idx)
+        .unwrap_or(content.len());
+
+    Some(content[start..].to_string())
+}
+
+pub fn set_recovery_scrollback_lines(cx: &mut App, scrollback_lines: usize) {
+    let settings = TerminalRecoverySettings { scrollback_lines };
+    if cx.has_global::<TerminalRecoverySettings>() {
+        *cx.global_mut::<TerminalRecoverySettings>() = settings;
+    } else {
+        cx.set_global(settings);
+    }
+}
+
+pub fn with_recovery_snapshot_overrides<R>(
+    cx: &mut App,
+    scrollback_lines: Option<usize>,
+    max_chars: Option<usize>,
+    f: impl FnOnce(&mut App) -> R,
+) -> R {
+    let previous = cx
+        .try_global::<TerminalRecoverySaveOverrides>()
+        .copied()
+        .unwrap_or_default();
+    let overrides = TerminalRecoverySaveOverrides {
+        scrollback_lines,
+        max_chars,
+    };
+
+    if cx.has_global::<TerminalRecoverySaveOverrides>() {
+        *cx.global_mut::<TerminalRecoverySaveOverrides>() = overrides;
+    } else {
+        cx.set_global(overrides);
+    }
+
+    let result = f(cx);
+
+    *cx.global_mut::<TerminalRecoverySaveOverrides>() = previous;
+    result
+}
 
 fn take_whole_scroll_lines(scroll_lines_accumulated: &mut f32) -> i32 {
     let lines = scroll_lines_accumulated.trunc() as i32;
@@ -339,6 +499,13 @@ enum ResizingPanel {
 }
 
 pub fn init(cx: &mut App) {
+    if !cx.has_global::<TerminalRecoverySettings>() {
+        cx.set_global(TerminalRecoverySettings::default());
+    }
+    if !cx.has_global::<TerminalRecoverySaveOverrides>() {
+        cx.set_global(TerminalRecoverySaveOverrides::default());
+    }
+
     cx.bind_keys([
         KeyBinding::new("tab", SendTab, Some(TERMINAL_CONTEXT)),
         KeyBinding::new("shift-tab", SendShiftTab, Some(TERMINAL_CONTEXT)),
@@ -395,8 +562,6 @@ struct ImeState {
 pub struct TerminalView {
     /// Terminal model entity
     terminal: Entity<Terminal>,
-    /// 本地终端工作目录
-    local_working_dir: Option<PathBuf>,
     /// 光标闪烁管理器
     blink_manager: Entity<BlinkCursor>,
     /// 侧边栏
@@ -443,7 +608,12 @@ pub struct TerminalView {
     autocomplete_enabled: bool,
     /// 中键粘贴
     middle_click_paste: bool,
-
+    /// 是否启用字体连字
+    font_ligatures_enabled: bool,
+    /// 终端退出行为: "prompt" 显示弹窗, "close" 直接关闭
+    exit_behavior: String,
+    /// 应用退出标记，避免重复 kill 已 detach 的 hosted PTY
+    app_quitting: bool,
     /// 侧边栏面板大小
     sidebar_panel_size: Pixels,
     /// 正在调整大小的面板
@@ -549,6 +719,10 @@ impl TerminalView {
         cx.global_mut::<ActiveConnections>().remove(connection_id);
     }
 
+    fn has_blocking_terminal_activity(&self, cx: &App) -> bool {
+        self.terminal.read(cx).has_running_processes()
+    }
+
     pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_index(config, None, window, cx)
     }
@@ -559,8 +733,6 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // 创建 Terminal Entity
-        let local_working_dir = config.working_dir.clone().map(PathBuf::from);
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
         let terminal = cx.new(move |cx| {
@@ -568,22 +740,75 @@ impl TerminalView {
             *init_error_clone.borrow_mut() = error;
             terminal
         });
-        let view = Self::new_with_terminal(
-            terminal,
-            None,
-            None,
-            true,
-            local_working_dir,
-            tab_index,
-            window,
-            cx,
-        );
+        let view = Self::new_with_terminal(terminal, None, None, true, tab_index, window, cx);
 
         if let Some(error) = init_error.borrow_mut().take() {
-            window.push_notification(
-                Notification::error(format!("创建本地终端失败: {}", error)).autohide(true),
+            // 窗口初始化期间（如标签页恢复）Root 尚未设置，跳过通知以避免崩溃
+            if window.root::<Root>().is_some() {
+                let error_msg = format!("创建本地终端失败: {}", error);
+                window.show_system_notification(
+                    SystemNotificationOptions::with_id(
+                        "终端错误",
+                        &error_msg,
+                        "terminal-init-error",
+                    ),
+                    cx,
+                );
+                window.push_notification(Notification::error(error_msg).autohide(true), cx);
+            } else {
+                tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
+            }
+        }
+
+        view
+    }
+
+    pub fn new_restored_local_with_index(
+        config: LocalConfig,
+        restore_state: LocalTerminalRestoreState,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let init_error = Rc::new(RefCell::new(None));
+        let init_error_clone = init_error.clone();
+        let recovery_content = restore_state.buffer_content.clone();
+        let pty_session_id = restore_state.pty_session_id.clone();
+        let terminal = cx.new(move |cx| {
+            #[cfg(unix)]
+            if let Some(session_id) = pty_session_id.clone() {
+                match Terminal::new_local_hosted_attach(config.clone(), session_id, cx) {
+                    Ok(terminal) => return terminal,
+                    Err(e) => {
+                        tracing::warn!("live attach 失败，回退到 buffer 恢复: {}", e);
+                    }
+                }
+            }
+            let (terminal, error) = Terminal::new_local_with_recovery_or_disconnected(
+                config,
+                recovery_content.as_deref(),
                 cx,
             );
+            *init_error_clone.borrow_mut() = error;
+            terminal
+        });
+        let view = Self::new_with_terminal(terminal, None, None, true, tab_index, window, cx);
+
+        if let Some(error) = init_error.borrow_mut().take() {
+            if window.root::<Root>().is_some() {
+                let error_msg = format!("创建本地终端失败: {}", error);
+                window.show_system_notification(
+                    SystemNotificationOptions::with_id(
+                        "终端错误",
+                        &error_msg,
+                        "terminal-init-error",
+                    ),
+                    cx,
+                );
+                window.push_notification(Notification::error(error_msg).autohide(true), cx);
+            } else {
+                tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
+            }
         }
 
         view
@@ -611,7 +836,37 @@ impl TerminalView {
             connection_id,
             Some(stored_conn),
             sync_path_with_terminal,
-            None,
+            tab_index,
+            window,
+            cx,
+        )
+    }
+
+    pub fn new_restored_ssh_with_index(
+        conn: StoredConnection,
+        working_dir: Option<&str>,
+        recovery_content: Option<String>,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        sync_path_with_terminal: bool,
+    ) -> Self {
+        let connection_id = conn.id;
+        let stored_conn = conn.clone();
+        let terminal = cx.new(|cx| {
+            Terminal::new_ssh_with_recovery(
+                conn,
+                cx,
+                working_dir,
+                sync_path_with_terminal,
+                recovery_content.as_deref(),
+            )
+        });
+        Self::new_with_terminal(
+            terminal,
+            connection_id,
+            Some(stored_conn),
+            sync_path_with_terminal,
             tab_index,
             window,
             cx,
@@ -631,16 +886,7 @@ impl TerminalView {
         let connection_id = conn.id;
         let terminal = cx.new(|cx| Terminal::new_serial(conn, cx));
         // 串口不传 stored_connection，避免创建文件管理器面板
-        Self::new_with_terminal(
-            terminal,
-            connection_id,
-            None,
-            true,
-            None,
-            tab_index,
-            window,
-            cx,
-        )
+        Self::new_with_terminal(terminal, connection_id, None, true, tab_index, window, cx)
     }
 
     fn new_with_terminal(
@@ -648,7 +894,6 @@ impl TerminalView {
         connection_id: Option<i64>,
         stored_connection: Option<StoredConnection>,
         sync_path_enabled: bool,
-        local_working_dir: Option<PathBuf>,
         tab_index: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -657,9 +902,6 @@ impl TerminalView {
 
         // 获取初始颜色
         let colors = terminal.read(cx).term().lock().colors().clone();
-        let is_local_terminal =
-            terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
-
         // 创建默认主题（需要在创建侧边栏之前）
         let default_theme = TerminalTheme::ocean();
         let ssh_config = terminal.read(cx).ssh_config().cloned();
@@ -692,15 +934,17 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
 
         // 焦点获得/失去订阅
-        let focus_subscription = cx.on_focus(&focus_handle, window, |this, _window, cx| {
+        let focus_subscription = cx.on_focus(&focus_handle, window, |this, window, cx| {
             if this.cursor_blink_enabled {
                 this.blink_manager.update(cx, BlinkCursor::start);
             }
+            this.sync_terminal_focus(window, cx);
         });
-        let blur_subscription = cx.on_blur(&focus_handle, window, |this, _window, cx| {
+        let blur_subscription = cx.on_blur(&focus_handle, window, |this, window, cx| {
             if this.cursor_blink_enabled {
                 this.blink_manager.update(cx, BlinkCursor::stop);
             }
+            this.sync_terminal_focus(window, cx);
         });
 
         let mut subscriptions = Vec::new();
@@ -726,11 +970,6 @@ impl TerminalView {
 
         let mut this = Self {
             terminal,
-            local_working_dir: if is_local_terminal {
-                local_working_dir
-            } else {
-                None
-            },
             blink_manager,
             sidebar,
             font_size: default_theme.font_size,
@@ -758,6 +997,9 @@ impl TerminalView {
             auto_copy_on_select: true,
             autocomplete_enabled: true,
             middle_click_paste: true,
+            font_ligatures_enabled: false,
+            exit_behavior: "prompt".to_string(),
+            app_quitting: false,
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
             view_bounds: Bounds::default(),
@@ -808,8 +1050,11 @@ impl TerminalView {
             TerminalSidebarEvent::FontSizeChanged(size) => {
                 self.set_font_size(*size, cx);
             }
+            TerminalSidebarEvent::LineHeightScaleChanged(scale) => {
+                self.set_line_height_scale(*scale, cx);
+            }
             TerminalSidebarEvent::FontFamilyChanged(family) => {
-                self.set_font_family(family.clone(), cx);
+                self.set_font_family(family.clone(), window, cx);
             }
             TerminalSidebarEvent::ThemeChanged(theme) => {
                 let theme_name = theme.name.to_string();
@@ -823,6 +1068,7 @@ impl TerminalView {
             }
             TerminalSidebarEvent::PasteCodeToTerminal(code) => {
                 // 粘贴代码块到终端（使用 bracketed paste 模式，不自动执行）
+                window.focus(&self.focus_handle, cx);
                 self.paste_code_block(&code, window, cx);
             }
             TerminalSidebarEvent::AskAi => {
@@ -1376,6 +1622,10 @@ impl TerminalView {
                 // 可选：播放声音或闪烁标签
             }
             TerminalModelEvent::ChildExit(_) => {
+                // 用户通过 exit 命令退出时，如果设置了直接关闭行为，则自动关闭 tab
+                if self.exit_behavior == "close" {
+                    self.request_close(cx);
+                }
                 cx.notify();
             }
             TerminalModelEvent::ClipboardStore(data) => {
@@ -1387,6 +1637,8 @@ impl TerminalView {
                     sidebar.set_file_manager_initial_dir(path.clone(), cx);
                     sidebar.sync_file_manager_path(path, cx);
                 });
+                cx.emit(TabContentEvent::StateChanged);
+                cx.notify();
             }
         }
     }
@@ -1399,7 +1651,18 @@ impl TerminalView {
 
     /// Apply a terminal theme
     pub fn set_theme(&mut self, theme: TerminalTheme, cx: &mut Context<Self>) {
-        self.current_theme = theme;
+        let next_theme = preserve_theme_typography(&self.current_theme, &theme);
+        if self.current_theme == next_theme {
+            return;
+        }
+
+        // 如果 ANSI 调色板发生了变化，发送 OSC 4 序列来应用新调色板
+        if self.current_theme.ansi_palette != next_theme.ansi_palette {
+            let osc_seq = next_theme.ansi_palette.to_osc4_sequence();
+            self.terminal.read(cx).write(&osc_seq);
+        }
+
+        self.current_theme = next_theme;
         self.font_size = self.current_theme.font_size;
         self.line_height = self.current_theme.line_height();
         cx.notify();
@@ -1418,11 +1681,6 @@ impl TerminalView {
     /// 获取 SSH 连接 ID（本地终端返回 None）
     pub fn connection_id(&self, cx: &App) -> Option<i64> {
         self.terminal.read(cx).connection_id()
-    }
-
-    /// 获取本地终端的工作目录
-    pub fn local_working_dir(&self) -> Option<&std::path::Path> {
-        self.local_working_dir.as_deref()
     }
 
     /// Get all available themes
@@ -1445,10 +1703,14 @@ impl TerminalView {
     pub fn apply_terminal_settings(
         &mut self,
         font_size: f32,
+        font_family: impl Into<SharedString>,
+        font_ligatures_enabled: bool,
+        line_height_scale: f32,
         auto_copy: bool,
         autocomplete_enabled: bool,
         middle_click_paste: bool,
         sync_path: bool,
+        exit_behavior: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1461,6 +1723,19 @@ impl TerminalView {
             self.line_height = self.current_theme.line_height();
         }
 
+        let font_family = font_family.into();
+        if self.current_theme.font_family != font_family {
+            self.current_theme.font_family = font_family;
+        }
+        self.font_ligatures_enabled = font_ligatures_enabled;
+
+        let clamped_line_height =
+            line_height_scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
+        if (self.current_theme.line_height_scale - clamped_line_height).abs() >= f32::EPSILON {
+            self.current_theme.line_height_scale = clamped_line_height;
+            self.line_height = self.current_theme.line_height();
+        }
+
         self.auto_copy_on_select = auto_copy;
         self.apply_autocomplete_enabled(autocomplete_enabled, cx);
         if !self.history_prompt_enabled(cx) {
@@ -1469,6 +1744,7 @@ impl TerminalView {
             self.dismiss_history_prompt_matches();
         }
         self.middle_click_paste = middle_click_paste;
+        self.exit_behavior = exit_behavior.to_string();
 
         self.terminal.update(cx, |terminal, _cx| {
             terminal.set_sync_path_with_terminal(sync_path);
@@ -1491,12 +1767,17 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let exit_behavior = self.exit_behavior.clone();
         self.apply_terminal_settings(
             settings.font_size,
+            self.current_theme.font_family.clone(),
+            self.font_ligatures_enabled,
+            self.current_theme.line_height_scale,
             settings.auto_copy,
             settings.enable_autocomplete,
             settings.middle_click_paste,
             settings.sync_path_with_terminal,
+            &exit_behavior,
             window,
             cx,
         );
@@ -1533,10 +1814,11 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.current_theme.name == theme.name {
+        let next_theme = preserve_theme_typography(&self.current_theme, theme);
+        if self.current_theme == next_theme {
             return;
         }
-        self.current_theme = theme.clone();
+        self.current_theme = next_theme;
         self.font_size = self.current_theme.font_size;
         self.line_height = self.current_theme.line_height();
         self.sync_sidebar_theme(window, cx);
@@ -1579,6 +1861,63 @@ impl TerminalView {
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.set_confirm_high_risk_command(enabled, cx);
         });
+        cx.notify();
+    }
+
+    pub fn apply_local_restore_state(
+        &mut self,
+        state: &LocalTerminalRestoreState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let font_size = state
+            .font_size
+            .unwrap_or_else(|| f32::from(self.current_theme.font_size));
+        let font_family = state
+            .font_family
+            .as_deref()
+            .filter(|family| !family.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.current_theme.font_family.to_string());
+        let font_ligatures = state.font_ligatures.unwrap_or(self.font_ligatures_enabled);
+        let line_height_scale = state
+            .line_height_scale
+            .unwrap_or(self.current_theme.line_height_scale);
+        let auto_copy = state.auto_copy.unwrap_or(self.auto_copy_on_select);
+        let middle_click_paste = state.middle_click_paste.unwrap_or(self.middle_click_paste);
+        let exit_behavior = state
+            .exit_behavior
+            .as_deref()
+            .unwrap_or(&self.exit_behavior)
+            .to_string();
+
+        self.apply_terminal_settings(
+            font_size,
+            font_family,
+            font_ligatures,
+            line_height_scale,
+            auto_copy,
+            self.autocomplete_enabled,
+            middle_click_paste,
+            false,
+            &exit_behavior,
+            window,
+            cx,
+        );
+
+        if let Some(theme_name) = state.theme_name.as_deref() {
+            if let Some(theme) = TerminalTheme::find_by_name(theme_name) {
+                self.apply_theme(&theme, window, cx);
+            }
+        }
+
+        self.apply_cursor_blink(state.cursor_blink.unwrap_or(false), window, cx);
+        self.apply_confirm_multiline_paste(state.confirm_multiline_paste.unwrap_or(true), cx);
+        self.apply_confirm_high_risk_command(state.confirm_high_risk_command.unwrap_or(true), cx);
+    }
+
+    pub fn apply_exit_behavior(&mut self, behavior: &str, cx: &mut Context<Self>) {
+        self.exit_behavior = behavior.to_string();
         cx.notify();
     }
 
@@ -1656,8 +1995,21 @@ impl TerminalView {
     }
 
     /// 设置主字体
-    pub fn set_font_family(&mut self, family: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.current_theme.font_family = family.into();
+    pub fn set_font_family(
+        &mut self,
+        family: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let family = family.into();
+        if self.current_theme.font_family == family {
+            return;
+        }
+        self.current_theme.font_family = family.clone();
+        self.sync_sidebar_theme(window, cx);
+        cx.emit(TerminalViewEvent::FontFamilyChanged {
+            family: family.to_string(),
+        });
         cx.notify();
     }
 
@@ -1668,8 +2020,13 @@ impl TerminalView {
 
     /// 设置行高比例
     pub fn set_line_height_scale(&mut self, scale: f32, cx: &mut Context<Self>) {
-        self.current_theme.line_height_scale = scale.clamp(1.0, 2.5);
+        let clamped = scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
+        if (self.current_theme.line_height_scale - clamped).abs() < f32::EPSILON {
+            return;
+        }
+        self.current_theme.line_height_scale = clamped;
         self.line_height = self.current_theme.line_height();
+        cx.emit(TerminalViewEvent::LineHeightScaleChanged { scale: clamped });
         cx.notify();
     }
 
@@ -1691,6 +2048,16 @@ impl TerminalView {
         self.terminal.update(cx, |terminal, cx| {
             terminal.reconnect(cx);
         });
+    }
+
+    fn request_close(&self, cx: &mut Context<Self>) {
+        cx.emit(TerminalViewEvent::Close);
+    }
+
+    fn shutdown_for_close(&mut self, cx: &mut Context<Self>) {
+        // tab 会立即从容器中移除，先同步回收活跃状态，避免主页残留"连接使用中"标记。
+        self.release_active_connection(cx);
+        self.terminal.read(cx).shutdown();
     }
 
     fn write_to_pty(&mut self, data: Vec<u8>, cx: &mut Context<Self>) {
@@ -2122,13 +2489,18 @@ impl TerminalView {
     fn paste_text_unchecked(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         // 仅在应用请求 bracketed paste 模式时才包装，避免把控制序列
         // 原样送进不支持的程序（例如 Vim 未开启时可能导致光标/位置异常）。
+        //
+        // 规范化行尾符：移除 \r 避免 macOS 剪贴板 CRLF 转换导致每行多出一个空行。
+        // 场景：外部复制 "line1\nline2\n" → macOS 粘贴时可能变成 "line1\r\nline2\r\n"，
+        // 直接发送会导致 \r 回车回到行首，覆盖上一行内容，视觉上呈现为空行。
+        let normalized = text.replace("\r\n", "\n").replace('\r', "");
         let mode = self.terminal.read(cx).mode();
         self.apply_paste_to_history_prompt(text, cx);
         if mode.contains(TermMode::BRACKETED_PASTE) {
-            let paste_text = format!("\x1b[200~{}\x1b[201~", text.replace('\x1b', ""));
+            let paste_text = format!("\x1b[200~{}\x1b[201~", normalized.replace('\x1b', ""));
             self.write_to_pty(paste_text.into_bytes(), cx);
         } else {
-            self.write_to_pty(text.as_bytes().to_vec(), cx);
+            self.write_to_pty(normalized.into_bytes(), cx);
         }
         self.focus_terminal(window, cx);
     }
@@ -2199,6 +2571,13 @@ impl TerminalView {
 
     fn focus_terminal(&self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle, cx);
+    }
+
+    fn sync_terminal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let is_focused = self.focus_handle.is_focused(window);
+        let terminal = self.terminal.read(cx);
+        let mut term = terminal.term().lock();
+        term.is_focused = is_focused;
     }
 
     fn show_unbracketed_paste_block_dialog(
@@ -2395,10 +2774,20 @@ impl TerminalView {
     }
 
     fn render_terminal(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let effective_theme = effective_terminal_theme(&self.current_theme, cx);
+
         // Prepare addons before rendering
         {
             let is_local =
                 self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+            let local_working_dir = if is_local {
+                self.terminal
+                    .read(cx)
+                    .latest_working_dir()
+                    .map(PathBuf::from)
+            } else {
+                None
+            };
             let term = self.terminal.read(cx).term().lock();
             let display_offset = term.grid().display_offset();
             let visible_lines = 0..term.screen_lines();
@@ -2407,7 +2796,7 @@ impl TerminalView {
                 visible_lines,
                 display_offset,
                 is_local,
-                base_dir: self.local_working_dir.as_deref(),
+                base_dir: local_working_dir.as_deref(),
             };
             self.addon_manager.dispatch_frame(&context);
         }
@@ -2418,7 +2807,7 @@ impl TerminalView {
             let mut term = term.lock();
 
             self.render_cache
-                .update(&mut term, &self.addon_manager, &self.current_theme);
+                .update(&mut term, &self.addon_manager, &effective_theme);
             term.reset_damage();
         }
 
@@ -2438,6 +2827,7 @@ impl TerminalView {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            self.font_ligatures_enabled,
             self.current_theme.line_height_scale,
             cursor_visible,
             self.cell_width, // 传入预计算的 cell_width，确保与 resize 一致
@@ -2556,21 +2946,30 @@ impl TerminalView {
         menu
     }
 
-    fn render_connection_overlay(
-        &self,
-        can_reconnect: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let connection_state = self.terminal.read(cx).connection_state().clone();
+    fn render_connection_overlay(&self, can_reconnect: bool, cx: &mut Context<Self>) -> AnyElement {
+        let terminal = self.terminal.read(cx);
+        let connection_state = terminal.connection_state().clone();
+        let connection_status_message = terminal.connection_status_label();
         let is_connecting = matches!(connection_state, ConnectionState::Connecting);
         let error_msg = match &connection_state {
             ConnectionState::Disconnected { error } => error.clone(),
             _ => None,
         };
 
+        // 区分用户 exit 和网络故障：child_exited 有值表示子进程已退出（用户 exit）
+        let child_exited = terminal.child_exited();
+        let is_user_exit = child_exited.is_some();
+
+        // 根据连接类型选择正确的 locale 前缀
+        let is_ssh = matches!(
+            terminal.connection_kind(),
+            TerminalConnectionKind::Ssh | TerminalConnectionKind::Serial
+        );
+
         div()
             .absolute()
             .inset_0()
+            .occlude()
             .flex()
             .items_center()
             .justify_center()
@@ -2616,9 +3015,17 @@ impl TerminalView {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(rgb(0xffffff))
                                     .child(if is_connecting {
-                                        t!("SshSession.connecting")
+                                        if is_ssh {
+                                            t!("SshSession.connecting")
+                                        } else {
+                                            t!("TerminalView.connecting")
+                                        }
                                     } else {
-                                        t!("SshSession.connection_lost")
+                                        if is_ssh {
+                                            t!("SshSession.connection_lost")
+                                        } else {
+                                            t!("LocalTerminal.connection_lost")
+                                        }
                                     }),
                             ),
                     )
@@ -2638,22 +3045,56 @@ impl TerminalView {
                             .text_sm()
                             .text_color(rgb(0x9ca3af))
                             .child(if is_connecting {
-                                t!("SshSession.establishing")
+                                if is_ssh {
+                                    connection_status_message.unwrap_or_else(|| {
+                                        t!("SshSession.establishing").to_string()
+                                    })
+                                } else {
+                                    connection_status_message.unwrap_or_else(|| {
+                                        t!("TerminalView.connecting").to_string()
+                                    })
+                                }
+                            } else if is_user_exit {
+                                if is_ssh {
+                                    t!("SshSession.session_ended").to_string()
+                                } else {
+                                    t!("LocalTerminal.session_ended").to_string()
+                                }
                             } else {
-                                t!("SshSession.disconnected")
+                                if is_ssh {
+                                    t!("SshSession.disconnected").to_string()
+                                } else {
+                                    t!("LocalTerminal.disconnected").to_string()
+                                }
                             }),
                     )
-                    .when(can_reconnect && !is_connecting, |this| {
+                    .when(!is_connecting, |this| {
                         this.child(
-                            Button::new("reconnect-btn")
-                                .label(t!("SshSession.reconnect"))
-                                .primary()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.reconnect(window, cx);
-                                })),
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("close-tab-btn")
+                                        .label(t!("Common.close"))
+                                        .warning()
+                                        .on_click(cx.listener(|this, _, _window, cx| {
+                                            this.request_close(cx);
+                                        })),
+                                )
+                                .when(can_reconnect, |el| {
+                                    el.child(
+                                        Button::new("reconnect-btn")
+                                            .label(t!("SshSession.reconnect"))
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reconnect(window, cx);
+                                            })),
+                                    )
+                                }),
                         )
                     }),
             )
+            .into_any_element()
     }
 
     fn handle_scroll(
@@ -2784,6 +3225,14 @@ impl TerminalView {
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
         let consumed = {
             let mut open_url = |url: &str| cx.open_url(url);
             let mut context = TerminalAddonMouseContext::new(
@@ -2793,7 +3242,7 @@ impl TerminalView {
                 event.modifiers,
                 event.position,
                 is_local,
-                self.local_working_dir.as_deref(),
+                local_working_dir.as_deref(),
                 &mut open_url,
             );
             self.addon_manager.dispatch_mouse_down(&mut context)
@@ -2866,6 +3315,14 @@ impl TerminalView {
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
         let hover_changed = {
             let mut open_url = |url: &str| cx.open_url(url);
             let mut context = TerminalAddonMouseContext::new(
@@ -2875,7 +3332,7 @@ impl TerminalView {
                 event.modifiers,
                 event.position,
                 is_local,
-                self.local_working_dir.as_deref(),
+                local_working_dir.as_deref(),
                 &mut open_url,
             );
             self.addon_manager.dispatch_mouse_move(&mut context)
@@ -2912,6 +3369,14 @@ impl TerminalView {
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
         {
             let mut open_url = |url: &str| cx.open_url(url);
             let mut context = TerminalAddonMouseContext::new(
@@ -2921,7 +3386,7 @@ impl TerminalView {
                 event.modifiers,
                 event.position,
                 is_local,
-                self.local_working_dir.as_deref(),
+                local_working_dir.as_deref(),
                 &mut open_url,
             );
             let _ = self.addon_manager.dispatch_mouse_up(&mut context);
@@ -2996,12 +3461,61 @@ impl TerminalView {
     }
 }
 
+/// 从保存的标签状态构建本地终端视图（供 TabContentRegistry 使用）
+pub fn build_local_terminal(
+    state: &one_core::tab_container::TabItemState,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<std::sync::Arc<dyn one_core::tab_container::TabContentView>> {
+    let payload = restore_payload_from_tab_data(&state.data)?;
+    if payload.kind != ConnectionRestoreKind::LocalTerminal {
+        return None;
+    }
+
+    let local_terminal = payload.local_terminal?;
+    let working_dir = local_terminal
+        .working_dir
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        // 验证是绝对路径（Windows: 包含 :\ 或 UNC；Unix: 以 / 开头）
+        // 相对路径会导致 conPTY/os error 267
+        .filter(|s| {
+            std::path::Path::new(s).is_absolute() || s.contains(":\\") || s.starts_with("\\\\")
+        })
+        .map(String::from);
+    let config = LocalConfig {
+        working_dir,
+        ..Default::default()
+    };
+    let view = cx.new(|cx| {
+        TerminalView::new_restored_local_with_index(
+            config,
+            local_terminal.clone(),
+            None,
+            window,
+            cx,
+        )
+    });
+
+    // 注意：不能在 cx.new() 的闭包内调用 view.update()（GPUI 不允许在 entity 构造期间更新自身）。
+    // 使用 window.defer() 将设置应用延迟到 entity 构造完成之后，且能获得新鲜的 &mut Window。
+    let view_clone = view.clone();
+    window.defer(cx, move |window, cx| {
+        view_clone.update(cx, |view, cx| {
+            view.apply_local_restore_state(&local_terminal, window, cx);
+        });
+    });
+
+    Some(std::sync::Arc::new(view))
+}
+
 impl Focusable for TerminalView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
+impl EventEmitter<TerminalViewEvent> for TerminalView {}
 impl EventEmitter<TabContentEvent> for TerminalView {}
 
 impl TabContent for TerminalView {
@@ -3035,21 +3549,211 @@ impl TabContent for TerminalView {
         }
     }
 
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let terminal = self.terminal.read(cx);
+        terminal.latest_working_dir().map(Into::into)
+    }
+
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        self.status_summary(cx)
+    }
+
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn on_activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        match self.connection_kind(cx) {
+            TerminalConnectionKind::Ssh => {
+                let Some(connection_id) = self.connection_id(cx) else {
+                    return JsonValue::Null;
+                };
+                let terminal = self.terminal.read(cx);
+                let working_dir = terminal.latest_working_dir();
+                let buffer_content = trim_recovery_content_to_recent_chars(
+                    terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
+                    configured_recovery_max_chars(cx),
+                );
+                let ssh_terminal = (working_dir.is_some() || buffer_content.is_some()).then_some(
+                    SshTerminalRestoreState {
+                        working_dir,
+                        buffer_content,
+                    },
+                );
+                ConnectionRestorePayload {
+                    kind: ConnectionRestoreKind::SshTerminal,
+                    connection_id: Some(connection_id),
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: None,
+                    ssh_terminal,
+                    title: self.title(cx).to_string(),
+                }
+                .into_tab_data()
+            }
+            TerminalConnectionKind::Serial => {
+                let Some(connection_id) = self.connection_id(cx) else {
+                    return JsonValue::Null;
+                };
+                ConnectionRestorePayload {
+                    kind: ConnectionRestoreKind::SerialTerminal,
+                    connection_id: Some(connection_id),
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: None,
+                    ssh_terminal: None,
+                    title: self.title(cx).to_string(),
+                }
+                .into_tab_data()
+            }
+            TerminalConnectionKind::Local => {
+                let terminal = self.terminal.read(cx);
+                let buffer_content = trim_recovery_content_to_recent_chars(
+                    terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
+                    configured_recovery_max_chars(cx),
+                );
+                let pty_session_id = terminal.local_pty_session_id().map(str::to_string);
+                let prefer_live_restore = pty_session_id.is_some().then_some(true);
+                ConnectionRestorePayload {
+                    kind: ConnectionRestoreKind::LocalTerminal,
+                    connection_id: None,
+                    workspace_id: None,
+                    active_connection_id: None,
+                    local_terminal: Some(LocalTerminalRestoreState {
+                        working_dir: terminal.latest_working_dir(),
+                        buffer_content,
+                        pty_session_id,
+                        prefer_live_restore,
+                        font_size: Some(f32::from(self.current_theme.font_size)),
+                        font_family: Some(self.current_theme.font_family.to_string()),
+                        font_ligatures: Some(self.font_ligatures_enabled),
+                        line_height_scale: Some(self.current_theme.line_height_scale),
+                        cursor_blink: Some(self.cursor_blink_enabled),
+                        auto_copy: Some(self.auto_copy_on_select),
+                        middle_click_paste: Some(self.middle_click_paste),
+                        confirm_multiline_paste: Some(self.confirm_multiline_paste),
+                        confirm_high_risk_command: Some(self.confirm_high_risk_command),
+                        exit_behavior: Some(self.exit_behavior.clone()),
+                        theme_name: Some(self.current_theme.name.to_string()),
+                    }),
+                    ssh_terminal: None,
+                    title: self.title(cx).to_string(),
+                }
+                .into_tab_data()
+            }
+        }
     }
 
     fn try_close(
         &mut self,
         _tab_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        if !self.has_blocking_terminal_activity(cx) {
+            if !self.app_quitting {
+                self.shutdown_for_close(cx);
+            }
+            return Task::ready(true);
+        }
+
+        // Dialog will be shown — log state for debugging
+        let term = self.terminal.read(cx);
+        tracing::warn!(
+            target: "terminal.ssh",
+            connection_state = ?term.connection_state(),
+            ssh_prompt_detected = term.ssh_prompt_detected(),
+            "SSH try_close: showing running process dialog"
+        );
+
+        let view = cx.entity().clone();
+        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+        let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        let tx_ok = tx.clone();
+        let tx_cancel = tx;
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let tx_ok = tx_ok.clone();
+            let tx_cancel = tx_cancel.clone();
+            let view = view.clone();
+            dialog
+                .title(t!("TerminalCloseDialog.running_process_close_title"))
+                .confirm()
+                .child(
+                    div().flex().flex_col().gap_2().child(
+                        div()
+                            .text_sm()
+                            .child(t!("TerminalCloseDialog.running_process_close_message")),
+                    ),
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(t!("TerminalCloseDialog.running_process_close_ok"))
+                        .cancel_text(t!("Common.cancel")),
+                )
+                .on_ok(move |_event, _window, _cx| {
+                    view.update(_cx, |this, cx| {
+                        this.shutdown_for_close(cx);
+                    });
+                    if let Ok(mut guard) = tx_ok.lock() {
+                        if let Some(sender) = guard.take() {
+                            let _ = sender.send(true);
+                        }
+                    }
+                    true
+                })
+                .on_cancel(move |_event, _window, _cx| {
+                    if let Ok(mut guard) = tx_cancel.lock() {
+                        if let Some(sender) = guard.take() {
+                            let _ = sender.send(false);
+                        }
+                    }
+                    false
+                })
+        });
+
+        cx.spawn(async move |_this, _cx| rx.await.unwrap_or(false))
+    }
+
+    fn force_close(
+        &mut self,
+        _tab_id: &str,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<bool> {
-        // tab 会立即从容器中移除，先同步回收活跃状态，避免主页残留“连接使用中”标记。
-        self.release_active_connection(cx);
-        // 关闭终端连接
-        self.terminal.read(cx).shutdown();
+        if !self.app_quitting {
+            self.shutdown_for_close(cx);
+        }
         Task::ready(true)
+    }
+
+    fn prepare_for_app_quit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.app_quitting = true;
+        self.terminal.update(cx, |terminal, _| {
+            terminal.close(terminal::TerminalCloseMode::Detach);
+        });
+    }
+
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        if !self.has_blocking_terminal_activity(cx) {
+            return None;
+        }
+        let title = self.title(cx);
+        let connection_kind = self.terminal.read(cx).connection_kind();
+        match connection_kind {
+            TerminalConnectionKind::Ssh => {
+                let activity = t!("RunningState.ssh.activity").into();
+                RunningState::ssh(title, activity)
+            }
+            _ => {
+                let activity = t!("RunningState.terminal.activity").into();
+                RunningState::terminal(title, activity)
+            }
+        }
     }
 }
 
@@ -3067,7 +3771,7 @@ impl Render for TerminalView {
                     .collect::<Vec<_>>(),
             ))
         };
-        let features = FontFeatures(std::sync::Arc::new(vec![("calt".to_string(), 0)]));
+        let features = terminal_font_features(self.font_ligatures_enabled);
 
         let font = Font {
             family: self.current_theme.font_family.clone(),
@@ -3104,8 +3808,10 @@ impl Render for TerminalView {
         }
 
         let connection_state = self.terminal.read(cx).connection_state().clone();
+        let show_connection_overlay =
+            matches!(connection_state, ConnectionState::Disconnected { .. })
+                || matches!(connection_state, ConnectionState::Connecting);
         let can_reconnect = self.terminal.read(cx).can_reconnect();
-        let bg_color = self.current_theme.background;
         let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
         let selection_text = self.terminal.read(cx).selection_text();
         let sidebar_visible = self.sidebar.read(cx).is_visible();
@@ -3114,12 +3820,12 @@ impl Render for TerminalView {
         let terminal_mode = self.terminal.read(cx).mode();
         let history_size = self.terminal.read(cx).term().lock().history_size();
         let show_scrollbar = !terminal_mode.contains(TermMode::ALT_SCREEN) && history_size > 0;
+        let ui_theme = UiTheme::global(cx);
 
         div()
             .size_full()
             .flex()
             .flex_row()
-            .bg(bg_color)
             .child({
                 let tooltip = self.addon_manager.tooltip();
                 let mouse_pos = self.mouse_position;
@@ -3182,21 +3888,33 @@ impl Render for TerminalView {
                             },
                         )
                         .absolute()
-                        .left(px(12.))
-                        .right(px(12.))
-                        .top(px(12.))
-                        .bottom(px(12.)),
+                        .left_0()
+                        .right_0()
+                        .top_0()
+                        .bottom_0(),
                     )
                     .child({
                         let view = cx.entity().clone();
                         let sidebar = self.sidebar.clone();
+                        let terminal_bg = if cfg!(target_os = "windows") {
+                            windows_surface_color(
+                                ui_theme.background,
+                                ui_theme.window_blur_enabled,
+                                ui_theme.surface_opacity,
+                                WindowsSurfaceLayer::TerminalFallback,
+                            )
+                        } else if ui_theme.window_blur_enabled {
+                            ui_theme.transparent
+                        } else {
+                            ui_theme.background
+                        };
                         div()
+                            .bg(terminal_bg) // 终端背景色，避免 Canvas 层未覆盖时闪烁
                             .absolute()
-                            .left(px(12.))
-                            .right(px(12.))
-                            .top(px(12.))
-                            .bottom(px(12.))
-                            .bg(self.current_theme.background)
+                            .left_1()
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
                             .overflow_hidden()
                             .child(self.render_terminal(cx))
                             .when_some(self.render_history_prompt_overlay(cx), |this, overlay| {
@@ -3256,12 +3974,7 @@ impl Render for TerminalView {
                                         .child(tooltip.display_text),
                                 ),
                         )
-                    })
-                    .when(
-                        matches!(connection_state, ConnectionState::Disconnected { .. })
-                            || matches!(connection_state, ConnectionState::Connecting),
-                        |this| this.child(self.render_connection_overlay(can_reconnect, cx)),
-                    );
+                    });
 
                 div()
                     .relative()
@@ -3269,14 +3982,18 @@ impl Render for TerminalView {
                     .flex()
                     .flex_col()
                     .child(terminal_core)
+                    // 连接状态弹窗放在 terminal_core 外部，避免被 Canvas 层拦截点击
+                    .when(show_connection_overlay, |this| {
+                        this.child(self.render_connection_overlay(can_reconnect, cx))
+                    })
                     .when(show_scrollbar, |this| {
                         this.child(
                             div()
                                 .absolute()
                                 .top(px(12.0))
-                                .right(px(4.0))
+                                .right(px(1.0))
                                 .bottom(px(12.0))
-                                .w(px(12.0))
+                                .w(Scrollbar::width())
                                 .child(
                                     Scrollbar::vertical(&self.scrollbar_handle)
                                         .scrollbar_show(ScrollbarShow::Always),
@@ -3482,20 +4199,33 @@ impl Element for ResizeEventHandler {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::TerminalView;
     use super::{
         alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
         has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
-        history_prompt_overlay_bounds, multiline_non_empty_line_count,
+        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
-        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines, UnbracketedPasteHazard,
+        should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
+        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
+    use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
-    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point};
+    #[cfg(target_os = "macos")]
+    use gpui::TestAppContext;
+    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
     use std::cell::Cell as StdCell;
+    #[cfg(target_os = "macos")]
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
     use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
+    #[cfg(target_os = "macos")]
+    use terminal::LocalConfig;
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {
@@ -3562,6 +4292,23 @@ mod tests {
         assert_eq!(
             detect_unbracketed_paste_hazard("printf 'hello\nworld"),
             Some(UnbracketedPasteHazard::UnterminatedQuote)
+        );
+    }
+
+    #[test]
+    fn trim_recovery_content_keeps_recent_utf8_chars() {
+        let content = Some("第一行\n第二行\n第三行".to_string());
+        assert_eq!(
+            trim_recovery_content_to_recent_chars(content, Some(3)).as_deref(),
+            Some("第三行")
+        );
+    }
+
+    #[test]
+    fn trim_recovery_content_zero_limit_drops_content() {
+        assert_eq!(
+            trim_recovery_content_to_recent_chars(Some("hello".to_string()), Some(0)),
+            None
         );
     }
 
@@ -3822,5 +4569,161 @@ mod tests {
             &pending_display_offset
         ));
         assert_eq!(pending_display_offset.take(), None);
+    }
+
+    #[test]
+    fn preserve_theme_typography_keeps_current_font_configuration() {
+        let current = TerminalTheme::ocean()
+            .with_font_size(18.0)
+            .with_font_family("Fira Code")
+            .with_font_fallbacks(vec![SharedString::from("Noto Sans Mono CJK SC")])
+            .with_line_height_scale(1.8);
+        let target = TerminalTheme::paper();
+
+        let merged = preserve_theme_typography(&current, &target);
+
+        assert_eq!(merged.name, target.name);
+        assert_eq!(merged.background, target.background);
+        assert_eq!(merged.foreground, target.foreground);
+        assert_eq!(f32::from(merged.font_size), 18.0);
+        assert_eq!(merged.font_family, SharedString::from("Fira Code"));
+        assert_eq!(
+            merged.font_fallbacks,
+            vec![SharedString::from("Noto Sans Mono CJK SC")]
+        );
+        assert!((merged.line_height_scale - 1.8).abs() < f32::EPSILON);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn local_terminal_view_reports_blocking_activity_after_keyboard_input() {
+        let mut cx = TestAppContext::single();
+        let previous_home = std::env::var_os("HOME");
+        let temp_home = std::env::temp_dir().join(format!(
+            "onetcli-terminal-view-test-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
+        std::env::set_var("HOME", &temp_home);
+        cx.update(one_core::gpui_tokio::init);
+        cx.update(one_core::storage::init);
+        cx.update(gpui_component::init);
+
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+            })
+            .expect("应创建终端测试窗口")
+        });
+
+        window
+            .update(&mut cx, |view, window, cx| {
+                window.focus(&view.focus_handle, cx);
+            })
+            .expect("应能聚焦终端视图");
+
+        thread::sleep(Duration::from_millis(800));
+        cx.simulate_keystrokes(*window, "s l e e p space 5 enter");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            cx.run_until_parked();
+
+            let has_blocking = window
+                .update(&mut cx, |view, _window, cx| {
+                    view.has_blocking_terminal_activity(cx)
+                })
+                .expect("应能读取终端 busy 状态");
+            if has_blocking {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                panic!("TerminalView 在键盘输入后仍未识别到 blocking activity");
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        window
+            .update(&mut cx, |view, _window, cx| view.shutdown_for_close(cx))
+            .expect("应能关闭测试终端");
+        cx.run_until_parked();
+
+        if let Some(home) = previous_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn local_terminal_view_reports_blocking_activity_after_top_command() {
+        let mut cx = TestAppContext::single();
+        let previous_home = std::env::var_os("HOME");
+        let temp_home = std::env::temp_dir().join(format!(
+            "onetcli-terminal-view-top-test-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
+        std::env::set_var("HOME", &temp_home);
+        cx.update(one_core::gpui_tokio::init);
+        cx.update(one_core::storage::init);
+        cx.update(gpui_component::init);
+
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+            })
+            .expect("应创建终端测试窗口")
+        });
+
+        window
+            .update(&mut cx, |view, window, cx| {
+                window.focus(&view.focus_handle, cx);
+            })
+            .expect("应能聚焦终端视图");
+
+        thread::sleep(Duration::from_millis(800));
+        cx.simulate_keystrokes(*window, "t o p enter");
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            cx.run_until_parked();
+
+            let has_blocking = window
+                .update(&mut cx, |view, _window, cx| {
+                    view.has_blocking_terminal_activity(cx)
+                })
+                .expect("应能读取终端 busy 状态");
+            if has_blocking {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                let visible = window
+                    .update(&mut cx, |view, _window, cx| {
+                        view.terminal.read(cx).visible_content()
+                    })
+                    .expect("应能读取终端可见内容");
+                panic!(
+                    "TerminalView 在执行 top 后仍未识别到 blocking activity，visible_content={visible:?}"
+                );
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        window
+            .update(&mut cx, |view, _window, cx| view.shutdown_for_close(cx))
+            .expect("应能关闭测试终端");
+        cx.run_until_parked();
+
+        if let Some(home) = previous_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
     }
 }

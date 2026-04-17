@@ -116,6 +116,8 @@ pub struct ProviderConfig {
     pub models: Vec<String>,
     pub max_tokens: Option<i32>,
     pub temperature: Option<f32>,
+    /// Anthropic 专属：thinking budget（最大 thinking token 数）
+    pub thinking_budget: Option<i32>,
     pub enabled: bool,
     pub is_default: bool,
     pub created_at: i64,
@@ -135,6 +137,7 @@ impl Default for ProviderConfig {
             models: Vec::new(),
             max_tokens: None,
             temperature: None,
+            thinking_budget: None,
             enabled: true,
             is_default: false,
             created_at: 0,
@@ -147,5 +150,59 @@ impl ProviderConfig {
     /// 是否为内置 provider
     pub fn is_builtin(&self) -> bool {
         self.provider_type.is_builtin()
+    }
+
+    /// 是否可在聊天等运行时入口中使用
+    pub fn is_runtime_available(&self) -> bool {
+        self.enabled && !self.is_builtin()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProviderConfig, ProviderType};
+
+    #[test]
+    fn builtin_provider_is_not_runtime_available() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::OnetCli,
+            enabled: true,
+            ..Default::default()
+        };
+
+        assert!(!config.is_runtime_available());
+    }
+
+    #[test]
+    fn enabled_custom_provider_is_runtime_available() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::OpenAI,
+            enabled: true,
+            ..Default::default()
+        };
+
+        assert!(config.is_runtime_available());
+    }
+
+    #[test]
+    fn anthropic_provider_supports_thinking_budget() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::Anthropic,
+            thinking_budget: Some(10000),
+            ..Default::default()
+        };
+
+        assert_eq!(config.thinking_budget, Some(10000));
+    }
+
+    #[test]
+    fn non_anthropic_provider_thinking_budget_is_optional() {
+        let config = ProviderConfig {
+            provider_type: ProviderType::OpenAI,
+            thinking_budget: None,
+            ..Default::default()
+        };
+
+        assert_eq!(config.thinking_budget, None);
     }
 }

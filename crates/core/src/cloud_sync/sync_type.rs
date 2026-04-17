@@ -2,10 +2,10 @@
 //!
 //! 提供 `SyncableItem` 和 `SyncTypeHandler` 两个核心 trait，
 //! 将不同数据类型的同步逻辑从流程控制中解耦。
-//! 新增同步数据类型只需实现 trait 并通过 `SyncEngine::register_type` 注册即可。
+//! 当前仅供 `one-core` 内部的通用同步流程使用。
 
 use crate::cloud_sync::engine::SyncEngine;
-use crate::cloud_sync::models::{CloudSyncData, Team};
+use crate::cloud_sync::models::CloudSyncData;
 use crate::cloud_sync::service::{CloudSyncService, SyncError};
 use crate::storage::PendingCloudDeletion;
 
@@ -13,7 +13,7 @@ use crate::storage::PendingCloudDeletion;
 ///
 /// 为各类本地数据（如 `StoredConnection`、`Workspace`）提供统一的字段访问接口，
 /// 使通用同步流程无需关心具体数据结构。
-pub trait SyncableItem: Clone + Send + Sync + 'static {
+pub(crate) trait SyncableItem: Clone + Send + Sync + 'static {
     /// 本地数据库 ID
     fn local_id(&self) -> Option<i64>;
     /// 设置本地 ID
@@ -27,19 +27,14 @@ pub trait SyncableItem: Clone + Send + Sync + 'static {
     /// 更新时间戳（秒）
     fn updated_at(&self) -> Option<i64>;
 
-    /// 是否启用同步（默认 true）
-    fn is_sync_enabled(&self) -> bool {
-        true
-    }
-
     /// 最后同步时间戳（默认 None，Connection 有此字段）
     fn last_synced_at(&self) -> Option<i64> {
         None
     }
 
-    /// 团队归属 ID（默认 None）
-    fn team_id(&self) -> Option<&str> {
-        None
+    /// 是否启用基于同步状态的比较逻辑
+    fn uses_sync_state(&self) -> bool {
+        false
     }
 }
 
@@ -47,7 +42,7 @@ pub trait SyncableItem: Clone + Send + Sync + 'static {
 ///
 /// 替代原有的 `WorkspaceSyncPlan`，适用于所有简单同步场景。
 #[derive(Debug)]
-pub struct GenericSyncPlan<T: SyncableItem> {
+pub(crate) struct GenericSyncPlan<T: SyncableItem> {
     /// 需要上传的数据项（本地新增）
     pub to_upload: Vec<T>,
     /// 需要更新到云端的数据项 (本地数据, 对应的云端同步数据)
@@ -69,11 +64,16 @@ impl<T: SyncableItem> Default for GenericSyncPlan<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingDeletionDecision {
+    DeleteCloud,
+    DropPending,
+}
+
 /// 数据类型同步处理器
 ///
 /// 封装特定数据类型的存储操作、加解密逻辑和同步回调。
-/// 实现此 trait 后，通过 `SyncEngine::register_type` 注册即可自动接入通用同步流程。
-pub trait SyncTypeHandler: Send + Sync + 'static {
+pub(crate) trait SyncTypeHandler: Send + Sync + 'static {
     type Item: SyncableItem;
 
     // --- 标识 ---
@@ -103,7 +103,7 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
 
     // --- 同步后回调 ---
 
-    /// 上传成功后的回调（通常更新 cloud_id）
+    /// 上传或更新云端成功后的回调（通常更新 cloud_id / last_synced_at）
     fn on_uploaded(
         &self,
         engine: &SyncEngine,
@@ -128,7 +128,6 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
         &self,
         service: &CloudSyncService,
         item: &Self::Item,
-        teams: &[Team],
     ) -> Result<CloudSyncData, SyncError>;
 
     // --- 待删除处理（有默认实现） ---
@@ -147,14 +146,8 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
             return Vec::new();
         };
 
-        let entity_type = self.pending_deletion_entity_type();
-        let result = if entity_type == "connection" {
-            repo.list_connections()
-        } else {
-            repo.list_workspaces()
-        };
-
-        result.unwrap_or_default()
+        repo.list_by_entity_type(self.pending_deletion_entity_type())
+            .unwrap_or_default()
     }
 
     /// 删除一条待删除记录
@@ -172,5 +165,18 @@ pub trait SyncTypeHandler: Send + Sync + 'static {
 
         repo.remove(cloud_id)
             .map_err(|e| SyncError::StorageError(e.to_string()))
+    }
+
+    fn decide_pending_deletion(
+        &self,
+        _engine: &SyncEngine,
+        _pending: &PendingCloudDeletion,
+        current_cloud: Option<&CloudSyncData>,
+    ) -> Result<PendingDeletionDecision, SyncError> {
+        if current_cloud.is_some_and(|item| item.deleted_at.is_some()) {
+            Ok(PendingDeletionDecision::DropPending)
+        } else {
+            Ok(PendingDeletionDecision::DeleteCloud)
+        }
     }
 }

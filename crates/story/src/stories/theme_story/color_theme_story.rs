@@ -115,8 +115,12 @@ impl ThemeColorsStory {
         use gpui_component::ThemeRegistry;
 
         let registry = ThemeRegistry::global(cx);
-        let mut themes = registry.sorted_themes();
-
+        let mode = cx.theme().mode;
+        let mut themes = registry
+            .sorted_themes()
+            .into_iter()
+            .filter(|t| t.mode == mode)
+            .collect::<Vec<_>>();
         themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
         let active_theme_name = cx.theme().theme_name().clone();

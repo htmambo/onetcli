@@ -1345,29 +1345,6 @@ impl DatabasePlugin for PostgresPlugin {
         )
     }
 
-    fn build_backup_table_sql(
-        &self,
-        _database: &str,
-        schema: Option<&str>,
-        source_table: &str,
-        target_table: &str,
-    ) -> String {
-        let qualify = |table: &str| match schema {
-            Some(schema) => format!(
-                "{}.{}",
-                self.quote_identifier(schema),
-                self.quote_identifier(table)
-            ),
-            None => self.quote_identifier(table),
-        };
-        let source = qualify(source_table);
-        let target = qualify(target_table);
-        format!(
-            "CREATE TABLE {} (LIKE {} INCLUDING ALL);\nINSERT INTO {} SELECT * FROM {};",
-            target, source, target, source
-        )
-    }
-
     fn build_column_def(&self, col: &ColumnDefinition) -> String {
         let mut def = String::new();
         def.push_str(&self.quote_identifier(&col.name));
@@ -1706,18 +1683,6 @@ mod tests {
         assert!(sql.contains("RENAME TO"));
         assert!(sql.contains("\"old_name\""));
         assert!(sql.contains("\"new_name\""));
-    }
-
-    #[test]
-    fn test_build_backup_table_sql() {
-        let plugin = create_plugin();
-        let sql = plugin.build_backup_table_sql("test_db", Some("public"), "orders", "orders_bak");
-        assert!(sql.contains(
-            "CREATE TABLE \"public\".\"orders_bak\" (LIKE \"public\".\"orders\" INCLUDING ALL);"
-        ));
-        assert!(sql.contains(
-            "INSERT INTO \"public\".\"orders_bak\" SELECT * FROM \"public\".\"orders\";"
-        ));
     }
 
     #[test]

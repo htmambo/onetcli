@@ -1,13 +1,13 @@
 //! 云端 API 客户端抽象层
 //!
-//! 定义云端 API 的通用接口，支持多种后端实现（如 Supabase）。
+//! 定义云端 API 的通用接口，当前主要对接 `sync_server`。
 
 use crate::cloud_sync::models::*;
-use crate::license::SubscriptionInfo;
 use crate::llm::ChatStream;
 use async_trait::async_trait;
 use llm_connector::ChatRequest;
 use std::fmt;
+use std::sync::Arc;
 
 /// 云端 API 错误类型
 #[derive(Debug, Clone)]
@@ -28,6 +28,10 @@ pub enum CloudApiError {
     NotFound(String),
     /// 冲突
     Conflict(String),
+    /// 不支持的操作
+    NotSupported(String),
+    /// 数据格式错误
+    DataFormatError(String),
     /// 未知错误
     Unknown(String),
 }
@@ -43,6 +47,8 @@ impl fmt::Display for CloudApiError {
             CloudApiError::ParseError(msg) => write!(f, "数据解析错误: {}", msg),
             CloudApiError::NotFound(msg) => write!(f, "资源未找到: {}", msg),
             CloudApiError::Conflict(msg) => write!(f, "冲突: {}", msg),
+            CloudApiError::NotSupported(msg) => write!(f, "不支持: {}", msg),
+            CloudApiError::DataFormatError(msg) => write!(f, "数据格式错误: {}", msg),
             CloudApiError::Unknown(msg) => write!(f, "未知错误: {}", msg),
         }
     }
@@ -60,6 +66,11 @@ impl CloudApiError {
 
 impl std::error::Error for CloudApiError {}
 
+/// 会话过期事件回调类型
+pub type SessionExpiredCallback = Arc<dyn Fn() + Send + Sync>;
+/// 自动刷新成功回调类型
+pub type TokenRefreshedCallback = Arc<dyn Fn(AuthResponse) + Send + Sync>;
+
 /// 云端 API 客户端 trait
 ///
 /// 定义与云端服务交互的通用接口。
@@ -76,13 +87,6 @@ pub trait CloudApiClient: Send + Sync {
         password: &str,
     ) -> Result<AuthResponse, CloudApiError>;
 
-    /// 使用 OAuth 登录（如 GitHub、Google）
-    async fn sign_in_with_oauth(
-        &self,
-        provider: &str,
-        redirect_url: &str,
-    ) -> Result<OAuthResponse, CloudApiError>;
-
     /// 注册新用户
     async fn sign_up(&self, email: &str, password: &str) -> Result<AuthResponse, CloudApiError>;
 
@@ -95,12 +99,6 @@ pub trait CloudApiClient: Send + Sync {
     /// 刷新访问令牌
     async fn refresh_token(&self, refresh_token: &str) -> Result<AuthResponse, CloudApiError>;
 
-    /// 发送 OTP 验证码到邮箱
-    async fn sign_in_with_otp(&self, email: &str) -> Result<(), CloudApiError>;
-
-    /// 验证 OTP 验证码并登录
-    async fn verify_otp(&self, email: &str, token: &str) -> Result<AuthResponse, CloudApiError>;
-
     // ========================================================================
     // 用户配置相关（密钥验证数据）
     // ========================================================================
@@ -110,15 +108,6 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 保存用户的加密配置
     async fn save_user_config(&self, config: &CloudUserConfig) -> Result<(), CloudApiError>;
-
-    // ========================================================================
-    // 订阅相关
-    // ========================================================================
-
-    /// 获取用户订阅信息
-    ///
-    /// 返回用户当前的订阅计划和状态，用于 License 功能控制。
-    async fn get_subscription(&self) -> Result<Option<SubscriptionInfo>, CloudApiError>;
 
     // ========================================================================
     // OnetCli 模型列表
@@ -133,11 +122,10 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 获取同步数据列表
     ///
-    /// 可选过滤：data_type, team_id, since_timestamp
+    /// 可选过滤：data_type, since_timestamp
     async fn list_sync_data(
         &self,
         data_type: Option<&str>,
-        team_id: Option<&str>,
         since: Option<i64>,
     ) -> Result<Vec<CloudSyncData>, CloudApiError>;
 
@@ -149,41 +137,6 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 软删除同步数据
     async fn delete_sync_data(&self, id: &str) -> Result<(), CloudApiError>;
-
-    // ========================================================================
-    // 团队管理
-    // ========================================================================
-
-    /// 获取当前用户所在的所有团队
-    async fn list_teams(&self) -> Result<Vec<Team>, CloudApiError>;
-
-    /// 创建团队
-    async fn create_team(&self, team: &Team) -> Result<Team, CloudApiError>;
-
-    /// 更新团队信息
-    async fn update_team(&self, team: &Team) -> Result<Team, CloudApiError>;
-
-    /// 删除团队
-    async fn delete_team(&self, id: &str) -> Result<(), CloudApiError>;
-
-    /// 获取团队成员列表
-    async fn list_team_members(&self, team_id: &str) -> Result<Vec<TeamMember>, CloudApiError>;
-
-    /// 添加团队成员
-    async fn add_team_member(&self, member: &TeamMember) -> Result<TeamMember, CloudApiError>;
-
-    /// 通过邮箱添加团队成员
-    ///
-    /// 使用服务端 RPC 函数根据邮箱查找用户并添加为团队成员。
-    /// 解决了客户端无法直接访问 auth.users 表的问题。
-    async fn add_team_member_by_email(
-        &self,
-        team_id: &str,
-        email: &str,
-    ) -> Result<TeamMember, CloudApiError>;
-
-    /// 移除团队成员
-    async fn remove_team_member(&self, member_id: &str) -> Result<(), CloudApiError>;
 
     // ========================================================================
     // AI 聊天
@@ -211,13 +164,6 @@ pub struct AuthResponse {
     pub expires_at: i64,
 }
 
-/// OAuth 响应
-#[derive(Debug, Clone)]
-pub struct OAuthResponse {
-    /// 授权 URL
-    pub auth_url: String,
-}
-
 /// 用户信息
 #[derive(Debug, Clone)]
 pub struct UserInfo {
@@ -225,10 +171,49 @@ pub struct UserInfo {
     pub id: String,
     /// 用户邮箱
     pub email: String,
+    /// 用户昵称（可选）
+    pub nickname: Option<String>,
     /// 用户名（可选）
     pub username: Option<String>,
     /// 头像 URL（可选）
     pub avatar_url: Option<String>,
     /// 创建时间
     pub created_at: i64,
+}
+
+impl UserInfo {
+    /// 返回适合界面展示的主身份文案，优先使用昵称，其次用户名，最后回退到邮箱前缀。
+    pub fn display_name(&self) -> String {
+        self.nickname
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                self.username
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+            })
+            .unwrap_or_else(|| {
+                self.email
+                    .split('@')
+                    .next()
+                    .unwrap_or(&self.email)
+                    .to_string()
+            })
+    }
+
+    /// 返回适合界面展示的副身份文案。
+    ///
+    /// 当主文案已经等于邮箱时，不再重复显示邮箱。
+    pub fn secondary_identity(&self) -> Option<String> {
+        let display_name = self.display_name();
+        if display_name == self.email {
+            None
+        } else {
+            Some(self.email.clone())
+        }
+    }
 }

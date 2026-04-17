@@ -432,6 +432,7 @@ fn build_ssh_config(conn: &StoredConnection) -> anyhow::Result<SshConnectConfig>
         timeout: ssh_params.connect_timeout.map(Duration::from_secs),
         keepalive_interval: ssh_params.keepalive_interval.map(Duration::from_secs),
         keepalive_max: ssh_params.keepalive_max,
+        enable_legacy_kex: ssh_params.enable_legacy_kex,
         jump_server: ssh_params.jump_server.map(|jump| {
             let jump_auth = match jump.auth_method {
                 SshAuthMethod::Password { password } => SshAuth::Password(password),
@@ -1036,6 +1037,14 @@ impl FileManagerPanel {
             self.selected_indices.clear();
             self.selected_indices.insert(row_ix);
         }
+    }
+
+    /// 切换隐藏文件显示
+    fn toggle_hidden_files(&mut self, cx: &mut Context<Self>) {
+        self.show_hidden = !self.show_hidden;
+        self.apply_filter();
+        self.selected_indices.clear();
+        cx.notify();
     }
 
     // ── 传输调度 ──────────────────────────────────────────────
@@ -2077,10 +2086,7 @@ impl FileManagerPanel {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, _window, cx| {
-                                    this.show_hidden = !this.show_hidden;
-                                    this.apply_filter();
-                                    this.selected_indices.clear();
-                                    cx.notify();
+                                    this.toggle_hidden_files(cx);
                                 }),
                             )
                             .tooltip(move |window, cx| {
@@ -2280,6 +2286,7 @@ impl FileManagerPanel {
         let is_dir = item.is_dir;
 
         h_flex()
+            .w_full()
             .h(px(36.))
             .px_2()
             .items_center()
@@ -2343,6 +2350,7 @@ impl FileManagerPanel {
     /// 渲染上级目录行（..）
     fn render_parent_row(&self, _cx: &App) -> impl IntoElement {
         h_flex()
+            .w_full()
             .h(px(36.))
             .px_2()
             .items_center()
@@ -2454,6 +2462,146 @@ impl FileManagerPanel {
                             this.select_and_upload_folder(window, cx);
                         },
                     )),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("FileManager.refresh"))
+                    .icon(IconName::Refresh)
+                    .on_click(window.listener_for(&view_refresh, move |this, _, _, cx| {
+                        this.refresh_dir(cx);
+                    })),
+            );
+
+        menu
+    }
+
+    /// 构建当前目录空白区域的右键菜单
+    fn build_panel_context_menu(
+        mut menu: PopupMenu,
+        current_path: &str,
+        view: &Entity<Self>,
+        window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let path_for_cd = current_path.to_string();
+        let path_for_copy = current_path.to_string();
+
+        let view_new_folder = view.clone();
+        let view_upload_files = view.clone();
+        let view_upload_folder = view.clone();
+        let view_cd = view.clone();
+        let view_copy_path = view.clone();
+        let view_refresh = view.clone();
+        let view_toggle_hidden = view.clone();
+
+        menu = menu
+            .item(
+                PopupMenuItem::new(t!("FileManager.new_folder"))
+                    .icon(IconName::NewFolder)
+                    .on_click(
+                        window.listener_for(&view_new_folder, move |this, _, window, cx| {
+                            this.show_new_folder_dialog(window, cx);
+                        }),
+                    ),
+            )
+            .item(
+                PopupMenuItem::new(t!("FileManager.upload_file"))
+                    .icon(IconName::Upload)
+                    .on_click(window.listener_for(
+                        &view_upload_files,
+                        move |this, _, window, cx| {
+                            this.select_and_upload_files(window, cx);
+                        },
+                    )),
+            )
+            .item(
+                PopupMenuItem::new(t!("FileManager.upload_folder"))
+                    .icon(IconName::Upload)
+                    .on_click(window.listener_for(
+                        &view_upload_folder,
+                        move |this, _, window, cx| {
+                            this.select_and_upload_folder(window, cx);
+                        },
+                    )),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("FileManager.cd_to_terminal"))
+                    .icon(IconName::SquareTerminal)
+                    .on_click(window.listener_for(&view_cd, move |_this, _, _, cx| {
+                        cx.emit(FileManagerPanelEvent::CdToTerminal(path_for_cd.clone()));
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("FileManager.copy_path"))
+                    .icon(IconName::Copy)
+                    .on_click(
+                        window.listener_for(&view_copy_path, move |_this, _, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(path_for_copy.clone()));
+                        }),
+                    ),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("FileManager.refresh"))
+                    .icon(IconName::Refresh)
+                    .on_click(window.listener_for(&view_refresh, move |this, _, _, cx| {
+                        this.refresh_dir(cx);
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("FileManager.toggle_hidden"))
+                    .icon(IconName::Eye)
+                    .on_click(
+                        window.listener_for(&view_toggle_hidden, move |this, _, _, cx| {
+                            this.toggle_hidden_files(cx);
+                        }),
+                    ),
+            );
+
+        menu
+    }
+
+    /// 构建上级目录行（..）的右键菜单
+    fn build_parent_context_menu(
+        mut menu: PopupMenu,
+        parent_path: &str,
+        view: &Entity<Self>,
+        window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let path_for_cd = parent_path.to_string();
+        let path_for_copy = parent_path.to_string();
+
+        let view_go_parent = view.clone();
+        let view_cd = view.clone();
+        let view_copy_path = view.clone();
+        let view_refresh = view.clone();
+
+        menu = menu
+            .item(
+                PopupMenuItem::new(t!("FileManager.go_parent"))
+                    .icon(IconName::ArrowUp)
+                    .on_click(window.listener_for(&view_go_parent, move |this, _, _, cx| {
+                        this.go_parent(cx);
+                    })),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!("FileManager.cd_to_terminal"))
+                    .icon(IconName::SquareTerminal)
+                    .on_click(window.listener_for(&view_cd, move |_this, _, _, cx| {
+                        cx.emit(FileManagerPanelEvent::CdToTerminal(path_for_cd.clone()));
+                    })),
+            )
+            .item(
+                PopupMenuItem::new(t!("FileManager.copy_path"))
+                    .icon(IconName::Copy)
+                    .on_click(
+                        window.listener_for(&view_copy_path, move |_this, _, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(path_for_copy.clone()));
+                        }),
+                    ),
             )
             .separator()
             .item(
@@ -2739,6 +2887,8 @@ impl FileManagerPanel {
         let is_loading = self.loading;
         let has_active_transfer = self.transfer_queue.has_active();
         let is_dragging = self.is_dragging_over;
+        let current_path_for_menu = self.current_path.clone();
+        let view_for_menu = cx.entity();
 
         v_flex()
             .size_full()
@@ -2772,26 +2922,54 @@ impl FileManagerPanel {
                             }
                         }))
                         .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .context_menu(move |menu, window, cx| {
+                                    Self::build_panel_context_menu(
+                                        menu,
+                                        &current_path_for_menu,
+                                        &view_for_menu,
+                                        window,
+                                        cx,
+                                    )
+                                }),
+                        )
+                        .child(
                             uniform_list("fm-file-list", total_count, {
                                 cx.processor(
                                     move |state: &mut Self, range: Range<usize>, _window, cx| {
                                         let current_path = state.current_path.clone();
                                         let has_parent = !state.is_at_root();
+                                        let parent_path = remote_path_parent(&current_path);
                                         let view = cx.entity();
 
                                         range
                                             .map(|list_ix| {
                                                 // 上级目录行
                                                 if has_parent && list_ix == 0 {
+                                                    let parent_path_for_menu = parent_path.clone();
+                                                    let parent_view = view.clone();
                                                     return div()
                                                         .id(list_ix)
+                                                        .w_full()
                                                         .cursor_pointer()
+                                                        .block_mouse_except_scroll()
                                                         .hover(|s| s.bg(cx.theme().list_hover))
                                                         .on_double_click(cx.listener(
                                                             move |this, _, _window, cx| {
                                                                 this.go_parent(cx);
                                                             },
                                                         ))
+                                                        .context_menu(move |menu, window, cx| {
+                                                            Self::build_parent_context_menu(
+                                                                menu,
+                                                                &parent_path_for_menu,
+                                                                &parent_view,
+                                                                window,
+                                                                cx,
+                                                            )
+                                                        })
                                                         .child(state.render_parent_row(cx))
                                                         .into_any_element();
                                                 }
@@ -2818,7 +2996,9 @@ impl FileManagerPanel {
 
                                                 div()
                                                     .id(list_ix)
+                                                    .w_full()
                                                     .cursor_pointer()
+                                                    .block_mouse_except_scroll()
                                                     .hover(|s| s.bg(cx.theme().list_hover))
                                                     .on_mouse_down(
                                                         MouseButton::Left,
@@ -2939,11 +3119,30 @@ impl Render for FileManagerPanel {
 
 #[cfg(test)]
 mod tests {
+    use super::remote_path_parent;
     use super::{
         build_refresh_error_plan, build_retry_reset_plan, clear_remote_listing_state,
         ConnectionState, RetryResetPlan,
     };
     use std::collections::HashSet;
+
+    #[test]
+    fn remote_path_parent_returns_parent_directory() {
+        assert_eq!(remote_path_parent("/root/projects/demo"), "/root/projects");
+        assert_eq!(remote_path_parent("/root/projects/demo/"), "/root/projects");
+    }
+
+    #[test]
+    fn remote_path_parent_keeps_root_stable() {
+        assert_eq!(remote_path_parent("/"), "/");
+        assert_eq!(remote_path_parent(""), "/");
+    }
+
+    #[test]
+    fn remote_path_parent_falls_back_to_root_for_single_segment() {
+        assert_eq!(remote_path_parent("demo"), "/");
+        assert_eq!(remote_path_parent("/demo"), "/");
+    }
 
     #[test]
     fn build_retry_reset_plan_prefers_explicit_working_dir() {

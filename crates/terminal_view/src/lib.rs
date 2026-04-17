@@ -4,8 +4,8 @@ pub mod addon;
 pub mod history_prompt;
 pub mod highlight_presets;
 pub mod keys;
-pub mod settings;
 pub mod serial_form_window;
+pub mod settings;
 pub mod sidebar;
 pub mod ssh_form_window;
 pub mod terminal_element;
@@ -25,8 +25,13 @@ pub use ssh_form_window::{SshFormWindow, SshFormWindowConfig};
 pub use terminal::terminal::{
     ConnectionState, SshTerminalConfig, Terminal, TerminalConnectionKind, TerminalModelEvent,
 };
+pub use terminal::terminal::{DEFAULT_RECOVERY_SCROLLBACK_LINES, MAX_RECOVERY_SCROLLBACK_LINES};
 pub use theme::{
-    default_font_fallbacks, TerminalTheme, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE,
-    MAX_FONT_SIZE, MIN_FONT_SIZE,
+    default_font_fallbacks, AnsiPalette, TerminalTheme, DEFAULT_FONT_SIZE,
+    DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE,
 };
-pub use view::{init, TerminalView};
+pub use view::{
+    build_local_terminal, init, set_recovery_scrollback_lines, with_recovery_snapshot_overrides,
+    TerminalView, TerminalViewEvent,
+};

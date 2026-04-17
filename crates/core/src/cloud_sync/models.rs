@@ -171,29 +171,6 @@ pub struct SyncPlan {
     pub conflicts: Vec<SyncConflict>,
 }
 
-impl SyncPlan {
-    /// 检查计划是否为空（无需执行任何操作）
-    pub fn is_empty(&self) -> bool {
-        self.to_upload.is_empty()
-            && self.to_update_cloud.is_empty()
-            && self.to_download.is_empty()
-            && self.to_update_local.is_empty()
-            && self.to_delete_cloud.is_empty()
-            && self.to_delete_local.is_empty()
-            && self.conflicts.is_empty()
-    }
-
-    /// 获取计划中的操作总数
-    pub fn total_operations(&self) -> usize {
-        self.to_upload.len()
-            + self.to_update_cloud.len()
-            + self.to_download.len()
-            + self.to_update_local.len()
-            + self.to_delete_cloud.len()
-            + self.to_delete_local.len()
-    }
-}
-
 // ============================================================================
 // 统一加密同步数据模型
 // ============================================================================
@@ -208,11 +185,11 @@ pub struct CloudSyncData {
     pub id: String,
     /// 记录创建者
     pub owner_id: String,
-    /// 团队归属：None = 个人数据，Some = 团队共享数据
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
     /// 数据类型标识（"connection" | "workspace" | ...）
     pub data_type: String,
+    /// 明文名称，便于云端直接展示与轻量匹配
+    #[serde(default)]
+    pub name: String,
     /// 加密后的完整数据 blob（base64(nonce + AES-256-GCM ciphertext)）
     pub encrypted_data: String,
     /// 加密密钥版本
@@ -230,6 +207,21 @@ pub struct CloudSyncData {
     pub deleted_at: Option<i64>,
 }
 
+impl CloudSyncData {
+    /// 判断云端同步项是否携带了可直接展示和匹配的真实名称。
+    ///
+    /// 兼容旧迁移把 `name` 回填成 `id` 的占位场景，这种值不能当作真实名称使用。
+    pub fn has_resolved_name(&self) -> bool {
+        let name = self.name.trim();
+        !name.is_empty() && name != self.id
+    }
+
+    /// 判断云端同步项是否仍需要回填真实名称。
+    pub fn needs_name_backfill(&self) -> bool {
+        !self.has_resolved_name()
+    }
+}
+
 fn default_version() -> u32 {
     1
 }
@@ -238,63 +230,43 @@ fn default_version() -> u32 {
 pub mod data_type {
     pub const CONNECTION: &str = "connection";
     pub const WORKSPACE: &str = "workspace";
+    pub const CERTIFICATE: &str = "certificate";
 }
 
-/// 团队
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Team {
-    /// 团队 UUID
-    pub id: String,
-    /// 团队名称
-    pub name: String,
-    /// 团队拥有者 ID
-    pub owner_id: String,
-    /// 团队描述
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// 团队密钥验证数据（由 owner 设置，成员验证用）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_verification: Option<String>,
-    /// 团队密钥版本号
-    #[serde(default)]
-    pub key_version: u32,
-    /// 创建时间戳（毫秒）
-    pub created_at: i64,
-    /// 更新时间戳（毫秒）
-    pub updated_at: i64,
-}
+#[cfg(test)]
+mod tests {
+    use super::CloudSyncData;
 
-/// 团队成员角色
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TeamRole {
-    #[serde(rename = "owner")]
-    Owner,
-    #[serde(rename = "member")]
-    Member,
-}
-
-impl std::fmt::Display for TeamRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TeamRole::Owner => write!(f, "owner"),
-            TeamRole::Member => write!(f, "member"),
+    fn sample_cloud_sync_data(name: &str) -> CloudSyncData {
+        CloudSyncData {
+            id: "ab934c43-8e85-4c9c-8119-8c3fc43e9f15".to_string(),
+            owner_id: "owner-1".to_string(),
+            data_type: "workspace".to_string(),
+            name: name.to_string(),
+            encrypted_data: "ENC:test".to_string(),
+            key_version: 1,
+            checksum: "checksum".to_string(),
+            version: 1,
+            updated_at: 0,
+            deleted_at: None,
         }
     }
-}
 
-/// 团队成员
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TeamMember {
-    /// 成员记录 UUID
-    pub id: String,
-    /// 所属团队 ID
-    pub team_id: String,
-    /// 用户 ID
-    pub user_id: String,
-    /// 成员角色
-    pub role: TeamRole,
-    /// 加入时间戳（毫秒）
-    pub joined_at: i64,
+    #[test]
+    fn placeholder_name_should_require_backfill() {
+        let cloud_data = sample_cloud_sync_data("ab934c43-8e85-4c9c-8119-8c3fc43e9f15");
+
+        assert!(!cloud_data.has_resolved_name());
+        assert!(cloud_data.needs_name_backfill());
+    }
+
+    #[test]
+    fn plaintext_name_should_be_usable() {
+        let cloud_data = sample_cloud_sync_data("生产工作区");
+
+        assert!(cloud_data.has_resolved_name());
+        assert!(!cloud_data.needs_name_backfill());
+    }
 }
 
 /// 连接明文数据结构（加密前 / 解密后的 JSON blob）
@@ -304,6 +276,9 @@ pub struct ConnectionPlainData {
     pub name: String,
     /// 连接类型
     pub connection_type: String,
+    /// 手动排序顺序
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
     /// 关联的工作空间云端 ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_cloud_id: Option<String>,
@@ -325,10 +300,30 @@ pub struct ConnectionPlainData {
 pub struct WorkspacePlainData {
     /// 工作空间名称
     pub name: String,
+    /// 手动排序顺序
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
     /// 颜色
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// 图标
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+}
+
+/// 证书明文数据结构（加密前 / 解密后的 JSON blob）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertificatePlainData {
+    /// 证书名称
+    pub name: String,
+    /// 证书类型
+    pub kind: String,
+    /// 证书参数（用户名、密码、密钥路径等），加密后 base64 字符串
+    pub params: String,
+    /// 备注
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remark: Option<String>,
+    /// 创建者
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<String>,
 }

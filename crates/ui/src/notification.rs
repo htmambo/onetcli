@@ -468,11 +468,7 @@ impl NotificationList {
             cx.spawn_in(window, async move |_, cx| {
                 Timer::after(Duration::from_secs(5)).await;
 
-                if let Err(err) =
-                    notification.update_in(cx, |note, window, cx| note.dismiss(window, cx))
-                {
-                    tracing::error!("failed to auto hide notification: {:?}", err);
-                }
+                _ = notification.update_in(cx, |note, window, cx| note.dismiss(window, cx));
             })
             .detach();
         }

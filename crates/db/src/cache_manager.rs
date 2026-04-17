@@ -559,21 +559,20 @@ impl GlobalNodeCache {
     ///
     /// 每 5 分钟扫描缓存目录，删除过期的 JSON 文件和空目录。
     /// 使用 GPUI background_executor 确保与应用生命周期一致。
-    pub fn start_cleanup_task(&self, cx: &App) {
+    /// 返回 Task 句柄，调用方持有时任务持续运行，drop 时自动取消。
+    pub fn start_cleanup_task(&self, cx: &App) -> gpui::Task<()> {
         let node_cache_dir = self.node_cache.cache_dir().clone();
         let metadata_cache_dir = self.metadata_cache.cache_dir().clone();
 
-        cx.background_executor()
-            .spawn(async move {
-                let interval = std::time::Duration::from_secs(5 * 60);
-                loop {
-                    smol::Timer::after(interval).await;
-                    debug!("Running periodic cache cleanup");
-                    Self::cleanup_expired_files(&node_cache_dir).await;
-                    Self::cleanup_expired_files(&metadata_cache_dir.join("metadata")).await;
-                }
-            })
-            .detach();
+        cx.background_executor().spawn(async move {
+            let interval = std::time::Duration::from_secs(5 * 60);
+            loop {
+                smol::Timer::after(interval).await;
+                debug!("Running periodic cache cleanup");
+                Self::cleanup_expired_files(&node_cache_dir).await;
+                Self::cleanup_expired_files(&metadata_cache_dir.join("metadata")).await;
+            }
+        })
     }
 
     /// 扫描目录并清理过期的缓存 JSON 文件

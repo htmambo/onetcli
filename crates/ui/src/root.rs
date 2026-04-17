@@ -12,7 +12,7 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement as _, Pixels, Render, StyleRefinement, Styled,
     WeakFocusHandle, Window, actions, div, prelude::FluentBuilder as _,
 };
-use std::{any::TypeId, rc::Rc};
+use std::{any::TypeId, cell::RefCell, rc::Rc};
 
 actions!(root, [Tab, TabPrev]);
 
@@ -52,19 +52,19 @@ pub(crate) struct ActiveDialog {
     focus_handle: FocusHandle,
     /// The previous focused handle before opening the Dialog.
     previous_focused_handle: Option<WeakFocusHandle>,
-    builder: Rc<dyn Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static>,
+    builder: Rc<RefCell<Box<dyn FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static>>>,
 }
 
 impl ActiveDialog {
     pub(crate) fn new(
         focus_handle: FocusHandle,
         previous_focused_handle: Option<WeakFocusHandle>,
-        builder: impl Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+        builder: impl FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static,
     ) -> Self {
         Self {
             focus_handle,
             previous_focused_handle,
-            builder: Rc::new(builder),
+            builder: Rc::new(RefCell::new(Box::new(builder))),
         }
     }
 }
@@ -117,6 +117,14 @@ impl Root {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<impl IntoElement + use<>> {
+        Self::render_notification_layer_with_offset(window, cx, None)
+    }
+
+    pub fn render_notification_layer_with_offset(
+        window: &mut Window,
+        cx: &mut App,
+        bottom_offset: Option<Pixels>,
+    ) -> Option<impl IntoElement + use<>> {
         let root = window.root::<Root>()??;
 
         let active_sheet_placement = root.read(cx).active_sheet.clone().map(|d| d.placement);
@@ -131,6 +139,7 @@ impl Root {
         };
 
         let placement = cx.theme().notification.placement;
+        let bottom_offset = bottom_offset.filter(|_| placement.is_bottom());
 
         Some(
             div()
@@ -157,6 +166,7 @@ impl Root {
                 .when_some(mr, |this, offset| this.mr(offset))
                 .when_some(mb, |this, offset| this.mb(offset))
                 .when_some(ml, |this, offset| this.ml(offset))
+                .when_some(bottom_offset, |this, offset| this.mb(offset))
                 .child(root.read(cx).notification.clone()),
         )
     }
@@ -208,7 +218,7 @@ impl Root {
             .map(|(i, active_dialog)| {
                 let mut dialog = Dialog::new(window, cx);
 
-                dialog = (active_dialog.builder)(dialog, window, cx);
+                dialog = (active_dialog.builder.borrow_mut())(dialog, window, cx);
 
                 // Give the dialog the focus handle, because `dialog` is a temporary value, is not possible to
                 // keep the focus handle in the dialog.
@@ -237,7 +247,7 @@ impl Root {
 
     pub fn open_dialog<F>(&mut self, build: F, window: &mut Window, cx: &mut Context<'_, Root>)
     where
-        F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+        F: FnMut(Dialog, &mut Window, &mut App) -> Dialog + 'static,
     {
         let previous_focused_handle = window.focused(cx).map(|h| h.downgrade());
         let focus_handle = cx.focus_handle();
@@ -447,6 +457,11 @@ impl Styled for Root {
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(cx.theme().font_size);
+        let root_bg = if cx.theme().window_blur_enabled {
+            cx.theme().transparent
+        } else {
+            cx.theme().background
+        };
 
         window_border().shadow_size(self.window_shadow_size).child(
             div()
@@ -457,7 +472,7 @@ impl Render for Root {
                 .relative()
                 .size_full()
                 .font_family(cx.theme().font_family.clone())
-                .bg(cx.theme().background)
+                .bg(root_bg)
                 .text_color(cx.theme().foreground)
                 .refine_style(&self.style)
                 .child(self.view.clone()),

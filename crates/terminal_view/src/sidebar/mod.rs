@@ -26,7 +26,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
+use gpui_component::{glass_sidebar, v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};
@@ -95,6 +95,8 @@ pub enum TerminalSidebarEvent {
     SearchNext,
     /// 字体大小变更
     FontSizeChanged(f32),
+    /// 行高比例变更
+    LineHeightScaleChanged(f32),
     /// 字体变更
     FontFamilyChanged(String),
     /// 主题变更
@@ -235,6 +237,9 @@ impl TerminalSidebar {
                 }
                 settings_panel::SettingsPanelEvent::FontSizeChanged(size) => {
                     cx.emit(TerminalSidebarEvent::FontSizeChanged(*size));
+                }
+                settings_panel::SettingsPanelEvent::LineHeightScaleChanged(scale) => {
+                    cx.emit(TerminalSidebarEvent::LineHeightScaleChanged(*scale));
                 }
                 settings_panel::SettingsPanelEvent::FontFamilyChanged(family) => {
                     cx.emit(TerminalSidebarEvent::FontFamilyChanged(family.clone()));
@@ -542,10 +547,12 @@ impl TerminalSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
-        let accent_color = self.colors.accent;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
+        let accent_color = glass_sidebar(self.colors.accent, blur_enabled, glass_opacity);
         let accent_fg = self.colors.accent_foreground;
         let muted_fg = self.colors.muted_foreground;
-        let muted_bg = self.colors.muted;
+        let muted_bg = glass_sidebar(self.colors.muted, blur_enabled, glass_opacity);
 
         div()
             .id(SharedString::from(format!("toolbar-btn-{:?}", panel)))
@@ -571,7 +578,9 @@ impl TerminalSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = self.colors.border;
-        let muted_bg = self.colors.background;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
+        let muted_bg = glass_sidebar(self.colors.background, blur_enabled, glass_opacity);
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -637,7 +646,9 @@ impl Focusable for TerminalSidebar {
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity;
+        let bg_color = glass_sidebar(cx.theme().background, blur_enabled, glass_opacity);
 
         div()
             .h_full()
