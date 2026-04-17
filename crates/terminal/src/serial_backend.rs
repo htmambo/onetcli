@@ -138,6 +138,10 @@ impl TerminalBackend for SerialBackend {
     fn close(&self, _mode: TerminalCloseMode) {
         let _ = self.command_tx.send(SerialCommand::Shutdown);
     }
+
+    fn shutdown(&self) {
+        let _ = self.command_tx.send(SerialCommand::Shutdown);
+    }
 }
 
 #[cfg(test)]

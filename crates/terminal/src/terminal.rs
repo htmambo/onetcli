@@ -7,6 +7,10 @@
 //!
 //! 与 TerminalView 分离，TerminalView 只负责视图逻辑。
 
+use std::cell::Cell;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
@@ -21,14 +25,8 @@ use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
-use std::cell::Cell;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
-#[cfg(any(test, not(target_os = "linux")))]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -40,17 +38,19 @@ use std::env;
 use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
 use std::path::Path;
+#[cfg(any(test, not(target_os = "linux")))]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::history::{
     collect_history_search_results, collect_history_suggestions_with_cwd, parse_shell_history,
     push_rich_history_entry, HistoryEntry, ShellHistoryFormat, PERSISTED_HISTORY_LIMIT,
     SESSION_HISTORY_LIMIT,
 };
+use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(unix)]
 use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
 #[cfg(unix)]
 use crate::local_pty_protocol::LocalPtyHostEvent;
-use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(unix)]
 use anyhow::Context as _;
 
@@ -61,8 +61,145 @@ use crate::{
 use ssh::{ChannelEvent, RusshClient, SshChannel, SshClient};
 pub use ssh::{
     JumpServerConnectConfig, ProxyConnectConfig, ProxyType, PtyConfig, SshAuth, SshConnectConfig,
-    SshConnectionStage,
+    SshConnectionStage, SshSessionManager,
 };
+
+const DEFAULT_COLS: usize = 80;
+const DEFAULT_ROWS: usize = 24;
+pub const DEFAULT_RECOVERY_SCROLLBACK_LINES: usize = 2000;
+pub const MAX_RECOVERY_SCROLLBACK_LINES: usize = 5000;
+const HISTORY_RESTORED_BANNER: &str =
+    "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n";
+const HISTORY_RESTORED_BANNER_COMPACT: &str = "*历史记录已恢复";
+
+fn is_history_restored_banner_line(line: &str) -> bool {
+    let compact: String = line.chars().filter(|ch| !ch.is_whitespace()).collect();
+    compact == HISTORY_RESTORED_BANNER_COMPACT
+}
+
+fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
+    lines.min(MAX_RECOVERY_SCROLLBACK_LINES)
+}
+
+/// 判断是否使用 hosted 本地 PTY 模式。
+/// 通过环境变量 `ONETCLI_HOSTED_LOCAL_PTY` 控制，默认关闭（fallback 到旧实现）。
+#[cfg(unix)]
+fn use_hosted_local_pty() -> bool {
+    std::env::var("ONETCLI_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
+}
+
+fn serialize_term_for_recovery(
+    term: &Term<GpuiEventProxy>,
+    max_lines: usize,
+) -> Option<String> {
+    let max_lines = normalize_recovery_scrollback_lines(max_lines);
+    if max_lines == 0 || term.mode().contains(TermMode::ALT_SCREEN) {
+        return None;
+    }
+
+    let history_size = term.history_size();
+    let screen_lines = term.screen_lines();
+    let columns = term.columns();
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for line_idx in 0..(history_size + screen_lines) {
+        let grid_line = Line((line_idx as i32) - (history_size as i32));
+        let row = &term.grid()[grid_line];
+        let line_length = row.line_length();
+
+        if line_length.0 > 0 {
+            for cell in row[..line_length].iter() {
+                if cell
+                    .flags
+                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+
+                current_line.push(cell.c);
+                if let Some(zerowidth) = cell.zerowidth() {
+                    current_line.extend(zerowidth.iter().copied());
+                }
+            }
+        }
+
+        let is_wrapline =
+            columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
+        if is_wrapline {
+            continue;
+        }
+        // 清理一些与`onetcli_prompt_hook`相关的内容
+        if current_line.contains("type onetcli_prompt_hook")
+            || (current_line.contains("PROMPT_COMMAND")
+                && current_line.contains("onetcli_prompt_hook"))
+        {
+            current_line.clear();
+            continue;
+        }
+
+        lines.push(current_line.trim_end_matches(' ').to_string());
+        current_line.clear();
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line.trim_end_matches(' ').to_string());
+    }
+
+    // 过滤掉恢复 banner 及其空行，避免每次恢复后 banner 被累积。
+    lines.retain(|s| !s.is_empty() && !is_history_restored_banner_line(s));
+
+    while matches!(lines.last(), Some(last) if last.is_empty()) {
+        lines.pop();
+    }
+
+    if lines.len() > max_lines {
+        lines = lines.split_off(lines.len() - max_lines);
+    }
+
+    (!lines.is_empty()).then(|| lines.join("\r\n"))
+}
+
+fn replay_term_output(
+    term: &Arc<FairMutex<Term<GpuiEventProxy>>>,
+    data: &[u8],
+    osc_tx: Option<&UnboundedSender<TerminalEvent>>,
+) {
+    let mut processor: Processor<StdSyncHandler> = Processor::new();
+    processor.advance(&mut *term.lock(), data);
+
+    // 从 PTY 输出中实时解析 OSC 7，触发路径更新
+    if let Some(tx) = osc_tx {
+        use crate::osc::extract_osc_events;
+        for osc_event in extract_osc_events(data) {
+            if let crate::osc::OscEvent::WorkingDirChanged(path) = osc_event {
+                let _ = tx.send(TerminalEvent::WorkingDirChanged(path));
+            }
+        }
+    }
+}
+
+fn normalize_working_dir(path: &str) -> Option<String> {
+    let path = path.trim();
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+/// 将路径中的 `~` 替换为实际的 home 目录路径。
+pub fn expand_tilde(path: &str) -> String {
+    let home = std::env::var("HOME").ok();
+    if let Some(ref home) = home {
+        if path == "~" {
+            return home.clone();
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            return format!("{}/{}", home, rest);
+        }
+        if let Some(rest) = path.strip_prefix("~\\") {
+            return format!("{}\\{}", home, rest);
+        }
+    }
+    path.to_string()
+}
 
 /// Terminal 发出的事件，供 TerminalView 订阅
 #[derive(Debug, Clone)]
@@ -115,118 +252,6 @@ enum SshProcessState {
     Busy,
 }
 
-const DEFAULT_COLS: usize = 80;
-const DEFAULT_ROWS: usize = 24;
-pub const DEFAULT_RECOVERY_SCROLLBACK_LINES: usize = 2000;
-pub const MAX_RECOVERY_SCROLLBACK_LINES: usize = 5000;
-const HISTORY_RESTORED_BANNER: &str =
-    "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n";
-const HISTORY_RESTORED_BANNER_COMPACT: &str = "*历史记录已恢复";
-
-fn is_history_restored_banner_line(line: &str) -> bool {
-    let compact: String = line.chars().filter(|ch| !ch.is_whitespace()).collect();
-    compact == HISTORY_RESTORED_BANNER_COMPACT
-}
-
-fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
-    lines.min(MAX_RECOVERY_SCROLLBACK_LINES)
-}
-
-/// 判断是否使用 hosted 本地 PTY 模式。
-/// 通过环境变量 `ONETCLI_HOSTED_LOCAL_PTY` 控制，默认关闭（fallback 到旧实现）。
-#[cfg(unix)]
-fn use_hosted_local_pty() -> bool {
-    std::env::var("ONETCLI_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
-}
-
-fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) -> Option<String> {
-    let max_lines = normalize_recovery_scrollback_lines(max_lines);
-    if max_lines == 0 || term.mode().contains(TermMode::ALT_SCREEN) {
-        return None;
-    }
-
-    let history_size = term.history_size();
-    let screen_lines = term.screen_lines();
-    let columns = term.columns();
-    let mut lines = Vec::new();
-    let mut current_line = String::new();
-
-    for line_idx in 0..(history_size + screen_lines) {
-        let grid_line = Line((line_idx as i32) - (history_size as i32));
-        let row = &term.grid()[grid_line];
-        let line_length = row.line_length();
-
-        if line_length.0 > 0 {
-            for cell in row[..line_length].iter() {
-                if cell
-                    .flags
-                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-                {
-                    continue;
-                }
-
-                current_line.push(cell.c);
-                if let Some(zerowidth) = cell.zerowidth() {
-                    current_line.extend(zerowidth.iter().copied());
-                }
-            }
-        }
-
-        let is_wrapline = columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
-        if is_wrapline {
-            continue;
-        }
-        // 清理一些与`onetcli_prompt_hook`相关的内容
-        if current_line.contains("type onetcli_prompt_hook")
-            || (current_line.contains("PROMPT_COMMAND")
-                && current_line.contains("onetcli_prompt_hook"))
-        {
-            current_line.clear();
-            continue;
-        }
-
-        lines.push(current_line.trim_end_matches(' ').to_string());
-        current_line.clear();
-    }
-
-    if !current_line.is_empty() {
-        lines.push(current_line.trim_end_matches(' ').to_string());
-    }
-
-    // 过滤掉恢复 banner 及其空行，避免每次恢复后 banner 被累积。
-    lines.retain(|s| !s.is_empty() && !is_history_restored_banner_line(s));
-
-    while matches!(lines.last(), Some(last) if last.is_empty()) {
-        lines.pop();
-    }
-
-    if lines.len() > max_lines {
-        lines = lines.split_off(lines.len() - max_lines);
-    }
-
-    (!lines.is_empty()).then(|| lines.join("\r\n"))
-}
-
-fn replay_term_output(
-    term: &Arc<FairMutex<Term<GpuiEventProxy>>>,
-    data: &[u8],
-    osc_tx: Option<&UnboundedSender<TerminalEvent>>,
-) {
-    let mut processor: Processor<StdSyncHandler> = Processor::new();
-    processor.advance(&mut *term.lock(), data);
-
-    // 从 PTY 输出中实时解析 OSC 7，触发路径更新
-    // 与 SSH 后端等价：每次收到 PTY 数据就检查 OSC 7
-    if let Some(tx) = osc_tx {
-        use crate::osc::extract_osc_events;
-        for osc_event in extract_osc_events(data) {
-            if let crate::osc::OscEvent::WorkingDirChanged(path) = osc_event {
-                let _ = tx.send(TerminalEvent::WorkingDirChanged(path));
-            }
-        }
-    }
-}
-
 /// 将路径安全地转为 POSIX shell 单参数，避免命令注入。
 pub(crate) fn shell_escape_arg(arg: &str) -> String {
     if arg.is_empty() {
@@ -250,27 +275,6 @@ fn build_cd_command(dir: &str) -> String {
     format!("cd -- {}", shell_escape_arg(dir))
 }
 
-fn build_ssh_base_init_commands(
-    working_dir: Option<&str>,
-    default_directory: Option<&str>,
-    init_script: Option<&str>,
-) -> Option<String> {
-    let mut commands = Vec::new();
-
-    if let Some(work_dir) = working_dir {
-        commands.push(build_cd_command(work_dir));
-    } else {
-        if let Some(dir) = default_directory.filter(|dir| !dir.is_empty()) {
-            commands.push(build_cd_command(dir));
-        }
-        if let Some(script) = init_script.filter(|script| !script.is_empty()) {
-            commands.push(script.to_string());
-        }
-    }
-
-    (!commands.is_empty()).then(|| commands.join("\n"))
-}
-
 const SSH_PROMPT_READY_COMMAND: &str = r#"printf "\033]1337;OnetcliPromptReady=1\007""#;
 const SSH_PROMPT_HOOK_NAME: &str = "onetcli_prompt_hook";
 
@@ -284,16 +288,12 @@ fn compose_ssh_init_commands(
         commands.push(base_commands.to_string());
     }
 
-    // Fallback: 如果远端 shell_integration.sh 因环境原因未生效，
-    // init_commands 中注入的轻量 hook 仍能确保进程状态在回到 prompt 时被重置为 Idle。
     commands.push(build_ssh_prompt_hook_command());
 
     (!commands.is_empty()).then(|| commands.join("\n"))
 }
 
 fn build_ssh_prompt_hook_command() -> String {
-    // 仅在函数未定义时才注册（避免重复注册和可见输出）。
-    // 使用 type 内置命令检测函数，比环境变量守卫更简洁可靠。
     format!(
         "\
 type {hook_name} >/dev/null 2>&1 || {{ \
@@ -308,42 +308,6 @@ fi; \
         hook_name = SSH_PROMPT_HOOK_NAME,
         hook_body = SSH_PROMPT_READY_COMMAND,
     )
-}
-
-fn build_ssh_init_commands(
-    working_dir: Option<&str>,
-    default_directory: Option<&str>,
-    init_script: Option<&str>,
-    sync_path_with_terminal: bool,
-) -> Option<String> {
-    let base_init_commands =
-        build_ssh_base_init_commands(working_dir, default_directory, init_script);
-    compose_ssh_init_commands(base_init_commands.as_deref(), sync_path_with_terminal)
-}
-
-fn normalize_working_dir(path: &str) -> Option<String> {
-    let path = path.trim();
-    (!path.is_empty()).then(|| path.to_string())
-}
-
-/// 将路径中的 `~` 替换为实际的 home 目录路径。
-///
-/// shell prompt 有时会将 home 目录显示为 `~` 或 `~/...`，
-/// 此函数将其展开为真实路径以便在 UI 状态栏中正确显示。
-pub fn expand_tilde(path: &str) -> String {
-    let home = std::env::var("HOME").ok();
-    if let Some(ref home) = home {
-        if path == "~" {
-            return home.clone();
-        }
-        if let Some(rest) = path.strip_prefix("~/") {
-            return format!("{}/{}", home, rest);
-        }
-        if let Some(rest) = path.strip_prefix("~\\") {
-            return format!("{}\\{}", home, rest);
-        }
-    }
-    path.to_string()
 }
 
 fn read_local_working_dir(path: &std::path::Path) -> Option<String> {
@@ -573,43 +537,6 @@ fn note_local_user_input(
     }
 }
 
-fn note_ssh_user_input(
-    connection_kind: TerminalConnectionKind,
-    ssh_process_state: &Cell<SshProcessState>,
-    data: &[u8],
-) {
-    if connection_kind != TerminalConnectionKind::Ssh || data.is_empty() {
-        return;
-    }
-
-    let has_newline = data.iter().any(|byte| matches!(*byte, b'\r' | b'\n'));
-    let should_mark_busy = matches!(ssh_process_state.get(), SshProcessState::Busy) || has_newline;
-    if should_mark_busy {
-        tracing::warn!(
-            target: "terminal.ssh",
-            has_newline,
-            data_len = data.len(),
-            data = %String::from_utf8_lossy(data).trim(),
-            "SSH user input -> Busy"
-        );
-        ssh_process_state.set(SshProcessState::Busy);
-    }
-}
-
-fn note_ssh_prompt_idle(
-    connection_kind: TerminalConnectionKind,
-    ssh_process_state: &Cell<SshProcessState>,
-) {
-    if connection_kind == TerminalConnectionKind::Ssh {
-        tracing::warn!(
-            target: "terminal.ssh",
-            prev_state = ?ssh_process_state.get(),
-            "SSH prompt idle -> Idle"
-        );
-        ssh_process_state.set(SshProcessState::Idle);
-    }
-}
-
 #[cfg(not(target_os = "linux"))]
 fn read_local_working_dir_from_pid(_pid: u32) -> Option<String> {
     None
@@ -662,6 +589,75 @@ fn build_local_cwd_tracking_init_command(cwd_file_path: &str) -> String {
     command.push_str("fi; ");
     command.push_str("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null\n");
     command
+}
+
+fn note_ssh_user_input(
+    connection_kind: TerminalConnectionKind,
+    ssh_process_state: &Cell<SshProcessState>,
+    data: &[u8],
+) {
+    if connection_kind != TerminalConnectionKind::Ssh || data.is_empty() {
+        return;
+    }
+
+    let has_newline = data.iter().any(|byte| matches!(*byte, b'\r' | b'\n'));
+    let should_mark_busy = matches!(ssh_process_state.get(), SshProcessState::Busy) || has_newline;
+    if should_mark_busy {
+        tracing::warn!(
+            target: "terminal.ssh",
+            has_newline,
+            data_len = data.len(),
+            data = %String::from_utf8_lossy(data).trim(),
+            "SSH user input -> Busy"
+        );
+        ssh_process_state.set(SshProcessState::Busy);
+    }
+}
+
+fn note_ssh_prompt_idle(
+    connection_kind: TerminalConnectionKind,
+    ssh_process_state: &Cell<SshProcessState>,
+) {
+    if connection_kind == TerminalConnectionKind::Ssh {
+        tracing::warn!(
+            target: "terminal.ssh",
+            prev_state = ?ssh_process_state.get(),
+            "SSH prompt idle -> Idle"
+        );
+        ssh_process_state.set(SshProcessState::Idle);
+    }
+}
+
+fn build_ssh_base_init_commands(
+    working_dir: Option<&str>,
+    default_directory: Option<&str>,
+    init_script: Option<&str>,
+) -> Option<String> {
+    let mut commands = Vec::new();
+
+    if let Some(work_dir) = working_dir {
+        commands.push(build_cd_command(work_dir));
+    } else {
+        if let Some(dir) = default_directory.filter(|dir| !dir.is_empty()) {
+            commands.push(build_cd_command(dir));
+        }
+        if let Some(script) = init_script.filter(|script| !script.is_empty()) {
+            commands.push(script.to_string());
+        }
+    }
+
+    (!commands.is_empty()).then(|| commands.join("\n"))
+}
+
+fn build_ssh_init_commands(
+    working_dir: Option<&str>,
+    default_directory: Option<&str>,
+    init_script: Option<&str>,
+    sync_path_with_terminal: bool,
+) -> Option<String> {
+    let base_init_commands =
+        build_ssh_base_init_commands(working_dir, default_directory, init_script);
+    compose_ssh_init_commands(base_init_commands.as_deref(), sync_path_with_terminal)
 }
 
 #[cfg(any(test, target_os = "windows"))]
@@ -784,17 +780,11 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
         }
 
         let script = integration_path.display();
-
-        // .zshenv — 恢复原始 ZDOTDIR，source 用户 .zshenv，再 source 集成脚本
-        // 注意：macOS alacritty 用 `login ... /bin/zsh -fc "exec ..."` 启动 shell，
-        // -c 命令使 shell 为 non-interactive，.zshrc 不会加载。
-        // .zshenv 在所有模式下都会加载，所以集成脚本要在这里 source。
-        // 脚本内部有 [[ $- != *i* ]] 守卫，非交互环境会提前返回。
         let zshenv = format!(
             "ZDOTDIR=\"${{_ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
              [[ -f \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\n\
              [[ -f \"$HOME/.zshenv\" ]] && source \"$HOME/.zshenv\"\n\
-             source \"{script}\"\n"
+              source \"{script}\"\n"
         );
         let _ = fs::write(zsh_dir.join(".zshenv"), zshenv);
 
@@ -973,6 +963,8 @@ pub struct Terminal {
 
     /// SSH 配置（用于重连）
     ssh_config: Option<SshTerminalConfig>,
+    /// SSH 会话管理器（用于 FileManagerPanel 和 ServerMonitorPanel）
+    ssh_session_manager: Option<Arc<SshSessionManager>>,
     /// SSH 会话的远端进程状态，由 prompt hook 与用户输入共同驱动。
     ssh_process_state: Cell<SshProcessState>,
     /// 是否已从远端收到过 OSC 133;A/B prompt 事件。
@@ -1087,6 +1079,7 @@ impl Terminal {
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
+            ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             serial_params: None,
@@ -1200,11 +1193,12 @@ impl Terminal {
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
+            ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             serial_params: None,
             event_tx: Some(event_tx),
-            event_proxy: None, // 本地终端的 event_proxy 已在 LocalPtyBackend 中设置
+            event_proxy: None,
             connection_id: None,
             connection_name: None,
             init_commands: None,
@@ -1245,7 +1239,6 @@ impl Terminal {
             .context("hosted local PTY spawn 失败")?;
         let (request_tx, mut host_event_rx) = client.split();
 
-        // 设置 PtyWrite 回写通道
         let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> =
             request_tx.clone();
         event_proxy.set_hosted_write_back(writeback_tx, session_id.clone());
@@ -1297,6 +1290,7 @@ impl Terminal {
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
+            ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             serial_params: None,
@@ -1387,6 +1381,7 @@ impl Terminal {
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
+            ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             serial_params: None,
@@ -1437,7 +1432,6 @@ impl Terminal {
             SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
         };
 
-        // 构建初始化命令
         let init_commands = build_ssh_init_commands(
             working_dir,
             ssh_params.default_directory.as_deref(),
@@ -1541,7 +1535,8 @@ impl Terminal {
             connection_wait_started_at: Some(Instant::now()),
             cols,
             rows,
-            ssh_config: Some(config),
+            ssh_config: Some(config.clone()),
+            ssh_session_manager: Some(Arc::new(SshSessionManager::new(config.ssh_config.clone()))),
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             serial_params: None,
@@ -1594,6 +1589,7 @@ impl Terminal {
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             ssh_config: None,
+            ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             serial_params: Some(serial_params),
@@ -1893,9 +1889,6 @@ impl Terminal {
                     cols: self.cols,
                     rows: self.rows,
                 });
-                // 重要：将当前终端尺寸同步到新连接的 SSH 后端
-                // 因为远程 PTY 是用 PtyConfig 默认尺寸（80x24）创建的，
-                // 需要调整到当前实际尺寸
                 tracing::info!(
                     "SSH 连接成功，同步终端尺寸到远程: {}x{}",
                     self.cols,
@@ -2060,7 +2053,6 @@ impl Terminal {
             TerminalEvent::CommandStart => {
                 // 不直接修改 ssh_process_state，因为 bash DEBUG trap
                 // 可能在 PS1 的命令 substitution 中误触发。
-                // Busy 状态由 note_ssh_user_input（检测换行符）驱动。
             }
             TerminalEvent::TitleChanged(title) => {
                 self.title = title.clone();
@@ -2087,7 +2079,6 @@ impl Terminal {
                 note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
             }
             TerminalEvent::CommandFinished { exit_code } => {
-                // 命令执行完毕（OSC 133;D）— 将退出码记录到最后一条历史条目
                 tracing::debug!("命令执行完毕，退出码: {}", exit_code);
                 if let Some(last) = self.session_history.back_mut() {
                     last.exit_code = Some(exit_code);
@@ -2117,12 +2108,54 @@ impl Terminal {
         self.child_exited
     }
 
+    /// 获取连接状态
+    pub fn connection_state(&self) -> &ConnectionState {
+        &self.connection_state
+    }
+
+    /// 获取连接名称
+    pub fn connection_name(&self) -> Option<&str> {
+        self.connection_name.as_deref()
+    }
+
+    /// 获取连接 ID
+    pub fn connection_id(&self) -> Option<i64> {
+        self.connection_id
+    }
+
+    /// 获取当前工作目录（由 OSC 7 更新，仅 SSH 终端）
+    pub fn current_working_dir(&self) -> Option<&str> {
+        self.current_working_dir.as_deref()
+    }
+
+    /// 获取最新工作目录。
+    pub fn latest_working_dir(&self) -> Option<String> {
+        if let Some(pid) = self.local_shell_pid {
+            if let Some(path) = read_local_working_dir_from_pid(pid) {
+                return Some(path);
+            }
+        }
+
+        if let Some(path) = self.local_cwd_file.as_deref() {
+            if let Some(path) = read_local_working_dir(path) {
+                return Some(path);
+            }
+        }
+
+        self.current_working_dir.clone()
+    }
+
+    /// 获取 hosted 本地 PTY 的 session id（如果有）。
+    pub fn local_pty_session_id(&self) -> Option<&str> {
+        self.local_pty_session_id.as_deref()
+    }
+
+    /// 获取工作目录的显示形式，将 `~` 替换为实际 home 路径。
+    pub fn working_dir_display(&self) -> Option<String> {
+        self.latest_working_dir().map(|path| expand_tilde(&path))
+    }
+
     /// 是否存在会在关闭时被中断的本地子进程。
-    ///
-    /// Linux / macOS 本地终端支持精确检测：shell 停在提示符时返回 false，
-    /// shell 下仍有存活子进程（如 vim、top、sleep、后台任务）时返回 true。
-    /// SSH 终端通过远端 prompt hook 判断：回到提示符时视为空闲，用户提交命令后直到下次提示符前视为运行中。
-    /// 串口等其它连接类型仍返回 false，避免把“会话仍然打开”误判为“任务仍在运行”。
     pub fn has_running_processes(&self) -> bool {
         if self.child_exited.is_some() {
             return false;
@@ -2174,11 +2207,6 @@ impl Terminal {
         self.ssh_prompt_detected
     }
 
-    /// 获取连接状态
-    pub fn connection_state(&self) -> &ConnectionState {
-        &self.connection_state
-    }
-
     /// 获取当前连接阶段提示
     pub fn connection_status_message(&self) -> Option<&str> {
         self.connection_status_message.as_deref()
@@ -2197,48 +2225,15 @@ impl Terminal {
         ))
     }
 
-    /// 获取连接名称
-    pub fn connection_name(&self) -> Option<&str> {
-        self.connection_name.as_deref()
+    /// 捕获整个终端内容为纯文本
+    pub fn visible_content(&self) -> String {
+        let term = self.term.lock();
+        serialize_term_for_recovery(&term, 500).unwrap_or_default()
     }
 
-    /// 获取连接 ID
-    pub fn connection_id(&self) -> Option<i64> {
-        self.connection_id
-    }
-
-    /// 获取当前工作目录（由 OSC 7 更新，仅 SSH 终端）
-    pub fn current_working_dir(&self) -> Option<&str> {
-        self.current_working_dir.as_deref()
-    }
-
-    /// 获取最新工作目录。
-    ///
-    /// 本地终端优先读取 cwd 跟踪文件，避免恢复时仍停留在初始目录。
-    pub fn latest_working_dir(&self) -> Option<String> {
-        if let Some(pid) = self.local_shell_pid {
-            if let Some(path) = read_local_working_dir_from_pid(pid) {
-                return Some(path);
-            }
-        }
-
-        if let Some(path) = self.local_cwd_file.as_deref() {
-            if let Some(path) = read_local_working_dir(path) {
-                return Some(path);
-            }
-        }
-
-        self.current_working_dir.clone()
-    }
-
-    /// 获取 hosted 本地 PTY 的 session id（如果有）。
-    pub fn local_pty_session_id(&self) -> Option<&str> {
-        self.local_pty_session_id.as_deref()
-    }
-
-    /// 获取工作目录的显示形式，将 `~` 替换为实际 home 路径。
-    pub fn working_dir_display(&self) -> Option<String> {
-        self.latest_working_dir().map(|path| expand_tilde(&path))
+    pub fn recovery_content(&self, max_lines: usize) -> Option<String> {
+        let term = self.term.lock();
+        serialize_term_for_recovery(&term, max_lines)
     }
 
     pub fn history_suggestions(&self, prefix: &str, limit: usize) -> Vec<String> {
@@ -2262,6 +2257,10 @@ impl Terminal {
     /// 获取 SSH 连接配置（仅 SSH 终端）
     pub fn ssh_config(&self) -> Option<&SshTerminalConfig> {
         self.ssh_config.as_ref()
+    }
+
+    pub fn ssh_session_manager(&self) -> Option<&Arc<SshSessionManager>> {
+        self.ssh_session_manager.as_ref()
     }
 
     /// 获取连接类型
@@ -2372,8 +2371,7 @@ impl Terminal {
 
     /// 更新 SSH 终端的路径同步设置。
     ///
-    /// SSH 路径事件由远端 shell integration 发出的 OSC 7/133 驱动。
-    /// 这里保留接口以兼容设置同步流程。
+    /// 路径同步由 shell 集成脚本发出 OSC 7，这里保留接口以兼容设置同步流程。
     pub fn set_sync_path_with_terminal(&mut self, _enabled: bool) {
         if self.connection_kind != TerminalConnectionKind::Ssh {
             return;
@@ -2440,17 +2438,6 @@ impl Terminal {
         }
     }
 
-    /// 捕获整个终端内容（完整 grid 缓冲区 + 回滚历史）为纯文本
-    pub fn visible_content(&self) -> String {
-        let term = self.term.lock();
-        serialize_term_for_recovery(&term, 500).unwrap_or_default()
-    }
-
-    pub fn recovery_content(&self, max_lines: usize) -> Option<String> {
-        let term = self.term.lock();
-        serialize_term_for_recovery(&term, max_lines)
-    }
-
     // ========== 滚动操作 ==========
 
     /// 滚动终端
@@ -2491,29 +2478,16 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cd_command, build_local_cwd_tracking_init_command, build_ssh_base_init_commands,
-        build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
-        expand_tilde, next_local_cwd_file_path, note_ssh_prompt_idle, note_ssh_user_input,
-        read_local_working_dir, resolve_default_windows_shell_from_env, shell_escape_arg,
-        SshProcessState, TerminalConnectionKind, SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
+        build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
+        compose_ssh_init_commands, resolve_default_windows_shell_from_env, shell_escape_arg,
+        SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
         push_history_entry, HistoryEntry, ShellHistoryFormat,
     };
-    #[cfg(target_os = "macos")]
-    use gpui::{AppContext, TestAppContext};
-    use std::cell::Cell;
     use std::collections::VecDeque;
     use std::fs;
-    #[cfg(target_os = "linux")]
-    use std::path::Path;
-    #[cfg(target_os = "macos")]
-    use std::process::{Child, Command};
-    #[cfg(target_os = "macos")]
-    use std::thread;
-    #[cfg(target_os = "macos")]
-    use std::time::{Duration, Instant};
 
     #[test]
     fn shell_escape_arg_handles_single_quote() {
@@ -2534,17 +2508,14 @@ mod tests {
     }
 
     #[test]
-    fn build_ssh_init_commands_keep_base_commands_for_all_sync_modes() {
+    fn build_ssh_init_commands_ignores_sync_path_switch_for_script_integration() {
         let enabled = build_ssh_init_commands(None, Some("/tmp"), Some("echo ready"), true)
-            .expect("启用路径同步时应生成初始化命令");
-        assert!(enabled.contains("cd -- '/tmp'"));
-        assert!(enabled.contains("echo ready"));
+            .expect("启用路径同步时应保留基础初始化命令");
 
         let disabled = build_ssh_init_commands(None, Some("/tmp"), Some("echo ready"), false)
             .expect("禁用路径同步时仍应保留其它初始化命令");
-        assert!(disabled.contains("cd -- '/tmp'"));
-        assert!(disabled.contains("echo ready"));
         assert_eq!(enabled, disabled);
+        assert!(disabled.contains("echo ready"));
     }
 
     #[test]
@@ -2576,134 +2547,6 @@ mod tests {
             .expect("带基础命令时应继续注入 SSH prompt hook");
         assert!(with_base.contains("echo ready"));
         assert!(with_base.contains(SSH_PROMPT_HOOK_NAME));
-    }
-
-    #[test]
-    fn ssh_prompt_hook_command_supports_zsh_and_bash_style_hooks() {
-        let commands = build_ssh_prompt_hook_command();
-        assert!(commands.contains("precmd_functions"));
-        assert!(commands.contains("PROMPT_COMMAND"));
-        assert!(commands.contains(SSH_PROMPT_HOOK_NAME));
-        assert!(commands.contains(SSH_PROMPT_READY_COMMAND));
-    }
-
-    #[test]
-    fn ssh_user_input_marks_busy_only_after_command_submission() {
-        let state = Cell::new(SshProcessState::Idle);
-
-        note_ssh_user_input(TerminalConnectionKind::Ssh, &state, b"top");
-        assert_eq!(state.get(), SshProcessState::Idle);
-
-        note_ssh_user_input(TerminalConnectionKind::Ssh, &state, b"\r");
-        assert_eq!(state.get(), SshProcessState::Busy);
-
-        state.set(SshProcessState::Idle);
-        note_ssh_user_input(TerminalConnectionKind::Local, &state, b"top\r");
-        assert_eq!(state.get(), SshProcessState::Idle);
-    }
-
-    #[test]
-    fn ssh_prompt_lifecycle_marks_idle_for_ssh_only() {
-        let state = Cell::new(SshProcessState::Busy);
-
-        note_ssh_prompt_idle(TerminalConnectionKind::Ssh, &state);
-        assert_eq!(state.get(), SshProcessState::Idle);
-
-        state.set(SshProcessState::Busy);
-        note_ssh_prompt_idle(TerminalConnectionKind::Local, &state);
-        assert_eq!(state.get(), SshProcessState::Busy);
-    }
-
-    #[test]
-    fn ssh_terminal_running_processes_follow_remote_state() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, _event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-
-        let terminal = super::Terminal {
-            term,
-            backend: None,
-            title: String::new(),
-            current_working_dir: None,
-            local_shell_pid: None,
-            local_cwd_file: None,
-            #[cfg(target_os = "macos")]
-            local_process_tree_settled: Cell::new(true),
-            child_exited: None,
-            connection_state: super::ConnectionState::Connected,
-            connection_status_message: None,
-            connection_wait_started_at: None,
-            cols: super::DEFAULT_COLS,
-            rows: super::DEFAULT_ROWS,
-            ssh_config: None,
-            ssh_process_state: Cell::new(SshProcessState::Busy),
-            ssh_prompt_detected: true,
-            serial_params: None,
-            event_tx: None,
-            event_proxy: None,
-            connection_id: None,
-            connection_name: None,
-            init_commands: None,
-            session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
-            connection_kind: TerminalConnectionKind::Ssh,
-            local_pty_session_id: None,
-        };
-        assert!(terminal.has_running_processes());
-
-        terminal.ssh_process_state.set(SshProcessState::Idle);
-        assert!(!terminal.has_running_processes());
-    }
-
-    #[test]
-    fn serialize_term_for_recovery_keeps_recent_scrollback() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, _event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-
-        super::replay_term_output(&term, b"line-1\r\nline-2\r\nline-3\r\n", None);
-
-        let serialized =
-            super::serialize_term_for_recovery(&term.lock(), 2).expect("应能生成恢复文本");
-        assert_eq!(serialized, "line-2\r\nline-3");
-    }
-
-    #[test]
-    fn serialize_term_for_recovery_skips_alt_screen() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, _event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-
-        super::replay_term_output(&term, b"\x1b[?1049hfullscreen", None);
-
-        assert_eq!(super::serialize_term_for_recovery(&term.lock(), 100), None);
-    }
-
-    #[test]
-    fn serialize_term_for_recovery_preserves_wide_chars_without_extra_spaces() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, _event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-
-        super::replay_term_output(&term, "历史记录已恢复".as_bytes(), None);
-
-        let visible =
-            super::serialize_term_for_recovery(&term.lock(), 20).expect("应能序列化宽字符文本");
-        assert_eq!(visible, "历史记录已恢复");
-    }
-
-    #[test]
-    fn replay_term_output_supports_history_restored_banner() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, _event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-
-        super::replay_term_output(&term, b"echo hello", None);
-        super::replay_term_output(&term, super::HISTORY_RESTORED_BANNER.as_bytes(), None);
-
-        let visible = super::serialize_term_for_recovery(&term.lock(), 20)
-            .expect("应能序列化带提示语的恢复内容");
-        assert_eq!(visible, "echo hello");
     }
 
     #[test]
@@ -2743,491 +2586,6 @@ mod tests {
 
         assert_eq!(resolved, cmd.to_string_lossy());
         let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn read_local_working_dir_trims_trailing_newlines() {
-        let temp_path =
-            std::env::temp_dir().join(format!("onetcli-cwd-test-{}", std::process::id()));
-        fs::write(&temp_path, "/tmp/demo\n").expect("应写入 cwd 文件");
-
-        assert_eq!(
-            read_local_working_dir(&temp_path).as_deref(),
-            Some("/tmp/demo")
-        );
-
-        let _ = fs::remove_file(&temp_path);
-    }
-
-    #[test]
-    fn build_local_cwd_tracking_init_command_covers_zsh_and_bash() {
-        let command = build_local_cwd_tracking_init_command("/tmp/demo");
-
-        assert!(command.contains("ONETCLI_CWD_FILE='/tmp/demo'"));
-        assert!(command.contains("typeset -ga precmd_functions;"));
-        assert!(command.contains("precmd_functions+=(onetcli_cwd_write)"));
-        assert!(command.contains("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null"));
-        assert!(command.contains("PROMPT_COMMAND='pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null'"));
-    }
-
-    #[test]
-    fn prepare_local_shell_launch_injects_zsh_shell_integration_env() {
-        let config = super::LocalConfig {
-            shell: Some("/bin/zsh".into()),
-            ..super::LocalConfig::default()
-        };
-
-        let (config, cwd_file) = super::prepare_local_shell_launch(config);
-
-        assert!(cwd_file.is_some());
-        assert!(config
-            .env
-            .iter()
-            .any(|(key, value)| key == "ONETCLI_SHELL_INTEGRATION" && value == "1"));
-        assert!(config.env.iter().any(|(key, value)| {
-            key == "ONETCLI_CWD_FILE"
-                && cwd_file
-                    .as_ref()
-                    .is_some_and(|path| value == &path.to_string_lossy())
-        }));
-        assert!(config.env.iter().any(|(key, _)| key == "ZDOTDIR"));
-        assert!(config.shell_args.is_empty());
-    }
-
-    #[test]
-    fn prepare_local_shell_launch_injects_bash_rcfile_args() {
-        let config = super::LocalConfig {
-            shell: Some("/bin/bash".into()),
-            ..super::LocalConfig::default()
-        };
-
-        let (config, _cwd_file) = super::prepare_local_shell_launch(config);
-
-        assert_eq!(
-            config.shell_args.first().map(String::as_str),
-            Some("--rcfile")
-        );
-        assert_eq!(config.shell_args.len(), 2);
-        assert!(config
-            .env
-            .iter()
-            .any(|(key, value)| key == "ONETCLI_SHELL_INTEGRATION" && value == "1"));
-    }
-
-    #[test]
-    fn expand_tilde_replaces_tilde_with_home() {
-        let previous_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", "/home/testuser");
-
-        assert_eq!(expand_tilde("~"), "/home/testuser");
-        assert_eq!(expand_tilde("~/projects"), "/home/testuser/projects");
-        assert_eq!(
-            expand_tilde("~/projects/code"),
-            "/home/testuser/projects/code"
-        );
-        // 非 ~ 路径保持不变
-        assert_eq!(expand_tilde("/tmp"), "/tmp");
-        assert_eq!(expand_tilde("/var/log"), "/var/log");
-        assert_eq!(expand_tilde("/home/other"), "/home/other");
-
-        if let Some(home) = previous_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-    }
-
-    #[test]
-    fn next_local_cwd_file_path_is_unique_per_terminal() {
-        let first = next_local_cwd_file_path();
-        let second = next_local_cwd_file_path();
-
-        assert_ne!(first, second);
-        assert!(first.file_name().unwrap_or_default() != second.file_name().unwrap_or_default());
-    }
-
-    #[cfg(target_os = "linux")]
-    fn write_proc_entry(root: &Path, pid: u32, state: char, children: &[u32]) {
-        let proc_dir = root.join(pid.to_string());
-        let task_dir = proc_dir.join("task").join(pid.to_string());
-        fs::create_dir_all(&task_dir).expect("应创建伪 proc 目录");
-        fs::write(
-            proc_dir.join("stat"),
-            format!("{pid} (fake process) {state} 0 0 0 0\n"),
-        )
-        .expect("应写入伪 stat 文件");
-        let children_text = children
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(" ");
-        fs::write(task_dir.join("children"), children_text).expect("应写入伪 children 文件");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn parse_proc_state_supports_names_with_spaces() {
-        let state = super::parse_proc_state("123 (ssh worker) S 0 0 0 0");
-        assert_eq!(state, Some('S'));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn has_live_descendant_process_detects_non_zombie_children() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("onetcli-proc-tree-live-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).expect("应创建伪 proc 根目录");
-
-        write_proc_entry(&temp_dir, 100, 'S', &[200]);
-        write_proc_entry(&temp_dir, 200, 'S', &[]);
-
-        assert!(super::has_live_descendant_process(&temp_dir, 100));
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn has_live_descendant_process_ignores_zombie_children() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("onetcli-proc-tree-zombie-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).expect("应创建伪 proc 根目录");
-
-        write_proc_entry(&temp_dir, 100, 'S', &[200]);
-        write_proc_entry(&temp_dir, 200, 'Z', &[]);
-
-        assert!(!super::has_live_descendant_process(&temp_dir, 100));
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[cfg(target_os = "macos")]
-    fn spawn_sleep_child(seconds: u64) -> Child {
-        Command::new("sleep")
-            .arg(seconds.to_string())
-            .spawn()
-            .expect("应创建 sleep 子进程")
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn has_live_descendant_process_detects_non_zombie_children() {
-        let mut child = spawn_sleep_child(3);
-
-        assert!(super::has_live_descendant_process(std::process::id()));
-
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-
-    #[cfg(target_os = "macos")]
-    unsafe fn fork_exit_child(delay_ms: u32) -> libc::pid_t {
-        let pid = libc::fork();
-        assert!(pid >= 0, "fork 应成功");
-        if pid == 0 {
-            libc::usleep(delay_ms * 1000);
-            libc::_exit(0);
-        }
-        pid
-    }
-
-    #[cfg(target_os = "macos")]
-    fn wait_until_terminal_unblocked() {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
-            if !super::has_live_descendant_process(std::process::id()) {
-                return;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        panic!("子进程退出后终端仍被错误识别为存在活动进程");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn has_live_descendant_process_ignores_zombie_children() {
-        let pid = unsafe { fork_exit_child(50) };
-
-        assert!(super::has_live_descendant_process(std::process::id()));
-        wait_until_terminal_unblocked();
-
-        assert!(!super::has_live_descendant_process(std::process::id()));
-
-        let mut status = 0;
-        unsafe {
-            libc::waitpid(pid, &mut status, 0);
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn resolve_terminal_process_pid_skips_login_wrapper() {
-        assert_eq!(
-            super::resolve_terminal_process_pid(10, Some("login"), true, &[20]),
-            20
-        );
-        assert_eq!(
-            super::resolve_terminal_process_pid(10, Some("login"), true, &[]),
-            10
-        );
-        assert_eq!(
-            super::resolve_terminal_process_pid(10, Some("zsh"), true, &[20]),
-            10
-        );
-        assert_eq!(
-            super::resolve_terminal_process_pid(10, None, false, &[20]),
-            20
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn startup_helpers_do_not_trigger_close_prompt_before_terminal_settles() {
-        assert!(!super::should_report_local_running_processes(false, true));
-        assert!(!super::should_report_local_running_processes(false, false));
-        assert!(super::should_report_local_running_processes(true, true));
-        assert!(!super::should_report_local_running_processes(true, false));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn local_user_input_marks_startup_as_settled() {
-        let settled = Cell::new(false);
-
-        super::note_local_user_input(TerminalConnectionKind::Local, &settled, b"top\r");
-        assert!(settled.get());
-
-        settled.set(false);
-        super::note_local_user_input(TerminalConnectionKind::Ssh, &settled, b"top\r");
-        assert!(!settled.get());
-
-        super::note_local_user_input(TerminalConnectionKind::Local, &settled, b"");
-        assert!(!settled.get());
-    }
-
-    #[cfg(target_os = "macos")]
-    fn macos_process_tree_lines(pid: u32, depth: usize, lines: &mut Vec<String>) {
-        let indent = "  ".repeat(depth);
-        let name = super::read_process_bsdinfo(pid)
-            .as_ref()
-            .and_then(super::process_name_from_bsdinfo)
-            .unwrap_or_else(|| "<unavailable>".to_string());
-        let children = super::read_child_pids(pid);
-        lines.push(format!(
-            "{indent}pid={pid} name={name} children={:?}",
-            children
-        ));
-        for child_pid in children {
-            macos_process_tree_lines(child_pid, depth + 1, lines);
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn macos_process_tree_snapshot(pid: u32) -> String {
-        let mut lines = Vec::new();
-        macos_process_tree_lines(pid, 0, &mut lines);
-        lines.join(" | ")
-    }
-
-    #[cfg(target_os = "macos")]
-    fn wait_for_local_process_state(
-        local_pid: u32,
-        timeout: Duration,
-        expected_running: bool,
-    ) -> u32 {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let resolved_pid = super::resolve_local_shell_pid(local_pid);
-            let is_running = super::has_live_descendant_process(resolved_pid);
-            if is_running == expected_running {
-                return resolved_pid;
-            }
-
-            if Instant::now() >= deadline {
-                let tree = macos_process_tree_snapshot(local_pid);
-                panic!(
-                    "等待本地终端进程状态超时: local_pid={local_pid}, resolved_pid={resolved_pid}, expected_running={expected_running}, actual_running={is_running}, tree={tree}"
-                );
-            }
-
-            thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_idle_local_terminal_has_no_blocking_processes() {
-        let config = super::LocalConfig::default();
-        let pty_options = PtyOptions {
-            shell: super::build_local_shell(config.shell, vec![]),
-            working_directory: config.working_dir.clone().map(Into::into),
-            env: config.env.into_iter().collect(),
-            drain_on_exit: true,
-        };
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-        let backend = LocalPtyBackend::new(term, event_proxy, pty_options).expect("应创建本地 PTY");
-        let local_pid = backend.child_pid().expect("本地 PTY 应返回 child pid");
-
-        let resolved_pid = wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
-        let tree = macos_process_tree_snapshot(local_pid);
-        let has_children = super::has_live_descendant_process(resolved_pid);
-
-        backend.shutdown();
-
-        assert!(
-            !has_children,
-            "空闲本地终端不应被识别为存在活动进程: local_pid={local_pid}, resolved_pid={resolved_pid}, tree={tree}"
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_local_terminal_detects_blocking_process_after_command() {
-        let config = super::LocalConfig::default();
-        let pty_options = PtyOptions {
-            shell: super::build_local_shell(config.shell, vec![]),
-            working_directory: config.working_dir.clone().map(Into::into),
-            env: config.env.into_iter().collect(),
-            drain_on_exit: true,
-        };
-        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (term, event_proxy, _colors) =
-            super::Terminal::create_term(super::DEFAULT_COLS, super::DEFAULT_ROWS, event_tx);
-        let backend = LocalPtyBackend::new(term, event_proxy, pty_options).expect("应创建本地 PTY");
-        let local_pid = backend.child_pid().expect("本地 PTY 应返回 child pid");
-
-        let idle_pid = wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
-        backend.write(b"sleep 5\r".to_vec());
-
-        let running_pid = wait_for_local_process_state(local_pid, Duration::from_secs(3), true);
-        let tree = macos_process_tree_snapshot(local_pid);
-
-        backend.shutdown();
-
-        assert_ne!(idle_pid, 0, "空闲阶段应解析到有效 shell pid");
-        assert_ne!(running_pid, 0, "运行命令后应解析到有效 shell pid");
-        assert!(
-            super::has_live_descendant_process(running_pid),
-            "运行命令后应识别为存在活动进程: local_pid={local_pid}, idle_pid={idle_pid}, running_pid={running_pid}, tree={tree}"
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn terminal_entity_reports_running_processes_after_user_input() {
-        let mut cx = TestAppContext::single();
-        cx.update(one_core::gpui_tokio::init);
-        let terminal: gpui::Entity<super::Terminal> = cx.update(|cx: &mut gpui::App| {
-            cx.new(|cx| {
-                super::Terminal::new_local(super::LocalConfig::default(), cx)
-                    .expect("应创建本地终端")
-            })
-        });
-
-        let local_pid = cx.read(|app| {
-            terminal
-                .read(app)
-                .local_shell_pid
-                .expect("本地终端应记录 child pid")
-        });
-        wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
-
-        terminal.update(&mut cx, |terminal, _| {
-            terminal.local_process_tree_settled.set(true);
-            terminal.write(b"sleep 5\r");
-        });
-
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            cx.run_until_parked();
-
-            if cx.read(|app| terminal.read(app).has_running_processes()) {
-                break;
-            }
-
-            if Instant::now() >= deadline {
-                let (child_exited, settled) = cx.read(|app| {
-                    let snapshot = terminal.read(app);
-                    (
-                        snapshot.child_exited,
-                        snapshot.local_process_tree_settled.get(),
-                    )
-                });
-                let tree = macos_process_tree_snapshot(local_pid);
-                panic!(
-                    "Terminal 实体未识别到运行中进程: local_pid={local_pid}, child_exited={:?}, settled={}, tree={tree}",
-                    child_exited, settled,
-                );
-            }
-
-            thread::sleep(Duration::from_millis(50));
-        }
-
-        terminal.update(&mut cx, |terminal: &mut super::Terminal, _| {
-            terminal.shutdown()
-        });
-        cx.run_until_parked();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn terminal_entity_reports_running_processes_after_top_command() {
-        let mut cx = TestAppContext::single();
-        cx.update(one_core::gpui_tokio::init);
-        let terminal: gpui::Entity<super::Terminal> = cx.update(|cx: &mut gpui::App| {
-            cx.new(|cx| {
-                super::Terminal::new_local(super::LocalConfig::default(), cx)
-                    .expect("应创建本地终端")
-            })
-        });
-
-        let local_pid = cx.read(|app| {
-            terminal
-                .read(app)
-                .local_shell_pid
-                .expect("本地终端应记录 child pid")
-        });
-        wait_for_local_process_state(local_pid, Duration::from_secs(3), false);
-
-        terminal.update(&mut cx, |terminal, _| {
-            terminal.local_process_tree_settled.set(true);
-            terminal.write(b"top\r");
-        });
-
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            cx.run_until_parked();
-
-            if cx.read(|app| terminal.read(app).has_running_processes()) {
-                break;
-            }
-
-            if Instant::now() >= deadline {
-                let (child_exited, settled) = cx.read(|app| {
-                    let snapshot = terminal.read(app);
-                    (
-                        snapshot.child_exited,
-                        snapshot.local_process_tree_settled.get(),
-                    )
-                });
-                let tree = macos_process_tree_snapshot(local_pid);
-                panic!(
-                    "Terminal 实体在执行 top 后仍未识别到运行中进程: local_pid={local_pid}, child_exited={:?}, settled={}, tree={tree}",
-                    child_exited, settled,
-                );
-            }
-
-            thread::sleep(Duration::from_millis(50));
-        }
-
-        terminal.update(&mut cx, |terminal: &mut super::Terminal, _| {
-            terminal.shutdown()
-        });
-        cx.run_until_parked();
     }
 
     #[test]

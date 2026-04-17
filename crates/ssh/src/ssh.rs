@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,8 +11,7 @@ use russh::*;
 use rust_i18n::t;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, oneshot};
-use tokio::task::JoinSet;
+use tokio::sync::{oneshot, Mutex};
 
 #[derive(Clone)]
 pub struct SshConnectConfig {
@@ -137,19 +137,6 @@ impl SshConnectionStage {
     }
 }
 
-pub fn format_connection_progress_message(message: &str, elapsed_secs: u64) -> String {
-    if elapsed_secs == 0 {
-        message.to_string()
-    } else {
-        t!(
-            "SshProgress.status_with_elapsed",
-            stage = message,
-            seconds = elapsed_secs
-        )
-        .to_string()
-    }
-}
-
 const LEGACY_KEX_ORDER: &[kex::Name] = &[kex::DH_G14_SHA1, kex::DH_GEX_SHA1, kex::DH_G1_SHA1];
 const LEGACY_CIPHER_ORDER: &[cipher::Name] = &[
     cipher::AES_128_CBC,
@@ -199,6 +186,19 @@ pub fn build_client_config(config: &SshConnectConfig) -> client::Config {
         preferred: build_preferred_algorithms(config.enable_legacy_kex),
         gex,
         ..<_>::default()
+    }
+}
+
+pub fn format_connection_progress_message(message: &str, elapsed_secs: u64) -> String {
+    if elapsed_secs == 0 {
+        message.to_string()
+    } else {
+        t!(
+            "SshProgress.status_with_elapsed",
+            stage = message,
+            seconds = elapsed_secs
+        )
+        .to_string()
     }
 }
 
@@ -285,122 +285,6 @@ pub struct RusshClient {
     _jump_session: Option<client::Handle<RusshHandler>>,
 }
 
-impl RusshClient {
-    pub async fn connect_with_progress<F>(config: SshConnectConfig, mut progress: F) -> Result<Self>
-    where
-        F: FnMut(SshConnectionStage) + Send,
-    {
-        let russh_config = Arc::new(build_client_config(&config));
-
-        if let Some(ref jump) = config.jump_server {
-            tracing::info!("通过跳板机 {}:{} 连接", jump.host, jump.port);
-
-            let jump_session = if let Some(ref proxy) = config.proxy {
-                progress(SshConnectionStage::ConnectingToJumpServerViaProxy);
-                tracing::info!("通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
-                let stream = connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                progress(SshConnectionStage::HandshakingJumpServer);
-                let handler = RusshHandler;
-                client::connect_stream(russh_config.clone(), stream, handler).await?
-            } else {
-                progress(SshConnectionStage::ConnectingToJumpServer);
-                let socket =
-                    connect_tcp_stream(russh_config.as_ref(), (jump.host.as_str(), jump.port))
-                        .await?;
-                progress(SshConnectionStage::HandshakingJumpServer);
-                let handler = RusshHandler;
-                client::connect_stream(russh_config.clone(), socket, handler).await?
-            };
-
-            let mut jump_session = jump_session;
-            progress(SshConnectionStage::AuthenticatingJumpServer);
-            authenticate_session(
-                &mut jump_session,
-                &jump.username,
-                &jump.auth,
-                default_auth_failure_messages(),
-            )
-            .await?;
-
-            progress(SshConnectionStage::OpeningJumpTunnel);
-            tracing::info!("通过跳板机转发到目标服务器 {}:{}", config.host, config.port);
-            let forwarded_channel = jump_session
-                .channel_open_direct_tcpip(&config.host, config.port as u32, "127.0.0.1", 0)
-                .await?;
-
-            progress(SshConnectionStage::ConnectingToTarget);
-            let handler = RusshHandler;
-            progress(SshConnectionStage::HandshakingTarget);
-            let mut session =
-                client::connect_stream(russh_config, forwarded_channel.into_stream(), handler)
-                    .await?;
-
-            progress(SshConnectionStage::AuthenticatingTarget);
-            authenticate_session(
-                &mut session,
-                &config.username,
-                &config.auth,
-                default_auth_failure_messages(),
-            )
-            .await?;
-
-            Ok(Self {
-                session,
-                _jump_session: Some(jump_session),
-            })
-        } else if let Some(ref proxy) = config.proxy {
-            progress(SshConnectionStage::ConnectingToTargetViaProxy);
-            tracing::info!(
-                "通过代理 {}:{} 连接目标服务器 {}:{}",
-                proxy.host,
-                proxy.port,
-                config.host,
-                config.port
-            );
-            let stream = connect_via_proxy(proxy, &config.host, config.port).await?;
-            progress(SshConnectionStage::HandshakingTarget);
-            let handler = RusshHandler;
-            let mut session = client::connect_stream(russh_config, stream, handler).await?;
-
-            progress(SshConnectionStage::AuthenticatingTarget);
-            authenticate_session(
-                &mut session,
-                &config.username,
-                &config.auth,
-                default_auth_failure_messages(),
-            )
-            .await?;
-
-            Ok(Self {
-                session,
-                _jump_session: None,
-            })
-        } else {
-            progress(SshConnectionStage::ConnectingToTarget);
-            let socket =
-                connect_tcp_stream(russh_config.as_ref(), (config.host.as_str(), config.port))
-                    .await?;
-            progress(SshConnectionStage::HandshakingTarget);
-            let handler = RusshHandler;
-            let mut session = client::connect_stream(russh_config, socket, handler).await?;
-
-            progress(SshConnectionStage::AuthenticatingTarget);
-            authenticate_session(
-                &mut session,
-                &config.username,
-                &config.auth,
-                default_auth_failure_messages(),
-            )
-            .await?;
-
-            Ok(Self {
-                session,
-                _jump_session: None,
-            })
-        }
-    }
-}
-
 pub struct LocalPortForwardTunnel {
     local_addr: SocketAddr,
     shutdown_tx: Option<oneshot::Sender<()>>,
@@ -434,19 +318,6 @@ impl Drop for LocalPortForwardTunnel {
             task.abort();
         }
     }
-}
-
-async fn connect_tcp_stream<A: tokio::net::ToSocketAddrs>(
-    config: &client::Config,
-    addrs: A,
-) -> Result<TcpStream> {
-    let socket = TcpStream::connect(addrs).await?;
-    if config.nodelay {
-        if let Err(err) = socket.set_nodelay(true) {
-            tracing::warn!("set_nodelay() failed: {:?}", err);
-        }
-    }
-    Ok(socket)
 }
 
 pub async fn authenticate_session<H>(
@@ -504,25 +375,26 @@ pub fn discover_default_private_keys() -> Vec<String> {
     let Some(home_dir) = dirs::home_dir() else {
         return Vec::new();
     };
+
     let ssh_dir = home_dir.join(".ssh");
     ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]
         .into_iter()
-        .map(|f| ssh_dir.join(f))
-        .filter(|p| p.is_file())
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|file_name| ssh_dir.join(file_name))
+        .filter(|path| path.is_file())
+        .map(path_to_string)
         .collect()
 }
 
 pub fn expand_auto_publickey_auth() -> Vec<SshAuth> {
-    let mut candidates = vec![SshAuth::Agent];
-    candidates.extend(discover_default_private_keys().into_iter().map(|key_path| {
+    let mut auth_candidates = vec![SshAuth::Agent];
+    auth_candidates.extend(discover_default_private_keys().into_iter().map(|key_path| {
         SshAuth::PrivateKey {
             key_path,
             passphrase: None,
             certificate_path: None,
         }
     }));
-    candidates
+    auth_candidates
 }
 
 pub async fn authenticate_session_with_fallbacks<H>(
@@ -530,36 +402,70 @@ pub async fn authenticate_session_with_fallbacks<H>(
     username: &str,
     auth_candidates: &[SshAuth],
     messages: AuthFailureMessages,
-) -> anyhow::Result<()>
+) -> Result<()>
 where
     H: client::Handler,
 {
-    let filtered: Vec<&SshAuth> = auth_candidates
+    let filtered_candidates: Vec<&SshAuth> = auth_candidates
         .iter()
-        .filter(|a| !matches!(a, SshAuth::AutoPublicKey))
+        .filter(|auth| !matches!(auth, SshAuth::AutoPublicKey))
         .collect();
-    if filtered.is_empty() {
+
+    if filtered_candidates.is_empty() {
         anyhow::bail!(messages.no_local_identity.clone());
     }
-    let has_keys = filtered
+
+    let has_default_keys = filtered_candidates
         .iter()
-        .any(|a| matches!(a, SshAuth::PrivateKey { .. }));
+        .any(|auth| matches!(auth, SshAuth::PrivateKey { .. }));
     let mut errors = Vec::new();
-    for auth in filtered {
+
+    for auth in filtered_candidates {
         match authenticate_session(session, username, auth, messages.clone()).await {
             Ok(()) => return Ok(()),
-            Err(e) => errors.push(e.to_string()),
+            Err(err) => errors.push(err.to_string()),
         }
     }
+
+    anyhow::bail!(build_auto_publickey_failure_message(
+        &messages,
+        has_default_keys,
+        &errors,
+    ));
+}
+
+fn default_auth_failure_messages() -> AuthFailureMessages {
+    AuthFailureMessages {
+        password_failed: t!("Ssh.auth_password_failed").to_string(),
+        certificate_failed: t!("Ssh.auth_certificate_failed").to_string(),
+        public_key_failed: t!("Ssh.auth_public_key_failed").to_string(),
+        agent_connect_failed: t!("Ssh.auth_agent_connect_failed").to_string(),
+        agent_no_identities: t!("Ssh.auth_agent_no_identities").to_string(),
+        agent_auth_failed: t!("Ssh.auth_agent_failed").to_string(),
+        auto_publickey_failed: t!("Ssh.auth_auto_publickey_failed").to_string(),
+        no_local_identity: t!("Ssh.auth_no_local_identity").to_string(),
+        auto_publickey_next_step: t!("Ssh.auth_auto_publickey_next_step").to_string(),
+    }
+}
+
+fn build_auto_publickey_failure_message(
+    messages: &AuthFailureMessages,
+    has_default_keys: bool,
+    errors: &[String],
+) -> String {
     let mut parts = vec![messages.auto_publickey_failed.clone()];
-    if !has_keys {
+    if !has_default_keys {
         parts.push(messages.no_local_identity.clone());
     }
     if !errors.is_empty() {
         parts.push(errors.join("; "));
     }
     parts.push(messages.auto_publickey_next_step.clone());
-    anyhow::bail!(parts.join(": "));
+    parts.join(": ")
+}
+
+fn path_to_string(path: PathBuf) -> String {
+    path.to_string_lossy().to_string()
 }
 
 pub async fn authenticate_with_strategy<H>(
@@ -577,20 +483,6 @@ where
             authenticate_session_with_fallbacks(session, username, &auth_candidates, messages).await
         }
         _ => authenticate_session(session, username, auth, messages).await,
-    }
-}
-
-fn default_auth_failure_messages() -> AuthFailureMessages {
-    AuthFailureMessages {
-        password_failed: t!("Ssh.auth_password_failed").to_string(),
-        certificate_failed: t!("Ssh.auth_certificate_failed").to_string(),
-        public_key_failed: t!("Ssh.auth_public_key_failed").to_string(),
-        agent_connect_failed: t!("Ssh.auth_agent_connect_failed").to_string(),
-        agent_no_identities: t!("Ssh.auth_agent_no_identities").to_string(),
-        agent_auth_failed: t!("Ssh.auth_agent_failed").to_string(),
-        auto_publickey_failed: t!("Ssh.auth_auto_publickey_failed").to_string(),
-        no_local_identity: t!("Ssh.auth_no_local_identity").to_string(),
-        auto_publickey_next_step: t!("Ssh.auth_auto_publickey_next_step").to_string(),
     }
 }
 
@@ -705,117 +597,6 @@ mod tests {
     #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
 
-    fn test_config() -> SshConnectConfig {
-        SshConnectConfig {
-            host: "target.example.com".to_string(),
-            port: 22,
-            username: "root".to_string(),
-            auth: SshAuth::Agent,
-            timeout: None,
-            keepalive_interval: None,
-            keepalive_max: None,
-            enable_legacy_kex: false,
-            jump_server: None,
-            proxy: None,
-        }
-    }
-
-    #[test]
-    fn initial_stage_prefers_direct_target_when_no_proxy_or_jump() {
-        let config = test_config();
-        assert_eq!(
-            SshConnectionStage::initial_for_config(&config),
-            SshConnectionStage::ConnectingToTarget
-        );
-    }
-
-    #[test]
-    fn initial_stage_prefers_proxy_when_direct_target_uses_proxy() {
-        let mut config = test_config();
-        config.proxy = Some(ProxyConnectConfig {
-            proxy_type: ProxyType::Socks5,
-            host: "proxy.example.com".to_string(),
-            port: 1080,
-            username: None,
-            password: None,
-        });
-
-        assert_eq!(
-            SshConnectionStage::initial_for_config(&config),
-            SshConnectionStage::ConnectingToTargetViaProxy
-        );
-    }
-
-    #[test]
-    fn initial_stage_prefers_jump_server_over_target() {
-        let mut config = test_config();
-        config.jump_server = Some(JumpServerConnectConfig {
-            host: "jump.example.com".to_string(),
-            port: 22,
-            username: "jump".to_string(),
-            auth: SshAuth::Agent,
-        });
-        config.proxy = Some(ProxyConnectConfig {
-            proxy_type: ProxyType::Http,
-            host: "proxy.example.com".to_string(),
-            port: 8080,
-            username: None,
-            password: None,
-        });
-
-        assert_eq!(
-            SshConnectionStage::initial_for_config(&config),
-            SshConnectionStage::ConnectingToJumpServerViaProxy
-        );
-    }
-
-    #[test]
-    fn build_client_config_keeps_legacy_kex_disabled_by_default() {
-        let config = test_config();
-        let client_config = build_client_config(&config);
-        assert!(
-            !client_config
-                .preferred
-                .kex
-                .iter()
-                .any(|name| name == &kex::DH_G1_SHA1)
-        );
-    }
-
-    #[test]
-    fn build_client_config_appends_legacy_kex_after_safe_defaults() {
-        let mut config = test_config();
-        config.enable_legacy_kex = true;
-
-        let client_config = build_client_config(&config);
-        let kex_names = client_config.preferred.kex.as_ref();
-        let curve25519_index = kex_names
-            .iter()
-            .position(|name| name == &kex::CURVE25519)
-            .expect("默认安全 KEX 应包含 curve25519");
-        let group1_index = kex_names
-            .iter()
-            .position(|name| name == &kex::DH_G1_SHA1)
-            .expect("启用兼容模式后应包含 group1");
-
-        assert!(kex_names.iter().any(|name| name == &kex::DH_G14_SHA1));
-        assert!(kex_names.iter().any(|name| name == &kex::DH_GEX_SHA1));
-        assert!(group1_index > curve25519_index);
-
-        let ciphers = client_config.preferred.cipher.as_ref();
-        let ctr_index = ciphers
-            .iter()
-            .position(|name| name == &cipher::AES_128_CTR)
-            .expect("默认安全 cipher 应包含 aes128-ctr");
-        let cbc_index = ciphers
-            .iter()
-            .position(|name| name == &cipher::AES_128_CBC)
-            .expect("启用兼容模式后应包含 aes128-cbc");
-        assert!(cbc_index > ctr_index);
-        assert_eq!(client_config.gex.min_group_size(), 2048);
-        assert_eq!(client_config.gex.preferred_group_size(), 4096);
-    }
-
     #[cfg(unix)]
     fn test_auth_failure_messages() -> AuthFailureMessages {
         AuthFailureMessages {
@@ -827,7 +608,15 @@ mod tests {
             agent_auth_failed: "agent_auth_failed".to_string(),
             auto_publickey_failed: "auto_publickey_failed".to_string(),
             no_local_identity: "no_local_identity".to_string(),
-            auto_publickey_next_step: "auto_publickey_next_step".to_string(),
+            auto_publickey_next_step: "next_step".to_string(),
+        }
+    }
+
+    fn home_dir_env_key() -> &'static str {
+        if cfg!(windows) {
+            "USERPROFILE"
+        } else {
+            "HOME"
         }
     }
 
@@ -863,6 +652,7 @@ mod tests {
             "错误信息应包含 agent 连接失败上下文"
         );
     }
+
     #[test]
     fn discover_default_private_keys_returns_expected_order() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1016,10 +806,9 @@ async fn connect_via_proxy(
         ProxyType::Socks5 => {
             use tokio_socks::tcp::Socks5Stream;
 
-            let stream = if let (Some(username), Some(password)) =
-                (&proxy.username, &proxy.password)
-            {
-                Socks5Stream::connect_with_password(
+            let stream =
+                if let (Some(username), Some(password)) = (&proxy.username, &proxy.password) {
+                    Socks5Stream::connect_with_password(
                     proxy_addr.as_str(),
                     (target_host, target_port),
                     username,
@@ -1029,15 +818,15 @@ async fn connect_via_proxy(
                 .map_err(|e| {
                     anyhow::anyhow!(t!("Ssh.socks5_proxy_connect_failed", error = e).to_string())
                 })?
-            } else {
-                Socks5Stream::connect(proxy_addr.as_str(), (target_host, target_port))
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            t!("Ssh.socks5_proxy_connect_failed", error = e).to_string()
-                        )
-                    })?
-            };
+                } else {
+                    Socks5Stream::connect(proxy_addr.as_str(), (target_host, target_port))
+                        .await
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                t!("Ssh.socks5_proxy_connect_failed", error = e).to_string()
+                            )
+                        })?
+                };
 
             Ok(stream.into_inner())
         }
@@ -1168,17 +957,11 @@ pub async fn start_local_port_forward(
     let target_host_for_task = target_host.clone();
 
     let accept_task = tokio::spawn(async move {
-        let mut conn_tasks: JoinSet<()> = JoinSet::new();
         loop {
             tokio::select! {
                 _ = &mut shutdown_rx => {
-                    // 等待所有活跃连接子任务结束
-                    conn_tasks.abort_all();
-                    conn_tasks.join_all().await;
                     break;
                 }
-                // 清理已完成的连接任务
-                Some(_) = conn_tasks.join_next(), if !conn_tasks.is_empty() => {}
                 accept_result = listener.accept() => {
                     let (mut inbound, inbound_addr) = match accept_result {
                         Ok(result) => result,
@@ -1190,7 +973,7 @@ pub async fn start_local_port_forward(
 
                     let client_for_conn = Arc::clone(&client_for_task);
                     let target_host_for_conn = target_host_for_task.clone();
-                    conn_tasks.spawn(async move {
+                    tokio::spawn(async move {
                         let origin_host = match inbound_addr {
                             SocketAddr::V4(v4) => v4.ip().to_string(),
                             SocketAddr::V6(v6) => v6.ip().to_string(),
@@ -1239,7 +1022,110 @@ impl SshClient for RusshClient {
     type Channel = RusshChannel;
 
     async fn connect(config: SshConnectConfig) -> Result<Self> {
-        Self::connect_with_progress(config, |_| {}).await
+        let russh_config = Arc::new(client::Config {
+            inactivity_timeout: config.timeout.or(Some(Duration::from_secs(300))),
+            keepalive_interval: config.keepalive_interval.or(Some(Duration::from_secs(60))),
+            keepalive_max: config.keepalive_max.unwrap_or(3),
+            ..<_>::default()
+        });
+
+        // 情况1: 使用跳板机连接
+        if let Some(ref jump) = config.jump_server {
+            tracing::info!("通过跳板机 {}:{} 连接", jump.host, jump.port);
+
+            // 先连接到跳板机（可能通过代理）
+            let jump_session = if let Some(ref proxy) = config.proxy {
+                tracing::info!("通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
+                let stream = connect_via_proxy(proxy, &jump.host, jump.port).await?;
+                let handler = RusshHandler;
+                client::connect_stream(russh_config.clone(), stream, handler).await?
+            } else {
+                let addrs = (jump.host.as_str(), jump.port);
+                let handler = RusshHandler;
+                client::connect(russh_config.clone(), addrs, handler).await?
+            };
+
+            // 认证跳板机
+            let mut jump_session = jump_session;
+            authenticate_with_strategy(
+                &mut jump_session,
+                &jump.username,
+                &jump.auth,
+                default_auth_failure_messages(),
+            )
+            .await?;
+
+            // 通过跳板机建立到目标服务器的端口转发
+            tracing::info!("通过跳板机转发到目标服务器 {}:{}", config.host, config.port);
+            let forwarded_channel = jump_session
+                .channel_open_direct_tcpip(&config.host, config.port as u32, "127.0.0.1", 0)
+                .await?;
+
+            // 使用转发通道创建SSH会话
+            let handler = RusshHandler;
+            let mut session =
+                client::connect_stream(russh_config, forwarded_channel.into_stream(), handler)
+                    .await?;
+
+            // 认证目标服务器
+            authenticate_with_strategy(
+                &mut session,
+                &config.username,
+                &config.auth,
+                default_auth_failure_messages(),
+            )
+            .await?;
+
+            Ok(Self {
+                session,
+                _jump_session: Some(jump_session),
+            })
+        }
+        // 情况2: 仅使用代理连接
+        else if let Some(ref proxy) = config.proxy {
+            tracing::info!(
+                "通过代理 {}:{} 连接目标服务器 {}:{}",
+                proxy.host,
+                proxy.port,
+                config.host,
+                config.port
+            );
+            let stream = connect_via_proxy(proxy, &config.host, config.port).await?;
+            let handler = RusshHandler;
+            let mut session = client::connect_stream(russh_config, stream, handler).await?;
+
+            authenticate_with_strategy(
+                &mut session,
+                &config.username,
+                &config.auth,
+                default_auth_failure_messages(),
+            )
+            .await?;
+
+            Ok(Self {
+                session,
+                _jump_session: None,
+            })
+        }
+        // 情况3: 直接连接
+        else {
+            let addrs = (config.host.as_str(), config.port);
+            let handler = RusshHandler;
+            let mut session = client::connect(russh_config, addrs, handler).await?;
+
+            authenticate_with_strategy(
+                &mut session,
+                &config.username,
+                &config.auth,
+                default_auth_failure_messages(),
+            )
+            .await?;
+
+            Ok(Self {
+                session,
+                _jump_session: None,
+            })
+        }
     }
 
     async fn open_channel(&mut self) -> Result<Self::Channel> {
@@ -1256,6 +1142,27 @@ impl SshClient for RusshClient {
 
     fn is_connected(&self) -> bool {
         !self.session.is_closed()
+    }
+}
+
+impl RusshClient {
+    pub async fn connect_with_progress(
+        config: SshConnectConfig,
+        mut on_progress: impl FnMut(SshConnectionStage) + Send + 'static,
+    ) -> Result<Self> {
+        on_progress(SshConnectionStage::ConnectingToTarget);
+        Self::connect(config).await
+    }
+
+    pub async fn open_raw_channel(&mut self) -> Result<Channel<client::Msg>> {
+        Ok(self.session.channel_open_session().await?)
+    }
+
+    pub async fn disconnect(&mut self) -> Result<()> {
+        self.session
+            .disconnect(Disconnect::ByApplication, "", "English")
+            .await?;
+        Ok(())
     }
 }
 

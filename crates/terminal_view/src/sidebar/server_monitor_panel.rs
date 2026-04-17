@@ -1,34 +1,31 @@
 //! 终端侧边栏服务器监控面板
 
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{anyhow, Context as _, Result};
 use chrono::Utc;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, Context, EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Task,
-    Window, div, linear_color_stop, linear_gradient, px,
+    div, linear_color_stop, linear_gradient, px, AnyElement, App, Context, EventEmitter,
+    FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Task, Window,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IconName, Sizable, StyledExt,
     button::{Button, ButtonVariants},
     chart::{AreaChart, LineChart, PieChart},
     h_flex,
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
-    v_flex,
+    v_flex, ActiveTheme, Disableable, IconName, Sizable, StyledExt,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::get_config_dir;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
-use ssh::{ChannelEvent, RusshClient, SshChannel, SshClient, SshConnectConfig};
+use ssh::{ChannelEvent, SshChannel, SshSessionManager};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
-use tokio::time::timeout;
 
 const REFRESH_INTERVAL_SECS: u64 = 3;
 const HISTORY_LIMIT: usize = 30;
@@ -36,7 +33,6 @@ const MAX_HISTORY_X_AXIS_LABELS: usize = 6;
 const SERVER_MONITOR_PREFS_FILE: &str = "server-monitor.json";
 const REMOTE_HELPER_DIR: &str = "$HOME/.onetcli-monitor";
 const REMOTE_HELPER_SCRIPT: &str = "$HOME/.onetcli-monitor/collect.sh";
-const STATS_COLLECT_TIMEOUT_SECS: u64 = 30;
 
 const REMOTE_MONITOR_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -u
@@ -444,7 +440,7 @@ fn save_server_monitor_preferences(preferences: &ServerMonitorPreferences) -> Re
 
 pub struct ServerMonitorPanel {
     connection_id: Option<i64>,
-    ssh_config: SshConnectConfig,
+    session_manager: Arc<SshSessionManager>,
     session_id: String,
     focus_handle: FocusHandle,
     auto_show: bool,
@@ -453,7 +449,6 @@ pub struct ServerMonitorPanel {
     in_flight: bool,
     last_error: Option<String>,
     refresh_task: Option<Task<()>>,
-    client: Option<Arc<Mutex<RusshClient>>>,
     current_stats: Option<ServerStats>,
     previous_cpu: Option<Vec<CpuSnapshot>>,
     previous_network: Option<NetworkTotals>,
@@ -478,13 +473,13 @@ impl ServerMonitorPanel {
 
     pub fn new(
         connection_id: Option<i64>,
-        ssh_config: SshConnectConfig,
+        session_manager: Arc<SshSessionManager>,
         auto_show: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             connection_id,
-            ssh_config,
+            session_manager,
             session_id: format!("session-{}", Utc::now().timestamp_millis()),
             focus_handle: cx.focus_handle(),
             auto_show,
@@ -493,7 +488,6 @@ impl ServerMonitorPanel {
             in_flight: false,
             last_error: None,
             refresh_task: None,
-            client: None,
             current_stats: None,
             previous_cpu: None,
             previous_network: None,
@@ -514,7 +508,6 @@ impl ServerMonitorPanel {
     }
 
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
-        self.client = None;
         self.in_flight = false;
         if self.monitor_enabled {
             self.refresh_now(cx);
@@ -534,22 +527,20 @@ impl ServerMonitorPanel {
         self.last_error = None;
         cx.notify();
 
-        let config = self.ssh_config.clone();
+        let session_manager = self.session_manager.clone();
         let session_id = self.session_id.clone();
         let task = Tokio::spawn(cx, async move {
-            let client = Arc::new(Mutex::new(RusshClient::connect(config).await?));
-            prepare_remote_monitor(client.clone()).await?;
-            let payload = collect_remote_stats(client.clone(), &session_id).await?;
+            prepare_remote_monitor(session_manager.clone()).await?;
+            let payload = collect_remote_stats(session_manager, &session_id).await?;
             let stats = parse_server_stats(&payload)?;
-            Ok::<_, anyhow::Error>((client, stats))
+            Ok::<_, anyhow::Error>(stats)
         });
 
         cx.spawn(async move |this, cx| match task.await {
-            Ok(Ok((client, stats))) => {
+            Ok(Ok(stats)) => {
                 let _ = this.update(cx, |this, cx| {
                     this.preparing = false;
                     this.monitor_enabled = true;
-                    this.client = Some(client);
                     this.last_error = None;
                     this.apply_stats(stats);
                     this.ensure_refresh_loop(cx);
@@ -560,7 +551,6 @@ impl ServerMonitorPanel {
                 let _ = this.update(cx, |this, cx| {
                     this.preparing = false;
                     this.monitor_enabled = false;
-                    this.client = None;
                     this.last_error = Some(format!("{error}"));
                     cx.notify();
                 });
@@ -569,7 +559,6 @@ impl ServerMonitorPanel {
                 let _ = this.update(cx, |this, cx| {
                     this.preparing = false;
                     this.monitor_enabled = false;
-                    this.client = None;
                     this.last_error = Some(format!("{error}"));
                     cx.notify();
                 });
@@ -584,27 +573,25 @@ impl ServerMonitorPanel {
             return;
         }
 
-        self.refresh_task = Some(cx.spawn(async move |this, cx| {
-            loop {
-                let should_continue = this
-                    .update(cx, |this, cx| {
-                        if !this.monitor_enabled {
-                            this.refresh_task = None;
-                            return false;
-                        }
-                        this.refresh_now(cx);
-                        true
-                    })
-                    .unwrap_or(false);
+        self.refresh_task = Some(cx.spawn(async move |this, cx| loop {
+            let should_continue = this
+                .update(cx, |this, cx| {
+                    if !this.monitor_enabled {
+                        this.refresh_task = None;
+                        return false;
+                    }
+                    this.refresh_now(cx);
+                    true
+                })
+                .unwrap_or(false);
 
-                if !should_continue {
-                    break;
-                }
-
-                cx.background_executor()
-                    .timer(Duration::from_secs(REFRESH_INTERVAL_SECS))
-                    .await;
+            if !should_continue {
+                break;
             }
+
+            cx.background_executor()
+                .timer(Duration::from_secs(REFRESH_INTERVAL_SECS))
+                .await;
         }));
     }
 
@@ -614,20 +601,18 @@ impl ServerMonitorPanel {
         }
 
         self.in_flight = true;
-        let config = self.ssh_config.clone();
+        let session_manager = self.session_manager.clone();
         let session_id = self.session_id.clone();
-        let existing_client = self.client.clone();
-        let needs_prepare = existing_client.is_none();
+        let needs_prepare = self.current_stats.is_none();
 
         let task = Tokio::spawn(cx, async move {
-            refresh_remote_stats(config, existing_client, &session_id, needs_prepare).await
+            refresh_remote_stats(session_manager, &session_id, needs_prepare).await
         });
 
         cx.spawn(async move |this, cx| match task.await {
-            Ok(Ok((client, stats))) => {
+            Ok(Ok(stats)) => {
                 let _ = this.update(cx, |this, cx| {
                     this.in_flight = false;
-                    this.client = Some(client);
                     this.last_error = None;
                     this.apply_stats(stats);
                     cx.notify();
@@ -636,7 +621,6 @@ impl ServerMonitorPanel {
             Ok(Err(error)) => {
                 let _ = this.update(cx, |this, cx| {
                     this.in_flight = false;
-                    this.client = None;
                     this.last_error = Some(format!("{error}"));
                     cx.notify();
                 });
@@ -644,7 +628,6 @@ impl ServerMonitorPanel {
             Err(error) => {
                 let _ = this.update(cx, |this, cx| {
                     this.in_flight = false;
-                    this.client = None;
                     this.last_error = Some(format!("{error}"));
                     cx.notify();
                 });
@@ -948,7 +931,7 @@ impl ServerMonitorPanel {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().secondary)
+            .bg(cx.theme().background)
             .p_3()
             .child(
                 h_flex()
@@ -1036,26 +1019,7 @@ impl ServerMonitorPanel {
                                         format_kib(segment.value as u64)
                                     )),
                             )
-                    }))
-                    .when(memory.swap_total > 0, |this| {
-                        this.child(
-                            div()
-                                .mt_1()
-                                .pt_1()
-                                .border_t_1()
-                                .border_color(cx.theme().border)
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!(
-                                            "Swap {} / {}",
-                                            format_kib(memory.swap_used),
-                                            format_kib(memory.swap_total)
-                                        )),
-                                ),
-                        )
-                    }),
+                    })),
             )
             .into_any_element()
     }
@@ -1161,6 +1125,7 @@ impl Render for ServerMonitorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
+            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(
@@ -1260,7 +1225,6 @@ fn render_cpu_core_grid(
     cores: &[CpuUsageCore],
     cx: &mut Context<ServerMonitorPanel>,
 ) -> AnyElement {
-    let core_chunks: Vec<_> = cores.chunks(2).collect();
     v_flex()
         .gap_2()
         .child(
@@ -1269,30 +1233,34 @@ fn render_cpu_core_grid(
                 .text_color(cx.theme().muted_foreground)
                 .child("Per-core"),
         )
-        .children(core_chunks.iter().map(|chunk| {
-            h_flex().w_full().gap_2().children(chunk.iter().map(|core| {
-                let value = core.percent.clamp(0.0, 100.0);
-                let label = core.name.clone();
-                v_flex()
-                    .flex_1()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .justify_between()
-                            .child(div().text_xs().child(label.clone()))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("{value:.1}%")),
-                            ),
-                    )
-                    .child(
-                        Progress::new(SharedString::from(format!("cpu-core-{label}")))
-                            .value(value as f32),
-                    )
-            }))
-        }))
+        .child(
+            h_flex()
+                .w_full()
+                .flex_wrap()
+                .gap_2()
+                .children(cores.iter().map(|core| {
+                    let value = core.percent.clamp(0.0, 100.0);
+                    let label = core.name.clone();
+                    v_flex()
+                        .w(px(108.0))
+                        .gap_1()
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .child(div().text_xs().child(label.clone()))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(format!("{value:.1}%")),
+                                ),
+                        )
+                        .child(
+                            Progress::new(SharedString::from(format!("cpu-core-{label}")))
+                                .value(value as f32),
+                        )
+                })),
+        )
         .into_any_element()
 }
 
@@ -1742,60 +1710,45 @@ fn parse_percent(value: &str) -> Option<f64> {
     parse_f64(value)
 }
 
-async fn refresh_remote_stats(
-    config: SshConnectConfig,
-    existing_client: Option<Arc<Mutex<RusshClient>>>,
-    session_id: &str,
-    needs_prepare: bool,
-) -> Result<(Arc<Mutex<RusshClient>>, ServerStats)> {
-    match refresh_remote_stats_inner(
-        config.clone(),
-        existing_client.clone(),
-        session_id,
-        needs_prepare,
-    )
-    .await
-    {
-        Ok(result) => Ok(result),
-        Err(_error) if existing_client.is_some() => {
-            let client = Arc::new(Mutex::new(RusshClient::connect(config).await?));
-            prepare_remote_monitor(client.clone()).await?;
-            let payload = collect_remote_stats(client.clone(), session_id).await?;
-            let stats = parse_server_stats(&payload)?;
-            Ok((client, stats))
-        }
-        Err(error) => Err(error),
-    }
-}
-
 async fn refresh_remote_stats_inner(
-    config: SshConnectConfig,
-    existing_client: Option<Arc<Mutex<RusshClient>>>,
+    session_manager: Arc<SshSessionManager>,
     session_id: &str,
     needs_prepare: bool,
-) -> Result<(Arc<Mutex<RusshClient>>, ServerStats)> {
-    let client = match existing_client {
-        Some(client) => client,
-        None => Arc::new(Mutex::new(RusshClient::connect(config).await?)),
-    };
-
+) -> Result<ServerStats> {
     if needs_prepare {
-        prepare_remote_monitor(client.clone()).await?;
+        prepare_remote_monitor(session_manager.clone()).await?;
     }
 
-    let payload = collect_remote_stats(client.clone(), session_id).await?;
+    let payload = collect_remote_stats(session_manager, session_id).await?;
     let stats = parse_server_stats(&payload)?;
-    Ok((client, stats))
+    Ok(stats)
 }
 
-async fn prepare_remote_monitor(client: Arc<Mutex<RusshClient>>) -> Result<()> {
-    exec_capture(client, &build_prepare_command())
+async fn refresh_remote_stats(
+    session_manager: Arc<SshSessionManager>,
+    session_id: &str,
+    needs_prepare: bool,
+) -> Result<ServerStats> {
+    match refresh_remote_stats_inner(session_manager.clone(), session_id, needs_prepare).await {
+        Ok(stats) => Ok(stats),
+        Err(_error) => {
+            session_manager.invalidate().await;
+            refresh_remote_stats_inner(session_manager, session_id, true).await
+        }
+    }
+}
+
+async fn prepare_remote_monitor(session_manager: Arc<SshSessionManager>) -> Result<()> {
+    exec_capture(session_manager, &build_prepare_command())
         .await
         .map(|_| ())
 }
 
-async fn collect_remote_stats(client: Arc<Mutex<RusshClient>>, session_id: &str) -> Result<String> {
-    let output = exec_capture(client, &build_collect_command(session_id)).await?;
+async fn collect_remote_stats(
+    session_manager: Arc<SshSessionManager>,
+    session_id: &str,
+) -> Result<String> {
+    let output = exec_capture(session_manager, &build_collect_command(session_id)).await?;
     if output.trim().is_empty() {
         Err(anyhow!("empty monitor payload"))
     } else {
@@ -1803,42 +1756,28 @@ async fn collect_remote_stats(client: Arc<Mutex<RusshClient>>, session_id: &str)
     }
 }
 
-async fn exec_capture(client: Arc<Mutex<RusshClient>>, command: &str) -> Result<String> {
-    let mut guard = client.lock().await;
-    let mut channel = guard.open_channel().await?;
+async fn exec_capture(session_manager: Arc<SshSessionManager>, command: &str) -> Result<String> {
+    let mut channel = session_manager.open_channel().await?;
     channel.exec(command).await?;
-    drop(guard); // 释放锁，允许并发其他操作
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let mut exit_status = 0u32;
-    let timeout_duration = Duration::from_secs(STATS_COLLECT_TIMEOUT_SECS);
 
-    loop {
-        let result = timeout(timeout_duration, channel.recv()).await;
-        match result {
-            Ok(Some(event)) => match event {
-                ChannelEvent::Data(data) => stdout.extend(data),
-                ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
-                ChannelEvent::ExitStatus(status) => exit_status = status,
-                ChannelEvent::ExitSignal {
-                    signal_name,
-                    error_message,
-                } => {
-                    return Err(anyhow!(
-                        "remote command failed with signal {signal_name}: {error_message}"
-                    ));
-                }
-                ChannelEvent::Eof | ChannelEvent::Close => break,
-            },
-            Ok(None) => break, // channel closed
-            Err(_) => {
-                // 超时：命令可能在等待数据但未返回
+    while let Some(event) = channel.recv().await {
+        match event {
+            ChannelEvent::Data(data) => stdout.extend(data),
+            ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
+            ChannelEvent::ExitStatus(status) => exit_status = status,
+            ChannelEvent::ExitSignal {
+                signal_name,
+                error_message,
+            } => {
                 return Err(anyhow!(
-                    "command execution timed out after {} seconds",
-                    STATS_COLLECT_TIMEOUT_SECS
+                    "remote command failed with signal {signal_name}: {error_message}"
                 ));
             }
+            ChannelEvent::Eof | ChannelEvent::Close => break,
         }
     }
 
@@ -1927,9 +1866,9 @@ fn format_bytes_per_sec(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CpuSnapshot, HistoryLimit, MemoryStats, NetworkTotals, ProcessEntry, history_points,
-        history_tick_margin, parse_server_stats, push_history_point, sample_cpu_usage,
-        sample_network_rates, split_sections,
+        history_points, history_tick_margin, parse_server_stats, push_history_point,
+        sample_cpu_usage, sample_network_rates, split_sections, CpuSnapshot, HistoryLimit,
+        MemoryStats, NetworkTotals, ProcessEntry,
     };
 
     #[test]
@@ -2030,18 +1969,14 @@ cpu:
 
         let sampled = sample_cpu_usage(&previous.cpu_snapshots, &current.cpu_snapshots);
 
-        assert!(
-            previous
-                .cpu_snapshots
-                .iter()
-                .any(|snapshot| snapshot.name == "cpu")
-        );
-        assert!(
-            current
-                .cpu_snapshots
-                .iter()
-                .any(|snapshot| snapshot.name == "cpu")
-        );
+        assert!(previous
+            .cpu_snapshots
+            .iter()
+            .any(|snapshot| snapshot.name == "cpu"));
+        assert!(current
+            .cpu_snapshots
+            .iter()
+            .any(|snapshot| snapshot.name == "cpu"));
         assert!(sampled.total_percent > 0.0);
     }
 

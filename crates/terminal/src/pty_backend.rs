@@ -272,6 +272,10 @@ impl TerminalBackend for LocalPtyBackend {
             }
         }
     }
+
+    fn shutdown(&self) {
+        LocalPtyBackend::shutdown(self);
+    }
 }
 
 /// GPUI Event proxy for alacritty_terminal

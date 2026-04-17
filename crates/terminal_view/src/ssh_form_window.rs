@@ -31,7 +31,7 @@ use one_core::storage::{
 use rust_i18n::t;
 use ssh::{
     format_connection_progress_message, JumpServerConnectConfig, ProxyConnectConfig, ProxyType,
-    RusshClient, SshAuth, SshClient, SshConnectConfig, SshConnectionStage,
+    RusshClient, SshAuth, SshConnectConfig, SshConnectionStage,
 };
 use std::time::{Duration, Instant};
 

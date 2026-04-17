@@ -367,4 +367,6 @@ impl TerminalBackend for LocalPtyClientBackend {
             mode,
         });
     }
+
+    fn shutdown(&self) {}
 }

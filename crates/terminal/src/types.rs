@@ -17,6 +17,7 @@ pub trait TerminalBackend: Send {
     fn write(&self, data: Vec<u8>);
     fn resize(&self, size: TerminalSize);
     fn close(&self, mode: TerminalCloseMode);
+    fn shutdown(&self);
 }
 
 /// Local terminal configuration
