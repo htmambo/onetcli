@@ -1259,7 +1259,9 @@ impl OnetCliApp {
             let tab_container = self.tab_container.read(cx);
             (
                 tab_container.current_status_summary_element(cx),
-                tab_container.current_status_summary(cx).map(|s| s.to_string()),
+                tab_container
+                    .current_status_summary(cx)
+                    .map(|s| s.to_string()),
             )
         };
 

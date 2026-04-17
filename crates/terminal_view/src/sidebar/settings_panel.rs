@@ -155,8 +155,10 @@ impl SettingsPanel {
 
         // 主题选择列表
         let mode_is_dark = cx.theme().mode.is_dark();
-        let all_themes: Vec<TerminalTheme> =
-            TerminalTheme::all().into_iter().filter(|t| t.variant.matches(mode_is_dark)).collect();
+        let all_themes: Vec<TerminalTheme> = TerminalTheme::all()
+            .into_iter()
+            .filter(|t| t.variant.matches(mode_is_dark))
+            .collect();
         let theme_names: Vec<SharedString> = all_themes
             .iter()
             .map(|t| SharedString::from(t.name))
@@ -165,8 +167,9 @@ impl SettingsPanel {
             .iter()
             .position(|t| t.name == initial_theme.name)
             .map(|i| gpui_component::IndexPath::default().row(i));
-        let theme_select_state =
-            cx.new(|cx| SelectState::new(theme_names, selected_theme_index, window, cx).searchable(true));
+        let theme_select_state = cx.new(|cx| {
+            SelectState::new(theme_names, selected_theme_index, window, cx).searchable(true)
+        });
 
         let mut subscriptions = Vec::new();
 
@@ -294,7 +297,10 @@ impl SettingsPanel {
             window,
             move |this, _state, event: &SelectEvent<Vec<SharedString>>, _window, cx| {
                 if let SelectEvent::Confirm(Some(name)) = event {
-                    if let Some(theme) = all_themes_for_sub.iter().find(|t| SharedString::from(t.name) == *name) {
+                    if let Some(theme) = all_themes_for_sub
+                        .iter()
+                        .find(|t| SharedString::from(t.name) == *name)
+                    {
                         this.set_theme(theme.clone(), cx);
                     }
                 }

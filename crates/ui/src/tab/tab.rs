@@ -266,7 +266,11 @@ impl TabVariant {
         match self {
             TabVariant::Tab => TabStyle {
                 fg: cx.theme().muted_foreground,
-                bg: if selected { cx.theme().tab_active } else { cx.theme().tab },
+                bg: if selected {
+                    cx.theme().tab_active
+                } else {
+                    cx.theme().tab
+                },
                 border_color: if selected {
                     cx.theme().border
                 } else {

@@ -609,7 +609,10 @@ impl ThemeColor {
         apply_color!(switch, fallback = self.secondary_active);
         apply_color!(switch_thumb, fallback = self.background);
         if config.mode.is_dark() {
-            apply_color!(tab, fallback = self.background.blend(self.border.opacity(0.15)));
+            apply_color!(
+                tab,
+                fallback = self.background.blend(self.border.opacity(0.15))
+            );
             apply_color!(tab_active, fallback = self.secondary);
         } else {
             apply_color!(tab, fallback = self.secondary);

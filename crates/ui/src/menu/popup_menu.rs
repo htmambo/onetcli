@@ -989,12 +989,7 @@ impl PopupMenu {
             None => Kbd::binding_for_action(action.as_ref(), None, window),
         };
         let muted = cx.theme().muted;
-        kbd.map(move |this| {
-            this.p_0()
-                .flex_nowrap()
-                .border_0()
-                .bg(muted)
-        })
+        kbd.map(move |this| this.p_0().flex_nowrap().border_0().bg(muted))
     }
 
     fn render_icon(

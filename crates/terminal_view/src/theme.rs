@@ -153,9 +153,22 @@ impl AnsiPalette {
     /// 转换为 Rgba 数组
     fn to_array(&self) -> [Rgba; 16] {
         [
-            self.color0, self.color1, self.color2, self.color3, self.color4, self.color5,
-            self.color6, self.color7, self.color8, self.color9, self.color10, self.color11,
-            self.color12, self.color13, self.color14, self.color15,
+            self.color0,
+            self.color1,
+            self.color2,
+            self.color3,
+            self.color4,
+            self.color5,
+            self.color6,
+            self.color7,
+            self.color8,
+            self.color9,
+            self.color10,
+            self.color11,
+            self.color12,
+            self.color13,
+            self.color14,
+            self.color15,
         ]
     }
 }

@@ -13,8 +13,8 @@ use gpui_component::list::{List, ListDelegate, ListState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
-    ActiveTheme, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable, Sizable, Size,
-    WindowExt as _, h_flex, linux_prefers_system_window_controls,
+    ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
+    Sizable, Size, WindowExt as _, h_flex, linux_prefers_system_window_controls,
     should_render_custom_window_controls, v_flex,
 };
 use rust_i18n::t;
@@ -986,10 +986,6 @@ fn inactive_tab_background_alpha(surface_opacity: f32, tab_bar_alpha: f32) -> f3
     (surface_opacity + extra).clamp(0.0, 1.0)
 }
 
-fn hover_tab_background_alpha(inactive_alpha: f32) -> f32 {
-    (inactive_alpha + 0.08).clamp(0.0, 1.0)
-}
-
 fn is_regular_tab_active(tab_index: usize, active_index: usize, pinned_tab_active: bool) -> bool {
     !pinned_tab_active && tab_index == active_index
 }
@@ -999,6 +995,49 @@ fn with_alpha(color: gpui::Hsla, alpha: f32) -> gpui::Hsla {
         a: alpha.clamp(0.0, 1.0),
         ..color
     }
+}
+
+fn shift_tab_tone(color: gpui::Hsla, is_dark: bool, amount: f32) -> gpui::Hsla {
+    let adjusted = if is_dark {
+        color.lighten(amount)
+    } else {
+        color.darken(amount)
+    };
+
+    gpui::Hsla {
+        l: adjusted.l.clamp(0.0, 1.0),
+        ..adjusted
+    }
+}
+
+fn default_inactive_tab_color(
+    tab_bar_color: gpui::Hsla,
+    surface_opacity: f32,
+    is_dark: bool,
+) -> gpui::Hsla {
+    let target_alpha =
+        inactive_tab_background_alpha(surface_opacity, tab_bar_color.a).max(tab_bar_color.a);
+
+    with_alpha(shift_tab_tone(tab_bar_color, is_dark, 0.18), target_alpha)
+}
+
+fn default_hover_tab_color(inactive_tab_color: gpui::Hsla, is_dark: bool) -> gpui::Hsla {
+    with_alpha(
+        shift_tab_tone(inactive_tab_color, is_dark, 0.08),
+        inactive_tab_color.a,
+    )
+}
+
+fn default_inactive_tab_border_color(
+    inactive_tab_color: gpui::Hsla,
+    border_color: gpui::Hsla,
+    is_dark: bool,
+) -> gpui::Hsla {
+    let contrasted = shift_tab_tone(inactive_tab_color, is_dark, 0.28);
+    let themed_border = shift_tab_tone(border_color, is_dark, 0.08);
+    let blended = contrasted.mix(themed_border, 0.65);
+
+    with_alpha(blended, border_color.a.max(inactive_tab_color.a))
 }
 
 pub struct TabContainer {
@@ -1012,6 +1051,7 @@ pub struct TabContainer {
     active_tab_bg_color: Option<gpui::Hsla>,
     inactive_tab_hover_color: Option<gpui::Hsla>,
     inactive_tab_bg_color: Option<gpui::Hsla>,
+    inactive_tab_border_color: Option<gpui::Hsla>,
     tab_text_color: Option<gpui::Hsla>,
     tab_close_button_color: Option<gpui::Hsla>,
     left_padding: Option<gpui::Pixels>,
@@ -1047,6 +1087,7 @@ impl TabContainer {
             active_tab_bg_color: None,
             inactive_tab_hover_color: None,
             inactive_tab_bg_color: None,
+            inactive_tab_border_color: None,
             tab_text_color: None,
             tab_close_button_color: None,
             left_padding: None,
@@ -1067,6 +1108,11 @@ impl TabContainer {
 
     pub fn with_inactive_tab_bg_color(mut self, color: impl Into<Option<gpui::Hsla>>) -> Self {
         self.inactive_tab_bg_color = color.into();
+        self
+    }
+
+    pub fn with_inactive_tab_border_color(mut self, color: impl Into<Option<gpui::Hsla>>) -> Self {
+        self.inactive_tab_border_color = color.into();
         self
     }
 
@@ -1795,10 +1841,7 @@ impl TabContainer {
         Some(normalized_summary.to_string().into())
     }
 
-    pub fn current_status_summary_element(
-        &self,
-        cx: &App,
-    ) -> Option<gpui::AnyElement> {
+    pub fn current_status_summary_element(&self, cx: &App) -> Option<gpui::AnyElement> {
         let current_tab = if self.pinned_tab_active {
             self.pinned_tab.as_ref()
         } else {
@@ -2143,21 +2186,23 @@ impl TabContainer {
         let view = cx.entity();
 
         let theme = cx.theme();
+        let is_dark_theme = theme.is_dark();
         let tab_bar_alpha = tab_bar_background_alpha(theme.surface_opacity);
-        let inactive_tab_alpha =
-            inactive_tab_background_alpha(theme.surface_opacity, tab_bar_alpha);
-        let hover_tab_alpha = hover_tab_background_alpha(inactive_tab_alpha);
         let bg_color = self
             .tab_bar_bg_color
             .unwrap_or_else(|| with_alpha(theme.tab, tab_bar_alpha));
         let border_color = self.tab_bar_border_color.unwrap_or(theme.border);
         let active_tab_color = self.active_tab_bg_color.unwrap_or(theme.tab_active);
+        let inactive_tab_color = self.inactive_tab_bg_color.unwrap_or_else(|| {
+            default_inactive_tab_color(bg_color, theme.surface_opacity, is_dark_theme)
+        });
         let hover_tab_color = self
             .inactive_tab_hover_color
-            .unwrap_or_else(|| with_alpha(theme.tab, hover_tab_alpha));
-        let inactive_tab_color = self
-            .inactive_tab_bg_color
-            .unwrap_or_else(|| with_alpha(theme.tab, inactive_tab_alpha));
+            .unwrap_or_else(|| default_hover_tab_color(inactive_tab_color, is_dark_theme));
+        // 非激活标签边框色：基于 inactive tab 与主题边框共同生成，确保有辨识度。
+        let inactive_tab_border = self.inactive_tab_border_color.unwrap_or_else(|| {
+            default_inactive_tab_border_color(inactive_tab_color, border_color, is_dark_theme)
+        });
         let text_color = self.tab_text_color.unwrap_or(theme.tab_foreground);
         let close_btn_color = self
             .tab_close_button_color
@@ -2283,6 +2328,8 @@ impl TabContainer {
                         .when(!is_pinned_active, |el| {
                             el.hover(move |style| style.bg(hover_tab_color))
                                 .bg(inactive_tab_color)
+                                .border_1()
+                                .border_color(inactive_tab_border)
                         })
                         .when(drag_plan.enable_single_pinned_tab_drag, |el| {
                             el.window_control_area(WindowControlArea::Drag)
@@ -2458,6 +2505,8 @@ impl TabContainer {
                             .when(!is_active, |el| {
                                 el.hover(move |style| style.bg(hover_tab_color))
                                     .bg(inactive_tab_color)
+                                    .border_1()
+                                    .border_color(inactive_tab_border)
                             })
                             // 普通 tab 不应把拖动/按下事件冒泡为窗口拖动。
                             // 设置 tab_click_active 标志，防止 scroll region 的窗口拖动干扰。
@@ -2901,11 +2950,12 @@ impl Render for TabContainer {
 #[cfg(test)]
 mod tests {
     use super::{
-        TabBarDragPlan, build_tab_bar_drag_plan, inactive_tab_background_alpha,
-        is_regular_tab_active, should_render_windows_drag_spacer,
-        should_suppress_duplicate_status_summary, tab_bar_background_alpha,
-        uses_manual_window_move,
+        TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
+        default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
+        should_render_windows_drag_spacer, should_suppress_duplicate_status_summary,
+        tab_bar_background_alpha, uses_manual_window_move,
     };
+    use gpui::hsla;
 
     #[test]
     fn windows_仅渲染独立拖窗热区() {
@@ -2976,6 +3026,37 @@ mod tests {
     fn inactive_tab_alpha_整体不透明时加_point_two() {
         assert_eq!(inactive_tab_background_alpha(0.4, 1.0), 0.6);
         assert_eq!(inactive_tab_background_alpha(0.84, 1.0), 1.0);
+    }
+
+    #[test]
+    fn 暗色主题inactive_tab比tab_bar更亮() {
+        let tab_bar = hsla(0.0, 0.0, 0.16, 1.0);
+        let inactive = default_inactive_tab_color(tab_bar, 0.84, true);
+
+        assert!(inactive.l > tab_bar.l);
+        assert_eq!(inactive.a, 1.0);
+    }
+
+    #[test]
+    fn 亮色主题inactive_tab比tab_bar更暗() {
+        let tab_bar = hsla(0.0, 0.0, 0.96, 1.0);
+        let inactive = default_inactive_tab_color(tab_bar, 0.84, false);
+
+        assert!(inactive.l < tab_bar.l);
+        assert_eq!(inactive.a, 1.0);
+    }
+
+    #[test]
+    fn inactive_tab边框保持比背景更有辨识度() {
+        let dark_inactive = hsla(0.0, 0.0, 0.22, 1.0);
+        let dark_border =
+            default_inactive_tab_border_color(dark_inactive, hsla(0.0, 0.0, 0.25, 1.0), true);
+        assert!(dark_border.l > dark_inactive.l);
+
+        let light_inactive = hsla(0.0, 0.0, 0.90, 1.0);
+        let light_border =
+            default_inactive_tab_border_color(light_inactive, hsla(0.0, 0.0, 0.88, 1.0), false);
+        assert!(light_border.l < light_inactive.l);
     }
 
     #[test]

@@ -28,7 +28,10 @@ fn find_schemes_dir() -> Option<std::path::PathBuf> {
     let crate_src = Path::new(&manifest_dir).join("src");
 
     for ancestor in crate_src.ancestors() {
-        let candidate = ancestor.join("tabby").join("tabby-community-color-schemes").join("schemes");
+        let candidate = ancestor
+            .join("tabby")
+            .join("tabby-community-color-schemes")
+            .join("schemes");
         if candidate.is_dir() {
             return Some(candidate);
         }
@@ -37,7 +40,10 @@ fn find_schemes_dir() -> Option<std::path::PathBuf> {
     // 从 OUT_DIR 向上搜索（用于 workspace 构建场景）
     let out_dir = env::var("OUT_DIR").ok()?;
     for ancestor in Path::new(&out_dir).ancestors() {
-        let candidate = ancestor.join("tabby").join("tabby-community-color-schemes").join("schemes");
+        let candidate = ancestor
+            .join("tabby")
+            .join("tabby-community-color-schemes")
+            .join("schemes");
         if candidate.is_dir() {
             return Some(candidate);
         }
@@ -316,7 +322,11 @@ fn sanitize_name(name: &str) -> String {
         })
         .collect();
     // 合并连续的下划线
-    let base = base.split('_').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("_");
+    let base = base
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
     // Rust 标识符不能以数字开头
     if base.is_empty() || base.chars().next().unwrap().is_ascii_digit() {
         format!("tabby_{}", base)

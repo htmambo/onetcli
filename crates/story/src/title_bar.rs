@@ -141,7 +141,6 @@ impl FontSizeSelector {
         Theme::global_mut(cx).scrollbar_show = show.0;
         window.refresh();
     }
-
 }
 
 impl Render for FontSizeSelector {

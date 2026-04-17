@@ -575,8 +575,7 @@ fn note_ssh_user_input(
     }
 
     let has_newline = data.iter().any(|byte| matches!(*byte, b'\r' | b'\n'));
-    let should_mark_busy =
-        matches!(ssh_process_state.get(), SshProcessState::Busy) || has_newline;
+    let should_mark_busy = matches!(ssh_process_state.get(), SshProcessState::Busy) || has_newline;
     if should_mark_busy {
         tracing::warn!(
             target: "terminal.ssh",
@@ -2488,8 +2487,7 @@ mod tests {
         build_ssh_init_commands, build_ssh_prompt_hook_command, compose_ssh_init_commands,
         expand_tilde, next_local_cwd_file_path, note_ssh_prompt_idle, note_ssh_user_input,
         read_local_working_dir, resolve_default_windows_shell_from_env, shell_escape_arg,
-        SshProcessState, TerminalConnectionKind, SSH_PROMPT_HOOK_NAME,
-        SSH_PROMPT_READY_COMMAND,
+        SshProcessState, TerminalConnectionKind, SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
@@ -2681,8 +2679,8 @@ mod tests {
 
         super::replay_term_output(&term, "历史记录已恢复".as_bytes(), None);
 
-        let visible = super::serialize_term_for_recovery(&term.lock(), 20)
-            .expect("应能序列化宽字符文本");
+        let visible =
+            super::serialize_term_for_recovery(&term.lock(), 20).expect("应能序列化宽字符文本");
         assert_eq!(visible, "历史记录已恢复");
     }
 

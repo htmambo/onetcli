@@ -16,8 +16,8 @@ use gpui::{
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, LEFT_PANEL_ALPHA_OFFSET,
-    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, ThemeRegistry,
-    TitleBar, WindowExt,
+    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar,
+    WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
@@ -1088,16 +1088,24 @@ impl AppSettings {
 
         // 当 effective mode 改变时，如果当前 theme_name 不匹配新模式，
         // 尝试找同名变体（Light <-> Dark），找不到则回退到默认主题。
-        let effective_theme_name = if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(self.theme_name.as_str()) {
+        let effective_theme_name = if let Some(theme_config) = ThemeRegistry::global(cx)
+            .themes()
+            .get(self.theme_name.as_str())
+        {
             if theme_config.mode != mode {
-                Self::find_matching_theme_name(&self.theme_name, mode, cx)
-                    .unwrap_or_else(|| {
-                        if mode.is_dark() {
-                            ThemeRegistry::global(cx).default_dark_theme().name.to_string()
-                        } else {
-                            ThemeRegistry::global(cx).default_light_theme().name.to_string()
-                        }
-                    })
+                Self::find_matching_theme_name(&self.theme_name, mode, cx).unwrap_or_else(|| {
+                    if mode.is_dark() {
+                        ThemeRegistry::global(cx)
+                            .default_dark_theme()
+                            .name
+                            .to_string()
+                    } else {
+                        ThemeRegistry::global(cx)
+                            .default_light_theme()
+                            .name
+                            .to_string()
+                    }
+                })
             } else {
                 self.theme_name.clone()
             }
@@ -1105,7 +1113,11 @@ impl AppSettings {
             self.theme_name.clone()
         };
 
-        if let Some(theme_config) = ThemeRegistry::global(cx).themes().get(effective_theme_name.as_str()).cloned() {
+        if let Some(theme_config) = ThemeRegistry::global(cx)
+            .themes()
+            .get(effective_theme_name.as_str())
+            .cloned()
+        {
             Theme::global_mut(cx).apply_config(&theme_config);
         }
 
@@ -1235,7 +1247,9 @@ pub fn init_settings(cx: &mut App) {
 
 fn migrate_legacy_theme_state(settings: &mut AppSettings) {
     const LEGACY_STATE_FILE: &str = "target/state.json";
-    if settings.theme_name != default_theme_name() && settings.scrollbar_show != default_scrollbar_show() {
+    if settings.theme_name != default_theme_name()
+        && settings.scrollbar_show != default_scrollbar_show()
+    {
         return;
     }
     let Ok(content) = std::fs::read_to_string(LEGACY_STATE_FILE) else {
@@ -4153,8 +4167,6 @@ fn render_shortcuts_section(cx: &App) -> gpui::AnyElement {
 
     container.into_any_element()
 }
-
-
 
 /// GitHub 开源地址
 const GITHUB_URL: &str = "https://github.com/feigeCode/onetcli";

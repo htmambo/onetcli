@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Disableable, FocusableExt as _, Icon, IconName, Selectable,
-    Sizable, Size, StyleSized, StyledExt, button::ButtonIcon, h_flex, tooltip::Tooltip,
+    ActiveTheme, Disableable, FocusableExt as _, Icon, IconName, Selectable, Sizable, Size,
+    StyleSized, StyledExt, button::ButtonIcon, h_flex, tooltip::Tooltip,
 };
 use gpui::{
     Action, AnyElement, App, ClickEvent, Corners, Div, Edges, ElementId, Hsla, InteractiveElement,

@@ -1,7 +1,5 @@
 use crate::{
-    highlighter::HighlightTheme,
-    notification::NotificationSettings,
-    scroll::ScrollbarShow,
+    highlighter::HighlightTheme, notification::NotificationSettings, scroll::ScrollbarShow,
     sheet::SheetSettings,
 };
 use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
@@ -144,8 +142,6 @@ pub struct Theme {
     /// The sheet settings.
     pub sheet: SheetSettings,
 }
-
-
 
 impl Default for Theme {
     fn default() -> Self {

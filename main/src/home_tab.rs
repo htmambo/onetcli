@@ -7132,16 +7132,17 @@ impl TabContent for HomePage {
             workspace_count,
             t!("Home.connection"),
             connection_count,
-            if breakdown.is_empty() { String::new() } else { format!("({})", breakdown.join("/")) }
+            if breakdown.is_empty() {
+                String::new()
+            } else {
+                format!("({})", breakdown.join("/"))
+            }
         );
 
         Some(SharedString::from(base))
     }
 
-    fn status_summary_element(
-        &self,
-        cx: &App,
-    ) -> Option<gpui::AnyElement> {
+    fn status_summary_element(&self, cx: &App) -> Option<gpui::AnyElement> {
         let workspace_count = self.workspaces.len();
         let connection_count = self.connections.len();
 
@@ -7180,46 +7181,101 @@ impl TabContent for HomePage {
                 .text_sm()
                 .text_color(fg)
                 .child(format!(
-                    "{} {}，{} {}(", t!("Workspace.label"), workspace_count, t!("Home.connection"), connection_count
+                    "{} {}，{} {}(",
+                    t!("Workspace.label"),
+                    workspace_count,
+                    t!("Home.connection"),
+                    connection_count
                 ))
                 .into_any_element(),
         );
 
         if db_count > 0 {
             parts.push(
-                Icon::new(IconName::Database).small().text_color(fg).into_any_element(),
+                Icon::new(IconName::Database)
+                    .small()
+                    .text_color(fg)
+                    .into_any_element(),
             );
-            parts.push(div().text_sm().text_color(fgc).child(db_count.to_string()).into_any_element());
+            parts.push(
+                div()
+                    .text_sm()
+                    .text_color(fgc)
+                    .child(db_count.to_string())
+                    .into_any_element(),
+            );
             if ssh_sftp_count > 0 || redis_count > 0 || mongo_count > 0 || serial_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
         if ssh_sftp_count > 0 {
             parts.push(
-                Icon::new(IconName::Terminal).small().text_color(fg).into_any_element(),
+                Icon::new(IconName::Terminal)
+                    .small()
+                    .text_color(fg)
+                    .into_any_element(),
             );
-            parts.push(div().text_sm().text_color(fgc).child(ssh_sftp_count.to_string()).into_any_element());
+            parts.push(
+                div()
+                    .text_sm()
+                    .text_color(fgc)
+                    .child(ssh_sftp_count.to_string())
+                    .into_any_element(),
+            );
             if redis_count > 0 || mongo_count > 0 || serial_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
         if redis_count > 0 {
-            parts.push(Icon::new(IconName::Redis).small().text_color(fg).into_any_element());
-            parts.push(div().text_sm().text_color(fgc).child(redis_count.to_string()).into_any_element());
+            parts.push(
+                Icon::new(IconName::Redis)
+                    .small()
+                    .text_color(fg)
+                    .into_any_element(),
+            );
+            parts.push(
+                div()
+                    .text_sm()
+                    .text_color(fgc)
+                    .child(redis_count.to_string())
+                    .into_any_element(),
+            );
             if mongo_count > 0 || serial_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
         if mongo_count > 0 {
-            parts.push(Icon::new(IconName::MongoDB).small().text_color(fg).into_any_element());
-            parts.push(div().text_sm().text_color(fgc).child(mongo_count.to_string()).into_any_element());
+            parts.push(
+                Icon::new(IconName::MongoDB)
+                    .small()
+                    .text_color(fg)
+                    .into_any_element(),
+            );
+            parts.push(
+                div()
+                    .text_sm()
+                    .text_color(fgc)
+                    .child(mongo_count.to_string())
+                    .into_any_element(),
+            );
             if serial_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
         if serial_count > 0 {
-            parts.push(Icon::new(IconName::SerialPort).small().text_color(fg).into_any_element());
-            parts.push(div().text_sm().text_color(fgc).child(serial_count.to_string()).into_any_element());
+            parts.push(
+                Icon::new(IconName::SerialPort)
+                    .small()
+                    .text_color(fg)
+                    .into_any_element(),
+            );
+            parts.push(
+                div()
+                    .text_sm()
+                    .text_color(fgc)
+                    .child(serial_count.to_string())
+                    .into_any_element(),
+            );
         }
 
         parts.push(div().text_sm().text_color(fg).child(")").into_any_element());

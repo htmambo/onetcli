@@ -26,8 +26,6 @@ impl ScrollableMask {
             debug: None,
         }
     }
-
-
 }
 
 impl IntoElement for ScrollableMask {
