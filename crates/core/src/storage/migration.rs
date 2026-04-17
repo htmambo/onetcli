@@ -6,13 +6,38 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260225000001",
         include_str!("../../migrations/20260225000001_init.sql"),
     ),
-    (
-        "20260315000001",
-        include_str!("../../migrations/20260315000001_team_sync.sql"),
-    ),
+    ("20260315000001", ""),
     (
         "20260317000001",
         include_str!("../../migrations/20260317000001_connection_owner.sql"),
+    ),
+    (
+        "20260325000001",
+        include_str!("../../migrations/20260325000001_certificate_management.sql"),
+    ),
+    (
+        "20260326000001",
+        include_str!("../../migrations/20260326000001_workspace_sync_state.sql"),
+    ),
+    (
+        "20260326000002",
+        include_str!("../../migrations/20260326000002_workspace_delete_context.sql"),
+    ),
+    (
+        "20260326000003",
+        include_str!("../../migrations/20260326000003_home_manual_sort.sql"),
+    ),
+    (
+        "20260408000001",
+        include_str!("../../migrations/20260408000001_llm_thinking_budget.sql"),
+    ),
+    (
+        "20260410000001",
+        include_str!("../../migrations/20260410000001_certificate_params.sql"),
+    ),
+    (
+        "20260410000002",
+        include_str!("../../migrations/20260410000002_key_value.sql"),
     ),
 ];
 

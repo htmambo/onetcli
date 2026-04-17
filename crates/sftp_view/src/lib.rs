@@ -26,7 +26,10 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex,
 };
+use one_core::RunningState;
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
 };
@@ -35,6 +38,10 @@ use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};
 use std::collections::VecDeque;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -163,6 +170,7 @@ struct LocalFileEntry {
     size: u64,
     modified: SystemTime,
     is_dir: bool,
+    permissions: String,
 }
 
 impl TransferClientPool {
@@ -290,6 +298,82 @@ fn format_permissions(mode: u32, is_dir: bool) -> String {
     result.push(if mode & 0o004 != 0 { 'r' } else { '-' });
     result.push(if mode & 0o002 != 0 { 'w' } else { '-' });
     result.push(if mode & 0o001 != 0 { 'x' } else { '-' });
+
+    result
+}
+
+fn format_local_permissions(metadata: &std::fs::Metadata, is_dir: bool) -> String {
+    #[cfg(unix)]
+    {
+        format_permissions(metadata.permissions().mode(), is_dir)
+    }
+
+    #[cfg(windows)]
+    {
+        format_windows_permissions(metadata, is_dir)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let mut result = String::with_capacity(10);
+        result.push(if is_dir { 'd' } else { '-' });
+        if metadata.permissions().readonly() {
+            result.push_str("r--r--r--");
+        } else {
+            result.push_str("rw-rw-rw-");
+        }
+        result
+    }
+}
+
+#[cfg(windows)]
+fn format_windows_permissions(metadata: &std::fs::Metadata, is_dir: bool) -> String {
+    const FILE_ATTRIBUTE_READONLY: u32 = 0x0000_0001;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0000_0002;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
+    const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x0000_0020;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0000_0800;
+    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x0000_4000;
+
+    let attributes = metadata.file_attributes();
+    let readonly = attributes & FILE_ATTRIBUTE_READONLY != 0 || metadata.permissions().readonly();
+
+    let mut result = String::with_capacity(10);
+    result.push(if is_dir { 'd' } else { '-' });
+    result.push('r');
+    result.push(if readonly { '-' } else { 'w' });
+    result.push(if is_dir { 'x' } else { '-' });
+    result.push(if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+        'h'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+        's'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_ARCHIVE != 0 {
+        'a'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        'l'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_COMPRESSED != 0 {
+        'c'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_ENCRYPTED != 0 {
+        'e'
+    } else {
+        '-'
+    });
 
     result
 }
@@ -448,7 +532,23 @@ pub struct SftpView {
     tab_index: Option<usize>,
 }
 
+fn initial_remote_path(configured_path: Option<&str>) -> String {
+    configured_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
+        .to_string()
+}
+
+fn resolved_remote_path(requested_path: &str, real_path: Option<String>) -> String {
+    real_path.unwrap_or_else(|| requested_path.to_string())
+}
+
 impl SftpView {
+    pub fn connection_id(&self) -> Option<i64> {
+        self.stored_connection.id
+    }
+
     pub fn new(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_index(conn, None, window, cx)
     }
@@ -485,6 +585,7 @@ impl SftpView {
             timeout: ssh_params.connect_timeout.map(Duration::from_secs),
             keepalive_interval: ssh_params.keepalive_interval.map(Duration::from_secs),
             keepalive_max: ssh_params.keepalive_max,
+            enable_legacy_kex: ssh_params.enable_legacy_kex,
             jump_server: ssh_params.jump_server.map(|jump| {
                 let jump_auth = match jump.auth_method {
                     SshAuthMethod::Password { password } => SshAuth::Password(password),
@@ -522,7 +623,12 @@ impl SftpView {
         };
 
         let focus_handle = cx.focus_handle();
-        let local_current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let local_current_path = ssh_params
+            .sftp_local_directory
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
+        let remote_current_path = initial_remote_path(ssh_params.sftp_remote_directory.as_deref());
 
         let local_panel = cx.new(|cx| {
             FileListPanel::new(
@@ -533,12 +639,14 @@ impl SftpView {
             )
         });
 
-        let remote_panel = cx.new(|cx| FileListPanel::new("/root".to_string(), true, window, cx));
+        let remote_panel_path = remote_current_path.clone();
+        let remote_panel =
+            cx.new(|cx| FileListPanel::new(remote_panel_path.clone(), true, window, cx));
 
         let local_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
         let remote_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
 
         let mut subscriptions = Vec::new();
 
@@ -613,10 +721,10 @@ impl SftpView {
             sftp_client: None,
             stored_connection: conn.clone(),
             local_current_path: local_current_path.clone(),
-            remote_current_path: ".".to_string(),
+            remote_current_path: remote_current_path.clone(),
             local_history: vec![local_current_path.clone()],
             local_history_index: 0,
-            remote_history: vec![".".to_string()],
+            remote_history: vec![remote_current_path],
             remote_history_index: 0,
             local_panel,
             remote_panel,
@@ -646,6 +754,7 @@ impl SftpView {
     fn connect(&mut self, cx: &mut Context<Self>) {
         self.connection_state = ConnectionState::Connecting;
         let config = self.sftp_config.clone();
+        let requested_remote_path = self.remote_current_path.clone();
 
         tracing::info!(
             "Connecting to SFTP server: {}@{}",
@@ -655,13 +764,23 @@ impl SftpView {
 
         let task = Tokio::spawn(cx, async move {
             let mut client = RusshSftpClient::connect(config).await?;
-            // 连接成功后立即获取当前工作目录的真实路径
-            let real_path = client.realpath(".").await.ok();
-            Ok::<_, anyhow::Error>((client, real_path))
+            // 优先解析用户配置的初始目录；留空时回退到服务器默认目录 `.`
+            let real_path = match client.realpath(&requested_remote_path).await {
+                Ok(path) => Some(path),
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to resolve remote path {}: {}",
+                        requested_remote_path,
+                        err
+                    );
+                    None
+                }
+            };
+            Ok::<_, anyhow::Error>((client, real_path, requested_remote_path))
         });
 
         cx.spawn(async move |this, cx| match task.await {
-            Ok(Ok((client, real_path))) => {
+            Ok(Ok((client, real_path, requested_remote_path))) => {
                 tracing::info!("SFTP connection established successfully");
                 let client = Arc::new(Mutex::new(client));
 
@@ -670,13 +789,11 @@ impl SftpView {
                     this.connection_state = ConnectionState::Connected;
                     this.set_connection_active(true, cx);
 
-                    // 如果成功获取了真实路径，更新远程路径和历史记录
-                    if let Some(path) = real_path {
-                        tracing::info!("Remote working directory: {}", path);
-                        this.remote_current_path = path.clone();
-                        this.remote_history = vec![path];
-                        this.remote_history_index = 0;
-                    }
+                    let path = resolved_remote_path(&requested_remote_path, real_path);
+                    tracing::info!("Initial remote directory: {}", path);
+                    this.remote_current_path = path.clone();
+                    this.remote_history = vec![path];
+                    this.remote_history_index = 0;
 
                     cx.notify();
                 });
@@ -755,12 +872,13 @@ impl SftpView {
             Ok(dir_entries) => {
                 for entry in dir_entries.flatten() {
                     if let Ok(metadata) = entry.metadata() {
+                        let is_dir = metadata.is_dir();
                         entries.push(FileItem {
                             name: entry.file_name().to_string_lossy().to_string(),
                             size: metadata.len(),
                             modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                            is_dir: metadata.is_dir(),
-                            permissions: String::new(),
+                            is_dir,
+                            permissions: format_local_permissions(&metadata, is_dir),
                         });
                     }
                 }
@@ -912,7 +1030,11 @@ impl SftpView {
     }
 
     fn go_up_local(&mut self, cx: &mut Context<Self>) {
-        if let Some(parent) = self.local_current_path.parent() {
+        if let Some(parent) = self
+            .local_current_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
             self.local_current_path = parent.to_path_buf();
             self.push_local_history(self.local_current_path.clone());
             self.refresh_local_dir(cx);
@@ -1751,11 +1873,13 @@ impl SftpView {
                     let mut entries = Vec::new();
                     for entry in dir_entries.flatten() {
                         if let Ok(metadata) = entry.metadata() {
+                            let is_dir = metadata.is_dir();
                             entries.push(LocalFileEntry {
                                 name: entry.file_name().to_string_lossy().to_string(),
                                 size: metadata.len(),
                                 modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                                is_dir: metadata.is_dir(),
+                                is_dir,
+                                permissions: format_local_permissions(&metadata, is_dir),
                             });
                         }
                     }
@@ -1775,7 +1899,7 @@ impl SftpView {
                             size: e.size,
                             modified: e.modified,
                             is_dir: e.is_dir,
-                            permissions: String::new(),
+                            permissions: e.permissions,
                         })
                         .collect();
                     let _ = local_panel.update(cx, |panel, cx| {
@@ -3814,6 +3938,31 @@ impl SftpView {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{initial_remote_path, resolved_remote_path};
+
+    #[test]
+    fn initial_remote_path_prefers_configured_directory() {
+        assert_eq!(initial_remote_path(Some("/srv/www")), "/srv/www");
+    }
+
+    #[test]
+    fn initial_remote_path_defaults_to_server_directory_when_empty() {
+        assert_eq!(initial_remote_path(None), ".");
+        assert_eq!(initial_remote_path(Some("   ")), ".");
+    }
+
+    #[test]
+    fn resolved_remote_path_prefers_realpath_result() {
+        assert_eq!(
+            resolved_remote_path("logs", Some("/home/demo/logs".to_string())),
+            "/home/demo/logs"
+        );
+        assert_eq!(resolved_remote_path("logs", None), "logs");
+    }
+}
+
 impl EventEmitter<TabContentEvent> for SftpView {}
 impl EventEmitter<SftpViewEvent> for SftpView {}
 
@@ -3837,6 +3986,23 @@ impl TabContent for SftpView {
 
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let Some(connection_id) = self.stored_connection.id else {
+            return JsonValue::Null;
+        };
+
+        ConnectionRestorePayload {
+            kind: ConnectionRestoreKind::Sftp,
+            connection_id: Some(connection_id),
+            workspace_id: None,
+            active_connection_id: None,
+            local_terminal: None,
+            ssh_terminal: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn try_close(
@@ -3894,7 +4060,7 @@ impl TabContent for SftpView {
                         true
                     })
                     .overlay_closable(false)
-                    .close_button(false)
+                    .close_button(true)
             });
 
             let client = self.sftp_client.take();
@@ -3951,6 +4117,44 @@ impl TabContent for SftpView {
         }
         self.set_connection_active(false, cx);
         gpui::Task::ready(true)
+    }
+
+    fn force_close(
+        &mut self,
+        _tab_id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Task<bool> {
+        self.cancel_all_transfers();
+        let client = self.sftp_client.take();
+        self.set_connection_active(false, cx);
+
+        if let Some(client) = client {
+            let task = Tokio::spawn(cx, async move {
+                let mut guard = client.lock().await;
+                if let Err(e) = guard.disconnect().await {
+                    tracing::error!("强制关闭 SFTP 连接失败: {}", e);
+                }
+            });
+            return cx.spawn(async move |_this, _cx| {
+                let _ = task.await;
+                true
+            });
+        }
+
+        gpui::Task::ready(true)
+    }
+
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        let active_count = self.transfer_queue.active_tasks().len();
+        if active_count == 0 {
+            return None;
+        }
+
+        RunningState::sftp(
+            self.title(cx),
+            t!("RunningState.sftp.activity", count = active_count).into(),
+        )
     }
 }
 

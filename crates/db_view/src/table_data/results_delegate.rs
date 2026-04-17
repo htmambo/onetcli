@@ -16,6 +16,7 @@ use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::time_picker::{TimePickerEvent, TimePickerState};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, WindowExt, h_flex};
+use one_core::PendingChangeLevel;
 use one_core::storage::DatabaseType;
 use one_ui::edit_table::{
     CellEditor, Column, ColumnSort, EditTableDelegate, EditTableEvent, EditTableState,
@@ -23,6 +24,9 @@ use one_ui::edit_table::{
 };
 use rust_i18n::t;
 use uuid::Uuid;
+
+const NEW_ROW_ID_BASE: usize = 1_000_000;
+type CellChangeSnapshot = (Option<String>, Option<String>);
 
 /// Represents a single cell change with old and new values
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,8 +40,6 @@ pub struct CellChange {
 /// Represents the status of a row
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowStatus {
-    /// Original data, unchanged
-    Original,
     /// Newly added row
     New,
     /// Modified row
@@ -69,6 +71,57 @@ pub enum RowChange {
         original_data: Vec<Option<String>>,
         /// Row ID from database (if available)
         rowid: Option<String>,
+    },
+}
+
+/// Represents an undo entry for step-by-step undo
+#[derive(Debug, Clone)]
+pub enum UndoEntry {
+    /// A cell value was changed
+    CellChange {
+        /// Row index
+        row: usize,
+        /// Column index
+        col: usize,
+        /// Old value before change
+        old_value: Option<String>,
+        /// Previous tracked change snapshot for this cell
+        previous_change: Option<CellChangeSnapshot>,
+        /// Whether the cell was marked as modified before this edit
+        was_modified: bool,
+        /// Previous row status before this edit
+        previous_row_status: Option<RowStatus>,
+    },
+    /// A previously deleted new row was restored
+    DeleteRow {
+        /// Row data before removal
+        row_data: Vec<Option<String>>,
+        /// Row index where it was removed
+        row_index: usize,
+        /// Row ID from database
+        rowid: Option<String>,
+        /// Synthetic ID used for new rows
+        new_row_id: usize,
+    },
+    /// A new row was added
+    AddRow {
+        /// Row index of the new row
+        row_index: usize,
+        /// Synthetic ID used for new rows
+        new_row_id: usize,
+    },
+    /// An existing row was marked deleted and can be restored
+    UndeleteRow {
+        /// Row index where it was marked deleted
+        row_index: usize,
+        /// Original row index used for delete tracking
+        original_index: usize,
+        /// Row status before deletion
+        previous_row_status: Option<RowStatus>,
+        /// Cell change snapshots for this row before deletion
+        previous_cell_changes: Vec<(usize, CellChangeSnapshot)>,
+        /// Modified columns for this row before deletion
+        previous_modified_columns: Vec<usize>,
     },
 }
 
@@ -116,6 +169,12 @@ pub struct EditorTableDelegate {
     primary_key_indices: Vec<usize>,
     /// Data grid handle for context menu actions
     data_grid: Option<WeakEntity<DataGrid>>,
+    /// Undo stack for step-by-step undo
+    undo_stack: Vec<UndoEntry>,
+    /// Maximum undo stack size (0 means disabled)
+    undo_stack_size: usize,
+    /// Visible column mapping: UI column index -> original column index
+    visible_column_indices: Vec<usize>,
 }
 
 fn parse_primary_order_by_clause(order_by_clause: &str) -> Option<(String, ColumnSort)> {
@@ -200,11 +259,52 @@ impl Clone for EditorTableDelegate {
             table_name: self.table_name.clone(),
             primary_key_indices: self.primary_key_indices.clone(),
             data_grid: self.data_grid.clone(),
+            undo_stack: self.undo_stack.clone(),
+            undo_stack_size: self.undo_stack_size,
+            visible_column_indices: self.visible_column_indices.clone(),
         }
     }
 }
 
 impl EditorTableDelegate {
+    /// 获取可见列映射的引用
+    pub fn visible_column_indices(&self) -> &[usize] {
+        &self.visible_column_indices
+    }
+
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    /// 更新可见列映射，根据隐藏列集合过滤
+    pub fn update_visible_columns(&mut self, hidden_columns: &HashSet<SharedString>) {
+        self.visible_column_indices = self
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, col)| !hidden_columns.contains(&col.key))
+            .map(|(idx, _)| idx)
+            .collect();
+        tracing::info!(
+            "[column_visibility] update_visible_columns: hidden={}, visible={:?}, total={}",
+            hidden_columns.len(),
+            self.visible_column_indices,
+            self.columns.len()
+        );
+    }
+
+    /// 将 UI 列索引映射为原始列索引
+    pub fn map_visible_to_original(&self, visible_ix: usize) -> usize {
+        self.visible_column_indices
+            .get(visible_ix)
+            .copied()
+            .unwrap_or(visible_ix)
+    }
+
+    pub fn primary_key_indices(&self) -> &[usize] {
+        &self.primary_key_indices
+    }
+
     pub fn new(
         columns: Vec<Column>,
         rows: Vec<Vec<Option<String>>>,
@@ -227,7 +327,7 @@ impl EditorTableDelegate {
             modified_cells: HashSet::new(),
             deleted_original_rows: HashSet::new(),
             row_index_map,
-            next_new_row_id: 1_000_000,
+            next_new_row_id: NEW_ROW_ID_BASE,
             new_rows: HashMap::new(),
             active_filter_columns: HashSet::new(),
             filtered_row_indices: None,
@@ -238,6 +338,9 @@ impl EditorTableDelegate {
             table_name: SharedString::default(),
             primary_key_indices: Vec::new(),
             data_grid: None,
+            undo_stack: Vec::new(),
+            undo_stack_size: 50, // 默认值
+            visible_column_indices: Vec::new(),
         }
     }
 
@@ -247,6 +350,199 @@ impl EditorTableDelegate {
 
     pub fn set_editable(&mut self, editable: bool) {
         self.editable = editable;
+    }
+
+    pub fn set_undo_stack_size(&mut self, size: usize) {
+        self.undo_stack_size = size;
+        if size == 0 {
+            self.undo_stack.clear();
+            return;
+        }
+
+        if self.undo_stack.len() > size {
+            let overflow = self.undo_stack.len() - size;
+            self.undo_stack.drain(0..overflow);
+        }
+    }
+
+    /// Push an entry to the undo stack
+    fn push_undo(&mut self, entry: UndoEntry) {
+        if self.undo_stack_size == 0 {
+            return; // 禁用逐步撤销
+        }
+        self.undo_stack.push(entry);
+        // 保持栈大小不超过限制
+        if self.undo_stack.len() > self.undo_stack_size {
+            let overflow = self.undo_stack.len() - self.undo_stack_size;
+            self.undo_stack.drain(0..overflow);
+        }
+    }
+
+    /// Check if undo is available
+    pub fn can_undo(&self) -> bool {
+        self.undo_stack_size > 0 && !self.undo_stack.is_empty()
+    }
+
+    fn restore_row_status(&mut self, row_ix: usize, status: Option<RowStatus>) {
+        if let Some(status) = status {
+            self.row_status.insert(row_ix, status);
+        } else {
+            self.row_status.remove(&row_ix);
+        }
+    }
+
+    fn undo_cell_change(
+        &mut self,
+        row: usize,
+        col: usize,
+        old_value: Option<String>,
+        previous_change: Option<CellChangeSnapshot>,
+        was_modified: bool,
+        previous_row_status: Option<RowStatus>,
+    ) -> bool {
+        let Some(cell) = self
+            .rows
+            .get_mut(row)
+            .and_then(|current| current.get_mut(col))
+        else {
+            return false;
+        };
+        *cell = old_value.clone();
+
+        if self.is_new_row(row) {
+            self.sync_new_row_cell(row, col, old_value);
+        }
+
+        if let Some(change) = previous_change {
+            self.cell_changes.insert((row, col), change);
+        } else {
+            self.cell_changes.remove(&(row, col));
+        }
+
+        if was_modified {
+            self.modified_cells.insert((row, col));
+        } else {
+            self.modified_cells.remove(&(row, col));
+        }
+
+        self.restore_row_status(row, previous_row_status);
+        true
+    }
+
+    fn undo_new_row_deletion(
+        &mut self,
+        row_data: Vec<Option<String>>,
+        row_index: usize,
+        rowid: Option<String>,
+        new_row_id: usize,
+    ) -> bool {
+        self.reindex_after_insertion(row_index);
+        self.rows.insert(row_index, row_data.clone());
+        if !self.rowids.is_empty() {
+            self.rowids.insert(row_index, rowid.unwrap_or_default());
+        }
+        self.row_index_map.insert(row_index, new_row_id);
+        self.row_status.insert(row_index, RowStatus::New);
+        self.new_rows.insert(new_row_id, row_data.clone());
+
+        for (col_ix, value) in row_data.iter().enumerate() {
+            if value.is_some() {
+                self.modified_cells.insert((row_index, col_ix));
+            }
+        }
+
+        true
+    }
+
+    fn undo_row_addition(&mut self, row_index: usize, new_row_id: usize) -> bool {
+        if row_index >= self.rows.len() {
+            return false;
+        }
+
+        self.rows.remove(row_index);
+        if row_index < self.rowids.len() {
+            self.rowids.remove(row_index);
+        }
+        self.new_rows.remove(&new_row_id);
+        self.reindex_after_deletion(row_index);
+        true
+    }
+
+    fn undo_row_undeletion(
+        &mut self,
+        row_index: usize,
+        original_index: usize,
+        previous_row_status: Option<RowStatus>,
+        previous_cell_changes: Vec<(usize, CellChangeSnapshot)>,
+        previous_modified_columns: Vec<usize>,
+    ) -> bool {
+        if row_index >= self.rows.len() {
+            return false;
+        }
+
+        self.deleted_original_rows.remove(&original_index);
+        self.cell_changes.retain(|&(row, _), _| row != row_index);
+        self.modified_cells.retain(|&(row, _)| row != row_index);
+
+        for (col_ix, change) in previous_cell_changes {
+            self.cell_changes.insert((row_index, col_ix), change);
+        }
+        for col_ix in previous_modified_columns {
+            self.modified_cells.insert((row_index, col_ix));
+        }
+
+        self.restore_row_status(row_index, previous_row_status);
+        true
+    }
+
+    /// Perform a single undo operation
+    /// Returns true if an undo was performed, false if nothing to undo
+    pub fn undo(&mut self) -> bool {
+        if self.undo_stack_size == 0 || self.undo_stack.is_empty() {
+            return false;
+        }
+
+        let entry = self.undo_stack.pop().expect("undo stack is empty");
+        match entry {
+            UndoEntry::CellChange {
+                row,
+                col,
+                old_value,
+                previous_change,
+                was_modified,
+                previous_row_status,
+            } => self.undo_cell_change(
+                row,
+                col,
+                old_value,
+                previous_change,
+                was_modified,
+                previous_row_status,
+            ),
+            UndoEntry::DeleteRow {
+                row_data,
+                row_index,
+                rowid,
+                new_row_id,
+            } => self.undo_new_row_deletion(row_data, row_index, rowid, new_row_id),
+            UndoEntry::AddRow {
+                row_index,
+                new_row_id,
+            } => self.undo_row_addition(row_index, new_row_id),
+            UndoEntry::UndeleteRow {
+                row_index,
+                original_index,
+                previous_row_status,
+                previous_cell_changes,
+                previous_modified_columns,
+            } => self.undo_row_undeletion(
+                row_index,
+                original_index,
+                previous_row_status,
+                previous_cell_changes,
+                previous_modified_columns,
+            ),
+        }
     }
 
     fn values_equal(a: &Option<String>, b: &Option<String>) -> bool {
@@ -336,6 +632,141 @@ impl EditorTableDelegate {
             })
             .unwrap_or(FieldType::Unknown)
     }
+
+    fn values_equal_for_column(
+        &self,
+        col_ix: usize,
+        left: &Option<String>,
+        right: &Option<String>,
+    ) -> bool {
+        match self.get_field_type(col_ix) {
+            FieldType::DateTime => Self::datetime_values_equal(left, right),
+            _ => Self::values_equal(left, right),
+        }
+    }
+
+    fn original_row_index(&self, row_ix: usize) -> Option<usize> {
+        self.row_index_map
+            .get(&row_ix)
+            .copied()
+            .filter(|&index| index < NEW_ROW_ID_BASE)
+    }
+
+    fn row_has_cell_changes(&self, row_ix: usize) -> bool {
+        self.cell_changes.keys().any(|(row, _)| *row == row_ix)
+    }
+
+    fn row_cell_changes(&self, row_ix: usize) -> Vec<(usize, CellChangeSnapshot)> {
+        self.cell_changes
+            .iter()
+            .filter_map(|(&(row, col), change)| (row == row_ix).then_some((col, change.clone())))
+            .collect()
+    }
+
+    fn row_modified_columns(&self, row_ix: usize) -> Vec<usize> {
+        self.modified_cells
+            .iter()
+            .filter_map(|&(row, col)| (row == row_ix).then_some(col))
+            .collect()
+    }
+
+    fn tracked_original_rowid(&self, original_ix: usize) -> Option<String> {
+        self.original_rowids
+            .get(original_ix)
+            .filter(|rowid| !rowid.is_empty())
+            .cloned()
+    }
+
+    fn sync_new_row_cell(&mut self, row_ix: usize, col_ix: usize, value: Option<String>) {
+        let Some(new_row_id) = self.find_new_row_id(row_ix) else {
+            return;
+        };
+        let Some(new_row_data) = self.new_rows.get_mut(&new_row_id) else {
+            return;
+        };
+        if let Some(cell) = new_row_data.get_mut(col_ix) {
+            *cell = value.clone();
+        }
+        if value.is_some() {
+            self.modified_cells.insert((row_ix, col_ix));
+        } else {
+            self.modified_cells.remove(&(row_ix, col_ix));
+        }
+    }
+
+    fn sync_existing_row_cell(&mut self, row_ix: usize, col_ix: usize, value: Option<String>) {
+        let Some(original_ix) = self.original_row_index(row_ix) else {
+            return;
+        };
+        let original_value = self
+            .original_rows
+            .get(original_ix)
+            .and_then(|row| row.get(col_ix))
+            .cloned()
+            .unwrap_or(None);
+
+        if self.values_equal_for_column(col_ix, &original_value, &value) {
+            self.cell_changes.remove(&(row_ix, col_ix));
+            self.modified_cells.remove(&(row_ix, col_ix));
+        } else {
+            self.cell_changes
+                .insert((row_ix, col_ix), (original_value, value));
+            self.modified_cells.insert((row_ix, col_ix));
+        }
+
+        if self.row_has_cell_changes(row_ix) {
+            self.row_status.insert(row_ix, RowStatus::Modified);
+        } else {
+            self.row_status.remove(&row_ix);
+        }
+    }
+
+    fn apply_cell_change_value(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        new_opt_value: Option<String>,
+    ) -> bool {
+        let old_value = match self
+            .rows
+            .get(row_ix)
+            .and_then(|row| row.get(col_ix))
+            .cloned()
+        {
+            Some(value) => value,
+            None => return false,
+        };
+
+        if self.values_equal_for_column(col_ix, &old_value, &new_opt_value) {
+            return false;
+        }
+
+        self.push_undo(UndoEntry::CellChange {
+            row: row_ix,
+            col: col_ix,
+            old_value: old_value.clone(),
+            previous_change: self.cell_changes.get(&(row_ix, col_ix)).cloned(),
+            was_modified: self.modified_cells.contains(&(row_ix, col_ix)),
+            previous_row_status: self.row_status.get(&row_ix).copied(),
+        });
+
+        let Some(row) = self.rows.get_mut(row_ix) else {
+            return false;
+        };
+        let Some(cell) = row.get_mut(col_ix) else {
+            return false;
+        };
+        *cell = new_opt_value.clone();
+
+        if self.is_new_row(row_ix) {
+            self.sync_new_row_cell(row_ix, col_ix, new_opt_value);
+        } else {
+            self.sync_existing_row_cell(row_ix, col_ix, new_opt_value);
+        }
+
+        true
+    }
+
     /// Record a cell change (used by external editors like large text editor)
     ///
     /// This method handles tracking cell changes and updating row status.
@@ -357,49 +788,7 @@ impl EditorTableDelegate {
         col_ix: usize,
         new_opt_value: Option<String>,
     ) -> bool {
-        // Get old value from current rows
-        let Some(row) = self.rows.get_mut(row_ix) else {
-            return false;
-        };
-        let Some(cell) = row.get_mut(col_ix) else {
-            return false;
-        };
-
-        // If value hasn't changed, don't record
-        if Self::values_equal(cell, &new_opt_value) {
-            self.modified_cells
-                .retain(|&(r, c)| r != row_ix || c != col_ix);
-            return false;
-        }
-
-        let old_value = cell.clone();
-        *cell = new_opt_value.clone();
-
-        // Mark cell as modified for UI
-        self.modified_cells.insert((row_ix, col_ix));
-
-        // Track the change only if not a new row
-        if self.is_new_row(row_ix) {
-            // For new rows, update the new_rows data
-            if let Some(new_row_id) = self.find_new_row_id(row_ix) {
-                if let Some(new_row_data) = self.new_rows.get_mut(&new_row_id) {
-                    if let Some(cell) = new_row_data.get_mut(col_ix) {
-                        *cell = new_opt_value;
-                    }
-                }
-            }
-        } else {
-            // For existing rows, track the cell change
-            self.cell_changes
-                .entry((row_ix, col_ix))
-                .and_modify(|(_, new)| *new = new_opt_value.clone())
-                .or_insert((old_value, new_opt_value));
-
-            // Update row status
-            self.row_status.insert(row_ix, RowStatus::Modified);
-        }
-
-        true
+        self.apply_cell_change_value(row_ix, col_ix, new_opt_value)
     }
 
     pub fn clone_row(&mut self, display_row_ix: usize) -> Option<usize> {
@@ -411,12 +800,19 @@ impl EditorTableDelegate {
         let row_data = self.rows.get(actual_row_ix).cloned()?;
         let new_row_ix = self.rows.len();
         self.rows.push(row_data.clone());
+        if !self.rowids.is_empty() {
+            self.rowids.push(String::new());
+        }
 
         let new_row_id = self.next_new_row_id;
         self.next_new_row_id += 1;
         self.new_rows.insert(new_row_id, row_data);
         self.row_status.insert(new_row_ix, RowStatus::New);
         self.row_index_map.insert(new_row_ix, new_row_id);
+        self.push_undo(UndoEntry::AddRow {
+            row_index: new_row_ix,
+            new_row_id,
+        });
 
         Some(new_row_ix)
     }
@@ -443,6 +839,9 @@ impl EditorTableDelegate {
             })
             .collect();
 
+        // Reset visible columns — will be rebuilt by caller if needed
+        self.visible_column_indices.clear();
+
         let row_count = rows.len();
         self.original_rows = rows.clone();
         self.rows = rows.clone();
@@ -455,6 +854,8 @@ impl EditorTableDelegate {
     }
 
     pub fn apply_order_by_clause(&mut self, order_by_clause: &str) {
+        tracing::info!("[SORT] apply_order_by_clause: clause='{}'", order_by_clause);
+
         for column in &mut self.columns {
             if column.sort.is_some() {
                 column.sort = Some(ColumnSort::Default);
@@ -462,15 +863,34 @@ impl EditorTableDelegate {
         }
 
         let Some((column_name, sort)) = parse_primary_order_by_clause(order_by_clause) else {
+            tracing::info!("[SORT] apply_order_by_clause: no primary clause found");
             return;
         };
 
         let target = normalize_sort_identifier(&column_name);
+        tracing::info!(
+            "[SORT] apply_order_by_clause: looking for column target='{}', sort={:?}",
+            target,
+            sort
+        );
         if let Some(column) = self.columns.iter_mut().find(|column| {
             normalize_sort_identifier(column.key.as_ref()) == target
                 || normalize_sort_identifier(column.name.as_ref()) == target
         }) {
+            tracing::info!(
+                "[SORT] apply_order_by_clause: MATCHED column '{}'",
+                column.name
+            );
             column.sort = Some(sort);
+        } else {
+            tracing::info!(
+                "[SORT] apply_order_by_clause: NO MATCH for target='{}', columns={:?}",
+                target,
+                self.columns
+                    .iter()
+                    .map(|c| format!("key='{}' name='{}'", c.key, c.name))
+                    .collect::<Vec<_>>()
+            );
         }
     }
 
@@ -539,7 +959,7 @@ impl EditorTableDelegate {
         // Collect deleted rows
         for &original_ix in &self.deleted_original_rows {
             if let Some(original_data) = self.original_rows.get(original_ix) {
-                let rowid = self.original_rowids.get(original_ix).cloned();
+                let rowid = self.tracked_original_rowid(original_ix);
                 changes.push(RowChange::Deleted {
                     original_data: original_data.clone(),
                     rowid,
@@ -574,7 +994,7 @@ impl EditorTableDelegate {
         for (row_ix, cell_changes) in modified_rows {
             if let Some(&original_ix) = self.row_index_map.get(&row_ix) {
                 if let Some(original_data) = self.original_rows.get(original_ix) {
-                    let rowid = self.original_rowids.get(original_ix).cloned();
+                    let rowid = self.tracked_original_rowid(original_ix);
                     changes.push(RowChange::Updated {
                         original_data: original_data.clone(),
                         changes: cell_changes,
@@ -599,6 +1019,45 @@ impl EditorTableDelegate {
         self.modified_cells.clear();
         self.deleted_original_rows.clear();
         self.new_rows.clear();
+        self.undo_stack.clear();
+    }
+
+    /// Promote the current in-memory rows to the new saved baseline.
+    pub fn accept_current_state_as_saved(&mut self) {
+        let keep_indices: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(row_ix, _)| (!self.is_deleted_row(row_ix)).then_some(row_ix))
+            .collect();
+
+        let rows: Vec<Vec<Option<String>>> = keep_indices
+            .iter()
+            .filter_map(|&row_ix| self.rows.get(row_ix).cloned())
+            .collect();
+        let rowids = if self.rowids.is_empty() {
+            Vec::new()
+        } else {
+            keep_indices
+                .iter()
+                .map(|&row_ix| self.rowids.get(row_ix).cloned().unwrap_or_default())
+                .collect()
+        };
+
+        self.rows = rows.clone();
+        self.original_rows = rows;
+        self.rowids = rowids.clone();
+        self.original_rowids = rowids;
+        self.row_index_map = (0..self.rows.len())
+            .map(|row_ix| (row_ix, row_ix))
+            .collect();
+        self.clear_changes();
+
+        if !self.column_filters.is_empty() {
+            self.recalculate_filtered_indices();
+        } else {
+            self.filtered_row_indices = None;
+        }
     }
 
     /// Revert all changes and restore to original state
@@ -631,6 +1090,27 @@ impl EditorTableDelegate {
         !self.cell_changes.is_empty()
             || !self.deleted_original_rows.is_empty()
             || !self.new_rows.is_empty()
+    }
+
+    /// Get the highest pending change level (Delete > Modify > Insert)
+    pub fn pending_change_level(&self) -> Option<PendingChangeLevel> {
+        let mut level = None;
+        if !self.deleted_original_rows.is_empty() {
+            level = Some(PendingChangeLevel::Delete);
+        }
+        if !self.cell_changes.is_empty() {
+            let modify_level = Some(PendingChangeLevel::Modify);
+            if level.is_none() || modify_level > level {
+                level = modify_level;
+            }
+        }
+        if !self.new_rows.is_empty() {
+            let insert_level = Some(PendingChangeLevel::Insert);
+            if level.is_none() || insert_level > level {
+                level = insert_level;
+            }
+        }
+        level
     }
 
     /// Get the count of pending changes
@@ -779,8 +1259,26 @@ impl EditTableDelegate for EditorTableDelegate {
     fn row_number_enabled(&self, _cx: &App) -> bool {
         true
     }
+
+    fn row_number_offset(&self, cx: &App) -> usize {
+        // 从 data_grid 获取分页信息计算起始行号
+        if let Some(data_grid) = &self.data_grid {
+            if let Some(data_grid) = data_grid.upgrade() {
+                let (page, page_size) = data_grid.read(cx).get_page_info(cx);
+                if page_size > 0 {
+                    return (page - 1) * page_size + 1;
+                }
+            }
+        }
+        1
+    }
+
     fn columns_count(&self, _cx: &App) -> usize {
-        self.columns.len()
+        if self.visible_column_indices.is_empty() {
+            self.columns.len()
+        } else {
+            self.visible_column_indices.len()
+        }
     }
 
     fn rows_count(&self, _cx: &App) -> usize {
@@ -789,7 +1287,18 @@ impl EditTableDelegate for EditorTableDelegate {
     }
 
     fn column(&self, col_ix: usize, _cx: &App) -> Column {
-        self.columns[col_ix].clone()
+        let real_ix = if self.visible_column_indices.is_empty() {
+            col_ix
+        } else {
+            self.visible_column_indices
+                .get(col_ix)
+                .copied()
+                .unwrap_or(col_ix)
+        };
+        self.columns
+            .get(real_ix)
+            .cloned()
+            .unwrap_or_else(|| Column::new("unknown", "??"))
     }
 
     fn perform_sort(
@@ -799,9 +1308,10 @@ impl EditTableDelegate for EditorTableDelegate {
         window: &mut Window,
         cx: &mut Context<EditTableState<Self>>,
     ) {
+        let real_ix = self.map_visible_to_original(col_ix);
         let Some(column_name) = self
             .columns
-            .get(col_ix)
+            .get(real_ix)
             .map(|column| column.name.to_string())
         else {
             return;
@@ -809,6 +1319,14 @@ impl EditTableDelegate for EditorTableDelegate {
         let Some(data_grid) = self.data_grid.clone() else {
             return;
         };
+
+        tracing::info!(
+            "[SORT] delegate.perform_sort: col_ix={}, real_ix={}, column_name={}, sort={:?}",
+            col_ix,
+            real_ix,
+            column_name,
+            sort
+        );
 
         // `EditTableState::perform_sort` 会在当前表格实体的 update 闭包中调用 delegate。
         // 如果这里同步触发 `DataGrid::apply_column_sort`，后者会再次更新同一个表格实体，
@@ -828,15 +1346,16 @@ impl EditTableDelegate for EditorTableDelegate {
         _window: &mut Window,
         _: &mut Context<EditTableState<Self>>,
     ) -> impl IntoElement {
+        let real_ix = self.map_visible_to_original(col_ix);
         let col_name = self
             .columns
-            .get(col_ix)
+            .get(real_ix)
             .map(|c| c.name.clone())
             .unwrap_or_default();
 
         let tooltip_text = self
             .column_meta
-            .get(col_ix)
+            .get(real_ix)
             .map(|meta| {
                 let mut text = meta.data_type.to_lowercase().clone();
                 if let Some(comment) = &meta.comment {
@@ -850,7 +1369,7 @@ impl EditTableDelegate for EditorTableDelegate {
             .unwrap_or_default();
 
         h_flex()
-            .id(SharedString::from(format!("col-{}", col_ix)))
+            .id(SharedString::from(format!("col-{}", real_ix)))
             .size_full()
             .items_center()
             .justify_between()
@@ -1299,7 +1818,7 @@ impl EditTableDelegate for EditorTableDelegate {
                         return;
                     };
                     if let Err(error) = data_grid.update(cx, |grid, cx| {
-                        grid.refresh_data(cx);
+                        grid.request_refresh(window, cx);
                     }) {
                         tracing::error!("Failed to refresh data grid: {}", error);
                         window
@@ -1320,10 +1839,13 @@ impl EditTableDelegate for EditorTableDelegate {
         // Map display row index to actual row index
         let actual_row = self.map_display_to_actual_row(row);
 
+        // Map display column index to actual column index
+        let actual_col = self.map_visible_to_original(col);
+
         let value = self
             .rows
             .get(actual_row)
-            .and_then(|r| r.get(col))
+            .and_then(|r| r.get(actual_col))
             .cloned()
             .unwrap_or(None);
 
@@ -1700,7 +2222,6 @@ impl EditTableDelegate for EditorTableDelegate {
                 ))
             }
             _ => {
-                // 使用 Input 组件
                 let input = cx.new(|cx| {
                     let mut state = match field_type {
                         FieldType::Integer | FieldType::Decimal => {
@@ -1728,7 +2249,11 @@ impl EditTableDelegate for EditorTableDelegate {
                     },
                 );
 
-                Some((CellEditor::Input(input), vec![input_subscription]))
+                let editor = match field_type {
+                    FieldType::Integer | FieldType::Decimal => CellEditor::NumberInput(input),
+                    _ => CellEditor::Input(input),
+                };
+                Some((editor, vec![input_subscription]))
             }
         }
     }
@@ -1741,175 +2266,18 @@ impl EditTableDelegate for EditorTableDelegate {
         _window: &mut Window,
         cx: &mut Context<EditTableState<Self>>,
     ) -> bool {
-        // Map display row index to actual row index
         let actual_row = self.map_display_to_actual_row(row_ix);
-        // 空字符串转换为 None (NULL)
         let new_opt_value: Option<String> = if new_value.is_empty() {
             None
         } else {
-            Some(new_value.clone())
+            Some(new_value)
         };
 
-        tracing::debug!(
-            "on_cell_edited: row={}, col={}, new_value='{}', new_opt_value={:?}",
-            actual_row,
-            col_ix,
-            new_value,
-            new_opt_value
-        );
-
-        // 根据字段类型选择比较方法
-        let field_type = self.get_field_type(col_ix);
-        let values_eq: fn(&Option<String>, &Option<String>) -> bool = match field_type {
-            FieldType::DateTime => Self::datetime_values_equal,
-            _ => Self::values_equal,
-        };
-
-        // Check if cell is already modified
-        if self.is_cell_modified(row_ix, col_ix, cx) {
-            tracing::debug!(
-                "on_cell_edited: cell is already modified, actual_row={}, col_ix={}",
-                actual_row,
-                col_ix
-            );
-            tracing::debug!(
-                "on_cell_edited: original_rows.len()={}, is_new_row={}",
-                self.original_rows.len(),
-                self.is_new_row(actual_row)
-            );
-
-            // Check if user reverted to original value (only for existing rows, not new rows)
-            if !self.is_new_row(actual_row) {
-                if let Some(row) = self.original_rows.get(actual_row) {
-                    if let Some(original_cell) = row.get(col_ix) {
-                        tracing::debug!("on_cell_edited: original_cell={:?}", original_cell);
-                        if values_eq(original_cell, &new_opt_value) {
-                            tracing::debug!(
-                                "on_cell_edited: user reverted to original value, clearing modification"
-                            );
-                            // User reverted to original value - clear modification markers
-                            self.modified_cells
-                                .retain(|&(r, c)| r != actual_row || c != col_ix);
-                            self.cell_changes.remove(&(actual_row, col_ix));
-
-                            // Update the cell value
-                            if let Some(current_row) = self.rows.get_mut(actual_row) {
-                                if let Some(cell) = current_row.get_mut(col_ix) {
-                                    *cell = original_cell.clone();
-                                }
-                            }
-
-                            // Check if row still has any modifications
-                            let row_has_changes = (0..self.columns.len())
-                                .any(|c| self.modified_cells.contains(&(actual_row, c)));
-
-                            if !row_has_changes && !self.is_new_row(actual_row) {
-                                self.row_status.insert(actual_row, RowStatus::Original);
-                            }
-
-                            return true; // Still need to refresh UI
-                        }
-                    }
-                }
-            }
-
-            // Cell is modified and new value is different from original
-            // Update the cell value
-            if let Some(current_row) = self.rows.get_mut(actual_row) {
-                if let Some(cell) = current_row.get_mut(col_ix) {
-                    tracing::debug!("on_cell_edited: current cell={:?}", cell);
-                    if values_eq(cell, &new_opt_value) {
-                        // No actual change
-                        tracing::debug!("on_cell_edited: no actual change from current value");
-                        return false;
-                    }
-
-                    let old_value = cell.clone();
-                    *cell = new_opt_value.clone();
-                    tracing::debug!(
-                        "on_cell_edited: updated cell from {:?} to {:?}",
-                        old_value,
-                        new_opt_value
-                    );
-
-                    // Update cell_changes or new_rows depending on row type
-                    if self.is_new_row(actual_row) {
-                        // For new rows, update the new_rows data
-                        if let Some(new_row_id) = self.find_new_row_id(actual_row) {
-                            if let Some(new_row_data) = self.new_rows.get_mut(&new_row_id) {
-                                if let Some(cell) = new_row_data.get_mut(col_ix) {
-                                    tracing::debug!("on_cell_edited: updating new_rows data");
-                                    *cell = new_opt_value.clone();
-                                }
-                            }
-                        }
-                    } else {
-                        tracing::debug!(
-                            "on_cell_edited: cell_changes.contains_key={}",
-                            self.cell_changes.contains_key(&(actual_row, col_ix))
-                        );
-                        self.cell_changes
-                            .entry((actual_row, col_ix))
-                            .and_modify(|(_, new)| {
-                                tracing::debug!(
-                                    "on_cell_edited: updating cell_changes new value to {:?}",
-                                    new_opt_value
-                                );
-                                *new = new_opt_value.clone()
-                            })
-                            .or_insert_with(|| {
-                                tracing::debug!("on_cell_edited: inserting new cell_changes entry");
-                                (old_value.clone(), new_opt_value.clone())
-                            });
-                    }
-                }
-            }
-
-            return true;
+        let changed = self.apply_cell_change_value(actual_row, col_ix, new_opt_value);
+        if changed {
+            cx.notify();
         }
-
-        tracing::debug!("on_cell_edited: cell is not modified yet (initial edit)");
-        // Cell not yet modified - initial edit
-        if let Some(row) = self.rows.get_mut(actual_row) {
-            if let Some(cell) = row.get_mut(col_ix) {
-                // Only mark as modified if value actually changed
-                if values_eq(cell, &new_opt_value) {
-                    return false;
-                }
-
-                let old_value = cell.clone();
-                *cell = new_opt_value.clone();
-
-                // Mark cell as modified for UI (use actual row index)
-                self.modified_cells.insert((actual_row, col_ix));
-
-                // Track the change with old and new values
-                // If this is a new row, we don't need to track cell changes
-                if self.is_new_row(actual_row) {
-                    // Just update the new_rows data
-                    if let Some(new_row_id) = self.find_new_row_id(actual_row) {
-                        if let Some(new_row_data) = self.new_rows.get_mut(&new_row_id) {
-                            if let Some(cell) = new_row_data.get_mut(col_ix) {
-                                *cell = new_opt_value;
-                            }
-                        }
-                    }
-                } else {
-                    // For existing rows, track the cell change
-                    // If we already have a change for this cell, keep the original old_value
-                    self.cell_changes
-                        .entry((actual_row, col_ix))
-                        .and_modify(|(_, new)| *new = new_opt_value.clone())
-                        .or_insert((old_value, new_opt_value));
-
-                    // Update row status
-                    self.row_status.insert(actual_row, RowStatus::Modified);
-                }
-
-                return true;
-            }
-        }
-        false
+        changed
     }
 
     fn is_cell_modified(&self, row_ix: usize, col_ix: usize, _cx: &App) -> bool {
@@ -1938,18 +2306,23 @@ impl EditTableDelegate for EditorTableDelegate {
         // Add a new empty row (None represents NULL/empty value)
         let new_row: Vec<Option<String>> = vec![None; self.columns.len()];
         let row_ix = self.rows.len();
-        self.rows.push(new_row.clone());
 
-        // Track as new row
         let new_row_id = self.next_new_row_id;
         self.next_new_row_id += 1;
+
+        self.rows.push(new_row.clone());
+        if !self.rowids.is_empty() {
+            self.rowids.push(String::new());
+        }
         self.new_rows.insert(new_row_id, new_row);
         self.row_status.insert(row_ix, RowStatus::New);
-
-        // Map the new row index to the new_row_id (using high number as marker)
         self.row_index_map.insert(row_ix, new_row_id);
+        self.push_undo(UndoEntry::AddRow {
+            row_index: row_ix,
+            new_row_id,
+        });
 
-        self.next_new_row_id
+        row_ix
     }
 
     fn on_row_deleted(
@@ -1964,6 +2337,16 @@ impl EditTableDelegate for EditorTableDelegate {
 
         // Check if this is a new row (not yet saved to DB)
         if self.is_new_row(row_ix) {
+            let row_data = self.rows.get(row_ix).cloned().unwrap_or_default();
+            let rowid = (row_ix < self.rowids.len()).then(|| self.rowids[row_ix].clone());
+            let new_row_id = self.find_new_row_id(row_ix).unwrap_or(NEW_ROW_ID_BASE);
+            self.push_undo(UndoEntry::DeleteRow {
+                row_data,
+                row_index: row_ix,
+                rowid,
+                new_row_id,
+            });
+
             // For new rows, remove them immediately since they don't exist in DB
             if let Some(new_row_id) = self.find_new_row_id(row_ix) {
                 self.new_rows.remove(&new_row_id);
@@ -1971,6 +2354,9 @@ impl EditTableDelegate for EditorTableDelegate {
             self.rows.remove(row_ix);
             self.row_status.remove(&row_ix);
             self.row_index_map.remove(&row_ix);
+            if row_ix < self.rowids.len() {
+                self.rowids.remove(row_ix);
+            }
 
             // Re-index rows after deletion
             self.reindex_after_deletion(row_ix);
@@ -1978,6 +2364,13 @@ impl EditTableDelegate for EditorTableDelegate {
             // For existing rows (from DB), only mark as deleted but keep the row visible
             // This allows users to see deleted rows with special styling and undo the deletion
             if let Some(&original_ix) = self.row_index_map.get(&row_ix) {
+                self.push_undo(UndoEntry::UndeleteRow {
+                    row_index: row_ix,
+                    original_index: original_ix,
+                    previous_row_status: self.row_status.get(&row_ix).copied(),
+                    previous_cell_changes: self.row_cell_changes(row_ix),
+                    previous_modified_columns: self.row_modified_columns(row_ix),
+                });
                 self.deleted_original_rows.insert(original_ix);
             }
             self.row_status.insert(row_ix, RowStatus::Deleted);
@@ -2152,7 +2545,50 @@ impl EditorTableDelegate {
         self.row_index_map
             .get(&row_ix)
             .copied()
-            .filter(|&id| id >= 1_000_000)
+            .filter(|&id| id >= NEW_ROW_ID_BASE)
+    }
+
+    /// Re-index rows after an insertion
+    fn reindex_after_insertion(&mut self, inserted_ix: usize) {
+        let mut new_map = HashMap::new();
+        for (&row_ix, &original_ix) in &self.row_index_map {
+            if row_ix >= inserted_ix {
+                new_map.insert(row_ix + 1, original_ix);
+            } else {
+                new_map.insert(row_ix, original_ix);
+            }
+        }
+        self.row_index_map = new_map;
+
+        let mut new_status = HashMap::new();
+        for (&row_ix, &status) in &self.row_status {
+            if row_ix >= inserted_ix {
+                new_status.insert(row_ix + 1, status);
+            } else {
+                new_status.insert(row_ix, status);
+            }
+        }
+        self.row_status = new_status;
+
+        let mut new_changes = HashMap::new();
+        for (&(row_ix, col_ix), change) in &self.cell_changes {
+            if row_ix >= inserted_ix {
+                new_changes.insert((row_ix + 1, col_ix), change.clone());
+            } else {
+                new_changes.insert((row_ix, col_ix), change.clone());
+            }
+        }
+        self.cell_changes = new_changes;
+
+        let mut new_modified = HashSet::new();
+        for &(row_ix, col_ix) in &self.modified_cells {
+            if row_ix >= inserted_ix {
+                new_modified.insert((row_ix + 1, col_ix));
+            } else {
+                new_modified.insert((row_ix, col_ix));
+            }
+        }
+        self.modified_cells = new_modified;
     }
 
     /// Re-index rows after a deletion
@@ -2230,7 +2666,7 @@ impl EditorTableDelegate {
                 self.row_index_map
                     .get(&row_ix)
                     .and_then(|&original_ix| {
-                        if original_ix < 1_000_000 {
+                        if original_ix < NEW_ROW_ID_BASE {
                             self.original_rows.get(original_ix).cloned()
                         } else {
                             // 新行没有原始数据，使用当前数据
@@ -2250,8 +2686,61 @@ impl EditorTableDelegate {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_sort_identifier, parse_primary_order_by_clause};
+    use super::*;
     use one_ui::edit_table::ColumnSort;
+
+    fn opt(value: &str) -> Option<String> {
+        Some(value.to_string())
+    }
+
+    fn test_delegate(rows: Vec<Vec<Option<&str>>>, with_rowids: bool) -> EditorTableDelegate {
+        let rows: Vec<Vec<Option<String>>> = rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|value| value.map(str::to_string))
+                    .collect()
+            })
+            .collect();
+        let column_count = rows.first().map(Vec::len).unwrap_or(1);
+        let columns = (0..column_count)
+            .map(|ix| Column::new(format!("c{ix}"), format!("c{ix}")))
+            .collect();
+        let row_count = rows.len();
+        let rowids: Vec<String> = if with_rowids {
+            (0..row_count).map(|ix| format!("rowid-{ix}")).collect()
+        } else {
+            Vec::new()
+        };
+
+        EditorTableDelegate {
+            columns,
+            column_meta: Vec::new(),
+            rows: rows.clone(),
+            original_rows: rows,
+            rowids: rowids.clone(),
+            original_rowids: rowids,
+            row_status: HashMap::new(),
+            cell_changes: HashMap::new(),
+            modified_cells: HashSet::new(),
+            deleted_original_rows: HashSet::new(),
+            row_index_map: (0..row_count).map(|ix| (ix, ix)).collect(),
+            next_new_row_id: NEW_ROW_ID_BASE,
+            new_rows: HashMap::new(),
+            active_filter_columns: HashSet::new(),
+            filtered_row_indices: None,
+            column_filters: HashMap::new(),
+            editable: true,
+            loading: false,
+            database_type: DatabaseType::SQLite,
+            table_name: SharedString::default(),
+            primary_key_indices: Vec::new(),
+            data_grid: None,
+            undo_stack: Vec::new(),
+            undo_stack_size: 50,
+            visible_column_indices: Vec::new(),
+        }
+    }
 
     #[test]
     fn parse_primary_order_by_clause_uses_first_segment() {
@@ -2279,5 +2768,202 @@ mod tests {
         assert_eq!(normalize_sort_identifier("\"created_at\""), "created_at");
         assert_eq!(normalize_sort_identifier("[Order Detail]"), "order detail");
         assert_eq!(normalize_sort_identifier("t.\"user_id\""), "user_id");
+    }
+
+    #[test]
+    fn undo_cell_change_restores_previous_snapshot_step_by_step() {
+        let mut delegate = test_delegate(vec![vec![Some("A")]], true);
+
+        assert!(delegate.record_cell_change(0, 0, "B".to_string()));
+        assert!(delegate.record_cell_change(0, 0, "C".to_string()));
+
+        assert_eq!(delegate.rows[0][0], opt("C"));
+        assert_eq!(delegate.undo_stack.len(), 2);
+
+        assert!(delegate.undo());
+        assert_eq!(delegate.rows[0][0], opt("B"));
+        assert_eq!(
+            delegate.cell_changes.get(&(0, 0)),
+            Some(&(opt("A"), opt("B")))
+        );
+        assert!(delegate.modified_cells.contains(&(0, 0)));
+        assert_eq!(delegate.row_status.get(&0), Some(&RowStatus::Modified));
+
+        assert!(delegate.undo());
+        assert_eq!(delegate.rows[0][0], opt("A"));
+        assert!(!delegate.cell_changes.contains_key(&(0, 0)));
+        assert!(!delegate.modified_cells.contains(&(0, 0)));
+        assert!(!delegate.row_status.contains_key(&0));
+    }
+
+    #[test]
+    fn undo_existing_row_delete_restores_soft_deleted_state() {
+        let mut delegate = test_delegate(vec![vec![Some("A"), Some("1")]], true);
+        assert!(delegate.record_cell_change(0, 0, "A*".to_string()));
+
+        let original_index = delegate.row_index_map[&0];
+        delegate.push_undo(UndoEntry::UndeleteRow {
+            row_index: 0,
+            original_index,
+            previous_row_status: delegate.row_status.get(&0).copied(),
+            previous_cell_changes: delegate.row_cell_changes(0),
+            previous_modified_columns: delegate.row_modified_columns(0),
+        });
+        delegate.deleted_original_rows.insert(original_index);
+        delegate.row_status.insert(0, RowStatus::Deleted);
+        delegate.cell_changes.retain(|&(row, _), _| row != 0);
+        delegate.modified_cells.retain(|&(row, _)| row != 0);
+
+        assert!(delegate.undo());
+        assert_eq!(delegate.rows.len(), 1);
+        assert!(!delegate.deleted_original_rows.contains(&original_index));
+        assert_eq!(delegate.row_status.get(&0), Some(&RowStatus::Modified));
+        assert_eq!(
+            delegate.cell_changes.get(&(0, 0)),
+            Some(&(opt("A"), opt("A*")))
+        );
+        assert!(delegate.modified_cells.contains(&(0, 0)));
+    }
+
+    #[test]
+    fn undo_added_row_removes_latest_new_row_and_rowid_slot() {
+        let mut delegate = test_delegate(vec![vec![Some("A"), Some("1")]], true);
+
+        let new_row_ix = delegate.clone_row(0).expect("clone row should succeed");
+
+        assert_eq!(new_row_ix, 1);
+        assert_eq!(delegate.rows.len(), 2);
+        assert_eq!(delegate.rowids.len(), 2);
+        assert_eq!(delegate.rowids[1], "");
+        assert!(delegate.is_new_row(new_row_ix));
+
+        assert!(delegate.undo());
+        assert_eq!(delegate.rows.len(), 1);
+        assert_eq!(delegate.rowids.len(), 1);
+        assert!(delegate.new_rows.is_empty());
+        assert!(!delegate.row_index_map.contains_key(&new_row_ix));
+    }
+
+    #[test]
+    fn undo_deleted_new_row_restores_row_without_rowids() {
+        let mut delegate = test_delegate(vec![vec![Some("A"), Some("1")]], false);
+        let new_row_ix = delegate.clone_row(0).expect("clone row should succeed");
+        let new_row_id = delegate
+            .find_new_row_id(new_row_ix)
+            .expect("new row id should exist");
+        let row_data = delegate.rows[new_row_ix].clone();
+
+        delegate.push_undo(UndoEntry::DeleteRow {
+            row_data: row_data.clone(),
+            row_index: new_row_ix,
+            rowid: None,
+            new_row_id,
+        });
+        delegate.new_rows.remove(&new_row_id);
+        delegate.rows.remove(new_row_ix);
+        delegate.row_status.remove(&new_row_ix);
+        delegate.row_index_map.remove(&new_row_ix);
+        delegate.reindex_after_deletion(new_row_ix);
+
+        assert!(delegate.undo());
+        assert_eq!(delegate.rows.len(), 2);
+        assert_eq!(delegate.rows[new_row_ix], row_data);
+        assert!(delegate.rowids.is_empty());
+        assert_eq!(delegate.row_status.get(&new_row_ix), Some(&RowStatus::New));
+        assert_eq!(delegate.find_new_row_id(new_row_ix), Some(new_row_id));
+        assert_eq!(delegate.new_rows.get(&new_row_id), Some(&row_data));
+    }
+
+    #[test]
+    fn set_undo_stack_size_keeps_latest_entries_and_zero_clears_stack() {
+        let mut delegate = test_delegate(vec![vec![Some("A")]], false);
+
+        delegate.push_undo(UndoEntry::AddRow {
+            row_index: 1,
+            new_row_id: 1,
+        });
+        delegate.push_undo(UndoEntry::AddRow {
+            row_index: 2,
+            new_row_id: 2,
+        });
+        delegate.push_undo(UndoEntry::AddRow {
+            row_index: 3,
+            new_row_id: 3,
+        });
+
+        delegate.set_undo_stack_size(2);
+
+        assert_eq!(delegate.undo_stack.len(), 2);
+        assert!(matches!(
+            delegate.undo_stack[0],
+            UndoEntry::AddRow {
+                row_index: 2,
+                new_row_id: 2
+            }
+        ));
+        assert!(matches!(
+            delegate.undo_stack[1],
+            UndoEntry::AddRow {
+                row_index: 3,
+                new_row_id: 3
+            }
+        ));
+
+        delegate.set_undo_stack_size(0);
+        assert!(delegate.undo_stack.is_empty());
+        assert!(!delegate.can_undo());
+    }
+
+    #[test]
+    fn accept_current_state_as_saved_rebuilds_baseline_and_drops_deleted_rows() {
+        let mut delegate = test_delegate(vec![vec![Some("A")], vec![Some("B")]], true);
+
+        assert!(delegate.record_cell_change(0, 0, "A*".to_string()));
+        let new_row_ix = delegate.clone_row(0).expect("clone row should succeed");
+        assert!(delegate.record_cell_change(new_row_ix, 0, "C".to_string()));
+
+        let deleted_original_index = delegate.row_index_map[&1];
+        delegate
+            .deleted_original_rows
+            .insert(deleted_original_index);
+        delegate.row_status.insert(1, RowStatus::Deleted);
+        delegate.cell_changes.retain(|&(row, _), _| row != 1);
+        delegate.modified_cells.retain(|&(row, _)| row != 1);
+
+        delegate.accept_current_state_as_saved();
+
+        assert_eq!(delegate.rows, vec![vec![opt("A*")], vec![opt("C")]]);
+        assert_eq!(delegate.original_rows, delegate.rows);
+        assert_eq!(delegate.rowids, vec!["rowid-0".to_string(), String::new()]);
+        assert_eq!(delegate.original_rowids, delegate.rowids);
+        assert_eq!(delegate.row_index_map.get(&0), Some(&0));
+        assert_eq!(delegate.row_index_map.get(&1), Some(&1));
+        assert!(delegate.row_status.is_empty());
+        assert!(delegate.cell_changes.is_empty());
+        assert!(delegate.modified_cells.is_empty());
+        assert!(delegate.deleted_original_rows.is_empty());
+        assert!(delegate.new_rows.is_empty());
+        assert!(delegate.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn get_changes_ignores_empty_saved_rowid_after_accepting_baseline() {
+        let mut delegate = test_delegate(vec![vec![Some("A")]], true);
+        let new_row_ix = delegate.clone_row(0).expect("clone row should succeed");
+
+        delegate.accept_current_state_as_saved();
+
+        assert!(delegate.record_cell_change(new_row_ix, 0, "C".to_string()));
+
+        let changes = delegate.get_changes();
+        assert_eq!(changes.len(), 1);
+        assert!(matches!(
+            &changes[0],
+            RowChange::Updated {
+                original_data,
+                rowid,
+                ..
+            } if *original_data == vec![opt("A")] && rowid.is_none()
+        ));
     }
 }

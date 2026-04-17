@@ -15,6 +15,8 @@ use crate::{
 #[derive(Clone)]
 pub struct SettingGroup {
     style: StyleRefinement,
+    content_style: StyleRefinement,
+    title_style: StyleRefinement,
 
     pub(super) title: Option<SharedString>,
     pub(super) description: Option<SharedString>,
@@ -32,6 +34,8 @@ impl SettingGroup {
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
+            content_style: StyleRefinement::default(),
+            title_style: StyleRefinement::default(),
             title: None,
             description: None,
             items: Vec::new(),
@@ -47,6 +51,18 @@ impl SettingGroup {
     /// Set the description of the setting group, default is None.
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Set the title style of the group box title area.
+    pub fn title_style(mut self, style: &StyleRefinement) -> Self {
+        self.title_style = style.clone();
+        self
+    }
+
+    /// Set the content style of the group box body area.
+    pub fn content_style(mut self, style: &StyleRefinement) -> Self {
+        self.content_style = style.clone();
         self
     }
 
@@ -84,6 +100,8 @@ impl SettingGroup {
         GroupBox::new()
             .id(SharedString::from(format!("group-{}", options.group_ix)))
             .with_variant(options.group_variant)
+            .title_style(self.title_style.clone())
+            .content_style(self.content_style.clone())
             .when_some(self.title.clone(), |this, title| {
                 this.title(v_flex().gap_1().child(title).when_some(
                     self.description.clone(),

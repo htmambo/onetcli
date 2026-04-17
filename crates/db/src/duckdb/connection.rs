@@ -545,6 +545,8 @@ mod tests {
             database: None,
             service_name: None,
             sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
             extra_params: Default::default(),
         });
 

@@ -1,12 +1,13 @@
 use futures::channel::oneshot;
 use gpui::prelude::*;
 use gpui::{
-    div, px, uniform_list, AnyElement, App, AsyncApp, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    UniformListScrollHandle, Window,
+    AnyElement, App, AsyncApp, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle,
+    Window, div, px, uniform_list,
 };
 use gpui_component::{
+    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -18,13 +19,14 @@ use gpui_component::{
     scroll::Scrollbar,
     select::{Select, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt,
+    v_flex,
 };
 use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use crate::database_view_plugin::{ColumnEditorCapabilities, DatabaseViewPluginRegistry};
+use db::GlobalDbState;
 #[cfg(test)]
 use db::duckdb::DuckDbPlugin;
 use db::plugin::DatabasePlugin;
@@ -32,7 +34,6 @@ use db::types::{
     CharsetInfo, CollationInfo, ColumnDefinition, ColumnInfo, IndexDefinition, IndexInfo,
     ParsedColumnType, TableDesign, TableOptions,
 };
-use db::GlobalDbState;
 use gpui_component::select::SearchableVec;
 use one_core::storage::DatabaseType;
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
@@ -1353,7 +1354,7 @@ impl TabContent for TableDesigner {
             dialog
                 .title(format!("{} {}", t!("Common.close"), title))
                 .overlay_closable(false)
-                .close_button(false)
+                .close_button(true)
                 .footer(move |_ok, _cancel, _window, _cx| {
                     let tx_save = tx_save.clone();
                     let tx_discard = tx_discard.clone();
@@ -1871,11 +1872,7 @@ impl ColumnsEditor {
 
                 let default_value = {
                     let val = row.default_input.read(cx).text().to_string();
-                    if val.is_empty() {
-                        None
-                    } else {
-                        Some(val)
-                    }
+                    if val.is_empty() { None } else { Some(val) }
                 };
                 let comment = row.comment_input.read(cx).text().to_string();
                 let charset = row
@@ -3603,7 +3600,7 @@ mod tests {
                 || sql.contains("CHANGE COLUMN")
                 || sql.contains("sp_rename");
             assert!(has_rename, "[{:?}] 应包含重命名SQL: {sql}", database_type);
-            println!("[{:?}] SQL: {}", database_type, sql);
+            tracing::debug!("[{:?}] SQL: {}", database_type, sql);
         }
     }
 
@@ -3655,7 +3652,7 @@ mod tests {
         let plugin = PostgresPlugin::new();
         let sql = plugin.build_alter_table_sql_with_renames(&original, &current, &renames);
 
-        println!("Type case mismatch SQL: {}", sql);
+        tracing::debug!("Type case mismatch SQL: {}", sql);
 
         // 关键断言：不应包含 DROP COLUMN "name"
         assert!(
@@ -4423,9 +4420,11 @@ mod tests {
             Some("utf8mb3_general_ci"),
         );
 
-        assert!(items
-            .iter()
-            .any(|item| item.info.name == "utf8mb3_general_ci"));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.info.name == "utf8mb3_general_ci")
+        );
         assert_eq!(items[selected_idx].info.name, "utf8mb3_general_ci");
     }
 

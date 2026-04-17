@@ -128,7 +128,7 @@ impl TabVariant {
         match self {
             TabVariant::Tab => TabStyle {
                 fg: cx.theme().tab_foreground,
-                bg: cx.theme().transparent,
+                bg: cx.theme().tab,
                 borders: Edges {
                     left: px(1.),
                     right: px(1.),
@@ -172,7 +172,7 @@ impl TabVariant {
         match self {
             TabVariant::Tab => TabStyle {
                 fg: cx.theme().tab_foreground,
-                bg: cx.theme().transparent,
+                bg: cx.theme().tab,
                 borders: Edges {
                     left: px(1.),
                     right: px(1.),
@@ -266,7 +266,7 @@ impl TabVariant {
         match self {
             TabVariant::Tab => TabStyle {
                 fg: cx.theme().muted_foreground,
-                bg: cx.theme().transparent,
+                bg: if selected { cx.theme().tab_active } else { cx.theme().tab },
                 border_color: if selected {
                     cx.theme().border
                 } else {
@@ -291,13 +291,9 @@ impl TabVariant {
                 ..Default::default()
             },
             TabVariant::Pill => TabStyle {
-                fg: if selected {
-                    cx.theme().primary_foreground.opacity(0.5)
-                } else {
-                    cx.theme().muted_foreground
-                },
+                fg: cx.theme().muted_foreground,
                 bg: if selected {
-                    cx.theme().primary.opacity(0.5)
+                    cx.theme().muted
                 } else {
                     cx.theme().transparent
                 },

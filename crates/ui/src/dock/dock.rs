@@ -16,6 +16,8 @@ use crate::{
 
 use super::{DockArea, DockItem, PanelView, TabPanel};
 
+const DOCK_TAB_HEIGHT: f32 = 30.0;
+
 #[derive(Clone)]
 struct ResizePanel;
 
@@ -388,7 +390,7 @@ impl Render for Dock {
             })
             // Bottom Dock should keep the title bar, then user can click the Toggle button
             .when(!self.open && self.placement.is_bottom(), |this| {
-                this.h(px(29.))
+                this.h(px(DOCK_TAB_HEIGHT))
             })
             .map(|this| match &self.panel {
                 DockItem::Split { view, .. } => this.child(view.clone()),

@@ -203,6 +203,18 @@ ConnectionForm:
     en: Port
     zh-CN: 端口
     zh-HK: 端口
+  certificate:
+    en: Certificate
+    zh-CN: 证书
+    zh-HK: 憑證
+  ssh_certificate:
+    en: SSH Certificate
+    zh-CN: SSH 证书
+    zh-HK: SSH 憑證
+  certificate_none:
+    en: Do not use certificate
+    zh-CN: 不使用证书
+    zh-HK: 不使用憑證
   username:
     en: Username
     zh-CN: 用户名
@@ -319,6 +331,10 @@ ConnectionForm:
     en: "Missing required field: %{field}"
     zh-CN: "缺少必填字段：%{field}"
     zh-HK: "缺少必填欄位：%{field}"
+  manage_certificates:
+    en: Manage Certificates
+    zh-CN: 管理证书
+    zh-HK: 管理憑證
 
   # Placeholder
   enter_connection_name:
@@ -2113,6 +2129,14 @@ TableDataGrid:
     en: Refresh
     zh-CN: 刷新
     zh-HK: 重新整理
+  column_visibility:
+    en: Column Visibility
+    zh-CN: 列可见性
+    zh-HK: 列可見性
+  reset_column_visibility:
+    en: Reset Column Visibility
+    zh-CN: 重置列可见性
+    zh-HK: 重置列可見性
   add_row:
     en: Add Row
     zh-CN: 添加行
@@ -2125,6 +2149,10 @@ TableDataGrid:
     en: Undo
     zh-CN: 撤销
     zh-HK: 復原
+  step_undo:
+    en: Undo one step
+    zh-CN: 单步撤销
+    zh-HK: 单步復原
   sql_preview:
     en: SQL Preview
     zh-CN: SQL预览
@@ -2853,13 +2881,18 @@ DatabaseTab:
     zh-CN: 打开新编辑器
     zh-HK: 打開新編輯器
 
-# 团队同步
-TeamSync:
-  personal:
-    en: Personal
-    zh-CN: 个人
-    zh-HK: 個人
-  team_label:
-    en: Team
-    zh-CN: 团队归属
-    zh-HK: 團隊歸屬
+# 运行状态
+RunningState:
+  db_pending_changes:
+    activity_delete:
+      en: "Has records marked for deletion"
+      zh-CN: "有待删除的记录"
+      zh-HK: "有待刪除的記錄"
+    activity_modify:
+      en: "Has modified records"
+      zh-CN: "有已修改的记录"
+      zh-HK: "有已修改的記錄"
+    activity_insert:
+      en: "Has new records"
+      zh-CN: "有新记录"
+      zh-HK: "有新記錄"

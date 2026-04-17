@@ -1,8 +1,9 @@
 use crate::home_tab::HomePage;
-use gpui::{App, Context, Entity, ParentElement, SharedString, Styled, Task, Window, div, px};
+use gpui::{App, Context, Entity, ParentElement, SharedString, Styled, Task, Window, div};
 use gpui_component::{
     ActiveTheme, IndexPath, WindowExt, h_flex,
     list::{ListDelegate, ListItem, ListState},
+    tokens::Radius,
 };
 use one_core::storage::DatabaseType;
 use rust_i18n::t;
@@ -32,14 +33,14 @@ impl NewConnectionKind {
         }
     }
 
-    fn category(&self) -> &'static str {
+    fn category(&self) -> String {
         match self {
-            NewConnectionKind::Workspace => "工作区",
+            NewConnectionKind::Workspace => t!("NewConnection.workspace").to_string(),
             NewConnectionKind::Ssh | NewConnectionKind::Terminal | NewConnectionKind::Serial => {
-                "终端"
+                t!("NewConnection.terminal").to_string()
             }
-            NewConnectionKind::Redis | NewConnectionKind::MongoDB => "NoSQL",
-            NewConnectionKind::Database(_) => "数据库",
+            NewConnectionKind::Redis | NewConnectionKind::MongoDB => "NoSQL".to_string(),
+            NewConnectionKind::Database(_) => t!("NewConnection.database").to_string(),
         }
     }
 
@@ -162,7 +163,7 @@ impl ListDelegate for NewConnectionDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(px(6.0))
+                .rounded(Radius::Md.px())
                 .on_click(move |_, window, cx| {
                     parent.update(cx, |this, cx| {
                         kind.execute(this, window, cx);

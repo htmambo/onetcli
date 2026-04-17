@@ -558,7 +558,7 @@ impl SqlEditorTab {
         {
             Ok(result) => result,
             Err(e) => {
-                eprintln!("Failed to get tables: {}", e);
+                tracing::error!("Failed to get tables: {}", e);
                 return;
             }
         };
@@ -567,7 +567,7 @@ impl SqlEditorTab {
         let db_completion_info = match global_state.get_completion_info(cx, connection_id.clone()) {
             Ok(info) => info,
             Err(e) => {
-                eprintln!("Failed to get completion info: {}", e);
+                tracing::error!("Failed to get completion info: {}", e);
                 return;
             }
         };

@@ -1,12 +1,12 @@
 //! 终端设置面板
 //!
-//! 提供搜索、字体设置和主题切换功能
+//! 提供搜索、字体设置、行间距设置和主题切换功能
 
 use gpui::prelude::FluentBuilder;
 use gpui::FontWeight;
 use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
+    Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
@@ -16,7 +16,6 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
     notification::Notification,
-    scroll::ScrollableElement,
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
     try_parse_color, v_flex, ActiveTheme, Colorize, Icon, IconName, Sizable, Size, WindowExt,
@@ -25,7 +24,9 @@ use rust_i18n::t;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    theme::{TerminalTheme, MAX_FONT_SIZE, MIN_FONT_SIZE},
+    theme::{
+        TerminalTheme, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    },
     TerminalHighlightRule,
 };
 
@@ -42,6 +43,8 @@ pub enum SettingsPanelEvent {
     SearchNext,
     /// 字体大小变更
     FontSizeChanged(f32),
+    /// 行高比例变更
+    LineHeightScaleChanged(f32),
     /// 字体变更
     FontFamilyChanged(String),
     /// 主题变更
@@ -70,12 +73,18 @@ pub struct SettingsPanel {
     search_input_state: Entity<InputState>,
     /// 字体大小输入框状态
     font_size_input_state: Entity<InputState>,
+    /// 行高比例输入框状态
+    line_height_input_state: Entity<InputState>,
     /// 字体选择状态
     font_select_state: Entity<SelectState<Vec<SharedString>>>,
+    /// 主题选择状态
+    theme_select_state: Entity<SelectState<Vec<SharedString>>>,
     /// 当前主题
     current_theme: TerminalTheme,
     /// 字体大小输入变更抑制
     suppress_font_size_change: bool,
+    /// 行高比例输入变更抑制
+    suppress_line_height_change: bool,
     /// 光标闪烁开关
     cursor_blink: bool,
     /// 非 bracketed 模式下，多行粘贴确认
@@ -111,13 +120,21 @@ impl SettingsPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search..."));
+        let search_input_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Settings.search_placeholder")));
 
         // 字体大小输入框
         let font_size = f32::from(initial_theme.font_size);
         let font_size_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("13"));
         font_size_input_state.update(cx, |state: &mut InputState, cx| {
             state.set_value(&format!("{:.0}", font_size), window, cx);
+        });
+
+        // 行高比例输入框
+        let line_height_scale = initial_theme.line_height_scale;
+        let line_height_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("1.4"));
+        line_height_input_state.update(cx, |state: &mut InputState, cx| {
+            state.set_value(&format!("{:.1}", line_height_scale), window, cx);
         });
 
         // 字体选择列表
@@ -135,6 +152,21 @@ impl SettingsPanel {
 
         let font_select_state =
             cx.new(|cx| SelectState::new(fonts, selected_index, window, cx).searchable(true));
+
+        // 主题选择列表
+        let mode_is_dark = cx.theme().mode.is_dark();
+        let all_themes: Vec<TerminalTheme> =
+            TerminalTheme::all().into_iter().filter(|t| t.variant.matches(mode_is_dark)).collect();
+        let theme_names: Vec<SharedString> = all_themes
+            .iter()
+            .map(|t| SharedString::from(t.name))
+            .collect();
+        let selected_theme_index = all_themes
+            .iter()
+            .position(|t| t.name == initial_theme.name)
+            .map(|i| gpui_component::IndexPath::default().row(i));
+        let theme_select_state =
+            cx.new(|cx| SelectState::new(theme_names, selected_theme_index, window, cx).searchable(true));
 
         let mut subscriptions = Vec::new();
 
@@ -180,6 +212,48 @@ impl SettingsPanel {
             },
         ));
 
+        // 订阅行高比例输入事件
+        let line_height_entity = line_height_input_state.clone();
+        subscriptions.push(cx.subscribe_in(
+            &line_height_input_state,
+            window,
+            move |this, _state, event: &InputEvent, _window, cx| match event {
+                InputEvent::Change => {
+                    if this.suppress_line_height_change {
+                        return;
+                    }
+                    let value = line_height_entity.read(cx).value().to_string();
+                    if let Ok(scale) = value.parse::<f32>() {
+                        let clamped = scale.clamp(MIN_LINE_HEIGHT_SCALE, MAX_LINE_HEIGHT_SCALE);
+                        this.current_theme.line_height_scale = clamped;
+                        cx.emit(SettingsPanelEvent::LineHeightScaleChanged(clamped));
+                    }
+                }
+                _ => {}
+            },
+        ));
+
+        // 订阅行高比例步进事件
+        let line_height_entity2 = line_height_input_state.clone();
+        subscriptions.push(cx.subscribe_in(
+            &line_height_input_state,
+            window,
+            move |this, _state, event: &NumberInputEvent, window, cx| match event {
+                NumberInputEvent::Step(action) => {
+                    let current = this.current_theme.line_height_scale;
+                    let new_scale = match action {
+                        StepAction::Increment => (current + 0.1).min(MAX_LINE_HEIGHT_SCALE),
+                        StepAction::Decrement => (current - 0.1).max(MIN_LINE_HEIGHT_SCALE),
+                    };
+                    this.current_theme.line_height_scale = new_scale;
+                    line_height_entity2.update(cx, |state: &mut InputState, cx| {
+                        state.set_value(&format!("{:.1}", new_scale), window, cx);
+                    });
+                    cx.emit(SettingsPanelEvent::LineHeightScaleChanged(new_scale));
+                }
+            },
+        ));
+
         // 订阅字体大小步进事件
         let font_size_entity2 = font_size_input_state.clone();
         subscriptions.push(cx.subscribe_in(
@@ -213,12 +287,29 @@ impl SettingsPanel {
             },
         ));
 
+        // 订阅主题选择事件
+        let all_themes_for_sub = all_themes.clone();
+        subscriptions.push(cx.subscribe_in(
+            &theme_select_state,
+            window,
+            move |this, _state, event: &SelectEvent<Vec<SharedString>>, _window, cx| {
+                if let SelectEvent::Confirm(Some(name)) = event {
+                    if let Some(theme) = all_themes_for_sub.iter().find(|t| SharedString::from(t.name) == *name) {
+                        this.set_theme(theme.clone(), cx);
+                    }
+                }
+            },
+        ));
+
         Self {
             search_input_state,
             font_size_input_state,
+            line_height_input_state,
             font_select_state,
+            theme_select_state,
             current_theme: initial_theme.clone(),
             suppress_font_size_change: false,
+            suppress_line_height_change: false,
             cursor_blink: false,
             confirm_multiline_paste: true,
             confirm_high_risk_command: true,
@@ -248,10 +339,24 @@ impl SettingsPanel {
         });
         self.suppress_font_size_change = false;
 
+        // 更新行高比例输入框
+        let line_height_scale = theme.line_height_scale;
+        self.suppress_line_height_change = true;
+        self.line_height_input_state.update(cx, |state, cx| {
+            state.set_value(&format!("{:.1}", line_height_scale), window, cx);
+        });
+        self.suppress_line_height_change = false;
+
         // 更新字体选择
         let font_family = theme.font_family.clone();
         self.font_select_state.update(cx, |state, cx| {
             state.set_selected_value(&font_family, window, cx);
+        });
+
+        // 更新主题选择
+        let theme_name = SharedString::from(theme.name);
+        self.theme_select_state.update(cx, |state, cx| {
+            state.set_selected_value(&theme_name, window, cx);
         });
 
         self.current_theme = theme;
@@ -615,7 +720,7 @@ impl SettingsPanel {
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(fg)
-                            .child("Settings"),
+                            .child(t!("Common.settings")),
                     ),
             )
             .child(
@@ -641,7 +746,7 @@ impl SettingsPanel {
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(muted_fg)
-                        .child("SEARCH"),
+                        .child(t!("Settings.search").to_uppercase()),
                 )
                 .child(
                     h_flex()
@@ -670,70 +775,9 @@ impl SettingsPanel {
                     div()
                         .text_xs()
                         .text_color(muted_fg)
-                        .child("Press ⌘G for next, ⇧⌘G for previous"),
+                        .child(t!("Settings.search_hint")),
                 ),
         )
-    }
-
-    /// 渲染主题项
-    fn render_theme_item(&self, theme: TerminalTheme, cx: &mut Context<Self>) -> AnyElement {
-        let current_theme_name = self.current_theme.name;
-        let is_current = current_theme_name == theme.name;
-        let theme_for_click = theme.clone();
-        let accent = cx.theme().accent;
-        let accent_fg = cx.theme().accent_foreground;
-        let muted = cx.theme().muted;
-        let border = cx.theme().border;
-        let theme_i18n_key = format!("Theme.{}", theme.name);
-        let theme_display_name = t!(&theme_i18n_key).to_string();
-
-        div()
-            .id(SharedString::from(format!("theme-{}", theme.name)))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_3()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .cursor_pointer()
-            .when(is_current, |style| style.bg(accent).text_color(accent_fg))
-            .when(!is_current, |style| style.hover(|s| s.bg(muted)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _window, cx| {
-                    this.set_theme(theme_for_click.clone(), cx);
-                }),
-            )
-            // 颜色预览
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded_md()
-                            .bg(theme.background)
-                            .border_1()
-                            .border_color(border),
-                    )
-                    .child(
-                        div()
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded_md()
-                            .bg(theme.foreground)
-                            .border_1()
-                            .border_color(border),
-                    ),
-            )
-            // 主题名称
-            .child(div().flex_1().text_sm().child(theme_display_name))
-            .when(is_current, |item| {
-                item.child(Icon::new(IconName::Check).with_size(Size::Small))
-            })
-            .into_any_element()
     }
 
     /// 渲染字体设置区域
@@ -756,7 +800,7 @@ impl SettingsPanel {
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(muted_fg)
-                            .child("FONT SIZE"),
+                            .child(t!("Settings.font_size").to_uppercase()),
                     )
                     .child(
                         NumberInput::new(&self.font_size_input_state)
@@ -773,13 +817,30 @@ impl SettingsPanel {
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(muted_fg)
-                            .child("FONT FAMILY"),
+                            .child(t!("Settings.font_family").to_uppercase()),
                     )
                     .child(
                         Select::new(&self.font_select_state)
                             .small()
                             .text_color(fg)
-                            .placeholder("Select font..."),
+                            .placeholder(t!("Settings.select_font_placeholder")),
+                    ),
+            )
+            // 行高比例
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(muted_fg)
+                            .child(t!("Settings.line_height").to_uppercase()),
+                    )
+                    .child(
+                        NumberInput::new(&self.line_height_input_state)
+                            .small()
+                            .suffix(div().text_xs().text_color(muted_fg).child("x")),
                     ),
             )
     }
@@ -1207,16 +1268,10 @@ impl SettingsPanel {
     }
 
     /// 渲染主题选择区域
-    fn render_theme_section(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_theme_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
-        let muted = cx.theme().muted;
         let muted_fg = cx.theme().muted_foreground;
-
-        // 预先收集所有主题项
-        let theme_items: Vec<AnyElement> = TerminalTheme::all()
-            .into_iter()
-            .map(|theme| self.render_theme_item(theme, cx))
-            .collect();
+        let fg = cx.theme().foreground;
 
         v_flex()
             .gap_3()
@@ -1228,17 +1283,13 @@ impl SettingsPanel {
                     .text_xs()
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(muted_fg)
-                    .child("THEME"),
+                    .child(t!("Settings.theme").to_uppercase()),
             )
             .child(
-                div()
-                    .id("theme-list-scroll")
-                    .max_h(px(300.0))
-                    .overflow_y_scrollbar()
-                    .rounded_md()
-                    .bg(muted)
-                    .p_1()
-                    .children(theme_items),
+                Select::new(&self.theme_select_state)
+                    .small()
+                    .text_color(fg)
+                    .placeholder(t!("Settings.select_theme_placeholder")),
             )
     }
 }
@@ -1318,7 +1369,6 @@ impl Render for SettingsPanel {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(

@@ -14,14 +14,12 @@ use one_core::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use rust_i18n::t;
 
 use super::provider_form_dialog::ProviderForm;
-use crate::setting_tab::GlobalCurrentUser;
 
 pub struct LlmProvidersView {
     focus_handle: FocusHandle,
     storage_manager: StorageManager,
     providers: Vec<ProviderConfig>,
     loading: bool,
-    is_logged_in: bool,
 }
 
 impl LlmProvidersView {
@@ -35,7 +33,6 @@ impl LlmProvidersView {
             storage_manager,
             providers: vec![],
             loading: false,
-            is_logged_in: GlobalCurrentUser::get_user(cx).is_some(),
         };
         cx.spawn(async move |entity: WeakEntity<Self>, cx: &mut AsyncApp| {
             let _ = entity.update(cx, |this, cx| {
@@ -49,27 +46,13 @@ impl LlmProvidersView {
 
     fn load_providers(&mut self, cx: &mut Context<Self>) {
         self.loading = true;
-        let is_logged_in = GlobalCurrentUser::get_user(cx).is_some();
-        self.is_logged_in = is_logged_in;
-
         let repo = self
             .storage_manager
             .get::<ProviderRepository>()
             .expect("ProviderRepository not found");
 
-        if is_logged_in {
-            if let Err(e) = repo.ensure_onetcli_provider() {
-                tracing::error!("Failed to ensure OnetCli provider: {}", e);
-            }
-        }
-
         match repo.list() {
-            Ok(mut providers) => {
-                if !is_logged_in {
-                    providers.retain(|p| !p.is_builtin());
-                }
-                self.providers = providers;
-            }
+            Ok(providers) => self.providers = providers,
             Err(e) => {
                 tracing::error!("Failed to load providers: {}", e);
             }
@@ -165,14 +148,6 @@ impl LlmProvidersView {
     }
 
     fn delete_provider(&mut self, provider_id: i64, cx: &mut Context<Self>) {
-        // 内置 provider 不可删除
-        if self
-            .providers
-            .iter()
-            .any(|p| p.id == provider_id && p.is_builtin())
-        {
-            return;
-        }
         let repo = self
             .storage_manager
             .get::<ProviderRepository>()
@@ -216,10 +191,6 @@ impl LlmProvidersView {
     }
 
     fn toggle_provider(&mut self, provider: &ProviderConfig, cx: &mut Context<Self>) {
-        if provider.is_builtin() {
-            return;
-        }
-
         let mut updated = provider.clone();
         updated.enabled = !updated.enabled;
 
@@ -237,10 +208,19 @@ impl LlmProvidersView {
 
 impl Render for LlmProvidersView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        // 层级透明度：容器 Layer 2 (0.10)，卡片 Layer 5 (0.18)
+        let container_bg = if blur_enabled {
+            cx.theme().background.opacity(0.10)
+        } else {
+            cx.theme().background
+        };
+
         v_flex()
             .size_full()
             .gap_4()
             .p_6()
+            .bg(container_bg)
             .child(
                 h_flex()
                     .justify_between()
@@ -313,7 +293,7 @@ impl LlmProvidersView {
         provider: &ProviderConfig,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let is_builtin = provider.is_builtin();
+        let blur_enabled = cx.theme().window_blur_enabled;
         let provider_id = provider.id;
         let provider_for_default = provider.clone();
         let provider_for_toggle = provider.clone();
@@ -324,13 +304,9 @@ impl LlmProvidersView {
             .child(self.render_provider_header(provider, cx))
             .child(self.render_provider_details(provider, cx));
 
-        let actions = if is_builtin {
-            self.render_builtin_actions(&provider_for_default, cx)
-                .into_any_element()
-        } else {
-            self.render_custom_actions(provider_id, &provider_for_toggle, &provider_for_default, cx)
-                .into_any_element()
-        };
+        let actions = self
+            .render_provider_actions(provider_id, &provider_for_toggle, &provider_for_default, cx)
+            .into_any_element();
 
         div()
             .flex()
@@ -339,7 +315,12 @@ impl LlmProvidersView {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            // Layer 5: 卡片 - 0.18
+            .bg(if blur_enabled {
+                cx.theme().background.opacity(0.18)
+            } else {
+                cx.theme().background
+            })
             .child(info)
             .child(actions)
     }
@@ -448,47 +429,8 @@ impl LlmProvidersView {
             })
     }
 
-    /// 内置 provider（OnetCli）支持设置/取消默认和编辑，不可删除和禁用
-    fn render_builtin_actions(
-        &self,
-        provider: &ProviderConfig,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let provider_clone = provider.clone();
-        let provider_id = provider.id;
-        let is_default = provider.is_default;
-
-        h_flex()
-            .gap_2()
-            .items_center()
-            .child(
-                Button::new(SharedString::from(format!("default-{}", provider_id)))
-                    .with_variant(if is_default {
-                        ButtonVariant::Secondary
-                    } else {
-                        ButtonVariant::Primary
-                    })
-                    .label(if is_default {
-                        t!("LlmProviders.action_unset_default")
-                    } else {
-                        t!("LlmProviders.action_set_default")
-                    })
-                    .on_click(cx.listener(move |view, _, _, cx| {
-                        view.toggle_default(&provider_clone, cx);
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("edit-{}", provider_id)))
-                    .with_variant(ButtonVariant::Secondary)
-                    .label(t!("LlmProviders.action_edit"))
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.edit_provider(provider_id, window, cx);
-                    })),
-            )
-    }
-
-    /// 用户自定义 provider 支持启用/禁用、设置默认、编辑、删除
-    fn render_custom_actions(
+    /// 设置页中的 provider 统一支持启用/禁用、设置默认、编辑、删除
+    fn render_provider_actions(
         &self,
         provider_id: i64,
         provider_for_toggle: &ProviderConfig,

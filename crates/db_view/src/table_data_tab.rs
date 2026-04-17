@@ -1,3 +1,4 @@
+use crate::current_db_undo_stack_size;
 use crate::table_data::data_grid::{DataGrid, DataGridConfig};
 use futures::channel::oneshot;
 use gpui::{
@@ -35,7 +36,8 @@ impl TableDataTabContent {
             database_type,
         )
         .editable(editable)
-        .show_toolbar(true);
+        .show_toolbar(true)
+        .undo_stack_size(current_db_undo_stack_size(cx));
 
         if let Some(schema) = schema_name {
             config = config.with_schema(schema);
@@ -84,6 +86,14 @@ impl TabContent for TableDataTabContent {
         true
     }
 
+    fn has_pending_changes(&self, cx: &App) -> bool {
+        self.data_grid.read(cx).has_unsaved_changes(cx)
+    }
+
+    fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
+        self.data_grid.read(cx).pending_change_level(cx)
+    }
+
     fn try_close(
         &mut self,
         _tab_id: &str,
@@ -110,7 +120,7 @@ impl TabContent for TableDataTabContent {
             dialog
                 .title(format!("{} {}", t!("Common.close"), table_name))
                 .overlay_closable(false)
-                .close_button(false)
+                .close_button(true)
                 .footer(move |_ok, _cancel, _window, _cx| {
                     let data_grid = data_grid.clone();
                     let tx_save = tx_save.clone();

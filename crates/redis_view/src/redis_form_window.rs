@@ -3,25 +3,31 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, Size, TitleBar,
+    Disableable, Sizable, Size, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     radio::Radio,
-    select::{Select, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::certificate_manager::open_certificate_manager_popup;
+use one_core::certificate_notifier::{
+    CertificateDataEvent, get_notifier as get_certificate_notifier,
+};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
-    RedisClusterConfig, RedisMode, RedisParams, RedisSentinelConfig, StoredConnection, Workspace,
+    Certificate, CertificateReference, CertificateRepository, RedisClusterConfig, RedisMode,
+    RedisParams, RedisSentinelConfig, StoredConnection, Workspace,
 };
 use rust_i18n::t;
 use tracing::error;
@@ -32,7 +38,6 @@ use crate::{RedisConnectionConfig, RedisConnectionMode, RedisManager};
 pub struct RedisFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -70,32 +75,32 @@ impl SelectItem for WorkspaceSelectItem {
 }
 
 #[derive(Clone, Default, PartialEq)]
-struct TeamSelectItem {
-    id: Option<String>,
-    name: String,
+struct CertificateSelectItem {
+    id: Option<i64>,
+    label: String,
 }
 
-impl TeamSelectItem {
-    fn personal() -> Self {
+impl CertificateSelectItem {
+    fn none() -> Self {
         Self {
             id: None,
-            name: t!("TeamSync.personal").to_string(),
+            label: t!("Redis.certificate_none").to_string(),
         }
     }
 
-    fn from_team(team: &TeamOption) -> Self {
+    fn from_certificate(certificate: &Certificate) -> Self {
         Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
+            id: certificate.id,
+            label: format!("{} · {}", certificate.name, certificate.kind.label()),
         }
     }
 }
 
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
+impl SelectItem for CertificateSelectItem {
+    type Value = Option<i64>;
 
     fn title(&self) -> SharedString {
-        self.name.clone().into()
+        self.label.clone().into()
     }
 
     fn value(&self) -> &Self::Value {
@@ -148,11 +153,12 @@ pub struct RedisFormWindow {
     port_input: Entity<InputState>,
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,
+    certificates: Vec<Certificate>,
+    credential_select: Entity<SelectState<Vec<CertificateSelectItem>>>,
     db_index_input: Entity<InputState>,
 
     // 工作区选择
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
 
     // 连接模式
     mode: ModeSelection,
@@ -178,6 +184,7 @@ pub struct RedisFormWindow {
     // 测试状态
     is_testing: bool,
     test_result: Option<Result<(), String>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl RedisFormWindow {
@@ -205,6 +212,23 @@ impl RedisFormWindow {
             .editing_connection
             .as_ref()
             .and_then(|c| c.to_redis_params().ok());
+        let certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+        let mut certificate_items = vec![CertificateSelectItem::none()];
+        certificate_items.extend(
+            certificates
+                .iter()
+                .filter(|certificate| {
+                    certificate.kind == one_core::storage::CertificateKind::UsernamePassword
+                })
+                .map(CertificateSelectItem::from_certificate),
+        );
+        let credential_select =
+            cx.new(|cx| SelectState::new(certificate_items, Some(Default::default()), window, cx));
 
         // 基本信息输入框
         let name_input = cx.new(|cx| {
@@ -369,23 +393,6 @@ impl RedisFormWindow {
             state
         });
 
-        // 团队选择
-        let mut team_items = vec![TeamSelectItem::personal()];
-        team_items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-
-        let selected_team_id = config
-            .editing_connection
-            .as_ref()
-            .and_then(|c| c.team_id.clone());
-
-        let team_select = cx.new(|cx| {
-            let mut state = SelectState::new(team_items, Some(Default::default()), window, cx);
-            if let Some(ref team_id) = selected_team_id {
-                state.set_selected_value(&Some(team_id.clone()), window, cx);
-            }
-            state
-        });
-
         // 加载模式和高级设置
         let mut mode = ModeSelection::Standalone;
         let mut use_tls = false;
@@ -400,7 +407,7 @@ impl RedisFormWindow {
             sync_enabled = c.sync_enabled;
         }
 
-        Self {
+        let mut view = Self {
             focus_handle: cx.focus_handle(),
             title,
             is_editing,
@@ -413,9 +420,10 @@ impl RedisFormWindow {
             port_input,
             username_input,
             password_input,
+            certificates,
+            credential_select,
             db_index_input,
             workspace_select,
-            team_select,
             mode,
             sentinel_master_name_input,
             sentinel_nodes_input,
@@ -427,7 +435,39 @@ impl RedisFormWindow {
             sync_enabled,
             is_testing: false,
             test_result: None,
+            _subscriptions: Vec::new(),
+        };
+
+        if let Some(reference) = existing_params
+            .as_ref()
+            .and_then(|params| params.credential_ref.as_ref())
+        {
+            view.restore_selected_certificate(Some(reference), window, cx);
         }
+
+        cx.subscribe_in(
+            &view.credential_select,
+            window,
+            |this, _select, event: &SelectEvent<Vec<CertificateSelectItem>>, window, cx| {
+                let SelectEvent::Confirm(_) = event;
+                this.sync_selected_certificate_inputs(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+
+        if let Some(notifier) = get_certificate_notifier(cx) {
+            view._subscriptions.push(cx.subscribe_in(
+                &notifier,
+                window,
+                |this, _, _event: &CertificateDataEvent, window, cx| {
+                    this.reload_certificates(window, cx);
+                },
+            ));
+        }
+
+        view.sync_selected_certificate_inputs(window, cx);
+        view
     }
 
     /// 获取工作区 ID
@@ -439,17 +479,89 @@ impl RedisFormWindow {
             .flatten()
     }
 
-    /// 获取团队 ID
-    fn get_team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
+    fn restore_selected_certificate(
+        &mut self,
+        reference: Option<&CertificateReference>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(reference) = reference else {
+            return;
+        };
+
+        let selected_id = self
+            .certificates
+            .iter()
+            .find(|certificate| reference.matches_certificate(certificate))
+            .and_then(|certificate| certificate.id);
+        self.credential_select.update(cx, |select, cx| {
+            select.set_selected_value(&selected_id, window, cx);
+        });
+    }
+
+    fn selected_certificate(&self, cx: &App) -> Option<Certificate> {
+        let selected_id = self
+            .credential_select
             .read(cx)
             .selected_value()
             .cloned()
-            .flatten()
+            .flatten();
+        self.certificates
+            .iter()
+            .find(|certificate| certificate.id == selected_id)
+            .cloned()
+    }
+
+    fn reload_certificates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_id = self
+            .credential_select
+            .read(cx)
+            .selected_value()
+            .cloned()
+            .flatten();
+
+        self.certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+
+        let mut items = vec![CertificateSelectItem::none()];
+        items.extend(
+            self.certificates
+                .iter()
+                .filter(|certificate| {
+                    certificate.kind == one_core::storage::CertificateKind::UsernamePassword
+                })
+                .map(CertificateSelectItem::from_certificate),
+        );
+
+        self.credential_select.update(cx, |select, cx| {
+            select.set_items(items, window, cx);
+            select.set_selected_value(&selected_id, window, cx);
+        });
+        self.sync_selected_certificate_inputs(window, cx);
+        cx.notify();
+    }
+
+    fn sync_selected_certificate_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(certificate) = self.selected_certificate(cx) else {
+            return;
+        };
+
+        let username = certificate.username().unwrap_or("").to_string();
+        let password = certificate.password().unwrap_or("").to_string();
+        self.username_input
+            .update(cx, |state, cx| state.set_value(username, window, cx));
+        self.password_input.update(cx, |state, cx| {
+            state.set_value(password, window, cx);
+        });
     }
 
     /// 构建 RedisParams
     fn build_redis_params(&self, cx: &App) -> RedisParams {
+        let selected_certificate = self.selected_certificate(cx);
         let host = self.host_input.read(cx).text().to_string();
         let port: u16 = self
             .port_input
@@ -458,14 +570,20 @@ impl RedisFormWindow {
             .to_string()
             .parse()
             .unwrap_or(6379);
-        let password = {
-            let pwd = self.password_input.read(cx).text().to_string();
-            if pwd.is_empty() { None } else { Some(pwd) }
-        };
-        let username = {
-            let user = self.username_input.read(cx).text().to_string();
-            if user.is_empty() { None } else { Some(user) }
-        };
+        let password = selected_certificate
+            .as_ref()
+            .and_then(|certificate| certificate.password().map(|s| s.to_string()))
+            .or_else(|| {
+                let pwd = self.password_input.read(cx).text().to_string();
+                if pwd.is_empty() { None } else { Some(pwd) }
+            });
+        let username = selected_certificate
+            .as_ref()
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
+            .or_else(|| {
+                let user = self.username_input.read(cx).text().to_string();
+                if user.is_empty() { None } else { Some(user) }
+            });
         let db_index: u8 = self
             .db_index_input
             .read(cx)
@@ -531,6 +649,9 @@ impl RedisFormWindow {
             port,
             password,
             username,
+            credential_ref: selected_certificate
+                .as_ref()
+                .map(CertificateReference::from_certificate),
             db_index,
             mode: self.mode.to_redis_mode(),
             use_tls: self.use_tls,
@@ -604,7 +725,6 @@ impl RedisFormWindow {
         };
 
         let workspace_id = self.get_workspace_id(cx);
-        let team_id = self.get_team_id(cx);
         let owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
         let remark = {
             let r = self.remark_input.read(cx).text().to_string();
@@ -630,7 +750,6 @@ impl RedisFormWindow {
                 let mut conn = StoredConnection::new_redis(name, params, workspace_id);
                 conn.sync_enabled = sync_enabled;
                 conn.remark = remark;
-                conn.team_id = team_id;
                 if !is_editing {
                     conn.owner_id = owner_id;
                 }
@@ -688,31 +807,68 @@ impl RedisFormWindow {
                     .w(px(100.0))
                     .text_sm()
                     .text_right()
+                    .text_color(app_style::text_muted())
                     .child(label.to_string()),
             )
             .child(div().flex_1().child(child))
     }
 
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
+    }
+
     /// 渲染基本信息标签页
     fn render_basic_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let use_certificate = self.selected_certificate(cx).is_some();
+
         v_flex()
             .gap_2()
-            .child(self.render_form_row(&t!("Redis.name"), Input::new(&self.name_input)))
-            .child(self.render_form_row(&t!("Redis.host"), Input::new(&self.host_input)))
-            .child(self.render_form_row(&t!("Redis.port"), Input::new(&self.port_input)))
-            .child(self.render_form_row(&t!("Redis.username"), Input::new(&self.username_input)))
             .child(self.render_form_row(
-                &t!("Redis.password"),
-                Input::new(&self.password_input).mask_toggle(),
+                &t!("Redis.name"),
+                self.styled_input(Input::new(&self.name_input)),
             ))
-            .child(self.render_form_row(&t!("Redis.db_index"), Input::new(&self.db_index_input)))
+            .child(self.render_form_row(
+                &t!("Redis.host"),
+                self.styled_input(Input::new(&self.host_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("Redis.port"),
+                self.styled_input(Input::new(&self.port_input)),
+            ))
+            .child(self.render_form_row(
+                &t!("Redis.certificate"),
+                self.styled_select(Select::new(&self.credential_select).w_full()),
+            ))
+            .child(
+                self.render_form_row(
+                    &t!("Redis.username"),
+                    self.styled_input(Input::new(&self.username_input))
+                        .disabled(use_certificate),
+                ),
+            )
+            .child(
+                self.render_form_row(
+                    &t!("Redis.password"),
+                    self.styled_input(Input::new(&self.password_input))
+                        .mask_toggle()
+                        .disable_ime()
+                        .disabled(use_certificate),
+                ),
+            )
+            .child(self.render_form_row(
+                &t!("Redis.db_index"),
+                self.styled_input(Input::new(&self.db_index_input)),
+            ))
             .child(self.render_form_row(
                 &t!("Redis.workspace"),
-                Select::new(&self.workspace_select).w_full(),
-            ))
-            .child(self.render_form_row(
-                &t!("TeamSync.team_label"),
-                Select::new(&self.team_select).w_full(),
+                self.styled_select(Select::new(&self.workspace_select).w_full()),
             ))
             .child(
                 self.render_form_row(
@@ -730,7 +886,7 @@ impl RedisFormWindow {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(app_style::text_muted())
                                 .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
                         ),
                 ),
@@ -781,22 +937,26 @@ impl RedisFormWindow {
             .when(mode == ModeSelection::Sentinel, |this| {
                 this.child(self.render_form_row(
                     &t!("Redis.sentinel_master_name"),
-                    Input::new(&self.sentinel_master_name_input),
+                    self.styled_input(Input::new(&self.sentinel_master_name_input)),
                 ))
                 .child(self.render_form_row(
                     &t!("Redis.sentinel_nodes"),
-                    Input::new(&self.sentinel_nodes_input),
+                    self.styled_input(Input::new(&self.sentinel_nodes_input)),
                 ))
-                .child(self.render_form_row(
-                    &t!("Redis.sentinel_password"),
-                    Input::new(&self.sentinel_password_input).mask_toggle(),
-                ))
+                .child(
+                    self.render_form_row(
+                        &t!("Redis.sentinel_password"),
+                        self.styled_input(Input::new(&self.sentinel_password_input))
+                            .mask_toggle()
+                            .disable_ime(),
+                    ),
+                )
             })
             // 集群模式配置
             .when(mode == ModeSelection::Cluster, |this| {
                 this.child(self.render_form_row(
                     &t!("Redis.cluster_nodes"),
-                    Input::new(&self.cluster_nodes_input),
+                    self.styled_input(Input::new(&self.cluster_nodes_input)),
                 ))
             })
     }
@@ -818,15 +978,16 @@ impl RedisFormWindow {
             )
             .child(self.render_form_row(
                 &t!("Redis.connect_timeout"),
-                Input::new(&self.connect_timeout_input),
+                self.styled_input(Input::new(&self.connect_timeout_input)),
             ))
     }
 
     /// 渲染其他设置标签页
     fn render_other_tab(&self) -> impl IntoElement {
-        v_flex()
-            .gap_2()
-            .child(self.render_form_row(&t!("Redis.remark"), Input::new(&self.remark_input)))
+        v_flex().gap_2().child(self.render_form_row(
+            &t!("Redis.remark"),
+            self.styled_input(Input::new(&self.remark_input)),
+        ))
     }
 }
 
@@ -844,14 +1005,22 @@ impl Render for RedisFormWindow {
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::accent_dim_strong())
                     .text_sm()
-                    .text_color(cx.theme().success)
+                    .text_color(app_style::accent())
                     .child(t!("Redis.test_success").to_string()),
             ),
             Some(Err(e)) => Some(
                 div()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .bg(app_style::danger_dim())
                     .text_sm()
-                    .text_color(cx.theme().danger)
+                    .text_color(app_style::danger())
                     .child(e.clone()),
             ),
             None => None,
@@ -860,34 +1029,46 @@ impl Render for RedisFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(app_style::page_bg())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text_primary())
+                            .child(self.title.clone()),
+                    ),
             )
             // TabBar
             .child(
-                div().flex().justify_center().px_3().pt_2().child(
-                    TabBar::new("redis-form-tabs")
-                        .with_size(Size::Small)
-                        .underline()
-                        .selected_index(active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .child(Tab::new().label(t!("Redis.tab_basic").to_string()))
-                        .child(Tab::new().label(t!("Redis.tab_mode").to_string()))
-                        .child(Tab::new().label(t!("Redis.tab_advanced").to_string()))
-                        .child(Tab::new().label(t!("Redis.tab_other").to_string())),
+                div().flex().justify_center().px_4().pt_3().pb_1().child(
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::panel_bg())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("redis-form-tabs")
+                                .with_size(Size::Small)
+                                .underline()
+                                .selected_index(active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .child(Tab::new().label(t!("Redis.tab_basic").to_string()))
+                                .child(Tab::new().label(t!("Redis.tab_mode").to_string()))
+                                .child(Tab::new().label(t!("Redis.tab_advanced").to_string()))
+                                .child(Tab::new().label(t!("Redis.tab_other").to_string())),
+                        ),
                 ),
             )
             // 标签页内容
@@ -895,7 +1076,13 @@ impl Render for RedisFormWindow {
                 div()
                     .id("redis-form-content")
                     .flex_1()
-                    .p_3()
+                    .mx_4()
+                    .mb_4()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
+                    .p_4()
                     .overflow_y_scroll()
                     .child(match active_tab {
                         0 => self.render_basic_tab(cx).into_any_element(),
@@ -917,19 +1104,30 @@ impl Render for RedisFormWindow {
                     .px_6()
                     .py_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::panel_bg())
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(|_, window, _cx| {
                                 window.remove_window();
                             }),
                     )
                     .child(
+                        Button::new("manage-certificates")
+                            .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
+                            .label(t!("Redis.manage_certificates").to_string())
+                            .on_click(cx.listener(|_, _, window, cx| {
+                                open_certificate_manager_popup(window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(if is_testing {
                                 t!("Connection.testing").to_string()
                             } else {
@@ -943,7 +1141,7 @@ impl Render for RedisFormWindow {
                     .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.ok").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_save(window, cx);

@@ -73,7 +73,7 @@ pub fn handle_update_command() -> bool {
     }
 
     let Some(download_path) = args.next().map(PathBuf::from) else {
-        eprintln!("缺少更新包路径");
+        tracing::error!("缺少更新包路径");
         return true;
     };
 
@@ -84,7 +84,7 @@ pub fn handle_update_command() -> bool {
         .unwrap_or_else(|| download_path.clone());
 
     if let Err(err) = apply_update_helper(&download_path, &target_path) {
-        eprintln!("更新失败: {}", err);
+        tracing::error!("更新失败: {}", err);
     }
 
     true
@@ -262,7 +262,11 @@ async fn fetch_custom_dialog_info(
 
 fn show_update_dialog_on_active_window(info: UpdateDialogInfo, cx: &mut gpui::AsyncApp) {
     let _ = cx.update(|cx| {
-        show_update_dialog(info.clone(), cx);
+        if let Some(window_id) = cx.active_window() {
+            let _ = cx.update_window(window_id, |_, window, cx| {
+                show_update_dialog(info.clone(), window, cx);
+            });
+        }
     });
 }
 

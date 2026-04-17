@@ -1733,28 +1733,6 @@ impl DatabasePlugin for MsSqlPlugin {
         )
     }
 
-    fn build_backup_table_sql(
-        &self,
-        _database: &str,
-        schema: Option<&str>,
-        source_table: &str,
-        target_table: &str,
-    ) -> String {
-        let qualify = |table: &str| match schema {
-            Some(schema) => format!(
-                "{}.{}",
-                self.quote_identifier(schema),
-                self.quote_identifier(table)
-            ),
-            None => self.quote_identifier(table),
-        };
-        format!(
-            "SELECT * INTO {} FROM {};",
-            qualify(target_table),
-            qualify(source_table)
-        )
-    }
-
     fn build_column_def(&self, col: &ColumnDefinition) -> String {
         let mut def = String::new();
         def.push_str(&format!("[{}]", col.name.replace("]", "]]")));
@@ -2076,13 +2054,6 @@ mod tests {
         let sql = plugin.truncate_table("test_db", "users");
         assert!(sql.contains("TRUNCATE TABLE"));
         assert!(sql.contains("[users]"));
-    }
-
-    #[test]
-    fn test_build_backup_table_sql() {
-        let plugin = create_plugin();
-        let sql = plugin.build_backup_table_sql("test_db", Some("dbo"), "orders", "orders_bak");
-        assert_eq!(sql, "SELECT * INTO [dbo].[orders_bak] FROM [dbo].[orders];");
     }
 
     #[test]

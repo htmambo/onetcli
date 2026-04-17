@@ -608,8 +608,13 @@ impl ThemeColor {
         apply_color!(slider_thumb, fallback = self.primary_foreground);
         apply_color!(switch, fallback = self.secondary_active);
         apply_color!(switch_thumb, fallback = self.background);
-        apply_color!(tab, fallback = self.background);
-        apply_color!(tab_active, fallback = self.background);
+        if config.mode.is_dark() {
+            apply_color!(tab, fallback = self.background.blend(self.border.opacity(0.15)));
+            apply_color!(tab_active, fallback = self.secondary);
+        } else {
+            apply_color!(tab, fallback = self.secondary);
+            apply_color!(tab_active, fallback = self.background);
+        }
         apply_color!(tab_active_foreground, fallback = self.foreground);
         apply_color!(tab_bar, fallback = self.background);
         apply_color!(tab_bar_segmented, fallback = self.secondary);
@@ -629,11 +634,6 @@ impl ThemeColor {
         apply_color!(window_border, fallback = self.border);
 
         // TODO: Apply default fallback colors to highlight.
-
-        // Ensure opacity for list_active, table_active
-        self.list_active = self.list_active.alpha(self.list_active.a.min(0.2));
-        self.table_active = self.table_active.alpha(self.table_active.a.min(0.2));
-        self.selection = self.selection.alpha(self.selection.a.min(0.3));
     }
 }
 
@@ -645,14 +645,11 @@ impl Theme {
         } else {
             self.light_theme = config.clone();
         }
-        if let Some(style) = &config.highlight {
-            let highlight_theme = Arc::new(HighlightTheme {
-                name: config.name.to_string(),
-                appearance: config.mode,
-                style: style.clone(),
-            });
-            self.highlight_theme = highlight_theme.clone();
-        }
+        let next_highlight_theme = config.highlight.as_ref().map(|style| HighlightTheme {
+            name: config.name.to_string(),
+            appearance: config.mode,
+            style: style.clone(),
+        });
 
         let default_theme = if config.mode.is_dark() {
             Self::from(ThemeColor::dark().as_ref())
@@ -697,6 +694,20 @@ impl Theme {
         }
 
         self.colors.apply_config(&config, &default_theme.colors);
+        crate::theme::apply_glass_tuning(
+            &mut self.colors,
+            config.mode,
+            self.window_blur_enabled,
+            self.surface_opacity,
+        );
+        if let Some(mut highlight_theme) = next_highlight_theme {
+            crate::theme::apply_glass_highlight_tuning(
+                &mut highlight_theme.style,
+                self.window_blur_enabled,
+                self.surface_opacity,
+            );
+            self.highlight_theme = Arc::new(highlight_theme);
+        }
         self.mode = config.mode;
     }
 }

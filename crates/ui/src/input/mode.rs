@@ -11,7 +11,6 @@ use crate::highlighter::DiagnosticSet;
 use crate::highlighter::SyntaxHighlighter;
 use crate::input::{RopeExt as _, TabSize};
 
-#[allow(dead_code)]
 pub(super) struct PendingBackgroundParse {
     pub highlighter: Rc<RefCell<Option<SyntaxHighlighter>>>,
     pub parse_task: Rc<RefCell<Option<Task<()>>>>,
@@ -239,7 +238,6 @@ impl InputMode {
                 // If insert a chart, this is 1.
                 // If backspace or delete, this is -1.
                 // If selected to delete, this is the length of the selected text.
-                // let changed_len = new_text.len() as isize - selected_range.len() as isize;
                 let changed_len = new_text.len() as isize - selected_range.len() as isize;
                 let new_end = (selected_range.end as isize + changed_len) as usize;
 

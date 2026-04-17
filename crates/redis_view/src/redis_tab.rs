@@ -14,12 +14,16 @@ use gpui::{
     Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
 };
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::layout::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
 };
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
-use one_core::tab_container::{TabContainer, TabContent, TabContentEvent, TabItem};
+use one_core::tab_container::{
+    TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem,
+};
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use tracing::warn;
 
@@ -65,6 +69,12 @@ pub struct RedisTabView {
 }
 
 impl RedisTabView {
+    pub fn contains_connection_id(&self, connection_id: i64) -> bool {
+        self.connections
+            .iter()
+            .any(|connection| connection.id == Some(connection_id))
+    }
+
     pub fn new_with_active_conn(
         workspace: Option<Workspace>,
         connections: Vec<StoredConnection>,
@@ -117,6 +127,20 @@ impl RedisTabView {
                 },
             ),
         );
+        subscriptions.push(cx.subscribe(
+            &tab_container,
+            |_this, _, event: &TabContainerEvent, cx| match event {
+                TabContainerEvent::LayoutChanged
+                | TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.emit(TabContentEvent::StateChanged);
+                    cx.notify();
+                }
+                TabContainerEvent::OpenSftpRequested { .. } => {}
+                TabContainerEvent::TabBarTrailingActionRequested => {}
+            },
+        ));
 
         if let Some(active_connection_id) = active_connection_id {
             tree_view.update(cx, |tree_view, cx| {
@@ -271,8 +295,47 @@ impl TabContent for RedisTabView {
         }
     }
 
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .current_status_summary(cx)
+            .or_else(|| tab_container.current_title(cx))
+    }
+
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let kind = if self.workspace.is_some() {
+            ConnectionRestoreKind::RedisWorkspace
+        } else {
+            ConnectionRestoreKind::Redis
+        };
+        let connection_id = if kind.is_workspace() {
+            None
+        } else {
+            self.active_connection_id.or_else(|| {
+                self.connections
+                    .first()
+                    .and_then(|connection| connection.id)
+            })
+        };
+
+        if !kind.is_workspace() && connection_id.is_none() {
+            return JsonValue::Null;
+        }
+
+        ConnectionRestorePayload {
+            kind,
+            connection_id,
+            workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
+            active_connection_id: self.active_connection_id,
+            local_terminal: None,
+            ssh_terminal: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn on_activate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

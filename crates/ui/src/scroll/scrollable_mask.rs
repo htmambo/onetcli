@@ -27,12 +27,7 @@ impl ScrollableMask {
         }
     }
 
-    /// Enable the debug border, to show the mask bounds.
-    #[allow(dead_code)]
-    pub fn debug(mut self) -> Self {
-        self.debug = Some(gpui::yellow());
-        self
-    }
+
 }
 
 impl IntoElement for ScrollableMask {

@@ -7,8 +7,6 @@ index.scip
 *.log
 node_modules/
 
-.worktrees/
-
 # Rust build artifacts
 target/
 **/target/
@@ -40,6 +38,8 @@ Thumbs.db
 .Spotlight-V100
 .Trashes
 
+# Windows special device names
+nul
 
 # Environment variables
 .env
@@ -54,4 +54,10 @@ commit-info.md
 
 # macOS 应用图标（二进制资源，单独提交）
 resources/macos/OnetCli.icns
+
+# vibe coding
+.worktrees/
+.omc/
+.claude/
+.ace-tool/
 .superpowers/

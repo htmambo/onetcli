@@ -3,19 +3,19 @@ use crate::db_tree_view::get_icon_for_node_type;
 use db::{DbNode, DbNodeType, GlobalDbState, ObjectView};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, div, px, uniform_list,
+    AnyElement, App, AppContext, AsyncApp, Context, Div, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Stateful,
+    Styled, Subscription, WeakEntity, Window, div, px,
 };
-use gpui_component::button::Button;
+use gpui_component::WindowExt;
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::label::Label;
 use gpui_component::notification::Notification;
+use gpui_component::table::{Table, TableDelegate, TableEvent, TableState};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, h_flex, table::Column, tooltip::Tooltip, v_flex,
+    ActiveTheme, Icon, IconName, Sizable, Size, glass_sidebar_f64, h_flex, table::Column, v_flex,
 };
-use gpui_component::{InteractiveElementExt, WindowExt};
 use one_core::storage::manager::get_queries_dir;
 use one_core::storage::{
     ConnectionRepository, DatabaseType, DbConnectionConfig, GlobalStorageState, StorageManager,
@@ -25,7 +25,6 @@ use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::debouncer::Debouncer;
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -113,6 +112,118 @@ pub enum DatabaseObjectsBatchAction {
     DeleteQuery,
 }
 
+/// Table delegate for DatabaseObjects table view
+#[derive(Clone)]
+pub struct DatabaseObjectsTableDelegate {
+    pub columns: Vec<Column>,
+    pub rows: Vec<Vec<String>>,
+    pub filtered_rows: Vec<usize>,
+    pub db_node_type: DbNodeType,
+}
+
+impl Default for DatabaseObjectsTableDelegate {
+    fn default() -> Self {
+        Self {
+            columns: vec![],
+            rows: vec![],
+            filtered_rows: vec![],
+            db_node_type: DbNodeType::default(),
+        }
+    }
+}
+
+impl TableDelegate for DatabaseObjectsTableDelegate {
+    fn columns_count(&self, _cx: &App) -> usize {
+        self.columns.len() + 1
+    }
+
+    fn rows_count(&self, _cx: &App) -> usize {
+        self.filtered_rows.len()
+    }
+
+    fn column(&self, col_ix: usize, _cx: &App) -> Column {
+        if col_ix == 0 {
+            Column::new("#", "#").width(px(48.)).resizable(false)
+        } else {
+            self.columns
+                .get(col_ix - 1)
+                .cloned()
+                .unwrap_or_else(|| Column::new("col", "col"))
+        }
+    }
+
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let column = self.column(col_ix, cx);
+        let is_last = col_ix == self.columns_count(cx) - 1;
+
+        div()
+            .when(!is_last, |el| el.w(column.width))
+            .when(is_last, |el| el.flex_1())
+            .h_full()
+            .px_2()
+            .flex()
+            .items_center()
+            .text_sm()
+            .text_color(cx.theme().table_head_foreground)
+            .child(column.name.clone())
+    }
+
+    fn render_tr(
+        &mut self,
+        row_ix: usize,
+        _window: &mut Window,
+        _cx: &mut Context<TableState<Self>>,
+    ) -> Stateful<Div> {
+        div().id(row_ix)
+    }
+
+    fn render_td(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let Some(&original_row) = self.filtered_rows.get(row_ix) else {
+            return div().size_full().into_any_element();
+        };
+        let Some(row_values) = self.rows.get(original_row) else {
+            return div().size_full().into_any_element();
+        };
+
+        if col_ix == 0 {
+            return div()
+                .size_full()
+                .px_2()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child((row_ix + 1).to_string())
+                .into_any_element();
+        }
+
+        let data_col_ix = col_ix - 1;
+        let cell_value = row_values.get(data_col_ix).cloned().unwrap_or_default();
+
+        if data_col_ix == 0 {
+            let icon = get_icon_for_node_type(&self.db_node_type, cx.theme()).color();
+            h_flex()
+                .size_full()
+                .gap_2()
+                .items_center()
+                .child(icon)
+                .child(Label::new(cell_value))
+                .into_any_element()
+        } else {
+            div().size_full().child(cell_value).into_any_element()
+        }
+    }
+}
+
 pub struct DatabaseObjects {
     loaded_data: Entity<ObjectView>,
     // 直接管理表格数据
@@ -127,7 +238,10 @@ pub struct DatabaseObjects {
     search_seq: u64,
     search_debouncer: Arc<Debouncer>,
     current_node: Option<DbNode>,
+    // 用于批量操作时的多选记录
     selected_indices: HashSet<usize>,
+    // Table 状态
+    table: Entity<TableState<DatabaseObjectsTableDelegate>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -193,12 +307,37 @@ impl DatabaseObjects {
                         this.filtered_rows = (0..this.rows.len()).collect();
                         this.db_node_type = db_node_type;
                         this.selected_indices.clear();
+                        this.sync_table_delegate(cx);
+                        cx.emit(TabContentEvent::StateChanged);
                         cx.notify();
                     })
                     .ok();
             }
         })
         .detach();
+
+        // Create TableState with default delegate
+        let table_delegate = DatabaseObjectsTableDelegate::default();
+        let table = cx.new(|cx| {
+            TableState::new(table_delegate, window, cx)
+                .row_selectable(true)
+                .cell_selectable(false)
+        });
+
+        // Subscribe to table double-click events
+        let table_sub = cx.subscribe_in(
+            &table,
+            window,
+            move |this: &mut DatabaseObjects,
+                  _: &Entity<TableState<DatabaseObjectsTableDelegate>>,
+                  event: &TableEvent,
+                  _window,
+                  cx| {
+                if let TableEvent::DoubleClickedRow(row_ix) = event {
+                    this.handle_row_double_click(*row_ix, cx);
+                }
+            },
+        );
 
         Self {
             loaded_data,
@@ -214,7 +353,8 @@ impl DatabaseObjects {
             search_debouncer,
             current_node: None,
             selected_indices: HashSet::new(),
-            _subscriptions: vec![search_sub],
+            table,
+            _subscriptions: vec![search_sub, table_sub],
         }
     }
 
@@ -258,7 +398,6 @@ impl DatabaseObjects {
         }
 
         self.current_node = Some(node.clone());
-        self.selected_indices.clear();
         let node_clone = node.clone();
         let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
         let global_state = cx.global::<GlobalDbState>().clone();
@@ -299,6 +438,8 @@ impl DatabaseObjects {
                             this.filtered_rows = (0..this.rows.len()).collect();
                         }
                         this.selected_indices.clear();
+                        this.sync_table_delegate(cx);
+                        cx.emit(TabContentEvent::StateChanged);
                         cx.notify();
                     })
                     .ok();
@@ -307,17 +448,15 @@ impl DatabaseObjects {
         .detach();
     }
 
-    fn toggle_selection(&mut self, row_ix: usize, multi_select: bool) {
-        if multi_select {
-            if self.selected_indices.contains(&row_ix) {
-                self.selected_indices.remove(&row_ix);
-            } else {
-                self.selected_indices.insert(row_ix);
-            }
-        } else if !self.selected_indices.contains(&row_ix) {
-            self.selected_indices.clear();
-            self.selected_indices.insert(row_ix);
-        }
+    /// 同步 Table delegate 数据并刷新列组
+    fn sync_table_delegate(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |state, cx| {
+            state.delegate_mut().columns = self.columns.clone();
+            state.delegate_mut().rows = self.rows.clone();
+            state.delegate_mut().filtered_rows = self.filtered_rows.clone();
+            state.delegate_mut().db_node_type = self.db_node_type.clone();
+            state.refresh(cx);
+        });
     }
 
     fn apply_filter(&mut self) {
@@ -578,6 +717,24 @@ impl DatabaseObjects {
                 let query_id = row_data.get(1).cloned().unwrap_or_default();
                 metadata.insert("query_name".to_string(), name.clone());
                 metadata.insert("query_id".to_string(), query_id.clone());
+
+                // 重建 file_path 以支持双击打开查询
+                if let Ok(queries_dir) = get_queries_dir() {
+                    let db_name = if database.is_empty() {
+                        current_node.get_database_name().unwrap_or_default()
+                    } else {
+                        database.clone()
+                    };
+                    let file_path = queries_dir
+                        .join(database_type.as_str())
+                        .join(&connection_id)
+                        .join(&db_name)
+                        .join(format!("{}.sql", name));
+                    if let Some(path_str) = file_path.to_str() {
+                        metadata.insert("file_path".to_string(), path_str.to_string());
+                    }
+                }
+
                 (
                     format!("{}:queries:{}", connection_id, query_id),
                     DbNodeType::NamedQuery,
@@ -605,6 +762,77 @@ impl DatabaseObjects {
             .into_iter()
             .filter_map(|row_ix| self.build_node_for_row(row_ix))
             .collect()
+    }
+}
+
+impl DatabaseObjects {
+    fn tab_title_key(db_node_type: DbNodeType) -> &'static str {
+        match db_node_type {
+            DbNodeType::Connection => "Connection.connection_list",
+            DbNodeType::Database => "Database.database",
+            DbNodeType::Schema => "Schema.schema",
+            DbNodeType::TablesFolder | DbNodeType::Table => "DbTree.Tables",
+            DbNodeType::ColumnsFolder | DbNodeType::Column => "DbTree.Columns",
+            DbNodeType::IndexesFolder | DbNodeType::Index => "DbTree.Indexes",
+            DbNodeType::ForeignKeysFolder | DbNodeType::ForeignKey => "DbTree.ForeignKeys",
+            DbNodeType::TriggersFolder | DbNodeType::Trigger => "DbTree.Triggers",
+            DbNodeType::ChecksFolder | DbNodeType::Check => "DbTree.Checks",
+            DbNodeType::ViewsFolder | DbNodeType::View => "DbTree.Views",
+            DbNodeType::FunctionsFolder | DbNodeType::Function => "DbTree.Functions",
+            DbNodeType::ProceduresFolder | DbNodeType::Procedure => "DbTree.Procedures",
+            DbNodeType::SequencesFolder | DbNodeType::Sequence => "DbTree.Sequences",
+            DbNodeType::QueriesFolder | DbNodeType::NamedQuery => "Query.query_list",
+        }
+    }
+
+    fn tab_title_base(db_node_type: DbNodeType) -> String {
+        t!(Self::tab_title_key(db_node_type)).to_string()
+    }
+
+    fn should_show_database_name_in_title(db_node_type: DbNodeType) -> bool {
+        matches!(
+            db_node_type,
+            DbNodeType::Table | DbNodeType::View | DbNodeType::NamedQuery
+        )
+    }
+
+    fn compose_tab_title(
+        db_node_type: DbNodeType,
+        base_title: &str,
+        database_name: Option<&str>,
+    ) -> String {
+        if !Self::should_show_database_name_in_title(db_node_type) {
+            return base_title.to_string();
+        }
+
+        let database_name = database_name.map(str::trim).filter(|name| !name.is_empty());
+
+        match database_name {
+            Some(database_name) => format!("{}@{}", base_title, database_name),
+            None => base_title.to_string(),
+        }
+    }
+
+    fn tab_title(&self) -> String {
+        let base_title = Self::tab_title_base(self.db_node_type);
+        let database_name = self
+            .current_node
+            .as_ref()
+            .and_then(|node| node.get_database_name());
+
+        Self::compose_tab_title(self.db_node_type, &base_title, database_name.as_deref())
+    }
+
+    fn tab_width_size_for(db_node_type: DbNodeType) -> Size {
+        if Self::should_show_database_name_in_title(db_node_type) {
+            Size::Medium
+        } else {
+            Size::XSmall
+        }
+    }
+
+    fn tab_width_size(&self) -> Size {
+        Self::tab_width_size_for(self.db_node_type)
     }
 
     fn batch_action_for_event(event: &DatabaseObjectsEvent) -> Option<DatabaseObjectsBatchAction> {
@@ -640,136 +868,6 @@ impl DatabaseObjects {
         )
     }
 
-    fn render_header(
-        &self,
-        columns: &[Column],
-        show_row_number: bool,
-        cx: &App,
-    ) -> impl IntoElement {
-        let mut header = h_flex()
-            .h(px(32.))
-            .px_2()
-            .items_center()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .text_color(cx.theme().table_head_foreground)
-            .bg(cx.theme().table_head);
-
-        if show_row_number {
-            header = header.child(
-                div()
-                    .w(px(48.))
-                    .px_2()
-                    .text_sm()
-                    .text_color(cx.theme().table_head_foreground)
-                    .child(
-                        div()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_end()
-                            .child("#"),
-                    ),
-            );
-        }
-
-        let is_last_column = columns.len();
-        for (col_ix, column) in columns.iter().enumerate() {
-            let is_last = col_ix == is_last_column - 1;
-            header = header.child(
-                div()
-                    .when(!is_last, |el| el.w(column.width))
-                    .when(is_last, |el| el.flex_1())
-                    .h_full()
-                    .px_2()
-                    .text_sm()
-                    .text_color(cx.theme().table_head_foreground)
-                    .child(
-                        div()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .child(column.name.clone()),
-                    ),
-            );
-        }
-
-        header
-    }
-
-    fn render_row(
-        &self,
-        row_ix: usize,
-        row_values: &[String],
-        columns: &[Column],
-        show_row_number: bool,
-        is_selected: bool,
-        search_query: &str,
-        db_node_type: DbNodeType,
-        cx: &App,
-    ) -> impl IntoElement {
-        let mut row = h_flex()
-            .h(px(44.))
-            .px_2()
-            .items_center()
-            .when(is_selected, |el| el.bg(cx.theme().selection));
-
-        if show_row_number {
-            row = row.child(
-                div()
-                    .w(px(48.))
-                    .px_2()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child((row_ix + 1).to_string()),
-            );
-        }
-
-        let is_last_column = columns.len();
-        for (col_ix, column) in columns.iter().enumerate() {
-            let cell_value = row_values.get(col_ix).cloned().unwrap_or_default();
-            let tooltip_text = cell_value.clone();
-            let cell = if col_ix == 0 {
-                let icon = get_icon_for_node_type(&db_node_type, cx.theme()).color();
-                let label = if search_query.is_empty() {
-                    Label::new(cell_value)
-                } else {
-                    Label::new(cell_value).highlights(search_query.to_string())
-                };
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(icon)
-                    .child(label)
-                    .into_any_element()
-            } else {
-                div().child(cell_value).into_any_element()
-            };
-
-            // 最后一列使用 flex_1 自动填充剩余空间，其他列使用固定宽度
-            let is_last = col_ix == is_last_column - 1;
-            let cell_id = SharedString::from(format!("cell-{}-{}", row_ix, col_ix));
-            row = row.child(
-                div()
-                    .id(cell_id)
-                    .when(!is_last, |el| el.w(column.width))
-                    .when(is_last, |el| el.flex_1())
-                    .px_2()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    .when(!tooltip_text.is_empty(), |el| {
-                        el.tooltip(move |window, cx| {
-                            Tooltip::new(tooltip_text.clone()).build(window, cx)
-                        })
-                    })
-                    .child(cell),
-            );
-        }
-
-        row
-    }
-
     fn render_toolbar_buttons(
         &self,
         window: &mut Window,
@@ -790,6 +888,7 @@ impl DatabaseObjects {
         buttons.push({
             let node = current_node.clone();
             Button::new("refresh-data")
+                .ghost()
                 .with_size(Size::Medium)
                 .icon(IconName::Refresh)
                 .tooltip(t!("Common.refresh"))
@@ -811,6 +910,7 @@ impl DatabaseObjects {
                         let node = current_node.clone();
                         let event_fn = btn_config.event_fn;
                         Button::new(btn_config.id)
+                            .ghost()
                             .with_size(Size::Medium)
                             .icon(btn_config.icon)
                             .tooltip(btn_config.tooltip)
@@ -825,6 +925,7 @@ impl DatabaseObjects {
                     ToolbarButtonType::SelectedRow => {
                         let event_fn = btn_config.event_fn;
                         Button::new(btn_config.id)
+                            .ghost()
                             .with_size(Size::Medium)
                             .icon(btn_config.icon)
                             .tooltip(btn_config.tooltip)
@@ -886,13 +987,22 @@ impl Render for DatabaseObjects {
         let loaded_data = self.loaded_data.read(cx);
         let title = loaded_data.title.clone();
         let toolbar_buttons = self.render_toolbar_buttons(window, cx);
-        let columns = self.columns.clone();
-        let row_count = self.filtered_rows.len();
-        let show_row_number = true;
-        let search_query = self.search_query.clone();
-        let header = self.render_header(&columns, show_row_number, cx);
-        let list_columns = columns.clone();
-        let list_search_query = search_query.clone();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let glass_opacity = cx.theme().surface_opacity as f64 - 0.1;
+        let toolbar_bg = glass_sidebar_f64(cx.theme().background, blur_enabled, glass_opacity);
+        let toolbar_input_bg = glass_sidebar_f64(
+            cx.theme().input_background(),
+            blur_enabled,
+            glass_opacity - 0.08,
+        );
+
+        // Update delegate with current data (no refresh here, only when data actually changes)
+        self.table.update(cx, |state, _cx| {
+            state.delegate_mut().columns = self.columns.clone();
+            state.delegate_mut().rows = self.rows.clone();
+            state.delegate_mut().filtered_rows = self.filtered_rows.clone();
+            state.delegate_mut().db_node_type = self.db_node_type.clone();
+        });
 
         v_flex()
             .size_full()
@@ -904,7 +1014,7 @@ impl Render for DatabaseObjects {
                     .py_1()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .bg(toolbar_bg)
                     .children(toolbar_buttons)
                     .child(div().flex_1())
                     .child({
@@ -914,6 +1024,8 @@ impl Render for DatabaseObjects {
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),
                                 )
+                                .bg(toolbar_input_bg)
+                                .border_color(cx.theme().border.opacity(0.62))
                                 .cleanable(true)
                                 .small()
                                 .w_full(),
@@ -922,78 +1034,13 @@ impl Render for DatabaseObjects {
                     .into_any_element(),
             )
             .child(
-                v_flex().size_full().gap_2().child(header).child(
-                    div().flex_1().overflow_hidden().child(
-                        uniform_list("database-objects-list", row_count, {
-                            cx.processor(
-                                move |state: &mut Self, range: Range<usize>, _window, cx| {
-                                    let db_node_type = state.db_node_type.clone();
-                                    let show_row_number = true;
-                                    range
-                                        .map(|list_ix| {
-                                            let Some(original_row) =
-                                                state.filtered_rows.get(list_ix).copied()
-                                            else {
-                                                return div().id(list_ix).into_any_element();
-                                            };
-                                            let Some(row_values) = state.rows.get(original_row)
-                                            else {
-                                                return div().id(list_ix).into_any_element();
-                                            };
-
-                                            let is_selected =
-                                                state.selected_indices.contains(&list_ix);
-                                            let row_ix = list_ix;
-                                            div()
-                                                    .id(list_ix)
-                                                    .cursor_pointer()
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(
-                                                            move |this,
-                                                                  event: &MouseDownEvent,
-                                                                  _window,
-                                                                  cx| {
-                                                                let multi_select =
-                                                                    event.modifiers.secondary();
-                                                                this.toggle_selection(
-                                                                    row_ix,
-                                                                    multi_select,
-                                                                );
-                                                                cx.notify();
-                                                            },
-                                                        ),
-                                                    )
-                                                    .on_double_click(cx.listener(
-                                                        move |this, _, _window, cx| {
-                                                            this.handle_row_double_click(
-                                                                row_ix, cx,
-                                                            );
-                                                        },
-                                                    ))
-                                                    .child(state.render_row(
-                                                        row_ix,
-                                                        row_values,
-                                                        &list_columns,
-                                                        show_row_number,
-                                                        is_selected,
-                                                        &list_search_query,
-                                                        db_node_type.clone(),
-                                                        cx,
-                                                    ))
-                                                    .into_any_element()
-                                        })
-                                        .collect()
-                                },
-                            )
-                        })
-                        .flex_grow()
-                        .size_full()
-                        .with_sizing_behavior(ListSizingBehavior::Auto),
-                    ),
+                div().flex_1().overflow_hidden().child(
+                    Table::new(&self.table)
+                        .bordered(true)
+                        .with_size(Size::XSmall),
                 ),
             )
-            .child(div().p_2().text_sm().child(title))
+            .child(div().p_2().text_sm().bg(toolbar_bg).child(title))
     }
 }
 
@@ -1013,12 +1060,14 @@ impl Clone for DatabaseObjects {
             search_debouncer: self.search_debouncer.clone(),
             current_node: self.current_node.clone(),
             selected_indices: self.selected_indices.clone(),
+            table: self.table.clone(),
             _subscriptions: vec![],
         }
     }
 }
 
 impl EventEmitter<DatabaseObjectsEvent> for DatabaseObjects {}
+impl EventEmitter<TabContentEvent> for DatabaseObjects {}
 
 impl Focusable for DatabaseObjects {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -1028,13 +1077,20 @@ impl Focusable for DatabaseObjects {
 
 pub struct DatabaseObjectsPanel {
     database_objects: Entity<DatabaseObjects>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl DatabaseObjectsPanel {
     pub fn new(workspace: Option<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let database_objects = cx.new(|cx| DatabaseObjects::new(workspace, window, cx));
+        let state_sub = cx.subscribe(&database_objects, |_this, _, _: &TabContentEvent, cx| {
+            cx.emit(TabContentEvent::StateChanged);
+        });
 
-        Self { database_objects }
+        Self {
+            database_objects,
+            _subscriptions: vec![state_sub],
+        }
     }
 
     pub fn database_objects(&self) -> &Entity<DatabaseObjects> {
@@ -1078,7 +1134,18 @@ impl TabContent for DatabaseObjectsPanel {
         "DatabaseObjects"
     }
 
-    fn title(&self, _cx: &App) -> SharedString {
+    fn title(&self, cx: &App) -> SharedString {
+        let database_objects = self.database_objects.read(cx);
+        let title = database_objects.tab_title();
+        if !title.trim().is_empty() {
+            return SharedString::from(title);
+        }
+
+        let loaded_title = database_objects.loaded_data.read(cx).title.clone();
+        if !loaded_title.trim().is_empty() {
+            return loaded_title.into();
+        }
+
         SharedString::from(t!("DatabaseObjects.title"))
     }
 
@@ -1086,8 +1153,9 @@ impl TabContent for DatabaseObjectsPanel {
         false
     }
 
-    fn width_size(&self, _cx: &App) -> Option<Size> {
-        Some(Size::XSmall)
+    fn width_size(&self, cx: &App) -> Option<Size> {
+        let database_objects = self.database_objects.read(cx);
+        Some(database_objects.tab_width_size())
     }
 }
 
@@ -1095,6 +1163,89 @@ impl Clone for DatabaseObjectsPanel {
     fn clone(&self) -> Self {
         Self {
             database_objects: self.database_objects.clone(),
+            _subscriptions: vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DatabaseObjects;
+    use db::DbNodeType;
+    use gpui_component::Size;
+
+    #[test]
+    fn tab_title_key_distinguishes_database_and_table_lists() {
+        assert_eq!(
+            DatabaseObjects::tab_title_key(DbNodeType::Database),
+            "Database.database"
+        );
+        assert_eq!(
+            DatabaseObjects::tab_title_key(DbNodeType::Table),
+            "DbTree.Tables"
+        );
+    }
+
+    #[test]
+    fn compose_tab_title_appends_database_name_for_table_like_views() {
+        let table_title = DatabaseObjects::tab_title_base(DbNodeType::Table);
+        let view_title = DatabaseObjects::tab_title_base(DbNodeType::View);
+        let query_list_title = DatabaseObjects::tab_title_base(DbNodeType::NamedQuery);
+
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(DbNodeType::Table, &table_title, Some("analytics")),
+            format!("{table_title}@analytics")
+        );
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(DbNodeType::View, &view_title, Some("analytics")),
+            format!("{view_title}@analytics")
+        );
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(
+                DbNodeType::NamedQuery,
+                &query_list_title,
+                Some("analytics")
+            ),
+            format!("{query_list_title}@analytics")
+        );
+    }
+
+    #[test]
+    fn compose_tab_title_keeps_generic_titles_for_other_node_types() {
+        let connection_list_title = DatabaseObjects::tab_title_base(DbNodeType::Connection);
+        let database_title = DatabaseObjects::tab_title_base(DbNodeType::Database);
+
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(
+                DbNodeType::Connection,
+                &connection_list_title,
+                Some("demo")
+            ),
+            connection_list_title
+        );
+        assert_eq!(
+            DatabaseObjects::compose_tab_title(DbNodeType::Database, &database_title, Some("demo")),
+            database_title
+        );
+    }
+
+    #[test]
+    fn database_scoped_titles_use_medium_tab_width() {
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::Table),
+            Size::Medium
+        );
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::View),
+            Size::Medium
+        );
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::NamedQuery),
+            Size::Medium
+        );
+        assert_eq!(
+            DatabaseObjects::tab_width_size_for(DbNodeType::Database),
+            Size::XSmall
+        );
     }
 }

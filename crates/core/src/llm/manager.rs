@@ -63,6 +63,12 @@ impl ProviderManager {
             }
         };
 
+        // 缓存条目超过上限时清除最旧的条目（简单策略：超过 50 个时全部清理）
+        const MAX_PROVIDER_CACHE_SIZE: usize = 50;
+        if self.providers.len() >= MAX_PROVIDER_CACHE_SIZE {
+            self.providers.clear();
+        }
+
         self.providers.insert(
             id,
             ProviderCacheEntry {

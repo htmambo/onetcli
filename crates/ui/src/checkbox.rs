@@ -199,11 +199,7 @@ impl RenderOnce for Checkbox {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
-        let border_color = if checked {
-            cx.theme().primary
-        } else {
-            cx.theme().input
-        };
+        let border_color = cx.theme().primary;
         let color = if self.disabled {
             border_color.opacity(0.5)
         } else {

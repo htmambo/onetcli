@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::home_tab::HomePage;
 use gpui::{
     App, Context, Entity, InteractiveElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Task, Window, div, px,
+    StatefulInteractiveElement, Styled, Task, Window, div,
 };
 use gpui_component::{
     ActiveTheme, IconName, IndexPath, Sizable,
@@ -11,6 +11,7 @@ use gpui_component::{
     checkbox::Checkbox,
     h_flex,
     list::{ListDelegate, ListItem, ListState},
+    tokens::Radius,
     tooltip::Tooltip,
 };
 use one_core::storage::{StoredConnection, Workspace};
@@ -121,7 +122,7 @@ impl ListDelegate for WorkspaceFilterDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(px(4.0))
+                .rounded(Radius::Sm.px())
                 .on_click(move |_, _, cx| {
                     parent.update(cx, |this, cx| {
                         this.toggle_workspace_filter(item_id, cx);

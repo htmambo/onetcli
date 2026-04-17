@@ -975,11 +975,11 @@ impl PopupMenu {
         &self,
         action: Option<Box<dyn Action>>,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<Kbd> {
         let action = action?;
 
-        match self
+        let kbd = match self
             .action_context
             .as_ref()
             .and_then(|handle| Kbd::binding_for_action_in(action.as_ref(), handle, window))
@@ -987,12 +987,13 @@ impl PopupMenu {
             Some(kbd) => Some(kbd),
             // Fallback to App level key binding
             None => Kbd::binding_for_action(action.as_ref(), None, window),
-        }
-        .map(|this| {
+        };
+        let muted = cx.theme().muted;
+        kbd.map(move |this| {
             this.p_0()
                 .flex_nowrap()
                 .border_0()
-                .bg(gpui::transparent_white())
+                .bg(muted)
         })
     }
 
@@ -1094,7 +1095,7 @@ impl PopupMenu {
                 .p_0()
                 .my_0p5()
                 .mx_neg_1()
-                .border_b(px(2.))
+                .border_b(px(1.))
                 .border_color(cx.theme().border)
                 .disabled(true),
             PopupMenuItem::Label(label) => this.disabled(true).cursor_default().child(

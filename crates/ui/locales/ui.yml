@@ -242,6 +242,22 @@ Settings:
     zh-CN: 重置全部
     zh-HK: 重置全部
     it: Resetta Tutto
+EditTable:
+  filter_selected_count:
+    en: Selected %{selected} / %{total}
+    zh-CN: 已选 %{selected} / %{total}
+    zh-HK: 已選 %{selected} / %{total}
+    it: Selezionati %{selected} / %{total}
+  filter_select_all:
+    en: Select All
+    zh-CN: 全选
+    zh-HK: 全選
+    it: Seleziona tutto
+  filter_clear:
+    en: Clear
+    zh-CN: 清除
+    zh-HK: 清除
+    it: Cancella
 Pagination:
   previous:
     en: Previous

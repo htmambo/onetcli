@@ -82,7 +82,7 @@ impl KeyStorage for LocalFileStorage {
 
         fs::write(&path, &data).map_err(|e| format!("写入密钥文件失败: {}", e))?;
 
-        tracing::info!("[本地文件] 主密钥已保存");
+        // tracing::info!("[本地文件] 主密钥已保存");
         Ok(())
     }
 
@@ -95,7 +95,7 @@ impl KeyStorage for LocalFileStorage {
 
         let data = fs::read(&path).ok()?;
         if data.len() < 12 {
-            tracing::warn!("[本地文件] 密钥文件格式无效");
+            // tracing::warn!("[本地文件] 密钥文件格式无效");
             return None;
         }
 
@@ -106,7 +106,7 @@ impl KeyStorage for LocalFileStorage {
         let plaintext = cipher.decrypt(nonce, ciphertext).ok()?;
         let master_key = String::from_utf8(plaintext).ok()?;
 
-        tracing::info!("[本地文件] 成功读取密钥");
+        // tracing::info!("[本地文件] 成功读取密钥");
         Some(master_key)
     }
 
@@ -131,7 +131,7 @@ impl KeyStorage for LocalFileStorage {
 /// 设置全局密钥存储后端
 pub fn set_key_storage(storage: Arc<dyn KeyStorage>) {
     if let Ok(mut guard) = KEY_STORAGE.write() {
-        tracing::info!("[密钥存储] 切换到「{}」后端", storage.name());
+        // tracing::info!("[密钥存储] 切换到「{}」后端", storage.name());
         *guard = Some(storage);
     }
 }

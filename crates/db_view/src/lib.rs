@@ -15,6 +15,7 @@ pub mod mssql;
 pub mod mysql;
 pub mod oracle;
 pub mod postgresql;
+pub mod settings;
 mod sidebar;
 pub mod sql_editor;
 #[cfg(test)]
@@ -29,3 +30,4 @@ pub mod table_designer_tab;
 
 pub use common::DatabaseFormEvent;
 pub use one_core::ai_chat::ask_ai::{AskAiButton, emit_ask_ai_event, init_ask_ai_notifier};
+pub use settings::{DbViewSettings, current_db_undo_stack_size, set_db_view_settings};

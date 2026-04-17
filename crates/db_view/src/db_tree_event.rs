@@ -839,6 +839,7 @@ impl DatabaseEventHandler {
         );
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(t!("Table.import_data_to_table").to_string())
                 .size(900.0, 600.0),
             move |_window, _cx| import_view.clone(),
@@ -901,6 +902,7 @@ impl DatabaseEventHandler {
         .detach();
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(t!("ImportExport.export_table").to_string()).size(800.0, 600.0),
             move |_window, _cx| export_view.clone(),
             cx,
@@ -3478,6 +3480,7 @@ impl DatabaseEventHandler {
         };
 
         open_popup_window(
+            _window,
             PopupWindowOptions::new(t!("ImportExport.run_sql_file").to_string()).size(800.0, 520.0),
             move |window, cx| SqlRunView::new(connection_id, database, schema, window, cx),
             cx,
@@ -3533,8 +3536,9 @@ impl DatabaseEventHandler {
                     let database = database.clone();
                     let table = table.clone();
 
-                    cx.update_window(window_id, |_entity, _window, cx| {
+                    cx.update_window(window_id, |_entity, window, cx| {
                         open_popup_window(
+                            window,
                             PopupWindowOptions::new(t!("ImportExport.dump_sql_file").to_string())
                                 .size(800.0, 510.0),
                             move |window, cx| {

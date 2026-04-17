@@ -130,7 +130,7 @@ impl GroupBoxVariants for GroupBox {
 impl RenderOnce for GroupBox {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let (bg, border, has_paddings) = match self.variant {
-            GroupBoxVariant::Normal => (None, None, false),
+            GroupBoxVariant::Normal => (None, Some(cx.theme().border), false),
             GroupBoxVariant::Fill => (Some(cx.theme().group_box), None, true),
             GroupBoxVariant::Outline => (None, Some(cx.theme().border), true),
         };

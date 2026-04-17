@@ -23,7 +23,6 @@ pub(crate) static DEFAULT_THEME_COLORS: LazyLock<
     for theme in themes {
         let mut theme_color = ThemeColor::default();
         theme_color.apply_config(&theme, &ThemeColor::default());
-
         let highlight_theme = HighlightTheme {
             name: theme.name.to_string(),
             appearance: theme.mode,
@@ -120,6 +119,11 @@ impl ThemeRegistry {
     /// Returns a reference to the map of themes (including default themes).
     pub fn themes(&self) -> &HashMap<SharedString, Rc<ThemeConfig>> {
         &self.themes
+    }
+
+    /// Find a theme by name (case-sensitive).
+    pub fn get_by_name(&self, name: &str) -> Option<&Rc<ThemeConfig>> {
+        self.themes.get(name)
     }
 
     /// Returns a sorted list of themes.
