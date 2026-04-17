@@ -113,6 +113,10 @@ Home:
     en: Import
     zh-CN: 导入
     zh-HK: 導入
+  connection:
+    en: connection
+    zh-CN: 连接
+    zh-HK: 連線
   refresh:
     en: Refresh
     zh-CN: 刷新

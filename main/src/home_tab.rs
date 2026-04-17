@@ -7078,6 +7078,162 @@ impl TabContent for HomePage {
     fn width_size(&self, _cx: &App) -> Option<Size> {
         Some(Size::Small)
     }
+
+    fn status_summary(&self, _cx: &App) -> Option<SharedString> {
+        let workspace_count = self.workspaces.len();
+        let connection_count = self.connections.len();
+
+        let db_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::Database)
+            .count();
+        let ssh_sftp_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::SshSftp)
+            .count();
+        let redis_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::Redis)
+            .count();
+        let mongo_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::MongoDB)
+            .count();
+        let serial_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::Serial)
+            .count();
+
+        let mut breakdown = Vec::new();
+        if db_count > 0 {
+            breakdown.push(format!("DB:{}", db_count));
+        }
+        if ssh_sftp_count > 0 {
+            breakdown.push(format!("SSH:{}", ssh_sftp_count));
+        }
+        if redis_count > 0 {
+            breakdown.push(format!("Redis:{}", redis_count));
+        }
+        if mongo_count > 0 {
+            breakdown.push(format!("Mongo:{}", mongo_count));
+        }
+        if serial_count > 0 {
+            breakdown.push(format!("Ser:{}", serial_count));
+        }
+
+        let base = format!(
+            "{} {}，{} {}{}",
+            t!("Workspace.label"),
+            workspace_count,
+            t!("Home.connection"),
+            connection_count,
+            if breakdown.is_empty() { String::new() } else { format!("({})", breakdown.join("/")) }
+        );
+
+        Some(SharedString::from(base))
+    }
+
+    fn status_summary_element(
+        &self,
+        cx: &App,
+    ) -> Option<gpui::AnyElement> {
+        let workspace_count = self.workspaces.len();
+        let connection_count = self.connections.len();
+
+        let db_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::Database)
+            .count();
+        let ssh_sftp_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::SshSftp)
+            .count();
+        let redis_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::Redis)
+            .count();
+        let mongo_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::MongoDB)
+            .count();
+        let serial_count = self
+            .connections
+            .iter()
+            .filter(|c| c.connection_type == ConnectionType::Serial)
+            .count();
+
+        let fg = cx.theme().muted_foreground;
+        let fgc = cx.theme().foreground;
+
+        let mut parts: Vec<gpui::AnyElement> = vec![];
+        parts.push(
+            div()
+                .text_sm()
+                .text_color(fg)
+                .child(format!(
+                    "{} {}，{} {}(", t!("Workspace.label"), workspace_count, t!("Home.connection"), connection_count
+                ))
+                .into_any_element(),
+        );
+
+        if db_count > 0 {
+            parts.push(
+                Icon::new(IconName::Database).small().text_color(fg).into_any_element(),
+            );
+            parts.push(div().text_sm().text_color(fgc).child(db_count.to_string()).into_any_element());
+            if ssh_sftp_count > 0 || redis_count > 0 || mongo_count > 0 || serial_count > 0 {
+                parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
+            }
+        }
+        if ssh_sftp_count > 0 {
+            parts.push(
+                Icon::new(IconName::Terminal).small().text_color(fg).into_any_element(),
+            );
+            parts.push(div().text_sm().text_color(fgc).child(ssh_sftp_count.to_string()).into_any_element());
+            if redis_count > 0 || mongo_count > 0 || serial_count > 0 {
+                parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
+            }
+        }
+        if redis_count > 0 {
+            parts.push(Icon::new(IconName::Redis).small().text_color(fg).into_any_element());
+            parts.push(div().text_sm().text_color(fgc).child(redis_count.to_string()).into_any_element());
+            if mongo_count > 0 || serial_count > 0 {
+                parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
+            }
+        }
+        if mongo_count > 0 {
+            parts.push(Icon::new(IconName::MongoDB).small().text_color(fg).into_any_element());
+            parts.push(div().text_sm().text_color(fgc).child(mongo_count.to_string()).into_any_element());
+            if serial_count > 0 {
+                parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
+            }
+        }
+        if serial_count > 0 {
+            parts.push(Icon::new(IconName::SerialPort).small().text_color(fg).into_any_element());
+            parts.push(div().text_sm().text_color(fgc).child(serial_count.to_string()).into_any_element());
+        }
+
+        parts.push(div().text_sm().text_color(fg).child(")").into_any_element());
+
+        Some(
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap_1()
+                .children(parts)
+                .into_any_element(),
+        )
+    }
 }
 
 impl Render for HomePage {

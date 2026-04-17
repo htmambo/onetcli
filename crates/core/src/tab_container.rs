@@ -134,6 +134,12 @@ pub trait TabContent: EventEmitter<TabContentEvent> + Render + Focusable {
         None
     }
 
+    /// Get optional rich-element status summary for global status bars.
+    /// Returned elements are rendered directly (supports icons).
+    fn status_summary_element(&self, _cx: &App) -> Option<gpui::AnyElement> {
+        None
+    }
+
     /// Get optional subtitle shown below tab title (e.g., current path for terminals)
     fn subtitle(&self, cx: &App) -> Option<SharedString> {
         None
@@ -214,6 +220,7 @@ pub trait TabContentView: 'static + Send + Sync {
     fn title(&self, cx: &App) -> SharedString;
     fn icon(&self, cx: &App) -> Option<Icon>;
     fn status_summary(&self, cx: &App) -> Option<SharedString>;
+    fn status_summary_element(&self, cx: &App) -> Option<gpui::AnyElement>;
     fn subtitle(&self, cx: &App) -> Option<SharedString>;
     fn closeable(&self, cx: &App) -> bool;
     fn on_activate(&self, window: &mut Window, cx: &mut App);
@@ -251,6 +258,10 @@ impl<T: TabContent> TabContentView for Entity<T> {
 
     fn status_summary(&self, cx: &App) -> Option<SharedString> {
         self.read(cx).status_summary(cx)
+    }
+
+    fn status_summary_element(&self, cx: &App) -> Option<gpui::AnyElement> {
+        self.read(cx).status_summary_element(cx)
     }
 
     fn subtitle(&self, cx: &App) -> Option<SharedString> {
@@ -1782,6 +1793,18 @@ impl TabContainer {
         }
 
         Some(normalized_summary.to_string().into())
+    }
+
+    pub fn current_status_summary_element(
+        &self,
+        cx: &App,
+    ) -> Option<gpui::AnyElement> {
+        let current_tab = if self.pinned_tab_active {
+            self.pinned_tab.as_ref()
+        } else {
+            self.active_tab()
+        }?;
+        current_tab.content().status_summary_element(cx)
     }
 
     pub fn set_size(&mut self, size: Size, cx: &mut Context<Self>) {

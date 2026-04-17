@@ -1120,7 +1120,7 @@ impl OnetCliApp {
             .when(ssh > 0, |this| {
                 this.child(
                     Icon::new(IconName::Terminal)
-                        .xsmall()
+                        .small()
                         .text_color(cx.theme().muted_foreground),
                 )
                 .child(
@@ -1144,7 +1144,7 @@ impl OnetCliApp {
             .when(db > 0, |this| {
                 this.child(
                     Icon::new(IconName::Database)
-                        .xsmall()
+                        .small()
                         .text_color(cx.theme().muted_foreground),
                 )
                 .child(
@@ -1168,7 +1168,7 @@ impl OnetCliApp {
             .when(redis > 0, |this| {
                 this.child(
                     Icon::new(IconName::Redis)
-                        .xsmall()
+                        .small()
                         .text_color(cx.theme().muted_foreground),
                 )
                 .child(
@@ -1192,7 +1192,7 @@ impl OnetCliApp {
             .when(mongo > 0, |this| {
                 this.child(
                     Icon::new(IconName::MongoDB)
-                        .xsmall()
+                        .small()
                         .text_color(cx.theme().muted_foreground),
                 )
                 .child(
@@ -1221,7 +1221,7 @@ impl OnetCliApp {
             .when(sftp > 0, |this| {
                 this.child(
                     Icon::new(IconName::FolderOpen)
-                        .xsmall()
+                        .small()
                         .text_color(cx.theme().muted_foreground),
                 )
                 .child(
@@ -1234,7 +1234,7 @@ impl OnetCliApp {
             .when(sql_chat > 0, |this| {
                 this.child(
                     Icon::new(IconName::Bot)
-                        .xsmall()
+                        .small()
                         .text_color(cx.theme().muted_foreground),
                 )
                 .child(
@@ -1254,11 +1254,13 @@ impl OnetCliApp {
     }
 
     fn render_global_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let status_summary = {
+        // 获取富文本状态摘要（优先），否则降级到纯文本
+        let (status_summary_element, status_summary) = {
             let tab_container = self.tab_container.read(cx);
-            tab_container
-                .current_status_summary(cx)
-                .map(|summary| summary.to_string())
+            (
+                tab_container.current_status_summary_element(cx),
+                tab_container.current_status_summary(cx).map(|s| s.to_string()),
+            )
         };
 
         // 获取系统监控数据（复制字段以避免借用冲突）
@@ -1283,43 +1285,42 @@ impl OnetCliApp {
             .border_t_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().muted)
-            .child(
+            .child({
+                let left = if let Some(element) = status_summary_element {
+                    div().flex_1().min_w_0().truncate().child(element)
+                } else if let Some(s) = status_summary {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .truncate()
+                        .child(s)
+                } else {
+                    div()
+                };
                 h_flex()
                     .flex_1()
                     .min_w_0()
                     .items_center()
                     .gap_3()
-                    .when_some(status_summary, |this, summary| {
-                        this.child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .truncate()
-                                .child(summary),
-                        )
-                    }),
-            )
+                    .child(left)
+            })
             .child(
                 h_flex()
                     .items_center()
-                    .gap_4()
+                    .gap_2()
                     .when(total_connections > 0, |this| {
-                        this
-                            // 连接统计：总数(Terminal:数量/Redis:数量/Mongo:数量/HardDrive:数量)
-                            .child(Self::render_connection_stats(
-                                total_connections,
-                                conn_stats.ssh,
-                                conn_stats.db,
-                                conn_stats.redis,
-                                conn_stats.mongo,
-                                conn_stats.sftp,
-                                conn_stats.sql_chat,
-                                cx,
-                            ))
-                            // 分隔
-                            .child(div().h(px(12.0)).w(px(1.0)).bg(cx.theme().border))
+                        this.child(Self::render_connection_stats(
+                            total_connections,
+                            conn_stats.ssh,
+                            conn_stats.db,
+                            conn_stats.redis,
+                            conn_stats.mongo,
+                            conn_stats.sftp,
+                            conn_stats.sql_chat,
+                            cx,
+                        ))
                     })
                     // 内存: 图标 + 已用/总量(应用)
                     .child(
@@ -1329,7 +1330,7 @@ impl OnetCliApp {
                             .flex_shrink_0()
                             .child(
                                 Icon::new(IconName::MemoryStick)
-                                    .xsmall()
+                                    .small()
                                     .text_color(cx.theme().muted_foreground),
                             )
                             .child(div().text_xs().text_color(cx.theme().foreground).child(
@@ -1354,7 +1355,7 @@ impl OnetCliApp {
                             .flex_shrink_0()
                             .child(
                                 Icon::new(IconName::Cpu)
-                                    .xsmall()
+                                    .small()
                                     .text_color(cx.theme().muted_foreground),
                             )
                             .child(
