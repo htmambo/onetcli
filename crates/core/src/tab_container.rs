@@ -2392,16 +2392,7 @@ impl TabContainer {
                                 .child(pinned_title.to_string()),
                         ),
                 )
-                // Separator between pinned tab and scrollable tabs
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .mx_1()
-                        .when_some(top_padding, |el, padding| el.mt(padding))
-                        .w(px(1.0))
-                        .h(px(16.0))
-                        .bg(border_color),
-                )
+                // 分隔线已移除，改用 ml_1() 间隔
             })
             .child(
                 h_flex()
@@ -2409,6 +2400,7 @@ impl TabContainer {
                     .flex_1()
                     .min_w(px(0.0))
                     .relative()
+                    .ml_1()
                     // `overflow_hidden()` + `track_scroll()` 保留横向滚动能力，
                     // 同时隐藏系统滚动条；滚轮事件只作用于 tab 列表本身。
                     // Windows 使用 window_control_area(WindowControlArea::Drag) 提供原生拖动。
