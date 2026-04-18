@@ -46,7 +46,8 @@ use one_core::connection_restore::{
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
-use one_core::tab_container::{TabContent, TabContentEvent};
+use one_core::tab_container::{TabContent, TabContentEvent, TabContainer};
+use gpui::AnyWindowHandle;
 use one_core::RunningState;
 use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
@@ -637,6 +638,11 @@ pub struct TerminalView {
 
     scrollbar_metrics: Rc<RefCell<TerminalScrollbarMetrics>>,
     scrollbar_handle: TerminalScrollbarHandle,
+
+    /// 用于直接关闭标签页的 TabContainer 引用
+    tab_container: Option<Entity<TabContainer>>,
+    /// 当前窗口句柄，用于关闭标签页时传递 Window 参数
+    window_handle: Option<AnyWindowHandle>,
 }
 
 /// Mouse interaction state
@@ -937,7 +943,7 @@ impl TerminalView {
         let sidebar_subscription = cx.subscribe_in(&sidebar, window, Self::handle_sidebar_event);
 
         // 订阅 Terminal 事件
-        let terminal_subscription = cx.subscribe(&terminal, Self::handle_terminal_event);
+        let terminal_subscription = cx.subscribe_in(&terminal, window, Self::handle_terminal_event);
 
         // 订阅 BlinkCursor 变化
         let blink_subscription = cx.observe(&blink_manager, |this, _, cx| {
@@ -1022,6 +1028,8 @@ impl TerminalView {
             view_bounds: Bounds::default(),
             scrollbar_metrics,
             scrollbar_handle,
+            tab_container: None,
+            window_handle: None,
         };
         let initial_settings = current_settings(cx);
         this.apply_settings_snapshot(&initial_settings, window, cx);
@@ -1727,8 +1735,9 @@ impl TerminalView {
 
     fn handle_terminal_event(
         &mut self,
-        _terminal: Entity<Terminal>,
+        _terminal: &Entity<Terminal>,
         event: &TerminalModelEvent,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         tracing::debug!(
@@ -1760,7 +1769,7 @@ impl TerminalView {
             TerminalModelEvent::ChildExit(_) => {
                 // 用户通过 exit 命令退出时，如果设置了直接关闭行为，则自动关闭 tab
                 if self.exit_behavior == "close" {
-                    self.request_close(cx);
+                    self.request_close_from_event(_window, cx);
                 }
                 cx.notify();
             }
@@ -2186,7 +2195,21 @@ impl TerminalView {
         });
     }
 
-    fn request_close(&self, cx: &mut Context<Self>) {
+    pub fn set_tab_container(&mut self, container: Entity<TabContainer>) {
+        tracing::info!("set_tab_container called: container_id={:?}", container.entity_id());
+        self.tab_container = Some(container);
+    }
+
+    pub fn set_window_handle(&mut self, window: AnyWindowHandle) {
+        tracing::info!("set_window_handle called: {:?}", window);
+        self.window_handle = Some(window);
+    }
+
+    fn request_close(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(TerminalViewEvent::Close);
+    }
+
+    fn request_close_from_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         cx.emit(TerminalViewEvent::Close);
     }
 
@@ -3105,7 +3128,6 @@ impl TerminalView {
         div()
             .absolute()
             .inset_0()
-            .occlude()
             .flex()
             .items_center()
             .justify_center()
@@ -3213,8 +3235,8 @@ impl TerminalView {
                                     Button::new("close-tab-btn")
                                         .label(t!("Common.close"))
                                         .warning()
-                                        .on_click(cx.listener(|this, _, _window, cx| {
-                                            this.request_close(cx);
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.request_close(window, cx);
                                         })),
                                 )
                                 .when(can_reconnect, |el| {

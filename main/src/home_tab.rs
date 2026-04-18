@@ -999,6 +999,7 @@ impl HomePage {
                 gpui_component::notification::Notification::warning(feedback.message.clone())
             }
             SyncFeedbackLevel::Error => {
+                tracing::warn!(target: "sync", "{}", feedback.message);
                 gpui_component::notification::Notification::error(feedback.message.clone())
             }
         }

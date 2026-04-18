@@ -173,7 +173,14 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        tracing::info!("setup_terminal_view called, tab_container={:?}", self.tab_container.entity_id());
         self.register_terminal_view(terminal_view);
+        terminal_view.update(cx, |view, cx| {
+            view.set_tab_container(self.tab_container.clone());
+            if let Some(wh) = cx.active_window() {
+                view.set_window_handle(wh);
+            }
+        });
 
         // 从 AppSettings 读取所有终端设置并应用
         if cx.has_global::<AppSettings>() {
@@ -524,15 +531,14 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        tracing::info!("open_ssh_terminal_with_state called, conn_id={:?}", conn.id);
         let conn_id = conn.id.unwrap_or(0);
-        // 使用时间戳生成唯一 tab_id，支持同一连接打开多个 SSH 终端
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let tab_id = format!("ssh-terminal-{}-{}", conn_id, timestamp);
 
-        // 统计同一连接的 SSH 终端数量，计算序号
         let prefix = format!("ssh-terminal-{}-", conn_id);
         let existing_count = self
             .tab_container
@@ -579,6 +585,7 @@ impl HomePage {
                 )
             }
         });
+        self.setup_terminal_view(&terminal_view, window, cx);
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);
@@ -614,6 +621,7 @@ impl HomePage {
 
         let terminal_view =
             cx.new(|cx| TerminalView::new_serial_with_index(conn, tab_index, window, cx));
+        self.setup_terminal_view(&terminal_view, window, cx);
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "serial", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);
@@ -697,6 +705,7 @@ impl HomePage {
                                 sync_path,
                             )
                         });
+                        this.setup_terminal_view(&terminal_view, window, cx);
                         tab_container.update(cx, |tc, cx| {
                             let tab = TabItem::new(tab_id, "ssh", terminal_view);
                             tc.add_and_activate_tab_with_focus(tab, window, cx);
