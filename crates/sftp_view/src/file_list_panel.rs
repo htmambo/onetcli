@@ -943,6 +943,7 @@ impl FileListPanel {
         let path_for_rename = full_path.to_string();
         let name_for_download = name.to_string();
         let path_for_download = full_path.to_string();
+        let path_for_edit = full_path.to_string();
         let name_for_permissions = name.to_string();
         let path_for_permissions = full_path.to_string();
         let path_for_terminal = full_path.to_string();
@@ -993,30 +994,43 @@ impl FileListPanel {
         );
 
         if is_remote {
-            menu = menu
-                .item(
-                    PopupMenuItem::new(t!("Common.download").to_string())
-                        .icon(IconName::ArrowDown)
-                        .on_click(window.listener_for(&view_download, move |_this, _, _, cx| {
-                            cx.emit(FileListPanelEvent::Download {
-                                name: name_for_download.clone(),
-                                full_path: path_for_download.clone(),
+            let view_download = view_ref.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t!("Common.download").to_string())
+                    .icon(IconName::ArrowDown)
+                    .on_click(window.listener_for(&view_download, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::Download {
+                            name: name_for_download.clone(),
+                            full_path: path_for_download.clone(),
+                        });
+                    })),
+            );
+
+            if !is_dir {
+                let view_edit = view_ref.clone();
+                menu = menu.item(PopupMenuItem::new("Edit").icon(IconName::Edit).on_click(
+                    window.listener_for(&view_edit, move |_this, _, _, cx| {
+                        cx.emit(FileListPanelEvent::Edit {
+                            full_path: path_for_edit.clone(),
+                        });
+                        }),
+                ));
+            }
+
+            let view_permissions = view_ref.clone();
+            menu = menu.item(
+                PopupMenuItem::new(t!("File.change_permission").to_string())
+                    .icon(IconName::Key)
+                    .on_click(window.listener_for(
+                        &view_permissions,
+                        move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::ChangePermissions {
+                                name: name_for_permissions.clone(),
+                                full_path: path_for_permissions.clone(),
                             });
-                        })),
-                )
-                .item(
-                    PopupMenuItem::new(t!("File.change_permission").to_string())
-                        .icon(IconName::Key)
-                        .on_click(window.listener_for(
-                            &view_permissions,
-                            move |_this, _, _, cx| {
-                                cx.emit(FileListPanelEvent::ChangePermissions {
-                                    name: name_for_permissions.clone(),
-                                    full_path: path_for_permissions.clone(),
-                                });
-                            },
-                        )),
-                );
+                        },
+                    )),
+            );
         } else {
             menu = menu.item(
                 PopupMenuItem::new(t!("Common.upload").to_string())
@@ -1299,7 +1313,11 @@ impl FileListPanel {
 #[derive(Clone, Debug)]
 pub enum FileListPanelEvent {
     PathChanged(String),
-    ItemDoubleClicked(String),
+    ItemDoubleClicked {
+        name: String,
+        full_path: String,
+        is_dir: bool,
+    },
     SelectionChanged(Vec<String>),
     /// 新建文件
     NewFile,
@@ -1313,6 +1331,9 @@ pub enum FileListPanelEvent {
     /// 下载文件/文件夹
     Download {
         name: String,
+        full_path: String,
+    },
+    Edit {
         full_path: String,
     },
     /// 修改权限
@@ -1556,9 +1577,11 @@ impl Render for FileListPanel {
                                                 .hover(|style| style.bg(cx.theme().list_hover))
                                                 .on_double_click(cx.listener(
                                                     move |_this, _, _window, cx| {
-                                                        cx.emit(FileListPanelEvent::ItemDoubleClicked(
-                                                            "..".to_string(),
-                                                        ));
+                                                        cx.emit(FileListPanelEvent::ItemDoubleClicked {
+                                                            name: "..".to_string(),
+                                                            full_path: "..".to_string(),
+                                                            is_dir: true,
+                                                        });
                                                     },
                                                 ))
                                                 .context_menu(move |menu, window, cx| {
@@ -1678,12 +1701,13 @@ impl Render for FileListPanel {
                                             )
                                             .on_double_click(cx.listener({
                                                 let name = item_name.clone();
+                                                let full_path = full_path.clone();
                                                 move |_this, _, _window, cx| {
-                                                    if is_dir {
-                                                        cx.emit(FileListPanelEvent::ItemDoubleClicked(
-                                                            name.clone(),
-                                                        ));
-                                                    }
+                                                    cx.emit(FileListPanelEvent::ItemDoubleClicked {
+                                                        name: name.clone(),
+                                                        full_path: full_path.clone(),
+                                                        is_dir,
+                                                    });
                                                 }
                                             }))
                                             .context_menu(move |menu, window, cx| {

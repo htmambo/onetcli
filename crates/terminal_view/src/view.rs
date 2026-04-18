@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::addon::{
     AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
@@ -2233,13 +2234,39 @@ impl TerminalView {
             .read(cx)
             .current_working_dir()
             .map(str::to_string);
-        self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.reconnect_file_manager(working_dir, cx);
-            sidebar.reconnect_server_monitor(cx);
-        });
         self.terminal.update(cx, |terminal, cx| {
             terminal.reconnect(cx);
         });
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                let state = match this.update(cx, |this, cx| {
+                    this.terminal.read(cx).connection_state().clone()
+                }) {
+                    Ok(state) => state,
+                    Err(_) => break,
+                };
+
+                match state {
+                    ConnectionState::Connected => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.sidebar.update(cx, |sidebar, cx| {
+                                sidebar.reconnect_file_manager(working_dir.clone(), cx);
+                                sidebar.reconnect_server_monitor(cx);
+                            });
+                        });
+                        break;
+                    }
+                    ConnectionState::Disconnected { .. } => break,
+                    ConnectionState::Connecting => {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                    }
+                }
+            }
+        })
+        .detach();
     }
 
     pub fn set_tab_container(&mut self, container: Entity<TabContainer>) {

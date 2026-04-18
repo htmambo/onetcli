@@ -8725,6 +8725,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
+name = "remote_file_editor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "gpui-component",
+ "one-core",
+ "sftp",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "rend"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9860,6 +9873,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "one-core",
+ "remote_file_editor",
  "rust-i18n",
  "sftp",
  "ssh",
@@ -10829,6 +10843,7 @@ dependencies = [
  "one-core",
  "one-ui",
  "regex",
+ "remote_file_editor",
  "rust-i18n",
  "serde",
  "serde_json",
