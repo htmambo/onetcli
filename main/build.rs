@@ -8,9 +8,10 @@ fn main() {
         "ONETCLI_PAYPAL_QR_URL",
     ] {
         println!("cargo:rerun-if-env-changed={key}");
-        if let Ok(val) = std::env::var(key)
-            && !val.is_empty()
-        {
+        let Ok(val) = std::env::var(key) else {
+            continue;
+        };
+        if !val.is_empty() {
             println!("cargo:rustc-env={key}={val}");
         }
     }

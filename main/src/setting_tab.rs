@@ -397,7 +397,8 @@ impl GlobalProxySettings {
             self.host.trim(),
             self.port
         );
-        let mut url = Url::parse(&base).map_err(|err| t!("Settings.proxy.validation_url_format", error = err))?;
+        let mut url = Url::parse(&base)
+            .map_err(|err| t!("Settings.proxy.validation_url_format", error = err))?;
 
         if !self.username.trim().is_empty() {
             url.set_username(self.username.trim())

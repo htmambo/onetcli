@@ -253,7 +253,8 @@ copy_package_files() {
         "${STAGING_DIR}/usr/share/icons/hicolor/128x128/apps" \
         "${STAGING_DIR}/usr/share/icons/hicolor/256x256/apps" \
         "${STAGING_DIR}/usr/share/icons/hicolor/512x512/apps" \
-        "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}"
+        "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}" \
+        "${STAGING_DIR}/usr/share/onetcli/themes"
 
     install -m 755 "${BINARY_PATH}" "${STAGING_DIR}/usr/bin/${BINARY_NAME}"
     install -m 644 "${PROJECT_DIR}/resources/linux/onetcli.desktop" \
@@ -270,6 +271,15 @@ copy_package_files() {
         "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}/LICENSE-APACHE"
     install -m 644 "${PROJECT_DIR}/ONETCLI_LICENSE" \
         "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}/ONETCLI_LICENSE"
+
+    # Copy bundled themes to /usr/share/onetcli/themes
+    if [[ -d "${PROJECT_DIR}/themes" ]]; then
+        for theme_file in "${PROJECT_DIR}/themes"/*.json; do
+            if [[ -f "${theme_file}" ]]; then
+                install -m 644 "${theme_file}" "${STAGING_DIR}/usr/share/onetcli/themes/"
+            fi
+        done
+    fi
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then

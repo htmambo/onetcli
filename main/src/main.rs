@@ -48,15 +48,18 @@ fn main() {
 
         setting_tab::init_settings(cx);
 
-        // 异步加载 themes/ 目录下的外部主题文件，并在加载完成后重新应用当前主题配置
-        if let Err(err) = gpui_component::ThemeRegistry::watch_dir(
-            std::path::PathBuf::from("./themes"),
-            cx,
-            |cx| {
-                let settings = AppSettings::global(cx).clone();
-                settings.apply_theme_preferences(None, cx);
-            },
-        ) {
+        // 首次启动时从绑定到二进制的主题包复制主题文件到用户目录
+        if let Err(err) = one_core::storage::manager::ensure_themes_copied() {
+            tracing::warn!("Failed to copy bundled themes: {}", err);
+        }
+
+        // 开发态直接观察工作区 themes/，安装态观察用户主题目录。
+        let themes_dir = one_core::storage::manager::get_runtime_themes_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("./themes"));
+        if let Err(err) = gpui_component::ThemeRegistry::watch_dir(themes_dir, cx, |cx| {
+            let settings = AppSettings::global(cx).clone();
+            settings.apply_theme_preferences(None, cx);
+        }) {
             tracing::error!("Failed to watch themes directory: {}", err);
         }
 

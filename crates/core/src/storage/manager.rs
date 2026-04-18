@@ -4,7 +4,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use gpui::{App, Global};
 use std::any::{Any, TypeId};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::error;
@@ -111,6 +111,114 @@ pub fn get_download_dir() -> Option<PathBuf> {
     dirs::download_dir()
 }
 
+/// Returns the user-facing themes directory.
+/// Uses `~/.config/one-hub/themes` on Linux/macOS and `%APPDATA%/one-hub/themes` on Windows.
+pub fn get_themes_dir() -> Result<PathBuf> {
+    let config_dir = get_config_dir()?;
+    Ok(config_dir.join("themes"))
+}
+
+/// 返回当前运行态应使用的主题目录。
+/// 开发态（`cargo run -p main` / `target/...`）直接读取工作区 `themes/`，
+/// 安装态继续读取用户配置目录。
+pub fn get_runtime_themes_dir() -> Result<PathBuf> {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(dev_themes_dir) = find_workspace_themes_dir_for_exe(&exe_path) {
+            return Ok(dev_themes_dir);
+        }
+    }
+
+    get_themes_dir()
+}
+
+/// Copies bundled default themes to the user's themes directory if none exist.
+/// This is called on first run to populate the user's theme collection.
+pub fn ensure_themes_copied() -> Result<()> {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if find_workspace_themes_dir_for_exe(&exe_path).is_some() {
+            return Ok(());
+        }
+    }
+
+    let themes_dir = get_themes_dir()?;
+    if themes_dir.exists() {
+        if theme_dir_has_json(&themes_dir) {
+            return Ok(());
+        }
+    }
+
+    std::fs::create_dir_all(&themes_dir)?;
+
+    if let Some(bundled) = find_bundled_themes_dir() {
+        if bundled.exists() {
+            for entry in std::fs::read_dir(bundled)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    let file_name = path.file_name().unwrap();
+                    let dest = themes_dir.join(file_name);
+                    std::fs::copy(&path, &dest)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    Ok(())
+}
+
+/// Finds the bundled themes directory relative to the current executable.
+/// On Linux: /path/to/onetcli/../share/onetcli/themes
+/// On macOS: /path/to/onetcli/../share/onetcli/themes
+fn find_bundled_themes_dir() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+
+    // Installed: look for share/onetcli/themes relative to executable
+    #[cfg(target_os = "linux")]
+    let installed_path = exe_dir.join("../share/onetcli/themes");
+
+    #[cfg(target_os = "macos")]
+    let installed_path = exe_dir.join("../../share/onetcli/themes");
+
+    #[cfg(target_os = "windows")]
+    let installed_path = exe_dir.join("../share/onetcli/themes");
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    let installed_path = exe_dir.join("share/onetcli/themes");
+
+    if let Ok(installed) = installed_path.canonicalize() {
+        if installed.exists() {
+            return Some(installed);
+        }
+    }
+
+    None
+}
+
+fn find_workspace_themes_dir_for_exe(exe_path: &Path) -> Option<PathBuf> {
+    let target_dir = exe_path
+        .parent()?
+        .ancestors()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some("target"))?;
+    let workspace_dir = target_dir.parent()?;
+    let themes_dir = workspace_dir.join("themes");
+
+    if workspace_dir.join("Cargo.toml").is_file() && theme_dir_has_json(&themes_dir) {
+        return Some(themes_dir);
+    }
+
+    None
+}
+
+fn theme_dir_has_json(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+}
+
 pub fn get_queries_dir() -> Result<PathBuf> {
     let config_dir = get_config_dir()?;
     let queries_dir = config_dir.join("queries");
@@ -137,3 +245,7 @@ pub fn init(cx: &mut App) {
     };
     cx.set_global(global_storage_state)
 }
+
+#[cfg(test)]
+#[path = "manager_tests.rs"]
+mod tests;
