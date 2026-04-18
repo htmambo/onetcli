@@ -1,0 +1,190 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Codium Dark",
+  "author": "Generated from tabby-community-color-schemes (codium-dark)",
+  "url": "https://github.com/pineapplegiant/spaceduck",
+  "themes": [
+    {
+      "name": "Codium Dark",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#482050",
+        "accent.foreground": "#f7eded",
+        "background": "#2c1438",
+        "border": "#3d2049",
+        "window_border": "#c678dd",
+        "ring": "#c678dd",
+        "danger.active.background": "#9338b3",
+        "danger.background": "#752194",
+        "danger.foreground": "#f7eded",
+        "danger.hover.background": "#a846c2",
+        "foreground": "#f7eded",
+        "input.border": "#482050",
+        "link.active.foreground": "#c678dd",
+        "link.foreground": "#c678dd",
+        "link.hover.foreground": "#da9aea",
+        "list.active.background": "#75219433",
+        "list.active.border": "#c678dd",
+        "list.even.background": "#321548",
+        "list.hover.background": "#3d204966",
+        "muted.background": "#3d204966",
+        "muted.foreground": "#b090b7",
+        "panel.background": "#1e0d28",
+        "popover.background": "#2c1438",
+        "popover.foreground": "#f7eded",
+        "primary.active.background": "#9338b3",
+        "primary.background": "#c678dd",
+        "primary.foreground": "#2c1438",
+        "primary.hover.background": "#da9aea",
+        "progress.bar.background": "#3d2049",
+        "scrollbar.background": "#2c143800",
+        "scrollbar.thumb.background": "#482050",
+        "scrollbar.thumb.hover.background": "#582060",
+        "secondary.active.background": "#582060",
+        "secondary.background": "#3d2049",
+        "secondary.foreground": "#f7eded",
+        "secondary.hover.background": "#482050",
+        "selection.background": "#752194",
+        "sidebar.accent.background": "#c678dd",
+        "sidebar.accent.foreground": "#2c1438",
+        "sidebar.background": "#1e0d28",
+        "sidebar.border": "#3d2049",
+        "sidebar.foreground": "#e7bbf7",
+        "sidebar.primary.background": "#3d2049",
+        "sidebar.primary.foreground": "#f7eded",
+        "skeleton.background": "#3d204966",
+        "slider.background": "#3d2049",
+        "slider.thumb.background": "#c678dd",
+        "success.active.background": "#724582",
+        "success.background": "#581a69",
+        "success.foreground": "#f7eded",
+        "success.hover.background": "#682075",
+        "switch.background": "#3d2049",
+        "switch.thumb.background": "#c678dd",
+        "tab.active.background": "#9030a0",
+        "tab.active.foreground": "#f7eded",
+        "tab.background": "#321548",
+        "tab.foreground": "#b090b7",
+        "tab_bar.background": "#1e0d28",
+        "tab_bar.segmented.background": "#321548",
+        "title_bar.background": "#1e0d28",
+        "title_bar.border": "#3d2049",
+        "tiles.background": "#321548",
+        "warning.active.background": "#c678dd",
+        "warning.background": "#581a69",
+        "warning.foreground": "#f7eded",
+        "warning.hover.background": "#682075",
+        "chart.1": "#c678dd",
+        "chart.2": "#e7bbf7",
+        "chart.3": "#752194",
+        "chart.4": "#724582",
+        "chart.5": "#581a69",
+        "base.magenta": "#c678dd",
+        "base.magenta.light": "#c678dd33",
+        "base.red": "#752194",
+        "base.green": "#582572",
+        "base.yellow": "#724582",
+        "base.blue": "#582572",
+        "base.cyan": "#481359"
+      },
+      "highlight": {
+        "editor.foreground": "#f7eded",
+        "editor.background": "#2c1438",
+        "editor.active_line.background": "#3d204966",
+        "editor.line_number": "#724582",
+        "editor.active_line_number": "#e7bbf7",
+        "editor.invisible": "#72458266",
+        "conflict": "#e7bbf7",
+        "created": "#c678dd",
+        "deleted": "#752194",
+        "error": "#e7bbf7",
+        "hidden": "#724582",
+        "hint": "#c678dd",
+        "ignored": "#724582",
+        "info": "#c678dd",
+        "modified": "#e7bbf7",
+        "predictive": "#582572",
+        "renamed": "#c678dd",
+        "success": "#c678dd",
+        "unreachable": "#724582",
+        "warning": "#c678dd",
+        "syntax": {
+          "attribute": {
+            "color": "#e7bbf7"
+          },
+          "boolean": {
+            "color": "#e7bbf7"
+          },
+          "comment": {
+            "color": "#724582",
+            "font_style": "italic"
+          },
+          "comment.doc": {
+            "color": "#724582",
+            "font_style": "italic"
+          },
+          "constant": {
+            "color": "#e7bbf7"
+          },
+          "constructor": {
+            "color": "#c678dd"
+          },
+          "embedded": {
+            "color": "#f7eded"
+          },
+          "function": {
+            "color": "#c678dd"
+          },
+          "keyword": {
+            "color": "#e7bbf7"
+          },
+          "link_text": {
+            "color": "#c678dd",
+            "font_style": "underline"
+          },
+          "link_uri": {
+            "color": "#c678dd",
+            "font_style": "italic"
+          },
+          "number": {
+            "color": "#e7bbf7"
+          },
+          "string": {
+            "color": "#c678dd"
+          },
+          "string.escape": {
+            "color": "#c678dd"
+          },
+          "string.regex": {
+            "color": "#c678dd"
+          },
+          "string.special": {
+            "color": "#e7bbf7"
+          },
+          "string.special.symbol": {
+            "color": "#e7bbf7"
+          },
+          "tag": {
+            "color": "#e7bbf7"
+          },
+          "text.literal": {
+            "color": "#e7bbf7"
+          },
+          "title": {
+            "color": "#c678dd",
+            "font_weight": 600
+          },
+          "type": {
+            "color": "#c678dd"
+          },
+          "property": {
+            "color": "#f7eded"
+          },
+          "variable.special": {
+            "color": "#e7bbf7"
+          }
+        }
+      }
+    }
+  ]
+}
