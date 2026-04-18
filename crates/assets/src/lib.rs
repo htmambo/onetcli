@@ -35,3 +35,15 @@ impl AssetSource for Assets {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Assets;
+
+    #[test]
+    fn embeds_common_icons() {
+        assert!(Assets::get("icons/chevron-down.svg").is_some());
+        assert!(Assets::get("icons/window-close.svg").is_some());
+        assert!(Assets::get("icons/plus.svg").is_some());
+    }
+}

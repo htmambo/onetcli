@@ -1242,8 +1242,9 @@ pub fn init_settings(cx: &mut App) {
         settings.enable_sql_auto_save,
         settings.sql_auto_save_interval,
     ));
-    settings.apply(cx);
+    // apply() 内部可能会写回规范化后的主题设置，因此必须先注册全局状态。
     cx.set_global(settings);
+    AppSettings::global(cx).clone().apply(cx);
     let _ = get_auth_service(cx).update_sync_server_url(&initial_sync_server_url);
 }
 
