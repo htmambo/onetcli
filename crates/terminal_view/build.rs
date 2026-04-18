@@ -1,7 +1,7 @@
 //! Build script for terminal_view.
 //!
 //! 1. Watches locales directory for i18n changes
-//! 2. Parses tabby-community-color-schemes and generates Rust theme code
+//! 2. Parses local schemes/ directory and generates Rust theme code
 
 use std::env;
 use std::fs;
@@ -21,35 +21,15 @@ fn main() {
     }
 }
 
-/// 尝试查找 tabby 方案目录
+/// 查找本地 schemes 目录
 fn find_schemes_dir() -> Option<std::path::PathBuf> {
-    // 从 crate 源码目录向上搜索
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").ok()?;
-    let crate_src = Path::new(&manifest_dir).join("src");
-
-    for ancestor in crate_src.ancestors() {
-        let candidate = ancestor
-            .join("tabby")
-            .join("tabby-community-color-schemes")
-            .join("schemes");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
+    let local = Path::new(&manifest_dir).join("schemes");
+    if local.is_dir() {
+        Some(local)
+    } else {
+        None
     }
-
-    // 从 OUT_DIR 向上搜索（用于 workspace 构建场景）
-    let out_dir = env::var("OUT_DIR").ok()?;
-    for ancestor in Path::new(&out_dir).ancestors() {
-        let candidate = ancestor
-            .join("tabby")
-            .join("tabby-community-color-schemes")
-            .join("schemes");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-
-    None
 }
 
 /// 方案元数据

@@ -1,0 +1,129 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Tomorrow Night",
+  "author": "Converted from Tomorrow Night (tabby-community-color-schemes)",
+  "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
+  "themes": [
+    {
+      "name": "Tomorrow Night",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#1d1f21",
+        "accent.foreground": "#c5c8c6",
+        "background": "#1d1f21",
+        "border": "#363839",
+        "danger.active.background": "#cc6666",
+        "danger.background": "#3d1414",
+        "danger.foreground": "#cc6666",
+        "danger.hover.background": "#1e1f21",
+        "foreground": "#c5c8c6",
+        "input.border": "#363839",
+        "link.active.foreground": "#81a2be",
+        "link.foreground": "#81a2be",
+        "link.hover.foreground": "#81a2be",
+        "list.active.background": "#2a2d3366",
+        "list.active.border": "#81a2be",
+        "list.even.background": "#1a1c1e",
+        "muted.background": "#0d0f11",
+        "muted.foreground": "#606263",
+        "panel.background": "#080a0c",
+        "popover.background": "#1d1f21",
+        "popover.foreground": "#c5c8c6",
+        "primary.background": "#f0c674",
+        "primary.foreground": "#1d1f21",
+        "primary.hover.background": "#ffec9a",
+        "ring": "#81a2be",
+        "scrollbar.background": "#1d1f2100",
+        "scrollbar.thumb.background": "#373b41",
+        "secondary.active.background": "#2a2d33",
+        "secondary.background": "#0d0f11",
+        "secondary.foreground": "#c5c8c6",
+        "secondary.hover.background": "#292b2d",
+        "tab.active.background": "#2a2d33",
+        "tab.active.foreground": "#c5c8c6",
+        "tab.background": "#1d1f21",
+        "tab.foreground": "#606263",
+        "tab_bar.background": "#1d1f21",
+        "title_bar.background": "#101214",
+        "title_bar.border": "#363839",
+        "base.magenta.light": "#76657d",
+        "base.red": "#cc6666",
+        "base.green": "#b5bd68",
+        "base.yellow": "#f0c674",
+        "base.blue": "#81a2be",
+        "base.magenta": "#b294bb",
+        "base.cyan": "#8abeb7"
+      },
+      "highlight": {
+        "editor.foreground": "#c5c8c6",
+        "editor.background": "#1d1f21",
+        "editor.active_line.background": "#101214",
+        "editor.line_number": "#606263",
+        "editor.active_line_number": "#c5c8c6",
+        "editor.invisible": "#60626366",
+        "conflict": "#cc6666",
+        "created": "#b5bd68",
+        "deleted": "#4c0000",
+        "error": "#cc6666",
+        "hidden": "#606263",
+        "hint": "#67596e",
+        "ignored": "#606263",
+        "info": "#81a2be",
+        "modified": "#f0c674",
+        "predictive": "#637a8e",
+        "renamed": "#8abeb7",
+        "success": "#b5bd68",
+        "unreachable": "#606263",
+        "warning": "#f0c674",
+        "syntax": {
+          "attribute": {
+            "color": "#bbaec0"
+          },
+          "boolean": {
+            "color": "#cc6666"
+          },
+          "comment": {
+            "color": "#606263"
+          },
+          "comment.doc": {
+            "color": "#606263"
+          },
+          "constant": {
+            "color": "#cc6666"
+          },
+          "function": {
+            "color": "#81a2be"
+          },
+          "keyword": {
+            "color": "#b294bb"
+          },
+          "link": {
+            "color": "#81a2be",
+            "underline": true
+          },
+          "method": {
+            "color": "#81a2be"
+          },
+          "number": {
+            "color": "#cc6666"
+          },
+          "operator": {
+            "color": "#ffffff"
+          },
+          "predefined": {
+            "color": "#8abeb7"
+          },
+          "string": {
+            "color": "#b5bd68"
+          },
+          "type": {
+            "color": "#8abeb7"
+          },
+          "variable": {
+            "color": "#c5c8c6"
+          }
+        }
+      }
+    }
+  ]
+}

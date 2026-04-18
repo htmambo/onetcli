@@ -1,0 +1,129 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Dracula",
+  "author": "Converted from Dracula (tabby-community-color-schemes)",
+  "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
+  "themes": [
+    {
+      "name": "Dracula",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#1e1f29",
+        "accent.foreground": "#f8f8f2",
+        "background": "#1e1f29",
+        "border": "#3e3f47",
+        "danger.active.background": "#ff5555",
+        "danger.background": "#3d1414",
+        "danger.foreground": "#ff5555",
+        "danger.hover.background": "#1e1f29",
+        "foreground": "#f8f8f2",
+        "input.border": "#3e3f47",
+        "link.active.foreground": "#bd93f9",
+        "link.foreground": "#bd93f9",
+        "link.hover.foreground": "#bd93f9",
+        "list.active.background": "#2a2b3566",
+        "list.active.border": "#bd93f9",
+        "list.even.background": "#1e1f29",
+        "muted.background": "#090a14",
+        "muted.foreground": "#757579",
+        "panel.background": "#090a14",
+        "popover.background": "#1e1f29",
+        "popover.foreground": "#f8f8f2",
+        "primary.background": "#f1fa8c",
+        "primary.foreground": "#1e1f29",
+        "primary.hover.background": "#ffffb2",
+        "ring": "#bd93f9",
+        "scrollbar.background": "#1e1f2900",
+        "scrollbar.thumb.background": "#3e3f47",
+        "secondary.active.background": "#2a2b35",
+        "secondary.background": "#090a14",
+        "secondary.foreground": "#f8f8f2",
+        "secondary.hover.background": "#2a2b35",
+        "tab.active.background": "#2a2b35",
+        "tab.active.foreground": "#f8f8f2",
+        "tab.background": "#1e1f29",
+        "tab.foreground": "#757579",
+        "tab_bar.background": "#1e1f29",
+        "title_bar.background": "#11121c",
+        "title_bar.border": "#3e3f47",
+        "base.magenta.light": "#a55587",
+        "base.red": "#ff5555",
+        "base.green": "#50fa7b",
+        "base.yellow": "#f1fa8c",
+        "base.blue": "#bd93f9",
+        "base.magenta": "#ff79c6",
+        "base.cyan": "#8be9fd"
+      },
+      "highlight": {
+        "editor.foreground": "#f8f8f2",
+        "editor.background": "#1e1f29",
+        "editor.active_line.background": "#11121c",
+        "editor.line_number": "#757579",
+        "editor.active_line_number": "#f8f8f2",
+        "editor.invisible": "#75757966",
+        "conflict": "#ff5555",
+        "created": "#50fa7b",
+        "deleted": "#7f0000",
+        "error": "#ff5555",
+        "hidden": "#757579",
+        "hint": "#8e4c77",
+        "ignored": "#757579",
+        "info": "#bd93f9",
+        "modified": "#f1fa8c",
+        "predictive": "#8d70ba",
+        "renamed": "#8be9fd",
+        "success": "#50fa7b",
+        "unreachable": "#757579",
+        "warning": "#f1fa8c",
+        "syntax": {
+          "attribute": {
+            "color": "#fbb8dc"
+          },
+          "boolean": {
+            "color": "#ff5555"
+          },
+          "comment": {
+            "color": "#757579"
+          },
+          "comment.doc": {
+            "color": "#757579"
+          },
+          "constant": {
+            "color": "#ff5555"
+          },
+          "function": {
+            "color": "#bd93f9"
+          },
+          "keyword": {
+            "color": "#ff79c6"
+          },
+          "link": {
+            "color": "#bd93f9",
+            "underline": true
+          },
+          "method": {
+            "color": "#bd93f9"
+          },
+          "number": {
+            "color": "#ff5555"
+          },
+          "operator": {
+            "color": "#bbbbbb"
+          },
+          "predefined": {
+            "color": "#8be9fd"
+          },
+          "string": {
+            "color": "#50fa7b"
+          },
+          "type": {
+            "color": "#8be9fd"
+          },
+          "variable": {
+            "color": "#f8f8f2"
+          }
+        }
+      }
+    }
+  ]
+}

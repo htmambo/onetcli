@@ -4,6 +4,8 @@ use anyhow::Result;
 use dashmap::DashMap;
 use gpui::{App, Global};
 use std::any::{Any, TypeId};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -112,27 +114,61 @@ pub fn get_download_dir() -> Option<PathBuf> {
 }
 
 /// Returns the user-facing themes directory.
-/// Uses `~/.config/one-hub/themes` on Linux/macOS and `%APPDATA%/one-hub/themes` on Windows.
 pub fn get_themes_dir() -> Result<PathBuf> {
     let config_dir = get_config_dir()?;
     Ok(config_dir.join("themes"))
 }
 
 /// 返回当前运行态应使用的主题目录。
-/// 开发态（`cargo run -p main` / `target/...`）直接读取工作区 `themes/`，
-/// 安装态继续读取用户配置目录。
+/// Dev 模式（exe 在 target/ 下且 workspace 有 themes/）：返回 workspace themes/；
+/// 安装态：返回用户配置目录。
 pub fn get_runtime_themes_dir() -> Result<PathBuf> {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(dev_themes_dir) = find_workspace_themes_dir_for_exe(&exe_path) {
+            eprintln!(
+                "[themes] Dev mode, workspace themes: {}",
+                dev_themes_dir.display()
+            );
             return Ok(dev_themes_dir);
         }
     }
 
-    get_themes_dir()
+    let dir = get_themes_dir()?;
+    eprintln!(
+        "[themes] NOT dev mode, using user dir: {}, exe: {:?}",
+        dir.display(),
+        std::env::current_exe().map(|p| p.display().to_string()).ok()
+    );
+    Ok(dir)
 }
 
-/// Copies bundled default themes to the user's themes directory if none exist.
-/// This is called on first run to populate the user's theme collection.
+/// 主题版本文件，记录当前打包的 theme 集校验和，用于判断是否需要更新。
+const THEMES_VERSION_FILE: &str = ".themes_version";
+
+/// 获取打包主题的版本标识（基于 themes 目录内容的校验和）。
+fn get_bundled_themes_version(themes_dir: &Path) -> Option<String> {
+    let mut entries: Vec<_> = match std::fs::read_dir(themes_dir) {
+        Ok(dir) => dir
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect(),
+        Err(_) => return None,
+    };
+    entries.sort_by_key(|e| e.file_name());
+
+    let mut hasher = DefaultHasher::new();
+    for entry in entries {
+        entry.file_name().hash(&mut hasher);
+        if let Ok(content) = std::fs::read_to_string(entry.path()) {
+            content.hash(&mut hasher);
+        }
+    }
+    Some(format!("{:x}", hasher.finish()))
+}
+
+/// Copies bundled default themes to the user's themes directory if needed.
+/// - Dev mode: skip entirely, use workspace themes directly.
+/// - Install mode: copy bundled themes, but re-copy if bundled version differs from last installed.
 pub fn ensure_themes_copied() -> Result<()> {
     if let Ok(exe_path) = std::env::current_exe() {
         if find_workspace_themes_dir_for_exe(&exe_path).is_some() {
@@ -141,16 +177,18 @@ pub fn ensure_themes_copied() -> Result<()> {
     }
 
     let themes_dir = get_themes_dir()?;
-    if themes_dir.exists() {
-        if theme_dir_has_json(&themes_dir) {
-            return Ok(());
-        }
-    }
-
-    std::fs::create_dir_all(&themes_dir)?;
+    let user_version_file = themes_dir.join(THEMES_VERSION_FILE);
+    let current_version = std::fs::read_to_string(&user_version_file).ok();
 
     if let Some(bundled) = find_bundled_themes_dir() {
         if bundled.exists() {
+            let bundled_version = get_bundled_themes_version(&bundled);
+
+            if current_version == bundled_version {
+                return Ok(());
+            }
+
+            std::fs::create_dir_all(&themes_dir)?;
             for entry in std::fs::read_dir(bundled)? {
                 let entry = entry?;
                 let path = entry.path();
@@ -160,6 +198,10 @@ pub fn ensure_themes_copied() -> Result<()> {
                     std::fs::copy(&path, &dest)?;
                 }
             }
+
+            if let Some(version) = bundled_version {
+                std::fs::write(&user_version_file, version)?;
+            }
             return Ok(());
         }
     }
@@ -168,12 +210,9 @@ pub fn ensure_themes_copied() -> Result<()> {
 }
 
 /// Finds the bundled themes directory relative to the current executable.
-/// On Linux: /path/to/onetcli/../share/onetcli/themes
-/// On macOS: /path/to/onetcli/../share/onetcli/themes
 fn find_bundled_themes_dir() -> Option<PathBuf> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
 
-    // Installed: look for share/onetcli/themes relative to executable
     #[cfg(target_os = "linux")]
     let installed_path = exe_dir.join("../share/onetcli/themes");
 

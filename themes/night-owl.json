@@ -1,0 +1,129 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Night Owl",
+  "author": "Converted from Night Owl (tabby-community-color-schemes)",
+  "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
+  "themes": [
+    {
+      "name": "Night Owl",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#011627",
+        "accent.foreground": "#d6deeb",
+        "background": "#011627",
+        "border": "#203444",
+        "danger.active.background": "#ef5350",
+        "danger.background": "#320610",
+        "danger.foreground": "#ef5350",
+        "danger.hover.background": "#320610",
+        "foreground": "#d6deeb",
+        "input.border": "#203444",
+        "link.active.foreground": "#82aaff",
+        "link.foreground": "#82aaff",
+        "link.hover.foreground": "#82aaff",
+        "list.active.background": "#0d223366",
+        "list.active.border": "#82aaff",
+        "list.even.background": "#011827",
+        "muted.background": "#00091a",
+        "muted.foreground": "#566675",
+        "panel.background": "#000112",
+        "popover.background": "#011627",
+        "popover.foreground": "#d6deeb",
+        "primary.background": "#addb67",
+        "primary.foreground": "#011627",
+        "primary.hover.background": "#d3ff8d",
+        "ring": "#82aaff",
+        "scrollbar.background": "#01162700",
+        "scrollbar.thumb.background": "#203444",
+        "secondary.active.background": "#0d2233",
+        "secondary.background": "#011627",
+        "secondary.foreground": "#d6deeb",
+        "secondary.hover.background": "#0d2233",
+        "tab.active.background": "#0d2233",
+        "tab.active.foreground": "#d6deeb",
+        "tab.background": "#011827",
+        "tab.foreground": "#566675",
+        "tab_bar.background": "#011627",
+        "title_bar.background": "#00091a",
+        "title_bar.border": "#203444",
+        "base.magenta.light": "#77609c",
+        "base.red": "#ef5350",
+        "base.green": "#22da6e",
+        "base.yellow": "#addb67",
+        "base.blue": "#82aaff",
+        "base.magenta": "#c792ea",
+        "base.cyan": "#21c7a8"
+      },
+      "highlight": {
+        "editor.foreground": "#d6deeb",
+        "editor.background": "#011627",
+        "editor.active_line.background": "#00091a",
+        "editor.line_number": "#566675",
+        "editor.active_line_number": "#d6deeb",
+        "editor.invisible": "#56667566",
+        "conflict": "#ef5350",
+        "created": "#22da6e",
+        "deleted": "#6f0000",
+        "error": "#ef5350",
+        "hidden": "#566675",
+        "hint": "#645488",
+        "ignored": "#566675",
+        "info": "#82aaff",
+        "modified": "#addb67",
+        "predictive": "#5b7dbe",
+        "renamed": "#21c7a8",
+        "success": "#22da6e",
+        "unreachable": "#566675",
+        "warning": "#ffeb95",
+        "syntax": {
+          "attribute": {
+            "color": "#ceb8ea"
+          },
+          "boolean": {
+            "color": "#ef5350"
+          },
+          "comment": {
+            "color": "#566675"
+          },
+          "comment.doc": {
+            "color": "#566675"
+          },
+          "constant": {
+            "color": "#ef5350"
+          },
+          "function": {
+            "color": "#82aaff"
+          },
+          "keyword": {
+            "color": "#c792ea"
+          },
+          "link": {
+            "color": "#82aaff",
+            "underline": true
+          },
+          "method": {
+            "color": "#82aaff"
+          },
+          "number": {
+            "color": "#ef5350"
+          },
+          "operator": {
+            "color": "#ffffff"
+          },
+          "predefined": {
+            "color": "#21c7a8"
+          },
+          "string": {
+            "color": "#22da6e"
+          },
+          "type": {
+            "color": "#21c7a8"
+          },
+          "variable": {
+            "color": "#d6deeb"
+          }
+        }
+      }
+    }
+  ]
+}

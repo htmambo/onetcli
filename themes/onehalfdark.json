@@ -1,0 +1,129 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "OneHalfDark",
+  "author": "Converted from OneHalfDark (tabby-community-color-schemes)",
+  "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
+  "themes": [
+    {
+      "name": "OneHalfDark",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#01050d",
+        "accent.foreground": "#dcdfe4",
+        "background": "#282c34",
+        "border": "#43464e",
+        "danger.active.background": "#e06c75",
+        "danger.background": "#000001",
+        "danger.foreground": "#e06c75",
+        "danger.hover.background": "#01050d",
+        "foreground": "#dcdfe4",
+        "input.border": "#43464e",
+        "link.active.foreground": "#61afef",
+        "link.foreground": "#61afef",
+        "link.hover.foreground": "#61afef",
+        "list.active.background": "#01050d33",
+        "list.active.border": "#61afef",
+        "list.even.background": "#1a1c22",
+        "muted.background": "#12141a",
+        "muted.foreground": "#70737a",
+        "panel.background": "#13171f",
+        "popover.background": "#282c34",
+        "popover.foreground": "#dcdfe4",
+        "primary.background": "#e5c07b",
+        "primary.foreground": "#282c34",
+        "primary.hover.background": "#ffe6a1",
+        "ring": "#61afef",
+        "scrollbar.background": "#282c3400",
+        "scrollbar.thumb.background": "#383a42",
+        "secondary.active.background": "#2a2c33",
+        "secondary.background": "#12141a",
+        "secondary.foreground": "#dcdfe4",
+        "secondary.hover.background": "#343840",
+        "tab.active.background": "#2e3138",
+        "tab.active.foreground": "#dcdfe4",
+        "tab.background": "#1e1f24",
+        "tab.foreground": "#70737a",
+        "tab_bar.background": "#1e1f24",
+        "title_bar.background": "#1b1f27",
+        "title_bar.border": "#43464e",
+        "base.magenta.light": "#865999",
+        "base.red": "#e06c75",
+        "base.green": "#98c379",
+        "base.yellow": "#e5c07b",
+        "base.blue": "#61afef",
+        "base.magenta": "#c678dd",
+        "base.cyan": "#56b6c2"
+      },
+      "highlight": {
+        "editor.foreground": "#dcdfe4",
+        "editor.background": "#282c34",
+        "editor.active_line.background": "#1b1f27",
+        "editor.line_number": "#70737a",
+        "editor.active_line_number": "#dcdfe4",
+        "editor.invisible": "#70737a66",
+        "conflict": "#e06c75",
+        "created": "#98c379",
+        "deleted": "#600000",
+        "error": "#e06c75",
+        "hidden": "#70737a",
+        "hint": "#775288",
+        "ignored": "#70737a",
+        "info": "#61afef",
+        "modified": "#e5c07b",
+        "predictive": "#4f87b6",
+        "renamed": "#56b6c2",
+        "success": "#98c379",
+        "unreachable": "#70737a",
+        "warning": "#e5c07b",
+        "syntax": {
+          "attribute": {
+            "color": "#d1abe0"
+          },
+          "boolean": {
+            "color": "#e06c75"
+          },
+          "comment": {
+            "color": "#70737a"
+          },
+          "comment.doc": {
+            "color": "#70737a"
+          },
+          "constant": {
+            "color": "#e06c75"
+          },
+          "function": {
+            "color": "#61afef"
+          },
+          "keyword": {
+            "color": "#c678dd"
+          },
+          "link": {
+            "color": "#61afef",
+            "underline": true
+          },
+          "method": {
+            "color": "#61afef"
+          },
+          "number": {
+            "color": "#e06c75"
+          },
+          "operator": {
+            "color": "#dcdfe4"
+          },
+          "predefined": {
+            "color": "#56b6c2"
+          },
+          "string": {
+            "color": "#98c379"
+          },
+          "type": {
+            "color": "#56b6c2"
+          },
+          "variable": {
+            "color": "#dcdfe4"
+          }
+        }
+      }
+    }
+  ]
+}

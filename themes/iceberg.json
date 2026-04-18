@@ -1,0 +1,129 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Iceberg",
+  "author": "Converted from Iceberg (tabby-community-color-schemes)",
+  "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
+  "themes": [
+    {
+      "name": "Iceberg",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#161821",
+        "accent.foreground": "#c6c8d1",
+        "background": "#161821",
+        "border": "#30323b",
+        "danger.active.background": "#e27878",
+        "danger.background": "#1e0d19",
+        "danger.foreground": "#e27878",
+        "danger.hover.background": "#2a2035",
+        "foreground": "#c6c8d1",
+        "input.border": "#30323b",
+        "link.active.foreground": "#84a0c6",
+        "link.foreground": "#84a0c6",
+        "link.hover.foreground": "#91acd1",
+        "list.active.background": "#3b3c5266",
+        "list.active.border": "#84a0c6",
+        "list.even.background": "#1e2030",
+        "muted.background": "#12131e",
+        "muted.foreground": "#5c5e67",
+        "panel.background": "#01030c",
+        "popover.background": "#161821",
+        "popover.foreground": "#c6c8d1",
+        "primary.background": "#e2a478",
+        "primary.foreground": "#161821",
+        "primary.hover.background": "#ffca9e",
+        "ring": "#84a0c6",
+        "scrollbar.background": "#16182100",
+        "scrollbar.thumb.background": "#3b3c52",
+        "secondary.active.background": "#242738",
+        "secondary.background": "#12131e",
+        "secondary.foreground": "#c6c8d1",
+        "secondary.hover.background": "#22242d",
+        "tab.active.background": "#242738",
+        "tab.active.foreground": "#c6c8d1",
+        "tab.background": "#1a1c2a",
+        "tab.foreground": "#5c5e67",
+        "tab_bar.background": "#161821",
+        "title_bar.background": "#090b14",
+        "title_bar.border": "#30323b",
+        "base.magenta.light": "#686184",
+        "base.red": "#e27878",
+        "base.green": "#b4be82",
+        "base.yellow": "#e2a478",
+        "base.blue": "#84a0c6",
+        "base.magenta": "#a093c7",
+        "base.cyan": "#89b8c2"
+      },
+      "highlight": {
+        "editor.foreground": "#c6c8d1",
+        "editor.background": "#161821",
+        "editor.active_line.background": "#090b14",
+        "editor.line_number": "#5c5e67",
+        "editor.active_line_number": "#c6c8d1",
+        "editor.invisible": "#5c5e6766",
+        "conflict": "#e27878",
+        "created": "#b4be82",
+        "deleted": "#620000",
+        "error": "#e98989",
+        "hidden": "#5c5e67",
+        "hint": "#5b5574",
+        "ignored": "#5c5e67",
+        "info": "#91acd1",
+        "modified": "#e2a478",
+        "predictive": "#637794",
+        "renamed": "#89b8c2",
+        "success": "#b4be82",
+        "unreachable": "#5c5e67",
+        "warning": "#e9b189",
+        "syntax": {
+          "attribute": {
+            "color": "#b3adcc"
+          },
+          "boolean": {
+            "color": "#e98989"
+          },
+          "comment": {
+            "color": "#5c5e67"
+          },
+          "comment.doc": {
+            "color": "#5c5e67"
+          },
+          "constant": {
+            "color": "#e98989"
+          },
+          "function": {
+            "color": "#84a0c6"
+          },
+          "keyword": {
+            "color": "#a093c7"
+          },
+          "link": {
+            "color": "#84a0c6",
+            "underline": true
+          },
+          "method": {
+            "color": "#84a0c6"
+          },
+          "number": {
+            "color": "#e98989"
+          },
+          "operator": {
+            "color": "#c6c8d1"
+          },
+          "predefined": {
+            "color": "#89b8c2"
+          },
+          "string": {
+            "color": "#b4be82"
+          },
+          "type": {
+            "color": "#89b8c2"
+          },
+          "variable": {
+            "color": "#c6c8d1"
+          }
+        }
+      }
+    }
+  ]
+}
