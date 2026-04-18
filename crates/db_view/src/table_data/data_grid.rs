@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AsyncApp, ClickEvent, Context, Corner, Entity, FocusHandle, Focusable,
-    IntoElement, ParentElement, PathPromptOptions, SharedString, Styled, Subscription, Window,
-    actions, div, px,
+    AnyElement, App, AsyncApp, ClickEvent, Context, Corner, Entity, EventEmitter, FocusHandle,
+    Focusable, IntoElement, ParentElement, PathPromptOptions, SharedString, Styled, Subscription,
+    Window, actions, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, Size, WindowExt, button::Button,
-    h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Selectable, Sizable as _, Size, WindowExt,
+    button::Button, h_flex, v_flex,
 };
 use one_ui::edit_table::{Column, EditTable, EditTableEvent, EditTableState};
 use rust_i18n::t;
@@ -16,6 +16,8 @@ use rust_xlsxwriter::Workbook;
 use tracing::{error, log::trace};
 
 use crate::import_export::table_export_view::DataExportView;
+use crate::settings::{LargeTextEditorOpenMode, current_settings as current_db_view_settings};
+use crate::sidebar::cell_editor_notifier::emit_toggle_cell_editor_sidebar_event;
 use crate::sql_editor::SqlEditor;
 use crate::table_data::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
 use crate::table_data::filter_editor::{FilterEditorEvent, TableFilterEditor, TableSchema};
@@ -81,6 +83,30 @@ where
 
     row_indices.sort_unstable_by(|left, right| right.cmp(left));
     row_indices
+}
+
+fn build_large_text_editor_title(column_name: &str, display_row_ix: usize) -> String {
+    t!(
+        "TableDataGrid.edit_cell_title",
+        column = column_name,
+        row = display_row_ix + 1
+    )
+    .to_string()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LargeTextCellTarget {
+    pub display_row_ix: usize,
+    pub actual_row_ix: usize,
+    pub col_ix: usize,
+    pub column_name: String,
+    pub value: String,
+    pub editable: bool,
+}
+
+#[derive(Clone, Debug)]
+pub enum DataGridEvent {
+    LargeTextSelectionChanged,
 }
 
 /// 数据表格使用场景
@@ -328,6 +354,8 @@ pub struct DataGrid {
     hidden_columns: HashSet<SharedString>,
     /// 列可见性是否已加载
     column_visibility_loaded: bool,
+    /// 侧边栏大文本编辑器是否已为当前表格打开
+    is_large_text_editor_sidebar_open: bool,
 }
 
 impl DataGrid {
@@ -363,6 +391,7 @@ impl DataGrid {
             _filter_sub: None,
             hidden_columns: HashSet::new(),
             column_visibility_loaded: false,
+            is_large_text_editor_sidebar_open: false,
         };
         result.bind_table_event(window, cx);
         if is_table_data {
@@ -376,10 +405,15 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.table,
             window,
-            |_this: &mut DataGrid, _, evt: &EditTableEvent, _window, _cx| {
-                if let EditTableEvent::SelectCell(row, col) = evt {
-                    trace!("select cell: {:?}", (row, col))
+            |_this, _, evt: &EditTableEvent, _window, cx| match evt {
+                EditTableEvent::SelectCell(row, col) => {
+                    trace!("select cell: {:?}", (row, col));
+                    cx.emit(DataGridEvent::LargeTextSelectionChanged);
                 }
+                EditTableEvent::SelectionChanged(_) | EditTableEvent::CellEdited(_, _) => {
+                    cx.emit(DataGridEvent::LargeTextSelectionChanged);
+                }
+                _ => {}
             },
         );
         self._table_sub = Some(sub);
@@ -828,8 +862,23 @@ impl DataGrid {
         self.request_reload_action(ReloadAction::RefreshCurrent, window, cx);
     }
 
-    pub fn open_large_text_editor(&self, window: &mut Window, cx: &mut App) {
+    pub fn open_large_text_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if current_db_view_settings(cx).large_text_editor_open_mode
+            == LargeTextEditorOpenMode::SidebarPreview
+            && emit_toggle_cell_editor_sidebar_event(cx.entity().downgrade(), cx)
+        {
+            return;
+        }
         self.show_large_text_editor(window, cx);
+    }
+
+    pub fn set_large_text_editor_sidebar_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.is_large_text_editor_sidebar_open == open {
+            return;
+        }
+
+        self.is_large_text_editor_sidebar_open = open;
+        cx.notify();
     }
 
     pub fn open_export_view(&self, window: &mut Window, cx: &mut App) {
@@ -1342,7 +1391,7 @@ impl DataGrid {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.show_large_text_editor(window, cx);
+        self.open_large_text_editor(window, cx);
     }
 
     fn handle_toolbar_refresh(
@@ -1375,48 +1424,69 @@ impl DataGrid {
     // ========== 大文本编辑器 ==========
 
     fn show_large_text_editor(&self, window: &mut Window, cx: &mut App) {
-        let table = self.table.read(cx);
-        let Some((row_ix, col_ix)) = table.selected_cell() else {
+        let Some(target) = self.selected_large_text_target(cx) else {
             window.push_notification(t!("TableData.select_cell").to_string(), cx);
             return;
         };
 
-        let delegate = table.delegate();
-        let Some(actual_row_ix) = delegate.resolve_display_row(row_ix) else {
-            return;
-        };
-        let current_content = delegate
-            .rows
-            .get(actual_row_ix)
-            .and_then(|r| r.get(col_ix - 1))
-            .cloned()
-            .unwrap_or(None);
-
-        let column_name = self
-            .table
-            .read(cx)
-            .delegate()
-            .columns
-            .get(col_ix.saturating_sub(1))
-            .map(|col| col.name.to_string())
-            .unwrap_or_else(|| t!("TableDataGrid.column_label", index = col_ix).to_string());
-        let title = t!(
-            "TableDataGrid.edit_cell_title",
-            column = column_name,
-            row = row_ix + 1
-        )
-        .to_string();
-        let editable = self.config.editable;
-
         self.show_text_editor_dialog(
-            current_content.unwrap_or_default(),
-            &title,
-            row_ix,
-            col_ix,
-            editable,
+            target.value,
+            &build_large_text_editor_title(&target.column_name, target.display_row_ix),
+            target.display_row_ix,
+            target.col_ix + 1,
+            target.editable,
             window,
             cx,
         );
+    }
+
+    pub fn selected_large_text_target(&self, cx: &App) -> Option<LargeTextCellTarget> {
+        let table = self.table.read(cx);
+        let (display_row_ix, selected_col_ix) = table.selected_cell()?;
+        let col_ix = selected_col_ix.checked_sub(1)?;
+        let delegate = table.delegate();
+        let actual_row_ix = delegate.resolve_display_row(display_row_ix)?;
+        let value = delegate
+            .rows
+            .get(actual_row_ix)
+            .and_then(|row| row.get(col_ix))
+            .cloned()
+            .flatten()
+            .unwrap_or_default();
+        let column_name = delegate
+            .columns
+            .get(col_ix)
+            .map(|col| col.name.to_string())
+            .unwrap_or_else(|| {
+                t!("TableDataGrid.column_label", index = selected_col_ix).to_string()
+            });
+
+        Some(LargeTextCellTarget {
+            display_row_ix,
+            actual_row_ix,
+            col_ix,
+            column_name,
+            value,
+            editable: self.config.editable,
+        })
+    }
+
+    pub fn apply_large_text_target_value(
+        &self,
+        target: &LargeTextCellTarget,
+        value: String,
+        cx: &mut App,
+    ) -> bool {
+        self.table.update(cx, |state, cx| {
+            let delegate = state.delegate_mut();
+            let changed = delegate.record_cell_change(target.actual_row_ix, target.col_ix, value);
+
+            if changed {
+                state.refresh(cx);
+            }
+
+            changed
+        })
     }
 
     fn show_text_editor_dialog(
@@ -1451,7 +1521,7 @@ impl DataGrid {
                 d = d
                     .footer(|ok, cancel, window, cx| vec![ok(window, cx), cancel(window, cx)])
                     .on_ok(move |_, window, cx| {
-                        let content = editor.read(cx).get_active_text(cx);
+                        let content = editor.read(cx).get_writeback_text(cx);
                         return match content {
                             Ok(val) => {
                                 data_grid.table.update(cx, |state, cx| {
@@ -2350,6 +2420,9 @@ impl DataGrid {
         let loading = self.table.read(cx).delegate().is_loading();
         let has_changes = self.has_unsaved_changes(cx);
         let data_grid = cx.entity().clone();
+        let large_text_button_selected = current_db_view_settings(cx).large_text_editor_open_mode
+            == LargeTextEditorOpenMode::SidebarPreview
+            && self.is_large_text_editor_sidebar_open;
 
         h_flex()
             .gap_1()
@@ -2522,6 +2595,7 @@ impl DataGrid {
                 Button::new("toggle-editor")
                     .with_size(Size::Medium)
                     .icon(IconName::EditBorder)
+                    .selected(large_text_button_selected)
                     .tooltip(t!("TableDataGrid.large_text_editor").to_string())
                     .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
@@ -2854,9 +2928,12 @@ impl Clone for DataGrid {
             _filter_sub: None,
             hidden_columns: self.hidden_columns.clone(),
             column_visibility_loaded: self.column_visibility_loaded,
+            is_large_text_editor_sidebar_open: self.is_large_text_editor_sidebar_open,
         }
     }
 }
+
+impl EventEmitter<DataGridEvent> for DataGrid {}
 
 impl Focusable for DataGrid {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
@@ -2874,12 +2951,14 @@ pub fn notification(cx: &mut App, error: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportFormat, TableMetadata, build_header_order_by_clause, collect_delete_row_indices,
+        ExportFormat, TableMetadata, build_header_order_by_clause, build_large_text_editor_title,
+        collect_delete_row_indices,
     };
     use db::DbManager;
     use gpui::SharedString;
     use one_core::storage::DatabaseType;
     use one_ui::edit_table::ColumnSort;
+    use rust_i18n::t;
     use std::io::{Cursor, Read};
     use zip::ZipArchive;
 
@@ -2964,6 +3043,16 @@ mod tests {
         let rows = collect_delete_row_indices(vec![1, 0], Some(5));
 
         assert_eq!(rows, vec![1, 0]);
+    }
+
+    #[test]
+    fn build_large_text_editor_title_formats_row_and_column() {
+        let title = build_large_text_editor_title("payload", 2);
+
+        assert_eq!(
+            title,
+            t!("TableDataGrid.edit_cell_title", column = "payload", row = 3).to_string()
+        );
     }
 
     #[test]

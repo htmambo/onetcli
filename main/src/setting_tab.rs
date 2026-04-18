@@ -3,14 +3,15 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, RwLock};
 
-use db_view::set_db_view_settings;
+use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
 use gpui::http_client::{AsyncBody, Method, Request, Url};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
-    Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, div, point, px, size,
+    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke,
+    ParentElement, PathPromptOptions, Pixels, Render, SharedString, StyleRefinement, Styled,
+    WeakEntity, Window, WindowAppearance, WindowBackgroundAppearance, WindowBounds, div, point,
+    px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
@@ -139,6 +140,39 @@ pub enum DatabaseOpenMode {
     Single,
     /// 工作区模式：按工作区分组打开，同一工作区的数据库在同一标签页
     Workspace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LargeTextCellEditorOpenMode {
+    #[default]
+    SidebarPreview,
+    Dialog,
+}
+
+impl LargeTextCellEditorOpenMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LargeTextCellEditorOpenMode::SidebarPreview => "sidebar_preview",
+            LargeTextCellEditorOpenMode::Dialog => "dialog",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "dialog" => LargeTextCellEditorOpenMode::Dialog,
+            _ => LargeTextCellEditorOpenMode::SidebarPreview,
+        }
+    }
+}
+
+impl From<LargeTextCellEditorOpenMode> for LargeTextEditorOpenMode {
+    fn from(value: LargeTextCellEditorOpenMode) -> Self {
+        match value {
+            LargeTextCellEditorOpenMode::SidebarPreview => LargeTextEditorOpenMode::SidebarPreview,
+            LargeTextCellEditorOpenMode::Dialog => LargeTextEditorOpenMode::Dialog,
+        }
+    }
 }
 
 impl DatabaseOpenMode {
@@ -495,6 +529,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub database_open_mode: DatabaseOpenMode,
     #[serde(default)]
+    pub large_text_cell_editor_open_mode: LargeTextCellEditorOpenMode,
+    #[serde(default)]
     pub connection_list_sort_field: ConnectionListSortField,
     #[serde(default)]
     pub connection_list_sort_order: ConnectionListSortOrder,
@@ -849,6 +885,7 @@ impl Default for AppSettings {
             onedrive_config: None,
             global_proxy: GlobalProxySettings::default(),
             database_open_mode: DatabaseOpenMode::default(),
+            large_text_cell_editor_open_mode: LargeTextCellEditorOpenMode::default(),
             connection_list_sort_field: ConnectionListSortField::default(),
             connection_list_sort_order: ConnectionListSortOrder::default(),
             connection_list_view_mode: ConnectionListViewMode::default(),
@@ -1213,7 +1250,13 @@ impl AppSettings {
     }
 
     pub fn sync_db_view_settings(&self, cx: &mut App) {
-        set_db_view_settings(cx, self.db_undo_stack_size);
+        db_view::init_db_view_settings(
+            cx,
+            DbViewSettings {
+                db_undo_stack_size: self.db_undo_stack_size,
+                large_text_editor_open_mode: self.large_text_cell_editor_open_mode.into(),
+            },
+        );
     }
 
     /// 更新自动保存配置（静态方法，避免借用冲突）
@@ -1476,6 +1519,7 @@ impl SettingsPanel {
                                 t!("Settings.General.Language.ui_language_desc").to_string(),
                             ),
                         ]),
+                    themed_setting_group(SettingGroup::new(), cx)
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Appearance.group_title"))
                         .items(vec![
@@ -2643,6 +2687,51 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Database.open_mode_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Database.large_text_editor_open_mode"),
+                                SettingField::dropdown(
+                                    vec![
+                                        (
+                                            "sidebar_preview".into(),
+                                            t!(
+                                                "Settings.General.Database.large_text_editor_open_mode_sidebar"
+                                            )
+                                            .into(),
+                                        ),
+                                        (
+                                            "dialog".into(),
+                                            t!(
+                                                "Settings.General.Database.large_text_editor_open_mode_dialog"
+                                            )
+                                            .into(),
+                                        ),
+                                    ],
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .large_text_cell_editor_open_mode
+                                                .as_str(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let mode =
+                                            LargeTextCellEditorOpenMode::from_str(val.as_ref());
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.large_text_cell_editor_open_mode = mode;
+                                        settings.save();
+                                        db_view::set_large_text_editor_open_mode(mode.into(), cx);
+                                    },
+                                )
+                                .default_value(SharedString::from(
+                                    default_settings
+                                        .large_text_cell_editor_open_mode
+                                        .as_str(),
+                                )),
+                            )
+                            .description(
+                                t!("Settings.General.Database.large_text_editor_open_mode_desc")
+                                    .to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Database.auto_save"),
