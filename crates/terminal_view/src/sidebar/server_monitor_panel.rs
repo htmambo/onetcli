@@ -1,21 +1,22 @@
 //! 终端侧边栏服务器监控面板
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, linear_color_stop, linear_gradient, px, AnyElement, App, Context, EventEmitter,
-    FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Task, Window,
+    AnyElement, App, Context, EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Task,
+    Window, div, linear_color_stop, linear_gradient, px,
 };
 use gpui_component::{
+    ActiveTheme, Disableable, IconName, Sizable, StyledExt,
     button::{Button, ButtonVariants},
     chart::{AreaChart, LineChart, PieChart},
     h_flex,
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Disableable, IconName, Sizable, StyledExt,
+    v_flex,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::get_config_dir;
@@ -583,25 +584,27 @@ impl ServerMonitorPanel {
             return;
         }
 
-        self.refresh_task = Some(cx.spawn(async move |this, cx| loop {
-            let should_continue = this
-                .update(cx, |this, cx| {
-                    if !this.monitor_enabled {
-                        this.refresh_task = None;
-                        return false;
-                    }
-                    this.refresh_now(cx);
-                    true
-                })
-                .unwrap_or(false);
+        self.refresh_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        if !this.monitor_enabled {
+                            this.refresh_task = None;
+                            return false;
+                        }
+                        this.refresh_now(cx);
+                        true
+                    })
+                    .unwrap_or(false);
 
-            if !should_continue {
-                break;
+                if !should_continue {
+                    break;
+                }
+
+                cx.background_executor()
+                    .timer(Duration::from_secs(REFRESH_INTERVAL_SECS))
+                    .await;
             }
-
-            cx.background_executor()
-                .timer(Duration::from_secs(REFRESH_INTERVAL_SECS))
-                .await;
         }));
     }
 
@@ -945,7 +948,7 @@ impl ServerMonitorPanel {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(cx.theme().secondary)
             .p_3()
             .child(
                 h_flex()
@@ -1158,7 +1161,6 @@ impl Render for ServerMonitorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(
@@ -1925,9 +1927,9 @@ fn format_bytes_per_sec(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        history_points, history_tick_margin, parse_server_stats, push_history_point,
-        sample_cpu_usage, sample_network_rates, split_sections, CpuSnapshot, HistoryLimit,
-        MemoryStats, NetworkTotals, ProcessEntry,
+        CpuSnapshot, HistoryLimit, MemoryStats, NetworkTotals, ProcessEntry, history_points,
+        history_tick_margin, parse_server_stats, push_history_point, sample_cpu_usage,
+        sample_network_rates, split_sections,
     };
 
     #[test]
@@ -2028,14 +2030,18 @@ cpu:
 
         let sampled = sample_cpu_usage(&previous.cpu_snapshots, &current.cpu_snapshots);
 
-        assert!(previous
-            .cpu_snapshots
-            .iter()
-            .any(|snapshot| snapshot.name == "cpu"));
-        assert!(current
-            .cpu_snapshots
-            .iter()
-            .any(|snapshot| snapshot.name == "cpu"));
+        assert!(
+            previous
+                .cpu_snapshots
+                .iter()
+                .any(|snapshot| snapshot.name == "cpu")
+        );
+        assert!(
+            current
+                .cpu_snapshots
+                .iter()
+                .any(|snapshot| snapshot.name == "cpu")
+        );
         assert!(sampled.total_percent > 0.0);
     }
 

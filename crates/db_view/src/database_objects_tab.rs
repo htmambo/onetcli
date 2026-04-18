@@ -14,7 +14,8 @@ use gpui_component::label::Label;
 use gpui_component::notification::Notification;
 use gpui_component::table::{Table, TableDelegate, TableEvent, TableState};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, glass_sidebar_f64, h_flex, table::Column, v_flex,
+    ActiveTheme, Icon, IconName, Sizable, Size, h_flex, sidebar_surface_color_with_offset,
+    table::Column, v_flex,
 };
 use one_core::storage::manager::get_queries_dir;
 use one_core::storage::{
@@ -988,12 +989,18 @@ impl Render for DatabaseObjects {
         let title = loaded_data.title.clone();
         let toolbar_buttons = self.render_toolbar_buttons(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity as f64 - 0.1;
-        let toolbar_bg = glass_sidebar_f64(cx.theme().background, blur_enabled, glass_opacity);
-        let toolbar_input_bg = glass_sidebar_f64(
+        let surface_opacity = cx.theme().surface_opacity;
+        let toolbar_bg = sidebar_surface_color_with_offset(
+            cx.theme().background,
+            blur_enabled,
+            surface_opacity,
+            -0.10,
+        );
+        let toolbar_input_bg = sidebar_surface_color_with_offset(
             cx.theme().input_background(),
             blur_enabled,
-            glass_opacity - 0.08,
+            surface_opacity,
+            -0.18,
         );
 
         // Update delegate with current data (no refresh here, only when data actually changes)

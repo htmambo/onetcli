@@ -10,8 +10,9 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
-    kbd::Kbd, windows_surface_color, windows_surface_opacity, BlinkCursor, Icon, IconName, Root,
-    Sizable, SystemNotificationOptions, Theme as UiTheme, WindowExt, WindowsSurfaceLayer,
+    BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions, Theme as UiTheme,
+    WindowExt, WindowsSurfaceLayer, kbd::Kbd, terminal_canvas_surface_opacity,
+    windows_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -22,42 +23,42 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::addon::{
-    register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
-    TerminalAddonFrameContext, TerminalAddonMouseContext,
+    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
+    TerminalAddonMouseContext, register_default_addons,
 };
 use crate::cd_completion::{
-    build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
+    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
 };
 use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
 use crate::settings::{
-    current_settings, update_settings, GlobalTerminalSettings, TerminalHighlightRule,
-    TerminalSettings, TerminalSettingsEvent,
+    GlobalTerminalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
+    current_settings, update_settings,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
+use crate::terminal_element::{RenderCache, TerminalElement, terminal_font_features};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
-    MIN_LINE_HEIGHT_SCALE,
+    DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    TerminalTheme,
 };
+use gpui::AnyWindowHandle;
+use one_core::RunningState;
 use one_core::connection_restore::{
-    restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
-    LocalTerminalRestoreState, SshTerminalRestoreState,
+    ConnectionRestoreKind, ConnectionRestorePayload, LocalTerminalRestoreState,
+    SshTerminalRestoreState, restore_payload_from_tab_data,
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
-use one_core::tab_container::{TabContent, TabContentEvent, TabContainer};
-use gpui::AnyWindowHandle;
-use one_core::RunningState;
-use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
+use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
+use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
-use terminal::terminal::{
-    ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
-    DEFAULT_RECOVERY_SCROLLBACK_LINES,
-};
 use terminal::LocalConfig;
+use terminal::terminal::{
+    ConnectionState, DEFAULT_RECOVERY_SCROLLBACK_LINES, Terminal, TerminalConnectionKind,
+    TerminalModelEvent, TerminalScrollProxy,
+};
 use tokio::sync::Mutex;
 
 actions!(
@@ -130,17 +131,8 @@ fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) ->
 
 fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
     let ui_theme = UiTheme::global(cx);
-    let surface_opacity = if cfg!(target_os = "windows") {
-        windows_surface_opacity(
-            ui_theme.surface_opacity,
-            ui_theme.window_blur_enabled,
-            WindowsSurfaceLayer::TerminalCanvas,
-        )
-    } else if ui_theme.window_blur_enabled {
-        (ui_theme.surface_opacity + 0.05).clamp(0.0, 1.0)
-    } else {
-        ui_theme.surface_opacity
-    };
+    let surface_opacity =
+        terminal_canvas_surface_opacity(ui_theme.surface_opacity, ui_theme.window_blur_enabled);
     theme
         .clone()
         .with_surface_opacity(surface_opacity)
@@ -2196,7 +2188,10 @@ impl TerminalView {
     }
 
     pub fn set_tab_container(&mut self, container: Entity<TabContainer>) {
-        tracing::info!("set_tab_container called: container_id={:?}", container.entity_id());
+        tracing::info!(
+            "set_tab_container called: container_id={:?}",
+            container.entity_id()
+        );
         self.tab_container = Some(container);
     }
 
@@ -4360,30 +4355,31 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
-        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
-        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
+        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
+        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
+        history_prompt_dropdown_origin, history_prompt_overlay_bounds,
+        multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
+        trim_recovery_content_to_recent_chars,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
     #[cfg(target_os = "macos")]
     use gpui::TestAppContext;
-    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
+    use gpui::{Bounds, Keystroke, MouseButton, Point, SharedString, px, size};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{
         thread,
         time::{Duration, Instant},
     };
-    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {

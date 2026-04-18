@@ -15,21 +15,22 @@ use gpui::{
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IndexPath, LEFT_PANEL_ALPHA_OFFSET,
-    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar,
-    WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, IndexPath, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
+    Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar, WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
     h_flex,
     input::{Input, InputState},
     kbd::Kbd,
+    offset_surface_color,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     setting::{
         NumberFieldOptions, RenderOptions, SelectIndex, SettingField, SettingGroup, SettingItem,
         SettingPage, Settings,
     },
+    sidebar_surface_color,
     switch::Switch,
     tokens::Radius,
     v_flex,
@@ -693,7 +694,7 @@ fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
 
 fn settings_group_content_style(cx: &App) -> StyleRefinement {
     let blur_enabled = cx.theme().window_blur_enabled;
-    let bg = settings_glass_with_offset(cx.theme().group_box, blur_enabled, 0.0, 0.14);
+    let bg = offset_surface_color(cx.theme().group_box, blur_enabled, 0.0, 0.14);
     sync_server_theme::surface_style()
         .rounded(Radius::Xl.px())
         .bg(bg)
@@ -712,7 +713,7 @@ fn themed_setting_group(group: SettingGroup, cx: &App) -> SettingGroup {
 fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     let blur_enabled = cx.theme().window_blur_enabled;
     // Layer 3: 页面标题 - 0.10
-    let header_bg = settings_glass_with_offset(cx.theme().secondary, blur_enabled, 0.0, 0.28);
+    let header_bg = offset_surface_color(cx.theme().secondary, blur_enabled, 0.0, 0.28);
     page.header_style(
         &StyleRefinement::default()
             .bg(header_bg)
@@ -3133,35 +3134,6 @@ impl TabContent for SettingsPanel {
     }
 }
 
-/// 透明度辅助函数：根据层级和应用透明度计算最终透明度
-/// 当毛玻璃关闭时，返回原始颜色（让主题色的 surface_tuning 决定透明度）
-/// 当毛玻璃开启时，使用 glass_opacity 作为基础透明度，并根据层级调整
-fn settings_glass(mut color: gpui::Hsla, blur_enabled: bool, glass_opacity: f64) -> gpui::Hsla {
-    if !blur_enabled {
-        return color;
-    }
-    // 左侧面板：alpha = glass_opacity + LEFT_PANEL_ALPHA_OFFSET
-    let offset = LEFT_PANEL_ALPHA_OFFSET;
-    let new_a = (glass_opacity as f32 + offset).clamp(0.0, 1.0);
-    color.a = new_a;
-    color
-}
-
-fn settings_glass_with_offset(
-    mut color: gpui::Hsla,
-    blur_enabled: bool,
-    glass_opacity: f64,
-    extra_offset: f32,
-) -> gpui::Hsla {
-    if !blur_enabled {
-        return color;
-    }
-    // alpha = glass_opacity + extra_offset
-    let new_a = (glass_opacity as f32 + extra_offset).clamp(0.0, 1.0);
-    color.a = new_a;
-    color
-}
-
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !cx.has_global::<AppSettings>() {
@@ -3169,12 +3141,12 @@ impl Render for SettingsPanel {
         }
 
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = AppSettings::global(cx).glass_opacity;
+        let glass_opacity = AppSettings::global(cx).glass_opacity as f32;
         // 左侧面板透明度：使用统一的 alpha = glass_opacity + LEFT_PANEL_ALPHA_OFFSET
-        let sidebar_bg = settings_glass(cx.theme().sidebar, blur_enabled, glass_opacity);
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, glass_opacity);
         // 页面背景透明度：glass_opacity + 0.02
         let page_bg =
-            settings_glass_with_offset(cx.theme().background, blur_enabled, glass_opacity, 0.02);
+            offset_surface_color(cx.theme().background, blur_enabled, glass_opacity, 0.02);
         let sidebar_style = StyleRefinement::default()
             .bg(sidebar_bg)
             .border_color(cx.theme().sidebar_border)

@@ -10,17 +10,20 @@ pub use file_list_panel::{
 
 use gpui::{
     App, AsyncApp, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
-    FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
+    FontWeight, IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
     actions, div, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, OverlayScrimLevel, Sizable, Size, WindowExt,
+    WindowsSurfaceLayer,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputState},
+    layered_surface_color,
     notification::Notification,
+    overlay_scrim_color,
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
@@ -2857,9 +2860,9 @@ impl SftpView {
             .inset_0()
             .m_4()
             .border_2()
-            .border_color(cx.theme().link)
+            .border_color(cx.theme().drag_border)
             .rounded_lg()
-            .bg(gpui::rgba(0x3b82f610))
+            .bg(cx.theme().drop_target)
             .flex()
             .flex_col()
             .items_center()
@@ -3196,6 +3199,14 @@ impl SftpView {
             ConnectionState::Disconnected { error } => error.clone(),
             _ => None,
         };
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let overlay_card_bg = layered_surface_color(
+            cx.theme().background,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentCard,
+        );
 
         div()
             .absolute()
@@ -3203,18 +3214,16 @@ impl SftpView {
             .flex()
             .items_center()
             .justify_center()
-            .bg(Hsla {
-                h: 0.,
-                s: 0.,
-                l: 0.,
-                a: 0.7,
-            })
+            .bg(overlay_scrim_color(
+                cx.theme().overlay,
+                OverlayScrimLevel::Blocking,
+            ))
             .child(
                 v_flex()
                     .gap_4()
                     .items_center()
                     .p_6()
-                    .bg(cx.theme().background)
+                    .bg(overlay_card_bg)
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded_lg()
@@ -3590,6 +3599,14 @@ impl SftpView {
         let is_dragging = self.is_dragging_over_local;
         let can_go_back = self.can_go_back_local();
         let can_go_forward = self.can_go_forward_local();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let path_bar_bg = layered_surface_color(
+            cx.theme().secondary,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
 
         v_flex()
             .flex_1()
@@ -3636,7 +3653,7 @@ impl SftpView {
                             .h_7()
                             .px_2()
                             .items_center()
-                            .bg(cx.theme().secondary)
+                            .bg(path_bar_bg)
                             .rounded_md()
                             .child(
                                 Input::new(&local_path_input)
@@ -3654,7 +3671,7 @@ impl SftpView {
                             .h_7()
                             .px_2()
                             .items_center()
-                            .bg(cx.theme().secondary)
+                            .bg(path_bar_bg)
                             .rounded_md()
                             .cursor_text()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -3711,8 +3728,8 @@ impl SftpView {
                     .id("local-drop-zone")
                     .flex_1()
                     .relative()
-                    .drag_over::<ExternalPaths>(|el, _, _, _cx| el.bg(gpui::rgba(0x3b82f620)))
-                    .drag_over::<DraggedFileItems>(|el, _, _, _cx| el.bg(gpui::rgba(0x3b82f620)))
+                    .drag_over::<ExternalPaths>(|el, _, _, cx| el.bg(cx.theme().drop_target))
+                    .drag_over::<DraggedFileItems>(|el, _, _, cx| el.bg(cx.theme().drop_target))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                         this.is_dragging_over_local = false;
                         this.handle_local_drop(paths.paths().to_vec(), window, cx);
@@ -3739,6 +3756,14 @@ impl SftpView {
         let is_dragging = self.is_dragging_over_remote;
         let can_go_back = self.can_go_back_remote();
         let can_go_forward = self.can_go_forward_remote();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let path_bar_bg = layered_surface_color(
+            cx.theme().secondary,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
 
         v_flex()
             .flex_1()
@@ -3783,7 +3808,7 @@ impl SftpView {
                             .h_7()
                             .px_2()
                             .items_center()
-                            .bg(cx.theme().secondary)
+                            .bg(path_bar_bg)
                             .rounded_md()
                             .child(
                                 Input::new(&remote_path_input)
@@ -3801,7 +3826,7 @@ impl SftpView {
                             .h_7()
                             .px_2()
                             .items_center()
-                            .bg(cx.theme().secondary)
+                            .bg(path_bar_bg)
                             .rounded_md()
                             .cursor_text()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -3865,9 +3890,9 @@ impl SftpView {
                     .flex_1()
                     .relative()
                     .when(is_connected, |el| {
-                        el.drag_over::<ExternalPaths>(|el, _, _, _cx| el.bg(gpui::rgba(0x3b82f620)))
-                            .drag_over::<DraggedFileItems>(|el, _, _, _cx| {
-                                el.bg(gpui::rgba(0x3b82f620))
+                        el.drag_over::<ExternalPaths>(|el, _, _, cx| el.bg(cx.theme().drop_target))
+                            .drag_over::<DraggedFileItems>(|el, _, _, cx| {
+                                el.bg(cx.theme().drop_target)
                             })
                             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                                 this.is_dragging_over_remote = false;
@@ -3894,7 +3919,10 @@ impl SftpView {
                                     div()
                                         .absolute()
                                         .inset_0()
-                                        .bg(gpui::rgba(0x00000040))
+                                        .bg(overlay_scrim_color(
+                                            cx.theme().overlay,
+                                            OverlayScrimLevel::Loading,
+                                        ))
                                         .flex()
                                         .items_center()
                                         .justify_center()
@@ -4167,11 +4195,19 @@ impl Focusable for SftpView {
 impl Render for SftpView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_disconnected = matches!(self.connection_state, ConnectionState::Disconnected { .. });
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let shell_bg = layered_surface_color(
+            cx.theme().background,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         v_flex()
             .size_full()
             .relative()
-            .bg(cx.theme().background)
+            .bg(shell_bg)
             .child(
                 h_flex()
                     .flex_1()

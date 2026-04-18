@@ -16,12 +16,13 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
-    glass_sidebar, h_flex,
+    h_flex,
     input::{Input, InputEvent, InputState},
     list::{List, ListDelegate, ListState},
     menu::{ContextMenuExt, PopupMenuItem},
     popover::Popover,
     scroll::Scrollbar,
+    sidebar_surface_color,
     spinner::Spinner,
     tokens::Radius,
     tooltip::Tooltip,
@@ -42,18 +43,6 @@ use one_core::{
     gpui_tokio::Tokio,
     storage::{ActiveConnections, GlobalStorageState, StoredConnection},
 };
-
-fn macos_sidebar_input_glass(
-    mut color: gpui::Hsla,
-    blur_enabled: bool,
-    glass_opacity: f32,
-) -> gpui::Hsla {
-    if blur_enabled {
-        let alpha = (glass_opacity + gpui_component::LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0);
-        color.a = alpha;
-    }
-    color
-}
 
 fn macos_sidebar_selection_glass(mut color: gpui::Hsla, blur_enabled: bool) -> gpui::Hsla {
     if blur_enabled {
@@ -2102,9 +2091,9 @@ impl Render for DbTreeView {
         let entries_len = self.flat_entries.len();
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let sidebar_bg = glass_sidebar(cx.theme().sidebar, blur_enabled, glass_opacity);
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, glass_opacity);
         let sidebar_input_bg =
-            macos_sidebar_input_glass(cx.theme().input_background(), blur_enabled, glass_opacity);
+            sidebar_surface_color(cx.theme().input_background(), blur_enabled, glass_opacity);
 
         v_flex()
             .id("db-tree-view")

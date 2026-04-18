@@ -173,7 +173,10 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        tracing::info!("setup_terminal_view called, tab_container={:?}", self.tab_container.entity_id());
+        tracing::info!(
+            "setup_terminal_view called, tab_container={:?}",
+            self.tab_container.entity_id()
+        );
         self.register_terminal_view(terminal_view);
         terminal_view.update(cx, |view, cx| {
             view.set_tab_container(self.tab_container.clone());

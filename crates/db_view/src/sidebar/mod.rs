@@ -13,7 +13,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, glass_sidebar, v_flex};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, sidebar_surface_color, v_flex};
 use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::layout::TOOLBAR_WIDTH;
@@ -158,10 +158,10 @@ impl DatabaseSidebar {
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
         let is_active = self.active_panel == Some(panel);
-        let accent_color = glass_sidebar(cx.theme().accent, blur_enabled, glass_opacity);
+        let accent_color = sidebar_surface_color(cx.theme().accent, blur_enabled, glass_opacity);
         let accent_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = glass_sidebar(cx.theme().muted, blur_enabled, glass_opacity);
+        let muted_bg = sidebar_surface_color(cx.theme().muted, blur_enabled, glass_opacity);
 
         div()
             .id(SharedString::from(format!("sidebar-btn-{:?}", panel)))
@@ -189,7 +189,7 @@ impl DatabaseSidebar {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let muted_bg = glass_sidebar(cx.theme().muted, blur_enabled, glass_opacity);
+        let muted_bg = sidebar_surface_color(cx.theme().muted, blur_enabled, glass_opacity);
 
         v_flex()
             .flex_shrink_0()
@@ -231,7 +231,7 @@ impl Render for DatabaseSidebar {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let bg_color = glass_sidebar(cx.theme().background, blur_enabled, glass_opacity);
+        let bg_color = sidebar_surface_color(cx.theme().background, blur_enabled, glass_opacity);
 
         div()
             .h_full()

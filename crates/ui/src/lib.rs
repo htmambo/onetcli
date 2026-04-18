@@ -14,6 +14,7 @@ mod index_path;
 mod inspector;
 mod root;
 mod styled;
+mod surface_alpha;
 mod system_notification;
 mod time;
 mod title_bar;
@@ -92,6 +93,11 @@ pub use input::{BlinkCursor, Rope, RopeExt, RopeLines};
 pub use inspector::*;
 pub use root::Root;
 pub use styled::*;
+pub use surface_alpha::{
+    OverlayScrimLevel, layered_level_surface_color, layered_surface_color, level_surface_color,
+    offset_surface_color, overlay_scrim_color, sidebar_surface_color,
+    sidebar_surface_color_with_offset, terminal_canvas_surface_opacity,
+};
 pub use system_notification::{SystemNotificationOptions, show_system_notification};
 pub use theme::*;
 pub use time::{calendar, date_picker, datetime_picker, time_picker};

@@ -1424,14 +1424,21 @@ impl DragColumn {
 
 impl Render for DragColumn {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let drag_bg = cx
+            .theme()
+            .table_head
+            .blend(cx.theme().table_active_border.opacity(0.18));
+
         div()
             .id("drag-column")
             .cursor_grabbing()
             .py_1()
             .px_2()
             .rounded_md()
-            .bg(cx.theme().primary.opacity(0.9))
-            .text_color(cx.theme().primary_foreground)
+            .border_1()
+            .border_color(cx.theme().table_active_border)
+            .bg(drag_bg)
+            .text_color(cx.theme().table_head_foreground)
             .text_sm()
             .child(if self.name.is_empty() {
                 t!("Table.column_number", index = self.index + 1).to_string()
@@ -2335,7 +2342,7 @@ impl ColumnsEditor {
             .gap_3()
             .px_3()
             .py_2()
-            .bg(cx.theme().muted.opacity(0.5))
+            .bg(cx.theme().table_head)
             .border_b_1()
             .border_color(cx.theme().border)
             .child(div().w(px(24.)))
@@ -2343,35 +2350,35 @@ impl ColumnsEditor {
                 div()
                     .w(px(160.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .child(t!("Table.column_name").to_string()),
             )
             .child(
                 div()
                     .w(px(140.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .child(t!("Table.type").to_string()),
             )
             .child(
                 div()
                     .w(px(60.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .child(t!("Table.length").to_string()),
             )
             .child(
                 div()
                     .w(px(60.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .child(t!("Table.decimal_places").to_string()),
             )
             .child(
                 div()
                     .w(px(50.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .text_center()
                     .child(t!("Table.nullable").to_string()),
             )
@@ -2379,7 +2386,7 @@ impl ColumnsEditor {
                 div()
                     .w(px(50.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .text_center()
                     .child(t!("Table.primary_key").to_string()),
             )
@@ -2387,7 +2394,7 @@ impl ColumnsEditor {
                 div()
                     .w(px(50.))
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .text_center()
                     .child(t!("Table.auto_increment_column").to_string()),
             )
@@ -2395,7 +2402,7 @@ impl ColumnsEditor {
                 div()
                     .flex_1()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(cx.theme().table_head_foreground)
                     .child(t!("Table.comment").to_string()),
             )
             .into_any_element()
@@ -2404,7 +2411,7 @@ impl ColumnsEditor {
     fn render_row(&self, idx: usize, row: &ColumnEditorRow, cx: &Context<Self>) -> AnyElement {
         let is_selected = self.selected_index == Some(idx);
         let name = row.name_input.read(cx).text().to_string();
-        let drag_border_color = cx.theme().primary;
+        let drag_border_color = cx.theme().table_active_border;
 
         h_flex()
             .id(("col-row", idx))
@@ -2412,10 +2419,10 @@ impl ColumnsEditor {
             .gap_3()
             .px_3()
             .py_1p5()
-            .when(is_selected, |this| this.bg(cx.theme().primary.opacity(0.1)))
-            .hover(|this| this.bg(cx.theme().muted.opacity(0.3)))
+            .when(is_selected, |this| this.bg(cx.theme().table_active))
+            .hover(|this| this.bg(cx.theme().table_hover))
             .border_b_1()
-            .border_color(cx.theme().border.opacity(0.5))
+            .border_color(cx.theme().table_row_border)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, _window, cx| {
@@ -2880,28 +2887,28 @@ impl Render for IndexesEditor {
                     .gap_3()
                     .px_3()
                     .py_2()
-                    .bg(cx.theme().muted.opacity(0.5))
+                    .bg(cx.theme().table_head)
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
                         div()
                             .w(px(160.))
                             .text_sm()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(cx.theme().table_head_foreground)
                             .child(t!("Table.index_name").to_string()),
                     )
                     .child(
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(cx.theme().table_head_foreground)
                             .child(t!("Table.columns").to_string()),
                     )
                     .child(
                         div()
                             .w(px(60.))
                             .text_sm()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(cx.theme().table_head_foreground)
                             .text_center()
                             .child(t!("Table.unique").to_string()),
                     ),
@@ -2918,10 +2925,10 @@ impl Render for IndexesEditor {
                             .gap_3()
                             .px_3()
                             .py_1p5()
-                            .when(is_selected, |this| this.bg(cx.theme().primary.opacity(0.1)))
-                            .hover(|this| this.bg(cx.theme().muted.opacity(0.3)))
+                            .when(is_selected, |this| this.bg(cx.theme().table_active))
+                            .hover(|this| this.bg(cx.theme().table_hover))
                             .border_b_1()
-                            .border_color(cx.theme().border.opacity(0.5))
+                            .border_color(cx.theme().table_row_border)
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, _window, cx| {

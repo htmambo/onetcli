@@ -4,8 +4,10 @@ use gpui::{
     SharedString, Styled, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, h_flex,
+    ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, WindowsSurfaceLayer,
+    h_flex,
     input::{Input, InputEvent, InputState},
+    layered_surface_color,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     scroll::{Scrollbar, ScrollbarShow},
     tooltip::Tooltip,
@@ -484,6 +486,14 @@ impl FileListPanel {
         let has_query = !self.search_query.is_empty();
         let filtered_count = self.filtered_indices.len();
         let total_count = self.items.len();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let search_bg = layered_surface_color(
+            cx.theme().background,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
 
         h_flex()
             .h_8()
@@ -492,7 +502,7 @@ impl FileListPanel {
             .items_center()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(search_bg)
             .child(
                 Icon::new(IconName::Search)
                     .xsmall()
@@ -519,6 +529,14 @@ impl FileListPanel {
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let sort_column = self.sort_column;
         let sort_order = self.sort_order;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let header_bg = layered_surface_color(
+            cx.theme().title_bar,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentSection,
+        );
 
         h_flex()
             .h_8()
@@ -526,7 +544,7 @@ impl FileListPanel {
             .items_center()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().title_bar)
+            .bg(header_bg)
             .child(self.render_header_cell(
                 t!("FileList.header_name").into(),
                 FileListColumn::Name,
@@ -1369,6 +1387,14 @@ impl DraggedFileItems {
 impl Render for DraggedFileItems {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.items.len();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let drag_card_bg = layered_surface_color(
+            cx.theme().background,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentCard,
+        );
 
         if count == 1 {
             // 单个文件显示详细信息
@@ -1380,7 +1406,7 @@ impl Render for DraggedFileItems {
                 .px_3()
                 .gap_2()
                 .items_center()
-                .bg(cx.theme().background)
+                .bg(drag_card_bg)
                 .border_1()
                 .border_color(cx.theme().border)
                 .rounded_md()
@@ -1408,7 +1434,7 @@ impl Render for DraggedFileItems {
                 .px_3()
                 .gap_2()
                 .items_center()
-                .bg(cx.theme().background)
+                .bg(drag_card_bg)
                 .border_1()
                 .border_color(cx.theme().border)
                 .rounded_md()
@@ -1426,6 +1452,15 @@ impl Render for DraggedFileItems {
 
 impl Render for DraggedFileItem {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let surface_opacity = cx.theme().surface_opacity;
+        let drag_card_bg = layered_surface_color(
+            cx.theme().background,
+            blur_enabled,
+            surface_opacity,
+            WindowsSurfaceLayer::ContentCard,
+        );
+
         h_flex()
             .id("dragged-file-item")
             .cursor_grab()
@@ -1433,7 +1468,7 @@ impl Render for DraggedFileItem {
             .px_3()
             .gap_2()
             .items_center()
-            .bg(cx.theme().background)
+            .bg(drag_card_bg)
             .border_1()
             .border_color(cx.theme().border)
             .rounded_md()

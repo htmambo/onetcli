@@ -137,7 +137,9 @@ pub fn get_runtime_themes_dir() -> Result<PathBuf> {
     eprintln!(
         "[themes] NOT dev mode, using user dir: {}, exe: {:?}",
         dir.display(),
-        std::env::current_exe().map(|p| p.display().to_string()).ok()
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .ok()
     );
     Ok(dir)
 }

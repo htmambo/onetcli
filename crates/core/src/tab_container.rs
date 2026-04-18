@@ -977,10 +977,6 @@ impl ListDelegate for TabListDelegate {
 // TabContainer - Main container component
 // ============================================================================
 
-fn tab_bar_background_alpha(surface_opacity: f32) -> f32 {
-    (surface_opacity + 0.3).clamp(0.0, 1.0)
-}
-
 fn inactive_tab_background_alpha(surface_opacity: f32, tab_bar_alpha: f32) -> f32 {
     let extra = if tab_bar_alpha < 1.0 { 0.4 } else { 0.2 };
     (surface_opacity + extra).clamp(0.0, 1.0)
@@ -1019,6 +1015,30 @@ fn default_inactive_tab_color(
         inactive_tab_background_alpha(surface_opacity, tab_bar_color.a).max(tab_bar_color.a);
 
     with_alpha(shift_tab_tone(tab_bar_color, is_dark, 0.18), target_alpha)
+}
+
+fn resolve_tab_bar_color(
+    explicit_tab_bar_color: Option<gpui::Hsla>,
+    theme_tab_bar_color: gpui::Hsla,
+) -> gpui::Hsla {
+    explicit_tab_bar_color.unwrap_or(theme_tab_bar_color)
+}
+
+fn resolve_inactive_tab_color(
+    explicit_inactive_tab_color: Option<gpui::Hsla>,
+    explicit_tab_bar_color: Option<gpui::Hsla>,
+    theme_tab_color: gpui::Hsla,
+    resolved_tab_bar_color: gpui::Hsla,
+    surface_opacity: f32,
+    is_dark: bool,
+) -> gpui::Hsla {
+    explicit_inactive_tab_color.unwrap_or_else(|| {
+        if explicit_tab_bar_color.is_some() {
+            default_inactive_tab_color(resolved_tab_bar_color, surface_opacity, is_dark)
+        } else {
+            theme_tab_color
+        }
+    })
 }
 
 fn default_hover_tab_color(inactive_tab_color: gpui::Hsla, is_dark: bool) -> gpui::Hsla {
@@ -2187,15 +2207,17 @@ impl TabContainer {
 
         let theme = cx.theme();
         let is_dark_theme = theme.is_dark();
-        let tab_bar_alpha = tab_bar_background_alpha(theme.surface_opacity);
-        let bg_color = self
-            .tab_bar_bg_color
-            .unwrap_or_else(|| with_alpha(theme.tab, tab_bar_alpha));
+        let bg_color = resolve_tab_bar_color(self.tab_bar_bg_color, theme.tab_bar);
         let border_color = self.tab_bar_border_color.unwrap_or(theme.border);
         let active_tab_color = self.active_tab_bg_color.unwrap_or(theme.tab_active);
-        let inactive_tab_color = self.inactive_tab_bg_color.unwrap_or_else(|| {
-            default_inactive_tab_color(bg_color, theme.surface_opacity, is_dark_theme)
-        });
+        let inactive_tab_color = resolve_inactive_tab_color(
+            self.inactive_tab_bg_color,
+            self.tab_bar_bg_color,
+            theme.tab,
+            bg_color,
+            theme.surface_opacity,
+            is_dark_theme,
+        );
         let hover_tab_color = self
             .inactive_tab_hover_color
             .unwrap_or_else(|| default_hover_tab_color(inactive_tab_color, is_dark_theme));
@@ -2944,10 +2966,14 @@ mod tests {
     use super::{
         TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
         default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
-        should_render_windows_drag_spacer, should_suppress_duplicate_status_summary,
-        tab_bar_background_alpha, uses_manual_window_move,
+        resolve_inactive_tab_color, resolve_tab_bar_color, should_render_windows_drag_spacer,
+        should_suppress_duplicate_status_summary, uses_manual_window_move,
     };
     use gpui::hsla;
+
+    fn assert_f32_close(actual: f32, expected: f32) {
+        assert!((actual - expected).abs() < 1e-6);
+    }
 
     #[test]
     fn windows_仅渲染独立拖窗热区() {
@@ -3003,21 +3029,15 @@ mod tests {
     }
 
     #[test]
-    fn tab_bar_background_alpha_使用系统透明度加_point_three() {
-        assert_eq!(tab_bar_background_alpha(0.4), 0.7);
-        assert_eq!(tab_bar_background_alpha(0.84), 1.0);
-    }
-
-    #[test]
     fn inactive_tab_alpha_整体仍透明时加_point_four() {
-        assert_eq!(inactive_tab_background_alpha(0.4, 0.7), 0.8);
-        assert_eq!(inactive_tab_background_alpha(0.55, 0.85), 0.95);
+        assert_f32_close(inactive_tab_background_alpha(0.4, 0.7), 0.8);
+        assert_f32_close(inactive_tab_background_alpha(0.55, 0.85), 0.95);
     }
 
     #[test]
     fn inactive_tab_alpha_整体不透明时加_point_two() {
-        assert_eq!(inactive_tab_background_alpha(0.4, 1.0), 0.6);
-        assert_eq!(inactive_tab_background_alpha(0.84, 1.0), 1.0);
+        assert_f32_close(inactive_tab_background_alpha(0.4, 1.0), 0.6);
+        assert_f32_close(inactive_tab_background_alpha(0.84, 1.0), 1.0);
     }
 
     #[test]
@@ -3036,6 +3056,44 @@ mod tests {
 
         assert!(inactive.l < tab_bar.l);
         assert_eq!(inactive.a, 1.0);
+    }
+
+    #[test]
+    fn 默认tab_bar直接使用主题tab_bar颜色() {
+        let theme_tab_bar = hsla(0.63, 0.18, 0.12, 0.91);
+
+        assert_eq!(resolve_tab_bar_color(None, theme_tab_bar), theme_tab_bar);
+    }
+
+    #[test]
+    fn 默认inactive_tab直接使用主题tab颜色() {
+        let theme_tab = hsla(0.63, 0.18, 0.18, 0.94);
+        let resolved = resolve_inactive_tab_color(
+            None,
+            None,
+            theme_tab,
+            hsla(0.63, 0.18, 0.12, 0.91),
+            0.84,
+            true,
+        );
+
+        assert_eq!(resolved, theme_tab);
+    }
+
+    #[test]
+    fn 显式覆盖tab_bar时inactive_tab仍按tab_bar推导() {
+        let custom_tab_bar = hsla(0.0, 0.0, 0.16, 0.7);
+        let expected = default_inactive_tab_color(custom_tab_bar, 0.84, true);
+        let resolved = resolve_inactive_tab_color(
+            None,
+            Some(custom_tab_bar),
+            hsla(0.0, 0.0, 0.22, 0.92),
+            custom_tab_bar,
+            0.84,
+            true,
+        );
+
+        assert_eq!(resolved, expected);
     }
 
     #[test]

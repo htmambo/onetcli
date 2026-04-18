@@ -282,11 +282,11 @@ mod tests {
     fn dialog_content_surface_alpha_uses_minimum_when_translucent() {
         assert_alpha_eq(
             dialog_surface_alpha(false, 0.40, DialogSurfaceRole::Content),
-            0.80,
+            0.70,
         );
         assert_alpha_eq(
             dialog_surface_alpha(true, 0.40, DialogSurfaceRole::Content),
-            0.80,
+            0.70,
         );
     }
 
@@ -298,7 +298,7 @@ mod tests {
         );
         assert_alpha_eq(
             dialog_surface_alpha(false, 0.84, DialogSurfaceRole::Chrome),
-            0.94,
+            1.0,
         );
     }
 
@@ -320,6 +320,17 @@ mod tests {
             dialog_surface_alpha(true, 0.96, DialogSurfaceRole::Chrome),
             1.0,
         );
+    }
+
+    #[test]
+    fn plain_surface_tuning_still_respects_surface_opacity_when_blur_disabled() {
+        let mut colors = *ThemeColor::light().as_ref();
+
+        apply_glass_tuning(&mut colors, ThemeMode::Light, false, 0.84);
+
+        assert_alpha_eq(colors.background.a, 0.84);
+        assert_alpha_eq(colors.group_box.a, 0.86);
+        assert_alpha_eq(colors.sidebar.a, 0.85);
     }
 
     #[test]
@@ -386,11 +397,11 @@ mod tests {
         assert_eq!(palette.title_bar.h, raw_colors.title_bar.h);
         assert_eq!(palette.title_bar.s, raw_colors.title_bar.s);
         assert_eq!(palette.title_bar.l, raw_colors.title_bar.l);
-        assert_alpha_eq(palette.title_bar.a, 0.94);
+        assert_alpha_eq(palette.title_bar.a, 1.0);
 
         assert_eq!(palette.footer.h, raw_colors.secondary.h);
         assert_eq!(palette.footer.s, raw_colors.secondary.s);
         assert_eq!(palette.footer.l, raw_colors.secondary.l);
-        assert_alpha_eq(palette.footer.a, 0.94);
+        assert_alpha_eq(palette.footer.a, 1.0);
     }
 }

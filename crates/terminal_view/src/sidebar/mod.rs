@@ -16,17 +16,14 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
-use crate::{
-    theme::{TerminalColors, TerminalTheme},
-    TerminalHighlightRule,
-};
+use crate::{TerminalHighlightRule, theme::TerminalTheme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
-use gpui_component::{glass_sidebar, v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, sidebar_surface_color, v_flex};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};
@@ -147,8 +144,6 @@ pub struct TerminalSidebar {
     sync_path_enabled: bool,
     /// 焦点句柄
     focus_handle: FocusHandle,
-    /// 终端主题配色（用于侧边栏工具栏）
-    colors: TerminalColors,
     /// 订阅句柄
     _subs: Vec<Subscription>,
 }
@@ -163,7 +158,6 @@ impl TerminalSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let colors = initial_theme.colors();
         let has_file_manager = stored_connection.is_some();
         let auto_show_server_monitor = ServerMonitorPanel::load_monitor_enabled(connection_id);
         let settings_panel = cx.new(|cx| {
@@ -245,7 +239,6 @@ impl TerminalSidebar {
                     cx.emit(TerminalSidebarEvent::FontFamilyChanged(family.clone()));
                 }
                 settings_panel::SettingsPanelEvent::ThemeChanged(theme) => {
-                    this.colors = theme.colors();
                     cx.emit(TerminalSidebarEvent::ThemeChanged(theme.clone()));
                 }
                 settings_panel::SettingsPanelEvent::CursorBlinkChanged(enabled) => {
@@ -343,7 +336,6 @@ impl TerminalSidebar {
             server_monitor_panel,
             sync_path_enabled,
             focus_handle: cx.focus_handle(),
-            colors,
             _subs: subs,
         }
     }
@@ -399,7 +391,6 @@ impl TerminalSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.colors = theme.colors();
         // 更新设置面板（会同时更新颜色和主题）
         let theme_clone = theme.clone();
         self.settings_panel.update(cx, |panel, cx| {
@@ -549,10 +540,10 @@ impl TerminalSidebar {
         let is_active = self.active_panel == Some(panel);
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let accent_color = glass_sidebar(self.colors.accent, blur_enabled, glass_opacity);
-        let accent_fg = self.colors.accent_foreground;
-        let muted_fg = self.colors.muted_foreground;
-        let muted_bg = glass_sidebar(self.colors.muted, blur_enabled, glass_opacity);
+        let active_bg = sidebar_surface_color(cx.theme().list_active, blur_enabled, glass_opacity);
+        let hover_bg =
+            sidebar_surface_color(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
+        let icon_color = cx.theme().sidebar_foreground;
 
         div()
             .id(SharedString::from(format!("toolbar-btn-{:?}", panel)))
@@ -563,24 +554,29 @@ impl TerminalSidebar {
             .justify_center()
             .rounded_md()
             .cursor_pointer()
-            .when(is_active, |this| this.bg(accent_color))
-            .when(!is_active, |this| this.hover(|s| s.bg(muted_bg)))
+            .when(is_active, |this| {
+                this.bg(active_bg)
+                    .border_l_3()
+                    .border_color(cx.theme().list_active_border)
+            })
+            .when(!is_active, |this| this.hover(|s| s.bg(hover_bg)))
             .on_click(cx.listener(move |this, _event, _window, cx| {
                 this.toggle_panel(panel, cx);
             }))
             .child(
                 Icon::new(panel.icon())
                     .with_size(Size::Medium)
-                    .text_color(if is_active { accent_fg } else { muted_fg }),
+                    .text_color(icon_color),
             )
     }
 
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let border_color = self.colors.border;
+        let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let muted_bg = glass_sidebar(self.colors.background, blur_enabled, glass_opacity);
+        let toolbar_base = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
+        let toolbar_bg = sidebar_surface_color(toolbar_base, blur_enabled, glass_opacity);
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -588,7 +584,7 @@ impl TerminalSidebar {
             .flex_shrink_0()
             .w(TOOLBAR_WIDTH)
             .h_full()
-            .bg(muted_bg)
+            .bg(toolbar_bg)
             .border_l_1()
             .border_color(border_color)
             .items_center()
@@ -648,7 +644,7 @@ impl Render for TerminalSidebar {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
         let glass_opacity = cx.theme().surface_opacity;
-        let bg_color = glass_sidebar(cx.theme().background, blur_enabled, glass_opacity);
+        let bg_color = sidebar_surface_color(cx.theme().muted, blur_enabled, glass_opacity);
 
         div()
             .h_full()

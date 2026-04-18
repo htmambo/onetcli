@@ -6,12 +6,13 @@
 
 use chrono::{DateTime, Local};
 use gpui::{
-    div, prelude::*, px, uniform_list, App, ClipboardItem, Context, Entity, EventEmitter,
-    ExternalPaths, FocusHandle, Focusable, IntoElement, ListSizingBehavior, MouseButton,
-    MouseDownEvent, ParentElement, PathPromptOptions, Render, SharedString, Styled,
-    UniformListScrollHandle, Window,
+    App, ClipboardItem, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
+    IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, PathPromptOptions,
+    Render, SharedString, Styled, UniformListScrollHandle, Window, div, prelude::*, px,
+    uniform_list,
 };
 use gpui_component::{
+    ActiveTheme, Icon, IconName, InteractiveElementExt, Sizable, Size, WindowExt,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
@@ -22,7 +23,7 @@ use gpui_component::{
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Icon, IconName, InteractiveElementExt, Sizable, Size, WindowExt,
+    v_flex,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{ProxyType as StorageProxyType, SshAuthMethod, StoredConnection};
@@ -32,8 +33,8 @@ use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshCo
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 
@@ -1403,27 +1404,29 @@ impl FileManagerPanel {
             return;
         }
 
-        self.progress_refresh_task = Some(cx.spawn(async move |this, cx| loop {
-            let should_continue = this
-                .update(cx, |this, cx| {
-                    let has_active = this.transfer_queue.has_active();
-                    if has_active {
-                        cx.notify();
-                        true
-                    } else {
-                        this.progress_refresh_task = None;
-                        false
-                    }
-                })
-                .unwrap_or(false);
+        self.progress_refresh_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        let has_active = this.transfer_queue.has_active();
+                        if has_active {
+                            cx.notify();
+                            true
+                        } else {
+                            this.progress_refresh_task = None;
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
 
-            if !should_continue {
-                break;
+                if !should_continue {
+                    break;
+                }
+
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
             }
-
-            cx.background_executor()
-                .timer(Duration::from_millis(100))
-                .await;
         }));
     }
 
@@ -2182,7 +2185,7 @@ impl FileManagerPanel {
             .items_center()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(cx.theme().secondary)
             .child(
                 Icon::new(IconName::Search)
                     .xsmall()
@@ -3105,15 +3108,12 @@ impl Render for FileManagerPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.connection_state.clone();
 
-        v_flex()
-            .size_full()
-            .bg(cx.theme().background)
-            .child(match state {
-                ConnectionState::Idle => self.render_idle(cx).into_any_element(),
-                ConnectionState::Connecting => self.render_connecting(cx).into_any_element(),
-                ConnectionState::Connected => self.render_file_list(cx).into_any_element(),
-                ConnectionState::Error(ref msg) => self.render_error(msg, cx).into_any_element(),
-            })
+        v_flex().size_full().child(match state {
+            ConnectionState::Idle => self.render_idle(cx).into_any_element(),
+            ConnectionState::Connecting => self.render_connecting(cx).into_any_element(),
+            ConnectionState::Connected => self.render_file_list(cx).into_any_element(),
+            ConnectionState::Error(ref msg) => self.render_error(msg, cx).into_any_element(),
+        })
     }
 }
 
@@ -3121,8 +3121,8 @@ impl Render for FileManagerPanel {
 mod tests {
     use super::remote_path_parent;
     use super::{
-        build_refresh_error_plan, build_retry_reset_plan, clear_remote_listing_state,
-        ConnectionState, RetryResetPlan,
+        ConnectionState, RetryResetPlan, build_refresh_error_plan, build_retry_reset_plan,
+        clear_remote_listing_state,
     };
     use std::collections::HashSet;
 
