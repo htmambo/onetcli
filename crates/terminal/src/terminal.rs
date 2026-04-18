@@ -1023,6 +1023,8 @@ pub struct Terminal {
     session_history: VecDeque<HistoryEntry>,
     /// 从 shell 历史文件加载的持久化历史
     persisted_history: Vec<String>,
+    /// 当前连接尝试代次，用于忽略过期的异步回调
+    connection_generation: u64,
 
     /// 连接类型
     connection_kind: TerminalConnectionKind,
@@ -1138,6 +1140,7 @@ impl Terminal {
             init_commands: None,
             session_history: VecDeque::new(),
             persisted_history: Vec::new(),
+            connection_generation: 0,
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: None,
         }
@@ -1253,6 +1256,7 @@ impl Terminal {
             init_commands: None,
             session_history: VecDeque::new(),
             persisted_history: Vec::new(),
+            connection_generation: 0,
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: None,
         })
@@ -1553,10 +1557,13 @@ impl Terminal {
             replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
         }
         let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+        let connection_generation = 1;
+        let ssh_session_manager = Arc::new(SshSessionManager::new(config.ssh_config.clone()));
 
-        Self::spawn_disconnect_handler(disconnect_rx, cx);
+        Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
         Self::spawn_event_loop(event_rx, cx);
         Self::spawn_ssh_connect(
+            ssh_session_manager.clone(),
             config.clone(),
             term.clone(),
             event_proxy.clone(),
@@ -1564,6 +1571,7 @@ impl Terminal {
             conn.id,
             Some(disconnect_tx),
             init_commands.clone(),
+            connection_generation,
             cx,
         );
         Self::spawn_connection_status_tick(cx);
@@ -1587,7 +1595,7 @@ impl Terminal {
             cols,
             rows,
             ssh_config: Some(config.clone()),
-            ssh_session_manager: Some(Arc::new(SshSessionManager::new(config.ssh_config.clone()))),
+            ssh_session_manager: Some(ssh_session_manager),
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
@@ -1599,6 +1607,7 @@ impl Terminal {
             init_commands,
             session_history: VecDeque::new(),
             persisted_history: Vec::new(),
+            connection_generation,
             connection_kind: TerminalConnectionKind::Ssh,
             local_pty_session_id: None,
         }
@@ -1614,14 +1623,16 @@ impl Terminal {
         let (term, _event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
         let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+        let connection_generation = 1;
 
-        Self::spawn_disconnect_handler(disconnect_rx, cx);
+        Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
         Self::spawn_event_loop(event_rx, cx);
         Self::spawn_serial_connect(
             serial_params.clone(),
             term.clone(),
             event_tx.clone(),
             Some(disconnect_tx),
+            connection_generation,
             cx,
         );
 
@@ -1653,9 +1664,19 @@ impl Terminal {
             init_commands: None,
             session_history: VecDeque::new(),
             persisted_history: Vec::new(),
+            connection_generation,
             connection_kind: TerminalConnectionKind::Serial,
             local_pty_session_id: None,
         }
+    }
+
+    fn next_connection_generation(&mut self) -> u64 {
+        self.connection_generation = self.connection_generation.wrapping_add(1).max(1);
+        self.connection_generation
+    }
+
+    fn is_current_connection_generation(&self, generation: u64) -> bool {
+        self.connection_generation == generation
     }
 
     fn create_term(
@@ -1767,12 +1788,16 @@ impl Terminal {
 
     fn spawn_disconnect_handler(
         disconnect_rx: tokio::sync::oneshot::Receiver<()>,
+        generation: u64,
         cx: &mut Context<Self>,
     ) {
         let entity = cx.entity().downgrade();
         cx.spawn(async move |_, cx| {
             let _ = disconnect_rx.await;
             let _ = entity.update(cx, |this, cx| {
+                if !this.is_current_connection_generation(generation) {
+                    return;
+                }
                 this.connection_state = ConnectionState::Disconnected { error: None };
                 this.connection_status_message = None;
                 this.connection_wait_started_at = None;
@@ -1850,6 +1875,7 @@ impl Terminal {
     }
 
     fn spawn_ssh_connect(
+        session_manager: Arc<SshSessionManager>,
         config: SshTerminalConfig,
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_proxy: GpuiEventProxy,
@@ -1857,6 +1883,7 @@ impl Terminal {
         connection_id: Option<i64>,
         on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
         init_commands: Option<String>,
+        generation: u64,
         cx: &mut Context<Self>,
     ) {
         // 创建 SSH 后端需要的通知通道
@@ -1882,7 +1909,7 @@ impl Terminal {
                 sender
             });
             SshBackend::connect_with_progress(
-                config.ssh_config,
+                session_manager,
                 config.pty_config,
                 connection_id,
                 term,
@@ -1918,7 +1945,7 @@ impl Terminal {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                this.handle_ssh_result(result, cx);
+                this.handle_ssh_result(result, generation, cx);
             });
         })
         .detach();
@@ -1927,8 +1954,16 @@ impl Terminal {
     fn handle_ssh_result(
         &mut self,
         result: Result<Result<SshBackend, anyhow::Error>, tokio::task::JoinError>,
+        generation: u64,
         cx: &mut Context<Self>,
     ) {
+        if !self.is_current_connection_generation(generation) {
+            if let Ok(Ok(backend)) = result {
+                backend.shutdown();
+            }
+            return;
+        }
+
         match result {
             Ok(Ok(backend)) => {
                 self.connection_state = ConnectionState::Connected;
@@ -1964,7 +1999,7 @@ impl Terminal {
             }
             Ok(Err(e)) => {
                 self.connection_state = ConnectionState::Disconnected {
-                    error: Some(e.to_string()),
+                    error: Some(format_connection_error(&e)),
                 };
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
@@ -1989,6 +2024,7 @@ impl Terminal {
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_tx: UnboundedSender<TerminalEvent>,
         on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
+        generation: u64,
         cx: &mut Context<Self>,
     ) {
         let disconnect_tx = on_disconnect.map(|tx| {
@@ -2006,7 +2042,7 @@ impl Terminal {
 
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let _ = this.update(cx, |this, cx| {
-                this.handle_serial_result(result, cx);
+                this.handle_serial_result(result, generation, cx);
             });
         })
         .detach();
@@ -2015,8 +2051,16 @@ impl Terminal {
     fn handle_serial_result(
         &mut self,
         result: anyhow::Result<SerialBackend>,
+        generation: u64,
         cx: &mut Context<Self>,
     ) {
+        if !self.is_current_connection_generation(generation) {
+            if let Ok(backend) = result {
+                backend.shutdown();
+            }
+            return;
+        }
+
         match result {
             Ok(backend) => {
                 self.connection_state = ConnectionState::Connected;
@@ -2434,25 +2478,51 @@ impl Terminal {
             let Some(event_proxy) = self.event_proxy.clone() else {
                 return;
             };
+            let session_manager = self
+                .ssh_session_manager
+                .clone()
+                .unwrap_or_else(|| Arc::new(SshSessionManager::new(config.ssh_config.clone())));
+            self.ssh_session_manager = Some(session_manager.clone());
 
             self.connection_state = ConnectionState::Connecting;
             self.connection_status_message =
                 Some(SshConnectionStage::initial_for_config(&config.ssh_config).description());
             self.connection_wait_started_at = Some(Instant::now());
             self.reset_ssh_process_tracking();
+            self.set_connection_active(false, cx);
+            if let Some(backend) = self.backend.take() {
+                backend.shutdown();
+            }
 
-            let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
-            Self::spawn_disconnect_handler(disconnect_rx, cx);
-            Self::spawn_ssh_connect(
-                config,
-                self.term.clone(),
-                event_proxy,
-                event_tx,
-                self.connection_id,
-                Some(disconnect_tx),
-                self.init_commands.clone(),
-                cx,
-            );
+            let generation = self.next_connection_generation();
+            let term = self.term.clone();
+            let connection_id = self.connection_id;
+            let init_commands = self.init_commands.clone();
+            let entity = cx.entity().downgrade();
+            cx.spawn(async move |_, cx| {
+                let _ = session_manager.disconnect().await;
+                let _ = entity.update(cx, |terminal, cx| {
+                    if !terminal.is_current_connection_generation(generation) {
+                        return;
+                    }
+
+                    let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+                    Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
+                    Self::spawn_ssh_connect(
+                        session_manager.clone(),
+                        config.clone(),
+                        term.clone(),
+                        event_proxy.clone(),
+                        event_tx.clone(),
+                        connection_id,
+                        Some(disconnect_tx),
+                        init_commands.clone(),
+                        generation,
+                        cx,
+                    );
+                });
+            })
+            .detach();
             Self::spawn_connection_status_tick(cx);
         } else if let Some(params) = self.serial_params.clone() {
             let Some(event_tx) = self.event_tx.clone() else {
@@ -2462,14 +2532,20 @@ impl Terminal {
             self.connection_state = ConnectionState::Connecting;
             self.connection_status_message = None;
             self.connection_wait_started_at = None;
+            self.set_connection_active(false, cx);
+            if let Some(backend) = self.backend.take() {
+                backend.shutdown();
+            }
+            let generation = self.next_connection_generation();
 
             let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
-            Self::spawn_disconnect_handler(disconnect_rx, cx);
+            Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
             Self::spawn_serial_connect(
                 params,
                 self.term.clone(),
                 event_tx,
                 Some(disconnect_tx),
+                generation,
                 cx,
             );
         } else {
@@ -2589,20 +2665,26 @@ impl Terminal {
     }
 }
 
+fn format_connection_error(err: &anyhow::Error) -> String {
+    format!("{err:#}")
+}
+
 impl EventEmitter<TerminalModelEvent> for Terminal {}
 
 #[cfg(test)]
 mod tests {
     use super::{
         build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
-        compose_ssh_init_commands, is_osc_palette_line, resolve_default_windows_shell_from_env,
-        shell_escape_arg, should_report_ssh_running_processes, SshProcessState,
-        SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
+        compose_ssh_init_commands, format_connection_error, is_osc_palette_line,
+        resolve_default_windows_shell_from_env, shell_escape_arg,
+        should_report_ssh_running_processes, SshProcessState, SSH_PROMPT_HOOK_NAME,
+        SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
         push_history_entry, HistoryEntry, ShellHistoryFormat,
     };
+    use anyhow::anyhow;
     use std::collections::VecDeque;
     use std::fs;
 
@@ -2828,6 +2910,28 @@ mod tests {
         assert!(!is_osc_palette_line("ls -la"));
         assert!(!is_osc_palette_line("4")); // 有 4 但不是调色板序列
         assert!(!is_osc_palette_line("4;rgb:14/09/19")); // 缺颜色索引
+    }
+
+    #[test]
+    fn format_connection_error_keeps_anyhow_context_chain() {
+        let err = anyhow!("channel open failed")
+            .context("shell setup channel failed")
+            .context("SSH connect failed");
+
+        let message = format_connection_error(&err);
+
+        assert!(
+            message.contains("SSH connect failed"),
+            "格式化结果应保留顶层上下文，实际: {message}"
+        );
+        assert!(
+            message.contains("shell setup channel failed"),
+            "格式化结果应保留中间上下文，实际: {message}"
+        );
+        assert!(
+            message.contains("channel open failed"),
+            "格式化结果应保留底层错误，实际: {message}"
+        );
     }
 }
 

@@ -13,8 +13,8 @@ use russh_sftp::client::rawsession::Limits;
 use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use rust_i18n::t;
 use ssh::{
-    AuthFailureMessages, ProxyConnectConfig, ProxyType, RusshClient, SshConnectConfig,
-    authenticate_with_strategy,
+    authenticate_with_strategy, AuthFailureMessages, ProxyConnectConfig, ProxyType, RusshClient,
+    SshConnectConfig,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
