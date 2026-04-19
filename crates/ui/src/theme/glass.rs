@@ -259,7 +259,12 @@ fn dialog_surface_alpha(blur_enabled: bool, opacity: f32, role: DialogSurfaceRol
         return 1.0;
     }
 
-    let base_alpha = opacity.max(DIALOG_SURFACE_BASE_OPACITY);
+    // 当 surface_opacity 未配置（= 0.0）时，使用完全不透明，避免背景透明透出内容
+    let base_alpha = if opacity == 0.0 {
+        1.0
+    } else {
+        opacity.max(DIALOG_SURFACE_BASE_OPACITY)
+    };
     match role {
         DialogSurfaceRole::Content => base_alpha,
         DialogSurfaceRole::Chrome => offset_alpha(base_alpha, DIALOG_CHROME_ALPHA_OFFSET),

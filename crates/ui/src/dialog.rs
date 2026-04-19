@@ -320,6 +320,7 @@ impl RenderOnce for Dialog {
             |_, _| DialogDragState::default(),
         );
 
+
         let render_ok: RenderButtonFn = Box::new({
             let on_ok = on_ok.clone();
             let on_close = on_close.clone();
@@ -688,8 +689,7 @@ impl RenderOnce for Dialog {
                                 ];
                                 this.top(y * delta).shadow(shadow)
                             }),
-                    )
-                    .with_animation("fade-in", animation, move |this, delta| this.opacity(delta)),
+                    ),
             )
     }
 }
