@@ -344,6 +344,8 @@ impl Theme {
             let mut theme = Theme::default();
             theme.light_theme = ThemeRegistry::global(cx).default_light_theme().clone();
             theme.dark_theme = ThemeRegistry::global(cx).default_dark_theme().clone();
+            // 确保初始 background.a 不为 0，避免在主题初始化完成前渲染时出现全透明
+            theme.colors.background.a = 1.0;
             cx.set_global(theme);
         }
     }

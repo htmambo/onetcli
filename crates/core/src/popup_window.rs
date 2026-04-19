@@ -296,7 +296,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
             window_min_size: Some(min_size),
             kind,
             #[cfg(target_os = "linux")]
-            window_background: gpui::WindowBackgroundAppearance::Transparent,
+            window_background: gpui::WindowBackgroundAppearance::Blurred,
             #[cfg(target_os = "linux")]
             window_decorations: Some(gpui::WindowDecorations::Client),
             ..Default::default()

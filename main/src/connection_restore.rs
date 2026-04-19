@@ -538,7 +538,7 @@ impl Render for ConnectionRestorePopupView {
         v_flex()
             .id("connection-restore-popup")
             .size_full()
-            .bg(app_style::page_bg())
+            .bg(cx.theme().background)
             .key_context("PopupWindow")
             .on_action(cx.listener(Self::on_cancel_popup))
             .child(
