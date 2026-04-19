@@ -761,6 +761,7 @@ impl Default for WebDavSettings {
 
 /// GitHub Gist 同步配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct GistSettings {
     pub client_id: String,
     pub gist_id: Option<String>,
@@ -769,6 +770,7 @@ pub struct GistSettings {
 
 /// Google Drive 同步配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct GoogleDriveSettings {
     pub client_id: String,
     pub client_secret: String,
@@ -776,19 +778,10 @@ pub struct GoogleDriveSettings {
     pub tokens: Option<OAuthTokens>,
 }
 
-impl Default for GoogleDriveSettings {
-    fn default() -> Self {
-        Self {
-            client_id: String::new(),
-            client_secret: String::new(),
-            folder_id: None,
-            tokens: None,
-        }
-    }
-}
 
 /// OneDrive 同步配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct OneDriveSettings {
     pub client_id: String,
     pub client_secret: String,
@@ -796,26 +789,7 @@ pub struct OneDriveSettings {
     pub tokens: Option<OAuthTokens>,
 }
 
-impl Default for OneDriveSettings {
-    fn default() -> Self {
-        Self {
-            client_id: String::new(),
-            client_secret: String::new(),
-            root_id: None,
-            tokens: None,
-        }
-    }
-}
 
-impl Default for GistSettings {
-    fn default() -> Self {
-        Self {
-            client_id: String::new(),
-            gist_id: None,
-            tokens: None,
-        }
-    }
-}
 
 impl Default for AppSettings {
     fn default() -> Self {

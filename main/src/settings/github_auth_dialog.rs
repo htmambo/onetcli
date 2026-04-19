@@ -19,8 +19,10 @@ const MAX_POLL_ATTEMPTS: u32 = 60;
 
 /// 授权状态
 #[derive(Clone)]
+#[derive(Default)]
 enum AuthState {
     /// 正在启动 device flow
+    #[default]
     Starting,
     /// 等待用户授权
     WaitingForAuth {
@@ -35,11 +37,6 @@ enum AuthState {
     Error { message: String },
 }
 
-impl Default for AuthState {
-    fn default() -> Self {
-        Self::Starting
-    }
-}
 
 /// GitHub 授权对话框
 pub struct GithubAuthDialog {

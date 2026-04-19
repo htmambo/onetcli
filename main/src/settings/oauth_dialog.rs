@@ -18,7 +18,9 @@ use crate::setting_tab::{AppSettings, GoogleDriveSettings, OneDriveSettings};
 
 /// OAuth 授权状态
 #[derive(Clone)]
+#[derive(Default)]
 enum OAuthState {
+    #[default]
     Building,
     WaitingForAuth { auth_url: String },
     Exchanging,
@@ -26,11 +28,6 @@ enum OAuthState {
     Error { message: String },
 }
 
-impl Default for OAuthState {
-    fn default() -> Self {
-        Self::Building
-    }
-}
 
 // ============================================================================
 // Google Drive 授权对话框

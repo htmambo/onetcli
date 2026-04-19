@@ -1068,7 +1068,7 @@ impl HomePage {
             let tab = tab_container
                 .tabs()
                 .iter()
-                .find(|tab| tab.id().to_string() == tab_id)?;
+                .find(|tab| tab.id() == tab_id)?;
             let terminal = tab.content().view().downcast::<TerminalView>().ok()?;
             let terminal = terminal.read(cx);
 
