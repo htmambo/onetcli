@@ -2560,6 +2560,7 @@ impl HomePage {
                     v_flex()
                         .gap_4()
                         .p_4()
+                        .bg(app_style::page_bg())
                         .child(
                             h_flex()
                                 .items_center()
