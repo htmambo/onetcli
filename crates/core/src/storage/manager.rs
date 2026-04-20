@@ -147,12 +147,19 @@ pub fn get_runtime_themes_dir() -> Result<PathBuf> {
 /// 主题版本文件，记录当前打包的 theme 集校验和，用于判断是否需要更新。
 const THEMES_VERSION_FILE: &str = ".themes_version";
 
+fn is_theme_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("json" | "jsonc")
+    )
+}
+
 /// 获取打包主题的版本标识（基于 themes 目录内容的校验和）。
 fn get_bundled_themes_version(themes_dir: &Path) -> Option<String> {
     let mut entries: Vec<_> = match std::fs::read_dir(themes_dir) {
         Ok(dir) => dir
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .filter(|e| is_theme_file(&e.path()))
             .collect(),
         Err(_) => return None,
     };
@@ -194,7 +201,7 @@ pub fn ensure_themes_copied() -> Result<()> {
             for entry in std::fs::read_dir(bundled)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if path.is_file() && is_theme_file(&path) {
                     let file_name = path.file_name().unwrap();
                     let dest = themes_dir.join(file_name);
                     std::fs::copy(&path, &dest)?;
@@ -244,20 +251,20 @@ fn find_workspace_themes_dir_for_exe(exe_path: &Path) -> Option<PathBuf> {
     let workspace_dir = target_dir.parent()?;
     let themes_dir = workspace_dir.join("themes");
 
-    if workspace_dir.join("Cargo.toml").is_file() && theme_dir_has_json(&themes_dir) {
+    if workspace_dir.join("Cargo.toml").is_file() && theme_dir_has_theme_files(&themes_dir) {
         return Some(themes_dir);
     }
 
     None
 }
 
-fn theme_dir_has_json(dir: &Path) -> bool {
+fn theme_dir_has_theme_files(dir: &Path) -> bool {
     std::fs::read_dir(dir)
         .ok()
         .into_iter()
         .flatten()
         .filter_map(|entry| entry.ok())
-        .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .any(|entry| is_theme_file(&entry.path()))
 }
 
 pub fn get_queries_dir() -> Result<PathBuf> {

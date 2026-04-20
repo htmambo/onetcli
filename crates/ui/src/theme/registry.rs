@@ -5,7 +5,7 @@ use notify::Watcher as _;
 use std::{
     collections::HashMap,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock},
 };
@@ -228,10 +228,10 @@ impl ThemeRegistry {
             for entry in fs::read_dir(&self.themes_dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if path.is_file() && is_supported_theme_file(&path) {
                     let file_content = fs::read_to_string(path.clone())?;
 
-                    match serde_json::from_str::<ThemeSet>(&file_content) {
+                    match parse_theme_set(&path, &file_content) {
                         Ok(theme_set) => {
                             themes.extend(theme_set.themes);
                         }
@@ -269,5 +269,85 @@ impl ThemeRegistry {
         }
 
         Ok(())
+    }
+}
+
+fn is_supported_theme_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("json" | "jsonc")
+    )
+}
+
+fn parse_theme_set(path: &Path, content: &str) -> std::result::Result<ThemeSet, json5::Error> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("jsonc") => json5::from_str::<ThemeSet>(content),
+        Some("json") => match serde_json::from_str::<ThemeSet>(content) {
+            Ok(theme_set) => Ok(theme_set),
+            Err(_) => json5::from_str::<ThemeSet>(content),
+        },
+        _ => json5::from_str::<ThemeSet>(content),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_supported_theme_file, parse_theme_set};
+    use std::path::Path;
+
+    #[test]
+    fn parse_theme_set_supports_json_with_comments() {
+        let content = r##"
+        {
+          "name": "Commented Theme",
+          "themes": [
+            {
+              "name": "Commented Theme",
+              "mode": "dark",
+              "colors": {
+                // 允许注释
+                "background": "#101010"
+              }
+            }
+          ]
+        }
+        "##;
+
+        let theme_set = parse_theme_set(Path::new("commented.json"), content)
+            .expect("应支持带注释的 json 主题");
+
+        assert_eq!(theme_set.themes.len(), 1);
+        assert_eq!(theme_set.themes[0].name.as_ref(), "Commented Theme");
+    }
+
+    #[test]
+    fn parse_theme_set_supports_jsonc_extension() {
+        let content = r##"
+        {
+          "name": "Commented Theme",
+          "themes": [
+            {
+              "name": "Commented Theme",
+              "mode": "dark",
+              "colors": {
+                "background": "#101010",
+              }
+            }
+          ]
+        }
+        "##;
+
+        let theme_set =
+            parse_theme_set(Path::new("commented.jsonc"), content).expect("应支持 jsonc 主题");
+
+        assert_eq!(theme_set.themes.len(), 1);
+        assert_eq!(theme_set.themes[0].name.as_ref(), "Commented Theme");
+    }
+
+    #[test]
+    fn supported_theme_files_include_json_and_jsonc() {
+        assert!(is_supported_theme_file(Path::new("a.json")));
+        assert!(is_supported_theme_file(Path::new("a.jsonc")));
+        assert!(!is_supported_theme_file(Path::new("a.yaml")));
     }
 }

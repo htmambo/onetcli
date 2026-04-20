@@ -274,7 +274,7 @@ copy_package_files() {
 
     # Copy bundled themes to /usr/share/onetcli/themes
     if [[ -d "${PROJECT_DIR}/themes" ]]; then
-        for theme_file in "${PROJECT_DIR}/themes"/*.json; do
+        for theme_file in "${PROJECT_DIR}/themes"/*.json "${PROJECT_DIR}/themes"/*.jsonc; do
             if [[ -f "${theme_file}" ]]; then
                 install -m 644 "${theme_file}" "${STAGING_DIR}/usr/share/onetcli/themes/"
             fi

@@ -4151,6 +4151,7 @@ dependencies = [
  "html5ever 0.27.0",
  "indoc",
  "itertools 0.13.0",
+ "json5",
  "lsp-types 0.97.0",
  "markdown",
  "markup5ever_rcdom",

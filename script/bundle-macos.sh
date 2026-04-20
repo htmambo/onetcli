@@ -86,7 +86,7 @@ fi
 # Copy bundled themes to Resources
 mkdir -p "$APP_DIR/Contents/Resources/themes"
 if [ -d "${PROJECT_DIR}/themes" ]; then
-    for theme_file in "${PROJECT_DIR}/themes"/*.json; do
+    for theme_file in "${PROJECT_DIR}/themes"/*.json "${PROJECT_DIR}/themes"/*.jsonc; do
         if [ -f "$theme_file" ]; then
             cp "$theme_file" "$APP_DIR/Contents/Resources/themes/"
         fi
