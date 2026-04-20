@@ -83,6 +83,16 @@ else
     echo "警告：未找到图标文件 ${ICNS_PATH}"
 fi
 
+# Copy bundled themes to Resources
+mkdir -p "$APP_DIR/Contents/Resources/themes"
+if [ -d "${PROJECT_DIR}/themes" ]; then
+    for theme_file in "${PROJECT_DIR}/themes"/*.json; do
+        if [ -f "$theme_file" ]; then
+            cp "$theme_file" "$APP_DIR/Contents/Resources/themes/"
+        fi
+    done
+fi
+
 # Write PkgInfo
 echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
