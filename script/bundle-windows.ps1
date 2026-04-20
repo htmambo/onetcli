@@ -182,6 +182,23 @@ foreach ($file in @("LICENSE-APACHE", "ONETCLI_LICENSE", "README.md", "README_CN
     }
 }
 
+# Copy bundled themes
+$themeSourceDir = Join-Path $projectDir "themes"
+$themeDestDir = Join-Path $stageDir "themes"
+if (Test-Path -LiteralPath $themeSourceDir) {
+    New-Item -ItemType Directory -Path $themeDestDir -Force | Out-Null
+    $jsonFiles = @(Get-ChildItem -LiteralPath $themeSourceDir -Filter "*.json" -File)
+    $jsoncFiles = @(Get-ChildItem -LiteralPath $themeSourceDir -Filter "*.jsonc" -File)
+    $allThemeFiles = $jsonFiles + $jsoncFiles
+    foreach ($themeFile in $allThemeFiles) {
+        Copy-Item -LiteralPath $themeFile.FullName -Destination $themeDestDir -Force
+    }
+    Write-Host "已复制 $($allThemeFiles.Count) 个主题文件到打包目录"
+}
+else {
+    Write-Host "警告：未找到主题目录 ${themeSourceDir}，跳过主题复制"
+}
+
 $buildInfo = @(
     "应用: OnetCli"
     "版本: $versionTag"
