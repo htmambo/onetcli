@@ -63,8 +63,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         if applied == 0 {
             if let Err(e) = conn.execute_batch(sql) {
                 let err_msg = e.to_string();
-                if err_msg.contains("duplicate column name")
-                    || err_msg.contains("no such column") {
+                if err_msg.contains("duplicate column name") || err_msg.contains("no such column") {
                     tracing::warn!(
                         "Migration {} skipped (column already exists or removed): {}",
                         version,

@@ -7,10 +7,6 @@
 //!
 //! 与 TerminalView 分离，TerminalView 只负责视图逻辑。
 
-use std::cell::Cell;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::collections::HashSet;
-use std::collections::VecDeque;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
@@ -25,6 +21,10 @@ use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{
     ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
+use std::cell::Cell;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,11 +46,11 @@ use crate::history::{
     push_rich_history_entry, HistoryEntry, ShellHistoryFormat, PERSISTED_HISTORY_LIMIT,
     SESSION_HISTORY_LIMIT,
 };
-use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(unix)]
 use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
 #[cfg(unix)]
 use crate::local_pty_protocol::LocalPtyHostEvent;
+use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(unix)]
 use anyhow::Context as _;
 
@@ -88,10 +88,7 @@ fn use_hosted_local_pty() -> bool {
     std::env::var("ONETCLI_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
 }
 
-fn serialize_term_for_recovery(
-    term: &Term<GpuiEventProxy>,
-    max_lines: usize,
-) -> Option<String> {
+fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) -> Option<String> {
     let max_lines = normalize_recovery_scrollback_lines(max_lines);
     if max_lines == 0 || term.mode().contains(TermMode::ALT_SCREEN) {
         return None;
@@ -124,8 +121,7 @@ fn serialize_term_for_recovery(
             }
         }
 
-        let is_wrapline =
-            columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
+        let is_wrapline = columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
         if is_wrapline {
             continue;
         }
@@ -526,6 +522,24 @@ fn should_report_local_running_processes(
     startup_settled && has_running_processes
 }
 
+fn should_report_ssh_running_processes(
+    is_connected: bool,
+    ssh_process_state: SshProcessState,
+    ssh_prompt_detected: bool,
+    interactive_mode_active: bool,
+    command_submitted_without_prompt_sync: bool,
+) -> bool {
+    is_connected
+        && ((ssh_prompt_detected && ssh_process_state == SshProcessState::Busy)
+            || (interactive_mode_active && command_submitted_without_prompt_sync))
+}
+
+fn has_ssh_interactive_program_mode(mode: TermMode) -> bool {
+    mode.intersects(
+        TermMode::ALT_SCREEN | TermMode::APP_CURSOR | TermMode::APP_KEYPAD | TermMode::MOUSE_MODE,
+    )
+}
+
 #[cfg(target_os = "macos")]
 fn note_local_user_input(
     connection_kind: TerminalConnectionKind,
@@ -594,6 +608,7 @@ fn build_local_cwd_tracking_init_command(cwd_file_path: &str) -> String {
 fn note_ssh_user_input(
     connection_kind: TerminalConnectionKind,
     ssh_process_state: &Cell<SshProcessState>,
+    ssh_command_submitted_without_prompt_sync: &Cell<bool>,
     data: &[u8],
 ) {
     if connection_kind != TerminalConnectionKind::Ssh || data.is_empty() {
@@ -611,12 +626,16 @@ fn note_ssh_user_input(
             "SSH user input -> Busy"
         );
         ssh_process_state.set(SshProcessState::Busy);
+        if has_newline {
+            ssh_command_submitted_without_prompt_sync.set(true);
+        }
     }
 }
 
 fn note_ssh_prompt_idle(
     connection_kind: TerminalConnectionKind,
     ssh_process_state: &Cell<SshProcessState>,
+    ssh_command_submitted_without_prompt_sync: &Cell<bool>,
 ) {
     if connection_kind == TerminalConnectionKind::Ssh {
         tracing::warn!(
@@ -625,6 +644,7 @@ fn note_ssh_prompt_idle(
             "SSH prompt idle -> Idle"
         );
         ssh_process_state.set(SshProcessState::Idle);
+        ssh_command_submitted_without_prompt_sync.set(false);
     }
 }
 
@@ -970,6 +990,9 @@ pub struct Terminal {
     /// 是否已从远端收到过 OSC 133;A/B prompt 事件。
     /// 用于防御 shell integration 不工作时的永久 Busy 误报。
     ssh_prompt_detected: bool,
+    /// 用户已提交命令，但会话尚未反馈“回到 prompt”。
+    /// 用于补偿不支持 shell integration 的 SSH，会更保守地拦截关闭。
+    ssh_command_submitted_without_prompt_sync: Cell<bool>,
     /// 串口参数（用于重连）
     serial_params: Option<SerialParams>,
     /// 事件发送器（用于 SSH 重连）
@@ -1092,6 +1115,7 @@ impl Terminal {
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1206,6 +1230,7 @@ impl Terminal {
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1303,6 +1328,7 @@ impl Terminal {
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1394,6 +1420,7 @@ impl Terminal {
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1549,6 +1576,7 @@ impl Terminal {
             ssh_session_manager: Some(Arc::new(SshSessionManager::new(config.ssh_config.clone()))),
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1602,6 +1630,7 @@ impl Terminal {
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
             serial_params: Some(serial_params),
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1735,7 +1764,7 @@ impl Terminal {
                 this.connection_wait_started_at = None;
                 this.backend = None;
                 this.child_exited = Some(0);
-                this.ssh_process_state.set(SshProcessState::Unknown);
+                this.reset_ssh_process_tracking();
                 this.set_connection_active(false, cx);
                 cx.emit(TerminalModelEvent::ChildExit(0));
                 cx.emit(TerminalModelEvent::Wakeup);
@@ -1891,8 +1920,15 @@ impl Terminal {
                 self.connection_state = ConnectionState::Connected;
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
-                self.ssh_process_state.set(SshProcessState::Unknown);
-                tracing::debug!(target: "terminal.ssh", "SSH connected, ssh_process_state = Unknown");
+                // 后端任务与这里并发执行，prompt 事件可能先于连接成功回调到达。
+                // 成功分支不能重置 SSH 跟踪状态，否则会把已收到的 Idle/prompt 信号抹掉，
+                // 导致 top 等前台程序运行时无法正确拦截关闭。
+                tracing::debug!(
+                    target: "terminal.ssh",
+                    ssh_process_state = ?self.ssh_process_state.get(),
+                    ssh_prompt_detected = self.ssh_prompt_detected,
+                    "SSH connected, preserving ssh process tracking state"
+                );
                 self.set_connection_active(true, cx);
                 // 连接后重新调整终端大小
                 self.term.lock().resize(TermDimensions {
@@ -1918,7 +1954,7 @@ impl Terminal {
                 };
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
-                self.ssh_process_state.set(SshProcessState::Unknown);
+                self.reset_ssh_process_tracking();
                 self.set_connection_active(false, cx);
             }
             Err(e) => {
@@ -1927,7 +1963,7 @@ impl Terminal {
                 };
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
-                self.ssh_process_state.set(SshProcessState::Unknown);
+                self.reset_ssh_process_tracking();
                 self.set_connection_active(false, cx);
             }
         }
@@ -2051,12 +2087,20 @@ impl Terminal {
                 cx.emit(TerminalModelEvent::Wakeup);
             }
             TerminalEvent::PromptStart => {
-                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
+                note_ssh_prompt_idle(
+                    self.connection_kind,
+                    &self.ssh_process_state,
+                    &self.ssh_command_submitted_without_prompt_sync,
+                );
                 self.ssh_prompt_detected = true;
                 cx.emit(TerminalModelEvent::PromptStart);
             }
             TerminalEvent::InputStart => {
-                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
+                note_ssh_prompt_idle(
+                    self.connection_kind,
+                    &self.ssh_process_state,
+                    &self.ssh_command_submitted_without_prompt_sync,
+                );
                 self.ssh_prompt_detected = true;
                 cx.emit(TerminalModelEvent::InputStart);
             }
@@ -2086,14 +2130,23 @@ impl Terminal {
                 cx.emit(TerminalModelEvent::WorkingDirChanged(path));
             }
             TerminalEvent::SshPromptReady => {
-                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
+                note_ssh_prompt_idle(
+                    self.connection_kind,
+                    &self.ssh_process_state,
+                    &self.ssh_command_submitted_without_prompt_sync,
+                );
+                self.ssh_prompt_detected = true;
             }
             TerminalEvent::CommandFinished { exit_code } => {
                 tracing::debug!("命令执行完毕，退出码: {}", exit_code);
                 if let Some(last) = self.session_history.back_mut() {
                     last.exit_code = Some(exit_code);
                 }
-                note_ssh_prompt_idle(self.connection_kind, &self.ssh_process_state);
+                note_ssh_prompt_idle(
+                    self.connection_kind,
+                    &self.ssh_process_state,
+                    &self.ssh_command_submitted_without_prompt_sync,
+                );
             }
             TerminalEvent::CommandRecorded(command) => {
                 self.record_history_entry(&command, cx);
@@ -2207,14 +2260,25 @@ impl Terminal {
         }
 
         if self.connection_kind == TerminalConnectionKind::Ssh {
-            let result = matches!(self.connection_state, ConnectionState::Connected)
-                && self.ssh_process_state.get() == SshProcessState::Busy;
+            let ssh_process_state = self.ssh_process_state.get();
+            let interactive_mode_active = has_ssh_interactive_program_mode(self.mode());
+            let command_submitted_without_prompt_sync =
+                self.ssh_command_submitted_without_prompt_sync.get() && !self.ssh_prompt_detected;
+            let result = should_report_ssh_running_processes(
+                matches!(self.connection_state, ConnectionState::Connected),
+                ssh_process_state,
+                self.ssh_prompt_detected,
+                interactive_mode_active,
+                command_submitted_without_prompt_sync,
+            );
             if result {
                 tracing::warn!(
                     target: "terminal.ssh",
                     connection_state = ?self.connection_state,
-                    ssh_process_state = ?self.ssh_process_state.get(),
+                    ssh_process_state = ?ssh_process_state,
                     ssh_prompt_detected = self.ssh_prompt_detected,
+                    interactive_mode_active,
+                    command_submitted_without_prompt_sync,
                     "SSH has_running_processes = true (blocking close)"
                 );
             }
@@ -2295,12 +2359,22 @@ impl Terminal {
         self.ssh_config.is_some() || self.serial_params.is_some()
     }
 
-    /// 写入数据到终端
-    pub fn write(&self, data: &[u8]) {
+    /// 写入用户输入到终端，并更新与关闭提示相关的 SSH 状态。
+    pub fn write_user_input(&self, data: &[u8]) {
         #[cfg(target_os = "macos")]
         note_local_user_input(self.connection_kind, &self.local_process_tree_settled, data);
-        note_ssh_user_input(self.connection_kind, &self.ssh_process_state, data);
+        note_ssh_user_input(
+            self.connection_kind,
+            &self.ssh_process_state,
+            &self.ssh_command_submitted_without_prompt_sync,
+            data,
+        );
 
+        self.write(data);
+    }
+
+    /// 原始写入数据到终端，不更新用户输入相关状态。
+    pub fn write(&self, data: &[u8]) {
         if let Some(ref backend) = self.backend {
             backend.write(data.to_vec());
         }
@@ -2351,7 +2425,7 @@ impl Terminal {
             self.connection_status_message =
                 Some(SshConnectionStage::initial_for_config(&config.ssh_config).description());
             self.connection_wait_started_at = Some(Instant::now());
-            self.ssh_process_state.set(SshProcessState::Unknown);
+            self.reset_ssh_process_tracking();
 
             let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
             Self::spawn_disconnect_handler(disconnect_rx, cx);
@@ -2389,6 +2463,12 @@ impl Terminal {
         }
 
         cx.emit(TerminalModelEvent::Wakeup);
+    }
+
+    fn reset_ssh_process_tracking(&mut self) {
+        self.ssh_process_state.set(SshProcessState::Unknown);
+        self.ssh_prompt_detected = false;
+        self.ssh_command_submitted_without_prompt_sync.set(false);
     }
 
     /// 更新 SSH 终端的路径同步设置。
@@ -2502,7 +2582,8 @@ mod tests {
     use super::{
         build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
         compose_ssh_init_commands, resolve_default_windows_shell_from_env, shell_escape_arg,
-        SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
+        should_report_ssh_running_processes, SshProcessState, SSH_PROMPT_HOOK_NAME,
+        SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
@@ -2569,6 +2650,55 @@ mod tests {
             .expect("带基础命令时应继续注入 SSH prompt hook");
         assert!(with_base.contains("echo ready"));
         assert!(with_base.contains(SSH_PROMPT_HOOK_NAME));
+    }
+
+    #[test]
+    fn should_report_ssh_running_processes_requires_detected_prompt() {
+        assert!(
+            should_report_ssh_running_processes(true, SshProcessState::Busy, true, false, false),
+            "已连接且检测到 prompt 时，Busy 应阻止关闭"
+        );
+        assert!(
+            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, false),
+            "未检测到 prompt 的 Busy 不能作为可靠的阻止关闭信号"
+        );
+    }
+
+    #[test]
+    fn should_report_ssh_running_processes_supports_submitted_command_fallback() {
+        assert!(
+            should_report_ssh_running_processes(true, SshProcessState::Busy, false, true, true),
+            "未同步到 prompt 时，已提交命令应保守地阻止关闭"
+        );
+        assert!(
+            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, true),
+            "无交互程序模式时，已提交命令不应单独阻止关闭"
+        );
+    }
+
+    #[test]
+    fn should_report_ssh_running_processes_ignores_idle_unknown_and_disconnected() {
+        assert!(!should_report_ssh_running_processes(
+            true,
+            SshProcessState::Idle,
+            true,
+            false,
+            false
+        ));
+        assert!(!should_report_ssh_running_processes(
+            true,
+            SshProcessState::Unknown,
+            true,
+            false,
+            false
+        ));
+        assert!(!should_report_ssh_running_processes(
+            false,
+            SshProcessState::Busy,
+            true,
+            true,
+            true
+        ));
     }
 
     #[test]

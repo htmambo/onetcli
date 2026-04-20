@@ -770,8 +770,7 @@ impl Default for WebDavSettings {
 }
 
 /// GitHub Gist 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GistSettings {
     pub client_id: String,
     pub gist_id: Option<String>,
@@ -779,8 +778,7 @@ pub struct GistSettings {
 }
 
 /// Google Drive 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GoogleDriveSettings {
     pub client_id: String,
     pub client_secret: String,
@@ -788,18 +786,14 @@ pub struct GoogleDriveSettings {
     pub tokens: Option<OAuthTokens>,
 }
 
-
 /// OneDrive 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OneDriveSettings {
     pub client_id: String,
     pub client_secret: String,
     pub root_id: Option<String>,
     pub tokens: Option<OAuthTokens>,
 }
-
-
 
 impl Default for AppSettings {
     fn default() -> Self {

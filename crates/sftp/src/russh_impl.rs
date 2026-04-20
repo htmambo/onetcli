@@ -1,21 +1,21 @@
 use crate::{FileEntry, ProgressCallback, SftpClient, TransferCancelled, TransferProgress};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use russh::client::{self, Handle};
 use russh::keys::PublicKey;
-use russh_sftp::client::error::Error as SftpError;
-use russh_sftp::client::rawsession::Limits;
 use russh_sftp::client::RawSftpSession;
 use russh_sftp::client::SftpSession;
+use russh_sftp::client::error::Error as SftpError;
+use russh_sftp::client::rawsession::Limits;
 use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use rust_i18n::t;
 use ssh::{
-    authenticate_with_strategy, AuthFailureMessages, ProxyConnectConfig, ProxyType, RusshClient,
-    SshConnectConfig,
+    AuthFailureMessages, ProxyConnectConfig, ProxyType, RusshClient, SshConnectConfig,
+    authenticate_with_strategy,
 };
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};

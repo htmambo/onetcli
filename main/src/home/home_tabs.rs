@@ -1065,10 +1065,7 @@ impl HomePage {
     fn ssh_connection_for_tab_id(&self, tab_id: &str, cx: &App) -> Option<StoredConnection> {
         let connection_id = {
             let tab_container = self.tab_container.read(cx);
-            let tab = tab_container
-                .tabs()
-                .iter()
-                .find(|tab| tab.id() == tab_id)?;
+            let tab = tab_container.tabs().iter().find(|tab| tab.id() == tab_id)?;
             let terminal = tab.content().view().downcast::<TerminalView>().ok()?;
             let terminal = terminal.read(cx);
 

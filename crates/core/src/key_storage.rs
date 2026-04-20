@@ -92,8 +92,8 @@ impl KeyStorage for LocalFileStorage {
         }
 
         let key = derive_encryption_key();
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| format!("创建加密器失败: {}", e))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&key).map_err(|e| format!("创建加密器失败: {}", e))?;
 
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);

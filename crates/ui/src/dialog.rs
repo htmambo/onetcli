@@ -320,7 +320,6 @@ impl RenderOnce for Dialog {
             |_, _| DialogDragState::default(),
         );
 
-
         let render_ok: RenderButtonFn = Box::new({
             let on_ok = on_ok.clone();
             let on_close = on_close.clone();

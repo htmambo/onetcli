@@ -819,8 +819,7 @@ fn update_condition_column_in_items(
                     id,
                     column.clone(),
                     valid_operators,
-                )
-                {
+                ) {
                     return Some(operator);
                 }
             }
@@ -839,7 +838,10 @@ fn default_filter_operators() -> Vec<FilterOperator> {
     ]
 }
 
-fn operator_items_for_column(schema: Option<&TableSchema>, column: &str) -> Vec<FilterOperatorItem> {
+fn operator_items_for_column(
+    schema: Option<&TableSchema>,
+    column: &str,
+) -> Vec<FilterOperatorItem> {
     let operators = schema
         .and_then(|s| s.columns.iter().find(|c| c.name == column))
         .map(operators_for_column)
@@ -1174,7 +1176,12 @@ impl VisualFilterBuilder {
             move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, window, cx| {
                 let SelectEvent::Confirm(value) = event;
                 if let Some(col_name) = value {
-                    this.update_condition_column(&row_id_clone_for_col, col_name.clone(), window, cx);
+                    this.update_condition_column(
+                        &row_id_clone_for_col,
+                        col_name.clone(),
+                        window,
+                        cx,
+                    );
                 }
             },
         )
@@ -1279,14 +1286,15 @@ impl VisualFilterBuilder {
             .map(operators_for_column)
             .unwrap_or_else(default_filter_operators);
 
-        if let Some(selected_operator) =
-            update_condition_column_in_items(&mut self.root_items, id, column.clone(), &valid_operators)
-        {
+        if let Some(selected_operator) = update_condition_column_in_items(
+            &mut self.root_items,
+            id,
+            column.clone(),
+            &valid_operators,
+        ) {
             if let Some(select) = self.operator_selects.get(id) {
-                let operator_items = SearchableVec::new(operator_items_for_column(
-                    self.schema.as_ref(),
-                    &column,
-                ));
+                let operator_items =
+                    SearchableVec::new(operator_items_for_column(self.schema.as_ref(), &column));
                 select.update(cx, |state, cx| {
                     state.set_items(operator_items, window, cx);
                     state.set_selected_value(&selected_operator, window, cx);
@@ -1478,10 +1486,19 @@ impl VisualFilterBuilder {
                 cx.subscribe_in(
                     &column_select_entity,
                     window,
-                    move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, window, cx| {
+                    move |this,
+                          _,
+                          event: &SelectEvent<SearchableVec<FilterColumnItem>>,
+                          window,
+                          cx| {
                         let SelectEvent::Confirm(value) = event;
                         if let Some(col_name) = value {
-                            this.update_condition_column(&row_id_clone, col_name.clone(), window, cx);
+                            this.update_condition_column(
+                                &row_id_clone,
+                                col_name.clone(),
+                                window,
+                                cx,
+                            );
                         }
                     },
                 )

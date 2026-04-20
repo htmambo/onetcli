@@ -17,17 +17,19 @@ use std::sync::Arc;
 use crate::setting_tab::{AppSettings, GoogleDriveSettings, OneDriveSettings};
 
 /// OAuth 授权状态
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 enum OAuthState {
     #[default]
     Building,
-    WaitingForAuth { auth_url: String },
+    WaitingForAuth {
+        auth_url: String,
+    },
     Exchanging,
     Success,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
-
 
 // ============================================================================
 // Google Drive 授权对话框

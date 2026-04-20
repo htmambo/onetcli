@@ -18,8 +18,7 @@ use crate::setting_tab::AppSettings;
 const MAX_POLL_ATTEMPTS: u32 = 60;
 
 /// 授权状态
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 enum AuthState {
     /// 正在启动 device flow
     #[default]
@@ -36,7 +35,6 @@ enum AuthState {
     /// 授权失败
     Error { message: String },
 }
-
 
 /// GitHub 授权对话框
 pub struct GithubAuthDialog {

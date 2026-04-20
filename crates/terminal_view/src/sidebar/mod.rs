@@ -16,14 +16,14 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
-use crate::{TerminalHighlightRule, theme::TerminalTheme};
+use crate::{theme::TerminalTheme, TerminalHighlightRule};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, sidebar_surface_color, v_flex};
+use gpui_component::{sidebar_surface_color, v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};

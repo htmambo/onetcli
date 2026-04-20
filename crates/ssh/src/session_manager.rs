@@ -147,8 +147,8 @@ mod tests {
     use crate::{JumpServerConnectConfig, ProxyConnectConfig, SshAuth, SshConnectConfig};
     use anyhow::Result;
     use async_trait::async_trait;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Default)]
     struct FakeConnector {

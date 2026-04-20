@@ -11,7 +11,7 @@ use russh::*;
 use rust_i18n::t;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 
 #[derive(Clone)]
 pub struct SshConnectConfig {
@@ -654,11 +654,7 @@ mod tests {
     }
 
     fn home_dir_env_key() -> &'static str {
-        if cfg!(windows) {
-            "USERPROFILE"
-        } else {
-            "HOME"
-        }
+        if cfg!(windows) { "USERPROFILE" } else { "HOME" }
     }
 
     #[cfg(unix)]
@@ -847,9 +843,10 @@ async fn connect_via_proxy(
         ProxyType::Socks5 => {
             use tokio_socks::tcp::Socks5Stream;
 
-            let stream =
-                if let (Some(username), Some(password)) = (&proxy.username, &proxy.password) {
-                    Socks5Stream::connect_with_password(
+            let stream = if let (Some(username), Some(password)) =
+                (&proxy.username, &proxy.password)
+            {
+                Socks5Stream::connect_with_password(
                     proxy_addr.as_str(),
                     (target_host, target_port),
                     username,
@@ -859,15 +856,15 @@ async fn connect_via_proxy(
                 .map_err(|e| {
                     anyhow::anyhow!(t!("Ssh.socks5_proxy_connect_failed", error = e).to_string())
                 })?
-                } else {
-                    Socks5Stream::connect(proxy_addr.as_str(), (target_host, target_port))
-                        .await
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                t!("Ssh.socks5_proxy_connect_failed", error = e).to_string()
-                            )
-                        })?
-                };
+            } else {
+                Socks5Stream::connect(proxy_addr.as_str(), (target_host, target_port))
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            t!("Ssh.socks5_proxy_connect_failed", error = e).to_string()
+                        )
+                    })?
+            };
 
             Ok(stream.into_inner())
         }

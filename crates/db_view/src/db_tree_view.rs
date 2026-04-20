@@ -12,8 +12,8 @@ use gpui::{
     UniformListScrollHandle, Window, div, prelude::FluentBuilder, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize,
-    StyledExt, app_style,
+    ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize, StyledExt,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -2112,7 +2112,7 @@ impl Render for DbTreeView {
                                 .prefix(
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),
-                                )                               
+                                )
                                 .cleanable(true)
                                 .small()
                                 .w_full()

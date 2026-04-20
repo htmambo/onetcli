@@ -19,6 +19,8 @@ pub enum OscEvent {
     CommandFinished { exit_code: i32 },
     /// 工作目录变更（OSC 7;file://host/path）
     WorkingDirChanged(String),
+    /// SSH prompt hook 的空闲提示（OSC 1337;OnetcliPromptReady=1）
+    SshPromptReady,
     /// 记录 shell 实际执行过的命令（OSC 1337;Command=<base64>）
     CommandRecorded(String),
 }
@@ -101,6 +103,11 @@ pub fn parse_osc_payload(payload: &str) -> Option<OscEvent> {
         }
     }
 
+    // OSC 1337：SSH prompt ready（兼容不支持 OSC 133 A/B/D 的会话）
+    if payload == "1337;OnetcliPromptReady=1" {
+        return Some(OscEvent::SshPromptReady);
+    }
+
     // OSC 1337：命令记录
     if let Some(encoded) = payload.strip_prefix("1337;Command=") {
         let command = BASE64_STANDARD
@@ -170,6 +177,14 @@ mod tests {
         assert_eq!(
             parse_osc_payload("1337;CurrentDir=/srv/demo"),
             Some(OscEvent::WorkingDirChanged("/srv/demo".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_osc_1337_prompt_ready() {
+        assert_eq!(
+            parse_osc_payload("1337;OnetcliPromptReady=1"),
+            Some(OscEvent::SshPromptReady)
         );
     }
 

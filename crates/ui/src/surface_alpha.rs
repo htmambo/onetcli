@@ -1,5 +1,5 @@
 use crate::glass_sidebar;
-use crate::theme::{windows_surface_color, windows_surface_opacity, WindowsSurfaceLayer};
+use crate::theme::{WindowsSurfaceLayer, windows_surface_color, windows_surface_opacity};
 use gpui::Hsla;
 
 const LEVEL_RATIO_BASELINE: f32 = 0.08;
@@ -46,10 +46,7 @@ pub fn level_surface_color(
     // window_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
     #[allow(unused_variables)]
     let _ = blur_enabled;
-    with_alpha(
-        color,
-        window_opacity + (level_ratio - LEVEL_RATIO_BASELINE),
-    )
+    with_alpha(color, window_opacity + (level_ratio - LEVEL_RATIO_BASELINE))
 }
 
 pub fn layered_level_surface_color(

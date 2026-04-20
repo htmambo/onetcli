@@ -31,9 +31,9 @@ use gpui_component::{
 };
 use one_core::RunningState;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
+use one_core::connection_state::{ConnectionState, set_connection_active};
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
-use one_core::connection_state::{ConnectionState, set_connection_active};
 use one_core::storage::models::StoredConnection;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use rust_i18n::t;
@@ -74,7 +74,6 @@ pub enum SftpViewEvent {
         working_dir: String,
     },
 }
-
 
 impl SharedProgress {
     /// 创建目录传输进度回调（含当前文件详情）。
