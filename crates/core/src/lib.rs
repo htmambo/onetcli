@@ -10,6 +10,7 @@ pub mod cloud_sync;
 pub mod config;
 pub mod connection_notifier;
 pub mod connection_restore;
+pub mod connection_state;
 pub mod crypto;
 pub mod gpui_tokio;
 pub mod key_storage;

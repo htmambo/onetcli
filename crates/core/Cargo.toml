@@ -36,3 +36,4 @@ url.workspace = true
 regex.workspace = true
 tiny_http.workspace = true
 urlencoding.workspace = true
+ssh.workspace = true

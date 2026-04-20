@@ -33,13 +33,12 @@ use one_core::RunningState;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
-use one_core::storage::models::{
-    ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
-};
+use one_core::connection_state::{ConnectionState, set_connection_active};
+use one_core::storage::models::StoredConnection;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
-use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};
+use ssh::SshConnectConfig;
 use std::collections::VecDeque;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -76,11 +75,45 @@ pub enum SftpViewEvent {
     },
 }
 
-#[derive(Clone, PartialEq)]
-enum ConnectionState {
-    Connecting,
-    Connected,
-    Disconnected { error: Option<String> },
+
+impl SharedProgress {
+    /// 创建目录传输进度回调（含当前文件详情）。
+    ///
+    /// 消除 upload_dir/download_dir/delete_recursive 中重复的进度回调闭包。
+    /// 注意：speed 字段在 delete_recursive 中也会被更新（原实现未更新，现统一处理）。
+    pub fn dir_callback(self: &Arc<Self>) -> sftp::ProgressCallback {
+        let progress = self.clone();
+        Box::new(move |p: TransferProgress| {
+            progress.scanning.store(false, Ordering::Relaxed);
+            progress.transferred.store(p.transferred, Ordering::Relaxed);
+            progress.total.store(p.total, Ordering::Relaxed);
+            progress.speed.store(p.speed.to_bits(), Ordering::Relaxed);
+            if let Some(file) = p.current_file {
+                if let Ok(mut guard) = progress.current_file.write() {
+                    *guard = Some(file);
+                }
+            }
+            progress
+                .current_file_transferred
+                .store(p.current_file_transferred, Ordering::Relaxed);
+            progress
+                .current_file_total
+                .store(p.current_file_total, Ordering::Relaxed);
+        })
+    }
+
+    /// 创建单文件传输进度回调（不含当前文件详情）。
+    ///
+    /// 消除 upload/download 中重复的进度回调闭包。
+    pub fn file_callback(self: &Arc<Self>) -> sftp::ProgressCallback {
+        let progress = self.clone();
+        Box::new(move |p: TransferProgress| {
+            progress.scanning.store(false, Ordering::Relaxed);
+            progress.transferred.store(p.transferred, Ordering::Relaxed);
+            progress.total.store(p.total, Ordering::Relaxed);
+            progress.speed.store(p.speed.to_bits(), Ordering::Relaxed);
+        })
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -566,64 +599,7 @@ impl SftpView {
             .to_ssh_params()
             .expect("StoredConnection should contain valid SSH params");
 
-        let auth = match ssh_params.auth_method {
-            SshAuthMethod::Password { password } => SshAuth::Password(password),
-            SshAuthMethod::PrivateKey {
-                key_path,
-                passphrase,
-            } => SshAuth::PrivateKey {
-                key_path,
-                passphrase,
-                certificate_path: None,
-            },
-            SshAuthMethod::Agent => SshAuth::Agent,
-            SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
-        };
-
-        let config = SshConnectConfig {
-            host: ssh_params.host,
-            port: ssh_params.port,
-            username: ssh_params.username,
-            auth,
-            timeout: ssh_params.connect_timeout.map(Duration::from_secs),
-            keepalive_interval: ssh_params.keepalive_interval.map(Duration::from_secs),
-            keepalive_max: ssh_params.keepalive_max,
-            enable_legacy_kex: ssh_params.enable_legacy_kex,
-            jump_server: ssh_params.jump_server.map(|jump| {
-                let jump_auth = match jump.auth_method {
-                    SshAuthMethod::Password { password } => SshAuth::Password(password),
-                    SshAuthMethod::PrivateKey {
-                        key_path,
-                        passphrase,
-                    } => SshAuth::PrivateKey {
-                        key_path,
-                        passphrase,
-                        certificate_path: None,
-                    },
-                    SshAuthMethod::Agent => SshAuth::Agent,
-                    SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
-                };
-                JumpServerConnectConfig {
-                    host: jump.host,
-                    port: jump.port,
-                    username: jump.username,
-                    auth: jump_auth,
-                }
-            }),
-            proxy: ssh_params.proxy.map(|p| {
-                let proxy_type = match p.proxy_type {
-                    StorageProxyType::Socks5 => ProxyType::Socks5,
-                    StorageProxyType::Http => ProxyType::Http,
-                };
-                ProxyConnectConfig {
-                    proxy_type,
-                    host: p.host,
-                    port: p.port,
-                    username: p.username,
-                    password: p.password,
-                }
-            }),
-        };
+        let config = ssh_params.to_connect_config();
 
         let focus_handle = cx.focus_handle();
         let local_current_path = ssh_params
@@ -831,16 +807,7 @@ impl SftpView {
     }
 
     fn set_connection_active(&self, active: bool, cx: &mut Context<Self>) {
-        let Some(connection_id) = self.stored_connection.id else {
-            return;
-        };
-
-        let global_state = cx.global_mut::<ActiveConnections>();
-        if active {
-            global_state.add(connection_id);
-        } else {
-            global_state.remove(connection_id);
-        }
+        set_connection_active(self.stored_connection.id, active, cx);
     }
 
     fn reconnect(&mut self, cx: &mut Context<Self>) {
@@ -1653,33 +1620,7 @@ impl SftpView {
                             local_path.to_string_lossy().as_ref(),
                             &remote_path,
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                                if let Some(file) = progress.current_file {
-                                    if let Ok(mut guard) =
-                                        progress_for_callback.current_file.write()
-                                    {
-                                        *guard = Some(file);
-                                    }
-                                }
-                                progress_for_callback
-                                    .current_file_transferred
-                                    .store(progress.current_file_transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .current_file_total
-                                    .store(progress.current_file_total, Ordering::Relaxed);
-                            }),
+                            progress_for_callback.dir_callback(),
                         )
                         .await
                 } else {
@@ -1688,20 +1629,7 @@ impl SftpView {
                             local_path.to_string_lossy().as_ref(),
                             &remote_path,
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                            }),
+                            progress_for_callback.file_callback(),
                         )
                         .await
                 }
@@ -1798,33 +1726,7 @@ impl SftpView {
                             &remote_path,
                             local_path.to_string_lossy().as_ref(),
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                                if let Some(file) = progress.current_file {
-                                    if let Ok(mut guard) =
-                                        progress_for_callback.current_file.write()
-                                    {
-                                        *guard = Some(file);
-                                    }
-                                }
-                                progress_for_callback
-                                    .current_file_transferred
-                                    .store(progress.current_file_transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .current_file_total
-                                    .store(progress.current_file_total, Ordering::Relaxed);
-                            }),
+                            progress_for_callback.dir_callback(),
                         )
                         .await
                 } else {
@@ -1833,20 +1735,7 @@ impl SftpView {
                             &remote_path,
                             local_path.to_string_lossy().as_ref(),
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                            }),
+                            progress_for_callback.file_callback(),
                         )
                         .await
                 }
@@ -2037,8 +1926,6 @@ impl SftpView {
                 }
 
                 let path = join_remote_path(&remote_dir, &entry.name);
-                let progress_callback = progress_for_task.clone();
-
                 let result = if entry.is_dir {
                     progress_for_task.scanning.store(true, Ordering::Relaxed);
                     progress_for_task.transferred.store(0, Ordering::Relaxed);
@@ -2057,26 +1944,7 @@ impl SftpView {
                         .delete_recursive(
                             &path,
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_callback.scanning.store(false, Ordering::Relaxed);
-                                progress_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                if let Some(file) = progress.current_file {
-                                    if let Ok(mut guard) = progress_callback.current_file.write() {
-                                        *guard = Some(file);
-                                    }
-                                }
-                                progress_callback
-                                    .current_file_transferred
-                                    .store(progress.current_file_transferred, Ordering::Relaxed);
-                                progress_callback
-                                    .current_file_total
-                                    .store(progress.current_file_total, Ordering::Relaxed);
-                            }),
+                            progress_for_task.dir_callback(),
                         )
                         .await
                 } else {

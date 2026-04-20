@@ -1,45 +1,15 @@
 use crate::cloud_sync::sync_type::SyncableItem;
 use crate::crypto;
 use crate::storage::traits::Entity;
-use gpui::Global;
 use gpui_component::Size::Large;
 use gpui_component::{Icon, IconName, Sizable};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
 use std::fmt;
 
-/// 活跃连接状态 - 用于跟踪哪些连接当前已打开
-#[derive(Default)]
-pub struct ActiveConnections {
-    active_ids: HashSet<i64>,
-}
-
-impl Global for ActiveConnections {}
-
-impl ActiveConnections {
-    pub fn new() -> Self {
-        Self {
-            active_ids: HashSet::new(),
-        }
-    }
-
-    pub fn add(&mut self, conn_id: i64) {
-        self.active_ids.insert(conn_id);
-    }
-
-    pub fn remove(&mut self, conn_id: i64) {
-        self.active_ids.remove(&conn_id);
-    }
-
-    pub fn is_active(&self, conn_id: i64) -> bool {
-        self.active_ids.contains(&conn_id)
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.active_ids.len()
-    }
-}
+// 从 connection_state 模块重导出，保持向后兼容。
+// 新代码应直接使用 one_core::connection_state::{ConnectionState, set_connection_active}。
+pub use crate::connection_state::{ActiveConnections, ConnectionState, set_connection_active};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionType {
