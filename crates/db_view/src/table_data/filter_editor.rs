@@ -804,22 +804,51 @@ fn update_condition_column_in_items(
     for item in items.iter_mut() {
         match item {
             FilterItem::Condition(row) if row.id == id => {
-                // 检查当前操作符是否对新列有效
-                let need_reset = !valid_operators.contains(&row.operator);
                 row.column = column;
-                return if need_reset { valid_operators.first().copied() } else { None };
+                if !valid_operators.contains(&row.operator) {
+                    row.operator = valid_operators
+                        .first()
+                        .copied()
+                        .unwrap_or(FilterOperator::Equal);
+                }
+                return Some(row.operator);
             }
             FilterItem::Group(group) => {
-                if let Some(new_op) =
-                    update_condition_column_in_items(&mut group.children, id, column.clone(), valid_operators)
+                if let Some(operator) = update_condition_column_in_items(
+                    &mut group.children,
+                    id,
+                    column.clone(),
+                    valid_operators,
+                )
                 {
-                    return Some(new_op);
+                    return Some(operator);
                 }
             }
             _ => {}
         }
     }
     None
+}
+
+fn default_filter_operators() -> Vec<FilterOperator> {
+    vec![
+        FilterOperator::Equal,
+        FilterOperator::NotEqual,
+        FilterOperator::IsNull,
+        FilterOperator::IsNotNull,
+    ]
+}
+
+fn operator_items_for_column(schema: Option<&TableSchema>, column: &str) -> Vec<FilterOperatorItem> {
+    let operators = schema
+        .and_then(|s| s.columns.iter().find(|c| c.name == column))
+        .map(operators_for_column)
+        .unwrap_or_else(default_filter_operators);
+
+    operators
+        .into_iter()
+        .map(|op| FilterOperatorItem { op })
+        .collect()
 }
 
 /// 递归查找并更新条件操作符
@@ -1139,12 +1168,13 @@ impl VisualFilterBuilder {
 
         // 订阅列选择事件
         let row_id_clone_for_col = row_id.clone();
-        cx.subscribe(
+        cx.subscribe_in(
             &column_select_entity,
-            move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, _cx| {
+            window,
+            move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, window, cx| {
                 let SelectEvent::Confirm(value) = event;
                 if let Some(col_name) = value {
-                    this.update_condition_column(&row_id_clone_for_col, col_name.clone());
+                    this.update_condition_column(&row_id_clone_for_col, col_name.clone(), window, cx);
                 }
             },
         )
@@ -1175,31 +1205,7 @@ impl VisualFilterBuilder {
         });
 
         // 创建操作符选择器
-        let operator_items: Vec<FilterOperatorItem> = schema
-            .as_ref()
-            .and_then(|s| s.columns.iter().find(|c| c.name == first_col))
-            .map(operators_for_column)
-            .map(|ops| {
-                ops.iter()
-                    .map(|op| FilterOperatorItem { op: *op })
-                    .collect()
-            })
-            .unwrap_or_else(|| {
-                vec![
-                    FilterOperatorItem {
-                        op: FilterOperator::Equal,
-                    },
-                    FilterOperatorItem {
-                        op: FilterOperator::NotEqual,
-                    },
-                    FilterOperatorItem {
-                        op: FilterOperator::IsNull,
-                    },
-                    FilterOperatorItem {
-                        op: FilterOperator::IsNotNull,
-                    },
-                ]
-            });
+        let operator_items = operator_items_for_column(schema.as_ref(), &first_col);
 
         let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
 
@@ -1259,22 +1265,37 @@ impl VisualFilterBuilder {
     }
 
     /// 在所有分组中递归查找并更新条件列
-    fn update_condition_column(&mut self, id: &str, column: String) {
-        // 获取新列的操作符列表
-        let valid_operators: Vec<FilterOperator> = self
+    fn update_condition_column(
+        &mut self,
+        id: &str,
+        column: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let valid_operators = self
             .schema
             .as_ref()
             .and_then(|s| s.columns.iter().find(|c| c.name == column))
             .map(operators_for_column)
-            .unwrap_or_else(|| vec![FilterOperator::Equal]);
+            .unwrap_or_else(default_filter_operators);
 
-        if let Some(new_op) =
-            update_condition_column_in_items(&mut self.root_items, id, column, &valid_operators)
+        if let Some(selected_operator) =
+            update_condition_column_in_items(&mut self.root_items, id, column.clone(), &valid_operators)
         {
-            // 需要重置操作符
-            self.update_condition_operator(id, new_op);
+            if let Some(select) = self.operator_selects.get(id) {
+                let operator_items = SearchableVec::new(operator_items_for_column(
+                    self.schema.as_ref(),
+                    &column,
+                ));
+                select.update(cx, |state, cx| {
+                    state.set_items(operator_items, window, cx);
+                    state.set_selected_value(&selected_operator, window, cx);
+                    cx.notify();
+                });
+            }
         }
         self.sync_filter_state();
+        cx.notify();
     }
 
     /// 在所有分组中递归查找并更新条件操作符
@@ -1285,26 +1306,10 @@ impl VisualFilterBuilder {
     }
 
     fn add_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut group_row = GroupRow::new(LogicOperator::And);
-
-        // 创建默认条件
-        let (condition_row, column_select_entity, operator_select_entity, value_input_entity) =
-            self.create_default_condition(window, cx);
-        let condition_id = condition_row.id.clone();
-        group_row
-            .children
-            .push(FilterItem::Condition(condition_row));
+        let group_row = GroupRow::new(LogicOperator::And);
+        let group_id = group_row.id.clone();
         self.root_items.push(FilterItem::Group(group_row));
-
-        // 存储 UI 组件
-        self.column_selects
-            .insert(condition_id.clone(), column_select_entity);
-        self.operator_selects
-            .insert(condition_id.clone(), operator_select_entity);
-        self.value_inputs.insert(condition_id, value_input_entity);
-
-        self.sync_filter_state();
-        cx.notify();
+        self.add_condition_to_group(&group_id, window, cx);
     }
 
     /// 清除所有筛选条件
@@ -1319,92 +1324,6 @@ impl VisualFilterBuilder {
         self.value_subscriptions.clear();
         self.filter_state = FilterState::new();
         cx.notify();
-    }
-
-    /// 添加分组到指定分组内
-    /// 创建默认条件行及其 UI 组件
-    fn create_default_condition(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> (
-        ConditionRow,
-        Entity<SelectState<SearchableVec<FilterColumnItem>>>,
-        Entity<SelectState<SearchableVec<FilterOperatorItem>>>,
-        Entity<InputState>,
-    ) {
-        let schema = self.schema.clone();
-        let first_col = schema
-            .as_ref()
-            .and_then(|s| s.columns.first())
-            .map(|c| c.name.clone())
-            .unwrap_or_default();
-        let first_op = schema
-            .as_ref()
-            .and_then(|s| s.columns.first())
-            .map(operators_for_column)
-            .and_then(|ops| ops.first().copied())
-            .unwrap_or(FilterOperator::Equal);
-
-        let condition_row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
-
-        let column_items: Vec<FilterColumnItem> = schema
-            .as_ref()
-            .map(|s| {
-                s.columns
-                    .iter()
-                    .map(|c| FilterColumnItem {
-                        name: c.name.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let selected_col_index = schema
-            .as_ref()
-            .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
-            .map(|i| IndexPath::new(i));
-
-        let column_select_entity = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(column_items),
-                selected_col_index,
-                window,
-                cx,
-            )
-        });
-
-        let operator_items: Vec<FilterOperatorItem> = schema
-            .as_ref()
-            .and_then(|s| s.columns.first())
-            .map(operators_for_column)
-            .map(|ops| {
-                ops.iter()
-                    .map(|op| FilterOperatorItem { op: *op })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
-
-        let operator_select_entity = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(operator_items),
-                selected_op_index.map(|i| IndexPath::new(i)),
-                window,
-                cx,
-            )
-        });
-
-        let value_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
-
-        (
-            condition_row,
-            column_select_entity,
-            operator_select_entity,
-            value_input_entity,
-        )
     }
 
     fn add_group_to_group(
@@ -1556,12 +1475,13 @@ impl VisualFilterBuilder {
 
                 // 订阅列选择事件
                 let row_id_clone = row_id.clone();
-                cx.subscribe(
+                cx.subscribe_in(
                     &column_select_entity,
-                    move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, _cx| {
+                    window,
+                    move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, window, cx| {
                         let SelectEvent::Confirm(value) = event;
                         if let Some(col_name) = value {
-                            this.update_condition_column(&row_id_clone, col_name.clone());
+                            this.update_condition_column(&row_id_clone, col_name.clone(), window, cx);
                         }
                     },
                 )
@@ -1592,31 +1512,7 @@ impl VisualFilterBuilder {
                 });
 
                 // 创建操作符选择器
-                let operator_items: Vec<FilterOperatorItem> = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.iter().find(|c| c.name == first_col))
-                    .map(operators_for_column)
-                    .map(|ops| {
-                        ops.iter()
-                            .map(|op| FilterOperatorItem { op: *op })
-                            .collect()
-                    })
-                    .unwrap_or_else(|| {
-                        vec![
-                            FilterOperatorItem {
-                                op: FilterOperator::Equal,
-                            },
-                            FilterOperatorItem {
-                                op: FilterOperator::NotEqual,
-                            },
-                            FilterOperatorItem {
-                                op: FilterOperator::IsNull,
-                            },
-                            FilterOperatorItem {
-                                op: FilterOperator::IsNotNull,
-                            },
-                        ]
-                    });
+                let operator_items = operator_items_for_column(schema.as_ref(), &first_col);
 
                 let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
 

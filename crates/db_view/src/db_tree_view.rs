@@ -13,6 +13,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize,
+    StyledExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -2092,8 +2093,6 @@ impl Render for DbTreeView {
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().window_opacity;
         let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, window_opacity);
-        let sidebar_input_bg =
-            sidebar_surface_color(cx.theme().input_background(), blur_enabled, window_opacity);
 
         v_flex()
             .id("db-tree-view")
@@ -2113,12 +2112,11 @@ impl Render for DbTreeView {
                                 .prefix(
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),
-                                )
-                                .bg(sidebar_input_bg)
-                                .border_color(cx.theme().sidebar_border.opacity(0.6))
+                                )                               
                                 .cleanable(true)
                                 .small()
-                                .w_full(),
+                                .w_full()
+                                .refine_style(&app_style::control_style()),
                         ),
                     )
                     .child(
