@@ -27,7 +27,7 @@ impl<'a> SemanticColorsRef<'a> {
 
     pub fn bg_surface(&self) -> gpui::Hsla {
         match self {
-            Self::Dark(colors) | Self::Light(colors) => colors.group_box,
+            Self::Dark(colors) | Self::Light(colors) => colors.group,
         }
     }
 

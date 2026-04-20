@@ -26,7 +26,6 @@
         "list.even.background": "#1e1f29",
         "muted.background": "#090a14",
         "muted.foreground": "#757579",
-        "panel.background": "#090a14",
         "popover.background": "#1e1f29",
         "popover.foreground": "#f8f8f2",
         "primary.background": "#f1fa8c",
@@ -60,7 +59,8 @@
         "base.yellow": "#f1fa8c",
         "base.blue": "#bd93f9",
         "base.magenta": "#ff79c6",
-        "base.cyan": "#8be9fd"
+        "base.cyan": "#8be9fd",
+        "group.background": "#090a14"
       },
       "highlight": {
         "editor.foreground": "#f8f8f2",

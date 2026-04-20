@@ -137,7 +137,7 @@ impl Render for PopupWindowView {
             .bg(surface_palette.content)
             .border_1()
             .border_color(app_style::border_strong())
-            .text_color(app_style::text_primary())
+            .text_color(app_style::text())
             .overflow_hidden()
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)

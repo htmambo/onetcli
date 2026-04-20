@@ -3,41 +3,22 @@
 //! 提供统一的侧边栏毛玻璃透明度调整逻辑，
 //! 替代各模块中重复的本地实现。
 
-use crate::theme::LEFT_PANEL_ALPHA_OFFSET;
 use gpui::Hsla;
 
-/// 为侧边栏背景应用毛玻璃透明度
+/// 返回侧边栏背景色，保持其 alpha 不变。
 ///
-/// blur_enabled 仅控制 frosted 视觉效果（是否在颜色上应用 frosted tuning），
-/// 实际的 alpha 透明度始终由 window_opacity 控制。
-///
-/// 当 blur_enabled=true 时，在 window_opacity 基础上增加 LEFT_PANEL_ALPHA_OFFSET，
-/// 以增强侧边栏的毛玻璃质感。
-///
-/// 当 blur_enabled=false 时，使用 window_opacity 作为 alpha，
-/// 不额外增加偏移量。
+/// 该函数存在的意义是统一侧边栏背景色的获取入口，
+/// 确保调用者不会意外覆盖掉 apply_glass_tuning 已经算好的 frosted alpha。
 ///
 /// # Arguments
-/// * `color` - 原始背景色（已经过 apply_glass_tuning 处理）
-/// * `blur_enabled` - 是否启用 frosted 效果
-/// * `window_opacity` - 窗口透明度（0.0~1.0）
+/// * `color` - 已经过 apply_glass_tuning 处理的 sidebar 颜色（alpha 已正确）
+/// * `_blur_enabled` - 已废弃，忽略
+/// * `_window_opacity` - 已废弃，忽略
 ///
 /// # Example
 /// ```ignore
 /// div().bg(glass_sidebar(cx.theme().sidebar, blur_enabled, cx.theme().window_opacity))
 /// ```
-pub fn glass_sidebar(color: Hsla, blur_enabled: bool, window_opacity: f32) -> Hsla {
-    let alpha = if blur_enabled {
-        (window_opacity + LEFT_PANEL_ALPHA_OFFSET).clamp(0.0, 1.0)
-    } else {
-        window_opacity.clamp(0.0, 1.0)
-    };
-    let mut c = color;
-    c.a = alpha;
-    c
-}
-
-/// 为侧边栏背景应用毛玻璃透明度（接受 f64 参数）
-pub fn glass_sidebar_f64(color: Hsla, blur_enabled: bool, window_opacity: f64) -> Hsla {
-    glass_sidebar(color, blur_enabled, window_opacity as f32)
+pub fn glass_sidebar(color: Hsla, _blur_enabled: bool, _window_opacity: f32) -> Hsla {
+    color
 }

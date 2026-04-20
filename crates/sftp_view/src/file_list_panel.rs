@@ -487,7 +487,7 @@ impl FileListPanel {
         let filtered_count = self.filtered_indices.len();
         let total_count = self.items.len();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().window_opacity;
+        let surface_opacity = cx.theme().ui_surface_opacity;
         let search_bg = layered_surface_color(
             cx.theme().background,
             blur_enabled,
@@ -530,7 +530,7 @@ impl FileListPanel {
         let sort_column = self.sort_column;
         let sort_order = self.sort_order;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().window_opacity;
+        let surface_opacity = cx.theme().ui_surface_opacity;
         let header_bg = layered_surface_color(
             cx.theme().title_bar,
             blur_enabled,
@@ -1388,7 +1388,7 @@ impl Render for DraggedFileItems {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.items.len();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().window_opacity;
+        let surface_opacity = cx.theme().ui_surface_opacity;
         let drag_card_bg = layered_surface_color(
             cx.theme().background,
             blur_enabled,
@@ -1453,7 +1453,7 @@ impl Render for DraggedFileItems {
 impl Render for DraggedFileItem {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().window_opacity;
+        let surface_opacity = cx.theme().ui_surface_opacity;
         let drag_card_bg = layered_surface_color(
             cx.theme().background,
             blur_enabled,

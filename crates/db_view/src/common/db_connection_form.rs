@@ -2147,7 +2147,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
-            .text_color(app_style::text_primary())
+            .text_color(app_style::text())
             .children(current_tab_fields.iter().enumerate().map(|(i, field_info)| {
                 let input_idx = field_input_offset + i;
                 let is_sqlite_path = matches!(db_type, DatabaseType::SQLite | DatabaseType::DuckDB)
@@ -2437,7 +2437,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
-            .text_color(app_style::text_primary())
+            .text_color(app_style::text())
             .child(
                 field()
                     .label(self.field_label("ssh_tunnel_enabled"))
@@ -2545,7 +2545,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
-            .text_color(app_style::text_primary())
+            .text_color(app_style::text())
             .child(
                 field()
                     .label(t!("ConnectionForm.require_ssl").to_string())
@@ -2621,7 +2621,7 @@ impl Render for DbConnectionForm {
                         .rounded_xl()
                         .border_1()
                         .border_color(app_style::border())
-                        .bg(app_style::panel_bg())
+                        .bg(app_style::surface())
                         .px_2()
                         .py_2()
                         .child(

@@ -1929,7 +1929,7 @@ impl HomePage {
                             .w_full()
                             .max_h(px(360.0))
                             .p(px(8.0))
-                            .bg(app_style::panel_bg())
+                            .bg(app_style::surface())
                             .border_1()
                             .border_color(app_style::border())
                             .rounded(cx.theme().radius),
@@ -1969,7 +1969,7 @@ impl HomePage {
                             .w_full()
                             .max_h(px(360.0))
                             .p(px(8.0))
-                            .bg(app_style::panel_bg())
+                            .bg(app_style::surface())
                             .border_1()
                             .border_color(app_style::border())
                             .rounded(cx.theme().radius),
@@ -2601,7 +2601,7 @@ impl HomePage {
         let view_for_sort_field = view_for_new_connection.clone();
         let view_for_view_mode = view_for_new_connection.clone();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
+        let window_opacity = cx.theme().backdrop_opacity;
         let toolbar_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
@@ -3132,13 +3132,11 @@ impl HomePage {
             }
         }
 
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, window_opacity);
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar);
         let sidebar_active_bg =
-            sidebar_surface_color(cx.theme().list_active, blur_enabled, window_opacity);
+            sidebar_surface_color(cx.theme().list_active);
         let sidebar_hover_bg =
-            sidebar_surface_color(cx.theme().sidebar_accent, blur_enabled, window_opacity);
+            sidebar_surface_color(cx.theme().sidebar_accent);
         let filter_types = ConnectionType::all();
 
         v_flex()
@@ -4369,7 +4367,7 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
+        let window_opacity = cx.theme().backdrop_opacity;
         let workspace_bg = layered_level_surface_color(
             cx.theme().tab,
             blur_enabled,
@@ -5002,7 +5000,7 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
+        let window_opacity = cx.theme().backdrop_opacity;
         let item_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
@@ -5713,7 +5711,7 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
+        let window_opacity = cx.theme().backdrop_opacity;
         let card_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
@@ -7327,7 +7325,7 @@ impl Render for HomePage {
 
         self.maybe_prompt_connection_restore(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
+        let window_opacity = cx.theme().backdrop_opacity;
         let home_shell_bg = if cfg!(target_os = "windows") || cx.theme().window_blur_enabled {
             cx.theme().transparent
         } else {

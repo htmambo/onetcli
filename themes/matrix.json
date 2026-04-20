@@ -30,7 +30,6 @@
         "list.even.background": "#00190066",
         "muted.background": "#001900",
         "muted.foreground": "#007700",
-        "panel.background": "#001900",
         "popover.background": "#020D02",
         "popover.foreground": "#00FF00",
         "primary.active.background": "#00FF0099",
@@ -63,7 +62,8 @@
         "base.yellow": "#ffea00",
         "base.blue": "#0000ff",
         "base.magenta": "#FF00FF",
-        "base.cyan": "#00ffd5"
+        "base.cyan": "#00ffd5",
+        "group.background": "#001900"
       },
       "highlight": {
         "editor.foreground": "#88FF88",

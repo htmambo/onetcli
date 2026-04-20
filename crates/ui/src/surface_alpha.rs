@@ -28,38 +28,38 @@ impl OverlayScrimLevel {
 pub fn offset_surface_color(
     color: Hsla,
     blur_enabled: bool,
-    window_opacity: f32,
+    backdrop_opacity: f32,
     offset: f32,
 ) -> Hsla {
-    // window_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
+    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
     #[allow(unused_variables)]
     let _blur_enabled = blur_enabled;
-    with_alpha(color, window_opacity + offset)
+    with_alpha(color, backdrop_opacity + offset)
 }
 
 pub fn level_surface_color(
     color: Hsla,
     blur_enabled: bool,
-    window_opacity: f32,
+    backdrop_opacity: f32,
     level_ratio: f32,
 ) -> Hsla {
-    // window_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
+    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
     #[allow(unused_variables)]
     let _ = blur_enabled;
-    with_alpha(color, window_opacity + (level_ratio - LEVEL_RATIO_BASELINE))
+    with_alpha(color, backdrop_opacity + (level_ratio - LEVEL_RATIO_BASELINE))
 }
 
 pub fn layered_level_surface_color(
     color: Hsla,
     blur_enabled: bool,
-    window_opacity: f32,
+    backdrop_opacity: f32,
     level_ratio: f32,
     layer: WindowsSurfaceLayer,
 ) -> Hsla {
     windows_surface_color(
-        level_surface_color(color, blur_enabled, window_opacity, level_ratio),
+        level_surface_color(color, blur_enabled, backdrop_opacity, level_ratio),
         blur_enabled,
-        window_opacity,
+        backdrop_opacity,
         layer,
     )
 }
@@ -67,40 +67,47 @@ pub fn layered_level_surface_color(
 pub fn layered_surface_color(
     color: Hsla,
     blur_enabled: bool,
-    window_opacity: f32,
+    backdrop_opacity: f32,
     layer: WindowsSurfaceLayer,
 ) -> Hsla {
-    windows_surface_color(color, blur_enabled, window_opacity, layer)
+    windows_surface_color(color, blur_enabled, backdrop_opacity, layer)
 }
 
-pub fn sidebar_surface_color(color: Hsla, blur_enabled: bool, window_opacity: f32) -> Hsla {
-    glass_sidebar(color, blur_enabled, window_opacity)
+/// Pass-through: the color's alpha is already set by `apply_glass_tuning` at theme init time.
+/// Do not overwrite it again.
+#[inline]
+pub fn sidebar_surface_color(color: Hsla) -> Hsla {
+    color
 }
 
 pub fn sidebar_surface_color_with_offset(
     color: Hsla,
     blur_enabled: bool,
-    window_opacity: f32,
+    backdrop_opacity: f32,
     offset: f32,
 ) -> Hsla {
-    sidebar_surface_color(color, blur_enabled, window_opacity + offset)
+    // 将 backdrop_opacity + offset 作为最终 alpha 应用，与 sidebar_surface_color
+    // 保持一致的逻辑，只是多了 offset 偏移。
+    #[allow(unused_variables)]
+    let _ = blur_enabled;
+    with_alpha(color, (backdrop_opacity + offset).clamp(0.0, 1.0))
 }
 
 pub fn overlay_scrim_color(color: Hsla, level: OverlayScrimLevel) -> Hsla {
     with_alpha(color, level.alpha())
 }
 
-pub fn terminal_canvas_surface_opacity(window_opacity: f32, blur_enabled: bool) -> f32 {
+pub fn terminal_canvas_surface_opacity(backdrop_opacity: f32, blur_enabled: bool) -> f32 {
     if cfg!(target_os = "windows") {
         windows_surface_opacity(
-            window_opacity,
+            backdrop_opacity,
             blur_enabled,
             WindowsSurfaceLayer::TerminalCanvas,
         )
     } else if blur_enabled {
-        (window_opacity + TERMINAL_BLUR_OPACITY_OFFSET).clamp(0.0, 1.0)
+        (backdrop_opacity + TERMINAL_BLUR_OPACITY_OFFSET).clamp(0.0, 1.0)
     } else {
-        window_opacity
+        backdrop_opacity
     }
 }
 
@@ -207,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_surface_color_uses_sidebar_glass_rule() {
+    fn sidebar_surface_color_is_pass_through() {
         let color = Hsla {
             h: 0.11,
             s: 0.28,
@@ -215,9 +222,14 @@ mod tests {
             a: 0.05,
         };
 
-        let result = sidebar_surface_color(color, true, 0.84);
+        // sidebar_surface_color 是直通函数，颜色 alpha 已在 apply_glass_tuning 时设置好
+        let result = sidebar_surface_color(color);
 
-        assert_alpha_eq(result.a, 1.0);
+        // 直通：输入输出完全一致
+        assert_eq!(result.h, color.h);
+        assert_eq!(result.s, color.s);
+        assert_eq!(result.l, color.l);
+        assert_alpha_eq(result.a, color.a);
     }
 
     #[test]
@@ -231,7 +243,8 @@ mod tests {
 
         let result = sidebar_surface_color_with_offset(color, true, 0.84, -0.10);
 
-        assert_alpha_eq(result.a, 0.94);
+        // window_opacity(0.84) + offset(-0.10) = 0.74
+        assert_alpha_eq(result.a, 0.74);
     }
 
     #[test]

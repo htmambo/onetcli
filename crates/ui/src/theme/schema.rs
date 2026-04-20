@@ -89,15 +89,12 @@ pub struct ThemeConfigColors {
     /// Default border color
     #[serde(rename = "border")]
     pub border: Option<SharedString>,
-    /// Background color for GroupBox.
-    #[serde(rename = "group_box.background")]
-    pub group_box: Option<SharedString>,
+    /// Background color for GroupBox / Panel.
+    #[serde(rename = "group.background", alias = "panel.background", alias = "group_box.background")]
+    pub group: Option<SharedString>,
     /// Text color for GroupBox.
-    #[serde(rename = "group_box.foreground")]
-    pub group_box_foreground: Option<SharedString>,
-    /// Title text color for GroupBox.
-    #[serde(rename = "group_box.title.foreground")]
-    pub group_box_title_foreground: Option<SharedString>,
+    #[serde(rename = "group.foreground")]
+    pub group_foreground: Option<SharedString>,
     /// Input caret color (Blinking cursor).
     #[serde(rename = "caret")]
     pub caret: Option<SharedString>,
@@ -534,15 +531,12 @@ impl ThemeColor {
         apply_color!(accordion, fallback = self.background);
         apply_color!(accordion_hover, fallback = self.accent.opacity(0.8));
         apply_color!(
-            group_box,
+            group,
             fallback = self
                 .background
-                .blend(
-                    self.secondary
-                        .opacity(if config.mode.is_dark() { 0.3 } else { 0.4 })
-                )
+                .blend(self.secondary.opacity(if config.mode.is_dark() { 0.3 } else { 0.4 }))
         );
-        apply_color!(group_box_foreground, fallback = self.foreground);
+        apply_color!(group_foreground, fallback = self.foreground);
         apply_color!(caret, fallback = self.primary);
         apply_color!(chart_1, fallback = self.blue.lighten(0.4));
         apply_color!(chart_2, fallback = self.blue.lighten(0.2));
@@ -701,13 +695,13 @@ impl Theme {
             &mut self.colors,
             config.mode,
             self.window_blur_enabled,
-            self.surface_opacity,
+            self.ui_surface_opacity,
         );
         if let Some(mut highlight_theme) = next_highlight_theme {
             crate::theme::apply_glass_highlight_tuning(
                 &mut highlight_theme.style,
                 self.window_blur_enabled,
-                self.surface_opacity,
+                self.ui_surface_opacity,
             );
             self.highlight_theme = Arc::new(highlight_theme);
         }

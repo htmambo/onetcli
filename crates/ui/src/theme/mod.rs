@@ -67,17 +67,36 @@ pub fn windows_surface_opacity(
     (opacity * factor).clamp(0.0, 1.0)
 }
 
+/// Apply Windows 层级的颜色暗化（仅调整 s/l，保留 alpha）。
+///
+/// 层级的视觉暗化通过降低亮度实现，替代 macOS/Linux 上通过不同 alpha
+/// 透明度形成的视觉层次感。
+pub fn apply_windows_layer_tint(color: Hsla, layer: WindowsSurfaceLayer) -> Hsla {
+    let tint = match layer {
+        // 层级越高（越靠上），需要越暗以形成视觉深度
+        WindowsSurfaceLayer::TerminalFallback => 0.10,
+        WindowsSurfaceLayer::TerminalCanvas => 0.07,
+        WindowsSurfaceLayer::ContentCard => 0.05,
+        WindowsSurfaceLayer::ContentSection => 0.03,
+        WindowsSurfaceLayer::ContentBase => 0.00,
+    };
+    color.lightness((color.l - tint).max(0.0))
+}
+
 pub fn windows_surface_color(
-    mut color: Hsla,
+    color: Hsla,
     blur_enabled: bool,
     opacity: f32,
     layer: WindowsSurfaceLayer,
 ) -> Hsla {
+    let mut c = color;
     if cfg!(target_os = "windows") {
-        color.a = windows_surface_opacity(opacity, blur_enabled, layer);
+        // Windows 上不再用 layer_factor 二次衰减 alpha（alpha 已在
+        // apply_glass_tuning 中由 surface_opacity 算好），改为通过颜色
+        // 暗化来体现层级深度，避免透明度被压暗两次的问题。
+        c = apply_windows_layer_tint(c, layer);
     }
-
-    color
+    c
 }
 
 pub fn init(cx: &mut App) {
@@ -128,8 +147,10 @@ pub struct Theme {
     pub shadow: bool,
     pub transparent: Hsla,
     pub window_blur_enabled: bool,
-    pub surface_opacity: f32,
-    pub window_opacity: f32,
+    /// UI 面板透明度（控制 sidebar、tab_bar、popover 等背景 alpha）。
+    pub ui_surface_opacity: f32,
+    /// 窗口背景透明度（控制窗口底层 backdrop 的实际透明度）。
+    pub backdrop_opacity: f32,
     /// Show the scrollbar mode, default: Scrolling
     pub scrollbar_show: ScrollbarShow,
     /// The notification setting.
@@ -252,8 +273,8 @@ impl Theme {
 
     pub fn set_window_surface_preferences(
         blur_enabled: bool,
-        surface_opacity: f64,
-        window_opacity: f64,
+        ui_surface_opacity: f64,
+        backdrop_opacity: f64,
         cx: &mut App,
     ) {
         Self::ensure_global(cx);
@@ -261,15 +282,15 @@ impl Theme {
         let theme = cx.global_mut::<Theme>();
         let mode = theme.mode;
         theme.window_blur_enabled = blur_enabled;
-        theme.surface_opacity = clamp_surface_opacity(surface_opacity);
-        theme.window_opacity = window_opacity as f32;
+        theme.ui_surface_opacity = clamp_surface_opacity(ui_surface_opacity);
+        theme.backdrop_opacity = backdrop_opacity as f32;
 
         // 重新应用毛玻璃调整到主题颜色
         crate::theme::apply_glass_tuning(
             &mut theme.colors,
             mode,
             blur_enabled,
-            theme.surface_opacity,
+            theme.ui_surface_opacity,
         );
 
         // 刷新所有窗口以应用新颜色
@@ -312,8 +333,8 @@ impl From<&ThemeColor> for Theme {
             mode: ThemeMode::default(),
             transparent: Hsla::transparent_black(),
             window_blur_enabled: true,
-            surface_opacity: DEFAULT_GLASS_OPACITY,
-            window_opacity: 1.0,
+            ui_surface_opacity: DEFAULT_GLASS_OPACITY,
+            backdrop_opacity: 1.0,
             font_family: ".SystemUIFont".into(),
             font_size: px(16.),
             mono_font_family: if cfg!(target_os = "macos") {

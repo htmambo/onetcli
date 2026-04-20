@@ -43,7 +43,7 @@ pub(crate) fn apply_glass_tuning(
 
     colors.background = surface_color(colors.background, mode, blur_enabled, tuning.base, 1.0);
     colors.border = with_alpha(colors.border, tuning.border);
-    colors.group_box = surface_color(colors.group_box, mode, blur_enabled, tuning.elevated, 0.9);
+    colors.group = surface_color(colors.group, mode, blur_enabled, tuning.elevated, 0.9);
     colors.input = with_alpha(colors.input, tuning.border);
     colors.list = surface_color(colors.list, mode, blur_enabled, tuning.base, 0.88);
     colors.list_even = surface_color(colors.list_even, mode, blur_enabled, tuning.base, 0.84);
@@ -131,7 +131,7 @@ pub(crate) fn dialog_chrome_surface_color(color: Hsla, blur_enabled: bool, opaci
 pub fn modal_surface_palette(theme: &Theme) -> ModalSurfacePalette {
     let colors = theme.colors_without_glass();
     let blur_enabled = theme.window_blur_enabled;
-    let opacity = theme.surface_opacity;
+    let opacity = theme.ui_surface_opacity;
 
     ModalSurfacePalette {
         content: dialog_content_surface_color(colors.background, blur_enabled, opacity),
@@ -238,6 +238,9 @@ fn surface_color(
 
 fn frost_color(color: Hsla, mode: ThemeMode, intensity: f32) -> Hsla {
     let intensity = intensity.clamp(0.0, 1.0);
+    if intensity == 0.0 {
+        return color;
+    }
     if mode.is_dark() {
         color
             .saturation((color.s * (1.0 - 0.20 * intensity)).clamp(0.0, 1.0))
@@ -250,6 +253,9 @@ fn frost_color(color: Hsla, mode: ThemeMode, intensity: f32) -> Hsla {
 }
 
 fn offset_alpha(alpha: f32, delta: f32) -> f32 {
+    if delta == 0.0 {
+        return alpha;
+    }
     (alpha + delta).clamp(0.0, 1.0)
 }
 
@@ -259,7 +265,7 @@ fn dialog_surface_alpha(blur_enabled: bool, opacity: f32, role: DialogSurfaceRol
         return 1.0;
     }
 
-    // 当 surface_opacity 未配置（= 0.0）时，使用完全不透明，避免背景透明透出内容
+    // 当 ui_surface_opacity 未配置（= 0.0）时，使用完全不透明，避免背景透明透出内容
     let base_alpha = if opacity == 0.0 {
         1.0
     } else {
@@ -328,13 +334,13 @@ mod tests {
     }
 
     #[test]
-    fn plain_surface_tuning_still_respects_surface_opacity_when_blur_disabled() {
+    fn plain_surface_tuning_still_respects_ui_surface_opacity_when_blur_disabled() {
         let mut colors = *ThemeColor::light().as_ref();
 
         apply_glass_tuning(&mut colors, ThemeMode::Light, false, 0.84);
 
         assert_alpha_eq(colors.background.a, 0.84);
-        assert_alpha_eq(colors.group_box.a, 0.86);
+        assert_alpha_eq(colors.group.a, 0.86);
         assert_alpha_eq(colors.sidebar.a, 0.85);
     }
 
@@ -383,12 +389,12 @@ mod tests {
         let mut theme = Theme::from(ThemeColor::light().as_ref());
         theme.mode = ThemeMode::Light;
         theme.window_blur_enabled = true;
-        theme.surface_opacity = 0.84;
+        theme.ui_surface_opacity = 0.84;
         apply_glass_tuning(
             &mut theme.colors,
             theme.mode,
             theme.window_blur_enabled,
-            theme.surface_opacity,
+            theme.ui_surface_opacity,
         );
 
         let raw_colors = theme.colors_without_glass();

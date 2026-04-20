@@ -21,10 +21,10 @@ pub struct ThemeColor {
     pub background: Hsla,
     /// Default border color
     pub border: Hsla,
-    /// Background color for GroupBox.
-    pub group_box: Hsla,
+    /// Background color for GroupBox / Panel.
+    pub group: Hsla,
     /// Text color for GroupBox.
-    pub group_box_foreground: Hsla,
+    pub group_foreground: Hsla,
     /// Input caret color (Blinking cursor).
     pub caret: Hsla,
     /// Chart 1 color.

@@ -1472,7 +1472,7 @@ impl Render for SshFormWindow {
                 .rounded_md()
                 .border_1()
                 .border_color(app_style::border())
-                .bg(app_style::panel_bg())
+                .bg(app_style::surface())
                 .child(Spinner::new().small())
                 .child(
                     div()
@@ -1509,7 +1509,7 @@ impl Render for SshFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(app_style::page_bg())
+            .bg(app_style::base())
             .child(
                 TitleBar::new()
                     .refine_style(&app_style::title_bar_style())
@@ -1521,7 +1521,7 @@ impl Render for SshFormWindow {
                             .flex_1()
                             .text_sm()
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(app_style::text_primary())
+                            .text_color(app_style::text())
                             .child(self.title.clone()),
                     ),
             )
@@ -1532,7 +1532,7 @@ impl Render for SshFormWindow {
                         .rounded_xl()
                         .border_1()
                         .border_color(app_style::border())
-                        .bg(app_style::panel_bg())
+                        .bg(app_style::surface())
                         .px_2()
                         .py_2()
                         .child(
@@ -1563,7 +1563,7 @@ impl Render for SshFormWindow {
                     .rounded_xl()
                     .border_1()
                     .border_color(app_style::border())
-                    .bg(app_style::panel_bg())
+                    .bg(app_style::surface())
                     .p_4()
                     .overflow_y_scroll()
                     .child(match active_tab {
@@ -1592,7 +1592,7 @@ impl Render for SshFormWindow {
                     .py_4()
                     .border_t_1()
                     .border_color(app_style::border())
-                    .bg(app_style::panel_bg())
+                    .bg(app_style::surface())
                     .child(
                         Button::new("cancel")
                             .small()

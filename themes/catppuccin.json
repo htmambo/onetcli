@@ -24,7 +24,6 @@
         "list.head.background": "#dce0e8",
         "muted.background": "#dce0e8",
         "muted.foreground": "#9a9db2",
-        "panel.background": "#dce0e8",
         "primary.active.background": "#7287fd",
         "primary.background": "#7287fd",
         "primary.foreground": "#EFF1F5",
@@ -55,7 +54,10 @@
         "base.blue": "#78acdc",
         "base.magenta": "#8778dc",
         "base.magenta.light": "#9978dc66",
-        "base.cyan": "#53d2b0"
+        "base.cyan": "#53d2b0",
+        "group.background": "#dce0e8",
+        "popover.background": "#ccd0e0",
+        "popover.foreground": "#4c4f69"
       },
       "highlight": {
         "editor.foreground": "#4c4f69",

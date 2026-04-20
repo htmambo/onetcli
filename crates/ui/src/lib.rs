@@ -85,7 +85,7 @@ pub use element_ext::ElementExt;
 pub use event::InteractiveElementExt;
 pub use focus_trap::FocusTrapElement;
 pub use geometry::*;
-pub use glass_sidebar::{glass_sidebar, glass_sidebar_f64};
+pub use glass_sidebar::glass_sidebar;
 pub use icon::*;
 pub use index_path::IndexPath;
 pub use input::{BlinkCursor, Rope, RopeExt, RopeLines};

@@ -135,7 +135,7 @@ impl Render for ConnectionFormWindow {
 
         v_flex()
             .size_full()
-            .bg(app_style::page_bg())
+            .bg(app_style::base())
             .child(
                 TitleBar::new()
                     .refine_style(&app_style::title_bar_style())
@@ -147,7 +147,7 @@ impl Render for ConnectionFormWindow {
                             .flex_1()
                             .text_sm()
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(app_style::text_primary())
+                            .text_color(app_style::text())
                             .child(self.title.clone()),
                     ),
             )
@@ -159,7 +159,7 @@ impl Render for ConnectionFormWindow {
                     .rounded_xl()
                     .border_1()
                     .border_color(app_style::border())
-                    .bg(app_style::panel_bg())
+                    .bg(app_style::surface())
                     .p_4()
                     .overflow_y_scrollbar()
                     .child(self.form.clone()),
@@ -193,7 +193,7 @@ impl Render for ConnectionFormWindow {
                     .p_4()
                     .border_t_1()
                     .border_color(app_style::border())
-                    .bg(app_style::panel_bg())
+                    .bg(app_style::surface())
                     .child(
                         Button::new("cancel")
                             .small()

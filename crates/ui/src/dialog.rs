@@ -599,7 +599,7 @@ impl RenderOnce for Dialog {
                                                 div()
                                                     .line_height(relative(1.))
                                                     .font_semibold()
-                                                    .text_color(app_style::text_primary())
+                                                    .text_color(app_style::text())
                                                     .child(title),
                                             )
                                         }),

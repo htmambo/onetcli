@@ -425,10 +425,10 @@ pub struct AppSettings {
     pub auto_switch_theme: bool,
     #[serde(default = "default_true")]
     pub enable_glass_effect: bool,
-    #[serde(default = "default_glass_opacity")]
-    pub glass_opacity: f64,
-    #[serde(default = "default_window_opacity")]
-    pub window_opacity: f64,
+    #[serde(default = "default_ui_surface_opacity")]
+    pub ui_surface_opacity: f64,
+    #[serde(default = "default_backdrop_opacity")]
+    pub backdrop_opacity: f64,
     #[serde(default = "default_font_family")]
     pub font_family: String,
     #[serde(default = "default_font_size")]
@@ -540,11 +540,19 @@ fn clamp_ui_font_size(size: f64) -> f32 {
     size.clamp(8.0, 72.0) as f32
 }
 
-fn default_glass_opacity() -> f64 {
+fn default_ui_surface_opacity() -> f64 {
     0.84
 }
 
-fn clamp_glass_opacity(opacity: f64) -> f64 {
+fn clamp_ui_surface_opacity(opacity: f64) -> f64 {
+    opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
+}
+
+fn default_backdrop_opacity() -> f64 {
+    1.0
+}
+
+fn clamp_backdrop_opacity(opacity: f64) -> f64 {
     opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
 }
 
@@ -704,7 +712,7 @@ fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
 
 fn settings_group_content_style(cx: &App) -> StyleRefinement {
     let blur_enabled = cx.theme().window_blur_enabled;
-    let bg = offset_surface_color(cx.theme().group_box, blur_enabled, 0.0, 0.14);
+    let bg = offset_surface_color(cx.theme().group, blur_enabled, 0.0, 0.14);
     sync_server_theme::surface_style()
         .rounded(Radius::Xl.px())
         .bg(bg)
@@ -802,8 +810,8 @@ impl Default for AppSettings {
             theme_mode: "light".to_string(),
             auto_switch_theme: false,
             enable_glass_effect: default_true(),
-            glass_opacity: default_glass_opacity(),
-            window_opacity: default_window_opacity(),
+            ui_surface_opacity: default_ui_surface_opacity(),
+            backdrop_opacity: default_backdrop_opacity(),
             font_family: default_font_family(),
             font_size: default_font_size(),
             terminal_font_size: default_terminal_font_size(),
@@ -1117,8 +1125,8 @@ impl AppSettings {
 
         Theme::set_window_surface_preferences(
             self.enable_glass_effect,
-            self.glass_opacity,
-            self.window_opacity,
+            self.ui_surface_opacity,
+            self.backdrop_opacity,
             cx,
         );
         Theme::change(mode, window, cx);
@@ -1531,18 +1539,18 @@ impl SettingsPanel {
                                         max: MAX_GLASS_OPACITY as f64,
                                         step: 0.01,
                                     },
-                                    |cx: &App| AppSettings::global(cx).glass_opacity,
+                                    |cx: &App| AppSettings::global(cx).ui_surface_opacity,
                                     |val: f64, cx: &mut App| {
                                         let settings_snapshot = {
                                             let settings = AppSettings::global_mut(cx);
-                                            settings.glass_opacity = clamp_glass_opacity(val);
+                                            settings.ui_surface_opacity = clamp_ui_surface_opacity(val);
                                             settings.save();
                                             settings.clone()
                                         };
                                         settings_snapshot.apply_theme_preferences(None, cx);
                                     },
                                 ))
-                                .default_value(default_settings.glass_opacity),
+                                .default_value(default_settings.ui_surface_opacity),
                             )
                             .description(
                                 t!("Settings.General.Appearance.glass_opacity_desc").to_string(),
@@ -1555,18 +1563,18 @@ impl SettingsPanel {
                                         max: MAX_GLASS_OPACITY as f64,
                                         step: 0.01,
                                     },
-                                    |cx: &App| AppSettings::global(cx).window_opacity,
+                                    |cx: &App| AppSettings::global(cx).backdrop_opacity,
                                     |val: f64, cx: &mut App| {
                                         let settings_snapshot = {
                                             let settings = AppSettings::global_mut(cx);
-                                            settings.window_opacity = clamp_window_opacity(val);
+                                            settings.backdrop_opacity = clamp_backdrop_opacity(val);
                                             settings.save();
                                             settings.clone()
                                         };
                                         settings_snapshot.apply_theme_preferences(None, cx);
                                     },
                                 ))
-                                .default_value(default_settings.window_opacity),
+                                .default_value(default_settings.backdrop_opacity),
                             )
                             .description(
                                 t!("Settings.General.Appearance.window_opacity_desc").to_string(),
@@ -2880,9 +2888,9 @@ mod tests {
 
     #[test]
     fn 毛玻璃透明度会被限制在允许范围内() {
-        assert_eq!(clamp_glass_opacity(0.2), MIN_GLASS_OPACITY as f64);
-        assert_eq!(clamp_glass_opacity(0.84), 0.84);
-        assert_eq!(clamp_glass_opacity(1.5), MAX_GLASS_OPACITY as f64);
+        assert_eq!(clamp_ui_surface_opacity(0.2), MIN_GLASS_OPACITY as f64);
+        assert_eq!(clamp_ui_surface_opacity(0.84), 0.84);
+        assert_eq!(clamp_ui_surface_opacity(1.5), MAX_GLASS_OPACITY as f64);
     }
 
     #[test]
@@ -3142,13 +3150,15 @@ impl Render for SettingsPanel {
             init_settings(cx);
         }
 
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().window_opacity;
-        // 左侧面板透明度：使用统一的 alpha = window_opacity + LEFT_PANEL_ALPHA_OFFSET
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, window_opacity);
-        // 页面背景透明度：window_opacity + 0.02
-        let page_bg =
-            offset_surface_color(cx.theme().background, blur_enabled, window_opacity, 0.02);
+        // 左侧面板透明度：已在 apply_glass_tuning 时设置到 sidebar 颜色中
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar);
+        // 页面背景透明度：backdrop_opacity + 0.02
+        let page_bg = offset_surface_color(
+            cx.theme().background,
+            cx.theme().window_blur_enabled,
+            cx.theme().backdrop_opacity,
+            0.02,
+        );
         let sidebar_style = StyleRefinement::default()
             .bg(sidebar_bg)
             .border_color(cx.theme().sidebar_border)

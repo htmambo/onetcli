@@ -52,7 +52,11 @@
         "base.blue": "#4385BE",
         "base.green": "#879A39",
         "base.magenta": "#CE5D97",
-        "base.cyan": "#3AA99F"
+        "base.cyan": "#3AA99F",
+        "link.foreground": "#78767c",
+        "panel.background": "#f2f0e5",
+        "popover.background": "#f2f0e5",
+        "popover.foreground": "#100f0f"
       },
       "highlight": {
         "editor.foreground": "#100F0F",

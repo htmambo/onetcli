@@ -2215,7 +2215,7 @@ impl TabContainer {
             self.tab_bar_bg_color,
             theme.tab,
             bg_color,
-            theme.surface_opacity,
+            theme.ui_surface_opacity,
             is_dark_theme,
         );
         let hover_tab_color = self

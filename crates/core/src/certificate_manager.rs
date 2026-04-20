@@ -209,9 +209,9 @@ impl Render for CertificateManagerView {
                         .border_color(app_style::border())
                         // Layer 5: 卡片 - 0.18
                         .bg(if cx.theme().window_blur_enabled {
-                            cx.theme().group_box.opacity(0.18)
+                            cx.theme().group.opacity(0.18)
                         } else {
-                            cx.theme().group_box
+                            cx.theme().group
                         })
                         .child(
                             h_flex()
@@ -224,7 +224,7 @@ impl Render for CertificateManagerView {
                                         .child(
                                             div()
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(app_style::text_primary())
+                                                .text_color(app_style::text())
                                                 .child(certificate.name.clone()),
                                         )
                                         .child(
@@ -250,7 +250,7 @@ impl Render for CertificateManagerView {
                                         .child(
                                             div()
                                                 .text_xs()
-                                                .text_color(app_style::text_soft())
+                                                .text_color(app_style::text_muted())
                                                 .child(sync_text),
                                         ),
                                 )
@@ -314,7 +314,7 @@ impl Render for CertificateManagerView {
                                         div()
                                             .text_xl()
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(app_style::text_primary())
+                                            .text_color(app_style::text())
                                             .child(t!("CertificateManager.title").to_string()),
                                     )
                                     .child(
@@ -842,7 +842,7 @@ impl Render for CertificateEditorView {
 
         v_flex()
             .size_full()
-            .bg(app_style::page_bg())
+            .bg(app_style::base())
             .child(
                 div()
                     .refine_style(&app_style::page_header_style())
@@ -854,7 +854,7 @@ impl Render for CertificateEditorView {
                         div()
                             .text_xl()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(app_style::text_primary())
+                            .text_color(app_style::text())
                             .child(title),
                     ),
             )
