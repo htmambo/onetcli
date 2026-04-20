@@ -219,7 +219,7 @@ fn find_bundled_themes_dir() -> Option<PathBuf> {
     let installed_path = exe_dir.join("../share/onetcli/themes");
 
     #[cfg(target_os = "macos")]
-    let installed_path = exe_dir.join("../../share/onetcli/themes");
+    let installed_path = exe_dir.join("../Resources/themes");
 
     #[cfg(target_os = "windows")]
     let installed_path = exe_dir.join("../share/onetcli/themes");
