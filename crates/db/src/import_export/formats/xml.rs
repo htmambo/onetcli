@@ -3,6 +3,7 @@ use std::time::Instant;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
+use super::build_export_select_sql;
 use crate::connection::DbConnection;
 use crate::executor::SqlResult;
 use crate::import_export::{
@@ -104,26 +105,7 @@ impl FormatHandler for XmlFormatHandler {
                 table: table.clone(),
             });
 
-            let table_ref = plugin.format_table_reference(&config.database, None, table);
-            let columns_str = if let Some(cols) = &config.columns {
-                cols.iter()
-                    .map(|c| plugin.quote_identifier(c))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            } else {
-                "*".to_string()
-            };
-
-            let mut select_sql = format!("SELECT {} FROM {}", columns_str, table_ref);
-            if let Some(where_clause) = &config.where_clause {
-                select_sql.push_str(" WHERE ");
-                select_sql.push_str(where_clause);
-            }
-            if let Some(limit) = config.limit {
-                let pagination = plugin.format_pagination(limit, 0, "");
-                select_sql.push_str(&pagination);
-            }
-
+            let select_sql = build_export_select_sql(plugin, config, table);
             let result = connection
                 .query(&select_sql)
                 .await

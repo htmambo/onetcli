@@ -3,7 +3,10 @@ use std::time::Instant;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
-use super::format_import_table_reference;
+use super::{
+    build_export_select_sql, build_insert_statement, execute_import_statements,
+    format_import_table_reference, quote_sql_string,
+};
 use crate::connection::DbConnection;
 use crate::executor::{ExecOptions, SqlResult};
 use crate::import_export::{
@@ -90,6 +93,7 @@ impl FormatHandler for TxtFormatHandler {
             }
         }
 
+        let mut statements = Vec::new();
         for (line_num, line) in lines.iter().skip(1).enumerate() {
             if line.trim().is_empty() {
                 continue;
@@ -104,55 +108,39 @@ impl FormatHandler for TxtFormatHandler {
                 continue;
             }
 
-            let mut insert_sql = format!("INSERT INTO {} (", table_ref);
-            for (i, col) in columns.iter().enumerate() {
-                if i > 0 {
-                    insert_sql.push_str(", ");
-                }
-                insert_sql.push_str(&plugin.quote_identifier(col));
-            }
-            insert_sql.push_str(") VALUES (");
-
-            for (i, val) in values.iter().enumerate() {
-                if i > 0 {
-                    insert_sql.push_str(", ");
-                }
-                if val.is_empty() || val.eq_ignore_ascii_case("null") {
-                    insert_sql.push_str("NULL");
-                } else {
-                    insert_sql.push('\'');
-                    insert_sql.push_str(&val.replace('\'', "''"));
-                    insert_sql.push('\'');
-                }
-            }
-            insert_sql.push(')');
-
-            match connection
-                .execute(plugin, &insert_sql, ExecOptions::default())
-                .await
-            {
-                Ok(results) => {
-                    for result in results {
-                        match result {
-                            SqlResult::Exec(exec_result) => {
-                                total_rows += exec_result.rows_affected;
-                            }
-                            SqlResult::Error(err) => {
-                                errors.push(format!("Line {}: {}", line_num + 2, err.message));
-                                if config.stop_on_error {
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
+            let sql_values = values
+                .iter()
+                .map(|val| {
+                    if val.is_empty() || val.eq_ignore_ascii_case("null") {
+                        "NULL".to_string()
+                    } else {
+                        quote_sql_string(val)
                     }
+                })
+                .collect::<Vec<_>>();
+            statements.push((
+                line_num + 2,
+                build_insert_statement(plugin, &table_ref, &columns, &sql_values),
+            ));
+        }
+
+        let statement_sql = statements
+            .iter()
+            .map(|(_, sql)| sql.clone())
+            .collect::<Vec<_>>();
+        let results = execute_import_statements(plugin, connection, config, &statement_sql).await?;
+        for ((line_number, _), result) in statements.iter().zip(results.into_iter()) {
+            match result {
+                SqlResult::Exec(exec_result) => {
+                    total_rows += exec_result.rows_affected;
                 }
-                Err(e) => {
-                    errors.push(format!("Line {}: {}", line_num + 2, e));
+                SqlResult::Error(err) => {
+                    errors.push(format!("Line {}: {}", line_number, err.message));
                     if config.stop_on_error {
                         break;
                     }
                 }
+                _ => {}
             }
         }
 
@@ -219,26 +207,7 @@ impl FormatHandler for TxtFormatHandler {
                 table: table.clone(),
             });
 
-            let table_ref = plugin.format_table_reference(&config.database, None, table);
-            let columns_str = if let Some(cols) = &config.columns {
-                cols.iter()
-                    .map(|c| plugin.quote_identifier(c))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            } else {
-                "*".to_string()
-            };
-
-            let mut select_sql = format!("SELECT {} FROM {}", columns_str, table_ref);
-            if let Some(where_clause) = &config.where_clause {
-                select_sql.push_str(" WHERE ");
-                select_sql.push_str(where_clause);
-            }
-            if let Some(limit) = config.limit {
-                let pagination = plugin.format_pagination(limit, 0, "");
-                select_sql.push_str(&pagination);
-            }
-
+            let select_sql = build_export_select_sql(plugin, config, table);
             let result = connection
                 .query(&select_sql)
                 .await

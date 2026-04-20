@@ -34,16 +34,28 @@ fn ensure_not_cancelled(cancelled: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-struct SftpHandler;
+struct SftpHandler {
+    host: String,
+    port: u16,
+}
+
+impl SftpHandler {
+    fn new(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            host: host.into(),
+            port,
+        }
+    }
+}
 
 impl client::Handler for SftpHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        ssh::verify_server_key(&self.host, self.port, server_public_key)
     }
 }
 
@@ -657,10 +669,10 @@ impl SftpClient for RusshSftpClient {
             let mut jump_session = if let Some(ref proxy) = ssh_config.proxy {
                 tracing::info!("SFTP: 通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
                 let stream = sftp_connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                let handler = SftpHandler;
+                let handler = SftpHandler::new(&jump.host, jump.port);
                 client::connect_stream(config.clone(), stream, handler).await?
             } else {
-                let handler = SftpHandler;
+                let handler = SftpHandler::new(&jump.host, jump.port);
                 client::connect(config.clone(), (jump.host.as_str(), jump.port), handler).await?
             };
 
@@ -678,7 +690,7 @@ impl SftpClient for RusshSftpClient {
                 .channel_open_direct_tcpip(&ssh_config.host, ssh_config.port as u32, "127.0.0.1", 0)
                 .await?;
 
-            let handler = SftpHandler;
+            let handler = SftpHandler::new(&ssh_config.host, ssh_config.port);
             let session =
                 client::connect_stream(config, forwarded_channel.into_stream(), handler).await?;
 
@@ -686,11 +698,11 @@ impl SftpClient for RusshSftpClient {
         } else if let Some(ref proxy) = ssh_config.proxy {
             tracing::info!("SFTP: 通过代理 {}:{} 连接", proxy.host, proxy.port);
             let stream = sftp_connect_via_proxy(proxy, &ssh_config.host, ssh_config.port).await?;
-            let handler = SftpHandler;
+            let handler = SftpHandler::new(&ssh_config.host, ssh_config.port);
             let session = client::connect_stream(config, stream, handler).await?;
             (session, None)
         } else {
-            let handler = SftpHandler;
+            let handler = SftpHandler::new(&ssh_config.host, ssh_config.port);
             let session =
                 client::connect(config, (ssh_config.host.as_str(), ssh_config.port), handler)
                     .await?;
