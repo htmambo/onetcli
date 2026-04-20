@@ -155,8 +155,8 @@ impl DatabaseSidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
+        let _blur_enabled = cx.theme().window_blur_enabled;
+        let _window_opacity = cx.theme().backdrop_opacity;
         let is_active = self.active_panel == Some(panel);
         let accent_color = sidebar_surface_color(cx.theme().accent);
         let accent_fg = cx.theme().accent_foreground;
@@ -187,8 +187,8 @@ impl DatabaseSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
+        let _blur_enabled = cx.theme().window_blur_enabled;
+        let _window_opacity = cx.theme().backdrop_opacity;
         let muted_bg = sidebar_surface_color(cx.theme().muted);
 
         v_flex()
@@ -229,8 +229,8 @@ impl Focusable for DatabaseSidebar {
 impl Render for DatabaseSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
+        let _blur_enabled = cx.theme().window_blur_enabled;
+        let _window_opacity = cx.theme().backdrop_opacity;
         let bg_color = sidebar_surface_color(cx.theme().background);
 
         div()

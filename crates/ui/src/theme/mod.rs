@@ -85,8 +85,8 @@ pub fn apply_windows_layer_tint(color: Hsla, layer: WindowsSurfaceLayer) -> Hsla
 
 pub fn windows_surface_color(
     color: Hsla,
-    blur_enabled: bool,
-    opacity: f32,
+    _blur_enabled: bool,
+    _opacity: f32,
     layer: WindowsSurfaceLayer,
 ) -> Hsla {
     let mut c = color;

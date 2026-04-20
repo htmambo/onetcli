@@ -539,8 +539,8 @@ impl TerminalSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
+        let _blur_enabled = cx.theme().window_blur_enabled;
+        let _window_opacity = cx.theme().backdrop_opacity;
         let active_bg = sidebar_surface_color(cx.theme().list_active);
         let hover_bg =
             sidebar_surface_color(cx.theme().sidebar_accent);
@@ -574,8 +574,8 @@ impl TerminalSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
+        let _blur_enabled = cx.theme().window_blur_enabled;
+        let _window_opacity = cx.theme().backdrop_opacity;
         let toolbar_base = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
         let toolbar_bg = sidebar_surface_color(toolbar_base);
         let has_file_manager = self.file_manager_panel.is_some();
@@ -643,8 +643,8 @@ impl Focusable for TerminalSidebar {
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
+        let _blur_enabled = cx.theme().window_blur_enabled;
+        let _window_opacity = cx.theme().backdrop_opacity;
         let bg_color = sidebar_surface_color(cx.theme().muted);
 
         div()

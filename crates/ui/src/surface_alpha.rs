@@ -1,4 +1,3 @@
-use crate::glass_sidebar;
 use crate::theme::{WindowsSurfaceLayer, windows_surface_color, windows_surface_opacity};
 use gpui::Hsla;
 

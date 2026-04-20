@@ -528,11 +528,11 @@ fn default_font_size() -> f64 {
     14.0
 }
 
-fn default_window_opacity() -> f64 {
+fn _default_window_opacity() -> f64 {
     1.0
 }
 
-fn clamp_window_opacity(opacity: f64) -> f64 {
+fn _clamp_window_opacity(opacity: f64) -> f64 {
     opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
 }
 
@@ -705,9 +705,9 @@ fn default_db_undo_stack_size() -> usize {
 
 fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
     field
-        .bg(sync_server_theme::panel_alt_bg())
+        .bg(sync_server_theme::surface_alt())
         .border_color(sync_server_theme::border_strong())
-        .text_color(sync_server_theme::text_primary())
+        .text_color(sync_server_theme::text())
 }
 
 fn settings_group_content_style(cx: &App) -> StyleRefinement {
@@ -719,7 +719,7 @@ fn settings_group_content_style(cx: &App) -> StyleRefinement {
 }
 
 fn settings_group_title_style() -> StyleRefinement {
-    StyleRefinement::default().text_color(sync_server_theme::text_primary())
+    StyleRefinement::default().text_color(sync_server_theme::text())
 }
 
 fn themed_setting_group(group: SettingGroup, cx: &App) -> SettingGroup {
@@ -736,7 +736,7 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
         &StyleRefinement::default()
             .bg(header_bg)
             .border_color(sync_server_theme::border())
-            .text_color(sync_server_theme::text_primary()),
+            .text_color(sync_server_theme::text()),
     )
 }
 
@@ -3832,7 +3832,7 @@ fn render_logged_in_user_sync(user: &UserInfo, _cx: &mut App) -> AnyElement {
         .gap_3()
         .p_3()
         .rounded_md()
-        .bg(sync_server_theme::panel_alt_bg())
+        .bg(sync_server_theme::surface_alt())
         .border_1()
         .border_color(sync_server_theme::border())
         .child(
@@ -3844,7 +3844,7 @@ fn render_logged_in_user_sync(user: &UserInfo, _cx: &mut App) -> AnyElement {
                     div()
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(sync_server_theme::text_primary())
+                        .text_color(sync_server_theme::text())
                         .child(display_name),
                 ),
         )
