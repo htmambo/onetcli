@@ -35,4 +35,3 @@ pub use settings::{
     current_db_undo_stack_size, init_settings as init_db_view_settings, set_db_view_settings,
     set_large_text_editor_open_mode,
 };
-pub use sidebar::cell_editor_notifier::init_cell_editor_sidebar_notifier;
