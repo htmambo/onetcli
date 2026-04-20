@@ -57,7 +57,7 @@ use std::ops::Deref;
 use terminal::LocalConfig;
 use terminal::terminal::{
     ConnectionState, DEFAULT_RECOVERY_SCROLLBACK_LINES, SshSessionManager, Terminal,
-    TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
+    TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy, TerminalScrollSnapshot,
 };
 use tokio::sync::Mutex;
 
@@ -681,6 +681,10 @@ impl TerminalScrollbarHandle {
 
     fn take_future_display_offset(&self) -> Option<usize> {
         self.future_display_offset.take()
+    }
+
+    fn snapshot(&self) -> TerminalScrollSnapshot {
+        self.proxy.snapshot()
     }
 }
 
@@ -2220,8 +2224,8 @@ impl TerminalView {
     }
 
     fn write_to_pty(&mut self, data: Vec<u8>, cx: &mut Context<Self>) {
-        // 用户输入时自动滚动到底部
-        let display_offset = self.terminal.read(cx).term().lock().grid().display_offset();
+        // 使用 scrollbar snapshot 获取 display_offset，避免独立加锁
+        let display_offset = self.scrollbar_handle.snapshot().display_offset;
         if should_scroll_to_bottom_on_user_input(
             display_offset,
             &self.scrollbar_handle.future_display_offset,
@@ -3970,13 +3974,15 @@ impl Render for TerminalView {
             matches!(connection_state, ConnectionState::Disconnected { .. })
                 || matches!(connection_state, ConnectionState::Connecting);
         let can_reconnect = self.terminal.read(cx).can_reconnect();
-        let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
-        let selection_text = self.terminal.read(cx).selection_text();
+        // 单次快照捕获所有渲染所需的终端状态，避免多次独立加锁
+        let render_snapshot = self.terminal.read(cx).render_snapshot();
+        let has_selection = render_snapshot.has_selection;
+        let selection_text = render_snapshot.selection_text;
+        let terminal_mode = render_snapshot.mode;
+        let history_size = render_snapshot.history_size;
         let sidebar_visible = self.sidebar.read(cx).is_visible();
         let sidebar_panel_size = self.sidebar_panel_size;
         let view = cx.entity().clone();
-        let terminal_mode = self.terminal.read(cx).mode();
-        let history_size = self.terminal.read(cx).term().lock().history_size();
         let show_scrollbar = !terminal_mode.contains(TermMode::ALT_SCREEN) && history_size > 0;
         let ui_theme = UiTheme::global(cx);
 

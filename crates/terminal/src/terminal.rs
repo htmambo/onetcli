@@ -1009,6 +1009,16 @@ pub struct TerminalScrollSnapshot {
     pub columns: usize,
 }
 
+/// Snapshot of terminal render state, captured in a single lock acquisition
+/// to avoid multiple independent locks that cause inconsistency and overhead.
+#[derive(Clone, Debug)]
+pub struct TerminalRenderSnapshot {
+    pub has_selection: bool,
+    pub selection_text: Option<String>,
+    pub mode: TermMode,
+    pub history_size: usize,
+}
+
 impl TerminalScrollProxy {
     /// Snapshot all scroll-related state in a single lock acquisition
     /// to avoid inconsistency from multiple separate locks.
@@ -2096,6 +2106,18 @@ impl Terminal {
     /// 获取 Term 的共享引用
     pub fn term(&self) -> &Arc<FairMutex<Term<GpuiEventProxy>>> {
         &self.term
+    }
+
+    /// Snapshot of terminal render state, captured in a single lock acquisition
+    /// to avoid multiple independent locks that cause inconsistency and overhead.
+    pub fn render_snapshot(&self) -> TerminalRenderSnapshot {
+        let term = self.term.lock();
+        TerminalRenderSnapshot {
+            has_selection: term.selection.is_some(),
+            selection_text: term.selection_to_string(),
+            mode: *term.mode(),
+            history_size: term.history_size(),
+        }
     }
 
     /// 获取终端标题
