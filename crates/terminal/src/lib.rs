@@ -29,5 +29,5 @@ pub use local_pty_protocol::{LocalPtyHostEvent, LocalPtyHostRequest};
 pub use pty_backend::{GpuiEventProxy, TerminalEvent};
 pub use serial_backend::SerialBackend;
 pub use ssh_backend::SshBackend;
-pub use terminal::{TerminalRenderSnapshot, TerminalScrollProxy};
+pub use terminal::TerminalScrollProxy;
 pub use types::{LocalConfig, TerminalBackend, TerminalCloseMode, TerminalSize};
