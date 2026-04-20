@@ -74,7 +74,14 @@ const HISTORY_RESTORED_BANNER_COMPACT: &str = "*历史记录已恢复";
 
 fn is_osc_palette_line(line: &str) -> bool {
     // OSC 4 调色板序列：\x1b]4;n;rgb:R/G/B
-    line.contains("\x1b]4;")
+    // 检查整行是否以此序列开头（已 trim 过的行）
+    // 场景：grid 中 OSC 4 序列可能嵌入在其他字符中间（如 "➜  ~ 4;0;rgb:14/09/19"），
+    // 因为 \x1b 可能被渲染为空格或被截断，所以改用前缀匹配而非 contains
+    // 格式：OSC 4;<index>;rgb:R/G/B，<index> 必须是数字
+    line.starts_with("\x1b]4;")
+        || (line.starts_with("4;")
+            && line[2..].chars().next().map_or(false, |c| c.is_ascii_digit())
+            && line.contains(";rgb:"))
 }
 
 fn is_history_restored_banner_line(line: &str) -> bool {
@@ -625,7 +632,7 @@ fn note_ssh_user_input(
     let has_newline = data.iter().any(|byte| matches!(*byte, b'\r' | b'\n'));
     let should_mark_busy = matches!(ssh_process_state.get(), SshProcessState::Busy) || has_newline;
     if should_mark_busy {
-        tracing::warn!(
+        tracing::debug!(
             target: "terminal.ssh",
             has_newline,
             data_len = data.len(),
@@ -645,7 +652,7 @@ fn note_ssh_prompt_idle(
     ssh_command_submitted_without_prompt_sync: &Cell<bool>,
 ) {
     if connection_kind == TerminalConnectionKind::Ssh {
-        tracing::warn!(
+        tracing::debug!(
             target: "terminal.ssh",
             prev_state = ?ssh_process_state.get(),
             "SSH prompt idle -> Idle"
@@ -2279,7 +2286,7 @@ impl Terminal {
                 command_submitted_without_prompt_sync,
             );
             if result {
-                tracing::warn!(
+                tracing::debug!(
                     target: "terminal.ssh",
                     connection_state = ?self.connection_state,
                     ssh_process_state = ?ssh_process_state,
@@ -2810,10 +2817,17 @@ mod tests {
 
     #[test]
     fn is_osc_palette_line_filters_ansi_color_sequences() {
+        // 完整转义序列（ESC ] 4;...）
         assert!(is_osc_palette_line("\x1b]4;0;rgb:14/09/19"));
         assert!(is_osc_palette_line("\x1b]4;15;rgb:ff/ff/ff"));
+        // ESC 被渲染为空格后以 4; 开头（trim 后）
+        assert!(is_osc_palette_line("4;0;rgb:14/09/19"));
+        assert!(is_osc_palette_line("4;1;rgb:75/20/94"));
+        // 普通内容和命令不匹配
         assert!(!is_osc_palette_line("➜  ~"));
         assert!(!is_osc_palette_line("ls -la"));
+        assert!(!is_osc_palette_line("4")); // 有 4 但不是调色板序列
+        assert!(!is_osc_palette_line("4;rgb:14/09/19")); // 缺颜色索引
     }
 }
 
