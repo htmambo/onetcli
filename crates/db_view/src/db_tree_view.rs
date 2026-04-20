@@ -2090,10 +2090,10 @@ impl Render for DbTreeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entries_len = self.flat_entries.len();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, window_opacity);
         let sidebar_input_bg =
-            sidebar_surface_color(cx.theme().input_background(), blur_enabled, glass_opacity);
+            sidebar_surface_color(cx.theme().input_background(), blur_enabled, window_opacity);
 
         v_flex()
             .id("db-tree-view")

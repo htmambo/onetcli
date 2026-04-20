@@ -2329,6 +2329,11 @@ impl EntityInputHandler for InputState {
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         let range = self.range_from_utf16(&range_utf16);
+        // 边界检查：确保 range 有效
+        let range = range.start.min(self.text.len())..range.end.min(self.text.len());
+        if range.start >= range.end {
+            return None;
+        }
         adjusted_range.replace(self.range_to_utf16(&range));
         Some(self.text.slice(range).to_string())
     }

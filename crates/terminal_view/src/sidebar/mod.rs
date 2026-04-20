@@ -540,10 +540,10 @@ impl TerminalSidebar {
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
-        let active_bg = sidebar_surface_color(cx.theme().list_active, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let active_bg = sidebar_surface_color(cx.theme().list_active, blur_enabled, window_opacity);
         let hover_bg =
-            sidebar_surface_color(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
+            sidebar_surface_color(cx.theme().sidebar_accent, blur_enabled, window_opacity);
         let icon_color = cx.theme().sidebar_foreground;
 
         div()
@@ -575,9 +575,9 @@ impl TerminalSidebar {
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
+        let window_opacity = cx.theme().window_opacity;
         let toolbar_base = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
-        let toolbar_bg = sidebar_surface_color(toolbar_base, blur_enabled, glass_opacity);
+        let toolbar_bg = sidebar_surface_color(toolbar_base, blur_enabled, window_opacity);
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -644,8 +644,8 @@ impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
-        let bg_color = sidebar_surface_color(cx.theme().muted, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let bg_color = sidebar_surface_color(cx.theme().muted, blur_enabled, window_opacity);
 
         div()
             .h_full()

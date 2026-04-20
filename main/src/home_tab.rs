@@ -2601,11 +2601,11 @@ impl HomePage {
         let view_for_sort_field = view_for_new_connection.clone();
         let view_for_view_mode = view_for_new_connection.clone();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity as f32;
+        let window_opacity = cx.theme().window_opacity;
         let toolbar_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.14,
             WindowsSurfaceLayer::ContentSection,
         );
@@ -3133,12 +3133,12 @@ impl HomePage {
         }
 
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity as f32;
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, window_opacity);
         let sidebar_active_bg =
-            sidebar_surface_color(cx.theme().list_active, blur_enabled, glass_opacity);
+            sidebar_surface_color(cx.theme().list_active, blur_enabled, window_opacity);
         let sidebar_hover_bg =
-            sidebar_surface_color(cx.theme().sidebar_accent, blur_enabled, glass_opacity);
+            sidebar_surface_color(cx.theme().sidebar_accent, blur_enabled, window_opacity);
         let filter_types = ConnectionType::all();
 
         v_flex()
@@ -4369,18 +4369,18 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity as f32;
+        let window_opacity = cx.theme().window_opacity;
         let workspace_bg = layered_level_surface_color(
             cx.theme().tab,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.14,
             WindowsSurfaceLayer::ContentSection,
         );
         let workspace_hover_bg = layered_level_surface_color(
             cx.theme().list_hover,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.10,
             WindowsSurfaceLayer::ContentSection,
         );
@@ -5002,18 +5002,18 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity as f32;
+        let window_opacity = cx.theme().window_opacity;
         let item_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.14,
             WindowsSurfaceLayer::ContentCard,
         );
         let item_icon_bg = layered_level_surface_color(
             cx.theme().muted,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.10,
             WindowsSurfaceLayer::ContentSection,
         );
@@ -5713,18 +5713,18 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity as f32;
+        let window_opacity = cx.theme().window_opacity;
         let card_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.16,
             WindowsSurfaceLayer::ContentCard,
         );
         let card_overlay_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.18,
             WindowsSurfaceLayer::ContentSection,
         );
@@ -7327,7 +7327,7 @@ impl Render for HomePage {
 
         self.maybe_prompt_connection_restore(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = crate::setting_tab::AppSettings::global(cx).glass_opacity as f32;
+        let window_opacity = cx.theme().window_opacity;
         let home_shell_bg = if cfg!(target_os = "windows") || cx.theme().window_blur_enabled {
             cx.theme().transparent
         } else {
@@ -7336,7 +7336,7 @@ impl Render for HomePage {
         let home_content_bg = layered_level_surface_color(
             cx.theme().muted,
             blur_enabled,
-            glass_opacity,
+            window_opacity,
             0.10,
             WindowsSurfaceLayer::ContentBase,
         );

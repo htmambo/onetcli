@@ -431,23 +431,40 @@ pub fn uuid_simple() -> String {
 /// 检测是否为字符串类型
 pub fn is_string_type(data_type: &str) -> bool {
     let dt = data_type.to_uppercase();
-    dt.contains("CHAR") || dt.contains("TEXT") || dt.contains("VARCHAR")
+    dt.contains("CHAR")
+        || dt.contains("TEXT")
+        || dt.contains("VARCHAR")
+        || dt.contains("LONGTEXT")
+        || dt.contains("MEDIUMTEXT")
+        || dt.contains("TINYTEXT")
+        || dt.contains("STRING")
+        || dt.contains("JSON")
 }
 
 /// 检测是否为数值类型
 pub fn is_numeric_type(data_type: &str) -> bool {
     let dt = data_type.to_uppercase();
     dt.contains("INT")
+        || dt.contains("BIGINT")
+        || dt.contains("SMALLINT")
+        || dt.contains("TINYINT")
         || dt.contains("DECIMAL")
         || dt.contains("FLOAT")
         || dt.contains("DOUBLE")
         || dt.contains("NUMERIC")
+        || dt.contains("NUMBER")
+        || dt.contains("REAL")
+        || dt.contains("SERIAL")
 }
 
 /// 检测是否为日期时间类型
 pub fn is_datetime_type(data_type: &str) -> bool {
     let dt = data_type.to_uppercase();
-    dt.contains("DATE") || dt.contains("TIME")
+    dt.contains("DATE")
+        || dt.contains("TIME")
+        || dt.contains("YEAR")
+        || dt.contains("TIMESTAMP")
+        || dt.contains("DATETIME")
 }
 
 /// 根据列类型返回适合的操作符

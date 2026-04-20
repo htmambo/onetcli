@@ -3068,7 +3068,7 @@ impl SftpView {
             _ => None,
         };
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().surface_opacity;
+        let surface_opacity = cx.theme().window_opacity;
         let overlay_card_bg = layered_surface_color(
             cx.theme().background,
             blur_enabled,
@@ -3468,7 +3468,7 @@ impl SftpView {
         let can_go_back = self.can_go_back_local();
         let can_go_forward = self.can_go_forward_local();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().surface_opacity;
+        let surface_opacity = cx.theme().window_opacity;
         let path_bar_bg = layered_surface_color(
             cx.theme().secondary,
             blur_enabled,
@@ -3625,7 +3625,7 @@ impl SftpView {
         let can_go_back = self.can_go_back_remote();
         let can_go_forward = self.can_go_forward_remote();
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().surface_opacity;
+        let surface_opacity = cx.theme().window_opacity;
         let path_bar_bg = layered_surface_color(
             cx.theme().secondary,
             blur_enabled,
@@ -4064,7 +4064,7 @@ impl Render for SftpView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_disconnected = matches!(self.connection_state, ConnectionState::Disconnected { .. });
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().surface_opacity;
+        let surface_opacity = cx.theme().window_opacity;
         let shell_bg = layered_surface_color(
             cx.theme().background,
             blur_enabled,

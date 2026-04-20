@@ -129,6 +129,7 @@ pub struct Theme {
     pub transparent: Hsla,
     pub window_blur_enabled: bool,
     pub surface_opacity: f32,
+    pub window_opacity: f32,
     /// Show the scrollbar mode, default: Scrolling
     pub scrollbar_show: ScrollbarShow,
     /// The notification setting.
@@ -249,13 +250,19 @@ impl Theme {
         }
     }
 
-    pub fn set_window_surface_preferences(blur_enabled: bool, opacity: f64, cx: &mut App) {
+    pub fn set_window_surface_preferences(
+        blur_enabled: bool,
+        surface_opacity: f64,
+        window_opacity: f64,
+        cx: &mut App,
+    ) {
         Self::ensure_global(cx);
 
         let theme = cx.global_mut::<Theme>();
         let mode = theme.mode;
         theme.window_blur_enabled = blur_enabled;
-        theme.surface_opacity = clamp_surface_opacity(opacity);
+        theme.surface_opacity = clamp_surface_opacity(surface_opacity);
+        theme.window_opacity = window_opacity as f32;
 
         // 重新应用毛玻璃调整到主题颜色
         crate::theme::apply_glass_tuning(
@@ -306,6 +313,7 @@ impl From<&ThemeColor> for Theme {
             transparent: Hsla::transparent_black(),
             window_blur_enabled: true,
             surface_opacity: DEFAULT_GLASS_OPACITY,
+            window_opacity: 1.0,
             font_family: ".SystemUIFont".into(),
             font_size: px(16.),
             mono_font_family: if cfg!(target_os = "macos") {

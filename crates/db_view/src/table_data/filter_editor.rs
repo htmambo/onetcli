@@ -794,23 +794,32 @@ pub struct VisualFilterBuilder {
 
 // ========== 递归辅助函数（避免 borrow checker 问题）==========
 
-/// 递归查找并更新条件列
-fn update_condition_column_in_items(items: &mut Vec<FilterItem>, id: &str, column: String) -> bool {
+/// 递归查找并更新条件列，同时返回是否需要重置操作符
+fn update_condition_column_in_items(
+    items: &mut Vec<FilterItem>,
+    id: &str,
+    column: String,
+    valid_operators: &[FilterOperator],
+) -> Option<FilterOperator> {
     for item in items.iter_mut() {
         match item {
             FilterItem::Condition(row) if row.id == id => {
+                // 检查当前操作符是否对新列有效
+                let need_reset = !valid_operators.contains(&row.operator);
                 row.column = column;
-                return true;
+                return if need_reset { valid_operators.first().copied() } else { None };
             }
             FilterItem::Group(group) => {
-                if update_condition_column_in_items(&mut group.children, id, column.clone()) {
-                    return true;
+                if let Some(new_op) =
+                    update_condition_column_in_items(&mut group.children, id, column.clone(), valid_operators)
+                {
+                    return Some(new_op);
                 }
             }
             _ => {}
         }
     }
-    false
+    None
 }
 
 /// 递归查找并更新条件操作符
@@ -1251,9 +1260,21 @@ impl VisualFilterBuilder {
 
     /// 在所有分组中递归查找并更新条件列
     fn update_condition_column(&mut self, id: &str, column: String) {
-        if update_condition_column_in_items(&mut self.root_items, id, column) {
-            self.sync_filter_state();
+        // 获取新列的操作符列表
+        let valid_operators: Vec<FilterOperator> = self
+            .schema
+            .as_ref()
+            .and_then(|s| s.columns.iter().find(|c| c.name == column))
+            .map(operators_for_column)
+            .unwrap_or_else(|| vec![FilterOperator::Equal]);
+
+        if let Some(new_op) =
+            update_condition_column_in_items(&mut self.root_items, id, column, &valid_operators)
+        {
+            // 需要重置操作符
+            self.update_condition_operator(id, new_op);
         }
+        self.sync_filter_state();
     }
 
     /// 在所有分组中递归查找并更新条件操作符

@@ -427,6 +427,8 @@ pub struct AppSettings {
     pub enable_glass_effect: bool,
     #[serde(default = "default_glass_opacity")]
     pub glass_opacity: f64,
+    #[serde(default = "default_window_opacity")]
+    pub window_opacity: f64,
     #[serde(default = "default_font_family")]
     pub font_family: String,
     #[serde(default = "default_font_size")]
@@ -524,6 +526,14 @@ fn default_font_family() -> String {
 
 fn default_font_size() -> f64 {
     14.0
+}
+
+fn default_window_opacity() -> f64 {
+    1.0
+}
+
+fn clamp_window_opacity(opacity: f64) -> f64 {
+    opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
 }
 
 fn clamp_ui_font_size(size: f64) -> f32 {
@@ -799,6 +809,7 @@ impl Default for AppSettings {
             auto_switch_theme: false,
             enable_glass_effect: default_true(),
             glass_opacity: default_glass_opacity(),
+            window_opacity: default_window_opacity(),
             font_family: default_font_family(),
             font_size: default_font_size(),
             terminal_font_size: default_terminal_font_size(),
@@ -960,18 +971,20 @@ impl AppSettings {
     }
 
     pub fn preferred_window_background(&self) -> WindowBackgroundAppearance {
+        // macOS 原生 Vibrancy 始终启用，与毛玻璃开关无关
+        // 毛玻璃开关仅控制应用层 UI 颜色的 frosted 效果
+        #[cfg(target_os = "macos")]
+        {
+            return WindowBackgroundAppearance::Blurred;
+        }
+
         if !self.enable_glass_effect {
             return WindowBackgroundAppearance::Opaque;
         }
 
         #[cfg(target_os = "linux")]
         {
-            WindowBackgroundAppearance::Blurred
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            WindowBackgroundAppearance::Blurred
+            return WindowBackgroundAppearance::Blurred;
         }
 
         #[cfg(target_os = "windows")]
@@ -980,7 +993,12 @@ impl AppSettings {
             // - Acrylic 通过 SetWindowCompositionAttribute 实现，兼容性更广
             // - MicaAltBackdrop 在某些 Windows 环境下可能静默失败
             // - Blurred 与 macOS/Linux 的透明+模糊行为更一致
-            WindowBackgroundAppearance::Blurred
+            return WindowBackgroundAppearance::Blurred;
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            return WindowBackgroundAppearance::Opaque;
         }
     }
 
@@ -1103,7 +1121,12 @@ impl AppSettings {
             AppSettings::global_mut(cx).save();
         }
 
-        Theme::set_window_surface_preferences(self.enable_glass_effect, self.glass_opacity, cx);
+        Theme::set_window_surface_preferences(
+            self.enable_glass_effect,
+            self.glass_opacity,
+            self.window_opacity,
+            cx,
+        );
         Theme::change(mode, window, cx);
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
         self.apply_misc_appearance_preferences(cx);
@@ -1507,6 +1530,30 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Appearance.glass_opacity_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Appearance.window_opacity"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: MIN_GLASS_OPACITY as f64,
+                                        max: MAX_GLASS_OPACITY as f64,
+                                        step: 0.01,
+                                    },
+                                    |cx: &App| AppSettings::global(cx).window_opacity,
+                                    |val: f64, cx: &mut App| {
+                                        let settings_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.window_opacity = clamp_window_opacity(val);
+                                            settings.save();
+                                            settings.clone()
+                                        };
+                                        settings_snapshot.apply_theme_preferences(None, cx);
+                                    },
+                                ))
+                                .default_value(default_settings.window_opacity),
+                            )
+                            .description(
+                                t!("Settings.General.Appearance.window_opacity_desc").to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Font.font_family"),
@@ -3116,12 +3163,12 @@ impl Render for SettingsPanel {
         }
 
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = AppSettings::global(cx).glass_opacity as f32;
-        // 左侧面板透明度：使用统一的 alpha = glass_opacity + LEFT_PANEL_ALPHA_OFFSET
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, glass_opacity);
-        // 页面背景透明度：glass_opacity + 0.02
+        let window_opacity = cx.theme().window_opacity;
+        // 左侧面板透明度：使用统一的 alpha = window_opacity + LEFT_PANEL_ALPHA_OFFSET
+        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar, blur_enabled, window_opacity);
+        // 页面背景透明度：window_opacity + 0.02
         let page_bg =
-            offset_surface_color(cx.theme().background, blur_enabled, glass_opacity, 0.02);
+            offset_surface_color(cx.theme().background, blur_enabled, window_opacity, 0.02);
         let sidebar_style = StyleRefinement::default()
             .bg(sidebar_bg)
             .border_color(cx.theme().sidebar_border)

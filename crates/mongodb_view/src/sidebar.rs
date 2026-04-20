@@ -118,11 +118,11 @@ impl MongoSidebar {
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
-        let accent_color = sidebar_surface_color(cx.theme().accent, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let accent_color = sidebar_surface_color(cx.theme().accent, blur_enabled, window_opacity);
         let accent_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = sidebar_surface_color(cx.theme().muted, blur_enabled, glass_opacity);
+        let muted_bg = sidebar_surface_color(cx.theme().muted, blur_enabled, window_opacity);
 
         div()
             .id(SharedString::from(format!(
@@ -151,8 +151,8 @@ impl MongoSidebar {
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
-        let muted_bg = sidebar_surface_color(cx.theme().muted, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let muted_bg = sidebar_surface_color(cx.theme().muted, blur_enabled, window_opacity);
 
         v_flex()
             .flex_shrink_0()
@@ -192,8 +192,8 @@ impl Render for MongoSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
         let blur_enabled = cx.theme().window_blur_enabled;
-        let glass_opacity = cx.theme().surface_opacity;
-        let bg_color = sidebar_surface_color(cx.theme().background, blur_enabled, glass_opacity);
+        let window_opacity = cx.theme().window_opacity;
+        let bg_color = sidebar_surface_color(cx.theme().background, blur_enabled, window_opacity);
 
         div()
             .h_full()

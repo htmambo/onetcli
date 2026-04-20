@@ -989,7 +989,7 @@ impl Render for DatabaseObjects {
         let title = loaded_data.title.clone();
         let toolbar_buttons = self.render_toolbar_buttons(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().surface_opacity;
+        let surface_opacity = cx.theme().window_opacity;
         let toolbar_bg = sidebar_surface_color_with_offset(
             cx.theme().background,
             blur_enabled,

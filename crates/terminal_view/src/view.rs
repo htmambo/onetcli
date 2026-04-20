@@ -132,7 +132,7 @@ fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) ->
 fn effective_terminal_theme(theme: &TerminalTheme, cx: &App) -> TerminalTheme {
     let ui_theme = UiTheme::global(cx);
     let surface_opacity =
-        terminal_canvas_surface_opacity(ui_theme.surface_opacity, ui_theme.window_blur_enabled);
+        terminal_canvas_surface_opacity(ui_theme.window_opacity, ui_theme.window_blur_enabled);
     theme
         .clone()
         .with_surface_opacity(surface_opacity)
