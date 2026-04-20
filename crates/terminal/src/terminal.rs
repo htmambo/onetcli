@@ -72,6 +72,11 @@ const HISTORY_RESTORED_BANNER: &str =
     "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n";
 const HISTORY_RESTORED_BANNER_COMPACT: &str = "*历史记录已恢复";
 
+fn is_osc_palette_line(line: &str) -> bool {
+    // OSC 4 调色板序列：\x1b]4;n;rgb:R/G/B
+    line.contains("\x1b]4;")
+}
+
 fn is_history_restored_banner_line(line: &str) -> bool {
     let compact: String = line.chars().filter(|ch| !ch.is_whitespace()).collect();
     compact == HISTORY_RESTORED_BANNER_COMPACT
@@ -142,8 +147,10 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
         lines.push(current_line.trim_end_matches(' ').to_string());
     }
 
-    // 过滤掉恢复 banner 及其空行，避免每次恢复后 banner 被累积。
-    lines.retain(|s| !s.is_empty() && !is_history_restored_banner_line(s));
+    // 过滤掉恢复 banner 和 OSC 调色板序列，避免恢复时被重新解析
+    lines.retain(|s| {
+        !s.is_empty() && !is_history_restored_banner_line(s) && !is_osc_palette_line(s)
+    });
 
     while matches!(lines.last(), Some(last) if last.is_empty()) {
         lines.pop();
@@ -2581,9 +2588,9 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 mod tests {
     use super::{
         build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
-        compose_ssh_init_commands, resolve_default_windows_shell_from_env, shell_escape_arg,
-        should_report_ssh_running_processes, SshProcessState, SSH_PROMPT_HOOK_NAME,
-        SSH_PROMPT_READY_COMMAND,
+        compose_ssh_init_commands, is_osc_palette_line, resolve_default_windows_shell_from_env,
+        shell_escape_arg, should_report_ssh_running_processes, SshProcessState,
+        SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
@@ -2799,6 +2806,14 @@ mod tests {
         let matches = collect_history_suggestions(&session, &persisted, "   ", 5);
 
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn is_osc_palette_line_filters_ansi_color_sequences() {
+        assert!(is_osc_palette_line("\x1b]4;0;rgb:14/09/19"));
+        assert!(is_osc_palette_line("\x1b]4;15;rgb:ff/ff/ff"));
+        assert!(!is_osc_palette_line("➜  ~"));
+        assert!(!is_osc_palette_line("ls -la"));
     }
 }
 
