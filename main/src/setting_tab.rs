@@ -1125,6 +1125,7 @@ impl AppSettings {
         Self::apply_ui_font_preferences(self.font_family.clone(), self.font_size, cx);
         self.apply_misc_appearance_preferences(cx);
         self.apply_window_background_preferences(cx);
+        sync_follow_app_terminal_themes(cx);
         cx.refresh_windows();
     }
 
@@ -1281,6 +1282,27 @@ fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
     let _ = cx.update_window(window_id, move |_, window, cx| {
         home_page.update(cx, |hp, cx| {
             hp.apply_terminal_settings_to_all(&settings, window, cx);
+        });
+    });
+}
+
+fn sync_follow_app_terminal_themes(cx: &mut App) {
+    let settings = AppSettings::global(cx).clone();
+    cx.defer(move |cx| {
+        let Some(home) = cx.try_global::<GlobalHomePage>() else {
+            return;
+        };
+        let Some(window_id) = cx.active_window() else {
+            return;
+        };
+
+        // 避免在 HomePage 自己的 update 调用栈里再次触发 home_page.update，
+        // 否则启动阶段会命中 gpui 的重入保护并直接 panic。
+        let home_page = home.home_page.clone();
+        let _ = cx.update_window(window_id, move |_, window, cx| {
+            home_page.update(cx, |hp, cx| {
+                hp.apply_app_settings(&settings, window, cx);
+            });
         });
     });
 }
@@ -2471,42 +2493,6 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Terminal.line_height_desc").to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Terminal.color_scheme"),
-                                SettingField::dropdown(
-                                    {
-                                        let mode_is_dark = Theme::global(cx).mode.is_dark();
-                                        let mut themes: Vec<_> = TerminalTheme::all()
-                                            .into_iter()
-                                            .filter(|t| t.variant.is_dark() == mode_is_dark)
-                                            .map(|t| {
-                                                let n = SharedString::from(t.name);
-                                                (n.clone(), n)
-                                            })
-                                            .collect();
-                                        themes.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-                                        themes
-                                    },
-                                    |cx: &App| {
-                                        SharedString::from(
-                                            AppSettings::global(cx).terminal_theme.clone(),
-                                        )
-                                    },
-                                    |val: SharedString, cx: &mut App| {
-                                        let settings_snapshot = {
-                                            let settings = AppSettings::global_mut(cx);
-                                            settings.terminal_theme = val.to_string();
-                                            settings.save();
-                                            settings.clone()
-                                        };
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
-                                    },
-                                )
-                                .default_value(default_settings.terminal_theme.clone()),
-                            )
-                            .description(
-                                t!("Settings.General.Terminal.color_scheme_desc").to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Terminal.auto_copy"),

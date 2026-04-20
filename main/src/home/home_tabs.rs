@@ -11,7 +11,7 @@ use one_core::tab_container::TabItem;
 use redis_view::RedisTabView;
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
-use terminal_view::{TerminalConnectionKind, TerminalTheme, TerminalView, TerminalViewEvent};
+use terminal_view::{TerminalConnectionKind, TerminalView, TerminalViewEvent};
 
 impl HomePage {
     fn terminal_sync_path_enabled(cx: &App) -> bool {
@@ -200,7 +200,6 @@ impl HomePage {
             let confirm_multiline = settings.terminal_confirm_multiline_paste;
             let confirm_high_risk = settings.terminal_confirm_high_risk_command;
             let exit_behavior = settings.terminal_exit_behavior.clone();
-            let theme = TerminalTheme::find_by_name(&settings.terminal_theme);
 
             terminal_view.update(cx, |view, cx| {
                 view.apply_terminal_settings(
@@ -216,15 +215,11 @@ impl HomePage {
                     window,
                     cx,
                 );
+                view.refresh_theme_from_app(window, cx);
                 view.apply_cursor_blink(cursor_blink, window, cx);
                 view.apply_confirm_multiline_paste(confirm_multiline, cx);
                 view.apply_confirm_high_risk_command(confirm_high_risk, cx);
             });
-            if let Some(theme) = theme {
-                terminal_view.update(cx, |view, cx| {
-                    view.apply_theme(&theme, window, cx);
-                });
-            }
         }
 
         // 单一订阅处理所有 TerminalViewEvent
@@ -281,18 +276,6 @@ impl HomePage {
                         });
                         let settings = AppSettings::global(cx).clone();
                         this.apply_terminal_settings_to_all(&settings, window, cx);
-                    }
-
-                    // ---- 持久化到 AppSettings 并同步 ----
-                    TerminalViewEvent::ThemeChanged { theme } => {
-                        cx.update_global::<AppSettings, _>(|s, _| {
-                            s.terminal_theme = theme.name.to_string();
-                            s.save();
-                        });
-                        let theme = theme.clone();
-                        this.for_each_terminal_view(window, cx, |view, window, cx| {
-                            view.apply_theme(&theme, window, cx);
-                        });
                     }
                     TerminalViewEvent::CursorBlinkChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
@@ -484,15 +467,12 @@ impl HomePage {
     ) {
         self.apply_terminal_settings_to_all(settings, window, cx);
 
-        let theme = TerminalTheme::find_by_name(&settings.terminal_theme);
         let cursor_blink = settings.terminal_cursor_blink;
         let confirm_multiline = settings.terminal_confirm_multiline_paste;
         let confirm_high_risk = settings.terminal_confirm_high_risk_command;
 
         self.for_each_terminal_view(window, cx, |view, window, cx| {
-            if let Some(theme) = theme.as_ref() {
-                view.apply_theme(theme, window, cx);
-            }
+            view.refresh_theme_from_app(window, cx);
             view.apply_cursor_blink(cursor_blink, window, cx);
             view.apply_confirm_multiline_paste(confirm_multiline, cx);
             view.apply_confirm_high_risk_command(confirm_high_risk, cx);
@@ -589,6 +569,11 @@ impl HomePage {
             }
         });
         self.setup_terminal_view(&terminal_view, window, cx);
+        if let Some(theme_name) = restore_state.and_then(|state| state.theme_name.as_deref()) {
+            terminal_view.update(cx, |view, cx| {
+                view.apply_theme_override_by_name(theme_name, window, cx);
+            });
+        }
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);

@@ -10,8 +10,9 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
-    kbd::Kbd, terminal_canvas_surface_opacity, windows_surface_color, BlinkCursor, Icon, IconName,
-    Root, Sizable, SystemNotificationOptions, Theme as UiTheme, WindowExt, WindowsSurfaceLayer,
+    BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions, Theme as UiTheme,
+    WindowExt, WindowsSurfaceLayer, kbd::Kbd, terminal_canvas_surface_opacity,
+    windows_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -22,42 +23,42 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::addon::{
-    register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
-    TerminalAddonFrameContext, TerminalAddonMouseContext,
+    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
+    TerminalAddonMouseContext, register_default_addons,
 };
 use crate::cd_completion::{
-    build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
+    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
 };
 use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
 use crate::settings::{
-    current_settings, update_settings, GlobalTerminalSettings, TerminalHighlightRule,
-    TerminalSettings, TerminalSettingsEvent,
+    GlobalTerminalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
+    current_settings, update_settings,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
+use crate::terminal_element::{RenderCache, TerminalElement, terminal_font_features};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
-    MIN_LINE_HEIGHT_SCALE,
+    DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE, TerminalTheme,
 };
 use gpui::AnyWindowHandle;
+use one_core::RunningState;
 use one_core::connection_restore::{
-    restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
-    LocalTerminalRestoreState, SshTerminalRestoreState,
+    ConnectionRestoreKind, ConnectionRestorePayload, LocalTerminalRestoreState,
+    SshTerminalRestoreState, restore_payload_from_tab_data,
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
-use one_core::RunningState;
-use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
+use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
-use terminal::terminal::{
-    ConnectionState, SshSessionManager, Terminal, TerminalConnectionKind, TerminalModelEvent,
-    TerminalScrollProxy, TerminalScrollSnapshot, DEFAULT_RECOVERY_SCROLLBACK_LINES,
-};
 use terminal::LocalConfig;
+use terminal::terminal::{
+    ConnectionState, DEFAULT_RECOVERY_SCROLLBACK_LINES, SshSessionManager, Terminal,
+    TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy, TerminalScrollSnapshot,
+};
 use tokio::sync::Mutex;
 
 actions!(
@@ -87,7 +88,6 @@ pub enum TerminalViewEvent {
     AutoCopyChanged { enabled: bool },
     MiddleClickPasteChanged { enabled: bool },
     SyncPathChanged { enabled: bool },
-    ThemeChanged { theme: TerminalTheme },
     CursorBlinkChanged { enabled: bool },
     ConfirmMultilinePasteChanged { enabled: bool },
     ConfirmHighRiskCommandChanged { enabled: bool },
@@ -598,6 +598,7 @@ pub struct TerminalView {
     cd_completion_loading_parent: Option<String>,
 
     current_theme: TerminalTheme,
+    theme_override_name: Option<String>,
 
     /// 标签页序号（用于多实例显示）
     tab_index: Option<usize>,
@@ -918,7 +919,7 @@ impl TerminalView {
         // 获取初始颜色
         let colors = terminal.read(cx).term().lock().colors().clone();
         // 创建默认主题（需要在创建侧边栏之前）
-        let default_theme = TerminalTheme::ocean();
+        let default_theme = TerminalTheme::follow_app(UiTheme::global(cx));
         let ssh_config = terminal.read(cx).ssh_config().cloned();
         let ssh_session_manager = terminal.read(cx).ssh_session_manager().cloned();
 
@@ -1010,6 +1011,7 @@ impl TerminalView {
             cd_completion_cache: HashMap::new(),
             cd_completion_loading_parent: None,
             current_theme: default_theme,
+            theme_override_name: None,
             tab_index,
             cursor_blink_enabled: false,
             confirm_multiline_paste: true,
@@ -1079,10 +1081,11 @@ impl TerminalView {
                 self.set_font_family(family.clone(), window, cx);
             }
             TerminalSidebarEvent::ThemeChanged(theme) => {
-                let theme_name = theme.name.to_string();
-                let _ = update_settings(cx, move |settings| {
-                    settings.theme = theme_name;
-                });
+                if theme.is_follow_app() {
+                    self.clear_theme_override(window, cx);
+                } else {
+                    self.set_theme_override(theme, window, cx);
+                }
             }
             TerminalSidebarEvent::ExecuteCommand(command) => {
                 // 仅粘贴命令，不自动回车执行，降低误操作风险
@@ -1793,9 +1796,17 @@ impl TerminalView {
         manager
     }
 
-    /// Apply a terminal theme
-    pub fn set_theme(&mut self, theme: TerminalTheme, cx: &mut Context<Self>) {
-        let next_theme = preserve_theme_typography(&self.current_theme, &theme);
+    fn app_theme_proxy(cx: &App) -> TerminalTheme {
+        TerminalTheme::follow_app(UiTheme::global(cx))
+    }
+
+    fn update_theme_state(
+        &mut self,
+        theme: &TerminalTheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let next_theme = preserve_theme_typography(&self.current_theme, theme);
         if self.current_theme == next_theme {
             return;
         }
@@ -1809,7 +1820,55 @@ impl TerminalView {
         self.current_theme = next_theme;
         self.font_size = self.current_theme.font_size;
         self.line_height = self.current_theme.line_height();
+        self.sync_sidebar_theme(window, cx);
         cx.notify();
+    }
+
+    pub fn clear_theme_override(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.theme_override_name = None;
+        let theme = Self::app_theme_proxy(cx);
+        self.update_theme_state(&theme, window, cx);
+    }
+
+    pub fn set_theme_override(
+        &mut self,
+        theme: &TerminalTheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.theme_override_name = Some(theme.name.to_string());
+        self.update_theme_state(theme, window, cx);
+    }
+
+    pub fn apply_theme_override_by_name(
+        &mut self,
+        theme_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if theme_name == FOLLOW_APP_THEME_NAME {
+            self.clear_theme_override(window, cx);
+            return;
+        }
+
+        if let Some(theme) = TerminalTheme::find_by_name(theme_name) {
+            self.set_theme_override(&theme, window, cx);
+        } else {
+            self.clear_theme_override(window, cx);
+        }
+    }
+
+    pub fn refresh_theme_from_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.theme_override_name.is_some() {
+            return;
+        }
+
+        let theme = Self::app_theme_proxy(cx);
+        self.update_theme_state(&theme, window, cx);
+    }
+
+    pub fn has_theme_override(&self) -> bool {
+        self.theme_override_name.is_some()
     }
 
     /// Get current theme
@@ -1929,9 +1988,6 @@ impl TerminalView {
         self.apply_confirm_multiline_paste(settings.confirm_multiline_paste, cx);
         self.apply_confirm_high_risk_command(settings.confirm_high_risk_command, cx);
         self.apply_custom_highlight_rules(&settings.custom_highlights, cx);
-        if let Some(theme) = TerminalTheme::find_by_name(&settings.theme) {
-            self.apply_theme(&theme, window, cx);
-        }
     }
 
     fn apply_custom_highlight_rules(
@@ -1958,15 +2014,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let next_theme = preserve_theme_typography(&self.current_theme, theme);
-        if self.current_theme == next_theme {
-            return;
-        }
-        self.current_theme = next_theme;
-        self.font_size = self.current_theme.font_size;
-        self.line_height = self.current_theme.line_height();
-        self.sync_sidebar_theme(window, cx);
-        cx.notify();
+        self.update_theme_state(theme, window, cx);
     }
 
     /// 应用光标闪烁（不 emit 事件，用于跨 tab 同步）
@@ -2050,9 +2098,9 @@ impl TerminalView {
         );
 
         if let Some(theme_name) = state.theme_name.as_deref() {
-            if let Some(theme) = TerminalTheme::find_by_name(theme_name) {
-                self.apply_theme(&theme, window, cx);
-            }
+            self.apply_theme_override_by_name(theme_name, window, cx);
+        } else {
+            self.theme_override_name = None;
         }
 
         self.apply_cursor_blink(state.cursor_blink.unwrap_or(false), window, cx);
@@ -3743,6 +3791,7 @@ impl TabContent for TerminalView {
                     SshTerminalRestoreState {
                         working_dir,
                         buffer_content,
+                        theme_name: self.theme_override_name.clone(),
                     },
                 );
                 ConnectionRestorePayload {
@@ -3799,7 +3848,7 @@ impl TabContent for TerminalView {
                         confirm_multiline_paste: Some(self.confirm_multiline_paste),
                         confirm_high_risk_command: Some(self.confirm_high_risk_command),
                         exit_behavior: Some(self.exit_behavior.clone()),
-                        theme_name: Some(self.current_theme.name.to_string()),
+                        theme_name: self.theme_override_name.clone(),
                     }),
                     ssh_terminal: None,
                     title: self.title(cx).to_string(),
@@ -4365,30 +4414,31 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
-        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
-        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
+        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
+        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
+        history_prompt_dropdown_origin, history_prompt_overlay_bounds,
+        multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
+        trim_recovery_content_to_recent_chars,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
     #[cfg(target_os = "macos")]
     use gpui::TestAppContext;
-    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
+    use gpui::{Bounds, Keystroke, MouseButton, Point, SharedString, px, size};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{
         thread,
         time::{Duration, Instant},
     };
-    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {

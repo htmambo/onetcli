@@ -1,0 +1,38 @@
+!
+! App theme aligned terminal scheme: Matrix
+!
+*.foreground:  #88FF88
+*.background:  #020D02
+*.cursorColor: #00FF00
+!
+! Black
+*.color0:      #020D02
+*.color8:      #007700
+!
+! Red
+*.color1:      #FF0000
+*.color9:      #FF0000
+!
+! Green
+*.color2:      #00FF00
+*.color10:     #82D967
+!
+! Yellow
+*.color3:      #FFEA00
+*.color11:     #FFD700
+!
+! Blue
+*.color4:      #0000FF
+*.color12:     #0000FF
+!
+! Magenta
+*.color5:      #FF00FF
+*.color13:     #FF00FF
+!
+! Cyan
+*.color6:      #00FFD5
+*.color14:     #00FFD5
+!
+! White
+*.color7:      #88FF88
+*.color15:     #88FF88

@@ -14,10 +14,13 @@
 //! - 在 `muted` 上使用 `foreground` 或 `muted_foreground`
 //! - 在 `accent` 上使用 `accent_foreground`
 
-use gpui::{rgb, Hsla, Pixels, Rgba, SharedString};
+use gpui::{Hsla, Pixels, Rgba, SharedString, rgb};
+use gpui_component::Theme as UiTheme;
 
 // 包含由 build.rs 生成的 tabby 配色方案
 include!(concat!(env!("OUT_DIR"), "/tabby_themes.rs"));
+
+pub const FOLLOW_APP_THEME_NAME: &str = "App Theme";
 
 /// 终端主题配色类型
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -291,6 +294,71 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
 }
 
 impl TerminalTheme {
+    pub fn follow_app(theme: &UiTheme) -> Self {
+        let editor_background = theme
+            .highlight_theme
+            .style
+            .editor_background
+            .unwrap_or_else(|| theme.input_background());
+        let editor_foreground = theme
+            .highlight_theme
+            .style
+            .editor_foreground
+            .unwrap_or(theme.foreground);
+        let cursor = if theme.caret.a > 0.0 {
+            theme.caret
+        } else {
+            editor_foreground
+        };
+        let variant = if theme.mode.is_dark() {
+            ThemeVariant::Dark
+        } else {
+            ThemeVariant::Light
+        };
+
+        let ansi_palette = AnsiPalette {
+            color0: hsla_to_rgba(adjust_lightness(
+                editor_background,
+                if theme.mode.is_dark() { -0.08 } else { 0.08 },
+            )),
+            color1: hsla_to_rgba(theme.red),
+            color2: hsla_to_rgba(theme.green),
+            color3: hsla_to_rgba(theme.yellow),
+            color4: hsla_to_rgba(theme.blue),
+            color5: hsla_to_rgba(theme.magenta),
+            color6: hsla_to_rgba(theme.cyan),
+            color7: hsla_to_rgba(editor_foreground),
+            color8: hsla_to_rgba(adjust_lightness(
+                editor_background,
+                if theme.mode.is_dark() { 0.18 } else { -0.18 },
+            )),
+            color9: hsla_to_rgba(prefer_light_variant(theme.red_light, theme.red)),
+            color10: hsla_to_rgba(prefer_light_variant(theme.green_light, theme.green)),
+            color11: hsla_to_rgba(prefer_light_variant(theme.yellow_light, theme.yellow)),
+            color12: hsla_to_rgba(prefer_light_variant(theme.blue_light, theme.blue)),
+            color13: hsla_to_rgba(prefer_light_variant(theme.magenta_light, theme.magenta)),
+            color14: hsla_to_rgba(prefer_light_variant(theme.cyan_light, theme.cyan)),
+            color15: hsla_to_rgba(adjust_lightness(
+                editor_foreground,
+                if theme.mode.is_dark() { 0.08 } else { -0.08 },
+            )),
+        };
+
+        Self::with_palette(
+            FOLLOW_APP_THEME_NAME,
+            variant,
+            editor_foreground,
+            editor_background,
+            cursor,
+            theme.selection,
+            ansi_palette,
+        )
+    }
+
+    pub fn is_follow_app(&self) -> bool {
+        self.name == FOLLOW_APP_THEME_NAME
+    }
+
     /// 获取所有可用主题（包括内置主题和 tabby 导入的主题）
     pub fn all() -> Vec<Self> {
         let mut themes = vec![
@@ -306,11 +374,12 @@ impl TerminalTheme {
             Self::crimson(),
         ];
 
-        // 添加 tabby 导入的主题（排除与内置重名的）
-        let built_in_names: std::collections::HashSet<_> =
-            themes.iter().map(|t| t.name.to_lowercase()).collect();
+        // 添加 tabby 导入的主题。
+        // 这里使用精确匹配，允许像 "Matrix" 与 "matrix" 这种仅大小写不同、
+        // 但语义上确实代表不同主题的条目同时存在。
+        let built_in_names: std::collections::HashSet<_> = themes.iter().map(|t| t.name).collect();
         for tabby_theme in tabby_all() {
-            if !built_in_names.contains(&tabby_theme.name.to_lowercase()) {
+            if !built_in_names.contains(&tabby_theme.name) {
                 themes.push(tabby_theme);
             }
         }
@@ -710,9 +779,27 @@ impl TerminalTheme {
     }
 }
 
+fn hsla_to_rgba(color: Hsla) -> Rgba {
+    color.into()
+}
+
+fn adjust_lightness(mut color: Hsla, delta: f32) -> Hsla {
+    color.l = (color.l + delta).clamp(0.0, 1.0);
+    color
+}
+
+fn prefer_light_variant(light: Hsla, fallback: Hsla) -> Hsla {
+    if light == Hsla::transparent_black() {
+        fallback
+    } else {
+        light
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::TerminalTheme;
+    use super::{FOLLOW_APP_THEME_NAME, TerminalTheme};
+    use gpui_component::Theme as UiTheme;
 
     #[test]
     fn 终端主背景透明度可被单独调整() {
@@ -741,5 +828,29 @@ mod tests {
 
         assert!(tinted.background.l > theme.background.l);
         assert!(tinted.background.s < theme.background.s);
+    }
+
+    #[test]
+    fn 跟随应用主题生成的终端主题使用固定名称() {
+        let theme = TerminalTheme::follow_app(&UiTheme::default());
+
+        assert_eq!(theme.name, FOLLOW_APP_THEME_NAME);
+        assert!(theme.is_follow_app());
+    }
+
+    #[test]
+    fn 应用独有主题已加入终端主题列表() {
+        for theme_name in [
+            "Adventure",
+            "Catppuccin Latte",
+            "Flexoki Light",
+            "Matrix",
+            "matrix",
+        ] {
+            assert!(
+                TerminalTheme::find_by_name(theme_name).is_some(),
+                "expected terminal theme `{theme_name}` to exist"
+            );
+        }
     }
 }

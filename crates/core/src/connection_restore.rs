@@ -94,6 +94,8 @@ pub struct SshTerminalRestoreState {
     pub working_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buffer_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -359,6 +361,7 @@ mod tests {
             ssh_terminal: Some(SshTerminalRestoreState {
                 working_dir: Some("/srv/demo".to_string()),
                 buffer_content: Some("pwd\r\n/srv/demo".to_string()),
+                theme_name: None,
             }),
             title: "服务器".to_string(),
         };
@@ -576,6 +579,7 @@ mod tests {
                     ssh_terminal: Some(SshTerminalRestoreState {
                         working_dir: Some("/srv/app".to_string()),
                         buffer_content: Some("ls\r\napp.log".to_string()),
+                        theme_name: None,
                     }),
                     title: "SSH".to_string(),
                 },
