@@ -2364,6 +2364,7 @@ impl DataGrid {
                     .with_size(Size::Medium)
                     .icon(IconName::Refresh)
                     .tooltip(t!("TableDataGrid.refresh").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .on_click(cx.listener(Self::handle_toolbar_refresh)),
             )
@@ -2373,6 +2374,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Plus)
                         .tooltip(t!("TableDataGrid.add_row").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading)
                         .on_click(cx.listener(Self::handle_add_row)),
                 )
@@ -2383,6 +2385,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Minus)
                         .tooltip(t!("TableDataGrid.delete_row").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading)
                         .on_click(cx.listener(Self::handle_delete_row)),
                 )
@@ -2393,6 +2396,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Undo)
                         .tooltip(t!("TableDataGrid.undo").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_revert_changes)),
                 )
@@ -2404,6 +2408,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::ArrowLeft)
                         .tooltip(t!("TableDataGrid.step_undo").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading || !can_undo)
                         .on_click(cx.listener(Self::handle_step_undo)),
                 )
@@ -2414,6 +2419,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Eye)
                         .tooltip(t!("TableDataGrid.sql_preview").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading)
                         .on_click(cx.listener(Self::handle_sql_preview)),
                 )
@@ -2424,6 +2430,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::ArrowUp)
                         .tooltip(t!("TableDataGrid.commit_changes").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_commit_changes)),
                 )
@@ -2435,6 +2442,7 @@ impl DataGrid {
                     .with_size(Size::Medium)
                     .icon(IconName::ListCheck)
                     .tooltip(t!("TableDataGrid.column_visibility").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .dropdown_menu(move |menu, _window, cx| {
                         let data_grid_weak = data_grid_entity.downgrade();
@@ -2515,6 +2523,7 @@ impl DataGrid {
                     .with_size(Size::Medium)
                     .icon(IconName::EditBorder)
                     .tooltip(t!("TableDataGrid.large_text_editor").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .on_click(cx.listener(Self::handle_large_text_editor)),
             )
@@ -2523,6 +2532,7 @@ impl DataGrid {
                     .with_size(Size::Medium)
                     .icon(IconName::Export)
                     .tooltip(t!("TableDataGrid.export").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .dropdown_menu(move |menu, window, _cx| {
                         menu.item(

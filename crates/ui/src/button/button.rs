@@ -520,13 +520,11 @@ impl RenderOnce for Button {
                     .hover(|this| {
                         let hover_style = style.hovered(self.outline, cx);
                         this.bg(hover_style.bg)
-                            .border_color(hover_style.border)
                             .text_color(hover_style.fg)
                     })
                     .active(|this| {
                         let active_style = style.active(self.outline, cx);
                         this.bg(active_style.bg)
-                            .border_color(active_style.border)
                             .text_color(active_style.fg)
                     })
             })
