@@ -191,6 +191,10 @@ fn replay_term_output(
     }
 }
 
+fn apply_term_escape_sequence(term: &Arc<FairMutex<Term<GpuiEventProxy>>>, data: &[u8]) {
+    replay_term_output(term, data, None);
+}
+
 fn normalize_working_dir(path: &str) -> Option<String> {
     let path = path.trim();
     (!path.is_empty()).then(|| path.to_string())
@@ -2442,6 +2446,12 @@ impl Terminal {
         }
     }
 
+    /// 直接把控制序列应用到本地终端模型，不经过 shell stdin。
+    pub fn apply_escape_sequence(&mut self, data: &[u8], cx: &mut Context<Self>) {
+        apply_term_escape_sequence(&self.term, data);
+        cx.emit(TerminalModelEvent::Wakeup);
+    }
+
     /// 调整终端大小
     pub fn resize(&mut self, cols: usize, rows: usize, pixel_width: u16, pixel_height: u16) {
         if self.cols == cols && self.rows == rows {
@@ -2678,12 +2688,14 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cd_command, build_ssh_base_init_commands, build_ssh_init_commands,
-        compose_ssh_init_commands, format_connection_error, is_osc_palette_line,
+        apply_term_escape_sequence, build_cd_command, build_ssh_base_init_commands,
+        build_ssh_init_commands, compose_ssh_init_commands, format_connection_error,
+        is_osc_palette_line,
         resolve_default_windows_shell_from_env, shell_escape_arg,
-        should_report_ssh_running_processes, SshProcessState, SSH_PROMPT_HOOK_NAME,
+        should_report_ssh_running_processes, SshProcessState, Terminal, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
+    use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
         push_history_entry, HistoryEntry, ShellHistoryFormat,
@@ -2691,6 +2703,7 @@ mod tests {
     use anyhow::anyhow;
     use std::collections::VecDeque;
     use std::fs;
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[test]
     fn shell_escape_arg_handles_single_quote() {
@@ -2932,6 +2945,23 @@ mod tests {
         assert!(!is_osc_palette_line("ls -la"));
         assert!(!is_osc_palette_line("4")); // 有 4 但不是调色板序列
         assert!(!is_osc_palette_line("4;rgb:14/09/19")); // 缺颜色索引
+    }
+
+    #[test]
+    fn apply_term_escape_sequence_updates_palette_in_terminal_model() {
+        let (event_tx, _event_rx) = unbounded_channel();
+        let (term, _event_proxy, _colors) = Terminal::create_term(80, 24, event_tx);
+        let target = Rgb {
+            r: 0x12,
+            g: 0x34,
+            b: 0x56,
+        };
+
+        assert_ne!(term.lock().colors()[NamedColor::Red], Some(target));
+
+        apply_term_escape_sequence(&term, b"\x1b]4;1;rgb:12/34/56\x07");
+
+        assert_eq!(term.lock().colors()[NamedColor::Red], Some(target));
     }
 
     #[test]

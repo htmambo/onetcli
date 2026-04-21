@@ -1815,7 +1815,9 @@ impl TerminalView {
         // 如果 ANSI 调色板发生了变化，发送 OSC 4 序列来应用新调色板
         if self.current_theme.ansi_palette != next_theme.ansi_palette {
             let osc_seq = next_theme.ansi_palette.to_osc4_sequence();
-            self.terminal.read(cx).write(&osc_seq);
+            self.terminal.update(cx, |terminal, cx| {
+                terminal.apply_escape_sequence(&osc_seq, cx);
+            });
         }
 
         self.current_theme = next_theme;
