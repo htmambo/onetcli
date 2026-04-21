@@ -8,7 +8,10 @@ use gpui::{
     InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
+use gpui_component::{
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
+    layered_level_surface_color,
+};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
@@ -379,11 +382,26 @@ impl Render for MongoTabView {
         let tree_panel_size = self.tree_panel_size;
         let sidebar_visible = self.sidebar.read(cx).is_panel_visible();
         let sidebar_panel_size = self.sidebar_panel_size;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
+        let shell_bg = if cfg!(target_os = "windows") || blur_enabled {
+            cx.theme().transparent
+        } else {
+            cx.theme().background
+        };
+        let content_bg = layered_level_surface_color(
+            cx.theme().muted,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         div()
             .id("mongodb-tab-view")
             .track_focus(&self.focus_handle)
             .size_full()
+            .bg(shell_bg)
             .child(
                 h_flex()
                     .size_full()
@@ -403,6 +421,7 @@ impl Render for MongoTabView {
                             .flex_1()
                             .h_full()
                             .min_w_0()
+                            .bg(content_bg)
                             .child(self.tab_container.clone()),
                     )
                     .when(sidebar_visible, |this| {

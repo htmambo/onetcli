@@ -13,7 +13,10 @@ use gpui::{
     MouseUpEvent, ParentElement, Pixels, Point, Render, SharedString, Style, Styled, Task, Window,
     div, prelude::FluentBuilder, px,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, tokens::Radius, v_flex};
+use gpui_component::{
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
+    layered_level_surface_color, tokens::Radius, v_flex,
+};
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{
@@ -658,10 +661,25 @@ impl Render for DatabaseTabView {
         let view = cx.entity().clone();
         let sidebar_visible = self.sidebar.read(cx).is_panel_visible();
         let sidebar_panel_size = self.sidebar_panel_size;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
+        let shell_bg = if cfg!(target_os = "windows") || blur_enabled {
+            cx.theme().transparent
+        } else {
+            cx.theme().background
+        };
+        let content_bg = layered_level_surface_color(
+            cx.theme().muted,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         div()
             .track_focus(&self.focus_handle)
             .size_full()
+            .bg(shell_bg)
             .when(!is_connected_flag, |el: gpui::Div| {
                 el.child(self.render_connection_status(cx))
             })
@@ -688,6 +706,7 @@ impl Render for DatabaseTabView {
                                 .flex_1()
                                 .h_full()
                                 .min_w_0()
+                                .bg(content_bg)
                                 .child(self.tab_container.clone()),
                         )
                         .when(sidebar_visible, |this| {

@@ -529,7 +529,7 @@ impl KeyValueView {
             .w_full()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().muted)
+            .bg(cx.theme().background)
             // 第一行：类型 + 键名 + 操作按钮
             .child(
                 h_flex()
@@ -2132,7 +2132,7 @@ impl KeyValueView {
             .justify_between()
             .border_t_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().muted)
+            .bg(cx.theme().background)
             .child(
                 h_flex()
                     .gap_4()

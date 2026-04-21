@@ -16,6 +16,7 @@ use gpui_component::{
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     notification::Notification,
     scroll::Scrollbar,
+    sidebar_surface_color,
     spinner::Spinner,
     v_flex,
 };
@@ -1213,11 +1214,28 @@ impl MongoTreeView {
             .items_center()
             .w_full()
             .min_h(px(28.0))
+            .relative()
+            .overflow_hidden()
             .px_2()
             .py_1()
+            .rounded_lg()
             .cursor_pointer()
-            .when(is_selected, |this| this.bg(cx.theme().list_active))
-            .when(!is_selected, |this| this.text_color(cx.theme().foreground))
+            .text_color(cx.theme().foreground)
+            .when(is_selected, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(3.0))
+                        .bg(cx.theme().list_active_border),
+                )
+                .bg(sidebar_surface_color(cx.theme().list_active))
+            })
+            .when(!is_selected, |this| {
+                this.hover(|style| style.bg(sidebar_surface_color(cx.theme().sidebar_accent)))
+            })
             .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
                 if event.click_count == 2 {
                     view_for_double_click.update(cx, |view, cx| {
@@ -1488,7 +1506,7 @@ impl Render for MongoTreeView {
         v_flex()
             .id("mongo-tree-view")
             .size_full()
-            .bg(cx.theme().sidebar)
+            .bg(sidebar_surface_color(cx.theme().sidebar))
             .child(
                 v_flex()
                     .w_full()

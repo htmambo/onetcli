@@ -17,6 +17,7 @@ use gpui_component::{
     menu::{ContextMenuExt, PopupMenuItem},
     popover::Popover,
     scroll::ScrollableElement,
+    sidebar_surface_color,
     spinner::Spinner,
     v_flex,
 };
@@ -1667,15 +1668,28 @@ impl RedisTreeView {
             .group("tree-item")
             .w_full()
             .h(px(28.0))
+            .relative()
+            .overflow_hidden()
             .pl(px(8.0 + depth as f32 * 16.0))
             .pr(px(4.0))
             .gap_1()
             .items_center()
             .cursor_pointer()
             .rounded(px(4.0))
-            .when(is_selected, |this| this.bg(cx.theme().list_active))
+            .when(is_selected, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(3.0))
+                        .bg(cx.theme().list_active_border),
+                )
+                .bg(sidebar_surface_color(cx.theme().list_active))
+            })
             .when(!is_selected, |this| {
-                this.hover(|style| style.bg(cx.theme().list_hover))
+                this.hover(|style| style.bg(sidebar_surface_color(cx.theme().sidebar_accent)))
             })
             // 单击选中，双击展开/连接
             .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
@@ -2146,7 +2160,7 @@ impl Render for RedisTreeView {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
+            .bg(sidebar_surface_color(cx.theme().sidebar))
             .child(self.render_toolbar(window, cx))
             .child(
                 div()

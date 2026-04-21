@@ -16,14 +16,14 @@ use gpui::{
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
-    Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar, WindowExt,
+    Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar, WindowExt, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
     h_flex,
     input::{Input, InputState},
     kbd::Kbd,
-    offset_surface_color,
+    layered_level_surface_color, offset_surface_color,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     setting::{
@@ -730,8 +730,15 @@ fn themed_setting_group(group: SettingGroup, cx: &App) -> SettingGroup {
 
 fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     let blur_enabled = cx.theme().window_blur_enabled;
-    // Layer 3: 页面标题 - 0.10
-    let header_bg = offset_surface_color(cx.theme().secondary, blur_enabled, 0.0, 0.28);
+    let window_opacity = cx.theme().backdrop_opacity;
+    // 与首页右侧标题栏保持同一分层，统一“标题 + 内容区”的壳层视觉。
+    let header_bg = layered_level_surface_color(
+        cx.theme().background,
+        blur_enabled,
+        window_opacity,
+        0.14,
+        WindowsSurfaceLayer::ContentSection,
+    );
     page.header_style(
         &StyleRefinement::default()
             .bg(header_bg)
@@ -3152,16 +3159,19 @@ impl Render for SettingsPanel {
 
         // 左侧面板透明度：已在 apply_glass_tuning 时设置到 sidebar 颜色中
         let sidebar_bg = sidebar_surface_color(cx.theme().sidebar);
-        // 页面背景透明度：backdrop_opacity + 0.02
-        let page_bg = offset_surface_color(
-            cx.theme().background,
-            cx.theme().window_blur_enabled,
-            cx.theme().backdrop_opacity,
-            0.02,
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
+        // 与首页右侧内容区保持一致，形成统一的内容底板层级。
+        let page_bg = layered_level_surface_color(
+            cx.theme().muted,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
         );
         let sidebar_style = StyleRefinement::default()
             .bg(sidebar_bg)
-            .border_color(cx.theme().sidebar_border)
+            .border_color(cx.theme().border)
             .text_color(cx.theme().sidebar_foreground);
         let content_style = StyleRefinement::default().bg(page_bg);
 

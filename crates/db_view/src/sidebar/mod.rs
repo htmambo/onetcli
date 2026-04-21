@@ -13,7 +13,10 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, sidebar_surface_color, v_flex};
+use gpui_component::{
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, layered_level_surface_color,
+    sidebar_surface_color, v_flex,
+};
 use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::layout::TOOLBAR_WIDTH;
@@ -158,10 +161,10 @@ impl DatabaseSidebar {
         let _blur_enabled = cx.theme().window_blur_enabled;
         let _window_opacity = cx.theme().backdrop_opacity;
         let is_active = self.active_panel == Some(panel);
-        let accent_color = sidebar_surface_color(cx.theme().accent);
-        let accent_fg = cx.theme().accent_foreground;
+        let active_bg = sidebar_surface_color(cx.theme().list_active);
+        let hover_bg = sidebar_surface_color(cx.theme().sidebar_accent);
+        let active_fg = cx.theme().sidebar_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = sidebar_surface_color(cx.theme().muted);
 
         div()
             .id(SharedString::from(format!("sidebar-btn-{:?}", panel)))
@@ -172,30 +175,28 @@ impl DatabaseSidebar {
             .justify_center()
             .rounded_md()
             .cursor_pointer()
-            .when(is_active, |this| this.bg(accent_color))
-            .when(!is_active, |this| this.hover(|s| s.bg(muted_bg)))
+            .when(is_active, |this| this.bg(active_bg))
+            .when(!is_active, |this| this.hover(|s| s.bg(hover_bg)))
             .on_click(cx.listener(move |this, _event, _window, cx| {
                 this.toggle_panel(panel, cx);
             }))
             .child(
                 Icon::new(panel.icon())
                     .with_size(Size::Medium)
-                    .text_color(if is_active { accent_fg } else { muted_fg }),
+                    .text_color(if is_active { active_fg } else { muted_fg }),
             )
     }
 
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let _blur_enabled = cx.theme().window_blur_enabled;
-        let _window_opacity = cx.theme().backdrop_opacity;
-        let muted_bg = sidebar_surface_color(cx.theme().muted);
+        let rail_bg = sidebar_surface_color(cx.theme().sidebar);
 
         v_flex()
             .flex_shrink_0()
             .w(TOOLBAR_WIDTH)
             .h_full()
-            .bg(muted_bg)
+            .bg(rail_bg)
             .border_l_1()
             .border_color(border_color)
             .items_center()
@@ -229,9 +230,13 @@ impl Focusable for DatabaseSidebar {
 impl Render for DatabaseSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let _blur_enabled = cx.theme().window_blur_enabled;
-        let _window_opacity = cx.theme().backdrop_opacity;
-        let bg_color = sidebar_surface_color(cx.theme().background);
+        let bg_color = layered_level_surface_color(
+            cx.theme().muted,
+            cx.theme().window_blur_enabled,
+            cx.theme().backdrop_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         div()
             .h_full()

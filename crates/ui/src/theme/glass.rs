@@ -227,12 +227,13 @@ fn surface_color(
     alpha: f32,
     frost_intensity: f32,
 ) -> Hsla {
+    // surface_opacity 独立于 blur 生效
+    // blur_enabled 只控制是否应用 frost_color 色彩处理，alpha 值始终应用
     let color = if blur_enabled {
         frost_color(color, mode, frost_intensity)
     } else {
         color
     };
-
     with_alpha(color, alpha)
 }
 
