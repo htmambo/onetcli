@@ -10,7 +10,7 @@
       "colors": {
         // === 主色调 ===
         // 主色背景（hover、选中状态）
-        "accent.background": "#482050",
+        "accent.background": "#852c96",
         // 主色文字
         "accent.foreground": "#f7eded",
 
@@ -108,7 +108,7 @@
         // 侧边栏强调色背景
         "sidebar.accent.background": "#c678dd",
         // 侧边栏强调色文字
-        "sidebar.accent.foreground": "#2c1438",
+        "sidebar.accent.foreground": "#e7bbf7",
         // 侧边栏背景
         "sidebar.background": "#1e0d28",
         // 侧边栏边框
