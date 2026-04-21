@@ -1,5 +1,5 @@
 mod column;
-mod delegate;
+pub mod delegate;
 pub mod filter_panel;
 mod filter_state;
 pub(crate) mod loading;

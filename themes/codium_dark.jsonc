@@ -20,7 +20,7 @@
         // 通用边框色
         "border": "#3d2049",
         // 窗口边框
-        "window_border": "#c678dd",
+        "window.border": "#c678dd",
         // 焦点环颜色
         "ring": "#c678dd",
         // 主文字色
@@ -38,11 +38,11 @@
 
         // === 链接色 ===
         // 链接激活状态文字
-        "link.active.foreground": "#c678dd",
+        "link.active": "#c678dd",
         // 链接默认文字
-        "link.foreground": "#c678dd",
+        "link": "#c678dd",
         // 链接悬停文字
-        "link.hover.foreground": "#da9aea",
+        "link.hover": "#da9aea",
 
         // === 列表色 ===
         // 列表项激活背景

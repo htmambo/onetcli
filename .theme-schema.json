@@ -209,18 +209,6 @@
           "description": "Default text color.",
           "type": ["string", "null"]
         },
-        "group_box.background": {
-          "description": "Background color for GroupBox.",
-          "type": ["string", "null"]
-        },
-        "group_box.foreground": {
-          "description": "Foreground color for GroupBox.",
-          "type": ["string", "null"]
-        },
-        "group_box.title.foreground": {
-          "description": "Title text color for GroupBox.",
-          "type": ["string", "null"]
-        },
         "info.background": {
           "description": "Info background color.",
           "type": ["string", "null"]
@@ -447,10 +435,6 @@
         },
         "table.active.border": {
           "description": "Table active item border color.",
-          "type": ["string", "null"]
-        },
-        "table.even.background": {
-          "description": "Stripe background color for even TableRow.",
           "type": ["string", "null"]
         },
         "table.head.background": {

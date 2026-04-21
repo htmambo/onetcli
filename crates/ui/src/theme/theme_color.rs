@@ -6,6 +6,38 @@ use gpui::Hsla;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Base color palette for theme colors.
+///
+/// This struct groups the 12 ANSI-style base colors used throughout the UI,
+/// providing a more organized access pattern via `ThemeColor.base.*`.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub struct ThemeBaseColors {
+    /// The base red color.
+    pub red: Hsla,
+    /// The base red light color.
+    pub red_light: Hsla,
+    /// The base green color.
+    pub green: Hsla,
+    /// The base green light color.
+    pub green_light: Hsla,
+    /// The base blue color.
+    pub blue: Hsla,
+    /// The base blue light color.
+    pub blue_light: Hsla,
+    /// The base yellow color.
+    pub yellow: Hsla,
+    /// The base yellow light color.
+    pub yellow_light: Hsla,
+    /// The base magenta color.
+    pub magenta: Hsla,
+    /// The base magenta light color.
+    pub magenta_light: Hsla,
+    /// The base cyan color.
+    pub cyan: Hsla,
+    /// The base cyan light color.
+    pub cyan_light: Hsla,
+}
+
 /// Theme colors used throughout the UI components.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct ThemeColor {
@@ -230,6 +262,14 @@ pub struct ThemeColor {
     pub cyan: Hsla,
     /// The base cyan light color.
     pub cyan_light: Hsla,
+
+    /// Base color palette grouping.
+    ///
+    /// This field provides organized access to the 12 base colors via `theme.base.*`.
+    /// It is populated by `sync_base_palette()` after `apply_config()` completes.
+    /// Marked with `#[serde(skip)]` to avoid redundant serialization.
+    #[serde(skip)]
+    pub base: ThemeBaseColors,
 }
 
 impl ThemeColor {
@@ -241,5 +281,28 @@ impl ThemeColor {
     /// Get the default dark theme colors.
     pub fn dark() -> Arc<Self> {
         DEFAULT_THEME_COLORS[&ThemeMode::Dark].0.clone()
+    }
+
+    /// Synchronize the base palette from the individual base color fields.
+    ///
+    /// This method populates the `base` field with the current values of the
+    /// individual base color fields (`red`, `green`, `blue`, etc.).
+    /// Call this method after `apply_config()` to ensure `theme.base.*` stays
+    /// in sync with the flat fields.
+    pub fn sync_base_palette(&mut self) {
+        self.base = ThemeBaseColors {
+            red: self.red,
+            red_light: self.red_light,
+            green: self.green,
+            green_light: self.green_light,
+            blue: self.blue,
+            blue_light: self.blue_light,
+            yellow: self.yellow,
+            yellow_light: self.yellow_light,
+            magenta: self.magenta,
+            magenta_light: self.magenta_light,
+            cyan: self.cyan,
+            cyan_light: self.cyan_light,
+        };
     }
 }

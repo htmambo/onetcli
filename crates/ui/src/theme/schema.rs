@@ -93,7 +93,7 @@ pub struct ThemeConfigColors {
     #[serde(rename = "group.background", alias = "panel.background", alias = "group_box.background")]
     pub group: Option<SharedString>,
     /// Text color for GroupBox.
-    #[serde(rename = "group.foreground")]
+    #[serde(rename = "group.foreground", alias = "group_box.foreground")]
     pub group_foreground: Option<SharedString>,
     /// Input caret color (Blinking cursor).
     #[serde(rename = "caret")]
@@ -156,13 +156,13 @@ pub struct ThemeConfigColors {
     #[serde(rename = "input.border")]
     pub input: Option<SharedString>,
     /// Link text color.
-    #[serde(rename = "link")]
+    #[serde(rename = "link", alias = "link.foreground")]
     pub link: Option<SharedString>,
     /// Active link text color.
-    #[serde(rename = "link.active")]
+    #[serde(rename = "link.active", alias = "link.active.foreground")]
     pub link_active: Option<SharedString>,
     /// Hover link text color.
-    #[serde(rename = "link.hover")]
+    #[serde(rename = "link.hover", alias = "link.hover.foreground")]
     pub link_hover: Option<SharedString>,
     /// Background color for List and ListItem.
     #[serde(rename = "list.background")]
@@ -361,7 +361,7 @@ pub struct ThemeConfigColors {
     /// # Platform specific:
     ///
     /// This is only works on Linux, other platforms we can't change the window border color.
-    #[serde(rename = "window.border")]
+    #[serde(rename = "window.border", alias = "window_border")]
     pub window_border: Option<SharedString>,
 
     /// Base blue color.
@@ -629,6 +629,9 @@ impl ThemeColor {
         apply_color!(tiles, fallback = self.background);
         apply_color!(overlay);
         apply_color!(window_border, fallback = self.border);
+
+        // Sync base palette after all colors are applied
+        self.sync_base_palette();
 
         // TODO: Apply default fallback colors to highlight.
     }

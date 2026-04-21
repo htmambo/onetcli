@@ -14,7 +14,7 @@
         "accent.foreground": "#f7eded",
         "background": "#320610",
         "border": "#5e1d21",
-        "window_border": "#ba3551",
+        "window.border": "#ba3551",
         "ring": "#ba3551",
         "foreground": "#f7eded",
         "muted.foreground": "#d8caca",
@@ -73,7 +73,7 @@
         "chart.4": "#6eafaa",
         "chart.5": "#5e1d21",
         "group.background": "#320610",
-        "link.foreground": "#f7eded",
+        "link": "#f7eded",
         "sidebar.primary.background": "#320610",
         "sidebar.primary.foreground": "#f7eded"
       },
