@@ -58,7 +58,7 @@
         // 次要/禁用区域背景
         "muted.background": "#3d204966",
         // 次要/禁用文字
-        "muted.foreground": "#b090b7",
+        "muted.foreground": "#9a7a9f",
 
         // === 面板/弹窗 ===
         // 面板背景（侧边栏等）
@@ -96,7 +96,7 @@
         // 次要按钮默认背景
         "secondary.background": "#3d2049",
         // 次要按钮文字
-        "secondary.foreground": "#f7eded",
+        "secondary.foreground": "#9a7a9f",
         // 次要按钮悬停背景
         "secondary.hover.background": "#482050",
 
@@ -183,9 +183,9 @@
         "warning.hover.background": "#682075",
 
         // === 图表色 ===
-        "chart.1": "#c678dd",
-        "chart.2": "#e7bbf7",
-        "chart.3": "#752194",
+        "chart.1": "#e7bbf7",
+        "chart.2": "#c678dd",
+        "chart.3": "#a46ac2",
         "chart.4": "#724582",
         "chart.5": "#581a69",
 
