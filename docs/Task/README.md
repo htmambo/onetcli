@@ -2,11 +2,12 @@
 
 ## 活跃任务 (Active)
 
-- ⏳ [UI 主题系统重构](Active/THEME_SYSTEM_REFACTOR_PLAN.md) - 开始于 2026-04-21
+暂无
 
 ## 已完成任务 (Archive)
 
-暂无
+### 2026-04
+- ✅ [UI 主题系统重构](Archive/2026-04/THEME_SYSTEM_REFACTOR_PLAN.md) - 完成于 2026-04-21
 
 ---
 
