@@ -1520,7 +1520,6 @@ impl SettingsPanel {
                             ),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
-                    themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Appearance.group_title"))
                         .items(vec![
                             SettingItem::new(

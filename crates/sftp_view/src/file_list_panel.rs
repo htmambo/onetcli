@@ -956,6 +956,7 @@ impl FileListPanel {
         let view_terminal_current = view.clone();
         let view_rename = view.clone();
         let view_download = view.clone();
+        let view_edit = view.clone();
         let view_upload = view.clone();
         let view_permissions = view.clone();
         let view_terminal_at = view.clone();
@@ -994,7 +995,6 @@ impl FileListPanel {
         );
 
         if is_remote {
-            let view_download = view_ref.clone();
             menu = menu.item(
                 PopupMenuItem::new(t!("Common.download").to_string())
                     .icon(IconName::ArrowDown)
@@ -1007,17 +1007,17 @@ impl FileListPanel {
             );
 
             if !is_dir {
-                let view_edit = view_ref.clone();
-                menu = menu.item(PopupMenuItem::new(t!("Common.edit").to_string()).icon(IconName::Edit).on_click(
-                    window.listener_for(&view_edit, move |_this, _, _, cx| {
-                        cx.emit(FileListPanelEvent::Edit {
-                            full_path: path_for_edit.clone(),
-                        });
-                        }),
-                ));
+                menu = menu.item(
+                    PopupMenuItem::new(t!("Common.edit").to_string())
+                        .icon(IconName::Edit)
+                        .on_click(window.listener_for(&view_edit, move |_this, _, _, cx| {
+                            cx.emit(FileListPanelEvent::Edit {
+                                full_path: path_for_edit.clone(),
+                            });
+                        })),
+                );
             }
 
-            let view_permissions = view_ref.clone();
             menu = menu.item(
                 PopupMenuItem::new(t!("File.change_permission").to_string())
                     .icon(IconName::Key)
@@ -1258,6 +1258,7 @@ impl FileListPanel {
         window: &mut Window,
         _cx: &mut Context<PopupMenu>,
     ) -> PopupMenu {
+        let path_for_parent = parent_path.to_string();
         let path_for_terminal = parent_path.to_string();
         let path_for_copy = parent_path.to_string();
 
@@ -1272,7 +1273,11 @@ impl FileListPanel {
                     .icon(IconName::ArrowUp)
                     .on_click(
                         window.listener_for(&view_go_parent, move |_this, _, _, cx| {
-                            cx.emit(FileListPanelEvent::ItemDoubleClicked("..".to_string()));
+                            cx.emit(FileListPanelEvent::ItemDoubleClicked {
+                                name: "..".to_string(),
+                                full_path: path_for_parent.clone(),
+                                is_dir: true,
+                            });
                         }),
                     ),
             )
