@@ -12,6 +12,7 @@ pub mod local_pty_protocol;
 pub mod osc;
 pub mod pty_backend;
 pub mod serial_backend;
+pub mod shell_integration;
 pub mod ssh_backend;
 pub mod terminal;
 pub mod types;

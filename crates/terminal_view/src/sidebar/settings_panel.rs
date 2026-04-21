@@ -1364,6 +1364,28 @@ mod tests {
     fn serialize_optional_color_returns_none_when_empty() {
         assert_eq!(serialize_optional_color(None::<Hsla>), None);
     }
+
+    #[test]
+    fn settings_panel_source_avoids_hard_coded_user_facing_strings() {
+        let source = include_str!("settings_panel.rs");
+        let forbidden_snippets = [
+            format!(".child({:?})", "Settings"),
+            format!(".placeholder({:?})", "Search..."),
+            format!(".child({:?})", "SEARCH"),
+            format!(".child({:?})", "Press ⌘G for next, ⇧⌘G for previous"),
+            format!(".child({:?})", "FONT SIZE"),
+            format!(".child({:?})", "FONT FAMILY"),
+            format!(".placeholder({:?})", "Select font..."),
+            format!(".child({:?})", "THEME"),
+        ];
+
+        for snippet in forbidden_snippets {
+            assert!(
+                !source.contains(&snippet),
+                "settings_panel.rs still contains hard-coded UI text snippet: {snippet}"
+            );
+        }
+    }
 }
 
 impl EventEmitter<SettingsPanelEvent> for SettingsPanel {}
