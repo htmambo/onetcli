@@ -14,8 +14,8 @@ use gpui_component::label::Label;
 use gpui_component::notification::Notification;
 use gpui_component::table::{Table, TableDelegate, TableEvent, TableState};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, h_flex, sidebar_surface_color_with_offset,
-    table::Column, v_flex,
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
+    layered_level_surface_color, table::Column, v_flex,
 };
 use one_core::storage::manager::get_queries_dir;
 use one_core::storage::{
@@ -989,12 +989,13 @@ impl Render for DatabaseObjects {
         let title = loaded_data.title.clone();
         let toolbar_buttons = self.render_toolbar_buttons(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
-        let surface_opacity = cx.theme().ui_surface_opacity;
-        let toolbar_bg = sidebar_surface_color_with_offset(
+        let window_opacity = cx.theme().backdrop_opacity;
+        let toolbar_bg = layered_level_surface_color(
             cx.theme().background,
             blur_enabled,
-            surface_opacity,
-            -0.10,
+            window_opacity,
+            0.14,
+            WindowsSurfaceLayer::ContentSection,
         );
 
         // Update delegate with current data (no refresh here, only when data actually changes)
@@ -1039,7 +1040,15 @@ impl Render for DatabaseObjects {
                         .with_size(Size::XSmall),
                 ),
             )
-            .child(div().p_2().text_sm().bg(toolbar_bg).child(title))
+            .child(
+                div()
+                    .p_2()
+                    .text_sm()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .bg(toolbar_bg)
+                    .child(title),
+            )
     }
 }
 

@@ -10,10 +10,12 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, Size, StyledExt, WindowExt as _,
+    WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputEvent, InputState},
+    layered_level_surface_color,
     notification::Notification,
     spinner::Spinner,
     tab::{Tab, TabBar},
@@ -36,6 +38,16 @@ const TAB_AGGREGATIONS: usize = 1;
 const TAB_SCHEMA: usize = 2;
 const TAB_INDEXES: usize = 3;
 const TAB_VALIDATION: usize = 4;
+
+fn content_section_bg(cx: &App) -> gpui::Hsla {
+    layered_level_surface_color(
+        cx.theme().background,
+        cx.theme().window_blur_enabled,
+        cx.theme().backdrop_opacity,
+        0.14,
+        WindowsSurfaceLayer::ContentSection,
+    )
+}
 
 #[derive(Clone)]
 struct DocumentItem {
@@ -2040,13 +2052,24 @@ impl CollectionView {
     }
 
     fn render_documents_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         v_flex()
             .flex_1()
             .min_h_0()
             .gap_2()
-            .child(self.render_query_bar(cx))
-            .child(self.render_options_panel(cx))
-            .child(self.render_action_bar(cx))
+            .child(
+                v_flex()
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
+                    .child(self.render_query_bar(cx))
+                    .child(self.render_options_panel(cx))
+                    .child(self.render_action_bar(cx)),
+            )
             .child(
                 h_flex()
                     .flex_1()
@@ -2059,6 +2082,7 @@ impl CollectionView {
     }
 
     fn render_aggregation_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         let result_summary = self
             .aggregation_count
             .map(|count| t!("MongoCollection.result_count", count = count).to_string());
@@ -2095,6 +2119,11 @@ impl CollectionView {
                 h_flex()
                     .gap_2()
                     .items_center()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
                     .child(
                         Button::new("mongo-aggregation-run")
                             .small()
@@ -2165,6 +2194,7 @@ impl CollectionView {
     }
 
     fn render_schema_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         let summary = self
             .schema_sample_count
             .map(|count| t!("MongoCollection.sample_count", count = count).to_string());
@@ -2201,6 +2231,11 @@ impl CollectionView {
                 h_flex()
                     .gap_2()
                     .items_center()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
                     .child(
                         Button::new("mongo-schema-refresh")
                             .small()
@@ -2233,6 +2268,7 @@ impl CollectionView {
     }
 
     fn render_indexes_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         let summary = self
             .indexes_count
             .map(|count| t!("MongoCollection.index_count", count = count).to_string());
@@ -2267,7 +2303,12 @@ impl CollectionView {
             .gap_2()
             .child(
                 v_flex()
+                    .px_3()
+                    .py_2()
                     .gap_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
                     .child(
                         h_flex()
                             .gap_2()
@@ -2358,6 +2399,7 @@ impl CollectionView {
     }
 
     fn render_validation_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         let body = if self.validation_loading {
             div()
                 .size_full()
@@ -2390,6 +2432,11 @@ impl CollectionView {
                 h_flex()
                     .gap_2()
                     .items_center()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
                     .child(
                         Button::new("mongo-validation-refresh")
                             .small()
@@ -2574,6 +2621,7 @@ impl CollectionView {
     fn render_document_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let total = self.total_count.unwrap_or(self.documents.len() as i64);
         let title = t!("MongoCollection.documents_title", total = total).to_string();
+        let section_bg = content_section_bg(cx);
 
         v_flex()
             .flex_1()
@@ -2584,13 +2632,21 @@ impl CollectionView {
             .border_r_1()
             .border_color(cx.theme().border)
             .child(
-                h_flex().items_center().px_2().py_1().child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .text_color(cx.theme().foreground)
-                        .child(title),
-                ),
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child(title),
+                    ),
             )
             .child(
                 div()
@@ -2603,6 +2659,7 @@ impl CollectionView {
 
     fn render_detail_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_editing = matches!(self.editor_mode, EditorMode::Create | EditorMode::Update);
+        let section_bg = content_section_bg(cx);
         let header_title = if self.show_explain {
             t!("MongoCollection.explain_result_title").to_string()
         } else if is_editing {
@@ -2643,12 +2700,17 @@ impl CollectionView {
             .h_full()
             .min_h_0()
             .min_w(px(320.0))
-            .px_2()
             .gap_2()
             .child(
                 h_flex()
+                    .w_full()
                     .items_center()
                     .justify_between()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
                     .child(
                         div()
                             .text_sm()
@@ -2695,10 +2757,11 @@ impl CollectionView {
                             }),
                     ),
             )
-            .child(body)
+            .child(div().flex_1().min_h_0().px_2().child(body))
     }
 
     fn render_pagination_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         let inputs = self.read_query_inputs_or_default(cx);
         let page_size = inputs.page_size;
         let skip_base = inputs.skip_base;
@@ -2733,10 +2796,11 @@ impl CollectionView {
         h_flex()
             .items_center()
             .justify_between()
-            .px_2()
-            .py_1()
+            .px_3()
+            .py_2()
             .border_t_1()
             .border_color(cx.theme().border)
+            .bg(section_bg)
             .child(
                 div()
                     .text_xs()
@@ -2921,14 +2985,25 @@ impl Render for CollectionView {
             }
         };
 
-        let container = v_flex().size_full().p_2().gap_2();
+        let section_bg = content_section_bg(cx);
+        let container = v_flex().size_full();
         if self.collection_name.is_none() {
-            container.child(body)
+            container.child(v_flex().size_full().p_2().gap_2().child(body))
         } else {
             container
-                .child(self.render_header(cx))
-                .child(self.render_tab_bar(cx))
-                .child(body)
+                .child(
+                    v_flex()
+                        .w_full()
+                        .px_3()
+                        .py_2()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .bg(section_bg)
+                        .child(self.render_header(cx))
+                        .child(self.render_tab_bar(cx)),
+                )
+                .child(v_flex().flex_1().min_h_0().p_2().gap_2().child(body))
         }
     }
 }

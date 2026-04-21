@@ -9,13 +9,14 @@ use gpui::{
     StatefulInteractiveElement, Styled, Task, Window, div, prelude::FluentBuilder, px, relative,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _,
+    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     dialog::DialogButtonProps,
     h_flex,
     highlighter::Language,
     input::{Input, InputEvent, InputState},
+    layered_level_surface_color,
     radio::Radio,
     select::{Select, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
@@ -41,6 +42,16 @@ enum LoadState {
     Loading,
     Loaded,
     Error(String),
+}
+
+fn content_section_bg(cx: &App) -> gpui::Hsla {
+    layered_level_surface_color(
+        cx.theme().background,
+        cx.theme().window_blur_enabled,
+        cx.theme().backdrop_opacity,
+        0.14,
+        WindowsSurfaceLayer::ContentSection,
+    )
 }
 
 /// 查看格式
@@ -505,6 +516,7 @@ impl KeyValueView {
         let Some(info) = &self.key_info else {
             return div().into_any_element();
         };
+        let section_bg = content_section_bg(cx);
 
         let key_name = info.name.clone();
         let key_type = info.key_type;
@@ -529,7 +541,7 @@ impl KeyValueView {
             .w_full()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(section_bg)
             // 第一行：类型 + 键名 + 操作按钮
             .child(
                 h_flex()
@@ -2107,6 +2119,7 @@ impl KeyValueView {
         let Some(info) = &self.key_info else {
             return div().into_any_element();
         };
+        let section_bg = content_section_bg(cx);
 
         let size = info.size.unwrap_or(0);
         let content_len = match &self.value_content {
@@ -2132,7 +2145,7 @@ impl KeyValueView {
             .justify_between()
             .border_t_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(section_bg)
             .child(
                 h_flex()
                     .gap_4()
@@ -2667,6 +2680,7 @@ impl KeyValueView {
         columns: Vec<(String, f32)>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
         let mut header = h_flex()
             .w_full()
             .h(px(36.0))
@@ -2674,7 +2688,7 @@ impl KeyValueView {
             .items_center()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().muted);
+            .bg(section_bg);
 
         let last_index = columns.len().saturating_sub(1);
         for (index, (name, width)) in columns.into_iter().enumerate() {
