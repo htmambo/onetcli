@@ -53,6 +53,7 @@ use crate::local_pty_protocol::LocalPtyHostEvent;
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(unix)]
 use anyhow::Context as _;
+#[cfg(not(target_os = "windows"))]
 use crate::shell_integration::embedded_shell_integration_script;
 
 use crate::{
