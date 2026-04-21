@@ -996,12 +996,6 @@ impl Render for DatabaseObjects {
             surface_opacity,
             -0.10,
         );
-        let toolbar_input_bg = sidebar_surface_color_with_offset(
-            cx.theme().input_background(),
-            blur_enabled,
-            surface_opacity,
-            -0.18,
-        );
 
         // Update delegate with current data (no refresh here, only when data actually changes)
         self.table.update(cx, |state, _cx| {
@@ -1031,8 +1025,6 @@ impl Render for DatabaseObjects {
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),
                                 )
-                                .bg(toolbar_input_bg)
-                                .border_color(cx.theme().border.opacity(0.62))
                                 .cleanable(true)
                                 .small()
                                 .w_full(),
