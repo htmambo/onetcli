@@ -95,6 +95,7 @@ pub struct Dialog {
     footer: Option<FooterFn>,
     children: Vec<AnyElement>,
     width: Pixels,
+    height: Option<Pixels>,
     max_width: Option<Pixels>,
     margin_top: Option<Pixels>,
 
@@ -132,6 +133,7 @@ impl Dialog {
             children: Vec::new(),
             margin_top: None,
             width: px(480.),
+            height: None,
             max_width: None,
             overlay: true,
             keyboard: true,
@@ -254,6 +256,13 @@ impl Dialog {
     /// Sets the width of the dialog, defaults to 480px.
     pub fn width(mut self, width: impl Into<Pixels>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// Sets the height of the dialog. If set, the dialog will be vertically centered
+    /// using this height: top = (viewport.height - self.height) / 2.
+    pub fn h(mut self, height: impl Into<Pixels>) -> Self {
+        self.height = Some(height.into());
         self
     }
 
@@ -389,7 +398,7 @@ impl RenderOnce for Dialog {
         };
         let offset_top = px(layer_ix as f32 * 16.);
         let base_x = bounds.center().x - self.width / 2.;
-        let default_y = ((view_size.height - px(360.)) / 2.).max(px(48.));
+        let default_y = ((view_size.height - self.height.unwrap_or(px(360.))) / 2.).max(px(48.));
         let base_y = self.margin_top.unwrap_or(default_y) + offset_top;
         let drag_offset = drag_state.read(cx).offset;
         let x = base_x + drag_offset.x;
@@ -564,6 +573,7 @@ impl RenderOnce for Dialog {
                             .left(x)
                             .top(y)
                             .w(self.width)
+                            .when_some(self.height, |this, h| this.h(h))
                             .when_some(self.max_width, |this, w| this.max_w(w))
                             .when(has_title, |this| {
                                 this.child(

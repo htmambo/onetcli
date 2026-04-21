@@ -330,7 +330,7 @@ pub fn open_connection_restore_dialog(
         dialog
             .title(t!("ConnectionRestore.title"))
             .w(px(520.0))
-            .max_h(px(560.0))
+            .h(px(560.0))
             .overlay_closable(false)
             .on_cancel(move |_, window, cx| {
                 home_page_cancel.update(cx, |home, cx| {
