@@ -215,13 +215,21 @@ impl SavedConnectionPickerList {
     fn render_connection_status_indicator(cx: &App) -> AnyElement {
         div()
             .absolute()
-            .top(px(5.0))
-            .left(px(5.0))
-            .w(px(8.0))
-            .h(px(8.0))
+            .top(px(6.0))
+            .left(px(17.0))
+            .w(px(12.0))
+            .h(px(12.0))
             .rounded_full()
             .bg(cx.theme().success)
             .shadow_lg()
+            .flex()                           // 新增：让内部内容居中
+            .items_center()                                                                                                    
+            .justify_center()
+            .child(                                                                                                            
+                Icon::new(IconName::Check)    // 白色钩号
+                    .with_size(px(11.0))   
+                    .text_color(gpui::white()),                                                                                
+            )
             .into_any_element()
     }
 
@@ -248,9 +256,9 @@ impl SavedConnectionPickerList {
                     )))
                     .w_full()
                     .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1p5()
+                    // .gap_1()
+                    .px_1()
+                    .py_1()
                     .rounded(Radius::Md.px())
                     .cursor_pointer()
                     .hover(|style| style.bg(cx.theme().list_hover))
@@ -318,9 +326,9 @@ impl SavedConnectionPickerList {
                                 .w_full()
                                 .flex()
                                 .items_center()
-                                .gap_2()
-                                // .ml_5()
-                                .px_2()
+                                .gap_1()
+                                .pl_5()
+                                // .px_1()
                                 // .py_1p5()
                                 .relative()
                                 .rounded(Radius::Md.px())

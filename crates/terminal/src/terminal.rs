@@ -137,10 +137,12 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
 
         let is_wrapline = columns > 0 && row[Column(columns - 1)].flags.contains(Flags::WRAPLINE);
         if is_wrapline {
+            current_line.clear();
             continue;
         }
-        // 清理一些与`onetcli_prompt_hook`相关的内容
+        // 清理一些不需要的内容
         if current_line.contains("type onetcli_prompt_hook")
+            || current_line.contains("cd --")
             || (current_line.contains("PROMPT_COMMAND")
                 && current_line.contains("onetcli_prompt_hook"))
         {
