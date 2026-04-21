@@ -284,6 +284,7 @@ impl QuickCommandPanel {
         cx: &mut Context<Self>,
     ) {
         let view = cx.entity().clone();
+        let text_muted = cx.theme().terminal_ui.text_muted;
 
         window.open_dialog(cx, move |dialog, _window, _cx| {
             let view_ok = view.clone();
@@ -308,7 +309,7 @@ impl QuickCommandPanel {
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(gpui::rgb(0x9ca3af))
+                                .text_color(text_muted)
                                 .child(preview),
                         )
                         .into_any_element(),

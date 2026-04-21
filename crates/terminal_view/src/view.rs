@@ -10,8 +10,8 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
-    BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions, Theme as UiTheme,
-    WindowExt, WindowsSurfaceLayer, kbd::Kbd, terminal_canvas_surface_opacity,
+    ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
+    Theme as UiTheme, WindowExt, WindowsSurfaceLayer, kbd::Kbd, terminal_canvas_surface_opacity,
     windows_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
@@ -3176,6 +3176,8 @@ impl TerminalView {
             TerminalConnectionKind::Ssh | TerminalConnectionKind::Serial
         );
 
+        let muted = cx.theme().muted;
+
         div()
             .absolute()
             .inset_0()
@@ -3195,7 +3197,7 @@ impl TerminalView {
                     .items_center()
                     .gap_4()
                     .p_6()
-                    .bg(rgb(0x2d2d2d))
+                    .bg(muted)
                     .rounded_lg()
                     .shadow_lg()
                     .max_w(px(400.0))
@@ -3213,16 +3215,16 @@ impl TerminalView {
                                 .color()
                                 .with_size(px(24.0))
                                 .text_color(if is_connecting {
-                                    rgb(0xfbbf24)
+                                    cx.theme().terminal_ui.search_match_bg
                                 } else {
-                                    rgb(0xef4444)
+                                    cx.theme().terminal_ui.status_disconnected
                                 }),
                             )
                             .child(
                                 div()
                                     .text_lg()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(cx.theme().terminal_ui.text_primary)
                                     .child(if is_connecting {
                                         if is_ssh {
                                             t!("SshSession.connecting")
@@ -3242,7 +3244,7 @@ impl TerminalView {
                         this.child(
                             div()
                                 .text_sm()
-                                .text_color(rgb(0xef4444))
+                                .text_color(cx.theme().terminal_ui.status_disconnected)
                                 .max_w(px(350.0))
                                 .overflow_hidden()
                                 .text_ellipsis()
@@ -3252,7 +3254,7 @@ impl TerminalView {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x9ca3af))
+                            .text_color(cx.theme().terminal_ui.text_muted)
                             .child(if is_connecting {
                                 if is_ssh {
                                     connection_status_message.unwrap_or_else(|| {
@@ -4147,6 +4149,8 @@ impl Render for TerminalView {
                     .when_some(tooltip.zip(mouse_pos), |this, (tooltip, pos)| {
                         let relative_x = pos.x - terminal_bounds.origin.x;
                         let relative_y = pos.y - terminal_bounds.origin.y;
+                        let text_primary = cx.theme().terminal_ui.text_primary;
+                        let text_muted = cx.theme().terminal_ui.text_muted;
                         this.child(
                             div()
                                 .absolute()
@@ -4154,7 +4158,7 @@ impl Render for TerminalView {
                                 .top(relative_y + px(20.0))
                                 .px_2()
                                 .py_1()
-                                .bg(rgb(0x3d3d3d))
+                                .bg(cx.theme().terminal_ui.scrollbar_track)
                                 .rounded_md()
                                 .shadow_md()
                                 .text_size(px(11.0))
@@ -4166,14 +4170,14 @@ impl Render for TerminalView {
                                         .child(
                                             div()
                                                 .px_1()
-                                                .bg(rgb(0x4d4d4d))
+                                                .bg(text_primary.opacity(0.2))
                                                 .rounded_sm()
-                                                .text_color(rgb(0xcccccc))
+                                                .text_color(text_primary)
                                                 .child(tooltip.action_hint),
                                         )
                                         .child(
                                             div()
-                                                .text_color(rgb(0x888888))
+                                                .text_color(text_muted)
                                                 .child(tooltip.action_text),
                                         ),
                                 )

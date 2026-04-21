@@ -1,6 +1,6 @@
 # UI 主题系统重构实施方案
 
-**状态**: 🔄 进行中
+**状态**: ✅ 已完成
 **分支**: `refactor/theme-system-cleanup`
 **创建时间**: 2026-04-21
 **完成时间**: 2026-04-21
@@ -176,10 +176,10 @@ pub trait TableModel: Send {
 
 | 任务 | 说明 |
 |------|------|
-| 终端硬编码收敛 | 把内置终端主题的硬编码颜色迁移到 `ThemeColor.base.*` |
-| Legacy 持久化移除 | 删除 `target/state.json` 相关逻辑，迁移到新配置路径 |
+| 终端硬编码收敛 | 新增 TerminalUiColors 结构体，收敛终端 UI 颜色 |
+| Legacy 持久化移除 | 迁移到 ~/.config/one-hub/theme_state.json |
 
-**状态**: ⏳ 待执行
+**状态**: ✅ 已完成 (2026-04-21)
 
 ---
 
@@ -221,4 +221,4 @@ rg -n 'themes_backup|glass_sidebar\(|sidebar_surface_color\(' crates main
 | Phase 3 - 颜色系统重组 | ✅ 已完成 | 2026-04-21 |
 | Phase 4 - TableModel 抽象 | ✅ 已完成 | 2026-04-21 |
 | Phase 5 - 低风险清理 | ✅ 已完成 | 2026-04-21 |
-| Phase 6 - 长期项 | ⏳ 待执行 | - |
+| Phase 6 - 终端颜色 & 持久化 | ✅ 已完成 | 2026-04-21 |

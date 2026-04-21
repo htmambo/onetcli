@@ -632,6 +632,8 @@ impl ThemeColor {
 
         // Sync base palette after all colors are applied
         self.sync_base_palette();
+        // Sync terminal UI colors after base palette
+        self.sync_terminal_ui();
 
         // TODO: Apply default fallback colors to highlight.
     }

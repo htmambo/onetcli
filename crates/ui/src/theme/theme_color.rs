@@ -38,6 +38,32 @@ pub struct ThemeBaseColors {
     pub cyan_light: Hsla,
 }
 
+/// Terminal UI colors for embedded terminal elements.
+///
+/// These colors are used for terminal-specific UI components like scrollbars,
+/// search highlighting, status indicators, and command displays.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub struct TerminalUiColors {
+    /// Scrollbar track background color.
+    pub scrollbar_track: Hsla,
+    /// Scrollbar thumb background color.
+    pub scrollbar_thumb: Hsla,
+    /// Search match highlight background (e.g., find result).
+    pub search_match_bg: Hsla,
+    /// Search current match highlight background.
+    pub search_match_current_bg: Hsla,
+    /// Status connected indicator color.
+    pub status_connected: Hsla,
+    /// Status disconnected/error indicator color.
+    pub status_disconnected: Hsla,
+    /// Primary text color for terminal UI elements.
+    pub text_primary: Hsla,
+    /// Muted text color for secondary terminal UI elements.
+    pub text_muted: Hsla,
+    /// Accent color for interactive terminal elements.
+    pub accent: Hsla,
+}
+
 /// Theme colors used throughout the UI components.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct ThemeColor {
@@ -270,6 +296,15 @@ pub struct ThemeColor {
     /// Marked with `#[serde(skip)]` to avoid redundant serialization.
     #[serde(skip)]
     pub base: ThemeBaseColors,
+
+    /// Terminal UI colors for embedded terminal elements.
+    ///
+    /// This field provides colors for terminal-specific UI components like
+    /// scrollbars, search highlighting, and status indicators.
+    /// It is populated by `sync_terminal_ui()` after `apply_config()` completes.
+    /// Marked with `#[serde(skip)]` to avoid redundant serialization.
+    #[serde(skip)]
+    pub terminal_ui: TerminalUiColors,
 }
 
 impl ThemeColor {
@@ -303,6 +338,25 @@ impl ThemeColor {
             magenta_light: self.magenta_light,
             cyan: self.cyan,
             cyan_light: self.cyan_light,
+        };
+    }
+
+    /// Synchronize terminal UI colors from existing theme color fields.
+    ///
+    /// This method populates the `terminal_ui` field with colors derived from
+    /// existing theme fields, providing a semantic interface for terminal UI elements.
+    /// Call this method after `apply_config()` to ensure `theme.terminal_ui.*` is updated.
+    pub fn sync_terminal_ui(&mut self) {
+        self.terminal_ui = TerminalUiColors {
+            scrollbar_track: self.scrollbar,
+            scrollbar_thumb: self.scrollbar_thumb,
+            search_match_bg: self.base.yellow,
+            search_match_current_bg: self.base.yellow_light,
+            status_connected: self.success,
+            status_disconnected: self.danger,
+            text_primary: self.foreground,
+            text_muted: self.muted_foreground,
+            accent: self.accent,
         };
     }
 }
