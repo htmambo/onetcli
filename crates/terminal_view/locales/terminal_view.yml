@@ -73,6 +73,10 @@ Common:
     en: Close
     zh-CN: 关闭
     zh-HK: 關閉
+  edit:
+    en: Edit
+    zh-CN: 编辑
+    zh-HK: 編輯
 
 # 连接
 Connection:
@@ -359,6 +363,10 @@ ConnectionForm:
 
 # 设置面板
 Settings:
+  title:
+    en: Settings
+    zh-CN: 设置
+    zh-HK: 設定
   search:
     en: Search
     zh-CN: 搜索

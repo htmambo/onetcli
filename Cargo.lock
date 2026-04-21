@@ -8810,6 +8810,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "one-core",
+ "rust-i18n",
  "sftp",
  "tokio",
  "tracing",
