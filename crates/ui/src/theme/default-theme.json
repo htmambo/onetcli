@@ -62,7 +62,8 @@
         "chart.2": "#2563eb",
         "chart.3": "#1d4ed8",
         "chart.4": "#1e40af",
-        "chart.5": "#1e3a8a"
+        "chart.5": "#1e3a8a",
+        "overlay": "#00000066"
       },
       "highlight": {
         "editor.foreground": "#000000",
@@ -206,7 +207,8 @@
         "chart.2": "#3b82f6",
         "chart.3": "#2563eb",
         "chart.4": "#1d4ed8",
-        "chart.5": "#1e40af"
+        "chart.5": "#1e40af",
+        "overlay": "#00000099"
       },
       "highlight": {
         "editor.foreground": "#CACCCA",

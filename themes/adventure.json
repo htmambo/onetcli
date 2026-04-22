@@ -40,8 +40,6 @@
         "sidebar.background": "#0f1112",
         "sidebar.border": "#282828",
         "sidebar.foreground": "#feffff",
-        "sidebar.primary.background": "#171a1c",
-        "sidebar.primary.foreground": "#e4d5c7",
         "tab.active.background": "#2C3238",
         "tab.active.foreground": "#feffff",
         "tab.background": "#171a1c",
@@ -66,7 +64,16 @@
         "base.magenta.light": "#e599bc",
         "base.yellow": "#aa7900",
         "base.yellow.light": "#ffb670",
-        "group.background": "#003a5b"
+        "group.background": "#003a5b",
+        "overlay": "#00000099",
+        "caret": "#4384ad",
+        "group.foreground": "#feffff",
+        "info.background": "#41b3a9",
+        "info.foreground": "#feffff",
+        "warning.foreground": "#feffff",
+        "table.even.background": "#0e0e0e",
+        "table.head.background": "#171717",
+        "table.hover.background": "#25292d"
       },
       "highlight": {
         "editor.foreground": "#feffff",

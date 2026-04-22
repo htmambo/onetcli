@@ -3,7 +3,7 @@
 //! 提供从 ThemeColor 到语义化颜色的映射，
 //! 让组件可以通过 `theme.semantic()` 获取语义化颜色。
 
-use crate::ThemeColor;
+use crate::{Colorize, ThemeColor};
 
 /// 语义色引用类型 — 基于当前主题颜色返回对应的语义色
 #[derive(Debug, Clone, Copy)]
@@ -39,7 +39,9 @@ impl<'a> SemanticColorsRef<'a> {
 
     pub fn border_subtle(&self) -> gpui::Hsla {
         match self {
-            Self::Dark(colors) | Self::Light(colors) => colors.border,
+            Self::Dark(colors) | Self::Light(colors) => {
+                colors.border.mix(colors.background, 0.5)
+            }
         }
     }
 
@@ -63,7 +65,7 @@ impl<'a> SemanticColorsRef<'a> {
 
     pub fn text_muted(&self) -> gpui::Hsla {
         match self {
-            Self::Dark(colors) | Self::Light(colors) => colors.muted_foreground,
+            Self::Dark(colors) | Self::Light(colors) => colors.muted_foreground.opacity(0.7),
         }
     }
 

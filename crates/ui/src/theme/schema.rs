@@ -251,12 +251,6 @@ pub struct ThemeConfigColors {
     /// Sidebar text color.
     #[serde(rename = "sidebar.foreground")]
     pub sidebar_foreground: Option<SharedString>,
-    /// Sidebar primary background color.
-    #[serde(rename = "sidebar.primary.background")]
-    pub sidebar_primary: Option<SharedString>,
-    /// Sidebar primary text color.
-    #[serde(rename = "sidebar.primary.foreground")]
-    pub sidebar_primary_foreground: Option<SharedString>,
     /// Skeleton background color.
     #[serde(rename = "skeleton.background")]
     pub skeleton: Option<SharedString>,
@@ -592,11 +586,6 @@ impl ThemeColor {
         apply_color!(sidebar_accent_foreground, fallback = self.accent_foreground);
         apply_color!(sidebar_border, fallback = self.border);
         apply_color!(sidebar_foreground, fallback = self.foreground);
-        apply_color!(sidebar_primary, fallback = self.primary);
-        apply_color!(
-            sidebar_primary_foreground,
-            fallback = self.primary_foreground
-        );
         apply_color!(skeleton, fallback = self.secondary);
         apply_color!(slider_bar, fallback = self.primary);
         apply_color!(slider_thumb, fallback = self.primary_foreground);
@@ -627,7 +616,7 @@ impl ThemeColor {
         apply_color!(title_bar, fallback = self.background);
         apply_color!(title_bar_border, fallback = self.border);
         apply_color!(tiles, fallback = self.background);
-        apply_color!(overlay);
+        apply_color!(overlay, fallback = gpui::hsla(0., 0., 0., 0.4));
         apply_color!(window_border, fallback = self.border);
 
         // Sync base palette after all colors are applied

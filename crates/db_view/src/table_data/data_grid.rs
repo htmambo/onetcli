@@ -843,9 +843,7 @@ impl DataGrid {
                             state.delegate_mut().set_column_meta(column_meta);
                             state.delegate_mut().update_data(columns, rows, rowids, cx);
                             state.delegate_mut().apply_order_by_clause(&order_by_clause);
-                            if !hidden_columns.is_empty() {
-                                state.delegate_mut().update_visible_columns(&hidden_columns);
-                            }
+                            state.delegate_mut().update_visible_columns(&hidden_columns);
                             state.refresh(cx);
                         });
                     });

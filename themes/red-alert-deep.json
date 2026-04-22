@@ -74,8 +74,16 @@
         "chart.5": "#5e1d21",
         "group.background": "#320610",
         "link": "#f9a0a0",
-        "sidebar.primary.background": "#320610",
-        "sidebar.primary.foreground": "#f7eded"
+        "overlay": "#00000099",
+        "caret": "#ba3551",
+        "group.foreground": "#f7eded",
+        "info.background": "#6eafaa",
+        "info.foreground": "#f7eded",
+        "warning.foreground": "#f7eded",
+        "table.background": "#320610",
+        "table.even.background": "#320610",
+        "table.head.background": "#3f1013",
+        "table.hover.background": "#ba355133"
       },
       "highlight": {
         "editor.foreground": "#f7eded",

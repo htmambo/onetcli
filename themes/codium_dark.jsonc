@@ -14,6 +14,12 @@
         // 主色文字
         "accent.foreground": "#f7eded",
 
+        // === 手风琴 ===
+        // 手风琴默认背景
+        "accordion.background": "#2c1438",
+        // 手风琴悬停背景
+        "accordion.hover.background": "#3d204966",
+
         // === 基础色 ===
         // 窗口/页面背景
         "background": "#2c1438",
@@ -24,7 +30,25 @@
         // 焦点环颜色
         "ring": "#c678dd",
         // 主文字色
-        "foreground": "#f7eded",
+        "foreground": "#f7edf7",
+
+        // === K线图表 ===
+        // 上涨色（K线 bullish）
+        "bullish.background": "#582572",
+        // 下跌色（K线 bearish）
+        "bearish.background": "#752194",
+
+        // === 图表色 ===
+        // 图表颜色 1
+        "chart.1": "#e7bbf7",
+        // 图表颜色 2
+        "chart.2": "#c678dd",
+        // 图表颜色 3
+        "chart.3": "#a46ac2",
+        // 图表颜色 4
+        "chart.4": "#724582",
+        // 图表颜色 5
+        "chart.5": "#581a69",
 
         // === 危险/错误色 ===
         // 危险按钮激活背景
@@ -36,6 +60,18 @@
         // 危险按钮悬停背景
         "danger.hover.background": "#a846c2",
 
+        // === 描述列表 ===
+        // 描述列表标签背景
+        "description_list.label.background": "#321548",
+        // 描述列表标签文字
+        "description_list.label.foreground": "#9a7a9f",
+
+        // === 拖拽交互 ===
+        // 拖拽边框色
+        "drag.border": "#c678dda6",
+        // 拖放目标背景
+        "drop_target.background": "#c678dd33",
+
         // === 链接色 ===
         // 链接激活状态文字
         "link.active": "#c678dd",
@@ -45,12 +81,16 @@
         "link.hover": "#da9aea",
 
         // === 列表色 ===
+        // 列表默认背景
+        "list.background": "#2c1438",
         // 列表项激活背景
         "list.active.background": "#75219433",
         // 列表项激活边框
         "list.active.border": "#c678dd",
         // 列表偶数行背景
         "list.even.background": "#321548",
+        // 列表头部背景
+        "list.head.background": "#321548",
         // 列表项悬停背景
         "list.hover.background": "#3d204966",
 
@@ -60,9 +100,15 @@
         // 次要/禁用文字
         "muted.foreground": "#9a7a9f",
 
+        // === 遮罩层 ===
+        // 弹窗/对话框遮罩背景
+        "overlay": "#2c143099",
+
         // === 面板/弹窗 ===
-        // 面板背景（侧边栏等）
-        "panel.background": "#1e0d28",
+        // 面板背景（GroupBox/侧边栏等）
+        "group.background": "#1e0d28",
+        // 面板文字
+        "group.foreground": "#f7eded",
         // 弹窗背景
         "popover.background": "#2c1438",
         // 弹窗文字
@@ -106,19 +152,15 @@
 
         // === 侧边栏 ===
         // 侧边栏强调色背景
-        "sidebar.accent.background": "#c678dd",
+        "sidebar.accent.background": "#2e0f3866",
         // 侧边栏强调色文字
-        "sidebar.accent.foreground": "#e7bbf7",
+        "sidebar.accent.foreground": "#785485",
         // 侧边栏背景
-        "sidebar.background": "#1e0d28",
+        "sidebar.background": "#230431",
         // 侧边栏边框
         "sidebar.border": "#3d2049",
         // 侧边栏文字
         "sidebar.foreground": "#e7bbf7",
-        // 侧边栏主色背景
-        "sidebar.primary.background": "#3d2049",
-        // 侧边栏主色文字
-        "sidebar.primary.foreground": "#f7eded",
 
         // === 骨架屏 ===
         // 加载骨架背景
@@ -162,15 +204,49 @@
         // 分段控件背景
         "tab_bar.segmented.background": "#321548",
 
-        // === 标题栏 ===
-        // 标题栏背景
-        "title_bar.background": "#1e0d28",
-        // 标题栏边框
-        "title_bar.border": "#3d2049",
+        // === 表格 ===
+        // 表格默认背景
+        "table.background": "#321548",
+        // 表格选中行背景
+        "table.active.background": "#75219433",
+        // 表格选中行边框
+        "table.active.border": "#5e0679",
+        // 表格偶数行背景
+        "table.even.background": "#3d204966",
+        // 表格头部背景
+        "table.head.background": "#2d0c2eff",
+        // 表格头部文字
+        "table.head.foreground": "#b28eb9",
+        // 表格悬停行背景
+        "table.hover.background": "#4e095c",
+        // 表格行边框
+        "table.row.border": "#3d2049",
 
         // === 磁贴 ===
         // 磁贴/网格背景
         "tiles.background": "#321548",
+
+        // === 标题栏 ===
+        // 标题栏背景
+        "title_bar.background": "#340f42",
+        // 标题栏边框
+        "title_bar.border": "#3d2049",
+
+        // === 输入框 ===
+        // 输入框边框
+        "input.border": "#3d2049",
+        // 光标/插入符颜色
+        "caret": "#c678dd",
+
+        // === 信息色 ===
+        // 信息按钮默认背景
+        "info.background": "#481359",
+        // 信息按钮激活背景
+        "info.active.background": "#360d42",
+        // 信息按钮文字
+        "info.foreground": "#f7eded",
+        // 信息按钮悬停背景
+        "info.hover.background": "#5a1a6d",
 
         // === 警告色 ===
         // 警告按钮激活背景
@@ -182,21 +258,31 @@
         // 警告按钮悬停背景
         "warning.hover.background": "#682075",
 
-        // === 图表色 ===
-        "chart.1": "#e7bbf7",
-        "chart.2": "#c678dd",
-        "chart.3": "#a46ac2",
-        "chart.4": "#724582",
-        "chart.5": "#581a69",
-
         // === 基础色板 ===
-        "base.magenta": "#c678dd",
-        "base.magenta.light": "#c678dd33",
-        "base.red": "#752194",
-        "base.green": "#582572",
-        "base.yellow": "#724582",
+        // 基础蓝色
         "base.blue": "#582572",
-        "base.cyan": "#481359"
+        // 基础浅蓝色
+        "base.blue.light": "#7a4a9a",
+        // 基础青色
+        "base.cyan": "#481359",
+        // 基础浅青色
+        "base.cyan.light": "#6a3a7d",
+        // 基础绿色
+        "base.green": "#582572",
+        // 基础浅绿色
+        "base.green.light": "#7a4a9a",
+        // 基础品红色
+        "base.magenta": "#c678dd",
+        // 基础浅品红色
+        "base.magenta.light": "#c678dd33",
+        // 基础红色
+        "base.red": "#752194",
+        // 基础浅红色
+        "base.red.light": "#a05cb5",
+        // 基础黄色
+        "base.yellow": "#724582",
+        // 基础浅黄色
+        "base.yellow.light": "#9a6aaa"
       },
       "highlight": {
         // === 编辑器 ===

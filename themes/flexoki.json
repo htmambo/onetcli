@@ -37,8 +37,6 @@
         "sidebar.background": "#F2F0E5",
         "sidebar.border": "#DAD8CE",
         "sidebar.foreground": "#100F0F",
-        "sidebar.primary.background": "#E8E4CE",
-        "sidebar.primary.foreground": "#100F0F",
         "tab.active.background": "#D1CEC0",
         "tab.active.foreground": "#100F0F",
         "tab.background": "#E8E4CE",
@@ -56,7 +54,16 @@
         "link": "#78767c",
         "panel.background": "#f2f0e5",
         "popover.background": "#f2f0e5",
-        "popover.foreground": "#100f0f"
+        "popover.foreground": "#100f0f",
+        "overlay": "#00000066",
+        "caret": "#3AA99F",
+        "group.foreground": "#100F0F",
+        "info.foreground": "#FAFAFA",
+        "warning.foreground": "#FAFAFA",
+        "table.background": "#FFFCF0",
+        "table.even.background": "#F2F0E5",
+        "table.head.background": "#F2F0E5",
+        "table.hover.background": "#E8E4CE"
       },
       "highlight": {
         "editor.foreground": "#100F0F",

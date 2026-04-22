@@ -50,10 +50,6 @@ pub struct TerminalUiColors {
     pub scrollbar_thumb: Hsla,
     /// Search match highlight background (e.g., find result).
     pub search_match_bg: Hsla,
-    /// Search current match highlight background.
-    pub search_match_current_bg: Hsla,
-    /// Status connected indicator color.
-    pub status_connected: Hsla,
     /// Status disconnected/error indicator color.
     pub status_disconnected: Hsla,
     /// Primary text color for terminal UI elements.
@@ -187,10 +183,6 @@ pub struct ThemeColor {
     pub sidebar_border: Hsla,
     /// Sidebar text color.
     pub sidebar_foreground: Hsla,
-    /// Sidebar primary background color.
-    pub sidebar_primary: Hsla,
-    /// Sidebar primary text color.
-    pub sidebar_primary_foreground: Hsla,
     /// Skeleton background color.
     pub skeleton: Hsla,
     /// Slider bar background color.
@@ -351,8 +343,6 @@ impl ThemeColor {
             scrollbar_track: self.scrollbar,
             scrollbar_thumb: self.scrollbar_thumb,
             search_match_bg: self.base.yellow,
-            search_match_current_bg: self.base.yellow_light,
-            status_connected: self.success,
             status_disconnected: self.danger,
             text_primary: self.foreground,
             text_muted: self.muted_foreground,

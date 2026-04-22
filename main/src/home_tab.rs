@@ -4369,14 +4369,14 @@ impl HomePage {
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
         let workspace_bg = layered_level_surface_color(
-            cx.theme().tab,
+            cx.theme().table,
             blur_enabled,
             window_opacity,
             0.14,
             WindowsSurfaceLayer::ContentSection,
         );
         let workspace_hover_bg = layered_level_surface_color(
-            cx.theme().list_hover,
+            cx.theme().table_hover,
             blur_enabled,
             window_opacity,
             0.10,
@@ -4413,7 +4413,7 @@ impl HomePage {
             .gap_0()
             .rounded_lg()
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().table_row_border)
             .bg(workspace_bg)
             .child(
                 h_flex()
@@ -4428,18 +4428,19 @@ impl HomePage {
                     .relative()
                     .overflow_hidden()
                     .cursor_pointer()
+                    .bg(cx.theme().table_head)
                     .when(manual_sort_mode && workspace_id.is_some(), |this| {
                         this.cursor_grab()
                     })
                     .rounded_t_lg()
                     .when(!is_collapsed, |this| {
-                        this.border_b_1().border_color(cx.theme().border)
+                        this.border_b_1().border_color(cx.theme().table_row_border)
                     })
                     .when(is_collapsed, |this| this.rounded_b_lg())
                     .hover(|s| s.bg(workspace_hover_bg))
                     .when(connection_workspace_drop_active, |this| {
-                        this.border_color(cx.theme().drag_border)
-                            .bg(cx.theme().drop_target.opacity(0.28))
+                        this.border_color(cx.theme().table_active_border)
+                            .bg(cx.theme().table_active.opacity(0.28))
                     })
                     .when(
                         manual_sort_mode && draggable_workspace_id.is_some(),
@@ -4484,8 +4485,8 @@ impl HomePage {
                                 if drag.workspace_id == workspace_id {
                                     this
                                 } else {
-                                    this.border_color(cx.theme().drag_border)
-                                        .bg(cx.theme().drop_target.opacity(0.35))
+                                    this.border_color(cx.theme().table_active_border)
+                                        .bg(cx.theme().table_active.opacity(0.35))
                                 }
                             })
                             .on_drop(cx.listener(
@@ -4537,8 +4538,8 @@ impl HomePage {
                             ) {
                                 this
                             } else {
-                                this.border_color(cx.theme().drag_border)
-                                    .bg(cx.theme().drop_target.opacity(0.35))
+                                this.border_color(cx.theme().table_active_border)
+                                    .bg(cx.theme().table_active.opacity(0.35))
                             }
                         })
                         .on_drop(cx.listener(
@@ -4600,7 +4601,7 @@ impl HomePage {
                         div()
                             .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().foreground)
+                            .text_color(cx.theme().table_head_foreground)
                             .child(workspace.name.clone()),
                     )
                     .child(
@@ -5713,14 +5714,14 @@ impl HomePage {
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
         let card_bg = layered_level_surface_color(
-            cx.theme().background,
+            cx.theme().list,
             blur_enabled,
             window_opacity,
             0.16,
             WindowsSurfaceLayer::ContentCard,
         );
         let card_overlay_bg = layered_level_surface_color(
-            cx.theme().background,
+            cx.theme().list,
             blur_enabled,
             window_opacity,
             0.18,
