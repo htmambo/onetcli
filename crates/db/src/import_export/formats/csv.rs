@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 
 use super::{
@@ -13,7 +13,6 @@ use crate::import_export::{
     ExportConfig, ExportProgressEvent, ExportProgressSender, ExportResult, FormatHandler,
     ImportConfig, ImportResult,
 };
-use crate::DatabasePlugin;
 
 pub struct CsvFormatHandler;
 
