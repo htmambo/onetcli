@@ -215,8 +215,8 @@ impl SavedConnectionPickerList {
     fn render_connection_status_indicator(cx: &App) -> AnyElement {
         div()
             .absolute()
-            .top(px(6.0))
-            .left(px(17.0))
+            .top(px(4.0))
+            .left(px(15.0))
             .w(px(12.0))
             .h(px(12.0))
             .rounded_full()
@@ -560,6 +560,7 @@ impl Render for TabBarSavedConnectionPicker {
                     .border_1()
                     .border_color(cx.theme().border)
                     .rounded(cx.theme().radius)
+                    .overflow_hidden()
                     .shadow_lg()
                     .child(picker.clone())
             })
