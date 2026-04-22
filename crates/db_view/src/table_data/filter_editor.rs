@@ -1,7 +1,8 @@
 use crate::table_data::filter_types::{
     ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, LogicOperator,
-    operators_for_column, uuid_simple,
+    OperatorCategory, operators_for_column, uuid_simple,
 };
+use rust_i18n::t;
 #[cfg(test)]
 use crate::table_data::filter_types::{is_datetime_type, is_numeric_type, is_string_type};
 use db::ColumnInfo;
@@ -15,7 +16,7 @@ use gpui_component::{ActiveTheme, IconName, Sizable, checkbox::Checkbox};
 use gpui_component::{
     IndexPath,
     button::{Button, ButtonVariants as _},
-    select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState},
+    select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectGroup, SelectItem, SelectState},
 };
 #[cfg(test)]
 use lsp_types::{
@@ -664,11 +665,39 @@ impl SelectItem for FilterOperatorItem {
     type Value = FilterOperator;
 
     fn title(&self) -> SharedString {
-        self.op.label().into()
+        let desc = t!(self.op.description_key());
+        format!("{} - {}", self.op.label(), desc).into()
+    }
+
+    fn display_title(&self) -> Option<gpui::AnyElement> {
+        Some(gpui::div().child(self.op.label()).into_any_element())
     }
 
     fn value(&self) -> &Self::Value {
         &self.op
+    }
+
+    fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.theme();
+        let desc: SharedString = t!(self.op.description_key()).into();
+        gpui::div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                gpui::div()
+                    .min_w(px(60.))
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(theme.primary)
+                    .child(self.op.label()),
+            )
+            .child(
+                gpui::div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(desc),
+            )
     }
 }
 
@@ -779,9 +808,9 @@ pub struct VisualFilterBuilder {
     /// 列选择器实体，按行 ID 索引
     column_selects:
         std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterColumnItem>>>>,
-    /// 操作符选择器实体，按行 ID 索引
+    /// 操作符选择器实体，按行 ID 索引（分组的）
     operator_selects:
-        std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterOperatorItem>>>>,
+        std::collections::HashMap<String, Entity<SelectState<SearchableVec<SelectGroup<FilterOperatorItem>>>>>,
     /// 值输入框实体，按行 ID 索引
     value_inputs: std::collections::HashMap<String, Entity<InputState>>,
     /// 范围起始值输入框实体，按行 ID 索引（BETWEEN 时使用）
@@ -838,19 +867,56 @@ fn default_filter_operators() -> Vec<FilterOperator> {
     ]
 }
 
-fn operator_items_for_column(
+/// 按分组返回操作符列表
+fn operator_groups_for_column(
     schema: Option<&TableSchema>,
     column: &str,
-) -> Vec<FilterOperatorItem> {
+) -> SearchableVec<SelectGroup<FilterOperatorItem>> {
     let operators = schema
         .and_then(|s| s.columns.iter().find(|c| c.name == column))
         .map(operators_for_column)
         .unwrap_or_else(default_filter_operators);
 
-    operators
-        .into_iter()
-        .map(|op| FilterOperatorItem { op })
-        .collect()
+    // 按类别分组
+    let mut comparison = Vec::new();
+    let mut range = Vec::new();
+    let mut pattern = Vec::new();
+    let mut list = Vec::new();
+    let mut null = Vec::new();
+
+    for op in operators {
+        let item = FilterOperatorItem { op };
+        match op.category() {
+            OperatorCategory::Comparison => comparison.push(item),
+            OperatorCategory::Range => range.push(item),
+            OperatorCategory::Pattern => pattern.push(item),
+            OperatorCategory::List => list.push(item),
+            OperatorCategory::Null => null.push(item),
+        }
+    }
+
+    let mut groups = SearchableVec::new(vec![]);
+    if !comparison.is_empty() {
+        let title: SharedString = t!(OperatorCategory::Comparison.i18n_key()).into();
+        groups.push(SelectGroup::new(title).items(comparison));
+    }
+    if !range.is_empty() {
+        let title: SharedString = t!(OperatorCategory::Range.i18n_key()).into();
+        groups.push(SelectGroup::new(title).items(range));
+    }
+    if !pattern.is_empty() {
+        let title: SharedString = t!(OperatorCategory::Pattern.i18n_key()).into();
+        groups.push(SelectGroup::new(title).items(pattern));
+    }
+    if !list.is_empty() {
+        let title: SharedString = t!(OperatorCategory::List.i18n_key()).into();
+        groups.push(SelectGroup::new(title).items(list));
+    }
+    if !null.is_empty() {
+        let title: SharedString = t!(OperatorCategory::Null.i18n_key()).into();
+        groups.push(SelectGroup::new(title).items(null));
+    }
+    groups
 }
 
 /// 递归查找并更新条件操作符
@@ -1189,9 +1255,9 @@ impl VisualFilterBuilder {
 
         // 创建范围值输入框（BETWEEN 时使用）
         let value_start_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder("起始值".to_string()));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter.placeholder_start").into_owned()));
         let value_end_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder("结束值".to_string()));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter.placeholder_end").into_owned()));
 
         // 观察范围起始值输入变化
         let row_id_clone_for_val_start = row_id.clone();
@@ -1211,15 +1277,15 @@ impl VisualFilterBuilder {
             cx.notify();
         });
 
-        // 创建操作符选择器
-        let operator_items = operator_items_for_column(schema.as_ref(), &first_col);
+        // 创建操作符选择器（分组）
+        let operator_groups = operator_groups_for_column(schema.as_ref(), &first_col);
 
-        let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
+        let selected_op_index = operator_groups.position(&first_op);
 
         let operator_select_entity = cx.new(|cx| {
             SelectState::new(
-                SearchableVec::new(operator_items),
-                selected_op_index.map(|i| IndexPath::new(i)),
+                operator_groups,
+                selected_op_index,
                 window,
                 cx,
             )
@@ -1229,7 +1295,7 @@ impl VisualFilterBuilder {
         let row_id_clone_for_op = row_id.clone();
         cx.subscribe(
             &operator_select_entity,
-            move |this, _, event: &SelectEvent<SearchableVec<FilterOperatorItem>>, _cx| {
+            move |this, _, event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>, _cx| {
                 let SelectEvent::Confirm(value) = event;
                 if let Some(op) = value {
                     this.update_condition_operator(&row_id_clone_for_op, *op);
@@ -1240,7 +1306,7 @@ impl VisualFilterBuilder {
 
         // 创建值输入框
         let value_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter.placeholder_value").into_owned()));
 
         // 观察值输入变化
         let row_id_clone_for_val = row_id.clone();
@@ -1293,10 +1359,9 @@ impl VisualFilterBuilder {
             &valid_operators,
         ) {
             if let Some(select) = self.operator_selects.get(id) {
-                let operator_items =
-                    SearchableVec::new(operator_items_for_column(self.schema.as_ref(), &column));
+                let operator_groups = operator_groups_for_column(self.schema.as_ref(), &column);
                 select.update(cx, |state, cx| {
-                    state.set_items(operator_items, window, cx);
+                    state.set_items(operator_groups, window, cx);
                     state.set_selected_value(&selected_operator, window, cx);
                     cx.notify();
                 });
@@ -1385,23 +1450,14 @@ impl VisualFilterBuilder {
                     )
                 });
 
-                let operator_items: Vec<FilterOperatorItem> = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.first())
-                    .map(operators_for_column)
-                    .map(|ops| {
-                        ops.iter()
-                            .map(|op| FilterOperatorItem { op: *op })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let operator_groups = operator_groups_for_column(schema.as_ref(), &first_col);
 
-                let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
+                let selected_op_index = operator_groups.position(&first_op);
 
                 let operator_select_entity = cx.new(|cx| {
                     SelectState::new(
-                        SearchableVec::new(operator_items),
-                        selected_op_index.map(|i| IndexPath::new(i)),
+                        operator_groups,
+                        selected_op_index,
                         window,
                         cx,
                     )
@@ -1528,15 +1584,15 @@ impl VisualFilterBuilder {
                     cx.notify();
                 });
 
-                // 创建操作符选择器
-                let operator_items = operator_items_for_column(schema.as_ref(), &first_col);
+                // 创建操作符选择器（分组）
+                let operator_groups = operator_groups_for_column(schema.as_ref(), &first_col);
 
-                let selected_op_index = operator_items.iter().position(|item| item.op == first_op);
+                let selected_op_index = operator_groups.position(&first_op);
 
                 let operator_select_entity = cx.new(|cx| {
                     SelectState::new(
-                        SearchableVec::new(operator_items),
-                        selected_op_index.map(|i| IndexPath::new(i)),
+                        operator_groups,
+                        selected_op_index,
                         window,
                         cx,
                     )
@@ -1546,7 +1602,7 @@ impl VisualFilterBuilder {
                 let row_id_clone_op = row_id.clone();
                 cx.subscribe(
                     &operator_select_entity,
-                    move |this, _, event: &SelectEvent<SearchableVec<FilterOperatorItem>>, _cx| {
+                    move |this, _, event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>, _cx| {
                         let SelectEvent::Confirm(value) = event;
                         if let Some(op) = value {
                             this.update_condition_operator(&row_id_clone_op, *op);
@@ -1861,10 +1917,10 @@ impl VisualFilterBuilder {
             )
             .child(
                 gpui::div()
-                    .w(px(120.))
+                    .w(px(100.))
                     .h_7()
                     .when_some(operator_select, |el, select| {
-                        el.child(Select::new(select).small())
+                        el.child(Select::new(select).small().menu_width(px(180.)))
                     }),
             )
             .child(value_area)
@@ -1873,7 +1929,7 @@ impl VisualFilterBuilder {
                     .small()
                     .ghost()
                     .icon(IconName::Trash)
-                    .tooltip("删除条件")
+                    .tooltip(t!("Filter.delete_condition"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.delete_condition(&row_id_for_delete, cx);
                     })),
@@ -1973,7 +2029,7 @@ impl VisualFilterBuilder {
                             .bg(primary_bg)
                             .text_color(primary_fg)
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .child("分组"),
+                            .child(t!("Filter.group")),
                     )
                     .child(
                         Button::new(format!("toggle-group-{}", group_id.clone()))
@@ -2003,7 +2059,7 @@ impl VisualFilterBuilder {
                             .small()
                             .ghost()
                             .icon(IconName::Plus)
-                            .tooltip("添加条件到分组")
+                            .tooltip(t!("Filter.add_condition_to_group"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.add_condition_to_group(&group_id_for_add_cond, window, cx);
                             })),
@@ -2013,7 +2069,7 @@ impl VisualFilterBuilder {
                             .small()
                             .ghost()
                             .icon(IconName::Folder)
-                            .tooltip("添加子分组")
+                            .tooltip(t!("Filter.add_subgroup"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.add_group_to_group(&group_id_for_add_group, window, cx);
                             })),
@@ -2023,7 +2079,7 @@ impl VisualFilterBuilder {
                             .small()
                             .ghost()
                             .icon(IconName::Trash)
-                            .tooltip("删除分组")
+                            .tooltip(t!("Filter.delete_group"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.delete_group(&group_id_for_delete, cx);
                             })),
@@ -2114,7 +2170,7 @@ impl Render for VisualFilterBuilder {
                                         .text_sm()
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .text_color(primary_color)
-                                        .child("WHERE"),
+                                        .child(t!("Filter.where_clause")),
                                     // )
                                     // .child(
                                     //     gpui::div()
@@ -2138,7 +2194,7 @@ impl Render for VisualFilterBuilder {
                                             .small()
                                             .icon(IconName::Plus)
                                             .ghost()
-                                            .tooltip("添加条件")
+                                            .tooltip(t!("Filter.add_condition"))
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.add_condition(window, cx);
                                             })),
@@ -2148,7 +2204,7 @@ impl Render for VisualFilterBuilder {
                                             .small()
                                             .icon(IconName::Folder)
                                             .ghost()
-                                            .tooltip("添加分组")
+                                            .tooltip(t!("Filter.add_group"))
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.add_group(window, cx);
                                             })),
@@ -2158,7 +2214,7 @@ impl Render for VisualFilterBuilder {
                                             .small()
                                             .icon(IconName::Trash)
                                             .ghost()
-                                            .tooltip("清除所有条件")
+                                            .tooltip(t!("Filter.clear_all"))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.clear_all(cx);
                                             })),
@@ -2167,7 +2223,7 @@ impl Render for VisualFilterBuilder {
                                         Button::new("apply-btn")
                                             .small()
                                             .icon(IconName::Check)
-                                            .tooltip("应用筛选条件")
+                                            .tooltip(t!("Filter.apply_filter"))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.handle_apply_click(cx);
                                             })),
@@ -2183,7 +2239,7 @@ impl Render for VisualFilterBuilder {
                                 .text_color(muted_foreground_color)
                                 .px_3()
                                 .py_2()
-                                .child("点击 + 添加筛选条件"),
+                                .child(t!("Filter.empty_hint")),
                         )
                     }),
             )

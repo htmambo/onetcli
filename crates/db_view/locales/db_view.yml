@@ -1118,8 +1118,143 @@ Query:
     zh-CN: SQL 语句
     zh-HK: SQL 語句
 
+# 筛选条件
+Filter:
+  where_clause:
+    en: Filter Conditions
+    zh-CN: 筛选条件
+    zh-HK: 篩選條件
+  # 操作符分组标题
+  category_comparison:
+    en: Comparison
+    zh-CN: 比较运算
+    zh-HK: 比較運算
+  category_range:
+    en: Range
+    zh-CN: 数值范围
+    zh-HK: 數值範圍
+  category_pattern:
+    en: Pattern Match
+    zh-CN: 模式匹配
+    zh-HK: 模式匹配
+  category_list:
+    en: List
+    zh-CN: 列表运算
+    zh-HK: 列表運算
+  category_null:
+    en: Null Check
+    zh-CN: 空值判断
+    zh-HK: 空值判斷
 
+  # 操作符说明
+  operator_equal:
+    en: Equal
+    zh-CN: 等于
+    zh-HK: 等於
+  operator_not_equal:
+    en: Not Equal
+    zh-CN: 不等于
+    zh-HK: 不等於
+  operator_greater_than:
+    en: Greater Than
+    zh-CN: 大于
+    zh-HK: 大於
+  operator_less_than:
+    en: Less Than
+    zh-CN: 小于
+    zh-HK: 小于
+  operator_greater_or_equal:
+    en: Greater or Equal
+    zh-CN: 大于等于
+    zh-HK: 大於等於
+  operator_less_or_equal:
+    en: Less or Equal
+    zh-CN: 小于等于
+    zh-HK: 小於等於
+  operator_like:
+    en: Like
+    zh-CN: 模糊匹配
+    zh-HK: 模糊匹配
+  operator_not_like:
+    en: Not Like
+    zh-CN: 不匹配
+    zh-HK: 不匹配
+  operator_in:
+    en: In
+    zh-CN: 在列表中
+    zh-HK: 在列表中
+  operator_not_in:
+    en: Not In
+    zh-CN: 不在列表中
+    zh-HK: 不在列表中
+  operator_is_null:
+    en: Is Null
+    zh-CN: 为空
+    zh-HK: 為空
+  operator_is_not_null:
+    en: Is Not Null
+    zh-CN: 不为空
+    zh-HK: 不為空
+  operator_between:
+    en: Between
+    zh-CN: 在范围内
+    zh-HK: 在範圍內
 
+  # 输入占位符
+  placeholder_value:
+    en: "Enter value..."
+    zh-CN: "输入值..."
+    zh-HK: "輸入值..."
+  placeholder_start:
+    en: "Start value"
+    zh-CN: "起始值"
+    zh-HK: "起始值"
+  placeholder_end:
+    en: "End value"
+    zh-CN: "结束值"
+    zh-HK: "結束值"
+
+  # 按钮和提示
+  add_condition:
+    en: Add Condition
+    zh-CN: 添加条件
+    zh-HK: 添加條件
+  add_group:
+    en: Add Group
+    zh-CN: 添加分组
+    zh-HK: 添加分組
+  delete_condition:
+    en: Delete Condition
+    zh-CN: 删除条件
+    zh-HK: 刪除條件
+  delete_group:
+    en: Delete Group
+    zh-CN: 删除分组
+    zh-HK: 刪除分組
+  add_condition_to_group:
+    en: Add Condition to Group
+    zh-CN: 添加条件到分组
+    zh-HK: 添加條件到分組
+  add_subgroup:
+    en: Add Subgroup
+    zh-CN: 添加子分组
+    zh-HK: 添加子分組
+  apply_filter:
+    en: Apply Filter
+    zh-CN: 应用筛选条件
+    zh-HK: 應用篩選條件
+  clear_all:
+    en: Clear All
+    zh-CN: 清除所有条件
+    zh-HK: 清除所有條件
+  empty_hint:
+    en: "Click + to add a filter condition"
+    zh-CN: 点击 + 添加筛选条件
+    zh-HK: 點擊 + 添加篩選條件
+  group:
+    en: Group
+    zh-CN: 分组
+    zh-HK: 分組
 
 # 导入导出
 ImportExport:

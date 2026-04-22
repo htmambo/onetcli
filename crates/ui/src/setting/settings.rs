@@ -1,8 +1,8 @@
 use crate::{
     IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
-    h_flex,
     input::{Input, InputState},
+    resizable::{ResizablePanel, h_resizable},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
@@ -287,30 +287,35 @@ impl RenderOnce for Settings {
         };
 
         div().flex_1().size_full().overflow_hidden().child(
-            h_flex()
-                .size_full()
+            h_resizable(self.id.clone())
                 .child(
-                    div()
-                        .w(self.sidebar_width)
-                        .h_full()
-                        .flex_shrink_0()
-                        .overflow_hidden()
-                        .refine_style(&self.sidebar_style)
-                        .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                    ResizablePanel::new()
+                        .size(self.sidebar_width)
+                        .size_range(px(120.)..px(400.))
+                        .child(
+                            div()
+                                .w_full()
+                                .h_full()
+                                .overflow_hidden()
+                                .refine_style(&self.sidebar_style)
+                                .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                        ),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .size_full()
-                        .overflow_hidden()
-                        .refine_style(&self.content_style)
-                        .child(self.render_active_page(
-                            &state,
-                            &filtered_pages,
-                            &options,
-                            window,
-                            cx,
-                        )),
+                    ResizablePanel::new()
+                        .child(
+                            div()
+                                .size_full()
+                                .overflow_hidden()
+                                .refine_style(&self.content_style)
+                                .child(self.render_active_page(
+                                    &state,
+                                    &filtered_pages,
+                                    &options,
+                                    window,
+                                    cx,
+                                )),
+                        ),
                 ),
         )
     }

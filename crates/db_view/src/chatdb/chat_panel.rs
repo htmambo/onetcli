@@ -22,8 +22,8 @@ use db::{GlobalDbState, is_query_statement_fallback};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
 };
 use gpui_component::button::ButtonVariants;
 use gpui_component::{
@@ -36,6 +36,7 @@ use gpui_component::{
     input::{Input, InputState},
     list::{List, ListState},
     popover::Popover,
+    resizable::{ResizablePanel, h_resizable},
     scroll::Scrollbar,
     text::TextView,
     v_flex,
@@ -139,6 +140,7 @@ pub struct ChatPanel {
     /// 是否为新会话（用于在发送第一条消息时更新会话名称）
     is_new_session: bool,
     is_logged_in: bool,
+    sidebar_width: Pixels,
 
     // 模型设置
     model_settings: ModelSettings,
@@ -251,6 +253,7 @@ impl ChatPanel {
             is_at_bottom: true,
             is_new_session: false,
             is_logged_in: GlobalCloudUser::is_logged_in(cx),
+            sidebar_width: px(260.0),
             model_settings: ModelSettings::default(),
             cancel_token: None,
             last_user_input: None,
@@ -1469,10 +1472,9 @@ impl ChatPanel {
         let session_list = self.session_list.clone();
 
         v_flex()
-            .w(px(260.0))
+            .w_full()
             .h_full()
             .min_h_0()
-            .flex_shrink_0()
             .border_r_1()
             .border_color(border)
             .bg(muted)
@@ -2147,16 +2149,32 @@ impl Render for ChatPanel {
 
         if self.show_history_sidebar {
             div().size_full().bg(cx.theme().background).child(
-                h_flex()
-                    .size_full()
-                    .child(self.render_history_sidebar(window, cx))
+                h_resizable("chat-panel-history")
                     .child(
-                        div().flex_1().h_full().min_w_0().child(
-                            v_flex()
-                                .size_full()
-                                .child(self.render_messages(cx))
-                                .child(self.render_input(cx)),
-                        ),
+                        ResizablePanel::new()
+                            .size(self.sidebar_width)
+                            .size_range(px(120.)..px(400.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h_full()
+                                    .overflow_hidden()
+                                    .child(self.render_history_sidebar(window, cx)),
+                            ),
+                    )
+                    .child(
+                        ResizablePanel::new()
+                            .child(
+                                div()
+                                    .size_full()
+                                    .min_w_0()
+                                    .child(
+                                        v_flex()
+                                            .size_full()
+                                            .child(self.render_messages(cx))
+                                            .child(self.render_input(cx)),
+                                    ),
+                            ),
                     ),
             )
         } else {

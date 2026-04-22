@@ -3140,8 +3140,9 @@ impl HomePage {
         let filter_types = ConnectionType::all();
 
         v_flex()
-            .w(SIDEBAR_DEFAULT_WIDTH)
+            .w(px(160.))
             .h_full()
+            .flex_shrink_0()
             .bg(sidebar_bg)
             .border_r_1()
             .border_color(cx.theme().border)

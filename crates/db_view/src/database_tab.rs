@@ -22,6 +22,7 @@ use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePaylo
 use one_core::layout::{
     CHAT_SIDEBAR_DEFAULT_WIDTH, CHAT_SIDEBAR_MIN_WIDTH, PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH,
     SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH, TREE_PANEL_DEFAULT_SIZE,
+    TREE_PANEL_MAX_SIZE, TREE_PANEL_MIN_SIZE,
 };
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, Workspace};
@@ -345,9 +346,10 @@ impl DatabaseTabView {
                 } else {
                     TOOLBAR_WIDTH
                 };
-                let max_size =
-                    (available_width - PANEL_MIN_SIZE - sidebar_width).max(PANEL_MIN_SIZE);
-                self.tree_panel_size = new_size.clamp(PANEL_MIN_SIZE, max_size);
+                let max_size = (available_width - PANEL_MIN_SIZE - sidebar_width)
+                    .max(TREE_PANEL_MIN_SIZE)
+                    .min(TREE_PANEL_MAX_SIZE);
+                self.tree_panel_size = new_size.clamp(TREE_PANEL_MIN_SIZE, max_size);
             }
             ResizingPanel::Sidebar => {
                 let new_size = self.bounds.right() - mouse_position.x;

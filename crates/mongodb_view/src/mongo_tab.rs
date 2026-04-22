@@ -6,7 +6,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Axis, Bounds, Context, Element, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
+    Render, SharedString, Style, Styled, Subscription, Task, Window, div,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
@@ -28,11 +28,11 @@ use crate::mongo_tree_event::MongoEventHandler;
 use crate::mongo_tree_view::MongoTreeView;
 use crate::sidebar::{MongoSidebar, MongoSidebarEvent};
 use one_core::layout::{
-    SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
+    PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
+    TOOLBAR_WIDTH, TREE_PANEL_DEFAULT_SIZE, TREE_PANEL_MAX_SIZE, TREE_PANEL_MIN_SIZE,
 };
 
-const PANEL_MIN_SIZE: Pixels = px(100.0);
-const TREE_PANEL_DEFAULT_SIZE: Pixels = px(250.0);
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizingPanel {
@@ -218,9 +218,10 @@ impl MongoTabView {
                 } else {
                     TOOLBAR_WIDTH
                 };
-                let max_size =
-                    (available_width - PANEL_MIN_SIZE - sidebar_width).max(PANEL_MIN_SIZE);
-                self.tree_panel_size = new_size.clamp(PANEL_MIN_SIZE, max_size);
+                let max_size = (available_width - PANEL_MIN_SIZE - sidebar_width)
+                    .max(TREE_PANEL_MIN_SIZE)
+                    .min(TREE_PANEL_MAX_SIZE);
+                self.tree_panel_size = new_size.clamp(TREE_PANEL_MIN_SIZE, max_size);
             }
             ResizingPanel::Sidebar => {
                 let new_size = self.bounds.right() - mouse_position.x;

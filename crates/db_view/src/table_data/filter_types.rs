@@ -4,6 +4,33 @@ use db::ColumnInfo;
 use one_ui::edit_table::ColumnSort;
 use tracing;
 
+/// 操作符分组类别
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorCategory {
+    /// 比较运算：等于、不等于
+    Comparison,
+    /// 数值范围：大于、小于、BETWEEN
+    Range,
+    /// 模式匹配：LIKE、NOT LIKE
+    Pattern,
+    /// 列表运算：IN、NOT IN
+    List,
+    /// 空值判断：IS NULL、IS NOT NULL
+    Null,
+}
+
+impl OperatorCategory {
+    pub fn i18n_key(&self) -> &'static str {
+        match self {
+            Self::Comparison => "Filter.category_comparison",
+            Self::Range => "Filter.category_range",
+            Self::Pattern => "Filter.category_pattern",
+            Self::List => "Filter.category_list",
+            Self::Null => "Filter.category_null",
+        }
+    }
+}
+
 /// 筛选操作符
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterOperator {
@@ -73,6 +100,38 @@ impl FilterOperator {
             Self::IsNull => "IS NULL",
             Self::IsNotNull => "IS NOT NULL",
             Self::Between => "BETWEEN",
+        }
+    }
+
+    /// 获取操作符分组类别
+    pub fn category(&self) -> OperatorCategory {
+        match self {
+            Self::Equal | Self::NotEqual => OperatorCategory::Comparison,
+            Self::GreaterThan | Self::LessThan | Self::GreaterOrEqual | Self::LessOrEqual | Self::Between => {
+                OperatorCategory::Range
+            }
+            Self::Like | Self::NotLike => OperatorCategory::Pattern,
+            Self::In | Self::NotIn => OperatorCategory::List,
+            Self::IsNull | Self::IsNotNull => OperatorCategory::Null,
+        }
+    }
+
+    /// 获取操作符说明的翻译键名
+    pub fn description_key(&self) -> &'static str {
+        match self {
+            Self::Equal => "Filter.operator_equal",
+            Self::NotEqual => "Filter.operator_not_equal",
+            Self::GreaterThan => "Filter.operator_greater_than",
+            Self::LessThan => "Filter.operator_less_than",
+            Self::GreaterOrEqual => "Filter.operator_greater_or_equal",
+            Self::LessOrEqual => "Filter.operator_less_or_equal",
+            Self::Like => "Filter.operator_like",
+            Self::NotLike => "Filter.operator_not_like",
+            Self::In => "Filter.operator_in",
+            Self::NotIn => "Filter.operator_not_in",
+            Self::IsNull => "Filter.operator_is_null",
+            Self::IsNotNull => "Filter.operator_is_not_null",
+            Self::Between => "Filter.operator_between",
         }
     }
 }

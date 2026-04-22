@@ -143,6 +143,7 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
         // 清理一些不需要的内容
         if current_line.contains("type onetcli_prompt_hook")
             || current_line.contains("cd --")
+            || current_line.contains("export PROMPT_COMMAND;")
             || (current_line.contains("PROMPT_COMMAND")
                 && current_line.contains("onetcli_prompt_hook"))
         {
