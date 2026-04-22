@@ -7,8 +7,8 @@ use gpui::{
     Window, actions, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, Size, WindowExt, button::Button,
-    h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, Size, WindowExt,
+    button::Button, h_flex, v_flex,
 };
 use one_ui::edit_table::{Column, EditTable, EditTableEvent, EditTableState};
 use rust_i18n::t;
@@ -2550,8 +2550,6 @@ impl DataGrid {
                     .dropdown_menu(move |menu, _window, cx| {
                         let data_grid_weak = data_grid_entity.downgrade();
                         let delegate_read = data_grid_entity.read(cx).table.read(cx);
-                        let visible_indices: Vec<usize> =
-                            delegate_read.delegate().visible_column_indices().to_vec();
                         let all_columns = delegate_read.delegate().columns().to_vec();
                         let pk_keys: HashSet<SharedString> = delegate_read
                             .delegate()
@@ -2565,43 +2563,51 @@ impl DataGrid {
                                     .map(|c| c.key.clone())
                             })
                             .collect();
-                        // drop(delegate_read);
-
-                        // Derive hidden from visible indices
-                        let hidden: HashSet<SharedString> = all_columns
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| !visible_indices.contains(i))
-                            .map(|(_, c)| c.key.clone())
-                            .collect();
 
                         all_columns
                             .into_iter()
                             .fold(menu, |menu, col| {
                                 let is_pk = pk_keys.contains(&col.key);
-                                let is_hidden = hidden.contains(&col.key);
                                 let col_key = col.key.clone();
                                 let col_name = col.name.clone();
                                 let dg_weak = data_grid_weak.clone();
+                                let dg_weak_for_click = data_grid_weak.clone();
+                                let col_key_for_click = col_key.clone();
                                 menu.item(
-                                    PopupMenuItem::new(col_name).checked(!is_hidden).on_click(
-                                        move |_, _, cx| {
-                                            if is_pk {
-                                                return;
-                                            }
-                                            if let Some(dg) = dg_weak.upgrade() {
-                                                dg.update(cx, |grid, cx| {
-                                                    if grid.hidden_columns.contains(&col_key) {
-                                                        grid.hidden_columns.remove(&col_key);
-                                                    } else {
-                                                        grid.hidden_columns.insert(col_key.clone());
-                                                    }
-                                                    grid.apply_column_visibility(cx);
-                                                    grid.save_column_visibility(cx);
-                                                });
-                                            }
-                                        },
-                                    ),
+                                    PopupMenuItem::element(move |_window, cx| {
+                                        let is_hidden = dg_weak
+                                            .upgrade()
+                                            .map(|dg| dg.read(cx).hidden_columns.contains(&col_key))
+                                            .unwrap_or(false);
+                                        let check_icon = if is_hidden {
+                                            Icon::empty().xsmall()
+                                        } else {
+                                            Icon::new(IconName::Check).xsmall()
+                                        };
+
+                                        h_flex()
+                                            .w_full()
+                                            .gap_1()
+                                            .items_center()
+                                            .child(check_icon)
+                                            .child(div().flex_1().child(col_name.clone()))
+                                    })
+                                    .on_click(move |_, _, cx| {
+                                        if is_pk {
+                                            return;
+                                        }
+                                        if let Some(dg) = dg_weak_for_click.upgrade() {
+                                            dg.update(cx, |grid, cx| {
+                                                if grid.hidden_columns.contains(&col_key_for_click) {
+                                                    grid.hidden_columns.remove(&col_key_for_click);
+                                                } else {
+                                                    grid.hidden_columns.insert(col_key_for_click.clone());
+                                                }
+                                                grid.apply_column_visibility(cx);
+                                                grid.save_column_visibility(cx);
+                                            });
+                                        }
+                                    }),
                                 )
                             })
                             .separator()
@@ -2619,6 +2625,7 @@ impl DataGrid {
                                     }
                                 }),
                             )
+                            .keep_open(true)
                     })
             })
             .child(

@@ -15,6 +15,10 @@ use std::rc::Rc;
 
 const CONTEXT: &str = "PopupMenu";
 
+/// Event emitted when menu needs to rebuild (for keep_open mode)
+#[derive(Clone, Default)]
+pub struct MenuRebuildEvent;
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
@@ -289,6 +293,8 @@ pub struct PopupMenu {
     scroll_handle: ScrollHandle,
     // This will update on render
     submenu_anchor: (Corner, Pixels),
+    /// When true, clicking an item will not dismiss the menu
+    keep_open: bool,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -311,6 +317,7 @@ impl PopupMenu {
             external_link_icon: true,
             size: Size::default(),
             submenu_anchor: (Corner::TopLeft, Pixels::ZERO),
+            keep_open: false,
             _subscriptions: vec![],
         }
     }
@@ -368,6 +375,22 @@ impl PopupMenu {
     /// Set the menu to show external link icon, default is true.
     pub fn external_link_icon(mut self, visible: bool) -> Self {
         self.external_link_icon = visible;
+        self
+    }
+
+    /// Request the menu to rebuild itself (useful for keep_open mode to refresh item states)
+    pub fn request_rebuild(&self, cx: &mut Context<Self>) {
+        cx.emit(MenuRebuildEvent);
+    }
+
+    /// Set the menu to keep open after clicking an item.
+    ///
+    /// When true, the menu will remain open until:
+    /// - Clicking outside the menu
+    /// - Pressing Escape
+    /// - Clicking a "dismiss" item (if implemented)
+    pub fn keep_open(mut self, keep_open: bool) -> Self {
+        self.keep_open = keep_open;
         self
     }
 
@@ -727,6 +750,7 @@ impl PopupMenu {
         cx.stop_propagation();
         window.prevent_default();
         self.selected_index = Some(ix);
+        cx.notify();
         self.confirm(&Confirm { secondary: false }, window, cx);
     }
 
@@ -744,7 +768,12 @@ impl PopupMenu {
                             self.dispatch_confirm_action(action, window, cx);
                         }
 
-                        self.dismiss(&Cancel, window, cx)
+                        if self.keep_open {
+                            // Emit rebuild event to refresh menu items
+                            cx.emit(MenuRebuildEvent);
+                        } else {
+                            self.dismiss(&Cancel, window, cx);
+                        }
                     }
                     Some(PopupMenuItem::ElementItem {
                         handler, action, ..
@@ -754,7 +783,11 @@ impl PopupMenu {
                         } else if let Some(action) = action.as_ref() {
                             self.dispatch_confirm_action(action, window, cx);
                         }
-                        self.dismiss(&Cancel, window, cx)
+                        if self.keep_open {
+                            cx.emit(MenuRebuildEvent);
+                        } else {
+                            self.dismiss(&Cancel, window, cx);
+                        }
                     }
                     _ => {}
                 }
@@ -1242,6 +1275,7 @@ impl PopupMenu {
 
 impl FluentBuilder for PopupMenu {}
 impl EventEmitter<DismissEvent> for PopupMenu {}
+impl EventEmitter<MenuRebuildEvent> for PopupMenu {}
 impl Focusable for PopupMenu {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()

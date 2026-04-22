@@ -81,9 +81,9 @@
         "info.foreground": "#f7eded",
         "warning.foreground": "#f7eded",
         "table.background": "#320610",
-        "table.even.background": "#320610",
+        "table.even.background": "#500919",
         "table.head.background": "#3f1013",
-        "table.hover.background": "#ba355133"
+        "table.hover.background": "#680119"
       },
       "highlight": {
         "editor.foreground": "#f7eded",
