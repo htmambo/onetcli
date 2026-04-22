@@ -1929,9 +1929,9 @@ impl HomePage {
                             .w_full()
                             .max_h(px(360.0))
                             .p(px(8.0))
-                            .bg(app_style::surface())
+                            .bg(cx.theme().list)
                             .border_1()
-                            .border_color(app_style::border())
+                            .border_color(cx.theme().border)
                             .rounded(cx.theme().radius),
                     ),
                 )
@@ -1969,9 +1969,9 @@ impl HomePage {
                             .w_full()
                             .max_h(px(360.0))
                             .p(px(8.0))
-                            .bg(app_style::surface())
+                            .bg(cx.theme().list)
                             .border_1()
-                            .border_color(app_style::border())
+                            .border_color(cx.theme().border)
                             .rounded(cx.theme().radius),
                     ),
                 )
@@ -5003,7 +5003,7 @@ impl HomePage {
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
         let item_bg = layered_level_surface_color(
-            cx.theme().background,
+            cx.theme().list,
             blur_enabled,
             window_opacity,
             0.14,
