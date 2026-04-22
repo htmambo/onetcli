@@ -1,4 +1,4 @@
-use crate::database_view_plugin::{DatabaseViewPluginRegistry, ToolbarButtonType};
+use crate::database_view_plugin::{ToolbarButtonType, build_toolbar_buttons_for};
 use crate::db_tree_view::get_icon_for_node_type;
 use db::{DbNode, DbNodeType, GlobalDbState, ObjectView};
 use gpui::prelude::FluentBuilder;
@@ -901,9 +901,8 @@ impl DatabaseObjects {
                 .into_any_element()
         });
 
-        let plugin_registry = cx.global::<DatabaseViewPluginRegistry>();
-        if let Some(plugin) = plugin_registry.get(&database_type) {
-            let toolbar_buttons = plugin.build_toolbar_buttons(node_type, data_db_node_type);
+        let toolbar_buttons =
+            build_toolbar_buttons_for(database_type, node_type, data_db_node_type);
 
             for btn_config in toolbar_buttons {
                 let button = match btn_config.button_type {

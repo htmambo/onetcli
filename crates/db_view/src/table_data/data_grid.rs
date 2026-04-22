@@ -29,13 +29,13 @@ use db::{
     ColumnInfo, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult, TableCellChange,
     TableDataRequest, TableRowChange, TableSaveRequest,
 };
+use gpui_component::button::ButtonVariants;
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::tab_container::TabContainer;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
-use gpui_component::button::ButtonVariants;
 
 #[cfg(test)]
 use db::DbManager;
