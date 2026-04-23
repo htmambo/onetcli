@@ -75,22 +75,6 @@ pub fn layered_surface_color(
 /// Pass-through: the color's alpha is already set by `apply_glass_tuning` at theme init time.
 /// Do not overwrite it again.
 #[inline]
-pub fn sidebar_surface_color(color: Hsla) -> Hsla {
-    color
-}
-
-pub fn sidebar_surface_color_with_offset(
-    color: Hsla,
-    blur_enabled: bool,
-    backdrop_opacity: f32,
-    offset: f32,
-) -> Hsla {
-    // 将 backdrop_opacity + offset 作为最终 alpha 应用，与 sidebar_surface_color
-    // 保持一致的逻辑，只是多了 offset 偏移。
-    #[allow(unused_variables)]
-    let _ = blur_enabled;
-    with_alpha(color, (backdrop_opacity + offset).clamp(0.0, 1.0))
-}
 
 pub fn overlay_scrim_color(color: Hsla, level: OverlayScrimLevel) -> Hsla {
     with_alpha(color, level.alpha())
@@ -210,59 +194,6 @@ mod tests {
         } else {
             assert_eq!(result, color);
         }
-    }
-
-    #[test]
-    fn sidebar_surface_color_is_pass_through() {
-        let color = Hsla {
-            h: 0.11,
-            s: 0.28,
-            l: 0.62,
-            a: 0.05,
-        };
-
-        // sidebar_surface_color 是直通函数，颜色 alpha 已在 apply_glass_tuning 时设置好
-        let result = sidebar_surface_color(color);
-
-        // 直通：输入输出完全一致
-        assert_eq!(result.h, color.h);
-        assert_eq!(result.s, color.s);
-        assert_eq!(result.l, color.l);
-        assert_alpha_eq(result.a, color.a);
-    }
-
-    #[test]
-    fn sidebar_surface_color_with_offset_applies_negative_offset() {
-        let color = Hsla {
-            h: 0.11,
-            s: 0.28,
-            l: 0.62,
-            a: 0.05,
-        };
-
-        let result = sidebar_surface_color_with_offset(color, true, 0.84, -0.10);
-
-        // window_opacity(0.84) + offset(-0.10) = 0.74
-        assert_alpha_eq(result.a, 0.74);
-    }
-
-    #[test]
-    fn sidebar_surface_color_with_offset_applies_opacity_without_blur() {
-        let color = Hsla {
-            h: 0.11,
-            s: 0.28,
-            l: 0.62,
-            a: 0.05,
-        };
-
-        // window_opacity 控制透明度，无论 blur 是否启用
-        let result = sidebar_surface_color_with_offset(color, false, 0.84, -0.10);
-
-        assert_eq!(result.h, color.h);
-        assert_eq!(result.s, color.s);
-        assert_eq!(result.l, color.l);
-        // window_opacity(0.84) + offset(-0.10) = 0.74
-        assert_alpha_eq(result.a, 0.74);
     }
 
     #[test]

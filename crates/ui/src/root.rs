@@ -1,8 +1,9 @@
 use crate::{
-    ActiveTheme, Anchor, ElementExt, Placement, StyledExt,
+    ActiveTheme, Anchor, ElementExt, Placement, StyledExt, WindowsSurfaceLayer,
     dialog::{ANIMATION_DURATION, Dialog},
     focus_trap::FocusTrapManager,
     input::InputState,
+    layered_level_surface_color,
     notification::{Notification, NotificationList},
     sheet::Sheet,
     window_border,
@@ -460,7 +461,13 @@ impl Render for Root {
         let root_bg = if cx.theme().window_blur_enabled {
             cx.theme().transparent
         } else {
-            cx.theme().background
+            layered_level_surface_color(
+                cx.theme().background,
+                false,
+                cx.theme().backdrop_opacity,
+                0.08,
+                WindowsSurfaceLayer::ContentBase,
+            )
         };
 
         window_border().shadow_size(self.window_shadow_size).child(

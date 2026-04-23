@@ -15,7 +15,7 @@ use gpui_component::popover::Popover;
 use gpui_component::{
     h_flex, linux_prefers_system_window_controls, should_render_custom_window_controls, v_flex,
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
-    Sizable, Size, WindowExt as _,
+    Sizable, Size, WindowExt as _, WindowsSurfaceLayer, layered_level_surface_color,
 };
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -1020,8 +1020,18 @@ fn default_inactive_tab_color(
 fn resolve_tab_bar_color(
     explicit_tab_bar_color: Option<gpui::Hsla>,
     theme_tab_bar_color: gpui::Hsla,
+    blur_enabled: bool,
+    backdrop_opacity: f32,
 ) -> gpui::Hsla {
-    explicit_tab_bar_color.unwrap_or(theme_tab_bar_color)
+    explicit_tab_bar_color.unwrap_or_else(|| {
+        layered_level_surface_color(
+            theme_tab_bar_color,
+            blur_enabled,
+            backdrop_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        )
+    })
 }
 
 fn resolve_inactive_tab_color(
@@ -1031,12 +1041,20 @@ fn resolve_inactive_tab_color(
     resolved_tab_bar_color: gpui::Hsla,
     surface_opacity: f32,
     is_dark: bool,
+    blur_enabled: bool,
+    backdrop_opacity: f32,
 ) -> gpui::Hsla {
     explicit_inactive_tab_color.unwrap_or_else(|| {
         if explicit_tab_bar_color.is_some() {
             default_inactive_tab_color(resolved_tab_bar_color, surface_opacity, is_dark)
         } else {
-            theme_tab_color
+            layered_level_surface_color(
+                theme_tab_color,
+                blur_enabled,
+                backdrop_opacity,
+                0.10,
+                WindowsSurfaceLayer::ContentBase,
+            )
         }
     })
 }
@@ -2208,16 +2226,33 @@ impl TabContainer {
 
         let theme = cx.theme();
         let is_dark_theme = theme.is_dark();
-        let bg_color = resolve_tab_bar_color(self.tab_bar_bg_color, theme.tab_bar);
+        let blur_enabled = theme.window_blur_enabled;
+        let backdrop_opacity = theme.backdrop_opacity;
+        let bg_color = resolve_tab_bar_color(
+            self.tab_bar_bg_color,
+            theme.tab_bar,
+            blur_enabled,
+            backdrop_opacity,
+        );
         let border_color = self.tab_bar_border_color.unwrap_or(theme.border);
-        let active_tab_color = self.active_tab_bg_color.unwrap_or(theme.tab_active);
+        let active_tab_color = self.active_tab_bg_color.unwrap_or_else(|| {
+            layered_level_surface_color(
+                theme.tab_active,
+                blur_enabled,
+                backdrop_opacity,
+                0.10,
+                WindowsSurfaceLayer::ContentBase,
+            )
+        });
         let inactive_tab_color = resolve_inactive_tab_color(
             self.inactive_tab_bg_color,
             self.tab_bar_bg_color,
             theme.tab,
             bg_color,
-            theme.ui_surface_opacity,
+            backdrop_opacity,
             is_dark_theme,
+            blur_enabled,
+            backdrop_opacity,
         );
         let hover_tab_color = self
             .inactive_tab_hover_color

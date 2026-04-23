@@ -23,7 +23,7 @@ use gpui_component::{
     menu::{ContextMenuExt, PopupMenuItem},
     popover::Popover,
     scroll::Scrollbar,
-    sidebar_surface_color,
+    WindowsSurfaceLayer, layered_level_surface_color,
     spinner::Spinner,
     tokens::Radius,
     tooltip::Tooltip,
@@ -2139,7 +2139,15 @@ impl DbTreeView {
 impl Render for DbTreeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entries_len = self.flat_entries.len();
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar);
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
+        let sidebar_bg = layered_level_surface_color(
+            cx.theme().sidebar,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         v_flex()
             .id("db-tree-view")
@@ -2349,10 +2357,24 @@ impl DbTreeView {
         let db_filter_list = self.db_filter_list_states.get(&node_id).cloned();
 
         // 样式
-        let selection_bg = sidebar_surface_color(cx.theme().list_active);
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
+        let selection_bg = layered_level_surface_color(
+            cx.theme().list_active,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         let selection_bar_color = cx.theme().list_active_border;
         let selection_text_color = cx.theme().sidebar_foreground;
-        let hover_bg = sidebar_surface_color(cx.theme().sidebar_accent);
+        let hover_bg = layered_level_surface_color(
+            cx.theme().sidebar_accent,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         let folder_text_color = cx.theme().muted_foreground;
         let foreground_color = cx.theme().sidebar_foreground;
         let indent = px(8.) + px(16.) * depth as f32;

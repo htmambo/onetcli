@@ -9,7 +9,7 @@ use std::rc::Rc;
 use super::{Tab, TabVariant};
 use crate::button::{Button, ButtonVariants as _};
 use crate::menu::{DropdownMenu as _, PopupMenuItem};
-use crate::{ActiveTheme, IconName, Selectable, Sizable, Size, StyledExt, h_flex};
+use crate::{ActiveTheme, IconName, Selectable, Sizable, Size, StyledExt, WindowsSurfaceLayer, h_flex, layered_level_surface_color};
 
 /// A TabBar element that contains multiple [`Tab`] items.
 #[derive(IntoElement)]
@@ -157,10 +157,22 @@ impl RenderOnce for TabBar {
             Size::Large => px(16.),
             _ => px(12.),
         };
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let backdrop_opacity = cx.theme().backdrop_opacity;
         let (bg, paddings, gap) = match self.variant {
             TabVariant::Tab => {
                 let padding = Edges::all(px(0.));
-                (cx.theme().tab_bar, padding, px(0.))
+                (
+                    layered_level_surface_color(
+                        cx.theme().tab_bar,
+                        blur_enabled,
+                        backdrop_opacity,
+                        0.10,
+                        WindowsSurfaceLayer::ContentBase,
+                    ),
+                    padding,
+                    px(0.),
+                )
             }
             TabVariant::Outline => {
                 let padding = Edges::all(px(0.));
@@ -182,7 +194,17 @@ impl RenderOnce for TabBar {
                     ..Default::default()
                 };
 
-                (cx.theme().tab_bar_segmented, padding, px(2.))
+                (
+                    layered_level_surface_color(
+                        cx.theme().tab_bar_segmented,
+                        blur_enabled,
+                        backdrop_opacity,
+                        0.10,
+                        WindowsSurfaceLayer::ContentBase,
+                    ),
+                    padding,
+                    px(2.),
+                )
             }
             TabVariant::Underline => {
                 // This gap is same as the tab inner_paddings

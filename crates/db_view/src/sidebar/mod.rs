@@ -16,7 +16,7 @@ use gpui::{
 use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, layered_level_surface_color,
-    sidebar_surface_color, v_flex,
+    v_flex,
 };
 use one_core::ai_chat::CodeBlockAction;
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
@@ -133,11 +133,23 @@ impl DatabaseSidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let _blur_enabled = cx.theme().window_blur_enabled;
-        let _window_opacity = cx.theme().backdrop_opacity;
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
         let is_active = self.active_panel == Some(panel);
-        let active_bg = sidebar_surface_color(cx.theme().list_active);
-        let hover_bg = sidebar_surface_color(cx.theme().sidebar_accent);
+        let active_bg = layered_level_surface_color(
+            cx.theme().list_active,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
+        let hover_bg = layered_level_surface_color(
+            cx.theme().sidebar_accent,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         let active_fg = cx.theme().sidebar_foreground;
         let muted_fg = cx.theme().muted_foreground;
 
@@ -163,8 +175,16 @@ impl DatabaseSidebar {
     }
 
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
         let border_color = cx.theme().border;
-        let rail_bg = sidebar_surface_color(cx.theme().sidebar);
+        let rail_bg = layered_level_surface_color(
+            cx.theme().sidebar,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         v_flex()
             .flex_shrink_0()

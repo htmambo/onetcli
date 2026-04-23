@@ -31,7 +31,6 @@ use gpui_component::{
         NumberFieldOptions, RenderOptions, SelectIndex, SettingField, SettingGroup, SettingItem,
         SettingPage, Settings,
     },
-    sidebar_surface_color,
     switch::Switch,
     tokens::Radius,
     v_flex,
@@ -3245,10 +3244,15 @@ impl Render for SettingsPanel {
             init_settings(cx);
         }
 
-        // 左侧面板透明度：已在 apply_glass_tuning 时设置到 sidebar 颜色中
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar);
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
+        let sidebar_bg = layered_level_surface_color(
+            cx.theme().sidebar,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         // 与首页右侧内容区保持一致，形成统一的内容底板层级。
         let page_bg = layered_level_surface_color(
             cx.theme().muted,

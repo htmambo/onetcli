@@ -17,7 +17,7 @@ use gpui::{
 };
 #[cfg(target_os = "macos")]
 use gpui::{Menu, MenuItem};
-use gpui_component::WindowExt;
+use gpui_component::{WindowExt, WindowsSurfaceLayer, layered_level_surface_color};
 
 actions!(
     onetcli_app,
@@ -1284,7 +1284,13 @@ impl OnetCliApp {
             .justify_between()
             .border_t_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().muted)
+            .bg(layered_level_surface_color(
+                cx.theme().muted,
+                cx.theme().window_blur_enabled,
+                cx.theme().backdrop_opacity,
+                0.10,
+                WindowsSurfaceLayer::ContentBase,
+            ))
             .child({
                 let left = if let Some(element) = status_summary_element {
                     div().flex_1().min_w_0().truncate().child(element)

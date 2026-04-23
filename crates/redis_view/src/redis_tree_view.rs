@@ -17,7 +17,7 @@ use gpui_component::{
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     popover::Popover,
     scroll::ScrollableElement,
-    sidebar_surface_color,
+    WindowsSurfaceLayer, layered_level_surface_color,
     spinner::Spinner,
     v_flex,
 };
@@ -1728,10 +1728,30 @@ impl RedisTreeView {
                         .w(px(3.0))
                         .bg(cx.theme().list_active_border),
                 )
-                .bg(sidebar_surface_color(cx.theme().list_active))
+                .bg({
+                let blur_enabled = cx.theme().window_blur_enabled;
+                let window_opacity = cx.theme().backdrop_opacity;
+                layered_level_surface_color(
+                    cx.theme().list_active,
+                    blur_enabled,
+                    window_opacity,
+                    0.10,
+                    WindowsSurfaceLayer::ContentBase,
+                )
+            })
             })
             .when(!is_selected, |this| {
-                this.hover(|style| style.bg(sidebar_surface_color(cx.theme().sidebar_accent)))
+                this.hover(|style| {
+                    let blur_enabled = cx.theme().window_blur_enabled;
+                    let window_opacity = cx.theme().backdrop_opacity;
+                    style.bg(layered_level_surface_color(
+                        cx.theme().sidebar_accent,
+                        blur_enabled,
+                        window_opacity,
+                        0.10,
+                        WindowsSurfaceLayer::ContentBase,
+                    ))
+                })
             })
             // 单击选中，双击展开/连接
             .on_mouse_down(MouseButton::Left, move |event, _window, cx| {
@@ -2135,7 +2155,17 @@ impl Render for RedisTreeView {
 
         v_flex()
             .size_full()
-            .bg(sidebar_surface_color(cx.theme().sidebar))
+            .bg({
+                let blur_enabled = cx.theme().window_blur_enabled;
+                let window_opacity = cx.theme().backdrop_opacity;
+                layered_level_surface_color(
+                    cx.theme().sidebar,
+                    blur_enabled,
+                    window_opacity,
+                    0.10,
+                    WindowsSurfaceLayer::ContentBase,
+                )
+            })
             .child(self.render_toolbar(window, cx))
             .child(
                 div()

@@ -9,10 +9,11 @@ use gpui::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable,
+    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     dock::PanelInfo,
     h_flex,
+    layered_level_surface_color,
     menu::{DropdownMenu, PopupMenu},
     tab::{Tab, TabBar},
     v_flex,
@@ -615,6 +616,15 @@ impl TabPanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let view = cx.entity().clone();
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let backdrop_opacity = cx.theme().backdrop_opacity;
+        let tab_bar_bg = layered_level_surface_color(
+            cx.theme().tab_bar,
+            blur_enabled,
+            backdrop_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         let Some(dock_area) = self.dock_area.upgrade() else {
             return div().into_any_element();
@@ -710,7 +720,7 @@ impl TabPanel {
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
-                        .bg(cx.theme().tab_bar)
+                        .bg(tab_bar_bg)
                         .px_2()
                         .children(left_dock_button)
                         .children(bottom_dock_button),
@@ -819,7 +829,7 @@ impl TabPanel {
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
-                        .bg(cx.theme().tab_bar)
+                        .bg(tab_bar_bg)
                         .px_2()
                         .gap_1()
                         .children(

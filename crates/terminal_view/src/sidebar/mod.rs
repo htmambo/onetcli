@@ -23,7 +23,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{sidebar_surface_color, v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
+use gpui_component::{v_flex, ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, layered_level_surface_color};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};
@@ -538,12 +538,23 @@ impl TerminalSidebar {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
         let is_active = self.active_panel == Some(panel);
-        let _blur_enabled = cx.theme().window_blur_enabled;
-        let _window_opacity = cx.theme().backdrop_opacity;
-        let active_bg = sidebar_surface_color(cx.theme().list_active);
-        let hover_bg =
-            sidebar_surface_color(cx.theme().sidebar_accent);
+        let active_bg = layered_level_surface_color(
+            cx.theme().list_active,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
+        let hover_bg = layered_level_surface_color(
+            cx.theme().sidebar_accent,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         let icon_color = cx.theme().sidebar_foreground;
 
         div()
@@ -573,11 +584,17 @@ impl TerminalSidebar {
 
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
         let border_color = cx.theme().border;
-        let _blur_enabled = cx.theme().window_blur_enabled;
-        let _window_opacity = cx.theme().backdrop_opacity;
         let toolbar_base = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
-        let toolbar_bg = sidebar_surface_color(toolbar_base);
+        let toolbar_bg = layered_level_surface_color(
+            toolbar_base,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -642,10 +659,16 @@ impl Focusable for TerminalSidebar {
 
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
         let border_color = cx.theme().border;
-        let _blur_enabled = cx.theme().window_blur_enabled;
-        let _window_opacity = cx.theme().backdrop_opacity;
-        let bg_color = sidebar_surface_color(cx.theme().muted);
+        let bg_color = layered_level_surface_color(
+            cx.theme().muted,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
         div()
             .h_full()

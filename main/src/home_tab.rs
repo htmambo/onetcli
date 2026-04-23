@@ -23,7 +23,6 @@ use gpui_component::{
     list::{List, ListState},
     menu::PopupMenuItem,
     popover::Popover,
-    sidebar_surface_color,
     tokens::Radius,
     tooltip::Tooltip,
     v_flex,
@@ -3132,11 +3131,29 @@ impl HomePage {
             }
         }
 
-        let sidebar_bg = sidebar_surface_color(cx.theme().sidebar);
-        let sidebar_active_bg =
-            sidebar_surface_color(cx.theme().list_active);
-        let sidebar_hover_bg =
-            sidebar_surface_color(cx.theme().sidebar_accent);
+        let blur_enabled = cx.theme().window_blur_enabled;
+        let window_opacity = cx.theme().backdrop_opacity;
+        let sidebar_bg = layered_level_surface_color(
+            cx.theme().sidebar,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
+        let sidebar_active_bg = layered_level_surface_color(
+            cx.theme().list_active,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
+        let sidebar_hover_bg = layered_level_surface_color(
+            cx.theme().sidebar_accent,
+            blur_enabled,
+            window_opacity,
+            0.10,
+            WindowsSurfaceLayer::ContentBase,
+        );
         let filter_types = ConnectionType::all();
 
         v_flex()
@@ -7331,7 +7348,13 @@ impl Render for HomePage {
         let home_shell_bg = if cfg!(target_os = "windows") || cx.theme().window_blur_enabled {
             cx.theme().transparent
         } else {
-            cx.theme().background
+            layered_level_surface_color(
+                cx.theme().background,
+                false,
+                window_opacity,
+                0.08,
+                WindowsSurfaceLayer::ContentBase,
+            )
         };
         let home_content_bg = layered_level_surface_color(
             cx.theme().muted,
