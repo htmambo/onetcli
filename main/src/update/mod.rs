@@ -26,6 +26,26 @@ use util::parse_version;
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPLY_UPDATE_FLAG: &str = "--apply-update";
 
+/// 检测当前是否以 `cargo run` 方式运行（开发模式）。
+/// 原理：若当前可执行文件位于 workspace 的 `target/` 目录下，则判定为开发模式。
+fn is_dev_mode() -> bool {
+    let Ok(exe_path) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(target_dir) = exe_path
+        .parent()
+        .and_then(|p| p.ancestors().find(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("target")
+        }))
+    else {
+        return false;
+    };
+    let Some(workspace_dir) = target_dir.parent() else {
+        return false;
+    };
+    workspace_dir.join("Cargo.toml").is_file()
+}
+
 /// 当前使用的更新源。修改此常量即可切换更新渠道。
 const ACTIVE_UPDATE_SOURCE: UpdateSource = UpdateSource::GitHub;
 
@@ -91,6 +111,11 @@ pub fn handle_update_command() -> bool {
 }
 
 pub fn schedule_update_check(window: &mut Window, cx: &mut App) {
+    if is_dev_mode() {
+        tracing::info!("开发模式，跳过自动更新检查");
+        return;
+    }
+
     if !should_run_update_check(
         UpdateCheckTrigger::Automatic,
         AppSettings::global(cx).auto_update,

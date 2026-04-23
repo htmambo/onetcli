@@ -16,7 +16,7 @@
         "border": "#5e1d21",
         "window.border": "#ba3551",
         "ring": "#ba3551",
-        "foreground": "#f7eded",
+        "foreground": "#f7f7ed",
         "muted.foreground": "#b0a0a0",
         "danger.background": "#ba3551",
         "danger.active.background": "#57030a",
@@ -26,7 +26,7 @@
         "list.active.background": "#ba355133",
         "list.active.border": "#ba3551",
         "list.even.background": "#320610",
-        "list.hover.background": "#ba355133",
+        "list.hover.background": "#8b0424",
         "muted.background": "#3f1013",
         "popover.background": "#3f1013",
         "popover.foreground": "#f7eded",
@@ -41,8 +41,8 @@
         "secondary.background": "#3f1013",
         "secondary.foreground": "#b0a0a0",
         "secondary.hover.background": "#5e1d21",
-        "tab.active.background": "#57030a",
-        "tab.active.foreground": "#f7eded",
+        "tab.active.background": "#9e0815",
+        "tab.active.foreground": "#ffffff",
         "tab.background": "#3f1013",
         "tab.foreground": "#d8caca",
         "tab_bar.background": "#320610",
@@ -83,7 +83,7 @@
         "table.background": "#320610",
         "table.even.background": "#500919",
         "table.head.background": "#3f1013",
-        "table.hover.background": "#680119"
+        "table.hover.background": "#8b0424"
       },
       "highlight": {
         "editor.foreground": "#f7eded",

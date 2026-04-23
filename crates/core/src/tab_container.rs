@@ -2226,6 +2226,7 @@ impl TabContainer {
             default_inactive_tab_border_color(inactive_tab_color, border_color, is_dark_theme)
         });
         let text_color = self.tab_text_color.unwrap_or(theme.tab_foreground);
+        let active_text_color = theme.tab_active_foreground;
         let close_btn_color = self
             .tab_close_button_color
             .unwrap_or(theme.muted_foreground);
@@ -2409,7 +2410,11 @@ impl TabContainer {
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_sm()
-                                .text_color(text_color)
+                                .text_color(if is_pinned_active {
+                                    active_text_color
+                                } else {
+                                    text_color
+                                })
                                 .text_ellipsis()
                                 .child(pinned_title.to_string()),
                         ),
@@ -2570,7 +2575,11 @@ impl TabContainer {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_sm()
-                                    .text_color(text_color)
+                                    .text_color(if is_active {
+                                        active_text_color
+                                    } else {
+                                        text_color
+                                    })
                                     .text_ellipsis()
                                     .child(title_clone.to_string()),
                             )
@@ -2672,7 +2681,7 @@ impl TabContainer {
                                         window.listener_for(
                                             &view_for_menu,
                                             move |this, _, window, cx| {
-                                                this.close_other_tabs(idx, window, cx).detach();
+                                                this.close_all_tabs(window, cx).detach();
                                             },
                                         ),
                                     ),
