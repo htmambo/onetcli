@@ -747,7 +747,8 @@ fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
 
 fn settings_group_content_style(cx: &App) -> StyleRefinement {
     let blur_enabled = cx.theme().window_blur_enabled;
-    let bg = offset_surface_color(cx.theme().group, blur_enabled, 0.0, 0.14);
+    let window_opacity = cx.theme().backdrop_opacity;
+    let bg = offset_surface_color(cx.theme().group, blur_enabled, window_opacity, 0.14);
     sync_server_theme::surface_style()
         .rounded(Radius::Xl.px())
         .bg(bg)
@@ -1023,7 +1024,7 @@ impl AppSettings {
             return WindowBackgroundAppearance::Blurred;
         }
 
-        if !self.enable_glass_effect {
+        if !self.enable_glass_effect && self.backdrop_opacity >= 1.0 {
             return WindowBackgroundAppearance::Opaque;
         }
 

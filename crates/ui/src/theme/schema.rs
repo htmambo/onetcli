@@ -685,11 +685,19 @@ impl Theme {
         }
 
         self.colors.apply_config(&config, &default_theme.colors);
+
+        // 关闭毛玻璃时，UI 面板透明度跟随窗口背景透明度。
+        let effective_surface_opacity = if self.window_blur_enabled {
+            self.ui_surface_opacity
+        } else {
+            self.backdrop_opacity
+        };
+
         crate::theme::apply_glass_tuning(
             &mut self.colors,
             config.mode,
             self.window_blur_enabled,
-            self.ui_surface_opacity,
+            effective_surface_opacity,
         );
         if let Some(mut highlight_theme) = next_highlight_theme {
             crate::theme::apply_glass_highlight_tuning(

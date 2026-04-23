@@ -30,10 +30,14 @@ pub fn offset_surface_color(
     backdrop_opacity: f32,
     offset: f32,
 ) -> Hsla {
-    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
-    #[allow(unused_variables)]
-    let _blur_enabled = blur_enabled;
-    with_alpha(color, backdrop_opacity + offset)
+    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果。
+    // 关闭毛玻璃时，不再叠加 offset，避免子层级反而更不透明。
+    let alpha = if blur_enabled {
+        backdrop_opacity + offset
+    } else {
+        backdrop_opacity
+    };
+    with_alpha(color, alpha)
 }
 
 pub fn level_surface_color(
@@ -42,10 +46,16 @@ pub fn level_surface_color(
     backdrop_opacity: f32,
     level_ratio: f32,
 ) -> Hsla {
-    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果
-    #[allow(unused_variables)]
-    let _ = blur_enabled;
-    with_alpha(color, backdrop_opacity + (level_ratio - LEVEL_RATIO_BASELINE))
+    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果。
+    // 毛玻璃开启时，更高层级需要更不透明以增强 frosted 可读性（加法偏移）。
+    // 关闭毛玻璃时，层级差异应通过颜色本身区分，不再增加 alpha，
+    // 否则子层级反而更不透明，桌面透出效果变差。
+    let alpha = if blur_enabled {
+        backdrop_opacity + (level_ratio - LEVEL_RATIO_BASELINE)
+    } else {
+        backdrop_opacity
+    };
+    with_alpha(color, alpha)
 }
 
 pub fn layered_level_surface_color(
@@ -106,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn offset_surface_color_always_applies_window_opacity() {
+    fn offset_surface_color_applies_window_opacity_without_blur() {
         let color = Hsla {
             h: 0.42,
             s: 0.31,
@@ -114,13 +124,13 @@ mod tests {
             a: 0.13,
         };
 
-        // window_opacity 控制透明度，无论 blur 是否启用
+        // 关闭 blur 时仅应用 backdrop_opacity，不叠加 offset
         let result = offset_surface_color(color, false, 0.84, 0.02);
 
         assert_eq!(result.h, color.h);
         assert_eq!(result.s, color.s);
         assert_eq!(result.l, color.l);
-        assert_alpha_eq(result.a, 0.86);
+        assert_alpha_eq(result.a, 0.84);
     }
 
     #[test]
@@ -132,6 +142,7 @@ mod tests {
             a: 0.13,
         };
 
+        // 开启 blur 时叠加 offset
         let result = offset_surface_color(color, true, 0.84, 0.02);
 
         assert_eq!(result.h, color.h);
@@ -152,6 +163,21 @@ mod tests {
         let result = level_surface_color(color, true, 0.84, 0.10);
 
         assert_alpha_eq(result.a, 0.86);
+    }
+
+    #[test]
+    fn level_surface_color_ignores_level_ratio_when_blur_disabled() {
+        let color = Hsla {
+            h: 0.13,
+            s: 0.22,
+            l: 0.74,
+            a: 0.09,
+        };
+
+        // 关闭 blur 时忽略 level_ratio，仅使用 backdrop_opacity
+        let result = level_surface_color(color, false, 0.84, 0.10);
+
+        assert_alpha_eq(result.a, 0.84);
     }
 
     #[test]

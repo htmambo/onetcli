@@ -458,7 +458,7 @@ impl Styled for Root {
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(cx.theme().font_size);
-        let root_bg = if cx.theme().window_blur_enabled {
+        let root_bg = if cx.theme().window_blur_enabled || cx.theme().backdrop_opacity < 1.0 {
             cx.theme().transparent
         } else {
             layered_level_surface_color(

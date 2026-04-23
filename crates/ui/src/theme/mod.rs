@@ -285,12 +285,20 @@ impl Theme {
         theme.ui_surface_opacity = clamp_surface_opacity(ui_surface_opacity);
         theme.backdrop_opacity = backdrop_opacity as f32;
 
+        // 关闭毛玻璃时，UI 面板透明度跟随窗口背景透明度，
+        // 避免 backdrop_opacity 已降低但 UI 元素仍保持高不透明度。
+        let effective_surface_opacity = if blur_enabled {
+            theme.ui_surface_opacity
+        } else {
+            theme.backdrop_opacity
+        };
+
         // 重新应用毛玻璃调整到主题颜色
         crate::theme::apply_glass_tuning(
             &mut theme.colors,
             mode,
             blur_enabled,
-            theme.ui_surface_opacity,
+            effective_surface_opacity,
         );
 
         // 刷新所有窗口以应用新颜色

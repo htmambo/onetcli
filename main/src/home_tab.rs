@@ -7345,7 +7345,10 @@ impl Render for HomePage {
         self.maybe_prompt_connection_restore(window, cx);
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
-        let home_shell_bg = if cfg!(target_os = "windows") || cx.theme().window_blur_enabled {
+        let home_shell_bg = if cfg!(target_os = "windows")
+            || cx.theme().window_blur_enabled
+            || cx.theme().backdrop_opacity < 1.0
+        {
             cx.theme().transparent
         } else {
             layered_level_surface_color(
