@@ -456,6 +456,8 @@ impl RenderOnce for Dialog {
                     .occlude()
                     .w(view_size.width)
                     .h(view_size.height)
+                    .rounded(cx.theme().radius_lg)
+                    .overflow_hidden()
                     .on_mouse_move(window.listener_for(
                         &drag_state,
                         move |drag_state, event: &MouseMoveEvent, _, cx| {
