@@ -843,6 +843,8 @@ impl Render for CertificateEditorView {
         v_flex()
             .size_full()
             .bg(app_style::base())
+            .rounded_lg()
+            .overflow_hidden()
             .child(
                 div()
                     .refine_style(&app_style::page_header_style())

@@ -1664,7 +1664,8 @@ impl DbTreeView {
                     .w_full()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .rounded(cx.theme().radius),
+                    .rounded(cx.theme().radius)
+                    .overflow_hidden(),
             )
             .into_any_element()
     }

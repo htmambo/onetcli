@@ -4433,6 +4433,7 @@ impl HomePage {
             .border_1()
             .border_color(cx.theme().table_row_border)
             .bg(workspace_bg)
+            .overflow_hidden()
             .child(
                 h_flex()
                     .id(ElementId::Name(SharedString::from(format!(

@@ -58,7 +58,9 @@ fn main() {
             .unwrap_or_else(|_| std::path::PathBuf::from("./themes"));
         if let Err(err) = gpui_component::ThemeRegistry::watch_dir(themes_dir, cx, |cx| {
             let settings = AppSettings::global(cx).clone();
-            settings.apply_theme_preferences(None, cx);
+            cx.defer(move |cx| {
+                settings.apply_theme_preferences(None, cx);
+            });
         }) {
             tracing::error!("Failed to watch themes directory: {}", err);
         }
