@@ -6,9 +6,9 @@ use serde::Deserialize;
 
 use super::UpdateDialogInfo;
 
-const GITHUB_OWNER: &str = "feigeCode";
+const GITHUB_OWNER: &str = "htmambo";
 const GITHUB_REPO: &str = "onetcli";
-const GITHUB_API_URL: &str = "https://api.github.com/repos/feigeCode/onetcli/releases/latest";
+const GITHUB_API_URL: &str = "https://api.github.com/repos/htmambo/onetcli/releases/latest";
 const GITHUB_USER_AGENT: &str = "onetcli-updater";
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

@@ -4252,7 +4252,7 @@ fn render_shortcuts_section(cx: &App) -> gpui::AnyElement {
 }
 
 /// GitHub 开源地址
-const GITHUB_URL: &str = "https://github.com/feigeCode/onetcli";
+const GITHUB_URL: &str = "https://github.com/htmambo/onetcli";
 
 /// 渲染关于页面
 fn render_about_section(cx: &App) -> gpui::AnyElement {

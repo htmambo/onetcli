@@ -186,11 +186,11 @@
         // 开关轨道背景
         "switch.background": "#3d2049",
         // 开关手柄背景
-        "switch.thumb.background": "#c678dd",
+        "switch.thumb.background": "#734f7e",
 
         // === 标签页 ===
         // 标签页激活背景
-        "tab.active.background": "#9030a0",
+        "tab.active.background": "#590868",
         // 标签页激活文字
         "tab.active.foreground": "#f7eded",
         // 标签页默认背景
