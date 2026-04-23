@@ -1044,19 +1044,18 @@ fn toggle_condition_logic_in_items(items: &mut Vec<FilterItem>, id: &str) -> boo
     false
 }
 
-/// 递归查找分组
-fn find_group_mut(items: &mut Vec<FilterItem>, id: &str) -> Option<usize> {
-    for (i, item) in items.iter_mut().enumerate() {
-        match item {
-            FilterItem::Group(group) if group.id == id => {
-                return Some(i);
+/// 递归查找分组，返回可变引用
+fn find_group_row_mut<'a>(items: &'a mut Vec<FilterItem>, id: &str) -> Option<&'a mut GroupRow> {
+    let mut rest = items.as_mut_slice();
+    while let Some((first, tail)) = rest.split_first_mut() {
+        rest = tail;
+        if let FilterItem::Group(group) = first {
+            if group.id == id {
+                return Some(group);
             }
-            FilterItem::Group(group) => {
-                if let Some(idx) = find_group_mut(&mut group.children, id) {
-                    return Some(idx);
-                }
+            if let Some(found) = find_group_row_mut(&mut group.children, id) {
+                return Some(found);
             }
-            _ => {}
         }
     }
     None
@@ -1405,83 +1404,15 @@ impl VisualFilterBuilder {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(idx) = find_group_mut(&mut self.root_items, parent_group_id) {
-            if let FilterItem::Group(parent) = &mut self.root_items[idx] {
-                let schema = self.schema.clone();
-                let first_col = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.first())
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                let first_op = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.first())
-                    .map(operators_for_column)
-                    .and_then(|ops| ops.first().copied())
-                    .unwrap_or(FilterOperator::Equal);
-
-                let condition_row =
-                    ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
-                let condition_id = condition_row.id.clone();
-
-                let column_items: Vec<FilterColumnItem> = schema
-                    .as_ref()
-                    .map(|s| {
-                        s.columns
-                            .iter()
-                            .map(|c| FilterColumnItem {
-                                name: c.name.clone(),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let selected_col_index = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
-                    .map(|i| IndexPath::new(i));
-
-                let column_select_entity = cx.new(|cx| {
-                    SelectState::new(
-                        SearchableVec::new(column_items),
-                        selected_col_index,
-                        window,
-                        cx,
-                    )
-                });
-
-                let operator_groups = operator_groups_for_column(schema.as_ref(), &first_col);
-
-                let selected_op_index = operator_groups.position(&first_op);
-
-                let operator_select_entity = cx.new(|cx| {
-                    SelectState::new(
-                        operator_groups,
-                        selected_op_index,
-                        window,
-                        cx,
-                    )
-                });
-
-                let value_input_entity =
-                    cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
-
-                let mut group_row = GroupRow::new(LogicOperator::And);
-                group_row
-                    .children
-                    .push(FilterItem::Condition(condition_row));
-                parent.children.push(FilterItem::Group(group_row));
-
-                self.column_selects
-                    .insert(condition_id.clone(), column_select_entity);
-                self.operator_selects
-                    .insert(condition_id.clone(), operator_select_entity);
-                self.value_inputs.insert(condition_id, value_input_entity);
-
-                self.collapsed_groups.remove(parent_group_id);
-                self.sync_filter_state();
-                cx.notify();
-            }
+        if let Some(parent) = find_group_row_mut(&mut self.root_items, parent_group_id) {
+            let group_row = GroupRow::new(LogicOperator::And);
+            let group_id = group_row.id.clone();
+            parent.children.push(FilterItem::Group(group_row));
+            self.collapsed_groups.remove(parent_group_id);
+            self.sync_filter_state();
+            cx.notify();
+            // 复用 add_condition_to_group 来创建初始条件及完整订阅
+            self.add_condition_to_group(&group_id, window, cx);
         }
     }
 
@@ -1492,8 +1423,7 @@ impl VisualFilterBuilder {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(idx) = find_group_mut(&mut self.root_items, parent_group_id) {
-            if let FilterItem::Group(parent) = &mut self.root_items[idx] {
+        if let Some(parent) = find_group_row_mut(&mut self.root_items, parent_group_id) {
                 let schema = self.schema.clone();
                 let first_col = schema
                     .as_ref()
@@ -1644,7 +1574,6 @@ impl VisualFilterBuilder {
                 self.sync_filter_state();
                 cx.notify();
             }
-        }
     }
 
     fn toggle_group_collapse(&mut self, group_id: &str, cx: &mut Context<Self>) {
@@ -1717,23 +1646,19 @@ impl VisualFilterBuilder {
     }
 
     fn toggle_group(&mut self, id: &str, cx: &mut Context<Self>) {
-        if let Some(idx) = find_group_mut(&mut self.root_items, id) {
-            if let FilterItem::Group(group) = &mut self.root_items[idx] {
-                group.enabled = !group.enabled;
-            }
+        if let Some(group) = find_group_row_mut(&mut self.root_items, id) {
+            group.enabled = !group.enabled;
         }
         self.sync_filter_state();
         cx.notify();
     }
 
     fn toggle_group_logic(&mut self, id: &str, cx: &mut Context<Self>) {
-        if let Some(idx) = find_group_mut(&mut self.root_items, id) {
-            if let FilterItem::Group(group) = &mut self.root_items[idx] {
-                group.logic_operator = match group.logic_operator {
-                    LogicOperator::And => LogicOperator::Or,
-                    LogicOperator::Or => LogicOperator::And,
+        if let Some(group) = find_group_row_mut(&mut self.root_items, id) {
+            group.logic_operator = match group.logic_operator {
+                LogicOperator::And => LogicOperator::Or,
+                LogicOperator::Or => LogicOperator::And,
                 };
-            }
         }
         self.sync_filter_state();
         cx.notify();
@@ -2230,18 +2155,30 @@ impl Render for VisualFilterBuilder {
                                     ),
                             ),
                     )
-                    // 渲染嵌套的筛选项列表
-                    .children(rendered_items)
-                    .when(!has_filters, |el| {
-                        el.child(
-                            gpui::div()
-                                .text_sm()
-                                .text_color(muted_foreground_color)
-                                .px_3()
-                                .py_2()
-                                .child(t!("Filter.empty_hint")),
-                        )
-                    }),
+                    // 条件列表容器（限制最大高度并支持滚动）
+                    .child(
+                        gpui::div()
+                            .id("filter-conditions-list")
+                            .max_h(px(320.))
+                            .overflow_y_scroll()
+                            .child(
+                                gpui::div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .children(rendered_items)
+                                    .when(!has_filters, |el| {
+                                        el.child(
+                                            gpui::div()
+                                                .text_sm()
+                                                .text_color(muted_foreground_color)
+                                                .px_3()
+                                                .py_2()
+                                                .child(t!("Filter.empty_hint")),
+                                        )
+                                    }),
+                            ),
+                    )
             )
     }
 }
