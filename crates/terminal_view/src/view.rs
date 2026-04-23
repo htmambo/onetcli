@@ -1197,7 +1197,7 @@ impl TerminalView {
             query = %self.history_prompt.query_input(),
             dropdown_visible = self.history_prompt.dropdown_visible(),
             matches_len = self.history_prompt.matches().len(),
-            selected_index = self.history_prompt.selected_index(),
+            selected_index = ?self.history_prompt.selected_index(),
             selected_match = ?selected_match,
             "history prompt state"
         );
@@ -1670,7 +1670,7 @@ impl TerminalView {
                             )
                         })
                         .children(matches.into_iter().enumerate().map(|(index, command)| {
-                            let active = index == selected_index;
+                            let active = selected_index == Some(index);
                             div()
                                 .on_mouse_move({
                                     let view = view.clone();
@@ -3620,13 +3620,12 @@ impl TerminalView {
     }
 
     fn send_tab(&mut self, _: &SendTab, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.try_accept_history_prompt(cx) {
-            return;
-        }
+        self.dismiss_history_prompt();
         self.write_to_pty(b"\x09".to_vec(), cx);
     }
 
     fn send_shift_tab(&mut self, _: &SendShiftTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_history_prompt();
         self.write_to_pty(b"\x1b[Z".to_vec(), cx);
     }
 
