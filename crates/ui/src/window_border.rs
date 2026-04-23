@@ -246,7 +246,7 @@ impl RenderOnce for WindowBorder {
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
                     })
-                    .bg(gpui::transparent_black())
+                    .bg(cx.theme().background)
                     .size_full()
                     .children(self.children),
             )
