@@ -484,6 +484,8 @@ impl gpui::Global for TabContentRegistry {}
 // ============================================================================
 
 const WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH: Pixels = px(72.0);
+const TAB_BAR_HEIGHT: Pixels = px(32.0);
+const WINDOW_CONTROL_BUTTON_SIZE: Pixels = px(32.0);
 
 /// 窗口拖动状态，用于在非 Windows 平台支持手动拖动窗口
 struct TabBarDragState {
@@ -2308,8 +2310,14 @@ impl TabContainer {
         h_flex()
             .id("tab-bar")
             .w_full()
-            .h(px(40.0))
+            .h(TAB_BAR_HEIGHT)
             .bg(bg_color)
+            .when(true, |this| {
+                this.rounded_tl(cx.theme().radius_lg)
+                    .rounded_tr(cx.theme().radius_lg)
+                    .pl(px(4.0))
+                    .pr(px(4.0))
+            })
             .items_center()
             .border_b_1()
             .border_color(border_color)
@@ -2919,7 +2927,7 @@ impl TabContainer {
             .id(id)
             .flex()
             .when(is_windows, |this| this.occlude())
-            .w(px(34.0))
+            .w(WINDOW_CONTROL_BUTTON_SIZE)
             .h_full()
             .flex_shrink_0()
             .justify_center()
