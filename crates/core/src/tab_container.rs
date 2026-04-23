@@ -2190,8 +2190,53 @@ impl TabContainer {
     }
 
     fn get_tab_width(&self, tab: &TabItem, cx: &App) -> gpui::Pixels {
-        let size = tab.content().width_size(cx).unwrap_or(self.size);
-        self.size_to_pixels(size)
+        let size = tab.content().width_size(cx);
+        // Size::Size(pixels) 直接返回，不参与比较
+        if let Some(Size::Size(pixels)) = size {
+            return pixels;
+        }
+
+        let title = tab.content().title(cx);
+        let theme = cx.theme();
+        // text_sm = 0.875rem，与 rem_size（即 theme.font_size）同步
+        let font_size = theme.font_size * 0.875_f32;
+        let text_system = cx.text_system();
+        let font_id = text_system.resolve_font(&gpui::font(theme.font_family.clone()));
+
+        // 精确测量每个字符宽度；测量失败时按中英文区别估算
+        let text_width: Pixels = title
+            .chars()
+            .map(|ch| {
+                text_system
+                    .advance(font_id, font_size, ch)
+                    .map(|advance| advance.width)
+                    .unwrap_or_else(|_| {
+                        if ch.is_ascii() {
+                            font_size * 0.5_f32
+                        } else {
+                            font_size
+                        }
+                    })
+            })
+            .sum();
+
+        let has_icon = tab.content().icon(cx).is_some();
+        let closeable = tab.content().closeable(cx);
+
+        // 固定开销：px_3 左右 padding (12+12) + 基础安全边距 8px
+        let mut extras = px(24.0 + 8.0);
+        if has_icon {
+            // icon 区域宽约 16px + gap 8px
+            extras += px(16.0 + 8.0);
+        }
+        if closeable {
+            // close button 16px + gap 8px
+            extras += px(16.0 + 8.0);
+        }
+
+        let calculated = text_width + extras;
+        let max_width = self.size_to_pixels(size.unwrap_or(self.size));
+        calculated.min(max_width)
     }
 
     fn size_to_pixels(&self, size: Size) -> gpui::Pixels {
@@ -2316,7 +2361,7 @@ impl TabContainer {
                 this.rounded_tl(cx.theme().radius_lg)
                     .rounded_tr(cx.theme().radius_lg)
                     .pl(px(4.0))
-                    .pr(px(4.0))
+                    // .pr(px(4.0))
             })
             .items_center()
             .border_b_1()
