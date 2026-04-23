@@ -28,8 +28,8 @@ test("导航文档链接、仓库链接和搜索配置符合官网用途", async
   const config = await readConfig();
 
   assert.match(config, /link:\s*"\/guide"/);
-  assert.match(config, /feigeCode\/onetcli/);
+  assert.match(config, /htmambo\/onetcli/);
   assert.match(config, /edit\/dev\/docs\/:path/);
-  assert.doesNotMatch(config, /hufei\/onetcli/);
+  assert.doesNotMatch(config, /htmambo\/onetcli/);
   assert.doesNotMatch(config, /provider:\s*"local"/);
 });

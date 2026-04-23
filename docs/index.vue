@@ -14,7 +14,7 @@
                     <span>内置终端</span>
                 </div>
                 <div class="hero-actions">
-                    <a class="primary-action" href="https://github.com/feigeCode/onetcli/releases" target="_blank" rel="noreferrer">
+                    <a class="primary-action" href="https://github.com/htmambo/onetcli/releases" target="_blank" rel="noreferrer">
                         <span>下载 OnetCli</span>
                     </a>
                     <a class="secondary-action" :href="withBase('/guide')">
@@ -123,7 +123,7 @@
                     <h3>支持平台</h3>
                     <p>macOS、Windows、Linux</p>
                 </div>
-                <a class="primary-action" href="https://github.com/feigeCode/onetcli/releases" target="_blank" rel="noreferrer">
+                <a class="primary-action" href="https://github.com/htmambo/onetcli/releases" target="_blank" rel="noreferrer">
                     <span>前往 GitHub Releases</span>
                 </a>
             </div>
@@ -198,7 +198,7 @@ const structuredData = JSON.stringify(
             operatingSystem: "macOS, Windows, Linux",
             description:
                 "OnetCli 是一个统一管理数据库、SSH / SFTP 与终端操作，并提供 SQL 生成与数据分析辅助能力的跨平台桌面客户端。",
-            downloadUrl: "https://github.com/feigeCode/onetcli/releases",
+            downloadUrl: "https://github.com/htmambo/onetcli/releases",
         },
         {
             "@context": "https://schema.org",

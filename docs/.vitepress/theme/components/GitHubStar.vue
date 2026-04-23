@@ -1,6 +1,6 @@
 <template>
     <a
-        href="https://github.com/feigeCode/onetcli"
+        href="https://github.com/htmambo/onetcli"
         target="_blank"
         rel="noopener noreferrer"
         class="github-star-button"

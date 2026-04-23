@@ -61,9 +61,9 @@ const config: UserConfig = {
     footer: {
       message: `OnetCli 是一个面向数据库、服务器和 AI 工作流的一体化桌面客户端。`,
       copyright: `
-        <a href="https://github.com/feigeCode/onetcli">GitHub</a>
+        <a href="https://github.com/htmambo/onetcli">GitHub</a>
         |
-        <a href="https://github.com/feigeCode/onetcli/releases">Releases</a>
+        <a href="https://github.com/htmambo/onetcli/releases">Releases</a>
         |
         <a href="/onetcli/changelog">更新日志</a>
         |
@@ -88,7 +88,7 @@ const config: UserConfig = {
 
     socialLinks: null,
     editLink: {
-      pattern: "https://github.com/feigeCode/onetcli/edit/dev/docs/:path",
+      pattern: "https://github.com/htmambo/onetcli/edit/dev/docs/:path",
     },
   },
   markdown: {
