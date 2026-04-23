@@ -1,14 +1,14 @@
 use crate::{
-    IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     input::{Input, InputState},
-    resizable::{ResizablePanel, h_resizable},
+    resizable::{h_resizable, ResizablePanel},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    IconName, Sizable, Size, StyledExt,
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
+    div, prelude::FluentBuilder as _, px, relative, App, AppContext as _, Axis, ElementId, Entity,
+    IntoElement, ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window,
 };
 use rust_i18n::t;
 
@@ -286,26 +286,36 @@ impl RenderOnce for Settings {
             layout: Axis::Horizontal,
         };
 
-        div().flex_1().size_full().overflow_hidden().child(
-            h_resizable(self.id.clone())
-                .child(
-                    ResizablePanel::new()
-                        .size(self.sidebar_width)
-                        .size_range(px(120.)..px(400.))
-                        .child(
-                            div()
-                                .w_full()
-                                .h_full()
-                                .overflow_hidden()
-                                .refine_style(&self.sidebar_style)
-                                .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
-                        ),
-                )
-                .child(
-                    ResizablePanel::new()
-                        .child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .size_full()
+            .overflow_hidden()
+            .child(
+                h_resizable(self.id.clone())
+                    .child(
+                        ResizablePanel::new()
+                            .size(self.sidebar_width)
+                            .size_range(px(120.)..px(400.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h_full()
+                                    .overflow_hidden()
+                                    .refine_style(&self.sidebar_style)
+                                    .child(self.render_sidebar(
+                                        &state,
+                                        &filtered_pages,
+                                        window,
+                                        cx,
+                                    )),
+                            ),
+                    )
+                    .child(
+                        ResizablePanel::new().child(
                             div()
                                 .size_full()
+                                .min_w_0()
                                 .overflow_hidden()
                                 .refine_style(&self.content_style)
                                 .child(self.render_active_page(
@@ -316,7 +326,7 @@ impl RenderOnce for Settings {
                                     cx,
                                 )),
                         ),
-                ),
-        )
+                    ),
+            )
     }
 }

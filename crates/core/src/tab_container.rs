@@ -1,11 +1,11 @@
 use crate::{PendingChangeLevel, RunningState};
-use futures::future::{Either, select};
+use futures::future::{select, Either};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Subscription, Task, Window,
-    WindowControlArea, div, px,
+    div, px, AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, RenderOnce, ScrollWheelEvent, SharedString, Styled,
+    Subscription, Task, Window, WindowControlArea,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -13,9 +13,9 @@ use gpui_component::list::{List, ListDelegate, ListState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
+    h_flex, linux_prefers_system_window_controls, should_render_custom_window_controls, v_flex,
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
-    Sizable, Size, WindowExt as _, h_flex, linux_prefers_system_window_controls,
-    should_render_custom_window_controls, v_flex,
+    Sizable, Size, WindowExt as _,
 };
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -2193,6 +2193,7 @@ impl TabContainer {
 
         div()
             .flex_1()
+            .min_w_0()
             .w_full()
             .overflow_hidden()
             .when_some(active_view, |el, view| el.child(view))
@@ -2973,10 +2974,10 @@ impl Render for TabContainer {
 #[cfg(test)]
 mod tests {
     use super::{
-        TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
-        default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
-        resolve_inactive_tab_color, resolve_tab_bar_color, should_render_windows_drag_spacer,
-        should_suppress_duplicate_status_summary, uses_manual_window_move,
+        build_tab_bar_drag_plan, default_inactive_tab_border_color, default_inactive_tab_color,
+        inactive_tab_background_alpha, is_regular_tab_active, resolve_inactive_tab_color,
+        resolve_tab_bar_color, should_render_windows_drag_spacer,
+        should_suppress_duplicate_status_summary, uses_manual_window_move, TabBarDragPlan,
     };
     use gpui::hsla;
 
