@@ -2146,7 +2146,7 @@ impl Render for DbTreeView {
             cx.theme().sidebar,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 
@@ -2364,7 +2364,7 @@ impl DbTreeView {
             cx.theme().list_active,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let selection_bar_color = cx.theme().list_active_border;
@@ -2373,7 +2373,7 @@ impl DbTreeView {
             cx.theme().sidebar_accent,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let folder_text_color = cx.theme().muted_foreground;

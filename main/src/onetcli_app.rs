@@ -1288,7 +1288,7 @@ impl OnetCliApp {
                 cx.theme().muted,
                 cx.theme().window_blur_enabled,
                 cx.theme().backdrop_opacity,
-                0.10,
+                2,
                 WindowsSurfaceLayer::ContentBase,
             ))
             .child({

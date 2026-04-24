@@ -1030,7 +1030,7 @@ fn resolve_tab_bar_color(
             theme_tab_bar_color,
             blur_enabled,
             backdrop_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         )
     })
@@ -1054,7 +1054,7 @@ fn resolve_inactive_tab_color(
                 theme_tab_color,
                 blur_enabled,
                 backdrop_opacity,
-                0.10,
+                2,
                 WindowsSurfaceLayer::ContentBase,
             )
         }
@@ -2280,7 +2280,7 @@ impl TabContainer {
                 theme.tab_active,
                 blur_enabled,
                 backdrop_opacity,
-                0.10,
+                2,
                 WindowsSurfaceLayer::ContentBase,
             )
         });

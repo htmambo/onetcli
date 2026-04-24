@@ -994,7 +994,7 @@ impl Render for DatabaseObjects {
             cx.theme().background,
             blur_enabled,
             window_opacity,
-            0.14,
+            3,
             WindowsSurfaceLayer::ContentSection,
         );
 

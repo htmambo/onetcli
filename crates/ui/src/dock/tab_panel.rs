@@ -622,7 +622,7 @@ impl TabPanel {
             cx.theme().tab_bar,
             blur_enabled,
             backdrop_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 

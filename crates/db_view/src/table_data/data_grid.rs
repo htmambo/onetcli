@@ -8,7 +8,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, Size, WindowExt,
-    button::Button, h_flex, v_flex,
+    button::Button, h_flex, v_flex, layered_level_surface_color, WindowsSurfaceLayer,
 };
 use one_ui::edit_table::{Column, EditTable, EditTableEvent, EditTableState};
 use rust_i18n::t;
@@ -2756,13 +2756,27 @@ impl DataGrid {
 
     pub fn render_table_area(&self, _window: &mut Window, cx: &App) -> AnyElement {
         let error_message = self.table_data_info.read(cx).error_message.clone();
+        let panelBg = layered_level_surface_color(
+            cx.theme().background,
+            cx.theme().window_blur_enabled,
+            cx.theme().backdrop_opacity,
+            1,
+            WindowsSurfaceLayer::MainBase,
+        );
+        let tabelBg = layered_level_surface_color(
+            cx.theme().background,
+            cx.theme().window_blur_enabled,
+            cx.theme().backdrop_opacity,
+            2,
+            WindowsSurfaceLayer::MainBase,
+        );
 
         if let Some(error) = error_message {
             return div()
                 .flex_1()
                 .w_full()
                 .h_full()
-                .bg(cx.theme().background)
+                .bg(panelBg)
                 .border_1()
                 .border_color(cx.theme().border)
                 .flex()
@@ -2782,7 +2796,7 @@ impl DataGrid {
             .flex_1()
             .w_full()
             .h_full()
-            .bg(cx.theme().background)
+            .bg(tabelBg)
             .border_1()
             .border_color(cx.theme().border)
             .child(table_view)

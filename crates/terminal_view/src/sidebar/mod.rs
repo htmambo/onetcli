@@ -545,14 +545,14 @@ impl TerminalSidebar {
             cx.theme().list_active,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let hover_bg = layered_level_surface_color(
             cx.theme().sidebar_accent,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let icon_color = cx.theme().sidebar_foreground;
@@ -592,7 +592,7 @@ impl TerminalSidebar {
             toolbar_base,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let has_file_manager = self.file_manager_panel.is_some();
@@ -666,7 +666,7 @@ impl Render for TerminalSidebar {
             cx.theme().muted,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 

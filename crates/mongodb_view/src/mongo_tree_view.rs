@@ -1287,7 +1287,7 @@ impl MongoTreeView {
                         cx.theme().list_active,
                         blur_enabled,
                         window_opacity,
-                        0.10,
+                        2,
                         WindowsSurfaceLayer::ContentBase,
                     )
                 })
@@ -1300,7 +1300,7 @@ impl MongoTreeView {
                         cx.theme().sidebar_accent,
                         blur_enabled,
                         window_opacity,
-                        0.10,
+                        2,
                         WindowsSurfaceLayer::ContentBase,
                     ))
                 })
@@ -1590,7 +1590,7 @@ impl Render for MongoTreeView {
                     cx.theme().sidebar,
                     blur_enabled,
                     window_opacity,
-                    0.10,
+                    2,
                     WindowsSurfaceLayer::ContentBase,
                 )
             })

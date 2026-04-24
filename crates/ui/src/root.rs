@@ -465,7 +465,7 @@ impl Render for Root {
                 cx.theme().background,
                 false,
                 cx.theme().backdrop_opacity,
-                0.08,
+                1,
                 WindowsSurfaceLayer::ContentBase,
             )
         };

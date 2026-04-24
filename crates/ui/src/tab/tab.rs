@@ -5,7 +5,7 @@ use crate::{ActiveTheme, Icon, IconName, Selectable, Sizable, Size, StyledExt, W
 fn tab_surface_color(cx: &App, color: Hsla) -> Hsla {
     let blur_enabled = cx.theme().window_blur_enabled;
     let backdrop_opacity = cx.theme().backdrop_opacity;
-    layered_level_surface_color(color, blur_enabled, backdrop_opacity, 0.10, WindowsSurfaceLayer::ContentBase)
+    layered_level_surface_color(color, blur_enabled, backdrop_opacity, 2, WindowsSurfaceLayer::ContentBase)
 }
 use gpui::prelude::FluentBuilder as _;
 use gpui::{

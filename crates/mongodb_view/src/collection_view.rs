@@ -44,7 +44,7 @@ fn content_section_bg(cx: &App) -> gpui::Hsla {
         cx.theme().background,
         cx.theme().window_blur_enabled,
         cx.theme().backdrop_opacity,
-        0.14,
+        3,
         WindowsSurfaceLayer::ContentSection,
     )
 }

@@ -140,14 +140,14 @@ impl DatabaseSidebar {
             cx.theme().list_active,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let hover_bg = layered_level_surface_color(
             cx.theme().sidebar_accent,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let active_fg = cx.theme().sidebar_foreground;
@@ -182,7 +182,7 @@ impl DatabaseSidebar {
             cx.theme().sidebar,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 
@@ -227,7 +227,7 @@ impl Render for DatabaseSidebar {
             cx.theme().muted,
             cx.theme().window_blur_enabled,
             cx.theme().backdrop_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 

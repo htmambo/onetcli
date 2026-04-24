@@ -4,6 +4,17 @@ use gpui::Hsla;
 const LEVEL_RATIO_BASELINE: f32 = 0.08;
 const TERMINAL_BLUR_OPACITY_OFFSET: f32 = 0.05;
 
+fn resolve_level_ratio(level: u8) -> f32 {
+    match level {
+        1 => 0.08,
+        2 => 0.10,
+        3 => 0.14,
+        4 => 0.16,
+        5 => 0.18,
+        _ => panic!("invalid surface level: {level}, expected 1..=5"),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayScrimLevel {
     Blocking,
@@ -24,28 +35,19 @@ impl OverlayScrimLevel {
     }
 }
 
-pub fn offset_surface_color(
-    color: Hsla,
-    blur_enabled: bool,
-    backdrop_opacity: f32,
-    offset: f32,
-) -> Hsla {
-    // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果。
-    // 关闭毛玻璃时，不再叠加 offset，避免子层级反而更不透明。
-    let alpha = if blur_enabled {
-        backdrop_opacity + offset
-    } else {
-        backdrop_opacity
-    };
-    with_alpha(color, alpha)
-}
-
+/// `level` 为层级编号，从底到顶由 1 开始：
+/// - `1`：最底层（最轻/最透明），如根背景。
+/// - `2`：中间层，如侧边栏、标签栏。
+/// - `3`：较重层，如内容区、工具栏。
+/// - `4`：卡片层。
+/// - `5`：最顶层（最重），如卡片叠加层。
 pub fn level_surface_color(
     color: Hsla,
     blur_enabled: bool,
     backdrop_opacity: f32,
-    level_ratio: f32,
+    level: u8,
 ) -> Hsla {
+    let level_ratio = resolve_level_ratio(level);
     // backdrop_opacity 控制实际的透明度，blur_enabled 仅控制 frosted 视觉效果。
     // 毛玻璃开启时，更高层级需要更不透明以增强 frosted 可读性（加法偏移）。
     // 关闭毛玻璃时，层级差异应通过颜色本身区分，不再增加 alpha，
@@ -58,15 +60,21 @@ pub fn level_surface_color(
     with_alpha(color, alpha)
 }
 
+/// `level` 为层级编号，从底到顶由 1 开始：
+/// - `1`：最底层（最轻/最透明），如根背景。
+/// - `2`：中间层，如侧边栏、标签栏。
+/// - `3`：较重层，如内容区、工具栏。
+/// - `4`：卡片层。
+/// - `5`：最顶层（最重），如卡片叠加层。
 pub fn layered_level_surface_color(
     color: Hsla,
     blur_enabled: bool,
     backdrop_opacity: f32,
-    level_ratio: f32,
+    level: u8,
     layer: WindowsSurfaceLayer,
 ) -> Hsla {
     windows_surface_color(
-        level_surface_color(color, blur_enabled, backdrop_opacity, level_ratio),
+        level_surface_color(color, blur_enabled, backdrop_opacity, level),
         blur_enabled,
         backdrop_opacity,
         layer,
@@ -116,42 +124,6 @@ mod tests {
     }
 
     #[test]
-    fn offset_surface_color_applies_window_opacity_without_blur() {
-        let color = Hsla {
-            h: 0.42,
-            s: 0.31,
-            l: 0.27,
-            a: 0.13,
-        };
-
-        // 关闭 blur 时仅应用 backdrop_opacity，不叠加 offset
-        let result = offset_surface_color(color, false, 0.84, 0.02);
-
-        assert_eq!(result.h, color.h);
-        assert_eq!(result.s, color.s);
-        assert_eq!(result.l, color.l);
-        assert_alpha_eq(result.a, 0.84);
-    }
-
-    #[test]
-    fn offset_surface_color_applies_offset_when_blur_enabled() {
-        let color = Hsla {
-            h: 0.42,
-            s: 0.31,
-            l: 0.27,
-            a: 0.13,
-        };
-
-        // 开启 blur 时叠加 offset
-        let result = offset_surface_color(color, true, 0.84, 0.02);
-
-        assert_eq!(result.h, color.h);
-        assert_eq!(result.s, color.s);
-        assert_eq!(result.l, color.l);
-        assert_alpha_eq(result.a, 0.86);
-    }
-
-    #[test]
     fn level_surface_color_uses_shared_level_baseline() {
         let color = Hsla {
             h: 0.13,
@@ -160,7 +132,7 @@ mod tests {
             a: 0.09,
         };
 
-        let result = level_surface_color(color, true, 0.84, 0.10);
+        let result = level_surface_color(color, true, 0.84, 2);
 
         assert_alpha_eq(result.a, 0.86);
     }
@@ -175,7 +147,7 @@ mod tests {
         };
 
         // 关闭 blur 时忽略 level_ratio，仅使用 backdrop_opacity
-        let result = level_surface_color(color, false, 0.84, 0.10);
+        let result = level_surface_color(color, false, 0.84, 2);
 
         assert_alpha_eq(result.a, 0.84);
     }
@@ -193,7 +165,7 @@ mod tests {
             color,
             true,
             0.84,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentSection,
         );
 

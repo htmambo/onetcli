@@ -34,6 +34,7 @@ pub const LEFT_PANEL_ALPHA_OFFSET: f32 = 0.20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsSurfaceLayer {
+    MainBase,
     ContentBase,
     ContentSection,
     ContentCard,
@@ -52,11 +53,13 @@ pub fn windows_surface_opacity(
     }
 
     let factor = match (blur_enabled, layer) {
+        (true, WindowsSurfaceLayer::MainBase) => 0.0,
         (true, WindowsSurfaceLayer::ContentBase) => 0.68,
         (true, WindowsSurfaceLayer::ContentSection) => 0.48,
         (true, WindowsSurfaceLayer::ContentCard) => 0.34,
         (true, WindowsSurfaceLayer::TerminalFallback) => 0.36,
         (true, WindowsSurfaceLayer::TerminalCanvas) => 0.52,
+        (false, WindowsSurfaceLayer::MainBase) => 0.0,
         (false, WindowsSurfaceLayer::ContentBase) => 0.45,
         (false, WindowsSurfaceLayer::ContentSection) => 0.24,
         (false, WindowsSurfaceLayer::ContentCard) => 0.14,
@@ -79,6 +82,7 @@ pub fn apply_windows_layer_tint(color: Hsla, layer: WindowsSurfaceLayer) -> Hsla
         WindowsSurfaceLayer::ContentCard => 0.05,
         WindowsSurfaceLayer::ContentSection => 0.03,
         WindowsSurfaceLayer::ContentBase => 0.00,
+        WindowsSurfaceLayer::MainBase => 0.00,
     };
     color.lightness((color.l - tint).max(0.0))
 }

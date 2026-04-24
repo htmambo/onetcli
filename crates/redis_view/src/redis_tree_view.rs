@@ -1735,7 +1735,7 @@ impl RedisTreeView {
                     cx.theme().list_active,
                     blur_enabled,
                     window_opacity,
-                    0.10,
+                    2,
                     WindowsSurfaceLayer::ContentBase,
                 )
             })
@@ -1748,7 +1748,7 @@ impl RedisTreeView {
                         cx.theme().sidebar_accent,
                         blur_enabled,
                         window_opacity,
-                        0.10,
+                        2,
                         WindowsSurfaceLayer::ContentBase,
                     ))
                 })
@@ -2162,7 +2162,7 @@ impl Render for RedisTreeView {
                     cx.theme().sidebar,
                     blur_enabled,
                     window_opacity,
-                    0.10,
+                    2,
                     WindowsSurfaceLayer::ContentBase,
                 )
             })

@@ -2604,7 +2604,7 @@ impl HomePage {
             cx.theme().background,
             blur_enabled,
             window_opacity,
-            0.14,
+            3,
             WindowsSurfaceLayer::ContentSection,
         );
         let workspace_filter_open = self.workspace_filter_open;
@@ -3136,21 +3136,21 @@ impl HomePage {
             cx.theme().sidebar,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let sidebar_active_bg = layered_level_surface_color(
             cx.theme().list_active,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let sidebar_hover_bg = layered_level_surface_color(
             cx.theme().sidebar_accent,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         let filter_types = ConnectionType::all();
@@ -4389,14 +4389,14 @@ impl HomePage {
             cx.theme().table,
             blur_enabled,
             window_opacity,
-            0.14,
+            3,
             WindowsSurfaceLayer::ContentSection,
         );
         let workspace_hover_bg = layered_level_surface_color(
             cx.theme().table_hover,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentSection,
         );
         let workspace_id = workspace.id;
@@ -5024,14 +5024,14 @@ impl HomePage {
             cx.theme().list,
             blur_enabled,
             window_opacity,
-            0.14,
+            3,
             WindowsSurfaceLayer::ContentCard,
         );
         let item_icon_bg = layered_level_surface_color(
             cx.theme().muted,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentSection,
         );
         let conn_id = conn.id;
@@ -5735,14 +5735,14 @@ impl HomePage {
             cx.theme().list,
             blur_enabled,
             window_opacity,
-            0.16,
+            4,
             WindowsSurfaceLayer::ContentCard,
         );
         let card_overlay_bg = layered_level_surface_color(
             cx.theme().list,
             blur_enabled,
             window_opacity,
-            0.18,
+            5,
             WindowsSurfaceLayer::ContentSection,
         );
         let conn_id = conn.id;
@@ -7355,7 +7355,7 @@ impl Render for HomePage {
                 cx.theme().background,
                 false,
                 window_opacity,
-                0.08,
+                1,
                 WindowsSurfaceLayer::ContentBase,
             )
         };
@@ -7363,7 +7363,7 @@ impl Render for HomePage {
             cx.theme().muted,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 

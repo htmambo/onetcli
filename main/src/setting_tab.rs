@@ -24,7 +24,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     kbd::Kbd,
-    layered_level_surface_color, offset_surface_color,
+    layered_level_surface_color,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     setting::{
@@ -748,7 +748,13 @@ fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
 fn settings_group_content_style(cx: &App) -> StyleRefinement {
     let blur_enabled = cx.theme().window_blur_enabled;
     let window_opacity = cx.theme().backdrop_opacity;
-    let bg = offset_surface_color(cx.theme().group, blur_enabled, window_opacity, 0.14);
+    let bg = layered_level_surface_color(
+        cx.theme().group,
+        blur_enabled,
+        window_opacity,
+        1,
+        WindowsSurfaceLayer::ContentBase,
+    );
     sync_server_theme::surface_style()
         .rounded(Radius::Xl.px())
         .bg(bg)
@@ -772,7 +778,7 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
         cx.theme().background,
         blur_enabled,
         window_opacity,
-        0.14,
+        1,
         WindowsSurfaceLayer::ContentSection,
     );
     page.header_style(
@@ -3251,7 +3257,7 @@ impl Render for SettingsPanel {
             cx.theme().sidebar,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
         // 与首页右侧内容区保持一致，形成统一的内容底板层级。
@@ -3259,7 +3265,7 @@ impl Render for SettingsPanel {
             cx.theme().muted,
             blur_enabled,
             window_opacity,
-            0.10,
+            1,
             WindowsSurfaceLayer::ContentBase,
         );
         let sidebar_style = StyleRefinement::default()

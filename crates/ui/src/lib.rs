@@ -92,8 +92,9 @@ pub use inspector::*;
 pub use root::Root;
 pub use styled::*;
 pub use surface_alpha::{
-    OverlayScrimLevel, layered_level_surface_color, layered_surface_color, level_surface_color,
-    offset_surface_color, overlay_scrim_color, terminal_canvas_surface_opacity,
+    OverlayScrimLevel, layered_level_surface_color, layered_surface_color,
+    level_surface_color, overlay_scrim_color,
+    terminal_canvas_surface_opacity,
 };
 pub use system_notification::{SystemNotificationOptions, show_system_notification};
 pub use theme::*;

@@ -420,7 +420,7 @@ impl Render for RedisTabView {
             cx.theme().muted,
             blur_enabled,
             window_opacity,
-            0.10,
+            2,
             WindowsSurfaceLayer::ContentBase,
         );
 
