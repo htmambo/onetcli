@@ -16,6 +16,7 @@ use gpui_component::{
     spinner::Spinner,
     tooltip::Tooltip,
     v_flex, ActiveTheme, Disableable, IconName, Sizable, StyledExt,
+    layered_level_surface_color, WindowsSurfaceLayer,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::get_config_dir;
@@ -770,7 +771,13 @@ impl ServerMonitorPanel {
                     div()
                         .w_full()
                         .rounded_md()
-                        .bg(cx.theme().danger.opacity(0.08))
+                        .bg(layered_level_surface_color(
+                            cx.theme().background,
+                            cx.theme().window_blur_enabled,
+                            cx.theme().backdrop_opacity,
+                            1,
+                            WindowsSurfaceLayer::ContentBase,
+                        ))
                         .p_3()
                         .text_xs()
                         .text_color(cx.theme().danger)
@@ -843,7 +850,13 @@ impl ServerMonitorPanel {
         match message {
             Some(message) => div()
                 .rounded_md()
-                .bg(cx.theme().warning.opacity(0.12))
+                .bg(layered_level_surface_color(
+                    cx.theme().background,
+                    cx.theme().window_blur_enabled,
+                    cx.theme().backdrop_opacity,
+                    2,
+                    WindowsSurfaceLayer::ContentBase,
+                ))
                 .p_3()
                 .text_xs()
                 .text_color(cx.theme().warning)
@@ -931,7 +944,13 @@ impl ServerMonitorPanel {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(layered_level_surface_color(
+                cx.theme().background,
+                cx.theme().window_blur_enabled,
+                cx.theme().backdrop_opacity,
+                1,
+                WindowsSurfaceLayer::ContentBase,
+            ))
             .p_3()
             .child(
                 h_flex()
@@ -1125,7 +1144,6 @@ impl Render for ServerMonitorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
-            // .bg(cx.theme().popover)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(

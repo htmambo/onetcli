@@ -2756,14 +2756,14 @@ impl DataGrid {
 
     pub fn render_table_area(&self, _window: &mut Window, cx: &App) -> AnyElement {
         let error_message = self.table_data_info.read(cx).error_message.clone();
-        let panelBg = layered_level_surface_color(
+        let panel_bg = layered_level_surface_color(
             cx.theme().background,
             cx.theme().window_blur_enabled,
             cx.theme().backdrop_opacity,
             1,
             WindowsSurfaceLayer::ContentBase,
         );
-        let tabelBg = layered_level_surface_color(
+        let table_bg = layered_level_surface_color(
             cx.theme().background,
             cx.theme().window_blur_enabled,
             cx.theme().backdrop_opacity,
@@ -2776,7 +2776,7 @@ impl DataGrid {
                 .flex_1()
                 .w_full()
                 .h_full()
-                .bg(panelBg)
+                .bg(panel_bg)
                 .border_1()
                 .border_color(cx.theme().border)
                 .flex()
@@ -2796,7 +2796,7 @@ impl DataGrid {
             .flex_1()
             .w_full()
             .h_full()
-            .bg(tabelBg)
+            .bg(table_bg)
             .border_1()
             .border_color(cx.theme().border)
             .child(table_view)

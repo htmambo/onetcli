@@ -125,8 +125,8 @@
         "primary.hover.background": "#da9aea",
 
         // === 进度条 ===
-        // 进度条轨道背景
-        "progress.bar.background": "#3d2049",
+        // 进度条轨道背景，如未定义，则使用 "primary.background"
+        "progress.bar.background": "#c678dd",
 
         // === 滚动条 ===
         // 滚动条轨道背景（透明）
