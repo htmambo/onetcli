@@ -2353,7 +2353,7 @@ impl TabContainer {
             .when(true, |this| {
                 this.rounded_tl(cx.theme().radius_lg)
                     .rounded_tr(cx.theme().radius_lg)
-                    .pl(px(4.0))
+                    // .pl(px(4.0))
                     // .pr(px(4.0))
             })
             .items_center()

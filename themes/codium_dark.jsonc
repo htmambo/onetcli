@@ -106,7 +106,7 @@
 
         // === 面板/弹窗 ===
         // 面板背景（GroupBox/侧边栏等）
-        "group.background": "#471d5c",
+        "group.background": "#2c1438",
         // 面板文字
         "group.foreground": "#f7eded",
         // 弹窗背景

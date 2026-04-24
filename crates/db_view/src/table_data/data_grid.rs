@@ -2761,14 +2761,14 @@ impl DataGrid {
             cx.theme().window_blur_enabled,
             cx.theme().backdrop_opacity,
             1,
-            WindowsSurfaceLayer::MainBase,
+            WindowsSurfaceLayer::ContentBase,
         );
         let tabelBg = layered_level_surface_color(
             cx.theme().background,
             cx.theme().window_blur_enabled,
             cx.theme().backdrop_opacity,
             2,
-            WindowsSurfaceLayer::MainBase,
+            WindowsSurfaceLayer::ContentBase,
         );
 
         if let Some(error) = error_message {
