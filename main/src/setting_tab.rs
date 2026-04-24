@@ -9,7 +9,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity,
     EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke,
-    ParentElement, PathPromptOptions, Pixels, Render, SharedString, StyleRefinement, Styled,
+    ParentElement, Pixels, Render, SharedString, StyleRefinement, Styled,
     WeakEntity, Window, WindowAppearance, WindowBackgroundAppearance, WindowBounds, div, point,
     px, size,
 };

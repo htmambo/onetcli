@@ -771,6 +771,7 @@ impl PopupMenu {
                         if self.keep_open {
                             // Emit rebuild event to refresh menu items
                             cx.emit(MenuRebuildEvent);
+                            cx.notify();
                         } else {
                             self.dismiss(&Cancel, window, cx);
                         }
@@ -785,6 +786,7 @@ impl PopupMenu {
                         }
                         if self.keep_open {
                             cx.emit(MenuRebuildEvent);
+                            cx.notify();
                         } else {
                             self.dismiss(&Cancel, window, cx);
                         }

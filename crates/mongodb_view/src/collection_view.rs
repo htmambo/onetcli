@@ -2675,21 +2675,15 @@ impl CollectionView {
                 .unwrap_or_else(|| t!("MongoCollection.select_document").to_string())
         };
 
-        let body = if self.show_explain {
-            div()
-                .flex_1()
-                .min_h_0()
-                .child(Input::new(&self.explain_input).h_full().disabled(true))
+        let body: AnyElement = if self.show_explain {
+            Input::new(&self.explain_input)
+                .h_full()
+                .disabled(true)
                 .into_any_element()
         } else if is_editing || self.selected_index.is_some() {
-            div()
-                .flex_1()
-                .min_h_0()
-                .child(
-                    Input::new(&self.editor_input)
-                        .h_full()
-                        .disabled(!is_editing),
-                )
+            Input::new(&self.editor_input)
+                .h_full()
+                .disabled(!is_editing)
                 .into_any_element()
         } else {
             self.render_empty_state(t!("MongoCollection.select_document").as_ref(), cx)
@@ -2757,7 +2751,7 @@ impl CollectionView {
                             }),
                     ),
             )
-            .child(div().flex_1().min_h_0().px_2().child(body))
+            .child(v_flex().flex_1().min_h_0().px_2().child(body))
     }
 
     fn render_pagination_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {

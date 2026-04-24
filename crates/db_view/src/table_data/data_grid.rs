@@ -372,6 +372,8 @@ pub struct DataGrid {
     column_visibility_loaded: bool,
     /// 侧边栏大文本编辑器是否已为当前表格打开
     is_large_text_editor_sidebar_open: bool,
+    /// 自身实体弱引用，用于异步回调中更新状态
+    self_entity: Option<gpui::WeakEntity<Self>>,
 }
 
 impl DataGrid {
@@ -408,6 +410,7 @@ impl DataGrid {
             hidden_columns: HashSet::new(),
             column_visibility_loaded: false,
             is_large_text_editor_sidebar_open: false,
+            self_entity: Some(data_grid_handle),
         };
         result.bind_table_event(window, cx);
         if is_table_data {
@@ -675,6 +678,7 @@ impl DataGrid {
         let order_by_clause = self.filter_editor.read(cx).get_order_by_clause(cx);
         let filter_editor = self.filter_editor.clone();
         let page_size = self.table_data_info.read(cx).page_size;
+        let data_grid_entity = self.self_entity.clone();
         let vis_key = format!(
             "column_visibility:{}:{}:{}",
             self.config.connection_id, self.config.database_name, self.config.table_name
@@ -838,6 +842,12 @@ impl DataGrid {
                             HashSet::new()
                         };
 
+                        if let Some(dg) = data_grid_entity.as_ref().and_then(|e| e.upgrade()) {
+                            dg.update(cx, |grid: &mut DataGrid, _cx| {
+                                grid.hidden_columns = hidden_columns.clone();
+                                grid.column_visibility_loaded = true;
+                            });
+                        }
                         table.update(cx, |state, cx| {
                             state.delegate_mut().set_loading(false);
                             state.delegate_mut().set_column_meta(column_meta);
@@ -2582,7 +2592,7 @@ impl DataGrid {
                                         let check_icon = if is_hidden {
                                             Icon::empty().xsmall()
                                         } else {
-                                            Icon::new(IconName::Check).xsmall()
+                                            Icon::new(IconName::Check).xsmall().text_color(cx.theme().success_foreground)
                                         };
 
                                         h_flex()
@@ -2966,6 +2976,7 @@ impl Clone for DataGrid {
             hidden_columns: self.hidden_columns.clone(),
             column_visibility_loaded: self.column_visibility_loaded,
             is_large_text_editor_sidebar_open: self.is_large_text_editor_sidebar_open,
+            self_entity: self.self_entity.clone(),
         }
     }
 }

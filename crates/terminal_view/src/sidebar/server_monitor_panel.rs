@@ -1095,7 +1095,7 @@ impl ServerMonitorPanel {
         };
 
         h_flex()
-            .gap_4()
+            .gap_1()
             .items_start()
             .w_full()
             .min_w(px(0.0))

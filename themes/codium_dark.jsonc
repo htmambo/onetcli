@@ -106,7 +106,7 @@
 
         // === 面板/弹窗 ===
         // 面板背景（GroupBox/侧边栏等）
-        "group.background": "#1e0d28",
+        "group.background": "#471d5c",
         // 面板文字
         "group.foreground": "#f7eded",
         // 弹窗背景
@@ -208,7 +208,7 @@
 
         // === 表格 ===
         // 表格默认背景
-        "table.background": "#321548",
+        "table.background": "#450b58",
         // 表格选中行背景
         "table.active.background": "#75219433",
         // 表格选中行边框
@@ -216,7 +216,7 @@
         // 表格偶数行背景
         "table.even.background": "#3d204966",
         // 表格头部背景
-        "table.head.background": "#2d0c2eff",
+        "table.head.background": "#2d0c2e",
         // 表格头部文字
         "table.head.foreground": "#b28eb9",
         // 表格悬停行背景
