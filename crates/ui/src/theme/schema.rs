@@ -290,6 +290,9 @@ pub struct ThemeConfigColors {
     /// Tab active background color.
     #[serde(rename = "tab.active.background")]
     pub tab_active: Option<SharedString>,
+    /// Tab hover background color.
+    #[serde(rename = "tab.hover.background")]
+    pub tab_hover: Option<SharedString>,
     /// Tab active text color.
     #[serde(rename = "tab.active.foreground")]
     pub tab_active_foreground: Option<SharedString>,
@@ -601,6 +604,7 @@ impl ThemeColor {
             apply_color!(tab, fallback = self.secondary);
             apply_color!(tab_active, fallback = self.background);
         }
+        apply_color!(tab_hover, fallback = self.tab_active);
         apply_color!(tab_active_foreground, fallback = self.foreground);
         apply_color!(tab_bar, fallback = self.background);
         apply_color!(tab_bar_segmented, fallback = self.secondary);

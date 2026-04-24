@@ -209,6 +209,8 @@ pub struct ThemeColor {
     pub tab: Hsla,
     /// Tab active background color.
     pub tab_active: Hsla,
+    /// Tab hover background color.
+    pub tab_hover: Hsla,
     /// Tab active text color.
     pub tab_active_foreground: Hsla,
     /// TabBar background color.

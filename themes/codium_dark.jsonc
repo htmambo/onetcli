@@ -197,6 +197,8 @@
         "tab.background": "#321548",
         // 标签页默认文字
         "tab.foreground": "#ccc",
+        // 标签页悬停背景
+        "tab.hover.background": "#590868",
 
         // === 标签栏 ===
         // 标签栏背景

@@ -70,6 +70,7 @@ pub(crate) fn apply_glass_tuning(
     colors.sidebar_border = with_alpha(colors.sidebar_border, tuning.divider);
     colors.tab = surface_color(colors.tab, mode, blur_enabled, tuning.chrome, 0.92);
     colors.tab_active = surface_color(colors.tab_active, mode, blur_enabled, tuning.elevated, 1.0);
+    colors.tab_hover = surface_color(colors.tab_hover, mode, blur_enabled, tuning.hover, 0.82);
     colors.tab_bar = surface_color(colors.tab_bar, mode, blur_enabled, tuning.chrome, 1.0);
     colors.tab_bar_segmented = surface_color(
         colors.tab_bar_segmented,

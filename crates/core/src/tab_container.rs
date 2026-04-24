@@ -484,8 +484,8 @@ impl gpui::Global for TabContentRegistry {}
 // ============================================================================
 
 const WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH: Pixels = px(72.0);
-const TAB_BAR_HEIGHT: Pixels = px(32.0);
-const WINDOW_CONTROL_BUTTON_SIZE: Pixels = px(32.0);
+const TAB_BAR_HEIGHT: Pixels = px(33.0);
+pub const WINDOW_CONTROL_BUTTON_SIZE: Pixels = px(32.0);
 
 /// 窗口拖动状态，用于在非 Windows 平台支持手动拖动窗口
 struct TabBarDragState {
@@ -1059,13 +1059,6 @@ fn resolve_inactive_tab_color(
             )
         }
     })
-}
-
-fn default_hover_tab_color(inactive_tab_color: gpui::Hsla, is_dark: bool) -> gpui::Hsla {
-    with_alpha(
-        shift_tab_tone(inactive_tab_color, is_dark, 0.08),
-        inactive_tab_color.a,
-    )
 }
 
 fn default_inactive_tab_border_color(
@@ -2303,7 +2296,7 @@ impl TabContainer {
         );
         let hover_tab_color = self
             .inactive_tab_hover_color
-            .unwrap_or_else(|| default_hover_tab_color(inactive_tab_color, is_dark_theme));
+            .unwrap_or(theme.tab_hover);
         // 非激活标签边框色：基于 inactive tab 与主题边框共同生成，确保有辨识度。
         let inactive_tab_border = self.inactive_tab_border_color.unwrap_or_else(|| {
             default_inactive_tab_border_color(inactive_tab_color, border_color, is_dark_theme)
@@ -2432,6 +2425,7 @@ impl TabContainer {
                         .items_center()
                         .gap_2()
                         .h(px(32.0))
+                        .cursor_pointer()
                         .px_3()
                         .when(!is_macos, |el| el.ml(left_padding))
                         .when_some(top_padding, |el, padding| el.mt(padding))
@@ -2604,10 +2598,10 @@ impl TabContainer {
                             .items_center()
                             .gap_2()
                             .h(px(32.0))
+                            .cursor_pointer()
                             .text_ellipsis()
                             .w(tab_width)
                             .px_3()
-                            // .cursor_pointer()
                             .rounded(px(6.0))
                             .when(is_active, |el| el.bg(active_tab_color))
                             .when(!is_active, |el| {

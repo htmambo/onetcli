@@ -19,6 +19,7 @@ use gpui_component::{
 };
 use one_core::storage::{ActiveConnections, ConnectionType, StoredConnection, Workspace};
 use rust_i18n::t;
+use one_core::tab_container::WINDOW_CONTROL_BUTTON_SIZE;
 
 #[derive(Clone)]
 pub(crate) enum SavedConnectionPickerEvent {
@@ -542,7 +543,8 @@ impl Render for TabBarSavedConnectionPicker {
                             .active(active_tab_color),
                     )
                     .compact()
-                    .w(px(32.0))
+                    .h(WINDOW_CONTROL_BUTTON_SIZE)
+                    .w(WINDOW_CONTROL_BUTTON_SIZE)
                     .rounded(Radius::Md.px())
                     .cursor_pointer()
                     .tooltip(t!("Home.saved_connection_picker_trigger")),
