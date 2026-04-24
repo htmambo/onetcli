@@ -2148,6 +2148,8 @@ impl Render for VisualFilterBuilder {
                                         Button::new("apply-btn")
                                             .small()
                                             .icon(IconName::Check)
+                                            .border_1()
+                                            .border_color(border_color)
                                             .tooltip(t!("Filter.apply_filter"))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.handle_apply_click(cx);

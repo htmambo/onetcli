@@ -183,10 +183,10 @@ pub fn builtin_highlight_presets() -> Vec<HighlightPreset> {
                 preset_rule(
                     "time_and_numbers",
                     "clock",
-                    r"\b\d{2}:\d{2}:\d{2}\b",
+                    r"\b:?\d{2}:\d{2}:\d{2}\b",
                     Some("#22d3ee"),
                     None,
-                    38,
+                    48,
                     "CustomHighlight.presets.time_and_numbers.rules.clock",
                 ),
                 preset_rule(

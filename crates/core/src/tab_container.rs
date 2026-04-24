@@ -1,21 +1,21 @@
 use crate::{PendingChangeLevel, RunningState};
-use futures::future::{select, Either};
+use futures::future::{Either, select};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, Render, RenderOnce, ScrollWheelEvent, SharedString, Styled,
-    Subscription, Task, Window, WindowControlArea,
+    AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Subscription, Task, Window,
+    WindowControlArea, div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
-    h_flex, linux_prefers_system_window_controls, should_render_custom_window_controls, v_flex,
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
-    Sizable, Size, WindowExt as _, WindowsSurfaceLayer, layered_level_surface_color,
+    Sizable, Size, WindowExt as _, WindowsSurfaceLayer, h_flex, layered_level_surface_color,
+    linux_prefers_system_window_controls, should_render_custom_window_controls, v_flex,
 };
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -2294,9 +2294,7 @@ impl TabContainer {
             blur_enabled,
             backdrop_opacity,
         );
-        let hover_tab_color = self
-            .inactive_tab_hover_color
-            .unwrap_or(theme.tab_hover);
+        let hover_tab_color = self.inactive_tab_hover_color.unwrap_or(theme.tab_hover);
         // 非激活标签边框色：基于 inactive tab 与主题边框共同生成，确保有辨识度。
         let inactive_tab_border = self.inactive_tab_border_color.unwrap_or_else(|| {
             default_inactive_tab_border_color(inactive_tab_color, border_color, is_dark_theme)
@@ -2313,7 +2311,7 @@ impl TabContainer {
         let indicator_green = theme.green;
         let indicator_default = theme.muted_foreground;
         let active_index = self.active_index;
-        let left_padding = self.left_padding.unwrap_or(px(8.0));
+        let left_padding = self.left_padding.unwrap_or(px(0.0));
 
         let tab_list = self.tab_list.clone();
         let tab_list_popover_open = self.list_popover_open;
@@ -2353,8 +2351,8 @@ impl TabContainer {
             .when(true, |this| {
                 this.rounded_tl(cx.theme().radius_lg)
                     .rounded_tr(cx.theme().radius_lg)
-                    // .pl(px(4.0))
-                    // .pr(px(4.0))
+                // .pl(px(4.0))
+                // .pr(px(4.0))
             })
             .items_center()
             .border_b_1()
@@ -2502,7 +2500,7 @@ impl TabContainer {
                                 .child(pinned_title.to_string()),
                         ),
                 )
-                // 分隔线已移除，改用 ml_1() 间隔
+                // 分隔线已移除，改用 ml(px(2.0)) 间隔
             })
             .child(
                 h_flex()
@@ -2510,7 +2508,7 @@ impl TabContainer {
                     .flex_1()
                     .min_w(px(0.0))
                     .relative()
-                    .ml_1()
+                    .ml(px(2.0))
                     // `overflow_hidden()` + `track_scroll()` 保留横向滚动能力，
                     // 同时隐藏系统滚动条；滚轮事件只作用于 tab 列表本身。
                     // Windows 使用 window_control_area(WindowControlArea::Drag) 提供原生拖动。
@@ -2562,7 +2560,7 @@ impl TabContainer {
                     })
                     .when_some(self.top_padding, |div, padding| div.pt(padding))
                     .pr_2()
-                    .gap_1()
+                    .gap(px(2.))
                     .track_scroll(&self.tab_bar_scroll_handle)
                     .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                         let title = tab.content().title(cx);
@@ -2622,9 +2620,8 @@ impl TabContainer {
                                     cx.stop_propagation();
                                 },
                             )
-                            .on_mouse_move(move |_evt, window: &mut Window, cx| {
+                            .on_mouse_move(move |_evt, window: &mut Window, _cx| {
                                 window.prevent_default();
-                                cx.stop_propagation();
                             })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.set_active_index(idx, window, cx);
@@ -2680,30 +2677,39 @@ impl TabContainer {
                             })
                             .when(closeable, |el| {
                                 let view_clone = view_clone.clone();
+                                let close_button_style = ButtonCustomVariant::new(cx)
+                                    .color(cx.theme().transparent)
+                                    .foreground(close_btn_color)
+                                    .border(cx.theme().transparent)
+                                    .hover(cx.theme().warning)
+                                    .active(cx.theme().warning_active);
                                 el.child(
-                                    div()
+                                    Button::new(SharedString::from(format!("tab-close-btn-{idx}")))
+                                        .icon(IconName::Close)
+                                        .custom(close_button_style)
+                                        .compact()
+                                        .tab_stop(false)
+                                        .occlude()
                                         .flex_shrink_0()
                                         .w(px(16.0))
                                         .h(px(16.0))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
+                                        .min_w(px(16.0))
+                                        .p_0()
                                         .rounded(px(2.0))
                                         .cursor_pointer()
-                                        .text_color(close_btn_color)
-                                        .hover(|style| {
-                                            style.bg(gpui::rgb(0x5a5a5a)).text_color(text_color)
-                                        })
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             move |_event, window, cx| {
+                                                window.prevent_default();
                                                 cx.stop_propagation();
-                                                view_clone.update(cx, |this, cx| {
-                                                    this.close_tab(idx, window, cx).detach();
-                                                });
                                             },
                                         )
-                                        .child("×"),
+                                        .on_click(move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            view_clone.update(cx, |this, cx| {
+                                                this.close_tab(idx, window, cx).detach();
+                                            });
+                                        }),
                                 )
                             })
                             .context_menu(move |menu, window, cx| {
@@ -3056,10 +3062,10 @@ impl Render for TabContainer {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tab_bar_drag_plan, default_inactive_tab_border_color, default_inactive_tab_color,
-        inactive_tab_background_alpha, is_regular_tab_active, resolve_inactive_tab_color,
-        resolve_tab_bar_color, should_render_windows_drag_spacer,
-        should_suppress_duplicate_status_summary, uses_manual_window_move, TabBarDragPlan,
+        TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
+        default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
+        resolve_inactive_tab_color, resolve_tab_bar_color, should_render_windows_drag_spacer,
+        should_suppress_duplicate_status_summary, uses_manual_window_move,
     };
     use gpui::hsla;
 

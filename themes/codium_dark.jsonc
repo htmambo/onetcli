@@ -27,7 +27,7 @@
         "border": "#3d2049",
         // 窗口边框
         "window.border": "#c678dd",
-        // 焦点环颜色
+        // 焦点环颜色（输入框、按钮等聚焦时的边框/阴影色）
         "ring": "#c678dd",
         // 主文字色
         "foreground": "#f7edf7",
@@ -254,7 +254,7 @@
         // 警告按钮激活背景
         "warning.active.background": "#c678dd",
         // 警告按钮默认背景
-        "warning.background": "#581a69",
+        "warning.background": "#9c3d17",
         // 警告按钮文字
         "warning.foreground": "#f7eded",
         // 警告按钮悬停背景

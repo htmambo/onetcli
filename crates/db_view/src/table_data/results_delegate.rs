@@ -4,9 +4,9 @@ use super::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
 use super::data_grid::DataGrid;
 use db::{ColumnInfo, FieldType};
 use gpui::{
-    App, AppContext, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder, px,
+    div, prelude::FluentBuilder, px, App, AppContext, ClipboardItem, Context, InteractiveElement,
+    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, WeakEntity, Window,
 };
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
@@ -15,12 +15,12 @@ use gpui_component::input::{InputEvent, InputState, MaskPattern};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::time_picker::{TimePickerEvent, TimePickerState};
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme, WindowExt, h_flex};
-use one_core::PendingChangeLevel;
+use gpui_component::{h_flex, ActiveTheme, WindowExt};
 use one_core::storage::DatabaseType;
+use one_core::PendingChangeLevel;
 use one_ui::edit_table::{
-    CellEditor, Column, ColumnSort, EditTableDelegate, EditTableEvent, EditTableState,
-    filter_panel::FilterValue,
+    filter_panel::FilterValue, CellEditor, Column, ColumnSort, EditTableDelegate, EditTableEvent,
+    EditTableState,
 };
 use rust_i18n::t;
 use uuid::Uuid;
@@ -295,10 +295,16 @@ impl EditorTableDelegate {
 
     /// 将 UI 列索引映射为原始列索引
     pub fn map_visible_to_original(&self, visible_ix: usize) -> usize {
-        self.visible_column_indices
-            .get(visible_ix)
-            .copied()
+        self.resolve_visible_column(visible_ix)
             .unwrap_or(visible_ix)
+    }
+
+    fn resolve_visible_column(&self, visible_ix: usize) -> Option<usize> {
+        if self.visible_column_indices.is_empty() {
+            (visible_ix < self.columns.len()).then_some(visible_ix)
+        } else {
+            self.visible_column_indices.get(visible_ix).copied()
+        }
     }
 
     pub fn primary_key_indices(&self) -> &[usize] {
@@ -1183,6 +1189,44 @@ impl EditorTableDelegate {
         }
     }
 
+    fn resolve_display_cell(
+        &self,
+        display_row_ix: usize,
+        display_col_ix: usize,
+    ) -> Option<(usize, usize)> {
+        let actual_row = self.resolve_display_row(display_row_ix)?;
+        let actual_col = self.resolve_visible_column(display_col_ix)?;
+        Some((actual_row, actual_col))
+    }
+
+    fn display_cell_value(&self, display_row_ix: usize, display_col_ix: usize) -> Option<String> {
+        let (actual_row, actual_col) = self.resolve_display_cell(display_row_ix, display_col_ix)?;
+        self.rows
+            .get(actual_row)
+            .and_then(|row| row.get(actual_col))
+            .cloned()
+            .flatten()
+    }
+
+    fn apply_display_cell_change_value(
+        &mut self,
+        display_row_ix: usize,
+        display_col_ix: usize,
+        new_value: Option<String>,
+    ) -> bool {
+        let Some((actual_row, actual_col)) =
+            self.resolve_display_cell(display_row_ix, display_col_ix)
+        else {
+            return false;
+        };
+
+        if self.is_deleted_row(actual_row) {
+            return false;
+        }
+
+        self.apply_cell_change_value(actual_row, actual_col, new_value)
+    }
+
     // ============================================================================
     // Column Filter Methods (to be called from external code)
     // ============================================================================
@@ -1454,17 +1498,17 @@ impl EditTableDelegate for EditorTableDelegate {
             let mut changed = false;
             let delegate = state.delegate_mut();
             for (row_ix, col_ix) in selected_cells {
-                let Some(actual_row_ix) = delegate.resolve_display_row(row_ix) else {
+                let Some((actual_row_ix, actual_col_ix)) =
+                    delegate.resolve_display_cell(row_ix, col_ix)
+                else {
                     continue;
                 };
                 if delegate.is_deleted_row(actual_row_ix) {
                     continue;
                 }
-                if actual_row_ix >= delegate.rows.len() || col_ix >= delegate.columns.len() {
-                    continue;
-                }
                 let new_value = value_for_cell();
-                changed |= delegate.record_cell_change_value(actual_row_ix, col_ix, new_value);
+                changed |=
+                    delegate.record_cell_change_value(actual_row_ix, actual_col_ix, new_value);
             }
 
             if changed {
@@ -1842,12 +1886,13 @@ impl EditTableDelegate for EditorTableDelegate {
         // Map display column index to actual column index
         let actual_col = self.map_visible_to_original(col);
 
-        let value = self
-            .rows
-            .get(actual_row)
-            .and_then(|r| r.get(actual_col))
-            .cloned()
-            .unwrap_or(None);
+        let value = self.display_cell_value(row, col).or_else(|| {
+            self.rows
+                .get(actual_row)
+                .and_then(|r| r.get(actual_col))
+                .cloned()
+                .flatten()
+        });
 
         match value {
             None => div()
@@ -1874,24 +1919,18 @@ impl EditTableDelegate for EditorTableDelegate {
             return None;
         }
 
-        // Map display row index to actual row index
-        let actual_row = self.map_display_to_actual_row(row_ix);
+        let (actual_row, actual_col) = self.resolve_display_cell(row_ix, col_ix)?;
 
         if self.is_deleted_row(actual_row) {
             return None;
         }
 
-        let value = self
-            .rows
-            .get(actual_row)
-            .and_then(|r| r.get(col_ix))
-            .cloned()
-            .unwrap_or(None);
+        let value = self.display_cell_value(row_ix, col_ix);
         // NULL 值编辑时显示为空
         let edit_value = value.unwrap_or_default();
 
         // 根据字段类型创建不同配置的输入组件
-        let field_type = self.get_field_type(col_ix);
+        let field_type = self.get_field_type(actual_col);
 
         match field_type {
             FieldType::Date => {
@@ -2266,14 +2305,13 @@ impl EditTableDelegate for EditorTableDelegate {
         _window: &mut Window,
         cx: &mut Context<EditTableState<Self>>,
     ) -> bool {
-        let actual_row = self.map_display_to_actual_row(row_ix);
         let new_opt_value: Option<String> = if new_value.is_empty() {
             None
         } else {
             Some(new_value)
         };
 
-        let changed = self.apply_cell_change_value(actual_row, col_ix, new_opt_value);
+        let changed = self.apply_display_cell_change_value(row_ix, col_ix, new_opt_value);
         if changed {
             cx.notify();
         }
@@ -2281,9 +2319,10 @@ impl EditTableDelegate for EditorTableDelegate {
     }
 
     fn is_cell_modified(&self, row_ix: usize, col_ix: usize, _cx: &App) -> bool {
-        // Map display row index to actual row index
-        let actual_row = self.map_display_to_actual_row(row_ix);
-        self.modified_cells.contains(&(actual_row, col_ix))
+        self.resolve_display_cell(row_ix, col_ix)
+            .is_some_and(|(actual_row, actual_col)| {
+                self.modified_cells.contains(&(actual_row, actual_col))
+            })
     }
 
     fn is_row_deleted(&self, row_ix: usize, _cx: &App) -> bool {
@@ -2393,13 +2432,17 @@ impl EditTableDelegate for EditorTableDelegate {
     fn get_column_filter_values(&self, col_ix: usize, _cx: &App) -> Vec<FilterValue> {
         use std::collections::HashMap;
 
+        let Some(actual_col_ix) = self.resolve_visible_column(col_ix) else {
+            return Vec::new();
+        };
+
         let mut value_counts: HashMap<String, usize> = HashMap::new();
 
         // 获取其他列的筛选条件（排除当前列）
         let other_filters: HashMap<usize, &HashSet<String>> = self
             .column_filters
             .iter()
-            .filter(|(c, _)| **c != col_ix)
+            .filter(|(c, _)| **c != actual_col_ix)
             .map(|(c, v)| (*c, v))
             .collect();
 
@@ -2416,7 +2459,7 @@ impl EditTableDelegate for EditorTableDelegate {
 
             if passes_other_filters {
                 let value = row
-                    .get(col_ix)
+                    .get(actual_col_ix)
                     .and_then(|opt| opt.clone())
                     .unwrap_or_else(|| "NULL".to_string());
                 *value_counts.entry(value).or_insert(0) += 1;
@@ -2432,7 +2475,8 @@ impl EditTableDelegate for EditorTableDelegate {
     }
 
     fn is_column_filtered(&self, col_ix: usize, _cx: &App) -> bool {
-        self.active_filter_columns.contains(&col_ix)
+        self.resolve_visible_column(col_ix)
+            .is_some_and(|actual_col_ix| self.active_filter_columns.contains(&actual_col_ix))
     }
 
     fn on_column_filter_changed(
@@ -2442,7 +2486,10 @@ impl EditTableDelegate for EditorTableDelegate {
         _window: &mut Window,
         _cx: &mut Context<EditTableState<Self>>,
     ) {
-        self.apply_filter(col_ix, selected_values);
+        let Some(actual_col_ix) = self.resolve_visible_column(col_ix) else {
+            return;
+        };
+        self.apply_filter(actual_col_ix, selected_values);
     }
 
     // ============================================================================
@@ -2455,7 +2502,10 @@ impl EditTableDelegate for EditorTableDelegate {
         _window: &mut Window,
         _cx: &mut Context<EditTableState<Self>>,
     ) {
-        self.clear_column_filter(col_ix);
+        let Some(actual_col_ix) = self.resolve_visible_column(col_ix) else {
+            return;
+        };
+        self.clear_column_filter(actual_col_ix);
     }
 
     fn multi_select_enabled(&self, _cx: &App) -> bool {
@@ -2463,13 +2513,7 @@ impl EditTableDelegate for EditorTableDelegate {
     }
 
     fn get_cell_value(&self, row_ix: usize, col_ix: usize, _cx: &App) -> String {
-        // Map display row index to actual row index
-        let actual_row = self.map_display_to_actual_row(row_ix);
-
-        self.rows
-            .get(actual_row)
-            .and_then(|r| r.get(col_ix))
-            .and_then(|opt| opt.clone())
+        self.display_cell_value(row_ix, col_ix)
             .unwrap_or_else(|| "NULL".to_string())
     }
 
@@ -2484,21 +2528,8 @@ impl EditTableDelegate for EditorTableDelegate {
         }
 
         for (row_ix, col_ix, value) in changes {
-            // Map display row index to actual row index
-            let actual_row = self.map_display_to_actual_row(row_ix);
-
-            // Skip if row is deleted
-            if self.is_deleted_row(actual_row) {
-                continue;
-            }
-
-            // Skip if out of bounds
-            if actual_row >= self.rows.len() || col_ix >= self.columns.len() {
-                continue;
-            }
-
-            // 使用现有的 record_cell_change 方法
-            self.record_cell_change(actual_row, col_ix, value);
+            let new_value = if value.is_empty() { None } else { Some(value) };
+            self.apply_display_cell_change_value(row_ix, col_ix, new_value);
         }
 
         true
@@ -2965,5 +2996,33 @@ mod tests {
                 ..
             } if *original_data == vec![opt("A")] && rowid.is_none()
         ));
+    }
+
+    #[test]
+    fn hidden_columns_remap_display_column_for_value_reads() {
+        let mut delegate = test_delegate(vec![vec![Some("A"), Some("B"), Some("C")]], true);
+        let hidden_columns = HashSet::from([SharedString::from("c1")]);
+
+        delegate.update_visible_columns(&hidden_columns);
+
+        assert_eq!(delegate.resolve_visible_column(0), Some(0));
+        assert_eq!(delegate.resolve_visible_column(1), Some(2));
+        assert_eq!(delegate.display_cell_value(0, 1), opt("C"));
+    }
+
+    #[test]
+    fn hidden_columns_remap_display_column_for_cell_changes() {
+        let mut delegate = test_delegate(vec![vec![Some("A"), Some("B"), Some("C")]], true);
+        let hidden_columns = HashSet::from([SharedString::from("c1")]);
+
+        delegate.update_visible_columns(&hidden_columns);
+
+        assert!(delegate.apply_display_cell_change_value(0, 1, opt("Z")));
+        assert_eq!(delegate.rows[0][2], opt("Z"));
+        assert_eq!(
+            delegate.cell_changes.get(&(0, 2)),
+            Some(&(opt("C"), opt("Z")))
+        );
+        assert!(!delegate.cell_changes.contains_key(&(0, 1)));
     }
 }
