@@ -982,9 +982,9 @@ Settings:
         zh-CN: 字体大小
         zh-HK: 字型大小
       font_size_desc:
-        en: Adjust font size for better readability (8-72)
-        zh-CN: 调整字体大小以获得更好的可读性（8-72）
-        zh-HK: 調整字型大小以獲得更好的可讀性（8-72）
+        en: Adjust font size for better readability (12-32)
+        zh-CN: 调整字体大小以获得更好的可读性（12-32）
+        zh-HK: 調整字型大小以獲得更好的可讀性（12-32）
 
     # 终端设置
     Terminal:
@@ -1013,9 +1013,9 @@ Settings:
         zh-CN: 终端字体大小
         zh-HK: 終端字型大小
       font_size_desc:
-        en: Adjust terminal font size (8-72)
-        zh-CN: 调整终端字体大小（8-72）
-        zh-HK: 調整終端字型大小（8-72）
+        en: Adjust terminal font size (12-32)
+        zh-CN: 调整终端字体大小（12-32）
+        zh-HK: 調整終端字型大小（12-32）
       line_height:
         en: Terminal Line Height
         zh-CN: 终端行间距

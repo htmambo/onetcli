@@ -4,8 +4,8 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Subscription, Task, Window,
-    WindowControlArea, div, px,
+    Render, RenderOnce, ScrollWheelEvent, SharedString, Styled, Subscription, Task, TextRun,
+    Window, WindowControlArea, div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
@@ -558,6 +558,12 @@ const TAB_ICON_WIDTH: Pixels = px(16.0);
 const TAB_CLOSE_BUTTON_WIDTH: Pixels = px(16.0);
 const TAB_PENDING_INDICATOR_WIDTH: Pixels = px(8.0);
 const TAB_COMPACT_ITEM_GAP: Pixels = px(4.0);
+const TAB_TITLE_TEXT_SCALE_MACOS: f32 = 0.875;
+const TAB_TITLE_TEXT_SCALE_LINUX: f32 = 1.0;
+const TAB_TITLE_TEXT_SCALE_WINDOWS: f32 = 1.275;
+const TAB_TITLE_TEXT_REFERENCE_FONT_SIZE: f32 = 18.0;
+const TAB_TITLE_TEXT_LARGE_FONT_EXTRA_PER_PX: f32 = 0.015;
+const TAB_TITLE_TEXT_MAX_LARGE_FONT_EXTRA: f32 = 0.45;
 
 fn tab_chrome_width(has_icon: bool, has_pending_indicator: bool, closeable: bool) -> Pixels {
     let mut width = TAB_HORIZONTAL_PADDING;
@@ -576,6 +582,30 @@ fn tab_chrome_width(has_icon: bool, has_pending_indicator: bool, closeable: bool
     }
 
     width
+}
+
+fn tab_title_text_scale(is_macos: bool, is_windows: bool) -> f32 {
+    if is_macos {
+        TAB_TITLE_TEXT_SCALE_MACOS
+    } else if is_windows {
+        TAB_TITLE_TEXT_SCALE_WINDOWS
+    } else {
+        TAB_TITLE_TEXT_SCALE_LINUX
+    }
+}
+
+fn tab_title_measure_font_size(
+    theme_font_size: Pixels,
+    is_macos: bool,
+    is_windows: bool,
+) -> Pixels {
+    let base_scale = tab_title_text_scale(is_macos, is_windows);
+    let large_font_extra = ((f32::from(theme_font_size) - TAB_TITLE_TEXT_REFERENCE_FONT_SIZE)
+        .max(0.0)
+        * TAB_TITLE_TEXT_LARGE_FONT_EXTRA_PER_PX)
+        .min(TAB_TITLE_TEXT_MAX_LARGE_FONT_EXTRA);
+
+    theme_font_size * base_scale * (1.0 + large_font_extra)
 }
 
 // ============================================================================
@@ -601,7 +631,7 @@ impl Render for DragTab {
             .id("drag-tab")
             .cursor_grabbing()
             .py_1()
-            .px_3()
+            .px(px(8.0))
             .min_w(px(80.0))
             .overflow_hidden()
             .whitespace_nowrap()
@@ -2215,7 +2245,7 @@ impl TabContainer {
         cx.notify();
     }
 
-    fn get_tab_width(&self, tab: &TabItem, cx: &App) -> gpui::Pixels {
+    fn get_tab_width(&self, tab: &TabItem, window: &Window, cx: &App) -> gpui::Pixels {
         let size = tab.content().width_size(cx);
         // Size::Size(pixels) 直接返回，不参与比较
         if let Some(Size::Size(pixels)) = size {
@@ -2224,27 +2254,48 @@ impl TabContainer {
 
         let title = tab.content().title(cx);
         let theme = cx.theme();
-        // text_sm = 0.875rem，与 rem_size（即 theme.font_size）同步
-        let font_size = theme.font_size;// * 0.875_f32;
-        let text_system = cx.text_system();
-        let font_id = text_system.resolve_font(&gpui::font(theme.font_family.clone()));
+        let text_system = window.text_system();
+        let font = gpui::font(theme.font_family.clone());
+        let font_size = tab_title_measure_font_size(
+            theme.font_size,
+            cfg!(target_os = "macos"),
+            cfg!(target_os = "windows"),
+        );
 
-        // 精确测量每个字符宽度；测量失败时按中英文区别估算
-        let text_width: Pixels = title
-            .chars()
-            .map(|ch| {
-                text_system
-                    .advance(font_id, font_size, ch)
-                    .map(|advance| advance.width)
-                    .unwrap_or_else(|_| {
-                        if ch.is_ascii() {
-                            font_size * 0.5_f32
-                        } else {
-                            font_size
-                        }
-                    })
+        let text_run = TextRun {
+            len: title.len(),
+            font: font.clone(),
+            color: theme.foreground,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        // 用整段 shaping 测量，避免逐字符 advance 在大字号下累积误差。
+        let text_width = text_system
+            .shape_text(title.clone(), font_size, &[text_run], None, None)
+            .map(|lines| {
+                lines
+                    .iter()
+                    .fold(px(0.0), |width, line| width.max(line.size(font_size).width))
             })
-            .sum();
+            .unwrap_or_else(|_| {
+                let font_id = text_system.resolve_font(&font);
+                title
+                    .chars()
+                    .map(|ch| {
+                        text_system
+                            .advance(font_id, font_size, ch)
+                            .map(|advance| advance.width)
+                            .unwrap_or_else(|_| {
+                                if ch.is_ascii() {
+                                    font_size * 0.5_f32
+                                } else {
+                                    font_size
+                                }
+                            })
+                    })
+                    .sum()
+            });
 
         let has_icon = tab.content().icon(cx).is_some();
         let has_pending_indicator = tab.content().pending_change_level(cx).is_some();
@@ -2451,17 +2502,17 @@ impl TabContainer {
                         .gap_2()
                         .h(px(32.0))
                         .cursor_pointer()
-                        .px_3()
                         .when(!is_macos, |el| el.ml(left_padding))
                         .when_some(top_padding, |el, padding| el.mt(padding))
                         .rounded(px(6.0))
                         .when(!is_macos, |el| el.rounded_tl(first_tab_corner_radius))
-                        .when(is_pinned_active, |el| el.bg(active_tab_color))
+                        .when(is_pinned_active, |el| el.bg(active_tab_color).px(px(8.0)))
                         .when(!is_pinned_active, |el| {
                             el.hover(move |style| style.bg(hover_tab_color))
                                 .bg(inactive_tab_color)
                                 .border_1()
                                 .border_color(inactive_tab_border)
+                                .px(px(8.0))
                         })
                         .when(drag_plan.enable_single_pinned_tab_drag, |el| {
                             el.window_control_area(WindowControlArea::Drag)
@@ -2598,7 +2649,7 @@ impl TabContainer {
                             is_regular_tab_active(idx, active_index, self.pinned_tab_active);
                         let view_clone = view.clone();
                         let title_clone = title.clone();
-                        let tab_width = self.get_tab_width(tab, cx);
+                        let tab_width = self.get_tab_width(tab, window, cx);
                         let interaction_state = interaction_state.clone();
                         let pending_change_level = tab.content().pending_change_level(cx);
                         // 根据 pending_change_level 确定指示器颜色
@@ -2627,17 +2678,17 @@ impl TabContainer {
                             .cursor_pointer()
                             .text_ellipsis()
                             .w(tab_width)
-                            .px_3()
                             .rounded(px(6.0))
                             .when(!is_macos && self.pinned_tab.is_none() && idx == 0, |el| {
                                 el.rounded_tl(first_tab_corner_radius)
                             })
-                            .when(is_active, |el| el.bg(active_tab_color))
+                            .when(is_active, |el| el.bg(active_tab_color).px(px(8.0)))
                             .when(!is_active, |el| {
                                 el.hover(move |style| style.bg(hover_tab_color))
                                     .bg(inactive_tab_color)
                                     .border_1()
                                     .border_color(inactive_tab_border)
+                                    .px(px(8.0))
                             })
                             // 普通 tab 不应把拖动/按下事件冒泡为窗口拖动。
                             // 设置 tab_click_active 标志，防止 scroll region 的窗口拖动干扰。
@@ -2707,47 +2758,47 @@ impl TabContainer {
                                                 .rounded_full()
                                                 .bg(indicator_color),
                                         )
-                                    })
-                                    .when(closeable, |group| {
-                                        let view_clone = view_clone.clone();
-                                        let close_button_style = ButtonCustomVariant::new(cx)
-                                            .color(cx.theme().transparent)
-                                            .foreground(close_btn_color)
-                                            .border(cx.theme().transparent)
-                                            .hover(cx.theme().warning)
-                                            .active(cx.theme().warning_active);
-                                        group.child(
-                                            Button::new(SharedString::from(format!(
-                                                "tab-close-btn-{idx}"
-                                            )))
-                                            .icon(IconName::Close)
-                                            .custom(close_button_style)
-                                            .compact()
-                                            .tab_stop(false)
-                                            .occlude()
-                                            .flex_shrink_0()
-                                            .w(px(16.0))
-                                            .h(px(16.0))
-                                            .min_w(px(16.0))
-                                            .p_0()
-                                            .rounded(px(2.0))
-                                            .cursor_pointer()
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                move |_event, window, cx| {
-                                                    window.prevent_default();
-                                                    cx.stop_propagation();
-                                                },
-                                            )
-                                            .on_click(move |_, window, cx| {
-                                                cx.stop_propagation();
-                                                view_clone.update(cx, |this, cx| {
-                                                    this.close_tab(idx, window, cx).detach();
-                                                });
-                                            }),
-                                        )
                                     }),
                             )
+                            .when(closeable, |group| {
+                                let view_clone = view_clone.clone();
+                                let close_button_style = ButtonCustomVariant::new(cx)
+                                    .color(cx.theme().transparent)
+                                    .foreground(close_btn_color)
+                                    .border(cx.theme().transparent)
+                                    .hover(cx.theme().warning)
+                                    .active(cx.theme().warning_active);
+                                group.child(
+                                    Button::new(SharedString::from(format!(
+                                        "tab-close-btn-{idx}"
+                                    )))
+                                    .icon(IconName::Close)
+                                    .custom(close_button_style)
+                                    .compact()
+                                    .tab_stop(false)
+                                    .occlude()
+                                    .flex_shrink_0()
+                                    .w(px(16.0))
+                                    .h(px(16.0))
+                                    .min_w(px(16.0))
+                                    .p_0()
+                                    .rounded(px(2.0))
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        move |_event, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        },
+                                    )
+                                    .on_click(move |_, window, cx| {
+                                        cx.stop_propagation();
+                                        view_clone.update(cx, |this, cx| {
+                                            this.close_tab(idx, window, cx).detach();
+                                        });
+                                    }),
+                                )
+                            })
                             .context_menu(move |menu, window, cx| {
                                 let view_for_menu = view_clone.clone();
                                 let (tab_count, closeable, is_ssh_tab, tab_id) = {
@@ -2899,15 +2950,14 @@ impl TabContainer {
                                             state.should_move = false;
                                         }),
                                     )
-                                    .on_mouse_move(window.listener_for(
-                                        &drag_state,
-                                        |state, _, window, _| {
+                                    .on_mouse_move(
+                                        window.listener_for(&drag_state, |state, _, window, _| {
                                             if state.should_move {
                                                 state.should_move = false;
                                                 window.start_window_move();
                                             }
-                                        },
-                                    ))
+                                        }),
+                                    )
                                 }),
                         )
                     })
@@ -3150,6 +3200,14 @@ mod tests {
         assert!(should_render_windows_drag_spacer(true, true));
         assert!(!should_render_windows_drag_spacer(true, false));
         assert!(!should_render_windows_drag_spacer(false, true));
+    }
+
+    #[test]
+    fn windows_与_linux_渲染内联拖窗热区() {
+        assert!(should_render_inline_drag_spacer(true, true, false));
+        assert!(should_render_inline_drag_spacer(true, false, true));
+        assert!(!should_render_inline_drag_spacer(true, false, false));
+        assert!(!should_render_inline_drag_spacer(false, true, true));
     }
 
     #[test]

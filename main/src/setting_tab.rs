@@ -572,7 +572,7 @@ fn _clamp_window_opacity(opacity: f64) -> f64 {
 }
 
 fn clamp_ui_font_size(size: f64) -> f32 {
-    size.clamp(8.0, 72.0) as f32
+    size.clamp(12.0, 32.0) as f32
 }
 
 fn default_ui_surface_opacity() -> f64 {
@@ -1673,8 +1673,8 @@ impl SettingsPanel {
                                 t!("Settings.General.Font.font_size"),
                                 themed_setting_field(SettingField::number_input(
                                     NumberFieldOptions {
-                                        min: 8.0,
-                                        max: 72.0,
+                                        min: 12.0,
+                                        max: 32.0,
                                         ..Default::default()
                                     },
                                     |cx: &App| AppSettings::global(cx).font_size,
@@ -2518,8 +2518,8 @@ impl SettingsPanel {
                                 t!("Settings.General.Terminal.font_size"),
                                 themed_setting_field(SettingField::number_input(
                                     NumberFieldOptions {
-                                        min: 8.0,
-                                        max: 72.0,
+                                        min: 12.0,
+                                        max: 32.0,
                                         ..Default::default()
                                     },
                                     |cx: &App| AppSettings::global(cx).terminal_font_size,

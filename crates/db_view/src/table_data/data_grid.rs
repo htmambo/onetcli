@@ -390,10 +390,14 @@ impl DataGrid {
             delegate.set_table_name(table_name);
             EditTableState::new(delegate, window, cx)
         });
+        // 根据应用字号动态计算行高：font_size * 2 + 2（18=>38px，16=>34px，14=>30px）
+        let font_size = cx.theme().font_size;
+        let row_height = font_size * 2.0 + px(2.);
         table.update(cx, |state, _| {
             let delegate = state.delegate_mut();
             delegate.set_data_grid(data_grid_handle.clone());
             delegate.set_undo_stack_size(config.undo_stack_size);
+            state.set_row_height(row_height);
         });
         let focus_handle = cx.focus_handle();
         let filter_editor = cx.new(|cx| TableFilterEditor::new(window, cx));

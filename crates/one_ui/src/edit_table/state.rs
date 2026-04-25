@@ -226,6 +226,22 @@ where
         self
     }
 
+    pub fn set_size(&mut self, size: Size) {
+        self.options.size = size;
+    }
+
+    /// 设置自定义行高（像素），覆盖 size 对应的默认值
+    pub fn set_row_height(&mut self, height: Pixels) {
+        self.options.row_height_override = Some(height);
+    }
+
+    /// 获取实际行高（优先使用 override）
+    fn effective_row_height(&self) -> Pixels {
+        self.options
+            .row_height_override
+            .unwrap_or_else(|| self.options.size.table_row_height())
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.prepare_col_groups(cx);
     }
@@ -985,7 +1001,7 @@ where
     }
 
     fn page_item_count(&self) -> usize {
-        let row_height = self.options.size.table_row_height();
+        let row_height = self.effective_row_height();
         let height = self.bounds.size.height;
         let count = (height / row_height).floor() as usize;
         count.saturating_sub(1).max(1)
@@ -2546,7 +2562,7 @@ where
         header
             .h_flex()
             .w_full()
-            .h(self.options.size.table_row_height())
+            .h(self.effective_row_height())
             .flex_shrink_0()
             .border_b_1()
             .border_color(cx.theme().border)
@@ -2634,7 +2650,7 @@ where
         let is_row_deleted = self.delegate.is_row_deleted(row_ix, cx);
         let is_row_added = self.delegate.is_row_added(row_ix, cx);
         let _view = cx.entity().clone();
-        let row_height = self.options.size.table_row_height();
+        let row_height = self.effective_row_height();
 
         if row_ix < rows_count {
             let is_last_row = row_ix + 1 == rows_count;
@@ -2821,7 +2837,7 @@ where
             div()
                 .occlude()
                 .absolute()
-                .top(self.options.size.table_row_height())
+                .top(self.effective_row_height())
                 .right_0()
                 .bottom_0()
                 .w(Scrollbar::width())
@@ -2869,7 +2885,7 @@ where
         let rows_count = self.delegate.rows_count(cx);
         let loading = self.delegate.loading(cx);
 
-        let row_height = self.options.size.table_row_height();
+        let row_height = self.effective_row_height();
         let total_height = self
             .vertical_scroll_handle
             .0

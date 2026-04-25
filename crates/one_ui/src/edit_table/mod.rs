@@ -6,7 +6,7 @@ pub(crate) mod loading;
 pub mod selection;
 mod state;
 
-use gpui::{App, KeyBinding};
+use gpui::{App, KeyBinding, Pixels};
 use gpui_component::Size;
 
 pub(crate) use column::{ColGroup, DragColumn, DragSelectCell, ResizeColumn};
@@ -85,6 +85,8 @@ pub struct TableOptions {
     pub size: Size,
     pub stripe: bool,
     pub scrollbar_visible: ScrollbarVisible,
+    /// 自定义行高（像素），覆盖 size 对应的默认值。None 表示使用 size 的默认行高。
+    pub row_height_override: Option<Pixels>,
 }
 
 impl Default for TableOptions {
@@ -93,6 +95,7 @@ impl Default for TableOptions {
             size: Size::Medium,
             stripe: true,
             scrollbar_visible: ScrollbarVisible::all(),
+            row_height_override: None,
         }
     }
 }
