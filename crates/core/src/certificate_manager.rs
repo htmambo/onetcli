@@ -11,7 +11,7 @@ use gpui_component::{
     input::{Input, InputState},
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
-    v_flex,
+    v_flex, modal_surface_palette,
 };
 use rust_i18n::t;
 
@@ -200,24 +200,20 @@ impl Render for CertificateManagerView {
                     } else {
                         t!("CertificateManager.sync_disabled").to_string()
                     };
+                    let surface_palette = modal_surface_palette(cx.theme());
 
                     v_flex()
-                        .gap_3()
+                        .gap_1()
                         .p_4()
                         .rounded_lg()
                         .border_1()
                         .border_color(app_style::border())
-                        // Layer 5: 卡片 - 0.18
-                        .bg(if cx.theme().window_blur_enabled {
-                            cx.theme().group.opacity(0.18)
-                        } else {
-                            cx.theme().group
-                        })
+                        .bg(surface_palette.content)
                         .child(
                             h_flex()
                                 .justify_between()
                                 .items_start()
-                                .gap_4()
+                                .gap_1()
                                 .child(
                                     v_flex()
                                         .gap_1()
@@ -300,13 +296,12 @@ impl Render for CertificateManagerView {
                     .refine_style(&app_style::page_header_style())
                     .border_b_1()
                     .border_color(app_style::border())
-                    .px_6()
-                    .py_5()
+                    .p_2()
                     .child(
                         h_flex()
                             .justify_between()
                             .items_center()
-                            .gap_4()
+                            .gap_1()
                             .child(
                                 v_flex()
                                     .gap_1()
@@ -336,8 +331,7 @@ impl Render for CertificateManagerView {
             .child(
                 div()
                     .flex_1()
-                    .px_6()
-                    .py_5()
+                    .p_2()
                     .overflow_y_scrollbar()
                     .when(self.certificates.is_empty(), |this| {
                         this.child(
@@ -625,7 +619,7 @@ impl Render for CertificateForm {
         let selected_kind = self.selected_kind(cx);
 
         v_flex()
-            .gap_3()
+            .gap_1()
             .child(
                 v_flex()
                     .gap_1()
@@ -702,7 +696,7 @@ impl Render for CertificateForm {
             })
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_1()
                     .items_center()
                     .child(
                         Checkbox::new("certificate-sync-enabled")
@@ -852,8 +846,7 @@ impl Render for CertificateEditorView {
                     .rounded_tr(cx.theme().radius_lg)
                     .border_b_1()
                     .border_color(app_style::border())
-                    .px_6()
-                    .py_4()
+                    .p_2()
                     .child(
                         div()
                             .text_xl()
@@ -862,14 +855,13 @@ impl Render for CertificateEditorView {
                             .child(title),
                     ),
             )
-            .child(div().flex_1().px_6().py_5().overflow_y_scrollbar().child(
-                v_flex().gap_4().child(self.form.clone()).when_some(
+            .child(div().flex_1().p_2().overflow_y_scrollbar().child(
+                v_flex().gap_1().child(self.form.clone()).when_some(
                     self.error_message.clone(),
                     |this, error_message| {
                         this.child(
                             div()
-                                .px_3()
-                                .py_2()
+                                .p_2()
                                 .rounded_md()
                                 .bg(app_style::danger_dim())
                                 .text_sm()
@@ -882,9 +874,8 @@ impl Render for CertificateEditorView {
             .child(
                 h_flex()
                     .justify_end()
-                    .gap_2()
-                    .px_6()
-                    .py_4()
+                    .gap_1()
+                    .p_2()
                     .refine_style(&app_style::footer_style())
                     .rounded_bl(cx.theme().radius_lg)
                     .rounded_br(cx.theme().radius_lg)
@@ -931,7 +922,7 @@ fn open_certificate_editor_popup(
 
     open_popup_window(
         window,
-        PopupWindowOptions::new(title).size(560.0, 640.0),
+        PopupWindowOptions::new(title).size(560.0, 560.0),
         move |window, cx| {
             let certificate = certificate.clone();
             cx.new(|cx| CertificateEditorView::new(certificate, window, cx))

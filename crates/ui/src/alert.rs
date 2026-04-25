@@ -199,7 +199,9 @@ impl RenderOnce for Alert {
             .text_sm()
             .border_1()
             .border_color(border_color)
-            .when(!self.banner, |this| this.rounded(radius).items_start())
+            .when(!self.banner, |this| {
+                this.rounded(radius).overflow_hidden().items_start()
+            })
             .refine_style(&self.style)
             .child(
                 div()

@@ -227,4 +227,3 @@ pub fn danger_button_variant(cx: &App) -> ButtonVariant {
             .active(cx.theme().danger_active),
     )
 }
-

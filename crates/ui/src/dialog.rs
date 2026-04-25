@@ -591,6 +591,8 @@ impl RenderOnce for Dialog {
                                         .cursor_move()
                                         .refine_style(&app_style::title_bar_style())
                                         .bg(dialog_palette.title_bar)
+                                        .rounded_tl(cx.theme().radius_lg)
+                                        .rounded_tr(cx.theme().radius_lg)
                                         .border_b_1()
                                         .border_color(app_style::border())
                                         .on_mouse_down(
@@ -647,6 +649,14 @@ impl RenderOnce for Dialog {
                                     .flex_1()
                                     .overflow_hidden()
                                     .bg(dialog_palette.content)
+                                    .when(!has_title, |this| {
+                                        this.rounded_tl(cx.theme().radius_lg)
+                                            .rounded_tr(cx.theme().radius_lg)
+                                    })
+                                    .when(!has_footer, |this| {
+                                        this.rounded_bl(cx.theme().radius_lg)
+                                            .rounded_br(cx.theme().radius_lg)
+                                    })
                                     .child(
                                         // Body
                                         v_flex()
@@ -672,6 +682,8 @@ impl RenderOnce for Dialog {
                                         .justify_end()
                                         .refine_style(&app_style::footer_style())
                                         .bg(dialog_palette.footer)
+                                        .rounded_bl(cx.theme().radius_lg)
+                                        .rounded_br(cx.theme().radius_lg)
                                         .border_t_1()
                                         .border_color(app_style::border())
                                         .children(footer(render_ok, render_cancel, window, cx)),

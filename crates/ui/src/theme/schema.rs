@@ -90,7 +90,11 @@ pub struct ThemeConfigColors {
     #[serde(rename = "border")]
     pub border: Option<SharedString>,
     /// Background color for GroupBox / Panel.
-    #[serde(rename = "group.background", alias = "panel.background", alias = "group_box.background")]
+    #[serde(
+        rename = "group.background",
+        alias = "panel.background",
+        alias = "group_box.background"
+    )]
     pub group: Option<SharedString>,
     /// Text color for GroupBox.
     #[serde(rename = "group.foreground", alias = "group_box.foreground")]
@@ -531,7 +535,10 @@ impl ThemeColor {
             group,
             fallback = self
                 .background
-                .blend(self.secondary.opacity(if config.mode.is_dark() { 0.3 } else { 0.4 }))
+                .blend(
+                    self.secondary
+                        .opacity(if config.mode.is_dark() { 0.3 } else { 0.4 })
+                )
         );
         apply_color!(group_foreground, fallback = self.foreground);
         apply_color!(caret, fallback = self.primary);

@@ -519,13 +519,11 @@ impl RenderOnce for Button {
                     .when(normal_style.underline, |this| this.text_decoration_1())
                     .hover(|this| {
                         let hover_style = style.hovered(self.outline, cx);
-                        this.bg(hover_style.bg)
-                            .text_color(hover_style.fg)
+                        this.bg(hover_style.bg).text_color(hover_style.fg)
                     })
                     .active(|this| {
                         let active_style = style.active(self.outline, cx);
-                        this.bg(active_style.bg)
-                            .text_color(active_style.fg)
+                        this.bg(active_style.bg).text_color(active_style.fg)
                     })
             })
             .when(self.disabled, |this| {

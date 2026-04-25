@@ -234,6 +234,7 @@ where
             .bg(cx.theme().table)
             .when(bordered, |this| {
                 this.rounded(cx.theme().radius)
+                    .overflow_hidden()
                     .border_1()
                     .border_color(cx.theme().border)
             })

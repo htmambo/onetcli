@@ -158,6 +158,7 @@ impl RenderOnce for GroupBox {
                     .when(has_paddings, |this| this.p_4())
                     .gap_4()
                     .rounded(cx.theme().radius)
+                    .overflow_hidden()
                     .refine_style(&self.content_style)
                     .children(self.children),
             )

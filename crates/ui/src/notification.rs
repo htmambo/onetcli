@@ -302,6 +302,7 @@ impl Render for Notification {
             .border_color(cx.theme().border)
             .bg(cx.theme().popover)
             .rounded(cx.theme().radius_lg)
+            .overflow_hidden()
             .shadow_md()
             .py_3p5()
             .px_4()

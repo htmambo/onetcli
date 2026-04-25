@@ -2163,18 +2163,14 @@ impl Render for ChatPanel {
                             ),
                     )
                     .child(
-                        ResizablePanel::new()
-                            .child(
-                                div()
+                        ResizablePanel::new().child(
+                            div().size_full().min_w_0().child(
+                                v_flex()
                                     .size_full()
-                                    .min_w_0()
-                                    .child(
-                                        v_flex()
-                                            .size_full()
-                                            .child(self.render_messages(cx))
-                                            .child(self.render_input(cx)),
-                                    ),
+                                    .child(self.render_messages(cx))
+                                    .child(self.render_input(cx)),
                             ),
+                        ),
                     ),
             )
         } else {

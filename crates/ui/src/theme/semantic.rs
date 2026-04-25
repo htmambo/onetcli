@@ -39,9 +39,7 @@ impl<'a> SemanticColorsRef<'a> {
 
     pub fn border_subtle(&self) -> gpui::Hsla {
         match self {
-            Self::Dark(colors) | Self::Light(colors) => {
-                colors.border.mix(colors.background, 0.5)
-            }
+            Self::Dark(colors) | Self::Light(colors) => colors.border.mix(colors.background, 0.5),
         }
     }
 
