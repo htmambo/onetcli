@@ -1036,7 +1036,7 @@ impl Render for DatabaseObjects {
             .child(
                 div().flex_1().overflow_hidden().child(
                     Table::new(&self.table)
-                        .bordered(true)
+                        .bordered(false)
                         .with_size(Size::XSmall),
                 ),
             )

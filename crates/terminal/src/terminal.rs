@@ -51,10 +51,10 @@ use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
 #[cfg(unix)]
 use crate::local_pty_protocol::LocalPtyHostEvent;
 use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
-#[cfg(unix)]
-use anyhow::Context as _;
 #[cfg(not(target_os = "windows"))]
 use crate::shell_integration::embedded_shell_integration_script;
+#[cfg(unix)]
+use anyhow::Context as _;
 
 use crate::{
     LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent,
@@ -82,7 +82,10 @@ fn is_osc_palette_line(line: &str) -> bool {
     // 格式：OSC 4;<index>;rgb:R/G/B，<index> 必须是数字
     line.starts_with("\x1b]4;")
         || (line.starts_with("4;")
-            && line[2..].chars().next().map_or(false, |c| c.is_ascii_digit())
+            && line[2..]
+                .chars()
+                .next()
+                .map_or(false, |c| c.is_ascii_digit())
             && line.contains(";rgb:"))
 }
 
@@ -2693,16 +2696,15 @@ mod tests {
     use super::{
         apply_term_escape_sequence, build_cd_command, build_ssh_base_init_commands,
         build_ssh_init_commands, compose_ssh_init_commands, format_connection_error,
-        is_osc_palette_line,
-        resolve_default_windows_shell_from_env, shell_escape_arg,
+        is_osc_palette_line, resolve_default_windows_shell_from_env, shell_escape_arg,
         should_report_ssh_running_processes, SshProcessState, Terminal, SSH_PROMPT_HOOK_NAME,
         SSH_PROMPT_READY_COMMAND,
     };
-    use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
         push_history_entry, HistoryEntry, ShellHistoryFormat,
     };
+    use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
     use anyhow::anyhow;
     use std::collections::VecDeque;
     use std::fs;

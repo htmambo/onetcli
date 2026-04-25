@@ -241,8 +241,8 @@ impl RenderOnce for WindowBorder {
                         div.border_1()
                             .border_color(cx.theme().window_border)
                             .rounded(border_radius)
-                            .overflow_hidden()
                     })
+                    .overflow_hidden()
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
                     })

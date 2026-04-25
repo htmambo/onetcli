@@ -1,9 +1,8 @@
 use crate::{
-    ActiveTheme, Anchor, ElementExt, Placement, StyledExt, WindowsSurfaceLayer,
+    ActiveTheme, Anchor, ElementExt, Placement, StyledExt,
     dialog::{ANIMATION_DURATION, Dialog},
     focus_trap::FocusTrapManager,
     input::InputState,
-    layered_level_surface_color,
     notification::{Notification, NotificationList},
     sheet::Sheet,
     window_border,
@@ -458,17 +457,6 @@ impl Styled for Root {
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(cx.theme().font_size);
-        let root_bg = if cx.theme().window_blur_enabled || cx.theme().backdrop_opacity < 1.0 {
-            cx.theme().transparent
-        } else {
-            layered_level_surface_color(
-                cx.theme().background,
-                false,
-                cx.theme().backdrop_opacity,
-                1,
-                WindowsSurfaceLayer::ContentBase,
-            )
-        };
 
         window_border().shadow_size(self.window_shadow_size).child(
             div()

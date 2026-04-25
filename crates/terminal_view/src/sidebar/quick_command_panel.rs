@@ -306,12 +306,7 @@ impl QuickCommandPanel {
                                 .text_sm()
                                 .child(t!("QuickCommand.delete_confirm_message")),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(text_muted)
-                                .child(preview),
-                        )
+                        .child(div().text_xs().text_color(text_muted).child(preview))
                         .into_any_element(),
                 )
                 .button_props(

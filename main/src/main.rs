@@ -89,7 +89,8 @@ fn main() {
                 width: px(640.),
                 height: px(480.),
             }),
-            window_background: AppSettings::global(cx).preferred_window_background(),
+            // window_background: AppSettings::global(cx).preferred_window_background(),
+            window_background: WindowBackgroundAppearance::Transparent,
             #[cfg(target_os = "linux")]
             app_id: Some("onetcli".to_string()),
             #[cfg(target_os = "linux")]

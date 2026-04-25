@@ -466,52 +466,57 @@ impl Render for ConnectionRestoreDialogContent {
         let all_selected = self.all_selected();
         let selected_count = self.selected_snapshot_ids.len();
         let total_count = self.items.len();
-        let item_views =
-            self.items
-                .iter()
-                .cloned()
-                .map(|item| {
-                    let checked = self.selected_snapshot_ids.contains(&item.snapshot_id);
-                    let snapshot_id = item.snapshot_id.clone();
-                    let view_for_toggle = view.clone();
+        let item_views = self
+            .items
+            .iter()
+            .cloned()
+            .map(|item| {
+                let checked = self.selected_snapshot_ids.contains(&item.snapshot_id);
+                let snapshot_id = item.snapshot_id.clone();
+                let view_for_toggle = view.clone();
 
-                    h_flex()
-                        .w_full()
-                        .gap_3()
-                        .items_start()
-                        .p_3()
-                        .block_mouse_except_scroll()
-                        .bg(cx.theme().background)
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .rounded_md()
-                        .child(
-                            Checkbox::new(format!("restore-connection-{}", snapshot_id))
-                                .block_mouse_except_scroll()
-                                .checked(checked)
-                                .on_click(move |_, _, cx| {
-                                    view_for_toggle.update(cx, |view, cx| {
-                                        if !view.selected_snapshot_ids.insert(snapshot_id.clone()) {
-                                            view.selected_snapshot_ids.remove(&snapshot_id);
-                                        }
-                                        cx.notify();
-                                    });
-                                }),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(item.title),
-                                )
-                                .child(div().text_xs().text_color(cx.theme().muted_foreground).child(item.subtitle)),
-                        )
-                })
-                .collect::<Vec<_>>();
+                h_flex()
+                    .w_full()
+                    .gap_3()
+                    .items_start()
+                    .p_3()
+                    .block_mouse_except_scroll()
+                    .bg(cx.theme().background)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded_md()
+                    .child(
+                        Checkbox::new(format!("restore-connection-{}", snapshot_id))
+                            .block_mouse_except_scroll()
+                            .checked(checked)
+                            .on_click(move |_, _, cx| {
+                                view_for_toggle.update(cx, |view, cx| {
+                                    if !view.selected_snapshot_ids.insert(snapshot_id.clone()) {
+                                        view.selected_snapshot_ids.remove(&snapshot_id);
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(item.title),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(item.subtitle),
+                            ),
+                    )
+            })
+            .collect::<Vec<_>>();
 
         v_flex()
             .id("connection-restore-dialog-content")

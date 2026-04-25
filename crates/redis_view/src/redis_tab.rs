@@ -31,8 +31,6 @@ use one_core::tab_container::{
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use tracing::warn;
 
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizingPanel {
     TreePanel,

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ::sysinfo::{Pid, System};
@@ -9,11 +9,11 @@ use smol::Timer;
 
 use crate::home_tab::{HomePage, NewConnectionShortcut, OpenConnectionQuickOpen};
 use crate::saved_connection_picker::TabBarSavedConnectionPicker;
-use crate::setting_tab::{build_app_http_client, AppSettings, SavedWindowBounds};
+use crate::setting_tab::{AppSettings, SavedWindowBounds, build_app_http_client};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    actions, div, px, AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement,
-    IntoElement, KeyBinding, ParentElement, Render, Styled, Task, Window,
+    AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
+    ParentElement, Render, Styled, Task, Window, actions, div, px,
 };
 #[cfg(target_os = "macos")]
 use gpui::{Menu, MenuItem};
@@ -142,7 +142,7 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 use gpui_component::dock::{ClosePanel, ToggleZoom};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, IconName, Root, Sizable};
+use gpui_component::{ActiveTheme, Icon, IconName, Root, Sizable, h_flex, v_flex};
 use one_core::llm::manager::GlobalProviderState;
 use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
@@ -1017,20 +1017,22 @@ impl OnetCliApp {
             return;
         }
 
-        self._background_recovery_task = Some(cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_secs(BACKGROUND_RECOVERY_SAVE_INTERVAL_SECS))
-                .await;
+        self._background_recovery_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(BACKGROUND_RECOVERY_SAVE_INTERVAL_SECS))
+                    .await;
 
-            let keep_running = this
-                .update(cx, |this, cx| {
-                    this.save_background_recovery_state(cx);
-                    true
-                })
-                .unwrap_or(false);
+                let keep_running = this
+                    .update(cx, |this, cx| {
+                        this.save_background_recovery_state(cx);
+                        true
+                    })
+                    .unwrap_or(false);
 
-            if !keep_running {
-                break;
+                if !keep_running {
+                    break;
+                }
             }
         }));
     }
@@ -1282,6 +1284,8 @@ impl OnetCliApp {
             .gap_4()
             .items_center()
             .justify_between()
+            .rounded_bl(cx.theme().radius)
+            .rounded_br(cx.theme().radius)
             .border_t_1()
             .border_color(cx.theme().border)
             .bg(layered_level_surface_color(
@@ -1426,8 +1430,8 @@ impl Render for OnetCliApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_status_bar_title, build_window_title, AppCloseDecision, AppCloseGuard,
-        ConnectionStats,
+        AppCloseDecision, AppCloseGuard, ConnectionStats, build_status_bar_title,
+        build_window_title,
     };
 
     #[test]

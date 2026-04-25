@@ -223,13 +223,13 @@ impl SavedConnectionPickerList {
             .rounded_full()
             .bg(cx.theme().success)
             .shadow_lg()
-            .flex()                           // 新增：让内部内容居中
-            .items_center()                                                                                                    
+            .flex() // 新增：让内部内容居中
+            .items_center()
             .justify_center()
-            .child(                                                                                                            
-                Icon::new(IconName::Check)    // 白色钩号
-                    .with_size(px(11.0))   
-                    .text_color(gpui::white()),                                                                                
+            .child(
+                Icon::new(IconName::Check) // 白色钩号
+                    .with_size(px(11.0))
+                    .text_color(gpui::white()),
             )
             .into_any_element()
     }

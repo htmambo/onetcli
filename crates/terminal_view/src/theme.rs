@@ -14,7 +14,7 @@
 //! - 在 `muted` 上使用 `foreground` 或 `muted_foreground`
 //! - 在 `accent` 上使用 `accent_foreground`
 
-use gpui::{Hsla, Pixels, Rgba, SharedString, rgb};
+use gpui::{rgb, Hsla, Pixels, Rgba, SharedString};
 use gpui_component::Theme as UiTheme;
 
 // 包含由 build.rs 生成的 tabby 配色方案
@@ -332,10 +332,7 @@ impl TerminalTheme {
                 editor_background,
                 if theme.mode.is_dark() { 0.18 } else { -0.18 },
             )),
-            color9: hsla_to_rgba(prefer_light_variant(
-                theme.base.red_light,
-                theme.base.red,
-            )),
+            color9: hsla_to_rgba(prefer_light_variant(theme.base.red_light, theme.base.red)),
             color10: hsla_to_rgba(prefer_light_variant(
                 theme.base.green_light,
                 theme.base.green,
@@ -344,18 +341,12 @@ impl TerminalTheme {
                 theme.base.yellow_light,
                 theme.base.yellow,
             )),
-            color12: hsla_to_rgba(prefer_light_variant(
-                theme.base.blue_light,
-                theme.base.blue,
-            )),
+            color12: hsla_to_rgba(prefer_light_variant(theme.base.blue_light, theme.base.blue)),
             color13: hsla_to_rgba(prefer_light_variant(
                 theme.base.magenta_light,
                 theme.base.magenta,
             )),
-            color14: hsla_to_rgba(prefer_light_variant(
-                theme.base.cyan_light,
-                theme.base.cyan,
-            )),
+            color14: hsla_to_rgba(prefer_light_variant(theme.base.cyan_light, theme.base.cyan)),
             color15: hsla_to_rgba(adjust_lightness(
                 editor_foreground,
                 if theme.mode.is_dark() { 0.08 } else { -0.08 },
@@ -816,7 +807,7 @@ fn prefer_light_variant(light: Hsla, fallback: Hsla) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use super::{FOLLOW_APP_THEME_NAME, TerminalTheme};
+    use super::{TerminalTheme, FOLLOW_APP_THEME_NAME};
     use gpui_component::Theme as UiTheme;
 
     #[test]

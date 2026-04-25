@@ -99,6 +99,7 @@ impl Render for Tooltip {
                 .border_color(cx.theme().border)
                 .shadow_md()
                 .rounded(Radius::Md.px())
+                .overflow_hidden()
                 .justify_between()
                 .py_0p5()
                 .px_2()

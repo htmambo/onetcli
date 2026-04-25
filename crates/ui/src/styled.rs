@@ -181,6 +181,7 @@ pub trait StyledExt: Styled + Sized {
             .border_color(cx.theme().border)
             .shadow_lg()
             .rounded(cx.theme().radius)
+            .overflow_hidden()
     }
 
     /// Set corner radii for the element.

@@ -888,6 +888,7 @@ where
                                         .border_1()
                                         .border_color(popup_border)
                                         .rounded(popup_radius)
+                                        .overflow_hidden()
                                         .shadow_md()
                                         .child(
                                             List::new(&self.list)

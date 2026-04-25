@@ -564,7 +564,7 @@ fn default_font_size() -> f64 {
 }
 
 fn _default_window_opacity() -> f64 {
-    1.0
+    0.84
 }
 
 fn _clamp_window_opacity(opacity: f64) -> f64 {
@@ -576,7 +576,7 @@ fn clamp_ui_font_size(size: f64) -> f32 {
 }
 
 fn default_ui_surface_opacity() -> f64 {
-    0.84
+    1.0
 }
 
 fn clamp_ui_surface_opacity(opacity: f64) -> f64 {
@@ -856,7 +856,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             locale: "zh-CN".to_string(),
-            theme_mode: "light".to_string(),
+            theme_mode: "auto".to_string(),
             auto_switch_theme: false,
             enable_glass_effect: default_true(),
             ui_surface_opacity: default_ui_surface_opacity(),
