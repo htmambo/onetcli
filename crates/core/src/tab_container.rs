@@ -543,7 +543,40 @@ fn should_render_windows_drag_spacer(show_window_controls: bool, is_windows: boo
     show_window_controls && is_windows
 }
 
+fn should_render_inline_drag_spacer(
+    show_window_controls: bool,
+    is_windows: bool,
+    is_linux: bool,
+) -> bool {
+    show_window_controls && (is_windows || is_linux)
+}
+
 const TAB_REORDER_DRAG_THRESHOLD: f64 = 6.0;
+const TAB_ITEM_GAP: Pixels = px(8.0);
+const TAB_HORIZONTAL_PADDING: Pixels = px(24.0);
+const TAB_ICON_WIDTH: Pixels = px(16.0);
+const TAB_CLOSE_BUTTON_WIDTH: Pixels = px(16.0);
+const TAB_PENDING_INDICATOR_WIDTH: Pixels = px(8.0);
+const TAB_COMPACT_ITEM_GAP: Pixels = px(4.0);
+
+fn tab_chrome_width(has_icon: bool, has_pending_indicator: bool, closeable: bool) -> Pixels {
+    let mut width = TAB_HORIZONTAL_PADDING;
+
+    if has_icon {
+        width += TAB_ICON_WIDTH + TAB_ITEM_GAP;
+    }
+
+    if has_pending_indicator {
+        width += TAB_PENDING_INDICATOR_WIDTH + TAB_COMPACT_ITEM_GAP;
+        if closeable {
+            width += TAB_CLOSE_BUTTON_WIDTH + TAB_COMPACT_ITEM_GAP;
+        }
+    } else if closeable {
+        width += TAB_CLOSE_BUTTON_WIDTH + TAB_COMPACT_ITEM_GAP;
+    }
+
+    width
+}
 
 // ============================================================================
 // DragTab - Visual representation during drag
@@ -2192,7 +2225,7 @@ impl TabContainer {
         let title = tab.content().title(cx);
         let theme = cx.theme();
         // text_sm = 0.875rem，与 rem_size（即 theme.font_size）同步
-        let font_size = theme.font_size * 0.875_f32;
+        let font_size = theme.font_size;// * 0.875_f32;
         let text_system = cx.text_system();
         let font_id = text_system.resolve_font(&gpui::font(theme.font_family.clone()));
 
@@ -2214,18 +2247,9 @@ impl TabContainer {
             .sum();
 
         let has_icon = tab.content().icon(cx).is_some();
+        let has_pending_indicator = tab.content().pending_change_level(cx).is_some();
         let closeable = tab.content().closeable(cx);
-
-        // 固定开销：px_3 左右 padding (12+12) + 基础安全边距 8px
-        let mut extras = px(24.0 + 8.0);
-        if has_icon {
-            // icon 区域宽约 16px + gap 8px
-            extras += px(16.0 + 8.0);
-        }
-        if closeable {
-            // close button 16px + gap 8px
-            extras += px(16.0 + 8.0);
-        }
+        let extras = tab_chrome_width(has_icon, has_pending_indicator, closeable);
 
         let calculated = text_width + extras;
         let max_width = self.size_to_pixels(size.unwrap_or(self.size));
@@ -2305,6 +2329,7 @@ impl TabContainer {
             .tab_close_button_color
             .unwrap_or(theme.muted_foreground);
         let drag_border_color = theme.drag_border;
+        let first_tab_corner_radius = theme.radius;
         // Pending change indicator colors
         let indicator_red = theme.red;
         let indicator_yellow = theme.yellow;
@@ -2327,6 +2352,8 @@ impl TabContainer {
         let manual_window_move = uses_manual_window_move(show_window_controls, is_windows);
         let show_windows_drag_spacer =
             should_render_windows_drag_spacer(show_window_controls, is_windows);
+        let show_inline_drag_spacer =
+            should_render_inline_drag_spacer(show_window_controls, is_windows, is_linux);
         // 所有非 macOS 平台都启用 tab 拖拽重排。Windows 上的窗口拖动由
         // WindowControlArea::Drag 独立热区（tab-bar-drag-spacer）处理，
         // 与 tab 自身的 on_drag 互不影响。
@@ -2428,6 +2455,7 @@ impl TabContainer {
                         .when(!is_macos, |el| el.ml(left_padding))
                         .when_some(top_padding, |el, padding| el.mt(padding))
                         .rounded(px(6.0))
+                        .when(!is_macos, |el| el.rounded_tl(first_tab_corner_radius))
                         .when(is_pinned_active, |el| el.bg(active_tab_color))
                         .when(!is_pinned_active, |el| {
                             el.hover(move |style| style.bg(hover_tab_color))
@@ -2601,6 +2629,9 @@ impl TabContainer {
                             .w(tab_width)
                             .px_3()
                             .rounded(px(6.0))
+                            .when(!is_macos && self.pinned_tab.is_none() && idx == 0, |el| {
+                                el.rounded_tl(first_tab_corner_radius)
+                            })
                             .when(is_active, |el| el.bg(active_tab_color))
                             .when(!is_active, |el| {
                                 el.hover(move |style| style.bg(hover_tab_color))
@@ -2626,13 +2657,11 @@ impl TabContainer {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.set_active_index(idx, window, cx);
                             }))
-                            .when(is_active, |el| {
-                                el.cursor_grab()
-                                    .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
-                                    .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
-                                        cx.stop_propagation();
-                                        cx.new(|_| drag.clone())
-                                    })
+                            .cursor_grab()
+                            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
+                            .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
+                                cx.stop_propagation();
+                                cx.new(|_| drag.clone())
                             })
                             // on_drop 和 drag_over 在所有 tab 上注册，接收来自其他 tab 的 drop 事件
                             .drag_over::<DragTab>(move |el, _, _, _cx| {
@@ -2650,68 +2679,75 @@ impl TabContainer {
                                 el.child(div().flex_shrink_0().flex().items_center().child(icon))
                             })
                             .child(
-                                div()
+                                h_flex()
                                     .flex_1()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_sm()
-                                    .text_color(if is_active {
-                                        active_text_color
-                                    } else {
-                                        text_color
-                                    })
-                                    .text_ellipsis()
-                                    .child(title_clone.to_string()),
-                            )
-                            // Pending changes 颜色指示器（圆点）
-                            .when(has_pending_indicator, |el| {
-                                el.child(
-                                    div()
-                                        .flex_shrink_0()
-                                        .w(px(8.0))
-                                        .h(px(8.0))
-                                        .rounded_full()
-                                        .bg(indicator_color)
-                                        .ml(px(-4.0)),
-                                )
-                            })
-                            .when(closeable, |el| {
-                                let view_clone = view_clone.clone();
-                                let close_button_style = ButtonCustomVariant::new(cx)
-                                    .color(cx.theme().transparent)
-                                    .foreground(close_btn_color)
-                                    .border(cx.theme().transparent)
-                                    .hover(cx.theme().warning)
-                                    .active(cx.theme().warning_active);
-                                el.child(
-                                    Button::new(SharedString::from(format!("tab-close-btn-{idx}")))
-                                        .icon(IconName::Close)
-                                        .custom(close_button_style)
-                                        .compact()
-                                        .tab_stop(false)
-                                        .occlude()
-                                        .flex_shrink_0()
-                                        .w(px(16.0))
-                                        .h(px(16.0))
-                                        .min_w(px(16.0))
-                                        .p_0()
-                                        .rounded(px(2.0))
-                                        .cursor_pointer()
-                                        .on_mouse_down(
-                                            MouseButton::Left,
-                                            move |_event, window, cx| {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                            },
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(TAB_COMPACT_ITEM_GAP)
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_sm()
+                                            .text_color(if is_active {
+                                                active_text_color
+                                            } else {
+                                                text_color
+                                            })
+                                            .text_ellipsis()
+                                            .child(title_clone.to_string()),
+                                    )
+                                    .when(has_pending_indicator, |group| {
+                                        group.child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .w(px(8.0))
+                                                .h(px(8.0))
+                                                .rounded_full()
+                                                .bg(indicator_color),
                                         )
-                                        .on_click(move |_, window, cx| {
-                                            cx.stop_propagation();
-                                            view_clone.update(cx, |this, cx| {
-                                                this.close_tab(idx, window, cx).detach();
-                                            });
-                                        }),
-                                )
-                            })
+                                    })
+                                    .when(closeable, |group| {
+                                        let view_clone = view_clone.clone();
+                                        let close_button_style = ButtonCustomVariant::new(cx)
+                                            .color(cx.theme().transparent)
+                                            .foreground(close_btn_color)
+                                            .border(cx.theme().transparent)
+                                            .hover(cx.theme().warning)
+                                            .active(cx.theme().warning_active);
+                                        group.child(
+                                            Button::new(SharedString::from(format!(
+                                                "tab-close-btn-{idx}"
+                                            )))
+                                            .icon(IconName::Close)
+                                            .custom(close_button_style)
+                                            .compact()
+                                            .tab_stop(false)
+                                            .occlude()
+                                            .flex_shrink_0()
+                                            .w(px(16.0))
+                                            .h(px(16.0))
+                                            .min_w(px(16.0))
+                                            .p_0()
+                                            .rounded(px(2.0))
+                                            .cursor_pointer()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_event, window, cx| {
+                                                    window.prevent_default();
+                                                    cx.stop_propagation();
+                                                },
+                                            )
+                                            .on_click(move |_, window, cx| {
+                                                cx.stop_propagation();
+                                                view_clone.update(cx, |this, cx| {
+                                                    this.close_tab(idx, window, cx).detach();
+                                                });
+                                            }),
+                                        )
+                                    }),
+                            )
                             .context_menu(move |menu, window, cx| {
                                 let view_for_menu = view_clone.clone();
                                 let (tab_count, closeable, is_ssh_tab, tab_id) = {
@@ -2825,10 +2861,15 @@ impl TabContainer {
                                 .id("tab-bar-trailing-controls")
                                 .flex_shrink_0()
                                 .items_center()
+                                .occlude()
+                                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                })
                                 .child(view),
                         )
                     })
-                    .when(show_windows_drag_spacer, |this| {
+                    .when(show_inline_drag_spacer, |this| {
                         this.child(
                             div()
                                 .id("tab-bar-inline-drag-spacer")
@@ -2836,7 +2877,38 @@ impl TabContainer {
                                 .min_w(WINDOWS_TAB_BAR_DRAG_SPACER_WIDTH)
                                 .h_full()
                                 .occlude()
-                                .window_control_area(WindowControlArea::Drag),
+                                .when(is_windows, |el| {
+                                    el.window_control_area(WindowControlArea::Drag)
+                                })
+                                .when(manual_window_move, |el| {
+                                    el.on_mouse_down_out(window.listener_for(
+                                        &drag_state,
+                                        |state, _, _, _| {
+                                            state.should_move = false;
+                                        },
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        window.listener_for(&drag_state, |state, _, _, _| {
+                                            state.should_move = true;
+                                        }),
+                                    )
+                                    .on_mouse_up(
+                                        MouseButton::Left,
+                                        window.listener_for(&drag_state, |state, _, _, _| {
+                                            state.should_move = false;
+                                        }),
+                                    )
+                                    .on_mouse_move(window.listener_for(
+                                        &drag_state,
+                                        |state, _, window, _| {
+                                            if state.should_move {
+                                                state.should_move = false;
+                                                window.start_window_move();
+                                            }
+                                        },
+                                    ))
+                                }),
                         )
                     })
                     // Linux 客户端装饰模式下，右键显示窗口菜单。

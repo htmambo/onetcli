@@ -5,9 +5,7 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Subscription,
     Window, WindowBounds, WindowKind, WindowOptions, actions, div, px, size,
 };
-use gpui_component::{
-    ActiveTheme as _, FocusTrapElement, Root, TitleBar, app_style, modal_surface_palette, v_flex,
-};
+use gpui_component::{ActiveTheme as _, FocusTrapElement, Root, TitleBar, app_style, modal_surface_palette, v_flex};
 
 actions!(popup_window, [CancelPopup]);
 
@@ -137,18 +135,14 @@ impl Render for PopupWindowView {
             .bg(surface_palette.content)
             .border_1()
             .border_color(app_style::border_strong())
+            .rounded(cx.theme().radius_lg)
             .text_color(app_style::text())
             .overflow_hidden()
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .focus_trap("popup-window-root", &self.focus_handle)
             .on_action(cx.listener(Self::on_cancel_popup))
-            .child(
-                div()
-                    .size_full()
-                    .bg(surface_palette.content)
-                    .child(self.content.clone()),
-            )
+            .child(div().size_full().child(self.content.clone()))
     }
 }
 

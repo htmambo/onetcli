@@ -848,6 +848,8 @@ impl Render for CertificateEditorView {
             .child(
                 div()
                     .refine_style(&app_style::page_header_style())
+                    .rounded_tl(cx.theme().radius_lg)
+                    .rounded_tr(cx.theme().radius_lg)
                     .border_b_1()
                     .border_color(app_style::border())
                     .px_6()
@@ -884,6 +886,8 @@ impl Render for CertificateEditorView {
                     .px_6()
                     .py_4()
                     .refine_style(&app_style::footer_style())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .border_t_1()
                     .border_color(app_style::border())
                     .child(
