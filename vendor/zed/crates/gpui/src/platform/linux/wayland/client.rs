@@ -876,7 +876,7 @@ impl LinuxClient for WaylandClient {
 
     fn active_window(&self) -> Option<AnyWindowHandle> {
         self.0
-            .borrow_mut()
+            .borrow()
             .keyboard_focused_window
             .as_ref()
             .map(|window| window.handle())
