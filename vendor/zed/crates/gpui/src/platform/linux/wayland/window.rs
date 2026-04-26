@@ -13,7 +13,10 @@ use futures::channel::oneshot::Receiver;
 use raw_window_handle as rwh;
 use wayland_backend::client::ObjectId;
 use wayland_client::WEnum;
-use wayland_client::{Proxy, protocol::wl_surface};
+use wayland_client::{
+    Proxy,
+    protocol::{wl_region, wl_surface},
+};
 use wayland_protocols::wp::viewporter::client::wp_viewport;
 use wayland_protocols::xdg::decoration::zv1::client::zxdg_toplevel_decoration_v1;
 use wayland_protocols::xdg::shell::client::xdg_surface;
@@ -103,6 +106,7 @@ pub struct WaylandWindowState {
     input_handler: Option<PlatformInputHandler>,
     decorations: WindowDecorations,
     background_appearance: WindowBackgroundAppearance,
+    blur_corner_radius: Pixels,
     fullscreen: bool,
     maximized: bool,
     tiling: Tiling,
@@ -363,6 +367,7 @@ impl WaylandWindowState {
             input_handler: None,
             decorations: WindowDecorations::Client,
             background_appearance: WindowBackgroundAppearance::Opaque,
+            blur_corner_radius: Pixels::ZERO,
             fullscreen: false,
             maximized: false,
             tiling: Tiling::default(),
@@ -627,7 +632,9 @@ impl WaylandWindowStatePtr {
             let request_frame_callback = !state.acknowledged_first_configure;
             if request_frame_callback {
                 state.acknowledged_first_configure = true;
-                drop(state);
+            }
+            update_window(state);
+            if request_frame_callback {
                 self.frame();
             }
         }
@@ -1000,8 +1007,10 @@ impl WaylandWindowStatePtr {
     }
 
     pub fn set_appearance(&mut self, appearance: WindowAppearance) {
-        self.state.borrow_mut().appearance = appearance;
-
+        {
+            let mut state = self.state.borrow_mut();
+            state.appearance = appearance;
+        }
         let mut callbacks = self.callbacks.borrow_mut();
         if let Some(ref mut fun) = callbacks.appearance_changed {
             (fun)()
@@ -1220,6 +1229,16 @@ impl PlatformWindow for WaylandWindow {
         update_window(state);
     }
 
+    fn set_blur_behind_corner_radius(&self, radius: Pixels) {
+        let mut state = self.borrow_mut();
+        state.blur_corner_radius = if radius < Pixels::ZERO {
+            Pixels::ZERO
+        } else {
+            radius
+        };
+        update_window(state);
+    }
+
     fn background_appearance(&self) -> WindowBackgroundAppearance {
         self.borrow().background_appearance
     }
@@ -1407,21 +1426,25 @@ impl PlatformWindow for WaylandWindow {
 
 fn update_window(mut state: RefMut<WaylandWindowState>) {
     let opaque = !state.is_transparent();
+    // surface/input/blur region 都是 surface-local 坐标，必须基于当前缓冲区尺寸计算，
+    // 不能混用面向窗口管理器的 window_bounds。
+    let surface_bounds = state.bounds.map_origin(|_| px(0.0));
+    let content_bounds = content_bounds_with_tiling(surface_bounds, state.inset(), state.tiling);
 
     state.renderer.update_transparency(!opaque);
-    let mut opaque_area = state.window_bounds.map(|v| v.0 as i32);
-    opaque_area.inset(state.inset().0 as i32);
 
-    let region = state
+    let opaque_region = state
         .globals
         .compositor
         .create_region(&state.globals.qh, ());
-    region.add(
-        opaque_area.origin.x,
-        opaque_area.origin.y,
-        opaque_area.size.width,
-        opaque_area.size.height,
-    );
+    if content_bounds.size.width > 0 && content_bounds.size.height > 0 {
+        opaque_region.add(
+            content_bounds.origin.x,
+            content_bounds.origin.y,
+            content_bounds.size.width,
+            content_bounds.size.height,
+        );
+    }
 
     // Note that rounded corners make this rectangle API hard to work with.
     // As this is common when using CSD, let's just disable this API.
@@ -1431,7 +1454,7 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
         // Promise the compositor that this region of the window surface
         // contains no transparent pixels. This allows the compositor to skip
         // updating whatever is behind the surface for better performance.
-        state.surface.set_opaque_region(Some(&region));
+        state.surface.set_opaque_region(Some(&opaque_region));
     } else {
         state.surface.set_opaque_region(None);
     }
@@ -1442,7 +1465,23 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
                 let blur = blur_manager.create(&state.surface, &state.globals.qh, ());
                 state.blur = Some(blur);
             }
+            let blur_region = state
+                .globals
+                .compositor
+                .create_region(&state.globals.qh, ());
+            if content_bounds.size.width > 0 && content_bounds.size.height > 0 {
+                populate_blur_region(
+                    &blur_region,
+                    content_bounds,
+                    state.blur_corner_radius.0.round() as i32,
+                    state.tiling,
+                );
+                state.blur.as_ref().unwrap().set_region(Some(&blur_region));
+            } else {
+                state.blur.as_ref().unwrap().set_region(None);
+            }
             state.blur.as_ref().unwrap().commit();
+            blur_region.destroy();
         } else {
             // It probably doesn't hurt to clear the blur for opaque windows
             blur_manager.unset(&state.surface);
@@ -1452,7 +1491,102 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
         }
     }
 
-    region.destroy();
+    opaque_region.destroy();
+}
+
+fn content_bounds_with_tiling(
+    window_bounds: Bounds<Pixels>,
+    inset: Pixels,
+    tiling: Tiling,
+) -> Bounds<i32> {
+    let mut bounds =
+        inset_by_tiling(window_bounds, inset, tiling).map(|value| value.0.round() as i32);
+    bounds.size.width = bounds.size.width.max(0);
+    bounds.size.height = bounds.size.height.max(0);
+    bounds
+}
+
+fn populate_blur_region(
+    region: &wl_region::WlRegion,
+    bounds: Bounds<i32>,
+    radius: i32,
+    tiling: Tiling,
+) {
+    let width = bounds.size.width.max(0);
+    let height = bounds.size.height.max(0);
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let radius = radius.max(0).min(width / 2).min(height / 2);
+    let top_left = if tiling.top || tiling.left { 0 } else { radius };
+    let top_right = if tiling.top || tiling.right {
+        0
+    } else {
+        radius
+    };
+    let bottom_right = if tiling.bottom || tiling.right {
+        0
+    } else {
+        radius
+    };
+    let bottom_left = if tiling.bottom || tiling.left {
+        0
+    } else {
+        radius
+    };
+
+    for row in 0..height {
+        if let Some((left_inset, row_width)) = blur_row_geometry(
+            width,
+            height,
+            row,
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        ) {
+            region.add(
+                bounds.origin.x + left_inset,
+                bounds.origin.y + row,
+                row_width,
+                1,
+            );
+        }
+    }
+}
+
+fn blur_row_geometry(
+    width: i32,
+    height: i32,
+    row: i32,
+    top_left: i32,
+    top_right: i32,
+    bottom_right: i32,
+    bottom_left: i32,
+) -> Option<(i32, i32)> {
+    let bottom_offset = height - 1 - row;
+    let left_inset =
+        rounded_corner_inset(row, top_left).max(rounded_corner_inset(bottom_offset, bottom_left));
+    let right_inset =
+        rounded_corner_inset(row, top_right).max(rounded_corner_inset(bottom_offset, bottom_right));
+    let row_width = width - left_inset - right_inset;
+
+    (row_width > 0).then_some((left_inset, row_width))
+}
+
+fn rounded_corner_inset(offset_from_edge: i32, radius: i32) -> i32 {
+    if radius <= 1 || offset_from_edge >= radius {
+        return 0;
+    }
+
+    let radius = radius as f32;
+    let distance_from_center = radius - offset_from_edge as f32 - 0.5;
+    let chord = (radius.powi(2) - distance_from_center.powi(2))
+        .max(0.0)
+        .sqrt();
+
+    (radius - chord).ceil().max(0.0) as i32
 }
 
 impl WindowDecorations {
@@ -1522,4 +1656,63 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
     }
 
     bounds
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{blur_row_geometry, content_bounds_with_tiling, rounded_corner_inset};
+    use crate::{Bounds, Point, Size, Tiling, px};
+
+    #[test]
+    fn rounded_corner_inset_在圆角边缘返回正内缩() {
+        assert!(rounded_corner_inset(0, 12) > 0);
+        assert_eq!(rounded_corner_inset(12, 12), 0);
+        assert_eq!(rounded_corner_inset(0, 0), 0);
+    }
+
+    #[test]
+    fn content_bounds_with_tiling_只收缩未贴边的阴影区() {
+        let bounds = content_bounds_with_tiling(
+            Bounds {
+                origin: Point::default(),
+                size: Size {
+                    width: px(200.0),
+                    height: px(120.0),
+                },
+            },
+            px(12.0),
+            Tiling {
+                top: true,
+                left: false,
+                right: false,
+                bottom: false,
+            },
+        );
+        assert_eq!(bounds.origin.x, 12);
+        assert_eq!(bounds.origin.y, 0);
+        assert_eq!(bounds.size.width, 176);
+        assert_eq!(bounds.size.height, 108);
+    }
+
+    #[test]
+    fn blur_row_geometry_会在顶部保留圆角内缩() {
+        let first_row = blur_row_geometry(100, 40, 0, 10, 10, 10, 10).unwrap();
+        let center_row = blur_row_geometry(100, 40, 10, 10, 10, 10, 10).unwrap();
+
+        assert!(first_row.0 > 0);
+        assert!(first_row.1 < 100);
+        assert_eq!(center_row.0, 0);
+        assert_eq!(center_row.1, 100);
+    }
+
+    #[test]
+    fn blur_row_geometry_贴边时不裁剪对应圆角() {
+        let top_row = blur_row_geometry(100, 40, 0, 0, 0, 10, 10).unwrap();
+        let bottom_row = blur_row_geometry(100, 40, 39, 0, 0, 10, 10).unwrap();
+
+        assert_eq!(top_row.0, 0);
+        assert_eq!(top_row.1, 100);
+        assert!(bottom_row.0 > 0);
+        assert!(bottom_row.1 < 100);
+    }
 }

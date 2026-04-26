@@ -246,7 +246,7 @@ impl RenderOnce for WindowBorder {
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
                     })
-                    .bg(cx.theme().background)
+                    .bg(cx.theme().transparent)
                     .size_full()
                     .children(self.children),
             )
