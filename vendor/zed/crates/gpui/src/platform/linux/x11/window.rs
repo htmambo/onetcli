@@ -20,6 +20,7 @@ use x11rb::{
     errors::ConnectionError,
     properties::{WmSizeHints, WmSizeHintsSpecification},
     protocol::{
+        shape::{self, ConnectionExt as _},
         sync,
         xinput::{self, ConnectionExt as _},
         xproto::{self, ClientMessageEvent, ConnectionExt, TranslateCoordinatesReply},
@@ -86,6 +87,8 @@ x11rb::atom_manager! {
         _DEEPIN_NO_TITLEBAR,
         _DEEPIN_FORCE_DECORATE,
         _KDE_NET_WM_BLUR_BEHIND_REGION,
+        _NET_WM_DEEPIN_BLUR_REGION_ROUNDED,
+        _NET_WM_DEEPIN_BLUR_REGION_MASK,
         _NET_CLIENT_LIST_STACKING,
     }
 }
@@ -270,6 +273,7 @@ pub struct X11WindowState {
     input_handler: Option<PlatformInputHandler>,
     appearance: WindowAppearance,
     background_appearance: WindowBackgroundAppearance,
+    blur_corner_radius: Pixels,
     maximized_vertical: bool,
     maximized_horizontal: bool,
     hidden: bool,
@@ -294,9 +298,175 @@ fn x11_blur_hint_enabled(background_appearance: WindowBackgroundAppearance) -> b
     matches!(background_appearance, WindowBackgroundAppearance::Blurred)
 }
 
-fn x11_blur_hint_region() -> [u32; 1] {
-    // KWin/Deepin on X11 treat a single zero CARDINAL as "blur the whole window".
-    [0]
+const DEFAULT_X11_BLUR_CORNER_RADIUS: Pixels = Pixels(8.0);
+const X11_DEEPIN_BLUR_AREA_FIELD_COUNT: usize = 6;
+
+fn x11_blur_hint_region(
+    size: Size<Pixels>,
+    corner_radius: Pixels,
+    scale_factor: f32,
+    use_rounded_clip: bool,
+) -> Vec<u32> {
+    if !use_rounded_clip {
+        // KWin/Deepin on X11 treat a single zero CARDINAL as "blur the whole window".
+        return vec![0];
+    }
+
+    let width = x11_scaled_pixel_value(size.width, scale_factor);
+    let height = x11_scaled_pixel_value(size.height, scale_factor);
+    let radius = x11_scaled_pixel_value(corner_radius, scale_factor);
+    let radius = radius.min(width / 2).min(height / 2);
+
+    if width == 0 || height == 0 || radius == 0 {
+        return vec![0];
+    }
+
+    let mut region = Vec::with_capacity(((radius * 2 + 1) * 4) as usize);
+
+    for y in 0..radius {
+        let inset = x11_rounded_corner_inset(y, radius);
+        let row_width = width.saturating_sub(inset * 2);
+        if row_width == 0 {
+            continue;
+        }
+        region.extend_from_slice(&[inset, y, row_width, 1]);
+    }
+
+    let center_height = height.saturating_sub(radius * 2);
+    if center_height > 0 {
+        region.extend_from_slice(&[0, radius, width, center_height]);
+    }
+
+    for y in (height - radius)..height {
+        let inset = x11_rounded_corner_inset(height - 1 - y, radius);
+        let row_width = width.saturating_sub(inset * 2);
+        if row_width == 0 {
+            continue;
+        }
+        region.extend_from_slice(&[inset, y, row_width, 1]);
+    }
+
+    if region.is_empty() {
+        vec![0]
+    } else {
+        region
+    }
+}
+
+fn x11_deepin_blur_region(
+    size: Size<Pixels>,
+    corner_radius: Pixels,
+    scale_factor: f32,
+    use_rounded_clip: bool,
+) -> Vec<u32> {
+    let width = x11_scaled_pixel_value(size.width, scale_factor);
+    let height = x11_scaled_pixel_value(size.height, scale_factor);
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+
+    let radius = if use_rounded_clip {
+        x11_scaled_pixel_value(corner_radius, scale_factor)
+            .min(width / 2)
+            .min(height / 2)
+    } else {
+        0
+    };
+
+    let mut region = Vec::with_capacity(X11_DEEPIN_BLUR_AREA_FIELD_COUNT);
+    region.extend_from_slice(&[0, 0, width, height, radius, radius]);
+    region
+}
+
+fn x11_rounded_corner_inset(y: u32, radius: u32) -> u32 {
+    if radius <= 1 {
+        return 0;
+    }
+
+    let radius = radius as f32;
+    let distance_from_center = radius - y as f32 - 0.5;
+    let chord = (radius.powi(2) - distance_from_center.powi(2))
+        .max(0.0)
+        .sqrt();
+
+    (radius - chord).ceil().max(0.0) as u32
+}
+
+fn x11_window_shape_rectangles(
+    size: Size<Pixels>,
+    corner_radius: Pixels,
+    scale_factor: f32,
+    use_rounded_shape: bool,
+) -> Vec<xproto::Rectangle> {
+    let width = x11_scaled_pixel_value(size.width, scale_factor);
+    let height = x11_scaled_pixel_value(size.height, scale_factor);
+
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+
+    if !use_rounded_shape {
+        return vec![xproto::Rectangle {
+            x: 0,
+            y: 0,
+            width: width.min(u16::MAX as u32) as u16,
+            height: height.min(u16::MAX as u32) as u16,
+        }];
+    }
+
+    let radius = x11_scaled_pixel_value(corner_radius, scale_factor);
+    let radius = radius.min(width / 2).min(height / 2);
+
+    if radius == 0 {
+        return vec![xproto::Rectangle {
+            x: 0,
+            y: 0,
+            width: width.min(u16::MAX as u32) as u16,
+            height: height.min(u16::MAX as u32) as u16,
+        }];
+    }
+
+    let mut rects = Vec::with_capacity((radius * 2 + 1) as usize);
+
+    for y in 0..radius {
+        let inset = x11_rounded_corner_inset(y, radius);
+        let row_width = width.saturating_sub(inset * 2);
+        push_x11_shape_rectangle(&mut rects, inset, y, row_width, 1);
+    }
+
+    let center_height = height.saturating_sub(radius * 2);
+    push_x11_shape_rectangle(&mut rects, 0, radius, width, center_height);
+
+    for y in (height - radius)..height {
+        let inset = x11_rounded_corner_inset(height - 1 - y, radius);
+        let row_width = width.saturating_sub(inset * 2);
+        push_x11_shape_rectangle(&mut rects, inset, y, row_width, 1);
+    }
+
+    rects
+}
+
+fn x11_scaled_pixel_value(value: Pixels, scale_factor: f32) -> u32 {
+    value.scale(scale_factor).0.round().max(0.0) as u32
+}
+
+fn push_x11_shape_rectangle(
+    rects: &mut Vec<xproto::Rectangle>,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    rects.push(xproto::Rectangle {
+        x: x.min(i16::MAX as u32) as i16,
+        y: y.min(i16::MAX as u32) as i16,
+        width: width.min(u16::MAX as u32) as u16,
+        height: height.min(u16::MAX as u32) as u16,
+    });
 }
 
 #[derive(Clone)]
@@ -813,6 +983,7 @@ impl X11WindowState {
                 appearance,
                 handle,
                 background_appearance: WindowBackgroundAppearance::Opaque,
+                blur_corner_radius: DEFAULT_X11_BLUR_CORNER_RADIUS,
                 destroyed: false,
                 client_side_decorations_supported,
                 deepin_no_titlebar_supported,
@@ -1028,33 +1199,163 @@ impl X11Window {
 
 impl X11WindowStatePtr {
     fn sync_background_material_hint(&self) {
-        let (background_appearance, blur_atom) = {
+        let (
+            background_appearance,
+            kde_blur_atom,
+            deepin_blur_atom,
+            deepin_mask_atom,
+            kde_blur_region,
+            deepin_blur_region,
+            use_deepin_blur_region,
+        ) = {
             let state = self.state.borrow();
+            let use_rounded_clip = matches!(state.decorations, WindowDecorations::Client)
+                && !state.fullscreen
+                && !(state.maximized_vertical && state.maximized_horizontal);
+
             (
                 state.background_appearance,
                 state.atoms._KDE_NET_WM_BLUR_BEHIND_REGION,
+                state.atoms._NET_WM_DEEPIN_BLUR_REGION_ROUNDED,
+                state.atoms._NET_WM_DEEPIN_BLUR_REGION_MASK,
+                x11_blur_hint_region(
+                    state.bounds.size,
+                    state.blur_corner_radius,
+                    state.scale_factor,
+                    use_rounded_clip,
+                ),
+                x11_deepin_blur_region(
+                    state.bounds.size,
+                    state.blur_corner_radius,
+                    state.scale_factor,
+                    use_rounded_clip,
+                ),
+                state.deepin_no_titlebar_supported,
             )
         };
 
-        let result = if x11_blur_hint_enabled(background_appearance) {
-            check_reply(
+        let mut should_flush = false;
+        let delete_property = |atom: xproto::Atom, message: &'static str| -> bool {
+            check_reply(|| message, self.xcb.delete_property(self.x_window, atom))
+                .log_err()
+                .is_some()
+        };
+
+        if !x11_blur_hint_enabled(background_appearance) {
+            should_flush |= delete_property(
+                kde_blur_atom,
+                "X11 DeleteProperty for _KDE_NET_WM_BLUR_BEHIND_REGION failed.",
+            );
+            should_flush |= delete_property(
+                deepin_blur_atom,
+                "X11 DeleteProperty for _NET_WM_DEEPIN_BLUR_REGION_ROUNDED failed.",
+            );
+            should_flush |= delete_property(
+                deepin_mask_atom,
+                "X11 DeleteProperty for _NET_WM_DEEPIN_BLUR_REGION_MASK failed.",
+            );
+        } else {
+            should_flush |= delete_property(
+                deepin_mask_atom,
+                "X11 DeleteProperty for _NET_WM_DEEPIN_BLUR_REGION_MASK failed.",
+            );
+
+            if check_reply(
                 || "X11 ChangeProperty32 for _KDE_NET_WM_BLUR_BEHIND_REGION failed.",
                 self.xcb.change_property32(
                     xproto::PropMode::REPLACE,
                     self.x_window,
-                    blur_atom,
+                    kde_blur_atom,
                     xproto::AtomEnum::CARDINAL,
-                    &x11_blur_hint_region(),
+                    &kde_blur_region,
                 ),
             )
-        } else {
-            check_reply(
-                || "X11 DeleteProperty for _KDE_NET_WM_BLUR_BEHIND_REGION failed.",
-                self.xcb.delete_property(self.x_window, blur_atom),
+            .log_err()
+            .is_some()
+            {
+                should_flush = true;
+            }
+
+            if use_deepin_blur_region && !deepin_blur_region.is_empty() {
+                if check_reply(
+                    || "X11 ChangeProperty32 for _NET_WM_DEEPIN_BLUR_REGION_ROUNDED failed.",
+                    self.xcb.change_property32(
+                        xproto::PropMode::REPLACE,
+                        self.x_window,
+                        deepin_blur_atom,
+                        xproto::AtomEnum::CARDINAL,
+                        &deepin_blur_region,
+                    ),
+                )
+                .log_err()
+                .is_some()
+                {
+                    should_flush = true;
+                }
+            } else {
+                should_flush |= delete_property(
+                    deepin_blur_atom,
+                    "X11 DeleteProperty for _NET_WM_DEEPIN_BLUR_REGION_ROUNDED failed.",
+                );
+            }
+        }
+
+        if should_flush {
+            xcb_flush(&self.xcb);
+        }
+    }
+
+    fn sync_window_shape(&self) {
+        let rects = {
+            let state = self.state.borrow();
+            let use_rounded_shape = state.deepin_no_titlebar_supported
+                && matches!(state.decorations, WindowDecorations::Client)
+                && state.background_appearance == WindowBackgroundAppearance::Blurred
+                && !state.fullscreen
+                && !(state.maximized_vertical && state.maximized_horizontal);
+
+            x11_window_shape_rectangles(
+                state.bounds.size,
+                state.blur_corner_radius,
+                state.scale_factor,
+                use_rounded_shape,
             )
         };
 
-        if result.log_err().is_some() {
+        if rects.is_empty() {
+            return;
+        }
+
+        let bounding_result = check_reply(
+            || "X11 Shape Rectangles for bounding region failed.",
+            self.xcb.shape_rectangles(
+                shape::SO::SET,
+                shape::SK::BOUNDING,
+                xproto::ClipOrdering::UNSORTED,
+                self.x_window,
+                0,
+                0,
+                &rects,
+            ),
+        );
+
+        let input_result = check_reply(
+            || "X11 Shape Rectangles for input region failed.",
+            self.xcb.shape_rectangles(
+                shape::SO::SET,
+                shape::SK::INPUT,
+                xproto::ClipOrdering::UNSORTED,
+                self.x_window,
+                0,
+                0,
+                &rects,
+            ),
+        );
+
+        let bounding_ok = bounding_result.log_err().is_some();
+        let input_ok = input_result.log_err().is_some();
+
+        if bounding_ok || input_ok {
             xcb_flush(&self.xcb);
         }
     }
@@ -1071,12 +1372,28 @@ impl X11WindowStatePtr {
     }
 
     pub fn property_notify(&self, event: xproto::PropertyNotifyEvent) -> anyhow::Result<()> {
-        let mut state = self.state.borrow_mut();
-        if event.atom == state.atoms._NET_WM_STATE {
+        let should_sync_background = {
+            let state = self.state.borrow();
+            event.atom == state.atoms._NET_WM_STATE
+        };
+
+        if should_sync_background {
+            let state = self.state.borrow_mut();
             self.set_wm_properties(state)?;
-        } else if event.atom == state.atoms._GTK_EDGE_CONSTRAINTS {
-            self.set_edge_constraints(state)?;
+            self.sync_window_shape();
+            self.sync_background_material_hint();
+        } else {
+            let should_update_edge_constraints = {
+                let state = self.state.borrow();
+                event.atom == state.atoms._GTK_EDGE_CONSTRAINTS
+            };
+
+            if should_update_edge_constraints {
+                let state = self.state.borrow_mut();
+                self.set_edge_constraints(state)?;
+            }
         }
+
         Ok(())
     }
 
@@ -1318,6 +1635,9 @@ impl X11WindowStatePtr {
                 )?;
             }
         }
+
+        self.sync_window_shape();
+        self.sync_background_material_hint();
 
         let mut callbacks = self.callbacks.borrow_mut();
         if let Some((content_size, scale_factor)) = resize_args
@@ -1597,6 +1917,20 @@ impl PlatformWindow for X11Window {
         state.renderer.update_transparency(transparent);
         drop(state);
 
+        self.0.sync_window_shape();
+        self.0.sync_background_material_hint();
+    }
+
+    fn set_blur_behind_corner_radius(&self, radius: Pixels) {
+        let mut state = self.0.state.borrow_mut();
+        state.blur_corner_radius = if radius < Pixels::ZERO {
+            Pixels::ZERO
+        } else {
+            radius
+        };
+        drop(state);
+
+        self.0.sync_window_shape();
         self.0.sync_background_material_hint();
     }
 
@@ -1953,6 +2287,8 @@ impl PlatformWindow for X11Window {
         }
 
         drop(state);
+        self.0.sync_window_shape();
+        self.0.sync_background_material_hint();
         let mut callbacks = self.0.callbacks.borrow_mut();
         if let Some(appearance_changed) = callbacks.appearance_changed.as_mut() {
             appearance_changed();
@@ -1982,9 +2318,9 @@ impl PlatformWindow for X11Window {
 mod tests {
     use super::{
         WmHintPropertyState, maximized_wm_hint_property_state, x11_blur_hint_enabled,
-        x11_blur_hint_region,
+        x11_blur_hint_region, x11_deepin_blur_region, x11_window_shape_rectangles,
     };
-    use crate::WindowBackgroundAppearance;
+    use crate::{Pixels, WindowBackgroundAppearance, px, size};
 
     #[test]
     fn maximized_windows_use_remove_for_restore() {
@@ -2013,6 +2349,77 @@ mod tests {
 
     #[test]
     fn x11_blur_hint_region_defaults_to_whole_window() {
-        assert_eq!(x11_blur_hint_region(), [0]);
+        assert_eq!(
+            x11_blur_hint_region(size(px(200.0), px(120.0)), Pixels::ZERO, 1.0, false),
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn x11_blur_hint_region_can_clip_to_rounded_window() {
+        assert_eq!(
+            x11_blur_hint_region(size(px(10.0), px(8.0)), px(2.0), 1.0, true),
+            vec![
+                1, 0, 8, 1, 1, 1, 8, 1, 0, 2, 10, 4, 1, 6, 8, 1, 1, 7, 8, 1,
+            ]
+        );
+    }
+
+    #[test]
+    fn x11_deepin_blur_region_uses_rounded_full_window_area() {
+        assert_eq!(
+            x11_deepin_blur_region(size(px(10.0), px(8.0)), px(2.0), 1.0, true),
+            vec![0, 0, 10, 8, 2, 2]
+        );
+    }
+
+    #[test]
+    fn x11_deepin_blur_region_uses_device_pixels_on_scaled_displays() {
+        assert_eq!(
+            x11_deepin_blur_region(size(px(10.0), px(8.0)), px(2.0), 2.0, true),
+            vec![0, 0, 20, 16, 4, 4]
+        );
+    }
+
+    #[test]
+    fn x11_window_shape_rectangles_can_clip_to_rounded_window() {
+        let actual = x11_window_shape_rectangles(size(px(10.0), px(8.0)), px(2.0), 1.0, true)
+            .into_iter()
+            .map(|rect| (rect.x, rect.y, rect.width, rect.height))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                (1, 0, 8, 1),
+                (1, 1, 8, 1),
+                (0, 2, 10, 4),
+                (1, 6, 8, 1),
+                (1, 7, 8, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn x11_window_shape_rectangles_use_device_pixels_on_scaled_displays() {
+        let actual = x11_window_shape_rectangles(size(px(10.0), px(8.0)), px(2.0), 2.0, true)
+            .into_iter()
+            .map(|rect| (rect.x, rect.y, rect.width, rect.height))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                (3, 0, 14, 1),
+                (1, 1, 18, 1),
+                (1, 2, 18, 1),
+                (1, 3, 18, 1),
+                (0, 4, 20, 8),
+                (1, 12, 18, 1),
+                (1, 13, 18, 1),
+                (1, 14, 18, 1),
+                (3, 15, 14, 1),
+            ]
+        );
     }
 }

@@ -89,8 +89,7 @@ fn main() {
                 width: px(640.),
                 height: px(480.),
             }),
-            // window_background: AppSettings::global(cx).preferred_window_background(),
-            window_background: WindowBackgroundAppearance::Transparent,
+            window_background: AppSettings::global(cx).preferred_window_background(),
             #[cfg(target_os = "linux")]
             app_id: Some("onetcli".to_string()),
             #[cfg(target_os = "linux")]
@@ -101,6 +100,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
+                window.set_blur_behind_corner_radius(AppSettings::global(cx).window_corner_radius());
                 window.activate_window();
                 app_init::init_window_systems(window, cx);
                 update::schedule_update_check(window, cx);

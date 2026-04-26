@@ -524,6 +524,7 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn background_appearance(&self) -> WindowBackgroundAppearance;
     fn set_title(&mut self, title: &str);
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance);
+    fn set_blur_behind_corner_radius(&self, _radius: Pixels) {}
     fn minimize(&self);
     fn zoom(&self);
     fn toggle_fullscreen(&self);

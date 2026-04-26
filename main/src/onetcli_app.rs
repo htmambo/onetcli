@@ -1286,6 +1286,7 @@ impl OnetCliApp {
             .justify_between()
             .rounded_bl(cx.theme().radius)
             .rounded_br(cx.theme().radius)
+            .overflow_hidden()
             .border_t_1()
             .border_color(cx.theme().border)
             .bg(layered_level_surface_color(

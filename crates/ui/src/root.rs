@@ -468,6 +468,8 @@ impl Render for Root {
                 .size_full()
                 .font_family(cx.theme().font_family.clone())
                 .bg(cx.theme().transparent)
+                .rounded(cx.theme().radius_lg)
+                .overflow_hidden()
                 .text_color(cx.theme().foreground)
                 .refine_style(&self.style)
                 .child(self.view.clone()),

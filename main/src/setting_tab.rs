@@ -1030,7 +1030,7 @@ impl AppSettings {
             return WindowBackgroundAppearance::Blurred;
         }
 
-        if !self.enable_glass_effect && self.backdrop_opacity >= 1.0 {
+        if !self.enable_glass_effect {
             return WindowBackgroundAppearance::Opaque;
         }
 
@@ -1052,6 +1052,10 @@ impl AppSettings {
         {
             return WindowBackgroundAppearance::Opaque;
         }
+    }
+
+    pub fn window_corner_radius(&self) -> Pixels {
+        px((self.radius + 2.0) as f32)
     }
 
     pub fn save_global(cx: &mut App) {
@@ -1220,14 +1224,16 @@ impl AppSettings {
         theme.scrollbar_show = scrollbar_show;
         theme.mono_font_family = self.mono_font_family.clone().into();
         theme.radius = px(self.radius as f32);
-        theme.radius_lg = px((self.radius + 2.0) as f32);
+        theme.radius_lg = self.window_corner_radius();
         theme.shadow = self.shadow;
     }
 
     fn apply_window_background_preferences(&self, cx: &mut App) {
         let background = self.preferred_window_background();
+        let corner_radius = self.window_corner_radius();
         for window_handle in cx.windows() {
             let _ = window_handle.update(cx, |_, window, _| {
+                window.set_blur_behind_corner_radius(corner_radius);
                 window.set_background_appearance(background);
                 window.refresh();
             });
@@ -2920,8 +2926,8 @@ mod tests {
     use super::parse_deepin_theme_appearance;
     use super::{
         AppSettings, GlobalProxySettings, ProxyType, SavedWindowBounds, SavedWindowDisplayState,
-        centered_window_bounds_within_visible_area, clamp_glass_opacity, editable_sync_server_url,
-        normalize_sync_server_url,
+        centered_window_bounds_within_visible_area, clamp_ui_surface_opacity,
+        editable_sync_server_url, normalize_sync_server_url,
     };
     use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
@@ -3010,6 +3016,17 @@ mod tests {
         assert_eq!(
             settings.preferred_window_background(),
             WindowBackgroundAppearance::Opaque
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_开启毛玻璃时仍请求模糊背景() {
+        let settings = AppSettings::default();
+
+        assert_eq!(
+            settings.preferred_window_background(),
+            WindowBackgroundAppearance::Blurred
         );
     }
 
@@ -3257,7 +3274,7 @@ impl Render for SettingsPanel {
             cx.theme().sidebar,
             blur_enabled,
             window_opacity,
-            2,
+            1,
             WindowsSurfaceLayer::ContentBase,
         );
         // 与首页右侧内容区保持一致，形成统一的内容底板层级。

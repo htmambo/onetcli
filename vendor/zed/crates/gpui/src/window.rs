@@ -2011,6 +2011,11 @@ impl Window {
             .set_background_appearance(background_appearance);
     }
 
+    /// 设置平台窗口 blur-behind 的圆角半径。
+    pub fn set_blur_behind_corner_radius(&self, radius: Pixels) {
+        self.platform_window.set_blur_behind_corner_radius(radius);
+    }
+
     /// Mark the window as dirty at the platform level.
     pub fn set_window_edited(&mut self, edited: bool) {
         self.platform_window.set_edited(edited);

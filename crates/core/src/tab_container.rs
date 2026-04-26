@@ -2432,6 +2432,7 @@ impl TabContainer {
                 // .pl(px(4.0))
                 // .pr(px(4.0))
             })
+            .overflow_hidden()
             .items_center()
             .border_b_1()
             .border_color(border_color)
