@@ -727,18 +727,6 @@ impl WaylandWindowStatePtr {
                     tiling = Tiling::tiled();
                 }
                 tiling = normalize_csd_tiling(tiling);
-                eprintln!(
-                    "[onetcli-wayland] configure fullscreen={} maximized={} resizing={} tiling=({}, {}, {}, {}) size={:?}",
-                    fullscreen,
-                    maximized,
-                    resizing,
-                    tiling.top,
-                    tiling.left,
-                    tiling.right,
-                    tiling.bottom,
-                    size
-                );
-
                 let mut state = self.state.borrow_mut();
                 state.in_progress_configure = Some(InProgressConfigure {
                     size,
@@ -1448,20 +1436,6 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
     let surface_bounds = state.bounds.map_origin(|_| px(0.0));
     let inset = state.inset();
     let content_bounds = content_bounds_with_tiling(surface_bounds, inset, state.tiling);
-    eprintln!(
-        "[onetcli-wayland] update bounds={:?} inset=({}, {}, {}, {}) tiling=({}, {}, {}, {}) content={:?}",
-        surface_bounds,
-        inset.top,
-        inset.left,
-        inset.right,
-        inset.bottom,
-        state.tiling.top,
-        state.tiling.left,
-        state.tiling.right,
-        state.tiling.bottom,
-        content_bounds
-    );
-
     state.renderer.update_transparency(!opaque);
 
     let opaque_region = state
@@ -1614,11 +1588,23 @@ fn blur_row_geometry(
     let bottom_offset = height - 1 - row;
     let left_inset =
         rounded_corner_inset(row, top_left).max(rounded_corner_inset(bottom_offset, bottom_left));
-    let right_inset =
-        rounded_corner_inset(row, top_right).max(rounded_corner_inset(bottom_offset, bottom_right));
+    let right_inset = kwin_guarded_right_corner_inset(
+        rounded_corner_inset(row, top_right)
+            .max(rounded_corner_inset(bottom_offset, bottom_right)),
+    );
     let row_width = width - left_inset - right_inset;
 
     (row_width > 0).then_some((left_inset, row_width))
+}
+
+fn kwin_guarded_right_corner_inset(inset: i32) -> i32 {
+    // KWin 的 Wayland blur region 在右侧圆角上偶尔会残留 1px 外溢，
+    // 给右侧圆角额外收一列，避免右上/右下角露出背景。
+    if inset > 0 {
+        inset + 1
+    } else {
+        inset
+    }
 }
 
 fn rounded_corner_inset(offset_from_edge: i32, radius: i32) -> i32 {
@@ -1711,8 +1697,8 @@ fn inset_by_tiling(
 #[cfg(test)]
 mod tests {
     use super::{
-        blur_row_geometry, compute_outer_size, content_bounds_with_tiling, normalize_csd_tiling,
-        rounded_corner_inset,
+        blur_row_geometry, compute_outer_size, content_bounds_with_tiling,
+        kwin_guarded_right_corner_inset, normalize_csd_tiling, rounded_corner_inset,
     };
     use crate::{Bounds, Edges, Point, Size, Tiling, px};
 
@@ -1840,5 +1826,11 @@ mod tests {
         assert_eq!(top_row.1, 100);
         assert!(bottom_row.0 > 0);
         assert!(bottom_row.1 < 100);
+    }
+
+    #[test]
+    fn kwin_guarded_right_corner_inset_仅在右侧圆角时增加安全边() {
+        assert_eq!(kwin_guarded_right_corner_inset(0), 0);
+        assert_eq!(kwin_guarded_right_corner_inset(3), 4);
     }
 }
