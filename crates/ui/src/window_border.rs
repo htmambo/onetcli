@@ -16,6 +16,19 @@ pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
 const BORDER_SIZE: Pixels = px(1.0);
 
+#[cfg(target_os = "linux")]
+fn linux_uses_wayland_session() -> bool {
+    std::env::var("XDG_SESSION_TYPE")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("wayland"))
+        || std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_uses_wayland_session() -> bool {
+    false
+}
+
 /// Create a new window border.
 pub fn window_border() -> WindowBorder {
     WindowBorder::new()
@@ -53,11 +66,13 @@ impl WindowBorder {
 
 /// Get the window paddings.
 pub fn window_paddings(window: &Window) -> Edges<Pixels> {
-    let shadow_size = window.client_inset().unwrap_or(SHADOW_SIZE);
+    let shadow_size = window
+        .client_inset_edges()
+        .unwrap_or_else(|| Edges::all(window.client_inset().unwrap_or(SHADOW_SIZE)));
     match window.window_decorations() {
         Decorations::Server => Edges::all(px(0.0)),
         Decorations::Client { tiling } => {
-            let mut paddings = Edges::all(shadow_size);
+            let mut paddings = shadow_size;
             if tiling.top {
                 paddings.top = px(0.0);
             }
@@ -86,6 +101,8 @@ impl RenderOnce for WindowBorder {
         let decorations = window.window_decorations();
         let shadow_size = self.shadow_size;
         let border_radius = cx.theme().radius_lg;
+        let hide_client_top_border =
+            cfg!(target_os = "linux") && matches!(decorations, Decorations::Client { .. });
         #[cfg(target_os = "linux")]
         let prefers_system_frame =
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
@@ -109,7 +126,18 @@ impl RenderOnce for WindowBorder {
 
         // Deepin/X11 的系统标题栏路径下不要继续声明自绘边框范围，
         // 否则窗口管理器可能把窗口当成仍在使用客户端边框。
-        window.set_client_inset(client_inset);
+        if prefers_system_frame {
+            window.set_client_inset(px(0.0));
+        } else if linux_uses_wayland_session() {
+            window.set_client_inset_edges(Edges {
+                top: px(0.0),
+                right: client_inset,
+                bottom: client_inset,
+                left: client_inset,
+            });
+        } else {
+            window.set_client_inset(client_inset);
+        }
 
         div()
             .id("window-backdrop")
@@ -176,10 +204,10 @@ impl RenderOnce for WindowBorder {
                     .when(!(tiling.bottom || tiling.left), |div| {
                         div.rounded_bl(border_radius)
                     })
-                    .when(!tiling.top, |div| div.pt(shadow_size))
                     .when(!tiling.bottom, |div| div.pb(shadow_size))
                     .when(!tiling.left, |div| div.pl(shadow_size))
                     .when(!tiling.right, |div| div.pr(shadow_size))
+                    .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, move |_, window, _| {
                         let Decorations::Client { tiling } = window.window_decorations() else {
                             return;
@@ -217,20 +245,22 @@ impl RenderOnce for WindowBorder {
                                 div.rounded_bl(border_radius)
                             })
                             .border_color(cx.theme().window_border)
-                            .when(!tiling.top, |div| div.border_t(BORDER_SIZE))
+                            .when(!tiling.top && !hide_client_top_border, |div| {
+                                div.border_t(BORDER_SIZE)
+                            })
                             .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
                             .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
                             .when(!tiling.right, |div| div.border_r(BORDER_SIZE))
-                            .when(!tiling.is_tiled(), |div| {
+                            .when(!tiling.is_tiled() && cx.theme().shadow, |div| {
                                 div.shadow(vec![gpui::BoxShadow {
                                     color: Hsla {
                                         h: 0.,
                                         s: 0.,
                                         l: 0.,
-                                        a: 0.3,
+                                        a: 0.14,
                                     },
-                                    blur_radius: shadow_size / 2.,
-                                    spread_radius: px(0.),
+                                    blur_radius: shadow_size * 0.75,
+                                    spread_radius: -shadow_size / 3.,
                                     offset: point(px(0.0), px(0.0)),
                                 }])
                             }),

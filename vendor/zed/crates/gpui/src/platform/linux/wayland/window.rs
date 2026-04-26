@@ -29,7 +29,7 @@ use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 use crate::{
-    AnyWindowHandle, Bounds, Decorations, Globals, GpuSpecs, Modifiers, Output, Pixels,
+    AnyWindowHandle, Bounds, Decorations, Edges, Globals, GpuSpecs, Modifiers, Output, Pixels,
     PlatformDisplay, PlatformInput, Point, PromptButton, PromptLevel, RequestFrameOptions,
     ResizeEdge, Size, Tiling, WaylandClientStatePtr, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, WindowControlArea, WindowControls, WindowDecorations, WindowParams, get_window,
@@ -119,7 +119,7 @@ pub struct WaylandWindowState {
     resize_throttle: bool,
     in_progress_window_controls: Option<WindowControls>,
     window_controls: WindowControls,
-    client_inset: Option<Pixels>,
+    client_inset: Option<Edges<Pixels>>,
 }
 
 pub enum WaylandSurfaceState {
@@ -407,10 +407,10 @@ impl WaylandWindowState {
         scale
     }
 
-    pub fn inset(&self) -> Pixels {
+    pub fn inset(&self) -> Edges<Pixels> {
         match self.decorations {
-            WindowDecorations::Server => px(0.0),
-            WindowDecorations::Client => self.client_inset.unwrap_or(px(0.0)),
+            WindowDecorations::Server => Edges::all(px(0.0)),
+            WindowDecorations::Client => self.client_inset.unwrap_or(Edges::all(px(0.0))),
         }
     }
 }
@@ -726,6 +726,18 @@ impl WaylandWindowStatePtr {
                 if fullscreen || maximized {
                     tiling = Tiling::tiled();
                 }
+                tiling = normalize_csd_tiling(tiling);
+                eprintln!(
+                    "[onetcli-wayland] configure fullscreen={} maximized={} resizing={} tiling=({}, {}, {}, {}) size={:?}",
+                    fullscreen,
+                    maximized,
+                    resizing,
+                    tiling.top,
+                    tiling.left,
+                    tiling.right,
+                    tiling.bottom,
+                    size
+                );
 
                 let mut state = self.state.borrow_mut();
                 state.in_progress_configure = Some(InProgressConfigure {
@@ -1089,8 +1101,9 @@ impl PlatformWindow for WaylandWindow {
             WindowBounds::Maximized(state.window_bounds)
         } else {
             let inset = state.inset();
+            let tiling = state.tiling;
             drop(state);
-            WindowBounds::Windowed(self.bounds().inset(inset))
+            WindowBounds::Windowed(inset_by_tiling(self.bounds(), inset, tiling))
         }
     }
 
@@ -1402,9 +1415,13 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn set_client_inset(&self, inset: Pixels) {
+        self.set_client_inset_edges(Edges::all(inset));
+    }
+
+    fn set_client_inset_edges(&self, insets: Edges<Pixels>) {
         let mut state = self.borrow_mut();
-        if Some(inset) != state.client_inset {
-            state.client_inset = Some(inset);
+        if Some(insets) != state.client_inset {
+            state.client_inset = Some(insets);
             update_window(state);
         }
     }
@@ -1429,7 +1446,21 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
     // surface/input/blur region 都是 surface-local 坐标，必须基于当前缓冲区尺寸计算，
     // 不能混用面向窗口管理器的 window_bounds。
     let surface_bounds = state.bounds.map_origin(|_| px(0.0));
-    let content_bounds = content_bounds_with_tiling(surface_bounds, state.inset(), state.tiling);
+    let inset = state.inset();
+    let content_bounds = content_bounds_with_tiling(surface_bounds, inset, state.tiling);
+    eprintln!(
+        "[onetcli-wayland] update bounds={:?} inset=({}, {}, {}, {}) tiling=({}, {}, {}, {}) content={:?}",
+        surface_bounds,
+        inset.top,
+        inset.left,
+        inset.right,
+        inset.bottom,
+        state.tiling.top,
+        state.tiling.left,
+        state.tiling.right,
+        state.tiling.bottom,
+        content_bounds
+    );
 
     state.renderer.update_transparency(!opaque);
 
@@ -1494,9 +1525,24 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
     opaque_region.destroy();
 }
 
+fn normalize_csd_tiling(mut tiling: Tiling) -> Tiling {
+    // KWin/Wayland 有时会给普通窗口上报单侧 tiled state（例如只有 right=true），
+    // 这会让 CSD 误以为对应圆角应该被抹平，表现为右上/右下角仍然方形。
+    // 真正的半屏/全屏平铺会同时带上另一轴状态，因此仅清理孤立单轴贴边。
+    if (tiling.left || tiling.right) && !tiling.top && !tiling.bottom {
+        tiling.left = false;
+        tiling.right = false;
+    }
+    if (tiling.top || tiling.bottom) && !tiling.left && !tiling.right {
+        tiling.top = false;
+        tiling.bottom = false;
+    }
+    tiling
+}
+
 fn content_bounds_with_tiling(
     window_bounds: Bounds<Pixels>,
-    inset: Pixels,
+    inset: Edges<Pixels>,
     tiling: Tiling,
 ) -> Bounds<i32> {
     let mut bounds =
@@ -1617,42 +1663,46 @@ impl ResizeEdge {
 /// updating to account for the client decorations. But that's not the area we want to render
 /// to, due to our intrusize CSD. So, here we calculate the 'actual' size, by adding back in the insets
 fn compute_outer_size(
-    inset: Pixels,
+    inset: Edges<Pixels>,
     new_size: Option<Size<Pixels>>,
     tiling: Tiling,
 ) -> Option<Size<Pixels>> {
     new_size.map(|mut new_size| {
         if !tiling.top {
-            new_size.height += inset;
+            new_size.height += inset.top;
         }
         if !tiling.bottom {
-            new_size.height += inset;
+            new_size.height += inset.bottom;
         }
         if !tiling.left {
-            new_size.width += inset;
+            new_size.width += inset.left;
         }
         if !tiling.right {
-            new_size.width += inset;
+            new_size.width += inset.right;
         }
 
         new_size
     })
 }
 
-fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) -> Bounds<Pixels> {
+fn inset_by_tiling(
+    mut bounds: Bounds<Pixels>,
+    inset: Edges<Pixels>,
+    tiling: Tiling,
+) -> Bounds<Pixels> {
     if !tiling.top {
-        bounds.origin.y += inset;
-        bounds.size.height -= inset;
+        bounds.origin.y += inset.top;
+        bounds.size.height -= inset.top;
     }
     if !tiling.bottom {
-        bounds.size.height -= inset;
+        bounds.size.height -= inset.bottom;
     }
     if !tiling.left {
-        bounds.origin.x += inset;
-        bounds.size.width -= inset;
+        bounds.origin.x += inset.left;
+        bounds.size.width -= inset.left;
     }
     if !tiling.right {
-        bounds.size.width -= inset;
+        bounds.size.width -= inset.right;
     }
 
     bounds
@@ -1660,8 +1710,11 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{blur_row_geometry, content_bounds_with_tiling, rounded_corner_inset};
-    use crate::{Bounds, Point, Size, Tiling, px};
+    use super::{
+        blur_row_geometry, compute_outer_size, content_bounds_with_tiling, normalize_csd_tiling,
+        rounded_corner_inset,
+    };
+    use crate::{Bounds, Edges, Point, Size, Tiling, px};
 
     #[test]
     fn rounded_corner_inset_在圆角边缘返回正内缩() {
@@ -1680,7 +1733,7 @@ mod tests {
                     height: px(120.0),
                 },
             },
-            px(12.0),
+            Edges::all(px(12.0)),
             Tiling {
                 top: true,
                 left: false,
@@ -1692,6 +1745,79 @@ mod tests {
         assert_eq!(bounds.origin.y, 0);
         assert_eq!(bounds.size.width, 176);
         assert_eq!(bounds.size.height, 108);
+    }
+
+    #[test]
+    fn content_bounds_with_tiling_支持顶部零内边距() {
+        let bounds = content_bounds_with_tiling(
+            Bounds {
+                origin: Point::default(),
+                size: Size {
+                    width: px(200.0),
+                    height: px(120.0),
+                },
+            },
+            Edges {
+                top: px(0.0),
+                right: px(12.0),
+                bottom: px(12.0),
+                left: px(12.0),
+            },
+            Tiling::default(),
+        );
+        assert_eq!(bounds.origin.x, 12);
+        assert_eq!(bounds.origin.y, 0);
+        assert_eq!(bounds.size.width, 176);
+        assert_eq!(bounds.size.height, 108);
+    }
+
+    #[test]
+    fn normalize_csd_tiling_会清理孤立右贴边() {
+        let tiling = normalize_csd_tiling(Tiling {
+            right: true,
+            ..Tiling::default()
+        });
+        assert_eq!(tiling, Tiling::default());
+    }
+
+    #[test]
+    fn normalize_csd_tiling_保留右半屏贴边() {
+        let tiling = normalize_csd_tiling(Tiling {
+            top: true,
+            right: true,
+            bottom: true,
+            ..Tiling::default()
+        });
+        assert_eq!(
+            tiling,
+            Tiling {
+                top: true,
+                right: true,
+                bottom: true,
+                ..Tiling::default()
+            }
+        );
+    }
+
+    #[test]
+    fn compute_outer_size_支持不对称边距() {
+        let size = compute_outer_size(
+            Edges {
+                top: px(0.0),
+                right: px(12.0),
+                bottom: px(12.0),
+                left: px(12.0),
+            },
+            Some(Size {
+                width: px(200.0),
+                height: px(120.0),
+            }),
+            Tiling::default(),
+        )
+        .unwrap();
+
+        assert_eq!(size.width, px(224.0));
+        assert_eq!(size.height, px(132.0));
     }
 
     #[test]

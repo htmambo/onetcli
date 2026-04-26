@@ -2338,6 +2338,11 @@ impl TabContainer {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let view = cx.entity();
+        let is_linux = cfg!(target_os = "linux");
+        let is_macos = cfg!(target_os = "macos");
+        let is_windows = cfg!(target_os = "windows");
+        let is_client_decorated = matches!(window.window_decorations(), Decorations::Client { .. });
+        let show_window_controls = self.show_window_controls;
 
         let theme = cx.theme();
         let is_dark_theme = theme.is_dark();
@@ -2393,11 +2398,6 @@ impl TabContainer {
         let tab_list_popover_open = self.list_popover_open;
 
         // 窗口拖动状态管理（仅在 Windows/Linux 上需要，且启用窗口控件时）
-        let is_linux = cfg!(target_os = "linux");
-        let is_macos = cfg!(target_os = "macos");
-        let is_windows = cfg!(target_os = "windows");
-        let is_client_decorated = matches!(window.window_decorations(), Decorations::Client { .. });
-        let show_window_controls = self.show_window_controls;
         let show_custom_window_controls =
             show_window_controls && should_render_custom_window_controls(window);
         let manual_window_move = uses_manual_window_move(show_window_controls, is_windows);

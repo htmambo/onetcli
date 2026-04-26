@@ -949,6 +949,7 @@ pub struct Window {
     pub(crate) pending_input_observers: SubscriberSet<(), AnyObserver>,
     prompt: Option<RenderablePromptHandle>,
     pub(crate) client_inset: Option<Pixels>,
+    pub(crate) client_inset_edges: Option<Edges<Pixels>>,
     #[cfg(any(feature = "inspector", debug_assertions))]
     inspector: Option<Entity<Inspector>>,
 }
@@ -1433,6 +1434,7 @@ impl Window {
             pending_input_observers: SubscriberSet::new(),
             prompt: None,
             client_inset: None,
+            client_inset_edges: None,
             image_cache_stack: Vec::new(),
             #[cfg(any(feature = "inspector", debug_assertions))]
             inspector: None,
@@ -1977,12 +1979,31 @@ impl Window {
     /// When using client side decorations, set this to the width of the invisible decorations (Wayland and X11)
     pub fn set_client_inset(&mut self, inset: Pixels) {
         self.client_inset = Some(inset);
+        self.client_inset_edges = Some(Edges::all(inset));
         self.platform_window.set_client_inset(inset);
     }
 
     /// Returns the client_inset value by [`Self::set_client_inset`].
     pub fn client_inset(&self) -> Option<Pixels> {
         self.client_inset
+    }
+
+    /// When using client-side decorations, set asymmetric invisible decoration insets.
+    pub fn set_client_inset_edges(&mut self, insets: Edges<Pixels>) {
+        self.client_inset = Some(
+            insets
+                .top
+                .max(insets.right)
+                .max(insets.bottom)
+                .max(insets.left),
+        );
+        self.client_inset_edges = Some(insets);
+        self.platform_window.set_client_inset_edges(insets);
+    }
+
+    /// Returns the per-edge client inset value if one was set explicitly.
+    pub fn client_inset_edges(&self) -> Option<Edges<Pixels>> {
+        self.client_inset_edges
     }
 
     /// Returns whether the title bar window controls need to be rendered by the application (Wayland and X11)
