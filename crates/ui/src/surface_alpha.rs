@@ -53,8 +53,7 @@ pub fn level_surface_color(
     // 关闭毛玻璃时，层级差异应通过颜色本身区分，不再增加 alpha，
     // 否则子层级反而更不透明，桌面透出效果变差。
     let alpha = if blur_enabled {
-        backdrop_opacity
-        //  + (level_ratio - 0.0) * LEVEL_RATIO_BASELINE
+        backdrop_opacity + (level_ratio - LEVEL_RATIO_BASELINE)
     } else {
         backdrop_opacity
     };
