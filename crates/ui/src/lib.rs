@@ -2,6 +2,7 @@ use gpui::{App, SharedString};
 use std::ops::Deref;
 
 mod anchored;
+pub mod app_style;
 mod element_ext;
 mod event;
 mod focus_trap;
@@ -13,6 +14,8 @@ mod index_path;
 mod inspector;
 mod root;
 mod styled;
+
+mod system_notification;
 mod time;
 mod title_bar;
 mod virtual_list;
@@ -71,6 +74,7 @@ pub mod table;
 pub mod tag;
 pub mod text;
 pub mod theme;
+pub mod tokens;
 pub mod tooltip;
 pub mod tree;
 
@@ -87,6 +91,8 @@ pub use input::{BlinkCursor, Rope, RopeExt, RopeLines};
 pub use inspector::*;
 pub use root::Root;
 pub use styled::*;
+
+pub use system_notification::{SystemNotificationOptions, show_system_notification};
 pub use theme::*;
 pub use time::{calendar, date_picker, datetime_picker, time_picker};
 pub use title_bar::*;

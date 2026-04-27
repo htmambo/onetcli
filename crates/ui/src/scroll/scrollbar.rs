@@ -17,19 +17,31 @@ use gpui::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The width of the scrollbar (THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH)
-const WIDTH: Pixels = px(4. * 2. + 8.);
+/// 滚动条总宽度 = THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH = 12px
+/// 用于滚动条本身的渲染尺寸，以及水平滚动条的高度
+const WIDTH: Pixels = px(4. * 3.);
+/// 滑块（thumb）最小高度，单位为像素。防止内容区域过大时滑块过小难以拖拽
 const MIN_THUMB_SIZE: f32 = 48.;
 
-const THUMB_WIDTH: Pixels = px(6.);
-const THUMB_RADIUS: Pixels = px(6. / 2.);
+/// 空闲/默认状态下滑块的尺寸参数
+/// 空闲状态：滚动条静置时只显示细长滑块，宽度 2px
+const THUMB_WIDTH: Pixels = px(2.);
+/// 空闲状态滑块的圆角半径（2px / 2 = 1px）
+const THUMB_RADIUS: Pixels = px(1.);
+/// 空闲状态滑块距滚动条边缘的距离，决定滑块在滚动条槽内的位置
 const THUMB_INSET: Pixels = px(4.);
 
-const THUMB_ACTIVE_WIDTH: Pixels = px(8.);
-const THUMB_ACTIVE_RADIUS: Pixels = px(8. / 2.);
+/// 悬停/激活状态下滑块的尺寸参数
+/// 激活状态：鼠标悬停或拖拽时滑块变宽（4px），更易操作
+const THUMB_ACTIVE_WIDTH: Pixels = px(4.);
+/// 激活状态滑块的圆角半径（4px / 2 = 2px）
+const THUMB_ACTIVE_RADIUS: Pixels = px(2.);
+/// 激活状态滑块距滚动条边缘的距离
 const THUMB_ACTIVE_INSET: Pixels = px(4.);
 
+/// 滚动条淡出动画总时长（秒）。滚动停止后，滚动条在该时间段内逐渐淡出消失
 const FADE_OUT_DURATION: f32 = 3.0;
+/// 滚动条淡出延迟（秒）。滚动停止后等待该时间后才开始淡出动画
 const FADE_OUT_DELAY: f32 = 2.0;
 
 /// Scrollbar show mode.
@@ -388,7 +400,7 @@ impl Scrollbar {
     }
 
     // Get the width of the scrollbar.
-    pub(crate) const fn width() -> Pixels {
+    pub const fn width() -> Pixels {
         WIDTH
     }
 

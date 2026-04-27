@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
+    ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, WindowExt,
+    h_flex,
 };
 use gpui::{
     AnyElement, App, ClickEvent, Context, Decorations, Hsla, InteractiveElement, IntoElement,
@@ -16,6 +17,49 @@ pub const TITLE_BAR_HEIGHT: Pixels = px(34.);
 const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 #[cfg(not(target_os = "macos"))]
 const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
+
+#[cfg(any(test, target_os = "linux"))]
+fn desktop_prefers_system_window_controls(
+    current_desktop: Option<&str>,
+    desktop_session: Option<&str>,
+) -> bool {
+    [current_desktop, desktop_session]
+        .into_iter()
+        .flatten()
+        .map(|value| value.to_ascii_lowercase())
+        .any(|value| value.contains("deepin") || value.contains("dde"))
+}
+
+#[cfg(target_os = "linux")]
+pub fn linux_prefers_system_window_controls() -> bool {
+    let current_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    let desktop_session = std::env::var("DESKTOP_SESSION").ok();
+
+    desktop_prefers_system_window_controls(current_desktop.as_deref(), desktop_session.as_deref())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn linux_prefers_system_window_controls() -> bool {
+    false
+}
+
+pub fn should_render_custom_window_controls(window: &Window) -> bool {
+    if cfg!(target_os = "macos") {
+        return false;
+    }
+
+    if cfg!(target_os = "linux") {
+        return matches!(window.window_decorations(), Decorations::Client { .. });
+    }
+
+    let _ = window;
+    true
+}
+
+fn should_round_window_controls(window: &Window) -> bool {
+    let _ = window;
+    cfg!(target_os = "linux") && linux_prefers_system_window_controls()
+}
 
 /// TitleBar used to customize the appearance of the title bar.
 ///
@@ -149,12 +193,22 @@ impl ControlIcon {
 }
 
 impl RenderOnce for ControlIcon {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
-        let hover_fg = self.hover_fg(cx);
-        let hover_bg = self.hover_bg(cx);
+        let unify_hover_style = should_round_window_controls(window);
+        let hover_fg = if unify_hover_style {
+            cx.theme().danger_foreground
+        } else {
+            self.hover_fg(cx)
+        };
+        let hover_bg = if unify_hover_style {
+            cx.theme().danger
+        } else {
+            self.hover_bg(cx)
+        };
         let active_bg = self.active_bg(cx);
+        let should_round_self = should_round_window_controls(window);
         let icon = self.clone();
         let on_close_window = match &self {
             ControlIcon::Close { on_close_window } => on_close_window.clone(),
@@ -171,6 +225,9 @@ impl RenderOnce for ControlIcon {
             .content_center()
             .items_center()
             .text_color(cx.theme().foreground)
+            .when(should_round_self, |this| {
+                this.rounded(cx.theme().radius_lg).overflow_hidden()
+            })
             .hover(|style| style.bg(hover_bg).text_color(hover_fg))
             .active(|style| style.bg(active_bg).text_color(hover_fg))
             .when(is_windows, |this| {
@@ -206,7 +263,7 @@ struct WindowControls {
 }
 
 impl RenderOnce for WindowControls {
-    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         if cfg!(target_os = "macos") {
             return div().id("window-controls");
         }
@@ -251,9 +308,15 @@ impl Render for TitleBarState {
 
 impl RenderOnce for TitleBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let TitleBar {
+            style,
+            children,
+            on_close_window,
+        } = self;
         let is_client_decorated = matches!(window.window_decorations(), Decorations::Client { .. });
         let is_linux = cfg!(target_os = "linux");
         let is_macos = cfg!(target_os = "macos");
+        let show_custom_window_controls = should_render_custom_window_controls(window);
 
         let state = window.use_state(cx, |_, _| TitleBarState { should_move: false });
 
@@ -269,12 +332,14 @@ impl RenderOnce for TitleBar {
                 .border_b_1()
                 .border_color(cx.theme().title_bar_border)
                 .bg(cx.theme().title_bar)
-                .refine_style(&self.style)
+                .rounded_tl(cx.theme().radius_lg)
+                .rounded_tr(cx.theme().radius_lg)
+                .refine_style(&style)
                 .when(is_linux, |this| {
                     this.on_double_click(|_, window, _| window.zoom_window())
                 })
                 .when(is_macos, |this| {
-                    this.on_double_click(|_, window, _| window.titlebar_double_click())
+                    this.on_double_click(|_, window, _| window.handle_titlebar_double_click())
                 })
                 .on_mouse_down_out(window.listener_for(&state, |state, _, _, _| {
                     state.should_move = false;
@@ -319,11 +384,37 @@ impl RenderOnce for TitleBar {
                                     }),
                             )
                         })
-                        .children(self.children),
+                        .children(children),
                 )
-                .child(WindowControls {
-                    on_close_window: self.on_close_window,
+                .when(show_custom_window_controls, |this| {
+                    this.child(WindowControls { on_close_window })
                 }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::desktop_prefers_system_window_controls;
+
+    #[test]
+    fn 识别_deepin_桌面环境() {
+        assert!(desktop_prefers_system_window_controls(
+            Some("Deepin"),
+            Some("deepin")
+        ));
+        assert!(desktop_prefers_system_window_controls(
+            Some("DDE"),
+            Some("dde")
+        ));
+    }
+
+    #[test]
+    fn 非_deepin_桌面环境不走兼容分支() {
+        assert!(!desktop_prefers_system_window_controls(
+            Some("GNOME"),
+            Some("ubuntu")
+        ));
+        assert!(!desktop_prefers_system_window_controls(None, None));
     }
 }
