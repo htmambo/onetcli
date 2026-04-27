@@ -1,7 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, div,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, WindowExt, app_style,
@@ -11,7 +12,7 @@ use gpui_component::{
     input::{Input, InputState},
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
-    v_flex, modal_surface_palette,
+    v_flex, modal_surface_palette, TitleBar,
 };
 use rust_i18n::t;
 
@@ -748,6 +749,10 @@ impl CertificateEditorView {
         }
     }
 
+    fn on_cancel(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
+        window.remove_window();
+    }
+
     fn on_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mut certificate) = self.form.update(cx, |form, cx| form.build_certificate(cx))
         else {
@@ -834,62 +839,65 @@ impl Render for CertificateEditorView {
             t!("CertificateManager.add_title").to_string()
         };
 
+        let error_element = self.error_message.as_ref().map(|error_message| {
+            div()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .bg(app_style::danger_dim())
+                .text_sm()
+                .text_color(app_style::danger())
+                .child(error_message.clone())
+        });
+
         v_flex()
+            .justify_center()
             .size_full()
             .bg(app_style::base())
-            .rounded_lg()
-            .overflow_hidden()
             .child(
-                div()
-                    .refine_style(&app_style::page_header_style())
-                    .rounded_tl(cx.theme().radius_lg)
-                    .rounded_tr(cx.theme().radius_lg)
-                    .border_b_1()
-                    .border_color(app_style::border())
-                    .p_2()
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
                     .child(
                         div()
-                            .text_xl()
-                            .font_weight(FontWeight::BOLD)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(app_style::text())
                             .child(title),
                     ),
             )
-            .child(div().flex_1().p_2().overflow_y_scrollbar().child(
-                v_flex().gap_1().child(self.form.clone()).when_some(
-                    self.error_message.clone(),
-                    |this, error_message| {
-                        this.child(
-                            div()
-                                .p_2()
-                                .rounded_md()
-                                .bg(app_style::danger_dim())
-                                .text_sm()
-                                .text_color(app_style::danger())
-                                .child(error_message),
-                        )
-                    },
-                ),
-            ))
+            .child(
+                div()
+                    .id("certificate-form-content")
+                    .flex_1()
+                    .p_4()
+                    .overflow_y_scroll()
+                    .child(self.form.clone()),
+            )
+            .when_some(error_element, |this, elem| {
+                this.child(h_flex().justify_center().pb_2().child(elem))
+            })
             .child(
                 h_flex()
                     .justify_end()
-                    .gap_1()
-                    .p_2()
-                    .refine_style(&app_style::footer_style())
-                    .rounded_bl(cx.theme().radius_lg)
-                    .rounded_br(cx.theme().radius_lg)
+                    .gap_2()
+                    .px_6()
+                    .py_4()
                     .border_t_1()
                     .border_color(app_style::border())
+                    .bg(app_style::surface())
                     .child(
                         Button::new("certificate-editor-cancel")
                             .small()
                             .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .disabled(is_saving)
-                            .on_click(|_, window, cx| {
-                                request_popup_window_close(window, cx);
-                            }),
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.on_cancel(window, cx);
+                            })),
                     )
                     .child(
                         Button::new("certificate-editor-save")
@@ -922,7 +930,7 @@ fn open_certificate_editor_popup(
 
     open_popup_window(
         window,
-        PopupWindowOptions::new(title).size(560.0, 560.0),
+        PopupWindowOptions::new(title).size(560.0, 460.0),
         move |window, cx| {
             let certificate = certificate.clone();
             cx.new(|cx| CertificateEditorView::new(certificate, window, cx))
@@ -935,7 +943,7 @@ pub fn open_certificate_manager_popup(window: &mut Window, cx: &mut App) {
     open_popup_window(
         window,
         PopupWindowOptions::new(t!("CertificateManager.window_title").to_string())
-            .size(760.0, 620.0),
+            .size(560.0, 460.0),
         |_window, cx| cx.new(|cx| CertificateManagerView::new(cx)),
         cx,
     );

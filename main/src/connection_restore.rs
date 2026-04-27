@@ -3,13 +3,13 @@ use std::collections::HashSet;
 
 use gpui::{
     App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement as _, Styled, Window, div, px,
+    Render, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, WindowExt, app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex, v_flex,
+    h_flex, v_flex, TitleBar,
 };
 use one_core::{
     connection_restore::{
@@ -17,6 +17,7 @@ use one_core::{
         LocalTerminalRestoreState, SshTerminalRestoreState, clear_connection_restore_snapshot,
         load_connection_restore_snapshot, snapshot_from_tab_state,
     },
+    popup_window::{PopupWindowOptions, open_popup_window},
     storage::{StoredConnection, Workspace},
     tab_persistence::load_tab_state,
 };
@@ -322,79 +323,18 @@ pub fn open_connection_restore_dialog(
         return;
     }
 
-    let content = cx.new(|_cx| ConnectionRestoreDialogContent::new(home_page.clone(), items));
-    let home_page_for_cancel = home_page.clone();
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let home_page_cancel = home_page_for_cancel.clone();
-        let footer_content = content.clone();
-        dialog
-            .title(t!("ConnectionRestore.title"))
-            .w(px(520.0))
-            .h(px(560.0))
-            .overlay_closable(false)
-            .on_cancel(move |_, window, cx| {
-                home_page_cancel.update(cx, |home, cx| {
-                    home.skip_pending_connection_restore(window, cx);
-                });
-                true
-            })
-            .footer(move |_ok, _cancel, _window, cx| {
-                let selected_count = footer_content.read(cx).selected_snapshot_ids.len();
-                let restoring = footer_content.read(cx).restoring;
-                let footer_skip = footer_content.clone();
-                let footer_restore = footer_content.clone();
-
-                vec![
-                    h_flex()
-                        .w_full()
-                        .justify_between()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("ConnectionRestore.partial_restore_hint")),
-                        )
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    Button::new("connection-restore-skip")
-                                        .small()
-                                        .with_variant(app_style::secondary_button_variant(cx))
-                                        .label(t!("ConnectionRestore.skip"))
-                                        .disabled(restoring)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = footer_skip
-                                                .update(cx, |this, cx| this.on_skip(window, cx));
-                                        }),
-                                )
-                                .child(
-                                    Button::new("connection-restore-apply")
-                                        .small()
-                                        .with_variant(app_style::primary_button_variant(cx))
-                                        .label(if restoring {
-                                            t!("ConnectionRestore.restoring")
-                                        } else {
-                                            t!("ConnectionRestore.restore_selected")
-                                        })
-                                        .disabled(selected_count == 0 || restoring)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = footer_restore
-                                                .update(cx, |this, cx| this.on_restore(window, cx));
-                                        }),
-                                ),
-                        )
-                        .into_any_element(),
-                ]
-            })
-            .child(content.clone())
-    });
+    open_popup_window(
+        window,
+        PopupWindowOptions::new(t!("ConnectionRestore.title").to_string()).size(560.0, 560.0),
+        move |_window, _cx| {
+            _cx.new(|_cx| ConnectionRestoreDialogContent::new(home_page.clone(), items.clone()))
+        },
+        cx,
+    );
 }
 
 pub struct ConnectionRestoreDialogContent {
-    home_page: Entity<HomePage>,
+    home_page: WeakEntity<HomePage>,
     items: Vec<ResolvedConnectionRestoreItem>,
     selected_snapshot_ids: HashSet<String>,
     restoring: bool,
@@ -408,7 +348,7 @@ impl ConnectionRestoreDialogContent {
             .collect::<HashSet<_>>();
 
         Self {
-            home_page,
+            home_page: home_page.downgrade(),
             items,
             selected_snapshot_ids,
             restoring: false,
@@ -437,11 +377,12 @@ impl ConnectionRestoreDialogContent {
         }
         self.restoring = true;
 
-        let home_page = self.home_page.clone();
-        home_page.update(cx, |home, cx| {
-            home.skip_pending_connection_restore(window, cx);
-        });
-        window.close_dialog(cx);
+        if let Some(home_page) = self.home_page.upgrade() {
+            home_page.update(cx, |home, cx| {
+                home.skip_pending_connection_restore(window, cx);
+            });
+        }
+        window.remove_window();
     }
 
     fn on_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -451,12 +392,12 @@ impl ConnectionRestoreDialogContent {
         self.restoring = true;
 
         let selected_snapshot_ids = self.selected_snapshot_ids();
-        let home_page = self.home_page.clone();
-
-        home_page.update(cx, |home, cx| {
-            home.restore_saved_connection_sessions(&selected_snapshot_ids, window, cx);
-        });
-        window.close_dialog(cx);
+        if let Some(home_page) = self.home_page.upgrade() {
+            home_page.update(cx, |home, cx| {
+                home.restore_saved_connection_sessions(&selected_snapshot_ids, window, cx);
+            });
+        }
+        window.remove_window();
     }
 }
 
@@ -466,6 +407,7 @@ impl Render for ConnectionRestoreDialogContent {
         let all_selected = self.all_selected();
         let selected_count = self.selected_snapshot_ids.len();
         let total_count = self.items.len();
+        let restoring = self.restoring;
         let item_views = self
             .items
             .iter()
@@ -519,69 +461,141 @@ impl Render for ConnectionRestoreDialogContent {
             .collect::<Vec<_>>();
 
         v_flex()
-            .id("connection-restore-dialog-content")
+            .justify_center()
             .size_full()
-            .min_h_0()
-            .gap_3()
+            .bg(app_style::base())
             .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("ConnectionRestore.description")),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .justify_between()
-                    .items_center()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child({
-                                let view_for_select_all = view.clone();
-                                Checkbox::new("restore-select-all")
-                                    .checked(all_selected)
-                                    .on_click(move |_, _, cx| {
-                                        view_for_select_all.update(cx, |view, cx| {
-                                            if view.all_selected() {
-                                                view.selected_snapshot_ids.clear();
-                                            } else {
-                                                view.selected_snapshot_ids = view
-                                                    .items
-                                                    .iter()
-                                                    .map(|item| item.snapshot_id.clone())
-                                                    .collect();
-                                            }
-                                            cx.notify();
-                                        });
-                                    })
-                            })
-                            .child(div().text_sm().child(t!("ConnectionRestore.select_all"))),
-                    )
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                t!("ConnectionRestore.selected_count")
-                                    .replace("%{selected}", &selected_count.to_string())
-                                    .replace("%{total}", &total_count.to_string()),
-                            ),
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(app_style::text())
+                            .child(t!("ConnectionRestore.title")),
                     ),
             )
             .child(
                 div()
-                    .id("connection-restore-list-scroll")
-                    .w_full()
+                    .id("connection-restore-dialog-body")
                     .flex_1()
-                    .min_h_0()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .p_4()
                     .overflow_y_scroll()
-                    .child(v_flex().w_full().gap_2().p_2().children(item_views)),
+                    .child(
+                        v_flex()
+                            .size_full()
+                            .min_h_0()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t!("ConnectionRestore.description")),
+                            )
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child({
+                                                let view_for_select_all = view.clone();
+                                                Checkbox::new("restore-select-all")
+                                                    .checked(all_selected)
+                                                    .on_click(move |_, _, cx| {
+                                                        view_for_select_all.update(cx, |view, cx| {
+                                                            if view.all_selected() {
+                                                                view.selected_snapshot_ids.clear();
+                                                            } else {
+                                                                view.selected_snapshot_ids = view
+                                                                    .items
+                                                                    .iter()
+                                                                    .map(|item| item.snapshot_id.clone())
+                                                                    .collect();
+                                                            }
+                                                            cx.notify();
+                                                        });
+                                                    })
+                                            })
+                                            .child(div().text_sm().child(t!("ConnectionRestore.select_all"))),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(
+                                                t!("ConnectionRestore.selected_count")
+                                                    .replace("%{selected}", &selected_count.to_string())
+                                                    .replace("%{total}", &total_count.to_string()),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("connection-restore-list-scroll")
+                                    .w_full()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().background)
+                                    .overflow_y_scroll()
+                                    .child(v_flex().w_full().gap_2().p_2().children(item_views)),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .px_6()
+                    .py_4()
+                    .border_t_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::surface())
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(t!("ConnectionRestore.partial_restore_hint")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Button::new("connection-restore-skip")
+                                    .small()
+                                    .with_variant(app_style::secondary_button_variant(cx))
+                                    .label(t!("ConnectionRestore.skip"))
+                                    .disabled(restoring)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.on_skip(window, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("connection-restore-apply")
+                                    .small()
+                                    .with_variant(app_style::primary_button_variant(cx))
+                                    .label(if restoring {
+                                        t!("ConnectionRestore.restoring")
+                                    } else {
+                                        t!("ConnectionRestore.restore_selected")
+                                    })
+                                    .disabled(selected_count == 0 || restoring)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.on_restore(window, cx);
+                                    })),
+                            ),
+                    ),
             )
     }
 }
