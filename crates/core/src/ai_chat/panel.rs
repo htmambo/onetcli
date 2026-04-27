@@ -415,20 +415,13 @@ impl AiChatPanel {
                     Some(r) => r,
                     None => return,
                 };
-                let mut list = match repo.list() {
-                    Ok(all) => all.into_iter().filter(|p| p.enabled).collect::<Vec<_>>(),
+                match repo.list() {
+                    Ok(all) => all
+                        .into_iter()
+                        .filter(|provider| provider.is_runtime_available())
+                        .collect::<Vec<_>>(),
                     Err(_) => Vec::new(),
-                };
-                if is_logged_in {
-                    if let Ok(onet) = repo.ensure_onetcli_provider() {
-                        if !list.iter().any(|p| p.id == onet.id) {
-                            list.insert(0, onet);
-                        }
-                    }
-                } else {
-                    list.retain(|p| !p.is_builtin());
                 }
-                list
             };
 
             let _ = cx.update(|cx| {
@@ -1044,8 +1037,8 @@ impl AiChatPanel {
         h_flex()
             .flex_shrink_0()
             .w_full()
-            .px_4()
-            .py_2()
+            .px_1()
+            .py_1()
             .border_b_1()
             .border_color(border)
             .bg(muted)
@@ -1125,8 +1118,8 @@ impl AiChatPanel {
             .w_full()
             .overflow_y_scroll()
             .track_scroll(&self.engine.scroll_handle)
-            .p_4()
-            .pb_8()
+            .p_1()
+            .pb_4()
             .child(
                 v_flex().w_full().gap_4().children(
                     self.engine.messages.iter().map(|msg| {
@@ -1155,9 +1148,9 @@ impl AiChatPanel {
         v_flex()
             .flex_shrink_0()
             .w_full()
-            .px_3()
-            .py_2()
-            .gap_2()
+            .px_1()
+            .py_1()
+            .gap_1()
             .border_t_1()
             .border_color(border)
             .bg(bg)

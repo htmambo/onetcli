@@ -85,8 +85,14 @@ impl AgentDispatcher {
             info!(agent = agent_id, "Dispatched as sole available agent");
             affinity.bind(agent_id);
             let agent = Arc::clone(agent);
+            let cancel_token = ctx.cancel_token.clone();
             tokio::spawn(async move {
-                agent.execute(ctx, tx).await;
+                tokio::select! {
+                    _ = agent.execute(ctx, tx) => {},
+                    _ = cancel_token.cancelled() => {
+                        info!(agent = agent_id, "Agent execution cancelled via token");
+                    }
+                }
             });
             return rx;
         }
@@ -134,8 +140,14 @@ impl AgentDispatcher {
 
         let agent_id = agent.descriptor().id;
         affinity.bind(agent_id);
+        let cancel_token = ctx.cancel_token.clone();
         tokio::spawn(async move {
-            agent.execute(ctx, tx).await;
+            tokio::select! {
+                _ = agent.execute(ctx, tx) => {},
+                _ = cancel_token.cancelled() => {
+                    info!(agent = agent_id, "Agent execution cancelled via token");
+                }
+            }
         });
 
         rx

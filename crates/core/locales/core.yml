@@ -1,6 +1,14 @@
 _version: 2
 
 Common:
+  edit:
+    en: "Edit"
+    zh-CN: "编辑"
+    zh-HK: "編輯"
+  delete:
+    en: "Delete"
+    zh-CN: "删除"
+    zh-HK: "刪除"
   save:
     en: "Save"
     zh-CN: "保存"
@@ -13,6 +21,154 @@ Common:
     en: "Search..."
     zh-CN: "搜索..."
     zh-HK: "搜尋..."
+
+TabContainer:
+  menu_open_sftp:
+    en: "Open SFTP"
+    zh-CN: "打开 SFTP"
+    zh-HK: "打開 SFTP"
+  menu_close:
+    en: "Close"
+    zh-CN: "关闭"
+    zh-HK: "關閉"
+  menu_close_all:
+    en: "Close All"
+    zh-CN: "关闭全部"
+    zh-HK: "關閉全部"
+  menu_close_others:
+    en: "Close Others"
+    zh-CN: "关闭其他"
+    zh-HK: "關閉其他"
+  menu_close_tabs_to_left:
+    en: "Close Tabs To The Left"
+    zh-CN: "关闭左侧标签页"
+    zh-HK: "關閉左側標籤頁"
+  menu_close_tabs_to_right:
+    en: "Close Tabs To The Right"
+    zh-CN: "关闭右侧标签页"
+    zh-HK: "關閉右側標籤頁"
+
+CertificateManager:
+  window_title:
+    en: "Certificate Manager"
+    zh-CN: "凭证管理"
+    zh-HK: "憑證管理"
+  title:
+    en: "Certificate Manager"
+    zh-CN: "凭证管理"
+    zh-HK: "憑證管理"
+  description:
+    en: "Reuse the same login credential in multiple connections and sync it to the cloud."
+    zh-CN: "将常用登录信息统一复用到多个连接中，并支持参与云同步。"
+    zh-HK: "將常用登入資訊統一復用到多個連線中，並支援參與雲同步。"
+  add:
+    en: "Add Certificate"
+    zh-CN: "新增凭证"
+    zh-HK: "新增憑證"
+  add_title:
+    en: "Add Certificate"
+    zh-CN: "新增凭证"
+    zh-HK: "新增憑證"
+  edit_title:
+    en: "Edit Certificate"
+    zh-CN: "编辑凭证"
+    zh-HK: "編輯憑證"
+  add_action:
+    en: "Add"
+    zh-CN: "新增"
+    zh-HK: "新增"
+  delete_confirm:
+    en: "Delete certificate \"%{name}\"?"
+    zh-CN: "确定删除凭证“%{name}”吗？"
+    zh-HK: "確定刪除憑證「%{name}」嗎？"
+  empty:
+    en: "No certificates yet."
+    zh-CN: "暂无凭证。"
+    zh-HK: "暫無憑證。"
+  personal_scope:
+    en: "Personal"
+    zh-CN: "个人"
+    zh-HK: "個人"
+  sync_enabled:
+    en: "Cloud sync enabled"
+    zh-CN: "已启用云同步"
+    zh-HK: "已啟用雲同步"
+  sync_disabled:
+    en: "Cloud sync disabled"
+    zh-CN: "未启用云同步"
+    zh-HK: "未啟用雲同步"
+  name:
+    en: "Name"
+    zh-CN: "名称"
+    zh-HK: "名稱"
+  name_placeholder:
+    en: "Certificate name"
+    zh-CN: "凭证名称"
+    zh-HK: "憑證名稱"
+  kind:
+    en: "Type"
+    zh-CN: "类型"
+    zh-HK: "類型"
+  username:
+    en: "Username"
+    zh-CN: "用户名"
+    zh-HK: "使用者名稱"
+  username_placeholder:
+    en: "Login username"
+    zh-CN: "登录用户名"
+    zh-HK: "登入使用者名稱"
+  password:
+    en: "Password"
+    zh-CN: "密码"
+    zh-HK: "密碼"
+  password_placeholder:
+    en: "Login password"
+    zh-CN: "登录密码"
+    zh-HK: "登入密碼"
+  key_path:
+    en: "Private Key Path"
+    zh-CN: "私钥路径"
+    zh-HK: "私鑰路徑"
+  key_path_placeholder:
+    en: "Private key file path"
+    zh-CN: "私钥文件路径"
+    zh-HK: "私鑰檔案路徑"
+  passphrase:
+    en: "Private Key Passphrase"
+    zh-CN: "私钥口令"
+    zh-HK: "私鑰口令"
+  passphrase_placeholder:
+    en: "Private key passphrase"
+    zh-CN: "私钥口令"
+    zh-HK: "私鑰口令"
+  scope:
+    en: "Scope"
+    zh-CN: "归属范围"
+    zh-HK: "歸屬範圍"
+  sync_switch:
+    en: "Enable cloud sync"
+    zh-CN: "启用云同步"
+    zh-HK: "啟用雲同步"
+  remark:
+    en: "Remark"
+    zh-CN: "备注"
+    zh-HK: "備註"
+  remark_placeholder:
+    en: "Optional remark"
+    zh-CN: "可选备注"
+    zh-HK: "可選備註"
+  validation_error:
+    en: "Please complete the required certificate fields."
+    zh-CN: "请完整填写凭证必填项。"
+    zh-HK: "請完整填寫憑證必填項。"
+  repository_unavailable:
+    en: "Certificate repository is unavailable."
+    zh-CN: "凭证仓储不可用。"
+    zh-HK: "憑證倉儲不可用。"
+  save_failed:
+    en: "Failed to save certificate: %{error}"
+    zh-CN: "保存凭证失败：%{error}"
+    zh-HK: "保存憑證失敗：%{error}"
 
 AiChat:
   title:
