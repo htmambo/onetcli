@@ -876,10 +876,9 @@ impl LinuxClient for WaylandClient {
 
     fn active_window(&self) -> Option<AnyWindowHandle> {
         self.0
-            .borrow()
-            .keyboard_focused_window
-            .as_ref()
-            .map(|window| window.handle())
+            .try_borrow()
+            .ok()
+            .and_then(|state|state.keyboard_focused_window.as_ref().map(|window| window.handle()))
     }
 
     fn window_stack(&self) -> Option<Vec<AnyWindowHandle>> {
