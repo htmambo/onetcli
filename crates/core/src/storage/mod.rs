@@ -6,6 +6,7 @@ pub mod models;
 pub mod quick_command;
 pub mod repository;
 pub mod row_mapping;
+pub mod ssh_convert;
 pub mod traits;
 
 use gpui::App;

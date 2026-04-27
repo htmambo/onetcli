@@ -1,16 +1,22 @@
+use std::path::PathBuf;
+
+use anyhow::Result;
 use gpui::{Action, App, SharedString};
-use gpui_component::{ActiveTheme, Theme, ThemeMode, ThemeRegistry, scroll::ScrollbarShow};
+use gpui_component::{Theme, ThemeMode, ThemeRegistry, scroll::ScrollbarShow};
 use serde::{Deserialize, Serialize};
 
-const STATE_FILE: &str = "target/state.json";
+use crate::storage::get_config_dir;
+
+const THEME_STATE_FILE: &str = "theme_state.json";
+const LEGACY_STATE_FILE: &str = "target/state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct State {
+struct ThemeState {
     theme: SharedString,
     scrollbar_show: Option<ScrollbarShow>,
 }
 
-impl Default for State {
+impl Default for ThemeState {
     fn default() -> Self {
         Self {
             theme: "Default Light".into(),
@@ -19,28 +25,47 @@ impl Default for State {
     }
 }
 
+fn get_theme_state_path() -> Result<PathBuf> {
+    let config_dir = get_config_dir()?;
+    if !config_dir.exists() {
+        std::fs::create_dir_all(&config_dir)?;
+    }
+    Ok(config_dir.join(THEME_STATE_FILE))
+}
+
 pub fn init(cx: &mut App) {
-    // Load last theme state
-    let json = std::fs::read_to_string(STATE_FILE).unwrap_or_default();
+    // Migrate from legacy path if needed
+    if std::path::Path::new(LEGACY_STATE_FILE).exists() {
+        if let Ok(legacy_json) = std::fs::read_to_string(LEGACY_STATE_FILE) {
+            if let Ok(legacy_state) = serde_json::from_str::<ThemeState>(&legacy_json) {
+                if let Ok(new_path) = get_theme_state_path() {
+                    if let Ok(json) = serde_json::to_string_pretty(&legacy_state) {
+                        let _ = std::fs::write(&new_path, json);
+                        let _ = std::fs::remove_file(LEGACY_STATE_FILE);
+                        tracing::info!("Migrated theme state from legacy path to {:?}", new_path);
+                    }
+                }
+            }
+        }
+    }
+
+    // Load last theme state from new path
     tracing::info!("Load themes...");
-    let state = serde_json::from_str::<State>(&json).unwrap_or_default();
+    let state = match get_theme_state_path() {
+        Ok(path) => {
+            let json = std::fs::read_to_string(&path).unwrap_or_default();
+            serde_json::from_str::<ThemeState>(&json).unwrap_or_default()
+        }
+        Err(e) => {
+            tracing::warn!("Failed to get theme state path: {}", e);
+            ThemeState::default()
+        }
+    };
+
     if let Some(scrollbar_show) = state.scrollbar_show {
         Theme::global_mut(cx).scrollbar_show = scrollbar_show;
     }
     cx.refresh_windows();
-
-    cx.observe_global::<Theme>(|cx| {
-        let state = State {
-            theme: cx.theme().theme_name().clone(),
-            scrollbar_show: Some(cx.theme().scrollbar_show),
-        };
-
-        if let Ok(json) = serde_json::to_string_pretty(&state) {
-            // Ignore write errors - if STATE_FILE doesn't exist or can't be written, do nothing
-            let _ = std::fs::write(STATE_FILE, json);
-        }
-    })
-    .detach();
 
     cx.on_action(|switch: &SwitchTheme, cx| {
         let theme_name = switch.0.clone();

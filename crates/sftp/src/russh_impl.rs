@@ -14,7 +14,7 @@ use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use rust_i18n::t;
 use ssh::{
     AuthFailureMessages, ProxyConnectConfig, ProxyType, RusshClient, SshConnectConfig,
-    authenticate_with_strategy, defaults,
+    authenticate_with_strategy,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -37,16 +37,28 @@ fn ensure_not_cancelled(cancelled: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-struct SftpHandler;
+struct SftpHandler {
+    host: String,
+    port: u16,
+}
+
+impl SftpHandler {
+    fn new(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            host: host.into(),
+            port,
+        }
+    }
+}
 
 impl client::Handler for SftpHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        ssh::verify_server_key(&self.host, self.port, server_public_key)
     }
 }
 
@@ -263,7 +275,7 @@ impl RusshSftpClient {
         remote_path: &str,
         local_path: &str,
         total_size: u64,
-        cancelled: &AtomicBool,
+        cancelled: Arc<AtomicBool>,
         progress: &(dyn Fn(TransferProgress) + Send + Sync),
     ) -> Result<()> {
         // 打开远程文件
@@ -287,8 +299,14 @@ impl RusshSftpClient {
         // 生产者：发起所有并发读请求
         let raw_for_producer = Arc::clone(&raw_session);
         let handle_for_producer = file_handle.clone();
+        let cancelled_for_producer = Arc::clone(&cancelled);
         let producer = tokio::spawn(async move {
             for i in 0..total_chunks {
+                // 检查取消状态，提前退出
+                if cancelled_for_producer.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 let offset = i * chunk_size;
                 let len = std::cmp::min(PIPELINE_CHUNK_SIZE, (total_size - offset) as u32);
 
@@ -302,7 +320,13 @@ impl RusshSftpClient {
                 let handle = handle_for_producer.clone();
                 let tx = tx.clone();
 
+                let cancelled_clone = Arc::clone(&cancelled_for_producer);
                 tokio::spawn(async move {
+                    // 内部读取请求也应检查取消状态
+                    if cancelled_clone.load(Ordering::Relaxed) {
+                        return;
+                    }
+
                     let result = raw.read(handle, offset, len).await;
                     drop(permit);
 
@@ -311,11 +335,9 @@ impl RusshSftpClient {
                             let _ = tx.send((offset, data.data)).await;
                         }
                         Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => {
-                            // EOF 表示文件读完，发送空数据标记此 offset
                             let _ = tx.send((offset, Vec::new())).await;
                         }
                         Err(_e) => {
-                            // 读取错误，发送空数据让 writer 侧处理
                             let _ = tx.send((offset, Vec::new())).await;
                         }
                     }
@@ -333,7 +355,7 @@ impl RusshSftpClient {
         let start_time = Instant::now();
 
         while let Some((offset, data)) = rx.recv().await {
-            ensure_not_cancelled(cancelled)?;
+            ensure_not_cancelled(&cancelled)?;
 
             if !data.is_empty() {
                 pending.insert(offset, data);
@@ -419,7 +441,7 @@ impl RusshSftpClient {
         dir_transferred: &mut u64,
         dir_total: u64,
         start_time: Instant,
-        cancelled: &AtomicBool,
+        cancelled: Arc<AtomicBool>,
         progress: &(dyn Fn(TransferProgress) + Send + Sync),
     ) -> Result<()> {
         let handle_result = raw_session
@@ -442,8 +464,14 @@ impl RusshSftpClient {
         let raw_for_producer = Arc::clone(&raw_session);
         let handle_for_producer = file_handle.clone();
 
+        let cancelled_for_producer = Arc::clone(&cancelled);
         let producer = tokio::spawn(async move {
             for i in 0..total_chunks {
+                // 检查取消状态，提前退出
+                if cancelled_for_producer.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 let offset = i * chunk_size;
                 let len = std::cmp::min(PIPELINE_CHUNK_SIZE, (total_size - offset) as u32);
 
@@ -482,7 +510,7 @@ impl RusshSftpClient {
         let mut current_file_transferred: u64 = 0;
 
         while let Some((offset, data)) = rx.recv().await {
-            ensure_not_cancelled(cancelled)?;
+            ensure_not_cancelled(&cancelled)?;
 
             if !data.is_empty() {
                 pending.insert(offset, data);
@@ -631,17 +659,11 @@ impl RusshSftpClient {
 #[async_trait]
 impl SftpClient for RusshSftpClient {
     async fn connect(ssh_config: SshConnectConfig) -> Result<Self> {
-        let config = Arc::new(client::Config {
-            inactivity_timeout: ssh_config.timeout.or(Some(defaults::INACTIVITY_TIMEOUT)),
-            keepalive_interval: ssh_config
-                .keepalive_interval
-                .or(Some(defaults::KEEPALIVE_INTERVAL)),
-            keepalive_max: ssh_config.keepalive_max.unwrap_or(defaults::KEEPALIVE_MAX),
-            window_size: 16 * 1024 * 1024, // 16 MB
-            maximum_packet_size: 0xFFFF,   // 65535, max allowed by russh
-            nodelay: true,
-            ..<_>::default()
-        });
+        let mut config = ssh::build_client_config(&ssh_config);
+        config.window_size = 16 * 1024 * 1024; // 16 MB
+        config.maximum_packet_size = 0xFFFF; // 65535, max allowed by russh
+        config.nodelay = true;
+        let config = Arc::new(config);
 
         let (mut session, jump_session) = if let Some(ref jump) = ssh_config.jump_server {
             tracing::info!("SFTP: 通过跳板机 {}:{} 连接", jump.host, jump.port);
@@ -650,10 +672,10 @@ impl SftpClient for RusshSftpClient {
             let mut jump_session = if let Some(ref proxy) = ssh_config.proxy {
                 tracing::info!("SFTP: 通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
                 let stream = sftp_connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                let handler = SftpHandler;
+                let handler = SftpHandler::new(&jump.host, jump.port);
                 client::connect_stream(config.clone(), stream, handler).await?
             } else {
-                let handler = SftpHandler;
+                let handler = SftpHandler::new(&jump.host, jump.port);
                 client::connect(config.clone(), (jump.host.as_str(), jump.port), handler).await?
             };
 
@@ -671,7 +693,7 @@ impl SftpClient for RusshSftpClient {
                 .channel_open_direct_tcpip(&ssh_config.host, ssh_config.port as u32, "127.0.0.1", 0)
                 .await?;
 
-            let handler = SftpHandler;
+            let handler = SftpHandler::new(&ssh_config.host, ssh_config.port);
             let session =
                 client::connect_stream(config, forwarded_channel.into_stream(), handler).await?;
 
@@ -679,11 +701,11 @@ impl SftpClient for RusshSftpClient {
         } else if let Some(ref proxy) = ssh_config.proxy {
             tracing::info!("SFTP: 通过代理 {}:{} 连接", proxy.host, proxy.port);
             let stream = sftp_connect_via_proxy(proxy, &ssh_config.host, ssh_config.port).await?;
-            let handler = SftpHandler;
+            let handler = SftpHandler::new(&ssh_config.host, ssh_config.port);
             let session = client::connect_stream(config, stream, handler).await?;
             (session, None)
         } else {
-            let handler = SftpHandler;
+            let handler = SftpHandler::new(&ssh_config.host, ssh_config.port);
             let session =
                 client::connect(config, (ssh_config.host.as_str(), ssh_config.port), handler)
                     .await?;
@@ -805,7 +827,7 @@ impl SftpClient for RusshSftpClient {
                 remote_path,
                 local_path,
                 total_size,
-                &cancelled,
+                Arc::clone(&cancelled),
                 &progress,
             )
             .await;
@@ -1244,7 +1266,7 @@ impl SftpClient for RusshSftpClient {
                         &mut transferred,
                         total_size,
                         start_time,
-                        &cancelled,
+                        Arc::clone(&cancelled),
                         &progress,
                     )
                     .await;
@@ -1485,6 +1507,29 @@ impl SftpClient for RusshSftpClient {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
+        // 先关闭流水线 raw session
+        self.raw_sftp.take();
+        // 关闭主 SFTP 会话
+        if let Err(e) = self.sftp.close().await {
+            tracing::warn!("SFTP session close error: {}", e);
+        }
+        // 断开 SSH session
+        match &mut self.owner {
+            SessionOwner::Owned { session, .. } => {
+                if let Err(e) = session
+                    .disconnect(russh::Disconnect::ByApplication, "", "en")
+                    .await
+                {
+                    tracing::warn!("SSH session disconnect error: {}", e);
+                }
+            }
+            SessionOwner::Shared { client } => {
+                let mut guard = client.lock().await;
+                if let Err(e) = guard.disconnect().await {
+                    tracing::warn!("SSH session disconnect error: {}", e);
+                }
+            }
+        }
         Ok(())
     }
 

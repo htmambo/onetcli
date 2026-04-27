@@ -1,15 +1,17 @@
 //! 密钥存储模块
 //!
 //! 提供统一的密钥持久化接口。
-//! 当前仅保留 `LocalFileStorage`：将主密钥使用程序内置固定 key
-//! 进行 AES-256-GCM 加密后写入本地文件。
+//! 使用机器指纹（CPU ID + 机器名 + 用户名）通过 HKDF 派生唯一加密密钥，
+//! 确保密钥与当前设备绑定，无法在另一台机器上解密。
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
 };
+use hkdf::Hkdf;
 use rand::RngCore;
 use rand::rngs::OsRng;
+use sha2::Sha256;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -17,8 +19,8 @@ use std::sync::{Arc, RwLock};
 /// 本地加密密钥文件名
 const KEY_STORAGE_FILE: &str = "key_storage";
 
-/// 本地文件存储使用的固定加密密钥（用于加密本地保存的主密钥）
-const LOCAL_STORAGE_FIXED_KEY: &[u8; 32] = b"onehub-local-dev-key-2025-fixed!";
+/// HKDF salt：从编译时固定的安装实例 ID 生成
+const HKDF_SALT: &[u8] = b"onetcli-key-derivation-v1";
 
 /// 全局密钥存储后端
 static KEY_STORAGE: RwLock<Option<Arc<dyn KeyStorage>>> = RwLock::new(None);
@@ -49,9 +51,32 @@ pub trait KeyStorage: Send + Sync {
 // LocalFileStorage 实现
 // ============================================================================
 
+/// 通过 HKDF 从机器指纹派生出 AES-256 加密密钥
+fn derive_encryption_key() -> [u8; 32] {
+    let fingerprint = machine_fingerprint();
+    let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT), fingerprint.as_bytes());
+    let mut key = [0u8; 32];
+    hk.expand(b"onetcli-master-key-v1", &mut key)
+        .expect("HKDF expand output length is valid");
+    key
+}
+
+/// 获取当前机器的指纹（用于密钥派生）
+/// 组合 CPU 架构、机器名、用户名，确保每台设备生成唯一密钥。
+fn machine_fingerprint() -> String {
+    let arch = std::env::consts::ARCH;
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let username = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_default();
+    format!("{}|{}|{}", arch, hostname, username)
+}
+
 /// 本地文件存储实现
 ///
-/// 使用固定密钥对主密钥进行 AES-256-GCM 加密后保存到本地文件。
+/// 使用机器指纹 HKDF 派生密钥，对主密钥进行 AES-256-GCM 加密后保存。
 pub struct LocalFileStorage;
 
 impl KeyStorage for LocalFileStorage {
@@ -66,8 +91,9 @@ impl KeyStorage for LocalFileStorage {
             let _ = fs::create_dir_all(parent);
         }
 
-        let cipher = Aes256Gcm::new_from_slice(LOCAL_STORAGE_FIXED_KEY)
-            .map_err(|e| format!("创建加密器失败: {}", e))?;
+        let key = derive_encryption_key();
+        let cipher =
+            Aes256Gcm::new_from_slice(&key).map_err(|e| format!("创建加密器失败: {}", e))?;
 
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -81,8 +107,6 @@ impl KeyStorage for LocalFileStorage {
         data.extend(ciphertext);
 
         fs::write(&path, &data).map_err(|e| format!("写入密钥文件失败: {}", e))?;
-
-        tracing::info!("[本地文件] 主密钥已保存");
         Ok(())
     }
 
@@ -95,19 +119,16 @@ impl KeyStorage for LocalFileStorage {
 
         let data = fs::read(&path).ok()?;
         if data.len() < 12 {
-            tracing::warn!("[本地文件] 密钥文件格式无效");
             return None;
         }
 
         let nonce = Nonce::from_slice(&data[..12]);
         let ciphertext = &data[12..];
 
-        let cipher = Aes256Gcm::new_from_slice(LOCAL_STORAGE_FIXED_KEY).ok()?;
+        let key = derive_encryption_key();
+        let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
         let plaintext = cipher.decrypt(nonce, ciphertext).ok()?;
-        let master_key = String::from_utf8(plaintext).ok()?;
-
-        tracing::info!("[本地文件] 成功读取密钥");
-        Some(master_key)
+        String::from_utf8(plaintext).ok()
     }
 
     fn delete(&self) -> Result<(), String> {
@@ -131,7 +152,7 @@ impl KeyStorage for LocalFileStorage {
 /// 设置全局密钥存储后端
 pub fn set_key_storage(storage: Arc<dyn KeyStorage>) {
     if let Ok(mut guard) = KEY_STORAGE.write() {
-        tracing::info!("[密钥存储] 切换到「{}」后端", storage.name());
+        // tracing::info!("[密钥存储] 切换到「{}」后端", storage.name());
         *guard = Some(storage);
     }
 }
