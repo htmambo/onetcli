@@ -101,18 +101,63 @@ DatePicker:
     zh-CN: 选择日期
     zh-HK: 選擇日期
     it: "Seleziona data"
+  ok:
+    en: OK
+    zh-CN: 确定
+    zh-HK: 確定
+    it: OK
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+    zh-HK: 取消
+    it: Annulla
+  now:
+    en: Now
+    zh-CN: 现在
+    zh-HK: 現在
+    it: Ora
 DateTimePicker:
   placeholder:
     en: "Select date and time"
     zh-CN: 选择日期和时间
     zh-HK: 選擇日期和時間
     it: "Seleziona data e ora"
+  ok:
+    en: OK
+    zh-CN: 确定
+    zh-HK: 確定
+    it: OK
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+    zh-HK: 取消
+    it: Annulla
+  now:
+    en: Now
+    zh-CN: 现在
+    zh-HK: 現在
+    it: Ora
 TimePicker:
   placeholder:
     en: "Select time"
     zh-CN: 选择时间
     zh-HK: 選擇時間
     it: "Seleziona ora"
+  ok:
+    en: OK
+    zh-CN: 确定
+    zh-HK: 確定
+    it: OK
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+    zh-HK: 取消
+    it: Annulla
+  now:
+    en: Now
+    zh-CN: 现在
+    zh-HK: 現在
+    it: Ora
 Select:
   placeholder:
     en: "Please select"
@@ -130,16 +175,16 @@ Dock:
     zh-CN: 关闭
     zh-HK: 關閉
     it: Chiudi
-  Zoom In:
+  "Zoom In":
     en: Zoom In
     zh-CN: 放大
     zh-HK: 放大
-    it: Zoom In
-  Zoom Out:
+    it: "Zoom In"
+  "Zoom Out":
     en: Zoom Out
     zh-CN: 缩小
     zh-HK: 縮小
-    it: Zoom Out
+    it: "Zoom Out"
   Collapse:
     en: Collapse
     zh-CN: 隐藏
@@ -219,15 +264,15 @@ Input:
     en: Paste
     zh-CN: 粘贴
     zh-HK: 貼上
-  Select All:
+  "Select All":
     en: Select All
     zh-CN: 全选
     zh-HK: 全選
-  Go to Definition:
+  "Go to Definition":
     en: Go to Definition
     zh-CN: 跳转到定义
     zh-HK: 跳轉到定義
-  Show Code Actions:
+  "Show Code Actions":
     en: Show Code Actions
     zh-CN: 显示代码操作
     zh-HK: 顯示代碼操作
@@ -237,11 +282,27 @@ Settings:
     zh-CN: 搜索...
     zh-HK: 搜索...
     it: Ricerca...
-  Reset All:
+  "Reset All":
     en: Reset All
     zh-CN: 重置全部
     zh-HK: 重置全部
-    it: Resetta Tutto
+    it: "Resetta Tutto"
+EditTable:
+  filter_selected_count:
+    en: "Selected %{selected} / %{total}"
+    zh-CN: "已选 %{selected} / %{total}"
+    zh-HK: "已選 %{selected} / %{total}"
+    it: "Selezionati %{selected} / %{total}"
+  filter_select_all:
+    en: Select All
+    zh-CN: 全选
+    zh-HK: 全選
+    it: "Seleziona tutto"
+  filter_clear:
+    en: Clear
+    zh-CN: 清除
+    zh-HK: 清除
+    it: Cancella
 Pagination:
   previous:
     en: Previous
@@ -251,3 +312,12 @@ Pagination:
     en: Next
     zh-CN: 下一页
     zh-HK: 下一頁
+Inspector:
+  reset_rust:
+    en: Reset
+    zh-CN: 重置
+    zh-HK: 重置
+  reset_json:
+    en: Reset
+    zh-CN: 重置
+    zh-HK: 重置

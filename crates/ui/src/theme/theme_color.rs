@@ -6,6 +6,60 @@ use gpui::Hsla;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Base color palette for theme colors.
+///
+/// This struct groups the 12 ANSI-style base colors used throughout the UI,
+/// providing a more organized access pattern via `ThemeColor.base.*`.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub struct ThemeBaseColors {
+    /// The base red color.
+    pub red: Hsla,
+    /// The base red light color.
+    pub red_light: Hsla,
+    /// The base green color.
+    pub green: Hsla,
+    /// The base green light color.
+    pub green_light: Hsla,
+    /// The base blue color.
+    pub blue: Hsla,
+    /// The base blue light color.
+    pub blue_light: Hsla,
+    /// The base yellow color.
+    pub yellow: Hsla,
+    /// The base yellow light color.
+    pub yellow_light: Hsla,
+    /// The base magenta color.
+    pub magenta: Hsla,
+    /// The base magenta light color.
+    pub magenta_light: Hsla,
+    /// The base cyan color.
+    pub cyan: Hsla,
+    /// The base cyan light color.
+    pub cyan_light: Hsla,
+}
+
+/// Terminal UI colors for embedded terminal elements.
+///
+/// These colors are used for terminal-specific UI components like scrollbars,
+/// search highlighting, status indicators, and command displays.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub struct TerminalUiColors {
+    /// Scrollbar track background color.
+    pub scrollbar_track: Hsla,
+    /// Scrollbar thumb background color.
+    pub scrollbar_thumb: Hsla,
+    /// Search match highlight background (e.g., find result).
+    pub search_match_bg: Hsla,
+    /// Status disconnected/error indicator color.
+    pub status_disconnected: Hsla,
+    /// Primary text color for terminal UI elements.
+    pub text_primary: Hsla,
+    /// Muted text color for secondary terminal UI elements.
+    pub text_muted: Hsla,
+    /// Accent color for interactive terminal elements.
+    pub accent: Hsla,
+}
+
 /// Theme colors used throughout the UI components.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct ThemeColor {
@@ -21,10 +75,10 @@ pub struct ThemeColor {
     pub background: Hsla,
     /// Default border color
     pub border: Hsla,
-    /// Background color for GroupBox.
-    pub group_box: Hsla,
+    /// Background color for GroupBox / Panel.
+    pub group: Hsla,
     /// Text color for GroupBox.
-    pub group_box_foreground: Hsla,
+    pub group_foreground: Hsla,
     /// Input caret color (Blinking cursor).
     pub caret: Hsla,
     /// Chart 1 color.
@@ -129,10 +183,6 @@ pub struct ThemeColor {
     pub sidebar_border: Hsla,
     /// Sidebar text color.
     pub sidebar_foreground: Hsla,
-    /// Sidebar primary background color.
-    pub sidebar_primary: Hsla,
-    /// Sidebar primary text color.
-    pub sidebar_primary_foreground: Hsla,
     /// Skeleton background color.
     pub skeleton: Hsla,
     /// Slider bar background color.
@@ -159,6 +209,8 @@ pub struct ThemeColor {
     pub tab: Hsla,
     /// Tab active background color.
     pub tab_active: Hsla,
+    /// Tab hover background color.
+    pub tab_hover: Hsla,
     /// Tab active text color.
     pub tab_active_foreground: Hsla,
     /// TabBar background color.
@@ -230,6 +282,23 @@ pub struct ThemeColor {
     pub cyan: Hsla,
     /// The base cyan light color.
     pub cyan_light: Hsla,
+
+    /// Base color palette grouping.
+    ///
+    /// This field provides organized access to the 12 base colors via `theme.base.*`.
+    /// It is populated by `sync_base_palette()` after `apply_config()` completes.
+    /// Marked with `#[serde(skip)]` to avoid redundant serialization.
+    #[serde(skip)]
+    pub base: ThemeBaseColors,
+
+    /// Terminal UI colors for embedded terminal elements.
+    ///
+    /// This field provides colors for terminal-specific UI components like
+    /// scrollbars, search highlighting, and status indicators.
+    /// It is populated by `sync_terminal_ui()` after `apply_config()` completes.
+    /// Marked with `#[serde(skip)]` to avoid redundant serialization.
+    #[serde(skip)]
+    pub terminal_ui: TerminalUiColors,
 }
 
 impl ThemeColor {
@@ -241,5 +310,45 @@ impl ThemeColor {
     /// Get the default dark theme colors.
     pub fn dark() -> Arc<Self> {
         DEFAULT_THEME_COLORS[&ThemeMode::Dark].0.clone()
+    }
+
+    /// Synchronize the base palette from the individual base color fields.
+    ///
+    /// This method populates the `base` field with the current values of the
+    /// individual base color fields (`red`, `green`, `blue`, etc.).
+    /// Call this method after `apply_config()` to ensure `theme.base.*` stays
+    /// in sync with the flat fields.
+    pub fn sync_base_palette(&mut self) {
+        self.base = ThemeBaseColors {
+            red: self.red,
+            red_light: self.red_light,
+            green: self.green,
+            green_light: self.green_light,
+            blue: self.blue,
+            blue_light: self.blue_light,
+            yellow: self.yellow,
+            yellow_light: self.yellow_light,
+            magenta: self.magenta,
+            magenta_light: self.magenta_light,
+            cyan: self.cyan,
+            cyan_light: self.cyan_light,
+        };
+    }
+
+    /// Synchronize terminal UI colors from existing theme color fields.
+    ///
+    /// This method populates the `terminal_ui` field with colors derived from
+    /// existing theme fields, providing a semantic interface for terminal UI elements.
+    /// Call this method after `apply_config()` to ensure `theme.terminal_ui.*` is updated.
+    pub fn sync_terminal_ui(&mut self) {
+        self.terminal_ui = TerminalUiColors {
+            scrollbar_track: self.scrollbar,
+            scrollbar_thumb: self.scrollbar_thumb,
+            search_match_bg: self.base.yellow,
+            status_disconnected: self.danger,
+            text_primary: self.foreground,
+            text_muted: self.muted_foreground,
+            accent: self.accent,
+        };
     }
 }

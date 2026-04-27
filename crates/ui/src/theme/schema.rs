@@ -89,15 +89,16 @@ pub struct ThemeConfigColors {
     /// Default border color
     #[serde(rename = "border")]
     pub border: Option<SharedString>,
-    /// Background color for GroupBox.
-    #[serde(rename = "group_box.background")]
-    pub group_box: Option<SharedString>,
+    /// Background color for GroupBox / Panel.
+    #[serde(
+        rename = "group.background",
+        alias = "panel.background",
+        alias = "group_box.background"
+    )]
+    pub group: Option<SharedString>,
     /// Text color for GroupBox.
-    #[serde(rename = "group_box.foreground")]
-    pub group_box_foreground: Option<SharedString>,
-    /// Title text color for GroupBox.
-    #[serde(rename = "group_box.title.foreground")]
-    pub group_box_title_foreground: Option<SharedString>,
+    #[serde(rename = "group.foreground", alias = "group_box.foreground")]
+    pub group_foreground: Option<SharedString>,
     /// Input caret color (Blinking cursor).
     #[serde(rename = "caret")]
     pub caret: Option<SharedString>,
@@ -159,13 +160,13 @@ pub struct ThemeConfigColors {
     #[serde(rename = "input.border")]
     pub input: Option<SharedString>,
     /// Link text color.
-    #[serde(rename = "link")]
+    #[serde(rename = "link", alias = "link.foreground")]
     pub link: Option<SharedString>,
     /// Active link text color.
-    #[serde(rename = "link.active")]
+    #[serde(rename = "link.active", alias = "link.active.foreground")]
     pub link_active: Option<SharedString>,
     /// Hover link text color.
-    #[serde(rename = "link.hover")]
+    #[serde(rename = "link.hover", alias = "link.hover.foreground")]
     pub link_hover: Option<SharedString>,
     /// Background color for List and ListItem.
     #[serde(rename = "list.background")]
@@ -254,12 +255,6 @@ pub struct ThemeConfigColors {
     /// Sidebar text color.
     #[serde(rename = "sidebar.foreground")]
     pub sidebar_foreground: Option<SharedString>,
-    /// Sidebar primary background color.
-    #[serde(rename = "sidebar.primary.background")]
-    pub sidebar_primary: Option<SharedString>,
-    /// Sidebar primary text color.
-    #[serde(rename = "sidebar.primary.foreground")]
-    pub sidebar_primary_foreground: Option<SharedString>,
     /// Skeleton background color.
     #[serde(rename = "skeleton.background")]
     pub skeleton: Option<SharedString>,
@@ -299,6 +294,9 @@ pub struct ThemeConfigColors {
     /// Tab active background color.
     #[serde(rename = "tab.active.background")]
     pub tab_active: Option<SharedString>,
+    /// Tab hover background color.
+    #[serde(rename = "tab.hover.background")]
+    pub tab_hover: Option<SharedString>,
     /// Tab active text color.
     #[serde(rename = "tab.active.foreground")]
     pub tab_active_foreground: Option<SharedString>,
@@ -364,7 +362,7 @@ pub struct ThemeConfigColors {
     /// # Platform specific:
     ///
     /// This is only works on Linux, other platforms we can't change the window border color.
-    #[serde(rename = "window.border")]
+    #[serde(rename = "window.border", alias = "window_border")]
     pub window_border: Option<SharedString>,
 
     /// Base blue color.
@@ -534,7 +532,7 @@ impl ThemeColor {
         apply_color!(accordion, fallback = self.background);
         apply_color!(accordion_hover, fallback = self.accent.opacity(0.8));
         apply_color!(
-            group_box,
+            group,
             fallback = self
                 .background
                 .blend(
@@ -542,7 +540,7 @@ impl ThemeColor {
                         .opacity(if config.mode.is_dark() { 0.3 } else { 0.4 })
                 )
         );
-        apply_color!(group_box_foreground, fallback = self.foreground);
+        apply_color!(group_foreground, fallback = self.foreground);
         apply_color!(caret, fallback = self.primary);
         apply_color!(chart_1, fallback = self.blue.lighten(0.4));
         apply_color!(chart_2, fallback = self.blue.lighten(0.2));
@@ -598,18 +596,22 @@ impl ThemeColor {
         apply_color!(sidebar_accent_foreground, fallback = self.accent_foreground);
         apply_color!(sidebar_border, fallback = self.border);
         apply_color!(sidebar_foreground, fallback = self.foreground);
-        apply_color!(sidebar_primary, fallback = self.primary);
-        apply_color!(
-            sidebar_primary_foreground,
-            fallback = self.primary_foreground
-        );
         apply_color!(skeleton, fallback = self.secondary);
         apply_color!(slider_bar, fallback = self.primary);
         apply_color!(slider_thumb, fallback = self.primary_foreground);
         apply_color!(switch, fallback = self.secondary_active);
         apply_color!(switch_thumb, fallback = self.background);
-        apply_color!(tab, fallback = self.background);
-        apply_color!(tab_active, fallback = self.background);
+        if config.mode.is_dark() {
+            apply_color!(
+                tab,
+                fallback = self.background.blend(self.border.opacity(0.15))
+            );
+            apply_color!(tab_active, fallback = self.secondary);
+        } else {
+            apply_color!(tab, fallback = self.secondary);
+            apply_color!(tab_active, fallback = self.background);
+        }
+        apply_color!(tab_hover, fallback = self.tab_active);
         apply_color!(tab_active_foreground, fallback = self.foreground);
         apply_color!(tab_bar, fallback = self.background);
         apply_color!(tab_bar_segmented, fallback = self.secondary);
@@ -625,15 +627,15 @@ impl ThemeColor {
         apply_color!(title_bar, fallback = self.background);
         apply_color!(title_bar_border, fallback = self.border);
         apply_color!(tiles, fallback = self.background);
-        apply_color!(overlay);
+        apply_color!(overlay, fallback = gpui::hsla(0., 0., 0., 0.4));
         apply_color!(window_border, fallback = self.border);
 
-        // TODO: Apply default fallback colors to highlight.
+        // Sync base palette after all colors are applied
+        self.sync_base_palette();
+        // Sync terminal UI colors after base palette
+        self.sync_terminal_ui();
 
-        // Ensure opacity for list_active, table_active
-        self.list_active = self.list_active.alpha(self.list_active.a.min(0.2));
-        self.table_active = self.table_active.alpha(self.table_active.a.min(0.2));
-        self.selection = self.selection.alpha(self.selection.a.min(0.3));
+        // TODO: Apply default fallback colors to highlight.
     }
 }
 
@@ -645,14 +647,11 @@ impl Theme {
         } else {
             self.light_theme = config.clone();
         }
-        if let Some(style) = &config.highlight {
-            let highlight_theme = Arc::new(HighlightTheme {
-                name: config.name.to_string(),
-                appearance: config.mode,
-                style: style.clone(),
-            });
-            self.highlight_theme = highlight_theme.clone();
-        }
+        let next_highlight_theme = config.highlight.as_ref().map(|style| HighlightTheme {
+            name: config.name.to_string(),
+            appearance: config.mode,
+            style: style.clone(),
+        });
 
         let default_theme = if config.mode.is_dark() {
             Self::from(ThemeColor::dark().as_ref())
@@ -697,6 +696,9 @@ impl Theme {
         }
 
         self.colors.apply_config(&config, &default_theme.colors);
+        if let Some(highlight_theme) = next_highlight_theme {
+            self.highlight_theme = Arc::new(highlight_theme);
+        }
         self.mode = config.mode;
     }
 }

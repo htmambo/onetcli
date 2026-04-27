@@ -1,6 +1,6 @@
 use crate::{
-    highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
-    scroll::ScrollbarShow, sheet::SheetSettings,
+    highlighter::HighlightTheme, notification::NotificationSettings, scroll::ScrollbarShow,
+    sheet::SheetSettings,
 };
 use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
 use schemars::JsonSchema;
@@ -14,11 +14,13 @@ use std::{
 mod color;
 mod registry;
 mod schema;
+mod semantic;
 mod theme_color;
 
 pub use color::*;
 pub use registry::*;
 pub use schema::*;
+pub use semantic::SemanticColorsRef;
 pub use theme_color::*;
 
 pub fn init(cx: &mut App) {
@@ -78,8 +80,6 @@ pub struct Theme {
     pub tile_shadow: bool,
     /// The border radius of the tile panel, default is 0px.
     pub tile_radius: Pixels,
-    /// The list settings.
-    pub list: ListSettings,
     /// The sheet settings.
     pub sheet: SheetSettings,
 }
@@ -158,12 +158,7 @@ impl Theme {
     /// Change the theme mode.
     pub fn change(mode: impl Into<ThemeMode>, window: Option<&mut Window>, cx: &mut App) {
         let mode = mode.into();
-        if !cx.has_global::<Theme>() {
-            let mut theme = Theme::default();
-            theme.light_theme = ThemeRegistry::global(cx).default_light_theme().clone();
-            theme.dark_theme = ThemeRegistry::global(cx).default_dark_theme().clone();
-            cx.set_global(theme);
-        }
+        Self::ensure_global(cx);
 
         let theme = cx.global_mut::<Theme>();
         theme.mode = mode;
@@ -172,6 +167,7 @@ impl Theme {
         } else {
             theme.apply_config(&theme.light_theme.clone());
         }
+        crate::app_style::sync_theme(theme);
 
         if let Some(window) = window {
             window.refresh();
@@ -181,11 +177,7 @@ impl Theme {
     /// Get the input background color.
     #[inline]
     pub fn input_background(&self) -> Hsla {
-        if self.is_dark() {
-            self.input.mix(self.transparent, 0.1)
-        } else {
-            self.background
-        }
+        self.background
     }
 
     /// Get the editor background color, if not set, use the input background color.
@@ -195,6 +187,16 @@ impl Theme {
             .style
             .editor_background
             .unwrap_or_else(|| self.input_background())
+    }
+
+    /// 获取语义化颜色（基于当前模式）
+    #[inline(always)]
+    pub fn semantic(&self) -> SemanticColorsRef<'_> {
+        if self.is_dark() {
+            SemanticColorsRef::Dark(&self.colors)
+        } else {
+            SemanticColorsRef::Light(&self.colors)
+        }
     }
 }
 
@@ -222,12 +224,24 @@ impl From<&ThemeColor> for Theme {
             tile_grid_size: px(8.),
             tile_shadow: true,
             tile_radius: px(0.),
-            list: ListSettings::default(),
             colors: *colors,
             light_theme: Rc::new(ThemeConfig::default()),
             dark_theme: Rc::new(ThemeConfig::default()),
             highlight_theme: HighlightTheme::default_light(),
             sheet: SheetSettings::default(),
+        }
+    }
+}
+
+impl Theme {
+    fn ensure_global(cx: &mut App) {
+        if !cx.has_global::<Theme>() {
+            let mut theme = Theme::default();
+            theme.light_theme = ThemeRegistry::global(cx).default_light_theme().clone();
+            theme.dark_theme = ThemeRegistry::global(cx).default_dark_theme().clone();
+            // 确保初始 background.a 不为 0，避免在主题初始化完成前渲染时出现全透明
+            theme.colors.background.a = 1.0;
+            cx.set_global(theme);
         }
     }
 }
