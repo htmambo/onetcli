@@ -302,6 +302,7 @@ impl Render for Notification {
             .border_color(cx.theme().border)
             .bg(cx.theme().popover)
             .rounded(cx.theme().radius_lg)
+            .overflow_hidden()
             .shadow_md()
             .py_3p5()
             .px_4()
@@ -468,11 +469,7 @@ impl NotificationList {
             cx.spawn_in(window, async move |_, cx| {
                 Timer::after(Duration::from_secs(5)).await;
 
-                if let Err(err) =
-                    notification.update_in(cx, |note, window, cx| note.dismiss(window, cx))
-                {
-                    tracing::error!("failed to auto hide notification: {:?}", err);
-                }
+                _ = notification.update_in(cx, |note, window, cx| note.dismiss(window, cx));
             })
             .detach();
         }

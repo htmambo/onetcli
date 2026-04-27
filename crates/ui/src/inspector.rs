@@ -12,6 +12,7 @@ use lsp_types::{
     DiagnosticSeverity, Position, TextEdit,
 };
 use ropey::Rope;
+use rust_i18n::t;
 
 use crate::{
     ActiveTheme, IconName, Selectable, Sizable, TITLE_BAR_HEIGHT,
@@ -425,11 +426,14 @@ impl Render for DivInspector {
                                 .justify_between()
                                 .gap_x_2()
                                 .child("Rust Styles")
-                                .child(Button::new("rust-reset").label("Reset").small().on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.reset_style(window, cx);
-                                    }),
-                                )),
+                                .child(
+                                    Button::new("rust-reset")
+                                        .label(t!("Inspector.reset_rust"))
+                                        .small()
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.reset_style(window, cx);
+                                        })),
+                                ),
                         )
                         .child(
                             v_flex()
@@ -453,11 +457,14 @@ impl Render for DivInspector {
                             h_flex()
                                 .gap_x_2()
                                 .child(div().flex_1().child("JSON Styles"))
-                                .child(Button::new("json-reset").label("Reset").small().on_click(
-                                    cx.listener(|this, _, window, cx| {
-                                        this.reset_style(window, cx);
-                                    }),
-                                )),
+                                .child(
+                                    Button::new("json-reset")
+                                        .label(t!("Inspector.reset_json"))
+                                        .small()
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.reset_style(window, cx);
+                                        })),
+                                ),
                         )
                         .child(
                             v_flex()

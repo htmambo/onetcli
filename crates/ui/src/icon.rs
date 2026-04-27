@@ -124,6 +124,7 @@ pub enum IconName {
     Sun,
     ThumbsDown,
     ThumbsUp,
+    Trash,
     TriangleAlert,
     Undo,
     Undo2,
@@ -200,6 +201,7 @@ pub enum IconName {
     SerialPort,
     Monitor,
     DuckDB,
+    ListCheck,
 }
 
 impl IconName {
@@ -313,6 +315,7 @@ impl IconNamed for IconName {
             Self::Sun => "icons/sun.svg",
             Self::ThumbsDown => "icons/thumbs-down.svg",
             Self::ThumbsUp => "icons/thumbs-up.svg",
+            Self::Trash => "icons/trash.svg",
             Self::TriangleAlert => "icons/triangle-alert.svg",
             Self::Undo => "icons/undo.svg",
             Self::Undo2 => "icons/undo-2.svg",
@@ -389,6 +392,7 @@ impl IconNamed for IconName {
             Self::SerialPort => "icons/serial_port.svg",
             Self::Monitor => "icons/monitor.svg",
             Self::DuckDB => "icons/duckdb.svg",
+            Self::ListCheck => "icons/list-check.svg",
         }
         .into()
     }

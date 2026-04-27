@@ -2,9 +2,10 @@ use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges,
-    FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement,
-    Pixels, Point, RenderOnce, SharedString, StyleRefinement, Styled, Window, WindowControlArea,
-    anchored, div, hsla, point, prelude::FluentBuilder, px, relative,
+    FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
+    prelude::FluentBuilder, px, relative,
 };
 use rust_i18n::t;
 
@@ -13,6 +14,7 @@ use crate::{
     TITLE_BAR_HEIGHT, WindowExt as _,
     actions::{Cancel, Confirm},
     animation::cubic_bezier,
+    app_style,
     button::{Button, ButtonVariant, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement as _,
@@ -31,6 +33,14 @@ pub(crate) fn init(cx: &mut App) {
 type RenderButtonFn = Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement>;
 type FooterFn =
     Box<dyn Fn(RenderButtonFn, RenderButtonFn, &mut Window, &mut App) -> Vec<AnyElement>>;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DialogDragState {
+    dragging: bool,
+    drag_origin: Point<Pixels>,
+    start_offset: Point<Pixels>,
+    offset: Point<Pixels>,
+}
 
 /// Dialog button props.
 pub struct DialogButtonProps {
@@ -85,6 +95,7 @@ pub struct Dialog {
     footer: Option<FooterFn>,
     children: Vec<AnyElement>,
     width: Pixels,
+    height: Option<Pixels>,
     max_width: Option<Pixels>,
     margin_top: Option<Pixels>,
 
@@ -122,6 +133,7 @@ impl Dialog {
             children: Vec::new(),
             margin_top: None,
             width: px(480.),
+            height: None,
             max_width: None,
             overlay: true,
             keyboard: true,
@@ -170,7 +182,7 @@ impl Dialog {
     pub fn confirm(self) -> Self {
         self.footer(|ok, cancel, window, cx| vec![cancel(window, cx), ok(window, cx)])
             .overlay_closable(false)
-            .close_button(false)
+            .close_button(true)
     }
 
     /// Set to as a alter dialog, with OK button.
@@ -179,7 +191,7 @@ impl Dialog {
     pub fn alert(self) -> Self {
         self.footer(|ok, _, window, cx| vec![ok(window, cx)])
             .overlay_closable(false)
-            .close_button(false)
+            .close_button(true)
     }
 
     /// Set the button props of the dialog.
@@ -247,6 +259,13 @@ impl Dialog {
         self
     }
 
+    /// Sets the height of the dialog. If set, the dialog will be vertically centered
+    /// using this height: top = (viewport.height - self.height) / 2.
+    pub fn h(mut self, height: impl Into<Pixels>) -> Self {
+        self.height = Some(height.into());
+        self
+    }
+
     /// Set the maximum width of the dialog, defaults to `None`.
     pub fn max_w(mut self, max_width: impl Into<Pixels>) -> Self {
         self.max_width = Some(max_width.into());
@@ -303,6 +322,12 @@ impl RenderOnce for Dialog {
         let on_ok = self.on_ok.clone();
         let on_cancel = self.on_cancel.clone();
         let has_title = self.title.is_some();
+        let has_footer = self.footer.is_some();
+        let drag_state = window.use_keyed_state(
+            SharedString::from(format!("dialog-drag-{}-{:?}", layer_ix, self.focus_handle)),
+            cx,
+            |_, _| DialogDragState::default(),
+        );
 
         let render_ok: RenderButtonFn = Box::new({
             let on_ok = on_ok.clone();
@@ -350,12 +375,11 @@ impl RenderOnce for Dialog {
                         let on_cancel = on_cancel.clone();
                         let on_close = on_close.clone();
                         move |_, window, cx| {
-                            if !on_cancel(&ClickEvent::default(), window, cx) {
-                                return;
-                            }
-
+                            let proceed = on_cancel(&ClickEvent::default(), window, cx);
                             window.close_dialog(cx);
-                            on_close(&ClickEvent::default(), window, cx);
+                            if proceed {
+                                on_close(&ClickEvent::default(), window, cx);
+                            }
                         }
                     })
                     .into_any_element()
@@ -373,8 +397,16 @@ impl RenderOnce for Dialog {
             size: view_size,
         };
         let offset_top = px(layer_ix as f32 * 16.);
-        let y = self.margin_top.unwrap_or(view_size.height / 10.) + offset_top;
-        let x = bounds.center().x - self.width / 2.;
+        let base_x = bounds.center().x - self.width / 2.;
+        let default_y = ((view_size.height - self.height.unwrap_or(px(360.))) / 2.).max(px(48.));
+        let base_y = self.margin_top.unwrap_or(default_y) + offset_top;
+        let drag_offset = drag_state.read(cx).offset;
+        let x = base_x + drag_offset.x;
+        let y = base_y + drag_offset.y;
+        let min_x = px(16.);
+        let max_x = (view_size.width - self.width - px(16.)).max(min_x);
+        let min_y = px(24.);
+        let max_y = (view_size.height - px(80.)).max(min_y);
 
         let base_size = window.text_style().font_size;
         let rem_size = window.rem_size();
@@ -395,8 +427,21 @@ impl RenderOnce for Dialog {
 
         if !has_title {
             // When no title, reduce the top padding to fix line-height effect.
-            paddings.top -= px(6.);
+            paddings.top = (paddings.top - px(6.)).max(px(0.));
         }
+
+        let title_bar_padding_y = paddings.top.min(px(16.)).max(px(12.));
+        let body_top_padding = if has_title {
+            (paddings.top - px(6.)).max(px(14.))
+        } else {
+            paddings.top
+        };
+        let body_bottom_padding = if has_footer {
+            (paddings.bottom - px(6.)).max(px(12.))
+        } else {
+            paddings.bottom
+        };
+        let footer_padding_y = paddings.bottom.min(px(16.)).max(px(12.));
 
         let animation =
             Animation::new(*ANIMATION_DURATION).with_easing(cubic_bezier(0.32, 0.72, 0., 1.));
@@ -410,6 +455,45 @@ impl RenderOnce for Dialog {
                     .occlude()
                     .w(view_size.width)
                     .h(view_size.height)
+                    .rounded(cx.theme().radius_lg)
+                    .overflow_hidden()
+                    .on_mouse_move(window.listener_for(
+                        &drag_state,
+                        move |drag_state, event: &MouseMoveEvent, _, cx| {
+                            if !drag_state.dragging {
+                                return;
+                            }
+
+                            let next_x = (base_x
+                                + drag_state.start_offset.x
+                                + (event.position.x - drag_state.drag_origin.x))
+                                .clamp(min_x, max_x);
+                            let next_y = (base_y
+                                + drag_state.start_offset.y
+                                + (event.position.y - drag_state.drag_origin.y))
+                                .clamp(min_y, max_y);
+                            let next_offset = point(next_x - base_x, next_y - base_y);
+
+                            if next_offset != drag_state.offset {
+                                drag_state.offset = next_offset;
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        window.listener_for(&drag_state, |drag_state, _: &MouseUpEvent, _, cx| {
+                            drag_state.dragging = false;
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        window.listener_for(&drag_state, |drag_state, _: &MouseUpEvent, _, cx| {
+                            drag_state.dragging = false;
+                            cx.notify();
+                        }),
+                    )
                     .when(self.overlay_visible, |this| {
                         this.bg(overlay_color(self.overlay, cx))
                     })
@@ -442,16 +526,15 @@ impl RenderOnce for Dialog {
                             .id(layer_ix)
                             .track_focus(&self.focus_handle)
                             .focus_trap(format!("dialog-{}", layer_ix), &self.focus_handle)
-                            .bg(cx.theme().background)
                             .border_1()
-                            .border_color(cx.theme().border)
+                            .border_color(app_style::border_strong())
                             .rounded(cx.theme().radius_lg)
+                            .overflow_hidden()
                             .min_h_24()
-                            .pt(paddings.top)
-                            .pb(paddings.bottom)
-                            .gap(paddings.top.min(px(16.)))
                             .refine_style(&self.style)
                             .px_0()
+                            .pt(px(0.))
+                            .pb(px(0.))
                             .key_context(CONTEXT)
                             .when(self.keyboard, |this| {
                                 this.on_action({
@@ -491,19 +574,56 @@ impl RenderOnce for Dialog {
                             .left(x)
                             .top(y)
                             .w(self.width)
+                            .when_some(self.height, |this, h| this.h(h))
                             .when_some(self.max_width, |this, w| this.max_w(w))
-                            .when_some(self.title, |this, title| {
+                            .when(has_title, |this| {
                                 this.child(
                                     div()
+                                        .w_full()
                                         .pl(paddings.left)
-                                        .pr(paddings.right)
-                                        .line_height(relative(1.))
-                                        .font_semibold()
-                                        .child(title),
+                                        .pr(paddings.right
+                                            + if self.close_button { px(28.) } else { px(0.) })
+                                        .pt(title_bar_padding_y)
+                                        .pb(title_bar_padding_y)
+                                        .flex()
+                                        .items_center()
+                                        .cursor_move()
+                                        .refine_style(&app_style::title_bar_style())
+                                        .bg(cx.theme().title_bar)
+                                        .rounded_tl(cx.theme().radius_lg)
+                                        .rounded_tr(cx.theme().radius_lg)
+                                        .border_b_1()
+                                        .border_color(app_style::border())
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            window.listener_for(
+                                                &drag_state,
+                                                |drag_state, event: &MouseDownEvent, _, cx| {
+                                                    drag_state.dragging = true;
+                                                    drag_state.drag_origin = event.position;
+                                                    drag_state.start_offset = drag_state.offset;
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                },
+                                            ),
+                                        )
+                                        .when_some(self.title, |this, title| {
+                                            this.child(
+                                                div()
+                                                    .line_height(relative(1.))
+                                                    .font_semibold()
+                                                    .text_color(app_style::text())
+                                                    .child(title),
+                                            )
+                                        }),
                                 )
                             })
                             .children(self.close_button.then(|| {
-                                let top = (paddings.top - px(10.)).max(px(8.));
+                                let top = if has_title {
+                                    title_bar_padding_y.max(px(8.))
+                                } else {
+                                    (paddings.top - px(10.)).max(px(8.))
+                                };
                                 let right = (paddings.right - px(10.)).max(px(8.));
 
                                 Button::new("close")
@@ -524,24 +644,47 @@ impl RenderOnce for Dialog {
                                     })
                             }))
                             .child(
-                                div().flex_1().overflow_hidden().child(
-                                    // Body
-                                    v_flex()
-                                        .size_full()
-                                        .overflow_y_scrollbar()
-                                        .pl(paddings.left)
-                                        .pr(paddings.right)
-                                        .children(self.children),
-                                ),
+                                div()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .bg(cx.theme().background)
+                                    .when(!has_title, |this| {
+                                        this.rounded_tl(cx.theme().radius_lg)
+                                            .rounded_tr(cx.theme().radius_lg)
+                                    })
+                                    .when(!has_footer, |this| {
+                                        this.rounded_bl(cx.theme().radius_lg)
+                                            .rounded_br(cx.theme().radius_lg)
+                                    })
+                                    .child(
+                                        // Body
+                                        v_flex()
+                                            .size_full()
+                                            .overflow_y_scrollbar()
+                                            .pl(paddings.left)
+                                            .pr(paddings.right)
+                                            .pt(body_top_padding)
+                                            .pb(body_bottom_padding)
+                                            .children(self.children),
+                                    ),
                             )
                             .when_some(self.footer, |this, footer| {
                                 this.child(
                                     h_flex()
+                                        .w_full()
                                         .gap_2()
                                         .pl(paddings.left)
                                         .pr(paddings.right)
+                                        .pt(footer_padding_y)
+                                        .pb(footer_padding_y)
                                         .line_height(relative(1.))
                                         .justify_end()
+                                        .refine_style(&app_style::footer_style())
+                                        .bg(cx.theme().secondary)
+                                        .rounded_bl(cx.theme().radius_lg)
+                                        .rounded_br(cx.theme().radius_lg)
+                                        .border_t_1()
+                                        .border_color(app_style::border())
                                         .children(footer(render_ok, render_cancel, window, cx)),
                                 )
                             })
@@ -568,8 +711,7 @@ impl RenderOnce for Dialog {
                                 ];
                                 this.top(y * delta).shadow(shadow)
                             }),
-                    )
-                    .with_animation("fade-in", animation, move |this, delta| this.opacity(delta)),
+                    ),
             )
     }
 }

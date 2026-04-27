@@ -783,6 +783,14 @@ where
         let allow_open = !(self.open || self.options.disabled);
         let outline_visible = self.open || is_focused && !self.options.disabled;
         let popup_radius = cx.theme().radius.min(px(8.));
+        let popup_bg = self
+            .options
+            .style
+            .background
+            .clone()
+            .and_then(|background| background.color())
+            .unwrap_or(cx.theme().background.into());
+        let popup_border = self.options.style.border_color.unwrap_or(cx.theme().border);
         let (bg, fg) = input_style(self.options.disabled, cx);
 
         self.list
@@ -876,10 +884,11 @@ where
                                     v_flex()
                                         .occlude()
                                         .mt_1p5()
-                                        .bg(cx.theme().background)
+                                        .bg(popup_bg)
                                         .border_1()
-                                        .border_color(cx.theme().border)
+                                        .border_color(popup_border)
                                         .rounded(popup_radius)
+                                        .overflow_hidden()
                                         .shadow_md()
                                         .child(
                                             List::new(&self.list)

@@ -60,14 +60,6 @@ impl Anchored {
         self
     }
 
-    /// Sets the position mode for this anchored element. Local will have this
-    /// interpret its [`Anchored::position`] as relative to the parent element.
-    /// While Window will have it interpret the position as relative to the window.
-    pub fn position_mode(mut self, mode: AnchoredPositionMode) -> Self {
-        self.position_mode = mode;
-        self
-    }
-
     /// Snap to window edge instead of switching anchor corner when an overflow would occur.
     pub fn snap_to_window(mut self) -> Self {
         self.fit_mode = AnchoredFitMode::SnapToWindow;
@@ -247,7 +239,6 @@ impl IntoElement for Anchored {
 }
 
 /// Which algorithm to use when fitting the anchored element to be inside the window.
-#[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum AnchoredFitMode {
     /// Snap the anchored element to the window edge.
@@ -259,13 +250,10 @@ pub enum AnchoredFitMode {
 }
 
 /// Which algorithm to use when positioning the anchored element.
-#[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum AnchoredPositionMode {
     /// Position the anchored element relative to the window.
     Window,
-    /// Position the anchored element relative to its parent.
-    Local,
 }
 
 impl AnchoredPositionMode {
@@ -279,23 +267,9 @@ impl AnchoredPositionMode {
     ) -> (Point<Pixels>, Bounds<Pixels>) {
         let offset = offset.unwrap_or_default();
 
-        match self {
-            AnchoredPositionMode::Window => {
-                let anchor_position = anchor_position.unwrap_or(bounds.origin);
-                let bounds =
-                    Self::from_corner_and_size(anchor_corner, anchor_position + offset, size);
-                (anchor_position, bounds)
-            }
-            AnchoredPositionMode::Local => {
-                let anchor_position = anchor_position.unwrap_or_default();
-                let bounds = Self::from_corner_and_size(
-                    anchor_corner,
-                    bounds.origin + anchor_position + offset,
-                    size,
-                );
-                (anchor_position, bounds)
-            }
-        }
+        let anchor_position = anchor_position.unwrap_or(bounds.origin);
+        let bounds = Self::from_corner_and_size(anchor_corner, anchor_position + offset, size);
+        (anchor_position, bounds)
     }
 
     // Ref https://github.com/zed-industries/zed/blob/b06f4088a3565c5e30663106ff79c1ced645d87a/crates/gpui/src/geometry.rs#L863

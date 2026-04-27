@@ -1,8 +1,9 @@
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Context, IntoElement, ParentElement, Render,
-    SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
 
+use crate::tokens::Radius;
 use crate::{ActiveTheme, StyledExt, h_flex, kbd::Kbd, text::Text};
 
 enum TooltipContext {
@@ -97,7 +98,8 @@ impl Render for Tooltip {
                 .border_1()
                 .border_color(cx.theme().border)
                 .shadow_md()
-                .rounded(px(6.))
+                .rounded(Radius::Md.px())
+                .overflow_hidden()
                 .justify_between()
                 .py_0p5()
                 .px_2()
