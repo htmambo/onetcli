@@ -1,0 +1,38 @@
+!
+! App theme aligned terminal scheme: Flexoki Light
+!
+*.foreground:  #100F0F
+*.background:  #FFFCF0
+*.cursorColor: #D0A215
+!
+! Black
+*.color0:      #100F0F
+*.color8:      #6F6E69
+!
+! Red
+*.color1:      #D14D41
+*.color9:      #D14D41
+!
+! Green
+*.color2:      #879A39
+*.color10:     #879A39
+!
+! Yellow
+*.color3:      #D0A215
+*.color11:     #D0A215
+!
+! Blue
+*.color4:      #4385BE
+*.color12:     #4385BE
+!
+! Magenta
+*.color5:      #CE5D97
+*.color13:     #CE5D97
+!
+! Cyan
+*.color6:      #3AA99F
+*.color14:     #3AA99F
+!
+! White
+*.color7:      #F2F0E5
+*.color15:     #FFFCF0

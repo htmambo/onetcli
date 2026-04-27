@@ -756,7 +756,7 @@ impl ServerMonitorPanel {
             .size_full()
             .items_center()
             .justify_center()
-            .gap_3()
+            .gap_1()
             .px_6()
             .child(
                 div()
@@ -882,7 +882,7 @@ impl ServerMonitorPanel {
             .unwrap_or_else(|| t!("ServerMonitor.unavailable").to_string());
 
         v_flex()
-            .gap_3()
+            .gap_1()
             .child(self.render_banner(cx))
             .child(self.render_card(
                 t!("ServerMonitor.cpu"),
@@ -966,7 +966,7 @@ impl ServerMonitorPanel {
             .filter(|usage| !usage.cores.is_empty())
             .map(|usage| {
                 v_flex()
-                    .gap_3()
+                    .gap_1()
                     .child(render_cpu_history_chart(&self.cpu_history, cx))
                     .child(render_cpu_core_grid(&usage.cores, cx))
                     .into_any_element()
@@ -1095,7 +1095,7 @@ impl ServerMonitorPanel {
         };
 
         h_flex()
-            .gap_4()
+            .gap_1()
             .items_start()
             .w_full()
             .min_w(px(0.0))
@@ -1125,7 +1125,6 @@ impl Render for ServerMonitorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(
@@ -1137,8 +1136,8 @@ impl Render for ServerMonitorPanel {
                     .child(
                         v_flex()
                             .flex_shrink_0()
-                            .p_3()
-                            .gap_3()
+                            .p_1()
+                            .gap_1()
                             .child(if self.preparing {
                                 self.render_preparing(cx).into_any_element()
                             } else if self.monitor_enabled {
@@ -1225,6 +1224,38 @@ fn render_cpu_core_grid(
     cores: &[CpuUsageCore],
     cx: &mut Context<ServerMonitorPanel>,
 ) -> AnyElement {
+    let core_count = cores.len();
+    let mut rows: Vec<AnyElement> = Vec::with_capacity((core_count + 1) / 2);
+
+    for chunk in cores.chunks(2) {
+        let mut row = h_flex().w_full().gap_2();
+        for core in chunk {
+            let value = core.percent.clamp(0.0, 100.0);
+            let label = core.name.clone();
+            row = row.child(
+                v_flex()
+                    .flex_1()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .child(div().text_xs().child(label.clone()))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("{value:.1}%")),
+                            ),
+                    )
+                    .child(
+                        Progress::new(SharedString::from(format!("cpu-core-{}", label)))
+                            .value(value as f32),
+                    ),
+            );
+        }
+        rows.push(row.into_any_element());
+    }
+
     v_flex()
         .gap_2()
         .child(
@@ -1233,34 +1264,7 @@ fn render_cpu_core_grid(
                 .text_color(cx.theme().muted_foreground)
                 .child("Per-core"),
         )
-        .child(
-            h_flex()
-                .w_full()
-                .flex_wrap()
-                .gap_2()
-                .children(cores.iter().map(|core| {
-                    let value = core.percent.clamp(0.0, 100.0);
-                    let label = core.name.clone();
-                    v_flex()
-                        .w(px(108.0))
-                        .gap_1()
-                        .child(
-                            h_flex()
-                                .justify_between()
-                                .child(div().text_xs().child(label.clone()))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("{value:.1}%")),
-                                ),
-                        )
-                        .child(
-                            Progress::new(SharedString::from(format!("cpu-core-{label}")))
-                                .value(value as f32),
-                        )
-                })),
-        )
+        .child(v_flex().gap_2().children(rows).into_any_element())
         .into_any_element()
 }
 

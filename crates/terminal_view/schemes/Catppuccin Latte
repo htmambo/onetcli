@@ -1,0 +1,38 @@
+!
+! App theme aligned terminal scheme: Catppuccin Latte
+!
+*.foreground:  #4C4F69
+*.background:  #EFF1F5
+*.cursorColor: #7287FD
+!
+! Black
+*.color0:      #4C4F69
+*.color8:      #9A9DB2
+!
+! Red
+*.color1:      #D26A53
+*.color9:      #D26A53
+!
+! Green
+*.color2:      #5AA93B
+*.color10:     #5AA93B
+!
+! Yellow
+*.color3:      #DF8E1D
+*.color11:     #DF8E1D
+!
+! Blue
+*.color4:      #78ACDC
+*.color12:     #78ACDC
+!
+! Magenta
+*.color5:      #8778DC
+*.color13:     #8778DC
+!
+! Cyan
+*.color6:      #53D2B0
+*.color14:     #53D2B0
+!
+! White
+*.color7:      #DCE0E8
+*.color15:     #EFF1F5

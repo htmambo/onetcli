@@ -1,0 +1,155 @@
+!
+! Red Alert Deep
+! 基于现有 "Red Alert" 方案衍生出的更深红版本。
+! 本文件刻意保留大量注释，并使用语义化的 `#define`
+! 命名，目的是让它成为后续新主题可维护的开发样板。
+!
+! 加载说明：
+! - Tabby 社区配色加载器会解析 `#define` 变量和 `*.key: value` 键值对。
+! - 当前会被 Tabby/xterm 实际消费的字段包括：
+!   foreground、background、cursorColor、cursorAccent、
+!   selection、selectionForeground、color0..color15。
+! - colorBD/colorIT/colorUL 这类遗留 Xresources 键当前不会被 Tabby 消费，
+!   因此这里只在文件末尾以注释形式保留，用作文档说明。
+!
+! 配色说明：
+! - 相比原始 "Red Alert"，这里把背景和主红色系整体压暗，
+!   以降低眩光，同时保留原本偏暖、偏警示的氛围。
+! - ANSI 槽位名称描述的是转义码位置，不要求字面色相完全一致。
+!   比如名为 “blue” 的槽位，在主题设计上仍然可以是偏暖色。
+!
+! ---------------------------------------------------------------------------
+! 终端画布核心颜色
+! ---------------------------------------------------------------------------
+!
+! 默认前景色：用于未显式指定 ANSI 颜色的文本、Shell 输出和大多数提示符文本。
+#define fg_main               #f7eded
+!
+! 终端底色：当 Tabby 配置为使用配色方案背景，而不是跟随应用主题背景时生效。
+#define bg_terminal           #320610
+!
+! 光标填充色：用于块光标、竖线光标和下划线光标本体。
+#define cursor_fill           #fff2f2
+!
+! 块光标内文字颜色：需要与光标填充色保持足够对比，保证光标下字符可读。
+#define cursor_text           #3f1013
+!
+! 选区背景色：用于鼠标拖拽或键盘选择终端文本时的高亮底色。
+! 这里使用 alpha 通道，以便原始字符颜色仍然部分可见。
+#define selection_bg          #b5445b55
+!
+! 可选的选区前景色覆盖：用于保证选中文本在红色选区背景上依然清晰。
+#define selection_fg          #fff8f7
+!
+! ---------------------------------------------------------------------------
+! ANSI 基础色（0-7）
+! 对应 SGR 30-37，也会被很多 shell / TUI 程序复用。
+! ---------------------------------------------------------------------------
+!
+! ANSI 0 / black：
+! 用于 SGR 30，也常被终端应用拿来表示深色背景块、阴影和低对比分隔元素。
+#define ansi_black            #57030a
+!
+! ANSI 1 / red：
+! 主要错误色 / 危险色。相比原始 Red Alert 的红色更深一些。
+#define ansi_red              #ba3551
+!
+! ANSI 2 / green：
+! 成功态、可执行文件名，以及很多提示符里的“正常/可用”状态文本。
+#define ansi_green            #6fa56a
+!
+! ANSI 3 / yellow：
+! 警告态、某些提示符中的目录名，以及中等强调级别的高亮。
+#define ansi_yellow           #b5ae72
+!
+! ANSI 4 / blue：
+! 原始 Red Alert 在这个槽位上刻意使用了偏暖的红粉色。
+! 这里保留这种暖色倾向，以维持原主题气质，兼顾依赖 SGR 34 的链接、
+! 主机名和次级强调元素。
+#define ansi_blue             #cf3d57
+!
+! ANSI 5 / magenta：
+! 提示符次级强调色、diff 高亮，以及部分工具自己的强调元素。
+#define ansi_magenta          #c874c3
+!
+! ANSI 6 / cyan：
+! 信息类文本、符号链接标记、主机名，以及提示符中的元信息。
+#define ansi_cyan             #6eafaa
+!
+! ANSI 7 / white：
+! 中性亮色兜底，很多经典终端程序会直接把它当普通亮文本使用。
+#define ansi_white            #d8caca
+!
+! ---------------------------------------------------------------------------
+! ANSI 高亮色（8-15）
+! 对应 SGR 90-97，或被很多程序当作 bold / 高强度变体。
+! ---------------------------------------------------------------------------
+!
+! ANSI 8 / bright black：
+! 常见于弱化文本、行号、低存在感边框和非激活提示符。
+#define ansi_bright_black     #5e1d21
+!
+! ANSI 9 / bright red：
+! 更强的错误色 / 高亮红，适合粗体红文本和更紧急的警示强调。
+#define ansi_bright_red       #d24c68
+!
+! ANSI 10 / bright green：
+! 高强度成功态颜色。
+#define ansi_bright_green     #97cd8c
+!
+! ANSI 11 / bright yellow：
+! 高可见度的警告 / 信息高亮，同时避免过于荧光化。
+#define ansi_bright_yellow    #ddd6aa
+!
+! ANSI 12 / bright blue：
+! 给整体偏暖的主题补一个偏冷的对照色，适合链接、主机名等
+! 需要和红色家族拉开层次的元素。
+#define ansi_bright_blue      #79ace6
+!
+! ANSI 13 / bright magenta：
+! 高强度洋红，适合提示符、diff 和插件 / UI 类强调。
+#define ansi_bright_magenta   #e0bfde
+!
+! ANSI 14 / bright cyan：
+! 更亮的信息提示色，也是 bright blue 的可读搭配色。
+#define ansi_bright_cyan      #b4ddd8
+!
+! ANSI 15 / bright white：
+! 最强强调级别的前景色，适合最亮的粗体 / 高亮文本。
+#define ansi_bright_white     #fff5f4
+!
+! ---------------------------------------------------------------------------
+! Tabby/xterm 当前实际消费的赋值区
+! ---------------------------------------------------------------------------
+*.foreground:          fg_main
+*.background:          bg_terminal
+*.cursorColor:         cursor_fill
+*.cursorAccent:        cursor_text
+*.selection:           selection_bg
+*.selectionForeground: selection_fg
+*.color0:              ansi_black
+*.color1:              ansi_red
+*.color2:              ansi_green
+*.color3:              ansi_yellow
+*.color4:              ansi_blue
+*.color5:              ansi_magenta
+*.color6:              ansi_cyan
+*.color7:              ansi_white
+*.color8:              ansi_bright_black
+*.color9:              ansi_bright_red
+*.color10:             ansi_bright_green
+*.color11:             ansi_bright_yellow
+*.color12:             ansi_bright_blue
+*.color13:             ansi_bright_magenta
+*.color14:             ansi_bright_cyan
+*.color15:             ansi_bright_white
+!
+! ---------------------------------------------------------------------------
+! 遗留 Xresources 占位键
+! ---------------------------------------------------------------------------
+! 原始 "Red Alert" 文件里带有启用状态的 colorBD，以及注释掉的
+! colorIT/colorUL 占位键。Tabby 当前不会消费这些字段，因此这里保持
+! 注释状态，避免误导为“运行时会生效”。
+!*.colorBD:            #ff9158
+!*.colorIT:
+!*.colorUL:

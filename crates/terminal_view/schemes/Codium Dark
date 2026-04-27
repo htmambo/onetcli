@@ -1,0 +1,45 @@
+!
+! Codium Dark (from codium-dark.json)
+!
+*.foreground:  #f7eded
+*.background:  #2c1438
+*.cursorColor: #e7bbf7
+*.selectionBackground: #58257280
+*.selectionForeground: #f8fafd
+!
+! Black
+*.color0:      #1f0927
+*.color8:      #724582
+!
+! Red
+*.color1:      #752194
+*.color9:      #e7bbf7
+!
+! Green
+*.color2:      #582572
+*.color10:     #724582
+!
+! Yellow
+*.color3:      #724582
+*.color11:     #c678dd
+!
+! Blue
+*.color4:      #582572
+*.color12:     #724582
+!
+! Magenta
+*.color5:      #c678dd
+*.color13:     #e7bbf7
+!
+! Cyan
+*.color6:      #481359
+*.color14:     #582572
+!
+! White
+*.color7:      #e7bbf7
+*.color15:     #f8fafd
+!
+! Bold, Italic, Underline
+*.colorBD:     #f8fafd
+!*.colorIT:
+!*.colorUL:

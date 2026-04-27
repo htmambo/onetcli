@@ -16,10 +16,7 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
-use crate::{
-    theme::{TerminalColors, TerminalTheme},
-    TerminalHighlightRule,
-};
+use crate::{theme::TerminalTheme, TerminalHighlightRule};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -97,6 +94,8 @@ pub enum TerminalSidebarEvent {
     SearchNext,
     /// 字体大小变更
     FontSizeChanged(f32),
+    /// 行高比例变更
+    LineHeightScaleChanged(f32),
     /// 字体变更
     FontFamilyChanged(String),
     /// 主题变更
@@ -147,8 +146,6 @@ pub struct TerminalSidebar {
     sync_path_enabled: bool,
     /// 焦点句柄
     focus_handle: FocusHandle,
-    /// 终端主题配色（用于侧边栏工具栏）
-    colors: TerminalColors,
     /// 订阅句柄
     _subs: Vec<Subscription>,
 }
@@ -164,7 +161,6 @@ impl TerminalSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let colors = initial_theme.colors();
         let has_file_manager = stored_connection.is_some();
         let auto_show_server_monitor = ServerMonitorPanel::load_monitor_enabled(connection_id);
         let settings_panel = cx.new(|cx| {
@@ -237,11 +233,13 @@ impl TerminalSidebar {
                 settings_panel::SettingsPanelEvent::FontSizeChanged(size) => {
                     cx.emit(TerminalSidebarEvent::FontSizeChanged(*size));
                 }
+                settings_panel::SettingsPanelEvent::LineHeightScaleChanged(scale) => {
+                    cx.emit(TerminalSidebarEvent::LineHeightScaleChanged(*scale));
+                }
                 settings_panel::SettingsPanelEvent::FontFamilyChanged(family) => {
                     cx.emit(TerminalSidebarEvent::FontFamilyChanged(family.clone()));
                 }
                 settings_panel::SettingsPanelEvent::ThemeChanged(theme) => {
-                    this.colors = theme.colors();
                     cx.emit(TerminalSidebarEvent::ThemeChanged(theme.clone()));
                 }
                 settings_panel::SettingsPanelEvent::CursorBlinkChanged(enabled) => {
@@ -339,7 +337,6 @@ impl TerminalSidebar {
             server_monitor_panel,
             sync_path_enabled,
             focus_handle: cx.focus_handle(),
-            colors,
             _subs: subs,
         }
     }
@@ -395,7 +392,6 @@ impl TerminalSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.colors = theme.colors();
         // 更新设置面板（会同时更新颜色和主题）
         let theme_clone = theme.clone();
         self.settings_panel.update(cx, |panel, cx| {
@@ -543,10 +539,9 @@ impl TerminalSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
-        let accent_color = self.colors.accent;
-        let accent_fg = self.colors.accent_foreground;
-        let muted_fg = self.colors.muted_foreground;
-        let muted_bg = self.colors.muted;
+        let active_bg = cx.theme().list_active;
+        let hover_bg = cx.theme().sidebar_accent;
+        let icon_color = cx.theme().sidebar_foreground;
 
         div()
             .id(SharedString::from(format!("toolbar-btn-{:?}", panel)))
@@ -557,22 +552,26 @@ impl TerminalSidebar {
             .justify_center()
             .rounded_md()
             .cursor_pointer()
-            .when(is_active, |this| this.bg(accent_color))
-            .when(!is_active, |this| this.hover(|s| s.bg(muted_bg)))
+            .when(is_active, |this| {
+                this.bg(active_bg)
+                    .border_l_3()
+                    .border_color(cx.theme().list_active_border)
+            })
+            .when(!is_active, |this| this.hover(|s| s.bg(hover_bg)))
             .on_click(cx.listener(move |this, _event, _window, cx| {
                 this.toggle_panel(panel, cx);
             }))
             .child(
                 Icon::new(panel.icon())
                     .with_size(Size::Medium)
-                    .text_color(if is_active { accent_fg } else { muted_fg }),
+                    .text_color(icon_color),
             )
     }
 
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let border_color = self.colors.border;
-        let muted_bg = self.colors.background;
+        let border_color = cx.theme().border;
+        let toolbar_bg = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
 
@@ -580,7 +579,7 @@ impl TerminalSidebar {
             .flex_shrink_0()
             .w(TOOLBAR_WIDTH)
             .h_full()
-            .bg(muted_bg)
+            .bg(toolbar_bg)
             .border_l_1()
             .border_color(border_color)
             .items_center()
@@ -638,7 +637,7 @@ impl Focusable for TerminalSidebar {
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let bg_color = cx.theme().muted;
 
         div()
             .h_full()

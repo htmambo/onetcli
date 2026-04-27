@@ -284,6 +284,7 @@ impl QuickCommandPanel {
         cx: &mut Context<Self>,
     ) {
         let view = cx.entity().clone();
+        let text_muted = cx.theme().terminal_ui.text_muted;
 
         window.open_dialog(cx, move |dialog, _window, _cx| {
             let view_ok = view.clone();
@@ -305,12 +306,7 @@ impl QuickCommandPanel {
                                 .text_sm()
                                 .child(t!("QuickCommand.delete_confirm_message")),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(gpui::rgb(0x9ca3af))
-                                .child(preview),
-                        )
+                        .child(div().text_xs().text_color(text_muted).child(preview))
                         .into_any_element(),
                 )
                 .button_props(
@@ -434,7 +430,7 @@ impl QuickCommandPanel {
             )
             .child(
                 Button::new("cancel-add")
-                    .label("Cancel")
+                    .label(t!("Common.cancel").to_string())
                     .ghost()
                     .xsmall()
                     .tooltip(t!("QuickCommand.cancel_tooltip").to_string())
@@ -448,7 +444,7 @@ impl QuickCommandPanel {
             )
             .child(
                 Button::new("confirm-add")
-                    .label("Add")
+                    .label(t!("Common.add").to_string())
                     .primary()
                     .xsmall()
                     .tooltip(t!("QuickCommand.confirm_add_tooltip").to_string())
@@ -661,7 +657,6 @@ impl Render for QuickCommandPanel {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(self.render_search_bar(cx))
