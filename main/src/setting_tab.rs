@@ -502,8 +502,6 @@ pub struct AppSettings {
     pub terminal_confirm_multiline_paste: bool,
     #[serde(default = "default_true")]
     pub terminal_confirm_high_risk_command: bool,
-    #[serde(default = "default_terminal_exit_behavior")]
-    pub terminal_exit_behavior: String,
     #[serde(default = "default_true")]
     pub auto_update: bool,
     #[serde(default)]
@@ -726,10 +724,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_terminal_exit_behavior() -> String {
-    "prompt".to_string()
-}
-
 fn default_auto_save_interval() -> f64 {
     5.0
 }
@@ -881,7 +875,6 @@ impl Default for AppSettings {
             terminal_recovery_scrollback_lines: default_terminal_recovery_scrollback_lines(),
             terminal_confirm_multiline_paste: default_true(),
             terminal_confirm_high_risk_command: default_true(),
-            terminal_exit_behavior: default_terminal_exit_behavior(),
             auto_update: true,
             sync_server_url: String::new(),
             sync_backend_type: default_sync_backend_type(),
@@ -2622,43 +2615,6 @@ impl SettingsPanel {
                             .description(
                                 t!("Settings.General.Terminal.recovery_scrollback_lines_desc")
                                     .to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Terminal.exit_behavior"),
-                                themed_setting_field(SettingField::dropdown(
-                                    vec![
-                                        (
-                                            "prompt".into(),
-                                            t!("Settings.General.Terminal.exit_behavior_prompt")
-                                                .into(),
-                                        ),
-                                        (
-                                            "close".into(),
-                                            t!("Settings.General.Terminal.exit_behavior_close")
-                                                .into(),
-                                        ),
-                                    ],
-                                    |cx: &App| {
-                                        SharedString::from(
-                                            AppSettings::global(cx).terminal_exit_behavior.clone(),
-                                        )
-                                    },
-                                    |val: SharedString, cx: &mut App| {
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.terminal_exit_behavior = val.to_string();
-                                        settings.save();
-                                        let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
-                                    },
-                                ))
-                                .default_value(
-                                    SharedString::from(
-                                        default_settings.terminal_exit_behavior.clone(),
-                                    ),
-                                ),
-                            )
-                            .description(
-                                t!("Settings.General.Terminal.exit_behavior_desc").to_string(),
                             ),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)

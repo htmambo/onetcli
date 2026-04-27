@@ -1064,22 +1064,6 @@ Settings:
         en: Limit how many recent local terminal lines are saved for restore prompts (0-5000)
         zh-CN: 限制本地终端在恢复弹窗中可恢复的最近历史行数（0-5000）
         zh-HK: 限制本地終端在恢復彈窗中可恢復的最近歷史行數（0-5000）
-      exit_behavior:
-        en: Exit behavior
-        zh-CN: 退出行为
-        zh-HK: 退出行為
-      exit_behavior_desc:
-        en: Choose what to do when terminal session ends
-        zh-CN: 选择终端会话结束时如何处理
-        zh-HK: 選擇終端機工作階段結束時如何處理
-      exit_behavior_prompt:
-        en: Prompt
-        zh-CN: 弹窗确认
-        zh-HK: 彈窗確認
-      exit_behavior_close:
-        en: Close directly
-        zh-CN: 直接关闭
-        zh-HK: 直接關閉
 
     # 数据库设置
     Database:

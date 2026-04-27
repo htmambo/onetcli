@@ -455,18 +455,6 @@ Settings:
     en: SESSION
     zh-CN: 会话
     zh-HK: 工作階段
-  exit_behavior_desc:
-    en: "When shell exits with 'exit' command"
-    zh-CN: 当 Shell 通过 exit 命令退出时
-    zh-HK: 當 Shell 通過 exit 命令退出時
-  exit_behavior_prompt:
-    en: Show confirmation dialog
-    zh-CN: 显示确认弹窗
-    zh-HK: 顯示確認彈窗
-  exit_behavior_close:
-    en: Close tab directly
-    zh-CN: 直接关闭标签
-    zh-HK: 直接關閉標籤
   sync_path_help:
     en: Automatically sync the current SSH working directory to the file manager through the shell integration script.
     zh-CN: 通过 Shell 集成脚本自动将当前 SSH 工作目录同步到文件管理器。

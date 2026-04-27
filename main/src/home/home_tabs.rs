@@ -199,7 +199,6 @@ impl HomePage {
             let cursor_blink = settings.terminal_cursor_blink;
             let confirm_multiline = settings.terminal_confirm_multiline_paste;
             let confirm_high_risk = settings.terminal_confirm_high_risk_command;
-            let exit_behavior = settings.terminal_exit_behavior.clone();
 
             terminal_view.update(cx, |view, cx| {
                 view.apply_terminal_settings(
@@ -211,7 +210,6 @@ impl HomePage {
                     autocomplete_enabled,
                     middle_click_paste,
                     sync_path,
-                    &exit_behavior,
                     window,
                     cx,
                 );
@@ -434,7 +432,6 @@ impl HomePage {
         let autocomplete_enabled = settings.terminal_enable_autocomplete;
         let middle_click_paste = settings.terminal_middle_click_paste;
         let sync_path = settings.terminal_sync_path_with_terminal;
-        let exit_behavior = settings.terminal_exit_behavior.clone();
         self.terminal_views.retain(|weak| {
             if let Some(view) = weak.upgrade() {
                 view.update(cx, |view, cx| {
@@ -447,7 +444,6 @@ impl HomePage {
                         autocomplete_enabled,
                         middle_click_paste,
                         sync_path,
-                        &exit_behavior,
                         window,
                         cx,
                     );

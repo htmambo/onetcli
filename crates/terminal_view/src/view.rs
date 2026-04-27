@@ -618,8 +618,6 @@ pub struct TerminalView {
     middle_click_paste: bool,
     /// 是否启用字体连字
     font_ligatures_enabled: bool,
-    /// 终端退出行为: "prompt" 显示弹窗, "close" 直接关闭
-    exit_behavior: String,
     /// 应用退出标记，避免重复 kill 已 detach 的 hosted PTY
     app_quitting: bool,
     /// 侧边栏面板大小
@@ -1021,7 +1019,6 @@ impl TerminalView {
             autocomplete_enabled: true,
             middle_click_paste: true,
             font_ligatures_enabled: false,
-            exit_behavior: "prompt".to_string(),
             app_quitting: false,
             sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
             resizing: None,
@@ -1913,7 +1910,6 @@ impl TerminalView {
         autocomplete_enabled: bool,
         middle_click_paste: bool,
         sync_path: bool,
-        exit_behavior: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1947,7 +1943,6 @@ impl TerminalView {
             self.dismiss_history_prompt_matches();
         }
         self.middle_click_paste = middle_click_paste;
-        self.exit_behavior = exit_behavior.to_string();
 
         self.terminal.update(cx, |terminal, _cx| {
             terminal.set_sync_path_with_terminal(sync_path);
@@ -1970,7 +1965,6 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let exit_behavior = self.exit_behavior.clone();
         self.apply_terminal_settings(
             settings.font_size,
             self.current_theme.font_family.clone(),
@@ -1980,7 +1974,6 @@ impl TerminalView {
             settings.enable_autocomplete,
             settings.middle_click_paste,
             settings.sync_path_with_terminal,
-            &exit_behavior,
             window,
             cx,
         );
@@ -2077,11 +2070,6 @@ impl TerminalView {
             .unwrap_or(self.current_theme.line_height_scale);
         let auto_copy = state.auto_copy.unwrap_or(self.auto_copy_on_select);
         let middle_click_paste = state.middle_click_paste.unwrap_or(self.middle_click_paste);
-        let exit_behavior = state
-            .exit_behavior
-            .as_deref()
-            .unwrap_or(&self.exit_behavior)
-            .to_string();
 
         self.apply_terminal_settings(
             font_size,
@@ -2092,7 +2080,6 @@ impl TerminalView {
             self.autocomplete_enabled,
             middle_click_paste,
             false,
-            &exit_behavior,
             window,
             cx,
         );
@@ -2106,11 +2093,6 @@ impl TerminalView {
         self.apply_cursor_blink(state.cursor_blink.unwrap_or(false), window, cx);
         self.apply_confirm_multiline_paste(state.confirm_multiline_paste.unwrap_or(true), cx);
         self.apply_confirm_high_risk_command(state.confirm_high_risk_command.unwrap_or(true), cx);
-    }
-
-    pub fn apply_exit_behavior(&mut self, behavior: &str, cx: &mut Context<Self>) {
-        self.exit_behavior = behavior.to_string();
-        cx.notify();
     }
 
     pub fn sync_sidebar_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3875,7 +3857,6 @@ impl TabContent for TerminalView {
                         middle_click_paste: Some(self.middle_click_paste),
                         confirm_multiline_paste: Some(self.confirm_multiline_paste),
                         confirm_high_risk_command: Some(self.confirm_high_risk_command),
-                        exit_behavior: Some(self.exit_behavior.clone()),
                         theme_name: self.theme_override_name.clone(),
                     }),
                     ssh_terminal: None,

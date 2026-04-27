@@ -83,8 +83,6 @@ pub struct LocalTerminalRestoreState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm_high_risk_command: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_behavior: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme_name: Option<String>,
 }
 
@@ -292,10 +290,6 @@ fn restore_legacy_local_terminal_payload(data: &Value) -> Option<ConnectionResto
             confirm_high_risk_command: data
                 .get("confirm_high_risk_command")
                 .and_then(|value| value.as_bool()),
-            exit_behavior: data
-                .get("exit_behavior")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
             theme_name: data
                 .get("theme_name")
                 .and_then(|value| value.as_str())
@@ -470,7 +464,6 @@ mod tests {
                 middle_click_paste: None,
                 confirm_multiline_paste: None,
                 confirm_high_risk_command: None,
-                exit_behavior: None,
                 theme_name: None,
             }),
             ssh_terminal: None,
@@ -531,7 +524,6 @@ mod tests {
                     middle_click_paste: None,
                     confirm_multiline_paste: None,
                     confirm_high_risk_command: None,
-                    exit_behavior: None,
                     theme_name: None,
                 }),
                 ssh_terminal: None,
@@ -603,7 +595,6 @@ mod tests {
                         middle_click_paste: Some(true),
                         confirm_multiline_paste: Some(true),
                         confirm_high_risk_command: Some(true),
-                        exit_behavior: Some("prompt".to_string()),
                         theme_name: Some("OneDark".to_string()),
                     }),
                     ssh_terminal: None,
