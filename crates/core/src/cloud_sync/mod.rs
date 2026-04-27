@@ -17,33 +17,40 @@
 //! 4. 验证通过后解锁同步服务
 //! 5. 执行同步操作（上传/下载/删除）
 
+pub mod blob_vault;
+mod blob_vault_driver;
+mod certificate_sync;
 pub mod client;
-pub mod conflict;
+#[cfg(test)]
+mod conflict;
 mod connection_sync;
 pub mod engine;
 mod generic_sync;
 mod models;
-pub mod queue;
+pub mod oauth;
+pub(crate) mod queue;
 mod service;
-pub mod state_manager;
-pub mod supabase;
-pub mod sync_type;
+pub mod sync_backend;
+pub mod sync_server;
+pub mod sync_server_driver;
+pub(crate) mod sync_type;
+pub mod webdav_adapter;
 mod workspace_sync;
 
 use std::sync::{Arc, RwLock};
 
 use gpui::{App, Global};
 
+pub use blob_vault::*;
 pub use client::*;
-pub use conflict::*;
 pub use engine::*;
 pub use models::*;
-pub use queue::*;
+pub use oauth::github_gist::{GithubGistSettings, GithubGistVault};
+pub use oauth::google_drive::GoogleDriveVault;
+pub use oauth::onedrive::OneDriveVault;
 pub use service::*;
-pub use state_manager::*;
-pub use sync_type::*;
-
-use crate::storage::{GlobalStorageState, StoredConnection, TeamKeyCacheRepository};
+pub use sync_backend::*;
+pub use webdav_adapter::{WebDavConfig, WebDavVault};
 
 // ============================================================================
 // 全局用户状态
@@ -83,66 +90,4 @@ impl GlobalCloudUser {
             }
         }
     }
-}
-
-// ============================================================================
-// 团队选项（供 UI 下拉使用）
-// ============================================================================
-
-/// 团队选择项
-#[derive(Debug, Clone)]
-pub struct TeamOption {
-    pub id: String,
-    pub name: String,
-}
-
-/// 获取可用团队列表（从本地 team_key_cache 缓存读取）
-pub fn get_cached_team_options(cx: &App) -> Vec<TeamOption> {
-    let Some(storage) = cx.try_global::<GlobalStorageState>() else {
-        return Vec::new();
-    };
-    let Some(repo) = storage.storage.get::<TeamKeyCacheRepository>() else {
-        return Vec::new();
-    };
-    match repo.list() {
-        Ok(caches) => caches
-            .into_iter()
-            .map(|c| TeamOption {
-                id: c.team_id,
-                name: c.team_name,
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    }
-}
-
-// ============================================================================
-// 权限判断
-// ============================================================================
-
-/// 判断当前用户是否可编辑指定连接
-pub fn can_edit_connection(conn: &StoredConnection, cx: &App) -> bool {
-    let Some(team_id) = &conn.team_id else {
-        return true; // 个人连接，始终可编辑
-    };
-
-    let Some(user) = GlobalCloudUser::get_user(cx) else {
-        return false; // 未登录，不可编辑团队连接
-    };
-
-    // 创建者可编辑
-    if conn.owner_id.as_deref() == Some(&user.id) {
-        return true;
-    }
-
-    // 团队 owner 可编辑所有
-    if let Some(storage) = cx.try_global::<GlobalStorageState>() {
-        if let Some(repo) = storage.storage.get::<TeamKeyCacheRepository>() {
-            if let Ok(Some(cache)) = repo.get(team_id) {
-                return cache.role.as_deref() == Some("owner");
-            }
-        }
-    }
-
-    false
 }

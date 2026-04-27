@@ -7,8 +7,23 @@ use crate::cloud_sync::engine::SyncEngine;
 use crate::cloud_sync::models::{CloudSyncData, SyncResult};
 use crate::cloud_sync::queue::SyncOperation;
 use crate::cloud_sync::service::SyncError;
-use crate::cloud_sync::sync_type::{GenericSyncPlan, SyncTypeHandler, SyncableItem};
+use crate::cloud_sync::sync_type::{
+    GenericSyncPlan, PendingDeletionDecision, SyncTypeHandler, SyncableItem,
+};
 use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkedSyncAction {
+    None,
+    UpdateCloud,
+    UpdateLocal,
+}
+
+#[derive(Debug, Default)]
+struct PendingDeletionOutcome {
+    handled_ids: Vec<String>,
+    refetch_cloud: bool,
+}
 
 /// 通用同步入口
 ///
@@ -27,50 +42,34 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
     let type_name = handler.display_name();
     let mut result = SyncResult::default();
 
-    // ========== 1. 处理待删除列表 ==========
-    let deleted_ids = process_pending_deletions(engine, handler).await;
+    // ========== 1. 获取云端数据（按 data_type 过滤） ==========
+    let mut cloud_sync_data = fetch_cloud_sync_data(engine, handler).await?;
+    tracing::info!("[{}] 云端同步数据: {} 个", type_name, cloud_sync_data.len());
+
+    // ========== 2. 处理待删除列表 ==========
+    let deletion_outcome = process_pending_deletions(engine, handler, &cloud_sync_data).await;
     tracing::info!(
         "[{}] 处理待删除列表完成: {} 个",
         type_name,
-        deleted_ids.len()
+        deletion_outcome.handled_ids.len()
     );
+    if deletion_outcome.refetch_cloud {
+        cloud_sync_data = fetch_cloud_sync_data(engine, handler).await?;
+        tracing::info!(
+            "[{}] 待删除处理后重新获取云端数据: {} 个",
+            type_name,
+            cloud_sync_data.len()
+        );
+    }
 
-    // ========== 2. 获取本地数据 ==========
+    // ========== 3. 获取本地数据 ==========
     let local_items = handler.list_local(engine)?;
     tracing::info!("[{}] 本地数据: {} 个", type_name, local_items.len());
 
-    // ========== 3. 获取云端数据（按 data_type 过滤） ==========
-    let cloud_sync_data = engine
-        .cloud_client
-        .list_sync_data(Some(handler.data_type()), None, None)
-        .await
-        .map_err(|e| SyncError::NetworkError(e.to_string()))?;
-    tracing::info!("[{}] 云端同步数据: {} 个", type_name, cloud_sync_data.len());
-
-    // ========== 4. 过滤未解锁团队数据 ==========
-    let cloud_sync_data: Vec<_> = cloud_sync_data
-        .into_iter()
-        .filter(|d| match &d.team_id {
-            Some(tid) => {
-                let unlocked = engine.is_team_unlocked(tid);
-                if !unlocked {
-                    tracing::info!("[{}] 跳过未解锁团队 {} 的云端数据 {}", type_name, tid, d.id);
-                }
-                unlocked
-            }
-            None => true,
-        })
-        .collect();
-    tracing::info!(
-        "[{}] 可处理的云端数据: {} 个",
-        type_name,
-        cloud_sync_data.len()
-    );
-
-    // ========== 5. 构建名称映射 ==========
+    // ========== 4. 构建名称映射 ==========
     let cloud_name_map = build_name_map(engine, handler, &cloud_sync_data);
 
-    // ========== 6. 处理云端软删除 ==========
+    // ========== 5. 处理云端软删除 ==========
     let soft_deleted = process_soft_deletions(engine, handler, &cloud_sync_data, &local_items)?;
     if soft_deleted > 0 {
         tracing::info!(
@@ -92,7 +91,7 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
         active_cloud_data.len()
     );
 
-    // ========== 7. 计算同步计划 ==========
+    // ========== 6. 计算同步计划 ==========
     let plan = calculate_sync_plan(
         engine,
         handler,
@@ -109,7 +108,7 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
         plan.to_update_local.len()
     );
 
-    // ========== 8. 构建操作队列 ==========
+    // ========== 7. 构建操作队列 ==========
     let local_item_map: HashMap<i64, H::Item> = local_items
         .iter()
         .filter_map(|item| item.local_id().map(|id| (id, item.clone())))
@@ -223,10 +222,26 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 };
 
                 match update_cloud_item(engine, handler, local_item, cloud_data).await {
-                    Ok(()) => {
-                        result.uploaded += 1;
-                        tracing::info!("[更新云端{}] 成功: {}", type_name, local_item.item_name());
-                    }
+                    Ok(()) => match handler.on_uploaded(engine, local_id, &cloud_id) {
+                        Ok(()) => {
+                            result.uploaded += 1;
+                            tracing::info!(
+                                "[更新云端{}] 成功: {}",
+                                type_name,
+                                local_item.item_name()
+                            );
+                        }
+                        Err(e) => {
+                            let msg = format!(
+                                "更新云端{}失败 {}: {}",
+                                type_name,
+                                local_item.item_name(),
+                                e
+                            );
+                            result.errors.push(msg.clone());
+                            queue.mark_failed(queued_operation, msg);
+                        }
+                    },
                     Err(e) => {
                         let msg = format!(
                             "更新云端{}失败 {}: {}",
@@ -338,13 +353,38 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
 // 内部辅助函数
 // ============================================================================
 
+async fn fetch_cloud_sync_data<H: SyncTypeHandler>(
+    engine: &SyncEngine,
+    handler: &H,
+) -> Result<Vec<CloudSyncData>, SyncError> {
+    let type_name = handler.display_name();
+    let cloud_sync_data = engine
+        .cloud_client
+        .list_sync_data(Some(handler.data_type()), None)
+        .await
+        .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+
+    tracing::info!(
+        "[{}] 可处理的云端数据: {} 个",
+        type_name,
+        cloud_sync_data.len()
+    );
+
+    Ok(cloud_sync_data)
+}
+
 /// 处理待删除列表
 async fn process_pending_deletions<H: SyncTypeHandler>(
     engine: &SyncEngine,
     handler: &H,
-) -> Vec<String> {
-    let mut deleted = Vec::new();
+    cloud_data_list: &[CloudSyncData],
+) -> PendingDeletionOutcome {
+    let mut outcome = PendingDeletionOutcome::default();
     let pending_list = handler.list_pending_deletions(engine);
+    let cloud_map: HashMap<&str, &CloudSyncData> = cloud_data_list
+        .iter()
+        .map(|item| (item.id.as_str(), item))
+        .collect();
 
     for pending in pending_list {
         tracing::info!(
@@ -352,6 +392,28 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
             handler.display_name(),
             pending.cloud_id
         );
+        let current_cloud = cloud_map.get(pending.cloud_id.as_str()).copied();
+        match handler.decide_pending_deletion(engine, &pending, current_cloud) {
+            Ok(PendingDeletionDecision::DropPending) => {
+                if let Err(e) = handler.remove_pending_deletion(engine, &pending.cloud_id) {
+                    tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                } else {
+                    outcome.handled_ids.push(pending.cloud_id);
+                }
+                continue;
+            }
+            Ok(PendingDeletionDecision::DeleteCloud) => {}
+            Err(error) => {
+                tracing::warn!(
+                    "[同步] 处理待删除{}决策失败: {} - {}（保留在待删除列表）",
+                    handler.display_name(),
+                    pending.cloud_id,
+                    error
+                );
+                continue;
+            }
+        }
+
         match engine
             .cloud_client
             .delete_sync_data(&pending.cloud_id)
@@ -365,8 +427,10 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
                 );
                 if let Err(e) = handler.remove_pending_deletion(engine, &pending.cloud_id) {
                     tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                } else {
+                    outcome.handled_ids.push(pending.cloud_id);
+                    outcome.refetch_cloud = true;
                 }
-                deleted.push(pending.cloud_id);
             }
             Err(e) => {
                 let error_str = e.to_string();
@@ -378,8 +442,9 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
                     );
                     if let Err(e) = handler.remove_pending_deletion(engine, &pending.cloud_id) {
                         tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                    } else {
+                        outcome.handled_ids.push(pending.cloud_id);
                     }
-                    deleted.push(pending.cloud_id);
                 } else {
                     tracing::warn!(
                         "[同步] 删除云端{}失败: {} - {}（保留在待删除列表）",
@@ -392,7 +457,7 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
         }
     }
 
-    deleted
+    outcome
 }
 
 /// 构建 cloud_id → name 映射
@@ -402,12 +467,17 @@ fn build_name_map<H: SyncTypeHandler>(
     cloud_data_list: &[CloudSyncData],
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let service = match engine.crypto_service.read() {
-        Ok(s) => s,
-        Err(_) => return map,
-    };
-
     for data in cloud_data_list {
+        if data.has_resolved_name() {
+            map.insert(data.id.clone(), data.name.clone());
+            continue;
+        }
+
+        let service = match engine.crypto_service.read() {
+            Ok(s) => s,
+            Err(_) => return map,
+        };
+
         if let Some(name) = handler.decrypt_name(&service, data) {
             map.insert(data.id.clone(), name);
         }
@@ -431,6 +501,14 @@ fn process_soft_deletions<H: SyncTypeHandler>(
                 .find(|item| item.cloud_id() == Some(cloud_data.id.as_str()))
             {
                 if let Some(local_id) = local_item.local_id() {
+                    if should_keep_local_item_on_cloud_delete(local_item) {
+                        tracing::info!(
+                            "[软删除] 跳过删除本地{} {}，因为存在未同步的本地更新",
+                            handler.display_name(),
+                            local_id
+                        );
+                        continue;
+                    }
                     tracing::info!(
                         "[软删除] 云端{} {} 已被删除，删除对应的本地数据 {}",
                         handler.display_name(),
@@ -485,15 +563,31 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
         match local_item.cloud_id() {
             Some(cloud_id) => {
                 if let Some(cloud_data) = cloud_map.get(cloud_id) {
+                    if cloud_data.needs_name_backfill() && !local_item.item_name().trim().is_empty()
+                    {
+                        plan.to_update_cloud
+                            .push((local_item.clone(), (*cloud_data).clone()));
+                        continue;
+                    }
+
                     let local_updated = local_item.updated_at().unwrap_or(0);
                     let cloud_updated = cloud_data.updated_at / 1000;
 
-                    if local_updated > cloud_updated {
-                        plan.to_update_cloud
-                            .push((local_item.clone(), (*cloud_data).clone()));
-                    } else if cloud_updated > local_updated {
-                        plan.to_update_local
-                            .push(((*cloud_data).clone(), local_item.clone()));
+                    match decide_linked_sync_action(
+                        local_item.uses_sync_state(),
+                        local_updated,
+                        local_item.last_synced_at(),
+                        cloud_updated,
+                    ) {
+                        LinkedSyncAction::UpdateCloud => {
+                            plan.to_update_cloud
+                                .push((local_item.clone(), (*cloud_data).clone()));
+                        }
+                        LinkedSyncAction::UpdateLocal => {
+                            plan.to_update_local
+                                .push(((*cloud_data).clone(), local_item.clone()));
+                        }
+                        LinkedSyncAction::None => {}
                     }
                 } else {
                     tracing::info!(
@@ -566,6 +660,60 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
     Ok(plan)
 }
 
+fn should_keep_local_item_on_cloud_delete<T: SyncableItem>(item: &T) -> bool {
+    if !item.uses_sync_state() {
+        return false;
+    }
+
+    let local_updated = item.updated_at().unwrap_or(0);
+    let last_synced_at = item.last_synced_at().unwrap_or(0);
+    local_updated > last_synced_at
+}
+
+fn decide_linked_sync_action(
+    uses_sync_state: bool,
+    local_updated: i64,
+    last_synced_at: Option<i64>,
+    cloud_updated: i64,
+) -> LinkedSyncAction {
+    if !uses_sync_state {
+        return if local_updated > cloud_updated {
+            LinkedSyncAction::UpdateCloud
+        } else if cloud_updated > local_updated {
+            LinkedSyncAction::UpdateLocal
+        } else {
+            LinkedSyncAction::None
+        };
+    }
+
+    match last_synced_at {
+        Some(last_synced_at) => {
+            let local_changed = local_updated > last_synced_at;
+            let cloud_changed = cloud_updated > last_synced_at;
+
+            match (local_changed, cloud_changed) {
+                (true, false) => LinkedSyncAction::UpdateCloud,
+                (false, true) => LinkedSyncAction::UpdateLocal,
+                (true, true) => {
+                    if local_updated >= cloud_updated {
+                        LinkedSyncAction::UpdateCloud
+                    } else {
+                        LinkedSyncAction::UpdateLocal
+                    }
+                }
+                (false, false) => LinkedSyncAction::None,
+            }
+        }
+        None => {
+            if local_updated >= cloud_updated {
+                LinkedSyncAction::UpdateCloud
+            } else {
+                LinkedSyncAction::UpdateLocal
+            }
+        }
+    }
+}
+
 /// 获取待删除的云端 ID 集合
 fn get_pending_cloud_ids<H: SyncTypeHandler>(engine: &SyncEngine, handler: &H) -> HashSet<String> {
     handler
@@ -581,13 +729,12 @@ async fn upload_item<H: SyncTypeHandler>(
     handler: &H,
     item: &H::Item,
 ) -> Result<String, SyncError> {
-    let teams = engine.get_cached_teams();
     let cloud_data = {
         let service = engine
             .crypto_service
             .read()
             .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-        handler.encrypt(&service, item, &teams)?
+        handler.encrypt(&service, item)?
     };
 
     let created = engine
@@ -606,13 +753,12 @@ async fn update_cloud_item<H: SyncTypeHandler>(
     item: &H::Item,
     cloud_data: &CloudSyncData,
 ) -> Result<(), SyncError> {
-    let teams = engine.get_cached_teams();
     let updated_data = {
         let service = engine
             .crypto_service
             .read()
             .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
-        let mut data = handler.encrypt(&service, item, &teams)?;
+        let mut data = handler.encrypt(&service, item)?;
         data.id = cloud_data.id.clone();
         data.version = cloud_data.version;
         data
@@ -664,4 +810,62 @@ async fn download_and_update_item<H: SyncTypeHandler>(
     drop(service);
 
     handler.update_local_item(engine, &updated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LinkedSyncAction, decide_linked_sync_action, should_keep_local_item_on_cloud_delete,
+    };
+    use crate::storage::Workspace;
+
+    #[test]
+    fn non_sync_state_items_keep_original_timestamp_comparison() {
+        assert_eq!(
+            decide_linked_sync_action(false, 100, Some(90), 100),
+            LinkedSyncAction::None
+        );
+    }
+
+    #[test]
+    fn sync_state_items_prefer_local_when_unsynced_timestamps_are_equal() {
+        assert_eq!(
+            decide_linked_sync_action(true, 100, None, 100),
+            LinkedSyncAction::UpdateCloud
+        );
+    }
+
+    #[test]
+    fn sync_state_items_detect_cloud_side_changes_since_last_sync() {
+        assert_eq!(
+            decide_linked_sync_action(true, 100, Some(100), 101),
+            LinkedSyncAction::UpdateLocal
+        );
+    }
+
+    #[test]
+    fn sync_state_items_stay_idle_when_nothing_changed_since_last_sync() {
+        assert_eq!(
+            decide_linked_sync_action(true, 100, Some(100), 100),
+            LinkedSyncAction::None
+        );
+    }
+
+    #[test]
+    fn cloud_delete_should_preserve_local_sync_state_item_when_local_has_unsynced_update() {
+        let mut workspace = Workspace::new("本地已更新工作区".to_string());
+        workspace.updated_at = Some(200);
+        workspace.last_synced_at = Some(100);
+
+        assert!(should_keep_local_item_on_cloud_delete(&workspace));
+    }
+
+    #[test]
+    fn cloud_delete_should_remove_local_sync_state_item_when_local_is_clean() {
+        let mut workspace = Workspace::new("本地已同步工作区".to_string());
+        workspace.updated_at = Some(100);
+        workspace.last_synced_at = Some(100);
+
+        assert!(!should_keep_local_item_on_cloud_delete(&workspace));
+    }
 }
