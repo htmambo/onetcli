@@ -1,0 +1,66 @@
+# Maintainer: OnetCli <xiaofei.hf@gmail.com>
+pkgname=onetcli
+pkgver=0.3.2
+pkgrel=1
+pkgdesc="One Net Client - Database, SSH, Terminal, AI Tools"
+arch=('x86_64' 'aarch64')
+url="https://github.com/htmambo/onetcli"
+license=('Apache-2.0' 'custom')
+depends=(
+    'fontconfig'
+    'gcc-libs'
+    'glibc'
+    'libxcb'
+    'libxkbcommon'
+    'libxkbcommon-x11'
+    'openssl'
+    'systemd-libs'
+    'vulkan-icd-loader'
+    'wayland'
+)
+makedepends=('rust' 'clang' 'git')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/htmambo/onetcli/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "${pkgname}-${pkgver}"
+    if [[ -f "target/release-fast/onetcli" ]]; then
+        echo "使用预构建的二进制文件，跳过编译。"
+    else
+        # 清除 makepkg 的编译标志，避免干扰 C 依赖（aws-lc-sys、libsqlite3-sys 等）的构建
+        unset CFLAGS CXXFLAGS LDFLAGS
+        # 使用系统链接器替代 rust-lld
+        export RUSTFLAGS="${RUSTFLAGS:-} -C linker=gcc"
+        cargo build --profile release-fast -p main
+    fi
+}
+
+package() {
+    cd "${pkgname}-${pkgver}"
+
+    # Binary
+    install -Dm755 "target/release-fast/onetcli" "${pkgdir}/usr/bin/onetcli"
+
+    # Desktop file
+    install -Dm644 "resources/linux/onetcli.desktop" "${pkgdir}/usr/share/applications/onetcli.desktop"
+
+    # Icons
+    install -Dm644 "resources/linux/onetcli-128.png" "${pkgdir}/usr/share/icons/hicolor/128x128/apps/onetcli.png"
+    install -Dm644 "resources/linux/onetcli-256.png" "${pkgdir}/usr/share/icons/hicolor/256x256/apps/onetcli.png"
+    install -Dm644 "resources/linux/onetcli-512.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/onetcli.png"
+
+    # Themes
+    install -dm755 "${pkgdir}/usr/share/onetcli/themes"
+    for theme in themes/*.json themes/*.jsonc; do
+        if [[ -f "${theme}" ]]; then
+            install -Dm644 "${theme}" "${pkgdir}/usr/share/onetcli/themes/$(basename "${theme}")"
+        fi
+    done
+
+    # Documentation
+    install -Dm644 "README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+
+    # Licenses
+    install -Dm644 "LICENSE-APACHE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+    install -Dm644 "ONETCLI_LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/ONETCLI_LICENSE"
+}
