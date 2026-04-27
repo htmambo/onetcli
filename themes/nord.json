@@ -1,0 +1,145 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Nord",
+  "author": "Converted from Nord (tabby-community-color-schemes)",
+  "url": "https://github.com/mbadolato/iTerm2-Color-Schemes",
+  "themes": [
+    {
+      "name": "Nord",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#070d19",
+        "accent.foreground": "#d8dee9",
+        "background": "#2e3440",
+        "border": "#474d59",
+        "danger.active.background": "#bf616a",
+        "danger.background": "#00010d",
+        "danger.foreground": "#bf616a",
+        "danger.hover.background": "#070d19",
+        "foreground": "#d8dee9",
+        "input.border": "#474d59",
+        "link.active": "#81a1c1",
+        "link": "#81a1c1",
+        "link.hover": "#68809a",
+        "list.active.background": "#070d1933",
+        "list.active.border": "#81a1c1",
+        "list.even.background": "#252a35",
+        "muted.background": "#252a35",
+        "muted.foreground": "#727883",
+        "popover.background": "#2e3440",
+        "popover.foreground": "#d8dee9",
+        "primary.background": "#ebcb8b",
+        "primary.foreground": "#2e3440",
+        "primary.hover.background": "#fff1b1",
+        "ring": "#81a1c1",
+        "scrollbar.background": "#2e344000",
+        "scrollbar.thumb.background": "#3b4252",
+        "secondary.active.background": "#3b4252",
+        "secondary.background": "#2e3440",
+        "secondary.foreground": "#d8dee9",
+        "secondary.hover.background": "#3a404c",
+        "sidebar.accent.background": "#4c566a",
+        "sidebar.accent.foreground": "#d8dee9",
+        "sidebar.background": "#212733",
+        "sidebar.border": "#474d59",
+        "sidebar.foreground": "#d8dee9",
+        "tab.active.background": "#4C566A",
+        "tab.active.foreground": "#d8dee9",
+        "tab.background": "#3B4252",
+        "tab.foreground": "#727883",
+        "tab_bar.background": "#2e3440",
+        "tab_bar.segmented.background": "#3B4252",
+        "title_bar.background": "#212733",
+        "title_bar.border": "#474d59",
+        "base.magenta.light": "#7e6a81",
+        "base.red": "#bf616a",
+        "base.green": "#a3be8c",
+        "base.yellow": "#ebcb8b",
+        "base.blue": "#81a1c1",
+        "base.magenta": "#b48ead",
+        "base.cyan": "#88c0d0",
+        "group.background": "#191f2b",
+        "overlay": "#00000099",
+        "caret": "#ebcb8b",
+        "group.foreground": "#d8dee9",
+        "info.background": "#88c0d0",
+        "info.foreground": "#2e3440",
+        "warning.foreground": "#2e3440",
+        "table.background": "#2e3440",
+        "table.even.background": "#252a35",
+        "table.head.background": "#252a35",
+        "table.hover.background": "#070d19"
+      },
+      "highlight": {
+        "editor.foreground": "#d8dee9",
+        "editor.background": "#2e3440",
+        "editor.active_line.background": "#212733",
+        "editor.line_number": "#727883",
+        "editor.active_line_number": "#d8dee9",
+        "editor.invisible": "#72788366",
+        "conflict": "#bf616a",
+        "created": "#a3be8c",
+        "deleted": "#3f0000",
+        "error": "#94545d",
+        "hidden": "#727883",
+        "hint": "#716176",
+        "ignored": "#727883",
+        "info": "#68809a",
+        "modified": "#ebcb8b",
+        "predictive": "#68809a",
+        "renamed": "#88c0d0",
+        "success": "#a3be8c",
+        "unreachable": "#727883",
+        "warning": "#b29e75",
+        "syntax": {
+          "attribute": {
+            "color": "#c6b6cb"
+          },
+          "boolean": {
+            "color": "#94545d"
+          },
+          "comment": {
+            "color": "#727883"
+          },
+          "comment.doc": {
+            "color": "#727883"
+          },
+          "constant": {
+            "color": "#94545d"
+          },
+          "function": {
+            "color": "#81a1c1"
+          },
+          "keyword": {
+            "color": "#b48ead"
+          },
+          "link": {
+            "color": "#81a1c1",
+            "underline": true
+          },
+          "method": {
+            "color": "#81a1c1"
+          },
+          "number": {
+            "color": "#94545d"
+          },
+          "operator": {
+            "color": "#e5e9f0"
+          },
+          "predefined": {
+            "color": "#88c0d0"
+          },
+          "string": {
+            "color": "#a3be8c"
+          },
+          "type": {
+            "color": "#88c0d0"
+          },
+          "variable": {
+            "color": "#d8dee9"
+          }
+        }
+      }
+    }
+  ]
+}

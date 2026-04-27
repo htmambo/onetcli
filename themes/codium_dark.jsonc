@@ -1,0 +1,386 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-component/raw/refs/heads/main/.theme-schema.json",
+  "name": "Codium Dark",
+  "author": "Generated from tabby-community-color-schemes (codium-dark)",
+  "url": "https://github.com/pineapplegiant/spaceduck",
+  "themes": [
+    {
+      "name": "Codium Dark",
+      "mode": "dark",
+      "colors": {
+        // === 主色调 ===
+        // 主色背景（hover、选中状态）
+        "accent.background": "#852c96",
+        // 主色文字
+        "accent.foreground": "#f7eded",
+
+        // === 手风琴 ===
+        // 手风琴默认背景
+        "accordion.background": "#2c1438",
+        // 手风琴悬停背景
+        "accordion.hover.background": "#3d204966",
+
+        // === 基础色 ===
+        // 窗口/页面背景
+        "background": "#2c1438",
+        // 通用边框色
+        "border": "#3d2049",
+        // 窗口边框
+        "window.border": "#c678dd",
+        // 焦点环颜色（输入框、按钮等聚焦时的边框/阴影色）
+        "ring": "#c678dd",
+        // 主文字色
+        "foreground": "#f7edf7",
+
+        // === K线图表 ===
+        // 上涨色（K线 bullish）
+        "bullish.background": "#582572",
+        // 下跌色（K线 bearish）
+        "bearish.background": "#752194",
+
+        // === 图表色 ===
+        // 图表颜色 1
+        "chart.1": "#e7bbf7",
+        // 图表颜色 2
+        "chart.2": "#c678dd",
+        // 图表颜色 3
+        "chart.3": "#a46ac2",
+        // 图表颜色 4
+        "chart.4": "#724582",
+        // 图表颜色 5
+        "chart.5": "#581a69",
+
+        // === 危险/错误色 ===
+        // 危险按钮激活背景
+        "danger.active.background": "#9338b3",
+        // 危险按钮默认背景
+        "danger.background": "#752194",
+        // 危险按钮文字
+        "danger.foreground": "#f7eded",
+        // 危险按钮悬停背景
+        "danger.hover.background": "#a846c2",
+
+        // === 描述列表 ===
+        // 描述列表标签背景
+        "description_list.label.background": "#321548",
+        // 描述列表标签文字
+        "description_list.label.foreground": "#9a7a9f",
+
+        // === 拖拽交互 ===
+        // 拖拽边框色
+        "drag.border": "#c678dda6",
+        // 拖放目标背景
+        "drop_target.background": "#c678dd33",
+
+        // === 链接色 ===
+        // 链接激活状态文字
+        "link.active": "#c678dd",
+        // 链接默认文字
+        "link": "#c678dd",
+        // 链接悬停文字
+        "link.hover": "#da9aea",
+
+        // === 列表色 ===
+        // 列表默认背景
+        "list.background": "#2c1438",
+        // 列表项激活背景
+        "list.active.background": "#75219433",
+        // 列表项激活边框
+        "list.active.border": "#c678dd",
+        // 列表偶数行背景
+        "list.even.background": "#321548",
+        // 列表头部背景
+        "list.head.background": "#321548",
+        // 列表项悬停背景
+        "list.hover.background": "#3d204966",
+
+        // === 弱化色 ===
+        // 次要/禁用区域背景
+        "muted.background": "#3d204966",
+        // 次要/禁用文字
+        "muted.foreground": "#9a7a9f",
+
+        // === 遮罩层 ===
+        // 弹窗/对话框遮罩背景
+        "overlay": "#2c143099",
+
+        // === 面板/弹窗 ===
+        // 面板背景（GroupBox/侧边栏等）
+        "group.background": "#2c1438",
+        // 面板文字
+        "group.foreground": "#f7eded",
+        // 弹窗背景
+        "popover.background": "#2c1438",
+        // 弹窗文字
+        "popover.foreground": "#f7eded",
+
+        // === 主要按钮 ===
+        // 主要按钮激活背景
+        "primary.active.background": "#9338b3",
+        // 主要按钮默认背景
+        "primary.background": "#c678dd",
+        // 主要按钮文字
+        "primary.foreground": "#2c1438",
+        // 主要按钮悬停背景
+        "primary.hover.background": "#da9aea",
+
+        // === 进度条 ===
+        // 进度条轨道背景，如未定义，则使用 "primary.background"
+        "progress.bar.background": "#c678dd",
+
+        // === 滚动条 ===
+        // 滚动条轨道背景（透明）
+        "scrollbar.background": "#2c143800",
+        // 滚动条滑块背景
+        "scrollbar.thumb.background": "#482050",
+        // 滚动条滑块悬停背景
+        "scrollbar.thumb.hover.background": "#582060",
+
+        // === 次要按钮 ===
+        // 次要按钮激活背景
+        "secondary.active.background": "#582060",
+        // 次要按钮默认背景
+        "secondary.background": "#3d2049",
+        // 次要按钮文字
+        "secondary.foreground": "#9a7a9f",
+        // 次要按钮悬停背景
+        "secondary.hover.background": "#482050",
+
+        // === 选择色 ===
+        // 文本选中背景
+        "selection.background": "#752194",
+
+        // === 侧边栏 ===
+        // 侧边栏强调色背景
+        "sidebar.accent.background": "#2e0f3866",
+        // 侧边栏强调色文字
+        "sidebar.accent.foreground": "#785485",
+        // 侧边栏背景
+        "sidebar.background": "#230431",
+        // 侧边栏边框
+        "sidebar.border": "#3d2049",
+        // 侧边栏文字
+        "sidebar.foreground": "#e7bbf7",
+
+        // === 骨架屏 ===
+        // 加载骨架背景
+        "skeleton.background": "#3d204966",
+
+        // === 滑块 ===
+        // 滑块轨道背景
+        "slider.background": "#3d2049",
+        // 滑块手柄背景
+        "slider.thumb.background": "#c678dd",
+
+        // === 成功色 ===
+        // 成功按钮激活背景
+        "success.active.background": "#724582",
+        // 成功按钮默认背景
+        "success.background": "#581a69",
+        // 成功按钮文字
+        "success.foreground": "#f7eded",
+        // 成功按钮悬停背景
+        "success.hover.background": "#682075",
+
+        // === 开关 ===
+        // 开关轨道背景
+        "switch.background": "#3d2049",
+        // 开关手柄背景
+        "switch.thumb.background": "#734f7e",
+
+        // === 标签页 ===
+        // 标签页激活背景
+        "tab.active.background": "#590868",
+        // 标签页激活文字
+        "tab.active.foreground": "#f7eded",
+        // 标签页默认背景
+        "tab.background": "#321548",
+        // 标签页默认文字
+        "tab.foreground": "#ccc",
+        // 标签页悬停背景
+        "tab.hover.background": "#590868",
+
+        // === 标签栏 ===
+        // 标签栏背景
+        "tab_bar.background": "#1e0d28",
+        // 分段控件背景
+        "tab_bar.segmented.background": "#321548",
+
+        // === 表格 ===
+        // 表格默认背景
+        "table.background": "#450b58",
+        // 表格选中行背景
+        "table.active.background": "#75219433",
+        // 表格选中行边框
+        "table.active.border": "#5e0679",
+        // 表格偶数行背景
+        "table.even.background": "#3d204966",
+        // 表格头部背景
+        "table.head.background": "#2d0c2e",
+        // 表格头部文字
+        "table.head.foreground": "#b28eb9",
+        // 表格悬停行背景
+        "table.hover.background": "#4e095c",
+        // 表格行边框
+        "table.row.border": "#3d2049",
+
+        // === 磁贴 ===
+        // 磁贴/网格背景
+        "tiles.background": "#321548",
+
+        // === 标题栏 ===
+        // 标题栏背景
+        "title_bar.background": "#340f42",
+        // 标题栏边框
+        "title_bar.border": "#3d2049",
+
+        // === 输入框 ===
+        // 输入框边框
+        "input.border": "#3d2049",
+        // 光标/插入符颜色
+        "caret": "#c678dd",
+
+        // === 信息色 ===
+        // 信息按钮默认背景
+        "info.background": "#481359",
+        // 信息按钮激活背景
+        "info.active.background": "#360d42",
+        // 信息按钮文字
+        "info.foreground": "#f7eded",
+        // 信息按钮悬停背景
+        "info.hover.background": "#5a1a6d",
+
+        // === 警告色 ===
+        // 警告按钮激活背景
+        "warning.active.background": "#c678dd",
+        // 警告按钮默认背景
+        "warning.background": "#9c3d17",
+        // 警告按钮文字
+        "warning.foreground": "#f7eded",
+        // 警告按钮悬停背景
+        "warning.hover.background": "#682075",
+
+        // === 基础色板 ===
+        // 基础蓝色
+        "base.blue": "#582572",
+        // 基础浅蓝色
+        "base.blue.light": "#7a4a9a",
+        // 基础青色
+        "base.cyan": "#481359",
+        // 基础浅青色
+        "base.cyan.light": "#6a3a7d",
+        // 基础绿色
+        "base.green": "#582572",
+        // 基础浅绿色
+        "base.green.light": "#7a4a9a",
+        // 基础品红色
+        "base.magenta": "#c678dd",
+        // 基础浅品红色
+        "base.magenta.light": "#c678dd33",
+        // 基础红色
+        "base.red": "#752194",
+        // 基础浅红色
+        "base.red.light": "#a05cb5",
+        // 基础黄色
+        "base.yellow": "#724582",
+        // 基础浅黄色
+        "base.yellow.light": "#9a6aaa"
+      },
+      "highlight": {
+        // === 编辑器 ===
+        // 编辑器默认文字
+        "editor.foreground": "#f7eded",
+        // 编辑器背景
+        "editor.background": "#2c1438",
+        // 编辑器当前行背景
+        "editor.active_line.background": "#3d204966",
+        // 编辑器行号
+        "editor.line_number": "#724582",
+        // 编辑器当前行号
+        "editor.active_line_number": "#e7bbf7",
+        // 编辑器不可见字符
+        "editor.invisible": "#72458266",
+
+        // === Git 状态 ===
+        // 冲突标记
+        "conflict": "#e7bbf7",
+        // 新增文件
+        "created": "#c678dd",
+        // 删除文件
+        "deleted": "#752194",
+        // 错误（诊断）
+        "error": "#e7bbf7",
+        // 隐藏文件
+        "hidden": "#724582",
+        // 提示（诊断）
+        "hint": "#c678dd",
+        // 忽略文件
+        "ignored": "#724582",
+        // 信息（诊断）
+        "info": "#c678dd",
+        // 修改文件
+        "modified": "#e7bbf7",
+        // 预测/推断内容
+        "predictive": "#582572",
+        // 重命名文件
+        "renamed": "#c678dd",
+        // 成功（诊断）
+        "success": "#c678dd",
+        // 不可达代码
+        "unreachable": "#724582",
+        // 警告（诊断）
+        "warning": "#c678dd",
+
+        // === 语法高亮 ===
+        "syntax": {
+          // HTML/XML 属性
+          "attribute": { "color": "#e7bbf7" },
+          // 布尔值
+          "boolean": { "color": "#e7bbf7" },
+          // 注释
+          "comment": { "color": "#724582", "font_style": "italic" },
+          // 文档注释
+          "comment.doc": { "color": "#724582", "font_style": "italic" },
+          // 常量
+          "constant": { "color": "#e7bbf7" },
+          // 构造函数
+          "constructor": { "color": "#c678dd" },
+          // 嵌入内容
+          "embedded": { "color": "#f7eded" },
+          // 函数调用/定义
+          "function": { "color": "#c678dd" },
+          // 关键字
+          "keyword": { "color": "#e7bbf7" },
+          // 链接文本
+          "link_text": { "color": "#c678dd", "font_style": "underline" },
+          // 链接 URL
+          "link_uri": { "color": "#c678dd", "font_style": "italic" },
+          // 数字
+          "number": { "color": "#e7bbf7" },
+          // 字符串
+          "string": { "color": "#c678dd" },
+          // 转义字符
+          "string.escape": { "color": "#c678dd" },
+          // 正则表达式
+          "string.regex": { "color": "#c678dd" },
+          // 特殊字符串
+          "string.special": { "color": "#e7bbf7" },
+          // 符号
+          "string.special.symbol": { "color": "#e7bbf7" },
+          // HTML/XML 标签
+          "tag": { "color": "#e7bbf7" },
+          // 文字字面量
+          "text.literal": { "color": "#e7bbf7" },
+          // 标题
+          "title": { "color": "#c678dd", "font_weight": 600 },
+          // 类型名
+          "type": { "color": "#c678dd" },
+          // 属性名
+          "property": { "color": "#f7eded" },
+          // 特殊变量
+          "variable.special": { "color": "#e7bbf7" }
+        }
+      }
+    }
+  ]
+}
