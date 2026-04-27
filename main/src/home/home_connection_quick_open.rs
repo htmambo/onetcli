@@ -1,8 +1,9 @@
 use crate::home_tab::HomePage;
-use gpui::{App, Context, Entity, ParentElement, SharedString, Styled, Task, Window, div, px};
+use gpui::{App, Context, Entity, ParentElement, SharedString, Styled, Task, Window, div};
 use gpui_component::{
     ActiveTheme, IndexPath, WindowExt, h_flex,
     list::{ListDelegate, ListItem, ListState},
+    tokens::Radius,
 };
 use one_core::storage::StoredConnection;
 
@@ -83,7 +84,7 @@ impl ListDelegate for ConnectionQuickOpenDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(px(6.0))
+                .rounded(Radius::Md.px())
                 .on_click(move |_, window, cx| {
                     parent.update(cx, |this, cx| {
                         this.open_connection_from_quick(&connection_for_open, window, cx);

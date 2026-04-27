@@ -87,6 +87,7 @@ impl Render for WorkspaceFormWindow {
 
         v_flex()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(cx.theme().background)
             .child(
                 TitleBar::new().child(

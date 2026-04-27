@@ -26,6 +26,22 @@ Common:
     en: Cancel
     zh-CN: 取消
     zh-HK: 取消
+  close_anyway:
+    en: Close Anyway
+    zh-CN: 仍然关闭
+    zh-HK: 仍然關閉
+  running_process_close_title:
+    en: Close Application
+    zh-CN: 关闭应用
+    zh-HK: 關閉應用
+  running_process_close_message:
+    en: Some tabs still have active sessions or tasks. Do you want to close the application anyway?
+    zh-CN: 部分标签页仍有活动会话或任务，确定仍要关闭应用吗？
+    zh-HK: 部分標籤頁仍有活動會話或任務，確定仍要關閉應用嗎？
+  running_process_safe_to_close:
+    en: Active tasks have been stopped. You can now safely close the application.
+    zh-CN: 活动任务已停止，现在可以安全关闭应用了。
+    zh-HK: 活動任務已停止，現在可以安全關閉應用了。
   confirm:
     en: Confirm
     zh-CN: 确认
@@ -42,6 +58,14 @@ Common:
     en: More
     zh-CN: 更多
     zh-HK: 更多
+  none:
+    en: None
+    zh-CN: 无
+    zh-HK: 無
+  retry:
+    en: Retry
+    zh-CN: 重试
+    zh-HK: 重試
 
 # 首页
 Home:
@@ -53,10 +77,26 @@ Home:
     en: "Search connections..."
     zh-CN: 搜索连接...
     zh-HK: 搜尋連線...
+  saved_connection_picker_trigger:
+    en: Open Saved Connection
+    zh-CN: 打开已保存连接
+    zh-HK: 打開已保存連線
+  saved_connection_picker_search_placeholder:
+    en: "Search saved connections..."
+    zh-CN: 搜索已保存连接...
+    zh-HK: 搜尋已保存連線...
+  saved_connection_picker_empty:
+    en: No saved connections found
+    zh-CN: 没有找到已保存连接
+    zh-HK: 找不到已保存連線
   new_connection:
     en: New Connection
     zh-CN: 新建连接
     zh-HK: 新建連線
+  terminal:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
   connection_count:
     en: "%{count} connections"
     zh-CN: "%{count} 个连接"
@@ -73,10 +113,66 @@ Home:
     en: Import
     zh-CN: 导入
     zh-HK: 導入
+  connection:
+    en: connection
+    zh-CN: 连接
+    zh-HK: 連線
   refresh:
     en: Refresh
     zh-CN: 刷新
     zh-HK: 刷新
+  sort_field:
+    en: Sort Field
+    zh-CN: 排序字段
+    zh-HK: 排序字段
+  sort_by_name:
+    en: Name
+    zh-CN: 名称
+    zh-HK: 名稱
+  sort_by_updated_at:
+    en: Updated Time
+    zh-CN: 更新时间
+    zh-HK: 更新時間
+  sort_by_created_at:
+    en: Created Time
+    zh-CN: 创建时间
+    zh-HK: 建立時間
+  sort_by_manual:
+    en: Manual Order
+    zh-CN: 手动排序
+    zh-HK: 手動排序
+  sort_order_ascending:
+    en: Ascending
+    zh-CN: 升序
+    zh-HK: 升序
+  sort_order_descending:
+    en: Descending
+    zh-CN: 降序
+    zh-HK: 降序
+  manual_sort_save_failed:
+    en: "Manual order could not be saved: %{error}"
+    zh-CN: "手动排序保存失败：%{error}"
+    zh-HK: "手動排序保存失敗：%{error}"
+  view_mode:
+    en: View Mode
+    zh-CN: 展示方式
+    zh-HK: 顯示方式
+  view_mode_card:
+    en: Cards
+    zh-CN: 卡片
+    zh-HK: 卡片
+  view_mode_list:
+    en: List
+    zh-CN: 列表
+    zh-HK: 列表
+  updated_at:
+    en: Updated
+    zh-CN: 更新时间
+    zh-HK: 更新時間
+  created_at:
+    en: Created
+    zh-CN: 创建时间
+    zh-HK: 建立時間
   cloud_loading:
     en: Loading cloud connections...
     zh-CN: 加载云端连接中...
@@ -109,6 +205,42 @@ Home:
     en: Sync data with cloud
     zh-CN: 与云端同步数据
     zh-HK: 與雲端同步數據
+  sync_failed:
+    en: Sync failed
+    zh-CN: 同步失败
+    zh-HK: 同步失敗
+  sync_completed_no_changes:
+    en: Sync completed, no changes detected
+    zh-CN: 同步完成，没有发现需要同步的数据
+    zh-HK: 同步完成，沒有發現需要同步的數據
+  sync_completed_summary:
+    en: "Sync completed: %{summary}"
+    zh-CN: "同步完成：%{summary}"
+    zh-HK: "同步完成：%{summary}"
+  sync_completed_with_issues:
+    en: "Sync completed: %{summary}; %{issues}"
+    zh-CN: "同步完成：%{summary}；%{issues}"
+    zh-HK: "同步完成：%{summary}；%{issues}"
+  sync_issues_conflicts:
+    en: "%{count} conflicts pending"
+    zh-CN: "%{count} 个冲突待处理"
+    zh-HK: "%{count} 個衝突待處理"
+  sync_issues_errors:
+    en: "%{count} issues: %{error}"
+    zh-CN: "%{count} 条问题：%{error}"
+    zh-HK: "%{count} 條問題：%{error}"
+  sync_conflicts_resolved:
+    en: Conflict resolution completed
+    zh-CN: 冲突处理完成
+    zh-HK: 衝突處理完成
+  sync_conflicts_resolved_with_issues:
+    en: "Conflict resolution completed, but %{count} issues remain: %{error}"
+    zh-CN: "冲突处理完成，但仍有 %{count} 条问题：%{error}"
+    zh-HK: "衝突處理完成，但仍有 %{count} 條問題：%{error}"
+  sync_server_url_required:
+    en: Please set a valid sync server URL in Settings first
+    zh-CN: 请先在设置中填写有效的同步地址
+    zh-HK: 請先在設定中填寫有效的同步地址
   conflict_tooltip:
     en: "%{count} sync conflicts need to be resolved"
     zh-CN: "%{count} 个同步冲突需要解决"
@@ -121,7 +253,7 @@ Home:
     en: "Sync conflicts (%{count})"
     zh-CN: "同步冲突（%{count} 个）"
     zh-HK: "同步衝突（%{count} 個）"
-  sync_conflict_apply_all:
+  sync_conflict_apply_strategy:
     en: "After selecting a resolution strategy, it will be applied to all conflicts automatically."
     zh-CN: "选择解决策略后，将自动应用到所有冲突"
     zh-HK: "選擇解決策略後，將自動套用到所有衝突"
@@ -133,6 +265,10 @@ Home:
     en: Use local version
     zh-CN: 使用本地版本
     zh-HK: 使用本地版本
+  sync_conflict_keep_both:
+    en: Keep both versions
+    zh-CN: 保留两个版本
+    zh-HK: 保留兩個版本
   ai_assistant:
     en: AI Assistant
     zh-CN: AI 助手
@@ -153,29 +289,10 @@ Home:
     en: Delete Connection
     zh-CN: 删除连接
     zh-HK: 刪除連線
-  team_badge:
-    en: Team
-    zh-CN: 团队
-    zh-HK: 團隊
-
-# 团队同步
-TeamSync:
-  personal:
-    en: Personal
-    zh-CN: 个人
-    zh-HK: 個人
-  select_team:
-    en: Team
-    zh-CN: 团队
-    zh-HK: 團隊
-  team_label:
-    en: Team
-    zh-CN: 团队归属
-    zh-HK: 團隊歸屬
-  no_permission:
-    en: No edit permission
-    zh-CN: 无编辑权限
-    zh-HK: 無編輯權限
+  duplicate_connection_failed:
+    en: "Failed to duplicate connection: %{error}"
+    zh-CN: "复制连接失败：%{error}"
+    zh-HK: "複製連線失敗：%{error}"
 
 # 用户认证
 Auth:
@@ -203,6 +320,10 @@ Auth:
     en: Password
     zh-CN: 密码
     zh-HK: 密碼
+  password_required:
+    en: Please enter your password
+    zh-CN: 请输入密码
+    zh-HK: 請輸入密碼
   password_placeholder:
     en: Enter your password
     zh-CN: 输入您的密码
@@ -259,47 +380,14 @@ Auth:
     en: "Please check your email (%{email}) to confirm your account"
     zh-CN: "请检查您的邮箱（%{email}）以确认您的账号"
     zh-HK: "請檢查您的電郵（%{email}）以確認您的帳號"
+  sync_server_url_required:
+    en: Please set a valid sync server URL in Settings before logging in
+    zh-CN: 登录前请先在设置中填写有效的同步地址
+    zh-HK: 登入前請先在設定中填寫有效的同步地址
   auth_error_title:
     en: Authentication Failed
     zh-CN: 认证失败
     zh-HK: 認證失敗
-  # OTP 相关
-  otp_placeholder:
-    en: Enter verification code
-    zh-CN: 输入验证码
-    zh-HK: 輸入驗證碼
-  otp_code:
-    en: Verification Code
-    zh-CN: 验证码
-    zh-HK: 驗證碼
-  otp_required:
-    en: Please enter the verification code
-    zh-CN: 请输入验证码
-    zh-HK: 請輸入驗證碼
-  send_otp:
-    en: Send Code
-    zh-CN: 发送验证码
-    zh-HK: 發送驗證碼
-  sending_otp:
-    en: Sending...
-    zh-CN: 发送中...
-    zh-HK: 發送中...
-  resend_otp:
-    en: Resend Code
-    zh-CN: 重新发送
-    zh-HK: 重新發送
-  verify_otp:
-    en: Verify Code
-    zh-CN: 验证
-    zh-HK: 驗證
-  otp_sent_hint:
-    en: A verification code has been sent to your email
-    zh-CN: 验证码已发送到您的邮箱
-    zh-HK: 驗證碼已發送到您的電郵
-  change_email:
-    en: Change email
-    zh-CN: 更换邮箱
-    zh-HK: 更換電郵
 
 # 主密钥
 Encryption:
@@ -417,6 +505,14 @@ Workspace:
     en: Edit Workspace
     zh-CN: 编辑工作区
     zh-HK: 編輯工作區
+  collapse:
+    en: Collapse
+    zh-CN: 收起
+    zh-HK: 收起
+  expand:
+    en: Expand
+    zh-CN: 展开
+    zh-HK: 展開
   delete:
     en: Delete Workspace
     zh-CN: 删除工作区
@@ -425,6 +521,22 @@ Workspace:
     en: "Are you sure you want to delete workspace \"%{workspace_name}\"?"
     zh-CN: "确定要删除工作区 \"%{workspace_name}\" 吗？"
     zh-HK: "確定要刪除工作區 \"%{workspace_name}\" 嗎？"
+  delete_has_connections:
+    en: "Workspace \"%{workspace_name}\" still contains %{count} connections. After deletion, these connections will be moved to Unassigned."
+    zh-CN: "工作区 \"%{workspace_name}\" 下还有 %{count} 个连接。删除后，这些连接会自动移动到未分区。"
+    zh-HK: "工作區 \"%{workspace_name}\" 下還有 %{count} 個連線。刪除後，這些連線會自動移到未分區。"
+  delete_move_to_unassigned:
+    en: "Delete and Unassign"
+    zh-CN: "删除并解绑连接"
+    zh-HK: "刪除並解除連線關聯"
+  delete_all_connections:
+    en: "Delete All Connections"
+    zh-CN: "删除全部连接"
+    zh-HK: "刪除全部連線"
+  delete_active_connections_blocked:
+    en: "Some connections in this workspace are currently in use. Close them first before deleting all connections."
+    zh-CN: "当前工作区中有连接正在使用，若要删除全部连接，请先关闭这些连接。"
+    zh-HK: "當前工作區中有連線正在使用，若要刪除全部連線，請先關閉這些連線。"
   filter:
     en: Workspace Filter
     zh-CN: 工作区过滤
@@ -481,12 +593,104 @@ Connection:
     zh-CN: "连接 \"%{conn_name}\" 正在使用中，删除前需要先关闭该连接。\n\n请先关闭该连接后再进行删除。"
     zh-HK: "連線 \"%{conn_name}\" 正在使用中，刪除前需要先關閉該連線。\n\n請先關閉該連線後再進行刪除。"
 
+ConnectionForm:
+  cloud_sync:
+    en: Cloud Sync
+    zh-CN: 云端同步
+    zh-HK: 雲端同步
+  cloud_sync_desc:
+    en: When enabled, this connection will be included in cloud sync.
+    zh-CN: 启用后，此连接会参与云端同步。
+    zh-HK: 啟用後，此連線會參與雲端同步。
+
 # 设置页面
 Settings:
   title:
     en: Settings
     zh-CN: 设置
     zh-HK: 設定
+
+  # 通用设置项
+  search_placeholder:
+    en: "Search settings..."
+    zh-CN: 搜索设置...
+    zh-HK: 搜尋設定...
+  search:
+    en: Search
+    zh-CN: 搜索
+    zh-HK: 搜尋
+  search_hint:
+    en: Use / to search, Enter to jump to next
+    zh-CN: 使用 / 搜索，Enter 跳转到下一个
+    zh-HK: 使用 / 搜尋，Enter 跳轉到下一個
+  font_size:
+    en: Font Size
+    zh-CN: 字体大小
+    zh-HK: 字型大小
+  font_family:
+    en: Font Family
+    zh-CN: 字体
+    zh-HK: 字型
+  select_font_placeholder:
+    en: Select a font
+    zh-CN: 选择字体
+    zh-HK: 選擇字型
+  select_theme_placeholder:
+    en: Select a color scheme
+    zh-CN: 选择配色方案
+    zh-HK: 選擇配色方案
+  line_height:
+    en: Line Height
+    zh-CN: 行间距
+    zh-HK: 行距
+  cursor:
+    en: Cursor
+    zh-CN: 光标
+    zh-HK: 光標
+  cursor_blink:
+    en: Cursor Blink
+    zh-CN: 光标闪烁
+    zh-HK: 光標閃爍
+  safety:
+    en: Safety
+    zh-CN: 安全
+    zh-HK: 安全
+  confirm_multiline_paste:
+    en: Confirm multi-line paste
+    zh-CN: 多行粘贴确认
+    zh-HK: 多行貼上確認
+  confirm_high_risk_command:
+    en: Confirm high-risk commands
+    zh-CN: 高危命令确认
+    zh-HK: 高危命令確認
+  auto_copy:
+    en: Auto copy on select
+    zh-CN: 选中自动复制
+    zh-HK: 選中自動複製
+  autocomplete:
+    en: Autocomplete
+    zh-CN: 自动补全
+    zh-HK: 自動補全
+  middle_click_paste:
+    en: Middle-click paste
+    zh-CN: 中键粘贴
+    zh-HK: 中鍵貼上
+  file_manager_section:
+    en: File Manager
+    zh-CN: 文件管理器
+    zh-HK: 檔案管理器
+  sync_path_with_terminal:
+    en: Sync path with terminal
+    zh-CN: 与终端同步路径
+    zh-HK: 與終端同步路徑
+  sync_path_help:
+    en: Automatically sync current directory with the terminal
+    zh-CN: 自动与终端同步当前目录
+    zh-HK: 自動與終端同步當前目錄
+  theme:
+    en: Theme
+    zh-CN: 主题
+    zh-HK: 主題
 
   # 通用设置组
   General:
@@ -528,22 +732,236 @@ Settings:
         en: Appearance
         zh-CN: 外观
         zh-HK: 外觀
-      dark_mode:
-        en: Dark Mode
-        zh-CN: 深色模式
-        zh-HK: 深色模式
-      dark_mode_desc:
-        en: Switch between light and dark themes
-        zh-CN: 在浅色和深色主题之间切换
-        zh-HK: 在淺色和深色主題之間切換
-      auto_switch_theme:
-        en: Auto Switch Theme
-        zh-CN: 自动切换主题
-        zh-HK: 自動切換主題
-      auto_switch_theme_desc:
-        en: Automatically switch theme based on system settings
-        zh-CN: 根据系统设置自动切换主题
-        zh-HK: 根據系統設定自動切換主題
+      theme_mode:
+        en: Theme Mode
+        zh-CN: 主题模式
+        zh-HK: 主題模式
+      theme_mode_desc:
+        en: Automatically follow the system theme, or force light or dark mode
+        zh-CN: 可自动跟随系统主题，或固定使用亮色 / 暗色主题
+        zh-HK: 可自動跟隨系統主題，或固定使用亮色 / 暗色主題
+      theme_mode_auto:
+        en: Auto
+        zh-CN: 自动
+        zh-HK: 自動
+      theme_mode_light:
+        en: Light
+        zh-CN: 亮色
+        zh-HK: 亮色
+      theme_mode_dark:
+        en: Dark
+        zh-CN: 暗色
+        zh-HK: 暗色
+      glass_effect:
+        en: Glass Effect
+        zh-CN: 毛玻璃效果
+        zh-HK: 毛玻璃效果
+      glass_effect_desc:
+        en: Enable platform blur or material backdrop for the application window without changing surface opacity
+        zh-CN: 为应用窗口启用平台毛玻璃或材质效果，不影响透明度
+        zh-HK: 為應用視窗啟用平台毛玻璃或材質效果，不影響透明度
+      glass_opacity:
+        en: Surface Opacity
+        zh-CN: 表面透明度
+        zh-HK: 表面透明度
+      glass_opacity_desc:
+        en: Adjust the translucency of the main surfaces. Only effective when glass effect is enabled.
+        zh-CN: 调整主表面的透明程度，仅在毛玻璃效果启用时生效
+        zh-HK: 調整主表面的透明程度，僅在毛玻璃效果啟用時生效
+      window_opacity:
+        en: Window Opacity
+        zh-CN: 窗口透明度
+        zh-HK: 視窗透明度
+      window_opacity_desc:
+        en: Adjust the overall opacity of the application window. Set to 1.0 for fully opaque, lower values for transparency.
+        zh-CN: 调整应用程序窗口的整体透明度。设为1.0则完全不透明，较低值则显示透明效果
+        zh-HK: 調整應用程式視窗的整體透明度。設為1.0則完全不透明，較低值則顯示透明效果
+      theme_name:
+        en: Color Theme
+        zh-CN: 配色主题
+        zh-HK: 配色主題
+      theme_name_desc:
+        en: Select a color theme for the application interface
+        zh-CN: 选择应用界面的配色主题
+        zh-HK: 選擇應用介面的配色主題
+      scrollbar_show:
+        en: Scrollbar Visibility
+        zh-CN: 滚动条显示
+        zh-HK: 滾動條顯示
+      scrollbar_show_desc:
+        en: Control when scrollbars are visible in the interface
+        zh-CN: 控制界面中滚动条的显示时机
+        zh-HK: 控制介面中滾動條的顯示時機
+      scrollbar_show_scrolling:
+        en: While Scrolling
+        zh-CN: 滚动时
+        zh-HK: 滾動時
+      scrollbar_show_hover:
+        en: On Hover
+        zh-CN: 悬停时
+        zh-HK: 懸停時
+      scrollbar_show_always:
+        en: Always
+        zh-CN: 始终显示
+        zh-HK: 始終顯示
+      shadow:
+        en: Shadow Effects
+        zh-CN: 阴影效果
+        zh-HK: 陰影效果
+      shadow_desc:
+        en: Enable shadow effects for UI elements such as inputs and buttons
+        zh-CN: 为输入框、按钮等 UI 元素启用阴影效果
+        zh-HK: 為輸入框、按鈕等 UI 元素啟用陰影效果
+      radius:
+        en: Corner Radius
+        zh-CN: 圆角大小
+        zh-HK: 圓角大小
+      radius_desc:
+        en: Adjust the border radius of general UI elements (0-24)
+        zh-CN: 调整普通 UI 元素的圆角大小（0-24）
+        zh-HK: 調整普通 UI 元素的圓角大小（0-24）
+      mono_font_family:
+        en: Monospace Font
+        zh-CN: 等宽字体
+        zh-HK: 等寬字型
+      mono_font_family_desc:
+        en: Select the monospace font used for code and terminal-like content
+        zh-CN: 选择用于代码和类终端内容的等宽字体
+        zh-HK: 選擇用於代碼和類終端內容的等寬字型
+
+    Sync:
+      group_title:
+        en: Sync
+        zh-CN: 同步
+        zh-HK: 同步
+      server_name:
+        en: Sync Server
+        zh-CN: 同步服务
+        zh-HK: 同步服務
+      server_url:
+        en: Sync Server URL
+        zh-CN: 同步地址
+        zh-HK: 同步地址
+      server_url_desc:
+        en: Set the sync_server URL, for example http://127.0.0.1:8787. Changes take effect immediately and require logging in again.
+        zh-CN: 配置 sync_server 地址，例如 http://127.0.0.1:8787。修改后会立即生效，并需要重新登录。
+        zh-HK: 配置 sync_server 地址，例如 http://127.0.0.1:8787。修改後會立即生效，並需要重新登入。
+      backend_type:
+        en: Sync Backend
+        zh-CN: 同步后端
+        zh-HK: 同步後端
+      backend_type_desc:
+        en: Choose the sync backend type. The default is "Custom Sync Server", which allows you to use your own sync server implementation based on the `sync_server` protocol.
+        zh-CN: 选择同步后端类型，默认是“自建 ONetCli 同步服务器”则允许你使用自己搭建的基于 `sync_server` 协议的同步服务器。
+        zh-HK: 選擇同步後端類型，默認是“自建 ONetCli 同步服務器”則允許你使用自己搭建的基於 `sync_server` 協議的同步服務器。
+      self_hosted_backend:
+        en: Custom Sync Server
+        zh-CN: 自建 ONetCli 同步服务器
+        zh-HK: 自建 ONetCli 同步服務器
+      webdav_backend:
+        en: WebDAV
+        zh-CN: WebDAV
+        zh-HK: WebDAV
+      github_gist_backend:
+        en: GitHub Gist
+        zh-CN: GitHub Gist
+        zh-HK: GitHub Gist
+      github_gist_group_title:
+        en: GitHub Gist
+        zh-CN: GitHub Gist
+        zh-HK: GitHub Gist
+      github_client_id:
+        en: GitHub OAuth App Client ID
+        zh-CN: GitHub OAuth 应用 Client ID
+        zh-HK: GitHub OAuth 應用 Client ID
+      github_client_id_desc:
+        en: Create a GitHub OAuth App at https://github.com/settings/developers, set the Device Flow callback URL to http://localhost
+        zh-CN: 在 https://github.com/settings/developers 创建 GitHub OAuth App，设备流回调地址设为 http://localhost
+        zh-HK: 在 https://github.com/settings/developers 建立 GitHub OAuth App，設備流回調位址設為 http://localhost
+      gist_id:
+        en: Gist ID
+        zh-CN: Gist ID
+        zh-HK: Gist ID
+      webdav_endpoint:
+        en: WebDAV Server URL
+        zh-CN: WebDAV 地址
+        zh-HK: WebDAV 位址
+      webdav_endpoint_desc:
+        en: "WebDAV server URL, e.g. https://dav.example.com"
+        zh-CN: "WebDAV 服务器地址，如 https://dav.example.com"
+        zh-HK: "WebDAV 伺服器位址，如 https://dav.example.com"
+      webdav_auth_type:
+        en: WebDAV Auth Type
+        zh-CN: WebDAV 认证方式
+        zh-HK: WebDAV 認證方式
+      webdav_username_password:
+        en: Username & Password
+        zh-CN: 用户名密码
+        zh-HK: 使用者名稱密碼
+      webdav_username:
+        en: WebDAV Username
+        zh-CN: WebDAV 用户名
+        zh-HK: WebDAV 使用者名稱
+      webdav_password:
+        en: WebDAV Password
+        zh-CN: WebDAV 密码
+        zh-HK: WebDAV 密碼
+      webdav_storage_path:
+        en: WebDAV Storage Path
+        zh-CN: WebDAV 存储路径
+        zh-HK: WebDAV 儲存路徑
+      webdav_storage_path_desc:
+        en: Path prefix for sync files stored on WebDAV
+        zh-CN: 同步文件存放的路径前缀
+        zh-HK: 同步檔案存放的路徑前置
+      gist_not_authorized:
+        en: Not authorized
+        zh-CN: 未授权
+        zh-HK: 未授權
+      gist_id_auto_fill_desc:
+        en: Gist ID is auto-filled after successful authorization
+        zh-CN: 授权成功后自动填充 Gist ID
+        zh-HK: 授權成功後自動填充 Gist ID
+      reauthorize:
+        en: Reauthorize
+        zh-CN: 重新授权
+        zh-HK: 重新授權
+      authorize_github:
+        en: Authorize GitHub
+        zh-CN: 授权 GitHub
+        zh-HK: 授權 GitHub
+      github_auth_title:
+        en: GitHub Authorization
+        zh-CN: GitHub 授权
+        zh-HK: GitHub 授權
+      google_drive_client_id_desc:
+        en: OAuth 2.0 Client ID created in Google Cloud Console
+        zh-CN: Google Cloud Console 中创建的 OAuth 2.0 Client ID
+        zh-HK: Google Cloud Console 中建立的 OAuth 2.0 Client ID
+      google_drive_client_secret_desc:
+        en: OAuth 2.0 Client Secret created in Google Cloud Console
+        zh-CN: Google Cloud Console 中创建的 OAuth 2.0 Client Secret
+        zh-HK: Google Cloud Console 中建立的 OAuth 2.0 Client Secret
+      authorize_google_drive:
+        en: Authorize Google Drive
+        zh-CN: 授权 Google Drive
+        zh-HK: 授權 Google Drive
+      google_drive_auth_title:
+        en: Google Drive Authorization
+        zh-CN: Google Drive 授权
+        zh-HK: Google Drive 授權
+      onedrive_client_id_desc:
+        en: Application (client) ID from Microsoft Azure App Registration
+        zh-CN: Microsoft Azure App Registration 中的 Application (client) ID
+        zh-HK: Microsoft Azure App Registration 中的 Application (client) ID
+      authorize_onedrive:
+        en: Authorize OneDrive
+        zh-CN: 授权 OneDrive
+        zh-HK: 授權 OneDrive
+      onedrive_auth_title:
+        en: OneDrive Authorization
+        zh-CN: OneDrive 授权
+        zh-HK: OneDrive 授權
 
     # 字体设置
     Font:
@@ -564,9 +982,9 @@ Settings:
         zh-CN: 字体大小
         zh-HK: 字型大小
       font_size_desc:
-        en: Adjust font size for better readability (8-72)
-        zh-CN: 调整字体大小以获得更好的可读性（8-72）
-        zh-HK: 調整字型大小以獲得更好的可讀性（8-72）
+        en: Adjust font size for better readability (12-32)
+        zh-CN: 调整字体大小以获得更好的可读性（12-32）
+        zh-HK: 調整字型大小以獲得更好的可讀性（12-32）
 
     # 终端设置
     Terminal:
@@ -574,14 +992,46 @@ Settings:
         en: Terminal
         zh-CN: 终端
         zh-HK: 終端
+      font_family:
+        en: Terminal Font Family
+        zh-CN: 终端字体
+        zh-HK: 終端字型
+      font_family_desc:
+        en: Select the terminal font family
+        zh-CN: 选择终端使用的等宽字体
+        zh-HK: 選擇終端使用的等寬字型
+      font_ligatures:
+        en: Terminal Ligatures
+        zh-CN: 终端连字
+        zh-HK: 終端連字
+      font_ligatures_desc:
+        en: Enable programming ligatures such as ->, => and != in the terminal
+        zh-CN: 启用终端中的编程连字效果，例如 ->、=>、!=
+        zh-HK: 啟用終端中的編程連字效果，例如 ->、=>、!=
       font_size:
         en: Terminal Font Size
         zh-CN: 终端字体大小
         zh-HK: 終端字型大小
       font_size_desc:
-        en: Adjust terminal font size (8-72)
-        zh-CN: 调整终端字体大小（8-72）
-        zh-HK: 調整終端字型大小（8-72）
+        en: Adjust terminal font size (12-32)
+        zh-CN: 调整终端字体大小（12-32）
+        zh-HK: 調整終端字型大小（12-32）
+      line_height:
+        en: Terminal Line Height
+        zh-CN: 终端行间距
+        zh-HK: 終端行距
+      line_height_desc:
+        en: Adjust terminal line height scale (1.0-2.5)
+        zh-CN: 调整终端行间距比例（1.0-2.5）
+        zh-HK: 調整終端行距比例（1.0-2.5）
+      color_scheme:
+        en: Color Scheme
+        zh-CN: 配色方案
+        zh-HK: 配色方案
+      color_scheme_desc:
+        en: Terminal color scheme
+        zh-CN: 终端配色方案
+        zh-HK: 終端配色方案
       auto_copy:
         en: Auto copy on select
         zh-CN: 选中自动复制
@@ -606,6 +1056,14 @@ Settings:
         en: Paste clipboard content with middle mouse button
         zh-CN: 使用鼠标中键粘贴剪贴板内容
         zh-HK: 使用滑鼠中鍵貼上剪貼簿內容
+      recovery_scrollback_lines:
+        en: Restored history lines
+        zh-CN: 恢复历史行数
+        zh-HK: 恢復歷史行數
+      recovery_scrollback_lines_desc:
+        en: Limit how many recent local terminal lines are saved for restore prompts (0-5000)
+        zh-CN: 限制本地终端在恢复弹窗中可恢复的最近历史行数（0-5000）
+        zh-HK: 限制本地終端在恢復彈窗中可恢復的最近歷史行數（0-5000）
 
     # 数据库设置
     Database:
@@ -661,6 +1119,14 @@ Settings:
         en: Set the interval for automatic saving (1-60 seconds)
         zh-CN: 设置自动保存的时间间隔（1-60秒）
         zh-HK: 設置自動保存的時間間隔（1-60秒）
+      undo_stack_size:
+        en: Undo History Size
+        zh-CN: 撤销历史数量
+        zh-HK: 撤銷歷史數量
+      undo_stack_size_desc:
+        en: "Maximum number of undo steps for data editing (0 to disable)"
+        zh-CN: 数据编辑的最大撤销步数（设为0则禁用逐步撤销）
+        zh-HK: 資料編輯的最大撤銷步數（設為0則停用逐步撤銷）
 
     Update:
       group_title:
@@ -756,7 +1222,31 @@ Settings:
       save_success:
         en: Global proxy settings applied
         zh-CN: 全局代理设置已生效
-        zh-HK: 全局代理設置已生效
+        zh-HK: 全局代理设置已生效
+      validation_host_empty:
+        en: Proxy host cannot be empty
+        zh-CN: 代理主机不能为空
+        zh-HK: 代理主機不能為空
+      validation_port_empty:
+        en: Proxy port cannot be empty
+        zh-CN: 代理端口不能为空
+        zh-HK: 代理埠不能為空
+      validation_password_requires_username:
+        en: Proxy password requires a username
+        zh-CN: 填写代理密码时必须同时填写用户名
+        zh-HK: 填寫代理密碼時必須同時填寫使用者名稱
+      validation_url_format:
+        en: "Invalid proxy URL format: %{error}"
+        zh-CN: "代理地址格式不正确: %{error}"
+        zh-HK: "代理地址格式不正確: %{error}"
+      validation_username_format:
+        en: Invalid proxy username format
+        zh-CN: 代理用户名格式不正确
+        zh-HK: 代理使用者名稱格式不正確
+      validation_password_format:
+        en: Invalid proxy password format
+        zh-CN: 代理密码格式不正确
+        zh-HK: 代理密碼格式不正確
 
   # 快捷键
   Shortcuts:
@@ -919,9 +1409,9 @@ Settings:
       zh-CN: 账户
       zh-HK: 帳戶
     username:
-      en: "Username:"
-      zh-CN: "用户名："
-      zh-HK: "用戶名："
+      en: "Nickname:"
+      zh-CN: "昵称："
+      zh-HK: "暱稱："
     email:
       en: "Email:"
       zh-CN: "邮箱："
@@ -1245,9 +1735,466 @@ LlmProviders:
     zh-CN: 至少需要选择一个模型
     zh-HK: 至少需要選擇一個模型
 
+CertificateManager:
+  title:
+    en: "Certificate Manager"
+    zh-CN: "凭证管理"
+    zh-HK: "憑證管理"
+
+SSH:
+  new:
+    en: New SSH Connection
+    zh-CN: 新建 SSH 连接
+    zh-HK: 新建 SSH 連線
+  edit:
+    en: Edit SSH Connection
+    zh-CN: 编辑 SSH 连接
+    zh-HK: 編輯 SSH 連線
+  name:
+    en: Name
+    zh-CN: 名称
+    zh-HK: 名稱
+  name_placeholder:
+    en: Connection name
+    zh-CN: 连接名称
+    zh-HK: 連線名稱
+  host:
+    en: Host
+    zh-CN: 主机
+    zh-HK: 主機
+  host_placeholder:
+    en: Hostname or IP address
+    zh-CN: 主机地址或 IP
+    zh-HK: 主機位址或 IP
+  port:
+    en: Port
+    zh-CN: 端口
+    zh-HK: 埠
+  certificate:
+    en: Credential
+    zh-CN: 凭证
+    zh-HK: 憑證
+  certificate_none:
+    en: No credential
+    zh-CN: 不使用凭证
+    zh-HK: 不使用憑證
+  username:
+    en: Username
+    zh-CN: 用户名
+    zh-HK: 使用者名稱
+  username_placeholder:
+    en: Username
+    zh-CN: 用户名
+    zh-HK: 使用者名稱
+  auth_method:
+    en: Authentication Method
+    zh-CN: 认证方式
+    zh-HK: 驗證方式
+  password:
+    en: Password
+    zh-CN: 密码
+    zh-HK: 密碼
+  password_placeholder:
+    en: Password
+    zh-CN: 密码
+    zh-HK: 密碼
+  private_key:
+    en: Private Key
+    zh-CN: 私钥
+    zh-HK: 私鑰
+  key_path:
+    en: Private Key Path
+    zh-CN: 私钥路径
+    zh-HK: 私鑰路徑
+  key_path_placeholder:
+    en: Private key file path
+    zh-CN: 私钥文件路径
+    zh-HK: 私鑰檔案路徑
+  passphrase:
+    en: Passphrase
+    zh-CN: 私钥口令
+    zh-HK: 私鑰口令
+  passphrase_placeholder:
+    en: Private key passphrase
+    zh-CN: 私钥口令
+    zh-HK: 私鑰口令
+  agent:
+    en: SSH Agent
+    zh-CN: SSH Agent
+    zh-HK: SSH Agent
+  workspace:
+    en: Workspace
+    zh-CN: 工作区
+    zh-HK: 工作區
+  default_directory:
+    en: Default Directory
+    zh-CN: 默认目录
+    zh-HK: 預設目錄
+  default_directory_placeholder:
+    en: Default directory after login
+    zh-CN: 登录后默认目录
+    zh-HK: 登入後預設目錄
+  init_script:
+    en: Init Script
+    zh-CN: 初始化脚本
+    zh-HK: 初始化腳本
+  init_script_placeholder:
+    en: Commands to run after login
+    zh-CN: 连接后自动执行的命令
+    zh-HK: 連線後自動執行的命令
+  enable_jump_server:
+    en: Use Jump Server
+    zh-CN: 启用跳板机
+    zh-HK: 啟用跳板機
+  jump_host:
+    en: Jump Host
+    zh-CN: 跳板机主机
+    zh-HK: 跳板機主機
+  jump_port:
+    en: Jump Port
+    zh-CN: 跳板机端口
+    zh-HK: 跳板機埠
+  jump_username:
+    en: Jump Username
+    zh-CN: 跳板机用户名
+    zh-HK: 跳板機使用者名稱
+  jump_password:
+    en: Jump Password
+    zh-CN: 跳板机密码
+    zh-HK: 跳板機密碼
+  enable_proxy:
+    en: Use Proxy
+    zh-CN: 启用代理
+    zh-HK: 啟用代理
+  proxy_type:
+    en: Proxy Type
+    zh-CN: 代理类型
+    zh-HK: 代理類型
+  proxy_host:
+    en: Proxy Host
+    zh-CN: 代理主机
+    zh-HK: 代理主機
+  proxy_port:
+    en: Proxy Port
+    zh-CN: 代理端口
+    zh-HK: 代理埠
+  proxy_username:
+    en: Proxy Username
+    zh-CN: 代理用户名
+    zh-HK: 代理使用者名稱
+  proxy_password:
+    en: Proxy Password
+    zh-CN: 代理密码
+    zh-HK: 代理密碼
+  connect_timeout:
+    en: Connect Timeout (s)
+    zh-CN: 连接超时（秒）
+    zh-HK: 連線逾時（秒）
+  keepalive_interval:
+    en: Keepalive Interval (s)
+    zh-CN: 保活间隔（秒）
+    zh-HK: 保活間隔（秒）
+  keepalive_max:
+    en: Keepalive Retries
+    zh-CN: 保活重试次数
+    zh-HK: 保活重試次數
+  remark:
+    en: Remark
+    zh-CN: 备注
+    zh-HK: 備註
+  remark_placeholder:
+    en: Optional remark
+    zh-CN: 可选备注
+    zh-HK: 可選備註
+  tab_basic:
+    en: Basic
+    zh-CN: 基本信息
+    zh-HK: 基本資訊
+  tab_init:
+    en: Startup
+    zh-CN: 初始化
+    zh-HK: 初始化
+  tab_jump_server:
+    en: Jump Server
+    zh-CN: 跳板机
+    zh-HK: 跳板機
+  tab_proxy:
+    en: Proxy
+    zh-CN: 代理
+    zh-HK: 代理
+  tab_advanced:
+    en: Advanced
+    zh-CN: 高级
+    zh-HK: 進階
+  tab_other:
+    en: Other
+    zh-CN: 其他
+    zh-HK: 其他
+  test_success:
+    en: Connection test succeeded
+    zh-CN: 连接测试成功
+    zh-HK: 連線測試成功
+  validation_error:
+    en: Please fill in the required fields
+    zh-CN: 请填写必填项
+    zh-HK: 請填寫必填項
+  manage_certificates:
+    en: Manage Credentials
+    zh-CN: 管理凭证
+    zh-HK: 管理憑證
 
 Serial:
   new:
     en: Serial
     zh-CN: 串口
     zh-HK: 串口
+  edit:
+    en: Edit Serial Connection
+    zh-CN: 编辑串口连接
+    zh-HK: 編輯串口連線
+  name:
+    en: Name
+    zh-CN: 名称
+    zh-HK: 名稱
+  name_placeholder:
+    en: Connection name
+    zh-CN: 连接名称
+    zh-HK: 連線名稱
+  port_name:
+    en: Serial Port
+    zh-CN: 串口设备
+    zh-HK: 串口裝置
+  port_name_placeholder:
+    en: Serial device path or name
+    zh-CN: 串口设备路径或名称
+    zh-HK: 串口裝置路徑或名稱
+  refresh_ports:
+    en: Refresh Ports
+    zh-CN: 刷新端口
+    zh-HK: 刷新埠
+  baud_rate:
+    en: Baud Rate
+    zh-CN: 波特率
+    zh-HK: 鮑率
+  data_bits:
+    en: Data Bits
+    zh-CN: 数据位
+    zh-HK: 數據位
+  stop_bits:
+    en: Stop Bits
+    zh-CN: 停止位
+    zh-HK: 停止位
+  parity:
+    en: Parity
+    zh-CN: 校验位
+    zh-HK: 同位檢查
+  flow_control:
+    en: Flow Control
+    zh-CN: 流控
+    zh-HK: 流控
+  workspace:
+    en: Workspace
+    zh-CN: 工作区
+    zh-HK: 工作區
+  remark:
+    en: Remark
+    zh-CN: 备注
+    zh-HK: 備註
+  remark_placeholder:
+    en: Optional remark
+    zh-CN: 可选备注
+    zh-HK: 可選備註
+  test_success:
+    en: Serial test succeeded
+    zh-CN: 串口测试成功
+    zh-HK: 串口測試成功
+  validation_error:
+    en: Please fill in the connection name and serial port
+    zh-CN: 请填写连接名称和串口设备
+    zh-HK: 請填寫連線名稱和串口裝置
+  enotty_hint:
+    en: The current device does not support exclusive detection. If this is a virtual serial port, you can ignore this and continue saving.
+    zh-CN: 当前设备不支持独占检测；如果这是虚拟串口，可以忽略该提示并继续保存。
+    zh-HK: 當前裝置不支援獨佔檢測；如果這是虛擬串口，可以忽略此提示並繼續保存。
+
+# OAuth 授权对话框
+OAuth:
+  starting:
+    en: Starting authorization...
+    zh-CN: 正在启动授权流程...
+    zh-HK: 正在啟動授權流程...
+  google_drive_auth:
+    en: Google Drive Authorization
+    zh-CN: Google Drive 授权
+    zh-HK: Google Drive 授權
+  onedrive_auth:
+    en: OneDrive Authorization
+    zh-CN: OneDrive 授权
+    zh-HK: OneDrive 授權
+  github_auth:
+    en: GitHub Authorization
+    zh-CN: GitHub 授权
+    zh-HK: GitHub 授權
+  open_browser_prompt:
+    en: "Click the button below to open the authorization page in your browser:"
+    zh-CN: 点击下方按钮在浏览器中打开授权页面：
+    zh-HK: 點擊下方按鈕在瀏覽器中開啟授權頁面：
+  open_auth_page:
+    en: Open Authorization Page
+    zh-CN: 打开授权页面
+    zh-HK: 開啟授權頁面
+  auth_complete_auto_confirm:
+    en: This window will automatically confirm after authorization is complete.
+    zh-CN: 授权完成后此窗口将自动确认。
+    zh-HK: 授權完成後此視窗將自動確認。
+  getting_access:
+    en: Getting access permissions...
+    zh-CN: 正在获取访问权限...
+    zh-HK: 正在獲取存取權限...
+  exchanging_token:
+    en: Exchanging access token after authorization...
+    zh-CN: 完成授权后正在交换访问令牌...
+    zh-HK: 完成授權後正在交換存取權杖...
+  auth_success:
+    en: Authorization successful!
+    zh-CN: 授权成功！
+    zh-HK: 授權成功！
+  google_drive_connected:
+    en: Google Drive has been successfully connected.
+    zh-CN: Google Drive 已成功连接。
+    zh-HK: Google Drive 已成功連線。
+  onedrive_connected:
+    en: OneDrive has been successfully connected.
+    zh-CN: OneDrive 已成功连接。
+    zh-HK: OneDrive 已成功連線。
+  auth_failed:
+    en: Authorization failed
+    zh-CN: 授权失败
+    zh-HK: 授權失敗
+  browser_open_link_code:
+    en: "Open the link in your browser and enter the verification code:"
+    zh-CN: 请在浏览器中打开链接并输入验证码：
+    zh-HK: 請在瀏覽器中開啟連結並輸入驗證碼：
+  copy_code:
+    en: Copy Code
+    zh-CN: 复制验证码
+    zh-HK: 複製驗證碼
+  click_confirm_after_auth:
+    en: Click the button below to confirm after authorization is successful
+    zh-CN: 授权成功后点击下方按钮确认
+    zh-HK: 授權成功後點擊下方按鈕確認
+  complete_auth:
+    en: Complete Authorization
+    zh-CN: 完成授权
+    zh-HK: 完成授權
+  waiting_for_auth_confirm:
+    en: Waiting for authorization confirmation...
+    zh-CN: 等待授权确认...
+    zh-HK: 等待授權確認...
+  browser_auth_confirm:
+    en: "Have you completed authorization in your browser? Confirming... (waiting up to 5 minutes)"
+    zh-CN: 已在浏览器中完成授权？正在确认... (最多等待 5 分钟)
+    zh-HK: 已在瀏覽器中完成授權？正在確認... (最多等待 5 分鐘)
+
+# 连接恢复弹窗
+ConnectionRestore:
+  title:
+    en: Restore Connections
+    zh-CN: 恢复连接
+    zh-HK: 恢復連線
+  description:
+    en: Some connection pages were still open before the last exit. Please select which ones to restore.
+    zh-CN: 检测到上次退出前仍有打开的连接页，请选择要恢复的项。
+    zh-HK: 檢測到上次退出前仍有開啟的連線頁，請選擇要恢復的項目。
+  select_all:
+    en: Select All
+    zh-CN: 全选
+    zh-HK: 全選
+  selected_count:
+    en: "%{selected} / %{total} selected"
+    zh-CN: "已选择 %{selected} / %{total}"
+    zh-HK: "已選擇 %{selected} / %{total}"
+  partial_restore_hint:
+    en: You can deselect items to restore only some connections
+    zh-CN: 可取消勾选后仅恢复部分连接
+    zh-HK: 可取消勾選後僅恢復部分連線
+  skip:
+    en: Skip
+    zh-CN: 跳过
+    zh-HK: 跳過
+  restoring:
+    en: Restoring...
+    zh-CN: 恢复中...
+    zh-HK: 恢復中...
+  restore_selected:
+    en: Restore Selected
+    zh-CN: 恢复所选
+    zh-HK: 恢復所選
+  # 连接类型标签
+  ssh_terminal:
+    en: SSH Terminal
+    zh-CN: SSH 终端
+    zh-HK: SSH 終端
+  local_terminal:
+    en: Local Terminal
+    zh-CN: 本地终端
+    zh-HK: 本地終端
+  serial_terminal:
+    en: Serial Terminal
+    zh-CN: 串口终端
+    zh-HK: 串口終端
+  database_page:
+    en: Database Connection Page
+    zh-CN: 数据库连接页
+    zh-HK: 資料庫連線頁
+  database_workspace:
+    en: Database Workspace
+    zh-CN: 数据库工作区
+    zh-HK: 資料庫工作區
+  redis_page:
+    en: Redis Connection Page
+    zh-CN: Redis 连接页
+    zh-HK: Redis 連線頁
+  redis_workspace:
+    en: Redis Workspace
+    zh-CN: Redis 工作区
+    zh-HK: Redis 工作區
+  mongodb_page:
+    en: MongoDB Connection Page
+    zh-CN: MongoDB 连接页
+    zh-HK: MongoDB 連線頁
+  mongodb_workspace:
+    en: MongoDB Workspace
+    zh-CN: MongoDB 工作区
+    zh-HK: MongoDB 工作區
+  workspace_page:
+    en: Workspace Page
+    zh-CN: 工作区页
+    zh-HK: 工作區頁
+  current_connection:
+    en: Current Connection
+    zh-CN: 当前连接
+    zh-HK: 當前連線
+  current_directory:
+    en: Current Directory
+    zh-CN: 当前目录
+    zh-HK: 目前目錄
+  default_directory:
+    en: Default Directory
+    zh-CN: 默认目录
+    zh-HK: 預設目錄
+
+# 新建连接类型
+NewConnection:
+  workspace:
+    en: Workspace
+    zh-CN: 工作区
+    zh-HK: 工作區
+  terminal:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
+  database:
+    en: Database
+    zh-CN: 数据库
+    zh-HK: 資料庫
