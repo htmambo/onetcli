@@ -24,6 +24,7 @@ use one_ui::edit_table::Column;
 use smol::Timer;
 use tracing::log::error;
 
+use crate::current_db_undo_stack_size;
 use crate::table_data::cell_preview_host::CellPreviewHost;
 use crate::table_data::data_grid::{DataGrid, DataGridConfig, DataGridUsage};
 use one_core::ai_chat::ask_ai::AskAiButton;
@@ -525,7 +526,8 @@ impl SqlResultTabContainer {
                 .usage(DataGridUsage::SqlResult)
                 .rows_count(query_result.rows.len())
                 .execution_time(query_result.elapsed_ms)
-                .sql(query_result.sql.clone());
+                .sql(query_result.sql.clone())
+                .undo_stack_size(current_db_undo_stack_size(cx));
 
                 let data_grid = cx.new(|cx| DataGrid::new(config, _window, cx));
                 let content = cx.new(|cx| CellPreviewHost::new(data_grid.clone(), _window, cx));

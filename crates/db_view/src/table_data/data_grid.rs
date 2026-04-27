@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, AsyncApp, ClickEvent, Context, Corner, Entity, EventEmitter, FocusHandle,
@@ -5,8 +7,8 @@ use gpui::{
     Window, actions, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, IconName, Sizable as _, Size, WindowExt, button::Button,
-    h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, Size, WindowExt,
+    button::Button, h_flex, v_flex,
 };
 use one_ui::edit_table::{Column, EditTable, EditTableEvent, EditTableState};
 use rust_i18n::t;
@@ -24,23 +26,25 @@ use crate::table_data::multi_text_editor::{
 use crate::table_data::results_delegate::{EditorTableDelegate, RowChange};
 use chrono::Local;
 use db::{
-    ColumnInfo, DbManager, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult,
-    TableCellChange, TableDataRequest, TableRowChange, TableSaveRequest,
+    ColumnInfo, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult, TableCellChange,
+    TableDataRequest, TableRowChange, TableSaveRequest,
 };
 use gpui_component::button::ButtonVariants;
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
-use one_core::storage::DatabaseType;
 use one_core::tab_container::TabContainer;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
 
-actions!(
-    data_grid,
-    [Page500, Page1000, Page2000, Page10000, Page100000]
-);
+#[cfg(test)]
+use db::DbManager;
+#[cfg(test)]
+use one_core::storage::DatabaseType;
 
+actions!(data_grid, [Page100, Page200, Page300, Page500, Page1000]);
+
+#[cfg(test)]
 fn build_header_order_by_clause(
     db_manager: &DbManager,
     database_type: DatabaseType,
@@ -155,6 +159,8 @@ pub struct DataGridConfig {
     execution_time: u128,
     /// 数据行数（SqlResult 场景使用）
     rows_count: usize,
+    /// 逐步撤销栈容量（0表示禁用）
+    undo_stack_size: usize,
 }
 
 impl DataGridConfig {
@@ -176,6 +182,7 @@ impl DataGridConfig {
             sql: "".to_string(),
             execution_time: 0,
             rows_count: 0,
+            undo_stack_size: 50,
         }
     }
 
@@ -209,6 +216,10 @@ impl DataGridConfig {
     }
     pub fn rows_count(mut self, rows_count: usize) -> Self {
         self.rows_count = rows_count;
+        self
+    }
+    pub fn undo_stack_size(mut self, size: usize) -> Self {
+        self.undo_stack_size = size;
         self
     }
 }
@@ -251,6 +262,18 @@ enum ExportFormat {
     Xlsx,
     Csv,
     InsertSql,
+}
+
+#[derive(Clone)]
+enum ReloadAction {
+    ApplyFilters,
+    ApplySort {
+        column_name: String,
+        sort: ColumnSort,
+    },
+    RefreshCurrent,
+    LoadPage(usize),
+    ChangePageSize(usize),
 }
 
 impl ExportFormat {
@@ -343,8 +366,14 @@ pub struct DataGrid {
     filter_editor: Entity<TableFilterEditor>,
     /// 过滤器事件订阅
     _filter_sub: Option<Subscription>,
+    /// 隐藏的列（本地持久化）
+    hidden_columns: HashSet<SharedString>,
+    /// 列可见性是否已加载
+    column_visibility_loaded: bool,
     /// 侧边栏大文本编辑器是否已为当前表格打开
     is_large_text_editor_sidebar_open: bool,
+    /// 自身实体弱引用，用于异步回调中更新状态
+    self_entity: Option<gpui::WeakEntity<Self>>,
 }
 
 impl DataGrid {
@@ -361,8 +390,14 @@ impl DataGrid {
             delegate.set_table_name(table_name);
             EditTableState::new(delegate, window, cx)
         });
+        // 根据应用字号动态计算行高：font_size * 2 + 2（18=>38px，16=>34px，14=>30px）
+        let font_size = cx.theme().font_size;
+        let row_height = font_size * 2.0 + px(2.);
         table.update(cx, |state, _| {
-            state.delegate_mut().set_data_grid(data_grid_handle.clone());
+            let delegate = state.delegate_mut();
+            delegate.set_data_grid(data_grid_handle.clone());
+            delegate.set_undo_stack_size(config.undo_stack_size);
+            state.set_row_height(row_height);
         });
         let focus_handle = cx.focus_handle();
         let filter_editor = cx.new(|cx| TableFilterEditor::new(window, cx));
@@ -376,7 +411,10 @@ impl DataGrid {
             table_data_info,
             filter_editor,
             _filter_sub: None,
+            hidden_columns: HashSet::new(),
+            column_visibility_loaded: false,
             is_large_text_editor_sidebar_open: false,
+            self_entity: Some(data_grid_handle),
         };
         result.bind_table_event(window, cx);
         if is_table_data {
@@ -408,14 +446,46 @@ impl DataGrid {
         let sub = cx.subscribe_in(
             &self.filter_editor,
             window,
-            |this: &mut DataGrid, _, evt: &FilterEditorEvent, _, cx| match evt {
-                FilterEditorEvent::QueryApply => {
-                    this.load_data_with_clauses(1, cx);
-                    cx.notify()
+            |this: &mut DataGrid, _, evt: &FilterEditorEvent, window, cx| {
+                if matches!(evt, FilterEditorEvent::QueryApply) {
+                    this.request_reload_action(ReloadAction::ApplyFilters, window, cx);
+                    cx.notify();
                 }
             },
         );
         self._filter_sub = Some(sub);
+    }
+
+    fn apply_column_visibility(&self, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            state
+                .delegate_mut()
+                .update_visible_columns(&self.hidden_columns);
+            state.refresh(cx);
+        });
+    }
+
+    fn column_visibility_key(&self) -> String {
+        format!(
+            "column_visibility:{}:{}:{}",
+            self.config.connection_id, self.config.database_name, self.config.table_name
+        )
+    }
+
+    fn save_column_visibility(&self, cx: &mut App) {
+        let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
+        let Some(storage) = storage else { return };
+        let Some(kv_repo) = storage
+            .storage
+            .get::<one_core::storage::KeyValueRepository>()
+        else {
+            return;
+        };
+        let key = self.column_visibility_key();
+        let hidden: Vec<String> = self.hidden_columns.iter().map(|s| s.to_string()).collect();
+        if let Ok(value) = serde_json::to_string(&hidden) {
+            let _ = kv_repo.set(&key, &value);
+        }
     }
 
     // ========== 公共访问器 ==========
@@ -501,26 +571,101 @@ impl DataGrid {
             return;
         }
 
-        let global_state = cx.global::<GlobalDbState>().clone();
-        let order_by_clause = match build_header_order_by_clause(
-            &global_state.db_manager,
-            self.config.database_type,
+        tracing::info!(
+            "[SORT] apply_column_sort: column={}, sort={:?}",
             column_name,
-            sort,
-        ) {
-            Ok(Some(clause)) => clause,
-            Ok(None) => String::new(),
-            Err(error) => {
-                window.push_notification(error, cx);
-                return;
-            }
-        };
+            sort
+        );
 
-        self.filter_editor.update(cx, |editor, cx| {
-            editor.set_order_by_clause(order_by_clause.clone(), window, cx);
+        self.request_reload_action(
+            ReloadAction::ApplySort {
+                column_name: column_name.to_string(),
+                sort,
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn commit_active_cell_edit(&self, window: &mut Window, cx: &mut App) {
+        // 先提交当前编辑中的单元格，避免未提交输入绕过未保存检查。
+        self.table.update(cx, |state, cx| {
+            state.commit_cell_edit(window, cx);
         });
+    }
 
-        self.load_data_with_clauses(1, cx);
+    fn request_reload_action(&self, action: ReloadAction, window: &mut Window, cx: &mut App) {
+        self.commit_active_cell_edit(window, cx);
+
+        if self.config.usage != DataGridUsage::TableData || !self.has_unsaved_changes(cx) {
+            self.execute_reload_action(action, cx);
+            return;
+        }
+
+        self.confirm_discard_and_reload(action, window, cx);
+    }
+
+    fn confirm_discard_and_reload(&self, action: ReloadAction, window: &mut Window, cx: &mut App) {
+        let data_grid = self.clone();
+        let title = format!(
+            "{} {}.{}",
+            t!("Common.refresh"),
+            self.config.database_name,
+            self.config.table_name
+        );
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let data_grid = data_grid.clone();
+            let action = action.clone();
+
+            dialog
+                .title(title.clone())
+                .overlay_closable(false)
+                .close_button(true)
+                .footer(move |_ok, _cancel, _window, _cx| {
+                    let data_grid = data_grid.clone();
+                    let action = action.clone();
+
+                    vec![
+                        Button::new("cancel")
+                            .label(t!("Common.cancel").to_string())
+                            .on_click(move |_, window: &mut Window, cx| {
+                                window.close_dialog(cx);
+                            })
+                            .into_any_element(),
+                        Button::new("discard")
+                            .label(t!("Common.discard").to_string())
+                            .on_click(move |_, window: &mut Window, cx| {
+                                window.close_dialog(cx);
+                                data_grid.revert_changes(cx);
+                                data_grid.execute_reload_action(action.clone(), cx);
+                            })
+                            .into_any_element(),
+                    ]
+                })
+                .child(t!("Table.unsaved_changes_prompt").to_string())
+        });
+    }
+
+    fn execute_reload_action(&self, action: ReloadAction, cx: &mut App) {
+        match action {
+            ReloadAction::ApplyFilters => self.load_data_with_clauses(1, cx),
+            ReloadAction::ApplySort { column_name, sort } => {
+                self.filter_editor.update(cx, |editor, cx| {
+                    editor.add_sort_column(&column_name, sort, cx);
+                });
+                self.load_data_with_clauses(1, cx);
+            }
+            ReloadAction::RefreshCurrent => self.refresh_data(cx),
+            ReloadAction::LoadPage(page) => self.load_data_with_clauses(page, cx),
+            ReloadAction::ChangePageSize(new_size) => {
+                self.table_data_info.update(cx, |info, cx| {
+                    info.page_size = new_size;
+                    cx.notify();
+                });
+                self.load_data_with_clauses(1, cx);
+            }
+        }
     }
 
     // ========== 数据加载 ==========
@@ -537,12 +682,27 @@ impl DataGrid {
         let order_by_clause = self.filter_editor.read(cx).get_order_by_clause(cx);
         let filter_editor = self.filter_editor.clone();
         let page_size = self.table_data_info.read(cx).page_size;
+        let data_grid_entity = self.self_entity.clone();
+        let vis_key = format!(
+            "column_visibility:{}:{}:{}",
+            self.config.connection_id, self.config.database_name, self.config.table_name
+        );
 
         tracing::info!(
-            "load_data_with_clauses: connection_id={}, database={}, table={}",
+            "load_data_with_clauses: connection_id={}, database={}, table={}, WHERE={}, ORDER BY={}",
             connection_id,
             database_name,
-            table_name
+            table_name,
+            if where_clause.is_empty() {
+                "(none)"
+            } else {
+                &where_clause
+            },
+            if order_by_clause.is_empty() {
+                "(none)"
+            } else {
+                &order_by_clause
+            }
         );
 
         self.table.update(cx, |state, cx| {
@@ -662,11 +822,42 @@ impl DataGrid {
                             );
                         });
 
+                        // 加载并应用列可见性配置
+                        let storage = cx.try_global::<one_core::storage::GlobalStorageState>();
+                        let hidden_columns: HashSet<SharedString> = if let Some(storage) = storage {
+                            if let Some(kv_repo) = storage
+                                .storage
+                                .get::<one_core::storage::KeyValueRepository>()
+                            {
+                                if let Ok(Some(value)) = kv_repo.get_by_key(&vis_key) {
+                                    if let Ok(hidden) = serde_json::from_str::<Vec<String>>(&value)
+                                    {
+                                        hidden.into_iter().map(SharedString::from).collect()
+                                    } else {
+                                        HashSet::new()
+                                    }
+                                } else {
+                                    HashSet::new()
+                                }
+                            } else {
+                                HashSet::new()
+                            }
+                        } else {
+                            HashSet::new()
+                        };
+
+                        if let Some(dg) = data_grid_entity.as_ref().and_then(|e| e.upgrade()) {
+                            dg.update(cx, |grid: &mut DataGrid, _cx| {
+                                grid.hidden_columns = hidden_columns.clone();
+                                grid.column_visibility_loaded = true;
+                            });
+                        }
                         table.update(cx, |state, cx| {
                             state.delegate_mut().set_loading(false);
                             state.delegate_mut().set_column_meta(column_meta);
                             state.delegate_mut().update_data(columns, rows, rowids, cx);
                             state.delegate_mut().apply_order_by_clause(&order_by_clause);
+                            state.delegate_mut().update_visible_columns(&hidden_columns);
                             state.refresh(cx);
                         });
                     });
@@ -693,6 +884,10 @@ impl DataGrid {
             return;
         }
         self.handle_refresh(cx);
+    }
+
+    pub fn request_refresh(&self, window: &mut Window, cx: &mut App) {
+        self.request_reload_action(ReloadAction::RefreshCurrent, window, cx);
     }
 
     pub fn open_large_text_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -780,6 +975,7 @@ impl DataGrid {
         }
 
         open_popup_window(
+            window,
             PopupWindowOptions::new(t!("TableDataGrid.export_table").to_string())
                 .size(800.0, 600.0),
             move |_window, _cx| export_view.clone(),
@@ -1113,14 +1309,14 @@ impl DataGrid {
         .detach();
     }
 
-    fn handle_prev_page(&self, cx: &mut App) {
+    fn handle_prev_page(&self, window: &mut Window, cx: &mut App) {
         let page = self.table_data_info.read(cx).current_page;
         if page > 1 {
-            self.load_data_with_clauses(page - 1, cx);
+            self.request_reload_action(ReloadAction::LoadPage(page - 1), window, cx);
         }
     }
 
-    fn handle_next_page(&self, cx: &mut App) {
+    fn handle_next_page(&self, window: &mut Window, cx: &mut App) {
         let info = self.table_data_info.read(cx);
         let page = info.current_page;
         let total = info.total_count;
@@ -1131,41 +1327,37 @@ impl DataGrid {
         }
         let total_pages = total.div_ceil(page_size);
         if page < total_pages {
-            self.load_data_with_clauses(page + 1, cx);
+            self.request_reload_action(ReloadAction::LoadPage(page + 1), window, cx);
         }
     }
 
-    fn handle_page_size_change(&self, new_size: usize, cx: &mut App) {
-        self.table_data_info.update(cx, |info, cx| {
-            info.page_size = new_size;
-            cx.notify();
-        });
-        self.load_data_with_clauses(1, cx);
+    fn handle_page_size_change(&self, new_size: usize, window: &mut Window, cx: &mut App) {
+        self.request_reload_action(ReloadAction::ChangePageSize(new_size), window, cx);
     }
 
-    fn handle_page_change_500(&mut self, _: &Page500, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(500, cx)
+    fn handle_page_change_500(&mut self, _: &Page500, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_page_size_change(500, window, cx)
     }
 
-    fn handle_page_change_1000(&mut self, _: &Page1000, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(1000, cx)
+    fn handle_page_change_100(&mut self, _: &Page100, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_page_size_change(100, window, cx)
     }
 
-    fn handle_page_change_2000(&mut self, _: &Page2000, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(2000, cx)
+    fn handle_page_change_200(&mut self, _: &Page200, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_page_size_change(200, window, cx)
     }
 
-    fn handle_page_change_10000(&mut self, _: &Page10000, _: &mut Window, cx: &mut Context<Self>) {
-        self.handle_page_size_change(10000, cx)
+    fn handle_page_change_300(&mut self, _: &Page300, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_page_size_change(300, window, cx)
     }
 
-    fn handle_page_change_100000(
+    fn handle_page_change_1000(
         &mut self,
-        _: &Page100000,
-        _: &mut Window,
+        _: &Page1000,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_page_size_change(100000, cx)
+        self.handle_page_size_change(1000, window, cx)
     }
 
     fn handle_add_row(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1201,6 +1393,10 @@ impl DataGrid {
         self.revert_changes(cx);
     }
 
+    fn handle_step_undo(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.step_undo(cx);
+    }
+
     fn handle_sql_preview(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.table.update(cx, |state, cx| {
             state.commit_cell_edit(window, cx);
@@ -1232,28 +1428,28 @@ impl DataGrid {
     fn handle_toolbar_refresh(
         &mut self,
         _: &ClickEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_refresh(cx);
+        self.request_refresh(window, cx);
     }
 
     fn handle_prev_page_click(
         &mut self,
         _: &ClickEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_prev_page(cx);
+        self.handle_prev_page(window, cx);
     }
 
     fn handle_next_page_click(
         &mut self,
         _: &ClickEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.handle_next_page(cx);
+        self.handle_next_page(window, cx);
     }
 
     // ========== 大文本编辑器 ==========
@@ -1425,6 +1621,14 @@ impl DataGrid {
         });
     }
 
+    pub fn accept_saved_changes(&self, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            state.delegate_mut().accept_current_state_as_saved();
+            state.refresh(cx);
+            cx.notify();
+        });
+    }
+
     pub fn revert_changes(&self, cx: &mut App) {
         self.table.update(cx, |state, cx| {
             state.delegate_mut().revert_all_changes();
@@ -1433,8 +1637,33 @@ impl DataGrid {
         });
     }
 
+    /// Perform a single step undo operation
+    pub fn step_undo(&self, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            let delegate = state.delegate_mut();
+            if delegate.undo() {
+                state.refresh(cx);
+                cx.notify();
+            }
+        });
+    }
+
+    /// Check if step undo is available
+    pub fn can_step_undo(&self, cx: &App) -> bool {
+        self.table.read(cx).delegate().can_undo()
+    }
+
     pub fn has_unsaved_changes(&self, cx: &App) -> bool {
         !self.get_changes(cx).is_empty()
+    }
+
+    pub fn get_page_info(&self, cx: &App) -> (usize, usize) {
+        let info = self.table_data_info.read(cx);
+        (info.current_page, info.page_size)
+    }
+
+    pub fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
+        self.table.read(cx).delegate().pending_change_level()
     }
 
     // ========== 复制为 SQL 语句 ==========
@@ -1825,7 +2054,8 @@ impl DataGrid {
                             t!("TableDataGrid.save_changes_failed", error = err_msg).to_string(),
                         );
                     } else {
-                        this.clear_changes(cx);
+                        this.accept_saved_changes(cx);
+                        this.refresh_data(cx);
                         notification(
                             cx,
                             t!("TableDataGrid.save_changes_success", count = change_count)
@@ -1960,7 +2190,8 @@ impl DataGrid {
                             t!("TableDataGrid.save_changes_failed", error = err_msg).to_string(),
                         );
                     } else {
-                        this.clear_changes(cx);
+                        this.accept_saved_changes(cx);
+                        this.refresh_data(cx);
                         notification(
                             cx,
                             t!("TableDataGrid.save_changes_success", count = change_count)
@@ -2182,7 +2413,8 @@ impl DataGrid {
                     cx.update(|cx| {
                         if let Some(window_id) = cx.active_window() {
                             let _ = cx.update_window(window_id, |_entity, window, cx| {
-                                data_grid.clear_changes(cx);
+                                data_grid.accept_saved_changes(cx);
+                                data_grid.refresh_data(cx);
                                 window.close_dialog(cx);
                                 window.push_notification(
                                     t!("TableDataGrid.execute_success").to_string(),
@@ -2230,6 +2462,7 @@ impl DataGrid {
     pub fn render_toolbar(&self, _window: &mut Window, cx: &Context<Self>) -> AnyElement {
         let editable = self.config.editable;
         let loading = self.table.read(cx).delegate().is_loading();
+        let has_changes = self.has_unsaved_changes(cx);
         let data_grid = cx.entity().clone();
         let large_text_button_selected = current_db_view_settings(cx).large_text_editor_open_mode
             == LargeTextEditorOpenMode::SidebarPreview
@@ -2248,6 +2481,7 @@ impl DataGrid {
                     .with_size(Size::Medium)
                     .icon(IconName::Refresh)
                     .tooltip(t!("TableDataGrid.refresh").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .on_click(cx.listener(Self::handle_toolbar_refresh)),
             )
@@ -2257,6 +2491,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Plus)
                         .tooltip(t!("TableDataGrid.add_row").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading)
                         .on_click(cx.listener(Self::handle_add_row)),
                 )
@@ -2267,6 +2502,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Minus)
                         .tooltip(t!("TableDataGrid.delete_row").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading)
                         .on_click(cx.listener(Self::handle_delete_row)),
                 )
@@ -2277,8 +2513,21 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Undo)
                         .tooltip(t!("TableDataGrid.undo").to_string())
-                        .disabled(loading)
+                        .border_color(cx.theme().border.opacity(0.5))
+                        .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_revert_changes)),
+                )
+            })
+            .when(editable, |this| {
+                let can_undo = self.can_step_undo(cx);
+                this.child(
+                    Button::new("step-undo")
+                        .with_size(Size::Medium)
+                        .icon(IconName::ArrowLeft)
+                        .tooltip(t!("TableDataGrid.step_undo").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
+                        .disabled(loading || !can_undo)
+                        .on_click(cx.listener(Self::handle_step_undo)),
                 )
             })
             .when(editable, |this| {
@@ -2287,6 +2536,7 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::Eye)
                         .tooltip(t!("TableDataGrid.sql_preview").to_string())
+                        .border_color(cx.theme().border.opacity(0.5))
                         .disabled(loading)
                         .on_click(cx.listener(Self::handle_sql_preview)),
                 )
@@ -2297,17 +2547,108 @@ impl DataGrid {
                         .with_size(Size::Medium)
                         .icon(IconName::ArrowUp)
                         .tooltip(t!("TableDataGrid.commit_changes").to_string())
-                        .disabled(loading)
+                        .border_color(cx.theme().border.opacity(0.5))
+                        .disabled(loading || !has_changes)
                         .on_click(cx.listener(Self::handle_commit_changes)),
                 )
             })
             .child(div().flex_1())
+            .child({
+                let data_grid_entity = cx.entity();
+                Button::new("column-visibility")
+                    .with_size(Size::Medium)
+                    .icon(IconName::ListCheck)
+                    .tooltip(t!("TableDataGrid.column_visibility").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
+                    .disabled(loading)
+                    .dropdown_menu(move |menu, _window, cx| {
+                        let data_grid_weak = data_grid_entity.downgrade();
+                        let delegate_read = data_grid_entity.read(cx).table.read(cx);
+                        let all_columns = delegate_read.delegate().columns().to_vec();
+                        let pk_keys: HashSet<SharedString> = delegate_read
+                            .delegate()
+                            .primary_key_indices()
+                            .iter()
+                            .filter_map(|&i| {
+                                delegate_read
+                                    .delegate()
+                                    .columns()
+                                    .get(i)
+                                    .map(|c| c.key.clone())
+                            })
+                            .collect();
+
+                        all_columns
+                            .into_iter()
+                            .fold(menu, |menu, col| {
+                                let is_pk = pk_keys.contains(&col.key);
+                                let col_key = col.key.clone();
+                                let col_name = col.name.clone();
+                                let dg_weak = data_grid_weak.clone();
+                                let dg_weak_for_click = data_grid_weak.clone();
+                                let col_key_for_click = col_key.clone();
+                                menu.item(
+                                    PopupMenuItem::element(move |_window, cx| {
+                                        let is_hidden = dg_weak
+                                            .upgrade()
+                                            .map(|dg| dg.read(cx).hidden_columns.contains(&col_key))
+                                            .unwrap_or(false);
+                                        let check_icon = if is_hidden {
+                                            Icon::empty().xsmall()
+                                        } else {
+                                            Icon::new(IconName::Check).xsmall().text_color(cx.theme().success_foreground)
+                                        };
+
+                                        h_flex()
+                                            .w_full()
+                                            .gap_1()
+                                            .items_center()
+                                            .child(check_icon)
+                                            .child(div().flex_1().child(col_name.clone()))
+                                    })
+                                    .on_click(move |_, _, cx| {
+                                        if is_pk {
+                                            return;
+                                        }
+                                        if let Some(dg) = dg_weak_for_click.upgrade() {
+                                            dg.update(cx, |grid, cx| {
+                                                if grid.hidden_columns.contains(&col_key_for_click) {
+                                                    grid.hidden_columns.remove(&col_key_for_click);
+                                                } else {
+                                                    grid.hidden_columns.insert(col_key_for_click.clone());
+                                                }
+                                                grid.apply_column_visibility(cx);
+                                                grid.save_column_visibility(cx);
+                                            });
+                                        }
+                                    }),
+                                )
+                            })
+                            .separator()
+                            .item(
+                                PopupMenuItem::new(
+                                    t!("TableDataGrid.reset_column_visibility").to_string(),
+                                )
+                                .on_click(move |_, _, cx| {
+                                    if let Some(dg) = data_grid_weak.upgrade() {
+                                        dg.update(cx, |grid, cx| {
+                                            grid.hidden_columns.clear();
+                                            grid.apply_column_visibility(cx);
+                                            grid.save_column_visibility(cx);
+                                        });
+                                    }
+                                }),
+                            )
+                            .keep_open(true)
+                    })
+            })
             .child(
                 Button::new("toggle-editor")
                     .with_size(Size::Medium)
                     .icon(IconName::EditBorder)
                     .when(large_text_button_selected, |this| this.primary())
                     .tooltip(t!("TableDataGrid.large_text_editor").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .on_click(cx.listener(Self::handle_large_text_editor)),
             )
@@ -2316,6 +2657,7 @@ impl DataGrid {
                     .with_size(Size::Medium)
                     .icon(IconName::Export)
                     .tooltip(t!("TableDataGrid.export").to_string())
+                    .border_color(cx.theme().border.opacity(0.5))
                     .disabled(loading)
                     .dropdown_menu(move |menu, window, _cx| {
                         menu.item(
@@ -2526,11 +2868,11 @@ impl DataGrid {
                             .with_size(Size::Small)
                             .label(label)
                             .dropdown_menu_with_anchor(Corner::TopRight, move |menu, _, _| {
-                                menu.menu("500", Box::new(Page500))
+                                menu.menu("100", Box::new(Page100))
+                                    .menu("200", Box::new(Page200))
+                                    .menu("300", Box::new(Page300))
+                                    .menu("500", Box::new(Page500))
                                     .menu("1000", Box::new(Page1000))
-                                    .menu("2000", Box::new(Page2000))
-                                    .menu("10000", Box::new(Page10000))
-                                    .menu("100000", Box::new(Page100000))
                             })
                     })
                     .child(
@@ -2590,11 +2932,11 @@ impl Render for DataGrid {
 
         v_flex()
             .when(is_table_data, |this| {
-                this.on_action(cx.listener(Self::handle_page_change_500))
+                this.on_action(cx.listener(Self::handle_page_change_100))
+                    .on_action(cx.listener(Self::handle_page_change_200))
+                    .on_action(cx.listener(Self::handle_page_change_300))
+                    .on_action(cx.listener(Self::handle_page_change_500))
                     .on_action(cx.listener(Self::handle_page_change_1000))
-                    .on_action(cx.listener(Self::handle_page_change_2000))
-                    .on_action(cx.listener(Self::handle_page_change_10000))
-                    .on_action(cx.listener(Self::handle_page_change_100000))
             })
             .size_full()
             .gap_0()
@@ -2606,6 +2948,7 @@ impl Render for DataGrid {
                         .w_full()
                         .px_2()
                         .py_1()
+                        .bg(cx.theme().background)
                         .child(self.filter_editor.clone()),
                 )
             })
@@ -2634,7 +2977,10 @@ impl Clone for DataGrid {
             table_data_info: self.table_data_info.clone(),
             filter_editor: self.filter_editor.clone(),
             _filter_sub: None,
+            hidden_columns: self.hidden_columns.clone(),
+            column_visibility_loaded: self.column_visibility_loaded,
             is_large_text_editor_sidebar_open: self.is_large_text_editor_sidebar_open,
+            self_entity: self.self_entity.clone(),
         }
     }
 }

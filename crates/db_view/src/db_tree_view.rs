@@ -12,7 +12,8 @@ use gpui::{
     UniformListScrollHandle, Window, div, prelude::FluentBuilder, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize,
+    ActiveTheme, Icon, IconName, IndexPath, Selectable, Sizable, Size as ComponentSize, StyledExt,
+    app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -23,6 +24,7 @@ use gpui_component::{
     popover::Popover,
     scroll::Scrollbar,
     spinner::Spinner,
+    tokens::Radius,
     tooltip::Tooltip,
     v_flex,
 };
@@ -180,7 +182,7 @@ impl RenderOnce for DatabaseListItem {
             .gap_2()
             .items_center()
             .cursor_pointer()
-            .rounded(px(4.0))
+            .rounded(Radius::Sm.px())
             .when(self.selected, |el| el.bg(cx.theme().list_active))
             .when(!self.selected, |el| {
                 el.hover(|style| style.bg(cx.theme().list_hover))
@@ -404,6 +406,8 @@ pub struct DbTreeView {
     connection_name: Option<String>,
     // 工作区ID
     workspace_id: Option<i64>,
+    // 是否为工作区模式（由外部打开方式决定）
+    _is_workspace_mode: bool,
     // 搜索输入框状态
     search_input: Entity<InputState>,
     // 搜索关键字
@@ -494,6 +498,7 @@ impl DbTreeView {
         connections: &Vec<StoredConnection>,
         window: &mut Window,
         cx: &mut Context<Self>,
+        is_workspace_mode: bool,
     ) -> Self {
         let focus_handle = cx.focus_handle();
         let mut db_nodes = HashMap::new();
@@ -594,7 +599,7 @@ impl DbTreeView {
         }
 
         // 构建初始的扁平化条目
-        let flat_entries = Self::build_initial_flat_entries(&db_nodes);
+        let flat_entries = Self::build_initial_flat_entries(&db_nodes, is_workspace_mode);
 
         Self {
             focus_handle,
@@ -610,6 +615,7 @@ impl DbTreeView {
             expanded_nodes: HashSet::new(),
             connection_name: None,
             workspace_id,
+            _is_workspace_mode: is_workspace_mode,
             search_input,
             search_query: String::new(),
             search_seq: 0,
@@ -623,20 +629,24 @@ impl DbTreeView {
     }
 
     /// 构建初始的扁平化条目
-    fn build_initial_flat_entries(db_nodes: &HashMap<String, DbNode>) -> Vec<FlatDbEntry> {
+    fn build_initial_flat_entries(
+        db_nodes: &HashMap<String, DbNode>,
+        _is_workspace_mode: bool,
+    ) -> Vec<FlatDbEntry> {
         let mut root_nodes: Vec<&DbNode> = db_nodes
             .values()
             .filter(|n| n.parent_context.is_none())
             .collect();
         root_nodes.sort();
 
-        root_nodes
-            .iter()
-            .map(|n| FlatDbEntry {
+        let mut entries = Vec::new();
+        for n in root_nodes {
+            entries.push(FlatDbEntry {
                 node_id: n.id.clone(),
                 depth: 0,
-            })
-            .collect()
+            });
+        }
+        entries
     }
 
     /// 处理全局连接数据变更事件
@@ -654,8 +664,21 @@ impl DbTreeView {
             }
             ConnectionDataEvent::ConnectionUpdated { connection } => {
                 if let Some(conn_id) = connection.id {
-                    if self.tracked_connection_ids.contains(&conn_id) {
-                        self.update_connection_info(connection, cx);
+                    match classify_connection_workspace_update(
+                        self.workspace_id,
+                        self.tracked_connection_ids.contains(&conn_id),
+                        connection.workspace_id,
+                    ) {
+                        ConnectionWorkspaceUpdateEffect::Remove => {
+                            self.remove_connection(&conn_id.to_string(), cx);
+                        }
+                        ConnectionWorkspaceUpdateEffect::Update => {
+                            self.update_connection_info(connection, cx);
+                        }
+                        ConnectionWorkspaceUpdateEffect::Add => {
+                            self.add_connection(connection, cx);
+                        }
+                        ConnectionWorkspaceUpdateEffect::Ignore => {}
                     }
                 }
             }
@@ -1459,7 +1482,6 @@ impl DbTreeView {
             return false;
         }
 
-        // 添加当前节点
         self.flat_entries.push(FlatDbEntry {
             node_id: node_id.to_string(),
             depth,
@@ -1641,7 +1663,8 @@ impl DbTreeView {
                     .w_full()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .rounded(cx.theme().radius),
+                    .rounded(cx.theme().radius)
+                    .overflow_hidden(),
             )
             .into_any_element()
     }
@@ -2116,11 +2139,12 @@ impl DbTreeView {
 impl Render for DbTreeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entries_len = self.flat_entries.len();
+        let sidebar_bg = cx.theme().sidebar;
 
         v_flex()
             .id("db-tree-view")
             .size_full()
-            .bg(cx.theme().sidebar)
+            .bg(sidebar_bg)
             .child({
                 let view_for_collapse = cx.entity();
                 h_flex()
@@ -2128,8 +2152,7 @@ impl Render for DbTreeView {
                     .p_1()
                     .gap_1()
                     .border_t_1()
-                    .border_color(cx.theme().sidebar_border)
-                    .bg(cx.theme().sidebar)
+                    .border_color(cx.theme().border)
                     .child(
                         div().flex_1().child(
                             Input::new(&self.search_input)
@@ -2139,7 +2162,8 @@ impl Render for DbTreeView {
                                 )
                                 .cleanable(true)
                                 .small()
-                                .w_full(),
+                                .w_full()
+                                .refine_style(&app_style::control_style()),
                         ),
                     )
                     .child(
@@ -2160,7 +2184,6 @@ impl Render for DbTreeView {
                 v_flex()
                     .flex_1()
                     .w_full()
-                    .bg(cx.theme().sidebar)
                     .child(
                         div()
                             .id("tree-scroll")
@@ -2326,10 +2349,10 @@ impl DbTreeView {
         let db_filter_list = self.db_filter_list_states.get(&node_id).cloned();
 
         // 样式
-        let selection_bg = cx.theme().sidebar_accent;
-        let selection_bar_color = cx.theme().blue;
-        let selection_text_color = cx.theme().sidebar_accent_foreground;
-        let hover_bg = cx.theme().secondary;
+        let selection_bg = cx.theme().list_active;
+        let selection_bar_color = cx.theme().list_active_border;
+        let selection_text_color = cx.theme().sidebar_foreground;
+        let hover_bg = cx.theme().sidebar_accent;
         let folder_text_color = cx.theme().muted_foreground;
         let foreground_color = cx.theme().sidebar_foreground;
         let indent = px(8.) + px(16.) * depth as f32;
@@ -2640,6 +2663,32 @@ impl Focusable for DbTreeView {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectionWorkspaceUpdateEffect {
+    Remove,
+    Update,
+    Add,
+    Ignore,
+}
+
+fn classify_connection_workspace_update(
+    tree_workspace_id: Option<i64>,
+    is_tracked: bool,
+    connection_workspace_id: Option<i64>,
+) -> ConnectionWorkspaceUpdateEffect {
+    if is_tracked {
+        if connection_workspace_id == tree_workspace_id {
+            ConnectionWorkspaceUpdateEffect::Update
+        } else {
+            ConnectionWorkspaceUpdateEffect::Remove
+        }
+    } else if tree_workspace_id.is_some() && connection_workspace_id == tree_workspace_id {
+        ConnectionWorkspaceUpdateEffect::Add
+    } else {
+        ConnectionWorkspaceUpdateEffect::Ignore
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2667,6 +2716,7 @@ mod tests {
             name: "conn".to_string(),
             connection_type: ConnectionType::Database,
             params: "{}".to_string(),
+            sort_order: Some(id),
             workspace_id: None,
             selected_databases: selected_databases.map(|dbs| {
                 serde_json::to_string(
@@ -2682,7 +2732,6 @@ mod tests {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -2693,6 +2742,38 @@ mod tests {
         assert_eq!(
             resolve_refresh_metadata_scope(&node),
             RefreshMetadataScope::Connection
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_remove_when_tracked_conn_moves_out() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), true, Some(9)),
+            ConnectionWorkspaceUpdateEffect::Remove
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_update_when_tracked_conn_stays() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), true, Some(7)),
+            ConnectionWorkspaceUpdateEffect::Update
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_add_when_untracked_conn_moves_in() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), false, Some(7)),
+            ConnectionWorkspaceUpdateEffect::Add
+        );
+    }
+
+    #[test]
+    fn classify_connection_workspace_update_returns_ignore_for_other_workspace() {
+        assert_eq!(
+            classify_connection_workspace_update(Some(7), false, Some(9)),
+            ConnectionWorkspaceUpdateEffect::Ignore
         );
     }
 

@@ -22,8 +22,8 @@ use db::{GlobalDbState, is_query_statement_fallback};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
 };
 use gpui_component::button::ButtonVariants;
 use gpui_component::{
@@ -36,6 +36,7 @@ use gpui_component::{
     input::{Input, InputState},
     list::{List, ListState},
     popover::Popover,
+    resizable::{ResizablePanel, h_resizable},
     scroll::Scrollbar,
     text::TextView,
     v_flex,
@@ -72,6 +73,31 @@ use one_core::ai_chat::services::{SessionService, extract_session_name};
 #[derive(Clone, Debug)]
 pub enum ChatPanelEvent {
     Close,
+}
+
+fn build_agent_history(
+    chat_history: &[Message],
+    history_count: usize,
+    current_input: &str,
+) -> Vec<Message> {
+    let mut history = if history_count > 0 && !chat_history.is_empty() {
+        let history_start = chat_history.len().saturating_sub(history_count);
+        chat_history
+            .iter()
+            .skip(history_start)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        chat_history.to_vec()
+    };
+
+    if history.last().is_some_and(|message| {
+        message.role == Role::User && message.content_as_text() == current_input
+    }) {
+        history.pop();
+    }
+
+    history
 }
 
 // ============================================================================
@@ -114,6 +140,7 @@ pub struct ChatPanel {
     /// 是否为新会话（用于在发送第一条消息时更新会话名称）
     is_new_session: bool,
     is_logged_in: bool,
+    sidebar_width: Pixels,
 
     // 模型设置
     model_settings: ModelSettings,
@@ -226,6 +253,7 @@ impl ChatPanel {
             is_at_bottom: true,
             is_new_session: false,
             is_logged_in: GlobalCloudUser::is_logged_in(cx),
+            sidebar_width: px(260.0),
             model_settings: ModelSettings::default(),
             cancel_token: None,
             last_user_input: None,
@@ -256,26 +284,16 @@ impl ChatPanel {
             }
         };
 
-        let mut providers = match repo.list() {
+        let providers = match repo.list() {
             Ok(all_providers) => all_providers
                 .into_iter()
-                .filter(|p| p.enabled)
+                .filter(|provider| provider.is_runtime_available())
                 .collect::<Vec<_>>(),
             Err(e) => {
                 tracing::error!("Failed to load providers: {}", e);
                 Vec::new()
             }
         };
-
-        if is_logged_in {
-            if let Ok(provider) = repo.ensure_onetcli_provider() {
-                if !providers.iter().any(|p| p.id == provider.id) {
-                    providers.insert(0, provider);
-                }
-            }
-        } else {
-            providers.retain(|p| !p.is_builtin());
-        }
 
         let items: Vec<ProviderItem> = providers.iter().map(ProviderItem::from_config).collect();
         if items.is_empty() {
@@ -664,16 +682,7 @@ impl ChatPanel {
 
         // 根据设置限制历史记录数量
         let history_count = self.model_settings.history_count;
-        let history: Vec<Message> = if history_count > 0 && !self.chat_history.is_empty() {
-            let history_start = self.chat_history.len().saturating_sub(history_count);
-            self.chat_history
-                .iter()
-                .skip(history_start)
-                .cloned()
-                .collect()
-        } else {
-            self.chat_history.clone()
-        };
+        let history = build_agent_history(&self.chat_history, history_count, &content);
 
         let ai_input = self.ai_input.clone();
         let session_id = self.session_id;
@@ -784,7 +793,7 @@ impl ChatPanel {
                 }
             }
 
-            // 构建 AgentContext（注入 DB capability）
+            // 构建 AgentContext（注入 DB capability + 会话 ID 用于跨会话状态持久化）
             let mut ctx_agent = AgentContext::new(
                 message_content,
                 history,
@@ -792,7 +801,8 @@ impl ChatPanel {
                 global_provider_state,
                 storage_manager,
                 cancel_token,
-            );
+            )
+            .with_session_id(session_db_id.to_string());
 
             if let Some(db_meta) = db_metadata {
                 ctx_agent.set_capability(CAP_DB_METADATA, db_meta);
@@ -1442,7 +1452,7 @@ impl ChatPanel {
                     .top_0()
                     .right_0()
                     .bottom_0()
-                    .w(px(16.0))
+                    .w(Scrollbar::width())
                     .child(Scrollbar::vertical(&self.scroll_handle)),
             )
     }
@@ -1462,10 +1472,9 @@ impl ChatPanel {
         let session_list = self.session_list.clone();
 
         v_flex()
-            .w(px(260.0))
+            .w_full()
             .h_full()
             .min_h_0()
-            .flex_shrink_0()
             .border_r_1()
             .border_color(border)
             .bg(muted)
@@ -2053,6 +2062,43 @@ impl ChatPanel {
 impl EventEmitter<ChatPanelEvent> for ChatPanel {}
 impl EventEmitter<TabContentEvent> for ChatPanel {}
 
+#[cfg(test)]
+mod tests {
+    use super::build_agent_history;
+    use one_core::llm::{Message, Role};
+
+    #[test]
+    fn build_agent_history_drops_inflight_user_message_from_tail() {
+        let history = vec![
+            Message::text(Role::Assistant, "上一条回复"),
+            Message::text(Role::User, "这样呢"),
+        ];
+
+        let result = build_agent_history(&history, 10, "这样呢");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].role, Role::Assistant);
+        assert_eq!(result[0].content_as_text(), "上一条回复");
+    }
+
+    #[test]
+    fn build_agent_history_keeps_older_same_content_messages() {
+        let history = vec![
+            Message::text(Role::User, "这样呢"),
+            Message::text(Role::Assistant, "我看到了"),
+            Message::text(Role::User, "这样呢"),
+        ];
+
+        let result = build_agent_history(&history, 10, "这样呢");
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].role, Role::User);
+        assert_eq!(result[0].content_as_text(), "这样呢");
+        assert_eq!(result[1].role, Role::Assistant);
+        assert_eq!(result[1].content_as_text(), "我看到了");
+    }
+}
+
 impl Focusable for ChatPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -2103,15 +2149,27 @@ impl Render for ChatPanel {
 
         if self.show_history_sidebar {
             div().size_full().bg(cx.theme().background).child(
-                h_flex()
-                    .size_full()
-                    .child(self.render_history_sidebar(window, cx))
+                h_resizable("chat-panel-history")
                     .child(
-                        div().flex_1().h_full().min_w_0().child(
-                            v_flex()
-                                .size_full()
-                                .child(self.render_messages(cx))
-                                .child(self.render_input(cx)),
+                        ResizablePanel::new()
+                            .size(self.sidebar_width)
+                            .size_range(px(120.)..px(400.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h_full()
+                                    .overflow_hidden()
+                                    .child(self.render_history_sidebar(window, cx)),
+                            ),
+                    )
+                    .child(
+                        ResizablePanel::new().child(
+                            div().size_full().min_w_0().child(
+                                v_flex()
+                                    .size_full()
+                                    .child(self.render_messages(cx))
+                                    .child(self.render_input(cx)),
+                            ),
                         ),
                     ),
             )

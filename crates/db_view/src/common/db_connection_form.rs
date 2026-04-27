@@ -1,14 +1,13 @@
 use anyhow::Error;
-use std::time::Instant;
-
 use db::{GlobalDbState, oracle};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AsyncApp, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement, PathPromptOptions, Render, SharedString, Styled, Window, div, prelude::*, px,
+    ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size,
+    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, StyledExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -18,19 +17,22 @@ use gpui_component::{
     popover::Popover,
     radio::Radio,
     scroll::ScrollableElement,
-    select::{Select, SelectEvent, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::certificate_notifier::{
+    CertificateDataEvent, get_notifier as get_certificate_notifier,
+};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
+    Certificate, CertificateKind, CertificateReference, CertificateRepository,
     ConnectionRepository, DatabaseType, DbConnectionConfig, GlobalStorageState, StoredConnection,
     Workspace, get_config_dir,
 };
 use rust_i18n::t;
-use tracing::info;
 
 /// Form select item for dropdown fields
 #[derive(Clone, Debug)]
@@ -85,41 +87,6 @@ impl WorkspaceSelectItem {
 
 impl SelectItem for WorkspaceSelectItem {
     type Value = Option<i64>;
-
-    fn title(&self) -> SharedString {
-        self.name.clone().into()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.id
-    }
-}
-
-/// Team select item for dropdown
-#[derive(Clone, Debug)]
-pub struct TeamSelectItem {
-    pub id: Option<String>,
-    pub name: String,
-}
-
-impl TeamSelectItem {
-    pub fn personal() -> Self {
-        Self {
-            id: None,
-            name: t!("TeamSync.personal").to_string(),
-        }
-    }
-
-    pub fn from_team(team: &TeamOption) -> Self {
-        Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
-        }
-    }
-}
-
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
 
     fn title(&self) -> SharedString {
         self.name.clone().into()
@@ -232,6 +199,16 @@ pub struct DbFormConfig {
 }
 
 impl DbFormConfig {
+    fn certificate_field(name: impl Into<String>, label: impl Into<String>) -> FormField {
+        FormField::new(name, label, FormFieldType::Select)
+            .optional()
+            .default("")
+            .options(vec![(
+                "".to_string(),
+                t!("ConnectionForm.certificate_none").to_string(),
+            )])
+    }
+
     fn ssh_tab_group() -> TabGroup {
         TabGroup::new("ssh", t!("ConnectionForm.ssh")).fields(vec![
             FormField::new(
@@ -260,6 +237,10 @@ impl DbFormConfig {
             .optional()
             .default("22")
             .placeholder("22"),
+            Self::certificate_field(
+                "ssh_tunnel_credential_ref",
+                t!("ConnectionForm.ssh_certificate"),
+            ),
             FormField::new(
                 "ssh_username",
                 t!("ConnectionForm.ssh_username"),
@@ -508,6 +489,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("3306")
                         .default("3306"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -539,16 +521,6 @@ impl DbFormConfig {
                     .optional()
                     .placeholder("30")
                     .default("30"),
-                    FormField::new("charset", t!("ConnectionForm.charset"), FormFieldType::Text)
-                        .optional()
-                        .placeholder("gbk"),
-                    FormField::new(
-                        "collation",
-                        t!("ConnectionForm.collation"),
-                        FormFieldType::Text,
-                    )
-                    .optional()
-                    .placeholder("gbk_chinese_ci"),
                     FormField::new(
                         "read_timeout",
                         t!("ConnectionForm.read_timeout"),
@@ -594,6 +566,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("5432")
                         .default("5432"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -669,6 +642,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("1433")
                         .default("1433"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -744,6 +718,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("1521")
                         .default("1521"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -810,6 +785,7 @@ impl DbFormConfig {
                     FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
                         .placeholder("8123 (HTTP port)")
                         .default("8123"),
+                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
                     FormField::new(
                         "username",
                         t!("ConnectionForm.username"),
@@ -1037,23 +1013,36 @@ pub struct DbConnectionForm {
     field_values: Vec<(String, Entity<String>)>,
     field_inputs: Vec<Option<Entity<InputState>>>,
     field_selects: std::collections::HashMap<String, Entity<SelectState<Vec<FormSelectItem>>>>,
+    certificates: Vec<Certificate>,
     is_testing: Entity<bool>,
     test_result: Entity<Option<Result<bool, String>>>,
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
     pending_file_path: Entity<Option<String>>,
     editing_connection: Option<StoredConnection>,
-    /// Whether cloud sync is enabled.
+    /// 是否启用云同步
     sync_enabled: Entity<bool>,
-    /// Oracle client detection status: Ok(version) / Err(error).
+    /// Oracle 客户端检测状态：Ok(版本) / Err(错误)
     oracle_client_status: Entity<Option<Result<String, String>>>,
     oracle_client_checking: Entity<bool>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl DbConnectionForm {
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
+    }
+
     pub fn new(config: DbFormConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let current_db_type = cx.new(|_| config.db_type);
+        let certificates = Self::load_certificates_from_storage(cx);
 
         // Initialize field values, inputs, and selects
         let mut field_values = Vec::new();
@@ -1067,11 +1056,19 @@ impl DbConnectionForm {
 
                 if field.field_type == FormFieldType::Select {
                     // Create SelectState for Select fields
-                    let items: Vec<FormSelectItem> = field
-                        .options
-                        .iter()
-                        .map(|(v, l)| FormSelectItem::new(v.clone(), l.clone()))
-                        .collect();
+                    let items: Vec<FormSelectItem> = match field.name.as_str() {
+                        "credential_ref" => {
+                            Self::build_certificate_select_items(&certificates, false)
+                        }
+                        "ssh_tunnel_credential_ref" => {
+                            Self::build_certificate_select_items(&certificates, true)
+                        }
+                        _ => field
+                            .options
+                            .iter()
+                            .map(|(v, l)| FormSelectItem::new(v.clone(), l.clone()))
+                            .collect(),
+                    };
                     // Find the index of the default value
                     let selected_index = if field.default_value.is_empty() {
                         Some(IndexPath::new(0))
@@ -1082,22 +1079,34 @@ impl DbConnectionForm {
                             .map(IndexPath::new)
                     };
                     let field_name = field.name.clone();
+                    let field_name_for_event = field_name.clone();
                     let value_clone = value.clone();
                     let select = cx.new(|cx| SelectState::new(items, selected_index, window, cx));
                     // Subscribe to select changes
                     cx.subscribe_in(
                         &select,
                         window,
-                        move |_form,
+                        move |form,
                               _select,
                               event: &SelectEvent<Vec<FormSelectItem>>,
-                              _window,
+                              window,
                               cx| {
                             if let SelectEvent::Confirm(Some(val)) = event {
+                                let selected_value = val.clone();
                                 value_clone.update(cx, |v, cx| {
-                                    *v = val.clone();
+                                    *v = selected_value.clone();
                                     cx.notify();
                                 });
+                                if matches!(
+                                    field_name_for_event.as_str(),
+                                    "credential_ref" | "ssh_tunnel_credential_ref"
+                                ) {
+                                    form.sync_selected_certificate_fields(
+                                        &field_name_for_event,
+                                        window,
+                                        cx,
+                                    );
+                                }
                             }
                         },
                     )
@@ -1152,18 +1161,14 @@ impl DbConnectionForm {
         let workspace_select =
             cx.new(|cx| SelectState::new(workspace_items, Some(Default::default()), window, cx));
 
-        let team_items = vec![TeamSelectItem::personal()];
-        let team_select =
-            cx.new(|cx| SelectState::new(team_items, Some(Default::default()), window, cx));
-
         let pending_file_path = cx.new(|_| None);
 
-        // Enable cloud sync by default.
+        // 默认启用云同步
         let sync_enabled = cx.new(|_| true);
         let oracle_client_status = cx.new(|_| None);
         let oracle_client_checking = cx.new(|_| false);
 
-        let form = Self {
+        let mut form = Self {
             config,
             current_db_type,
             focus_handle,
@@ -1171,19 +1176,64 @@ impl DbConnectionForm {
             field_values,
             field_inputs,
             field_selects,
+            certificates,
             is_testing,
             test_result,
             workspace_select,
-            team_select,
             pending_file_path,
             editing_connection: None,
             sync_enabled,
             oracle_client_status,
             oracle_client_checking,
+            _subscriptions: Vec::new(),
         };
+
+        if let Some(notifier) = get_certificate_notifier(cx) {
+            form._subscriptions.push(cx.subscribe_in(
+                &notifier,
+                window,
+                |this, _, _event: &CertificateDataEvent, window, cx| {
+                    this.reload_certificates(window, cx);
+                },
+            ));
+        }
 
         form.refresh_oracle_client_status(cx);
         form
+    }
+
+    fn load_certificates_from_storage(cx: &App) -> Vec<Certificate> {
+        cx.global::<GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default()
+    }
+
+    fn build_certificate_select_items(
+        certificates: &[Certificate],
+        allow_private_key: bool,
+    ) -> Vec<FormSelectItem> {
+        let mut items = vec![FormSelectItem::new(
+            "",
+            t!("ConnectionForm.certificate_none").to_string(),
+        )];
+        items.extend(
+            certificates
+                .iter()
+                .filter(|certificate| {
+                    allow_private_key || certificate.kind == CertificateKind::UsernamePassword
+                })
+                .filter_map(|certificate| {
+                    certificate.id.map(|id| {
+                        FormSelectItem::new(
+                            id.to_string(),
+                            format!("{} · {}", certificate.name, certificate.kind.label()),
+                        )
+                    })
+                }),
+        );
+        items
     }
 
     fn refresh_oracle_client_status(&self, cx: &mut Context<Self>) {
@@ -1271,21 +1321,6 @@ impl DbConnectionForm {
         cx.notify();
     }
 
-    pub fn set_teams(
-        &mut self,
-        teams: Vec<TeamOption>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mut items = vec![TeamSelectItem::personal()];
-        items.extend(teams.iter().map(TeamSelectItem::from_team));
-
-        self.team_select.update(cx, |select, cx| {
-            select.set_items(items, window, cx);
-        });
-        cx.notify();
-    }
-
     pub fn load_connection(
         &mut self,
         connection: &StoredConnection,
@@ -1295,7 +1330,7 @@ impl DbConnectionForm {
         self.editing_connection = Some(connection.clone());
         self.set_field_value("name", &connection.name, window, cx);
 
-        // Load the sync state.
+        // 加载同步状态
         self.sync_enabled.update(cx, |sync, cx| {
             *sync = connection.sync_enabled;
             cx.notify();
@@ -1318,6 +1353,20 @@ impl DbConnectionForm {
             for (key, value) in &params.extra_params {
                 self.set_field_value(key, value, window, cx);
             }
+            self.restore_selected_certificate(
+                "credential_ref",
+                params.credential_ref.as_ref(),
+                window,
+                cx,
+            );
+            self.restore_selected_certificate(
+                "ssh_tunnel_credential_ref",
+                params.ssh_tunnel_credential_ref.as_ref(),
+                window,
+                cx,
+            );
+            self.sync_selected_certificate_fields("credential_ref", window, cx);
+            self.sync_selected_certificate_fields("ssh_tunnel_credential_ref", window, cx);
         }
 
         if let Some(remark) = &connection.remark {
@@ -1330,17 +1379,6 @@ impl DbConnectionForm {
             });
         } else {
             self.workspace_select.update(cx, |select, cx| {
-                select.set_selected_value(&None, window, cx);
-            });
-        }
-
-        // Load team ownership.
-        if let Some(ref team_id) = connection.team_id {
-            self.team_select.update(cx, |select, cx| {
-                select.set_selected_value(&Some(team_id.clone()), window, cx);
-            });
-        } else {
-            self.team_select.update(cx, |select, cx| {
                 select.set_selected_value(&None, window, cx);
             });
         }
@@ -1383,6 +1421,116 @@ impl DbConnectionForm {
             .map(|(_, value)| value.read(cx).clone())
     }
 
+    fn selected_certificate_by_field(&self, field_name: &str, cx: &App) -> Option<Certificate> {
+        let selected_id = self
+            .get_field_value(field_name, cx)
+            .and_then(|value| value.parse::<i64>().ok());
+
+        self.certificates
+            .iter()
+            .find(|certificate| certificate.id == selected_id)
+            .cloned()
+    }
+
+    fn restore_selected_certificate(
+        &mut self,
+        field_name: &str,
+        reference: Option<&CertificateReference>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected_value = reference
+            .and_then(|reference| {
+                self.certificates
+                    .iter()
+                    .find(|certificate| reference.matches_certificate(certificate))
+                    .and_then(|certificate| certificate.id)
+                    .map(|id| id.to_string())
+            })
+            .unwrap_or_default();
+
+        self.set_field_value(field_name, &selected_value, window, cx);
+    }
+
+    fn sync_selected_certificate_fields(
+        &mut self,
+        field_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(certificate) = self.selected_certificate_by_field(field_name, cx) else {
+            return;
+        };
+
+        let username = certificate.username().unwrap_or("").to_string();
+        let password = certificate.password().unwrap_or("").to_string();
+        let key_path = certificate.key_path().unwrap_or("").to_string();
+        let passphrase = certificate.passphrase().unwrap_or("").to_string();
+
+        match field_name {
+            "credential_ref" => {
+                self.set_field_value("username", &username, window, cx);
+                self.set_field_value("password", &password, window, cx);
+            }
+            "ssh_tunnel_credential_ref" => {
+                self.set_field_value("ssh_username", &username, window, cx);
+                match certificate.kind {
+                    CertificateKind::UsernamePassword => {
+                        self.set_field_value("ssh_auth_type", "password", window, cx);
+                        self.set_field_value("ssh_password", &password, window, cx);
+                        self.set_field_value("ssh_private_key_path", "", window, cx);
+                        self.set_field_value("ssh_private_key_passphrase", "", window, cx);
+                    }
+                    CertificateKind::SshPrivateKey => {
+                        self.set_field_value("ssh_auth_type", "private_key", window, cx);
+                        self.set_field_value("ssh_private_key_path", &key_path, window, cx);
+                        self.set_field_value("ssh_private_key_passphrase", &passphrase, window, cx);
+                        self.set_field_value("ssh_password", "", window, cx);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn reload_certificates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_main_ref = self
+            .selected_certificate_by_field("credential_ref", cx)
+            .as_ref()
+            .map(CertificateReference::from_certificate);
+        let selected_ssh_ref = self
+            .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+            .as_ref()
+            .map(CertificateReference::from_certificate);
+
+        self.certificates = Self::load_certificates_from_storage(cx);
+
+        if let Some(select) = self.field_selects.get("credential_ref") {
+            let items = Self::build_certificate_select_items(&self.certificates, false);
+            select.update(cx, |select, cx| {
+                select.set_items(items, window, cx);
+            });
+        }
+
+        if let Some(select) = self.field_selects.get("ssh_tunnel_credential_ref") {
+            let items = Self::build_certificate_select_items(&self.certificates, true);
+            select.update(cx, |select, cx| {
+                select.set_items(items, window, cx);
+            });
+        }
+
+        self.restore_selected_certificate("credential_ref", selected_main_ref.as_ref(), window, cx);
+        self.restore_selected_certificate(
+            "ssh_tunnel_credential_ref",
+            selected_ssh_ref.as_ref(),
+            window,
+            cx,
+        );
+        self.sync_selected_certificate_fields("credential_ref", window, cx);
+        self.sync_selected_certificate_fields("ssh_tunnel_credential_ref", window, cx);
+        cx.notify();
+    }
+
     fn build_connection(&self, cx: &App) -> DbConnectionConfig {
         let workspace_id = self
             .workspace_select
@@ -1402,8 +1550,14 @@ impl DbConnectionForm {
             "remark",
             "service_name",
             "sid",
+            "credential_ref",
+            "ssh_tunnel_credential_ref",
         ];
         let mut extra_params = std::collections::HashMap::new();
+
+        let selected_credential = self.selected_certificate_by_field("credential_ref", cx);
+        let selected_ssh_credential =
+            self.selected_certificate_by_field("ssh_tunnel_credential_ref", cx);
 
         for (field_name, value_entity) in &self.field_values {
             if !basic_fields.contains(&field_name.as_str()) {
@@ -1423,17 +1577,63 @@ impl DbConnectionForm {
         if let Some(port_str) = port_str {
             port = port_str.parse().unwrap_or(3306);
         }
+
+        let username = selected_credential
+            .as_ref()
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
+            .unwrap_or_else(|| self.get_field_value("username", cx).unwrap_or_default());
+        let password = selected_credential
+            .as_ref()
+            .and_then(|certificate| certificate.password().map(|s| s.to_string()))
+            .unwrap_or_else(|| self.get_field_value("password", cx).unwrap_or_default());
+
+        if let Some(certificate) = selected_ssh_credential.as_ref() {
+            if let Some(username) = certificate.username() {
+                extra_params.insert("ssh_username".to_string(), username.to_string());
+            }
+
+            match certificate.kind {
+                CertificateKind::UsernamePassword => {
+                    extra_params.insert("ssh_auth_type".to_string(), "password".to_string());
+                    extra_params.insert(
+                        "ssh_password".to_string(),
+                        certificate.password().unwrap_or("").to_string(),
+                    );
+                    extra_params.remove("ssh_private_key_path");
+                    extra_params.remove("ssh_private_key_passphrase");
+                }
+                CertificateKind::SshPrivateKey => {
+                    extra_params.insert("ssh_auth_type".to_string(), "private_key".to_string());
+                    extra_params.insert(
+                        "ssh_private_key_path".to_string(),
+                        certificate.key_path().unwrap_or("").to_string(),
+                    );
+                    extra_params.insert(
+                        "ssh_private_key_passphrase".to_string(),
+                        certificate.passphrase().unwrap_or("").to_string(),
+                    );
+                    extra_params.remove("ssh_password");
+                }
+            }
+        }
+
         DbConnectionConfig {
             id: String::new(),
             database_type: db_type,
             name: self.get_field_value("name", cx).unwrap_or_default(),
             host: self.get_field_value("host", cx).unwrap_or_default(),
             port,
-            username: self.get_field_value("username", cx).unwrap_or_default(),
-            password: self.get_field_value("password", cx).unwrap_or_default(),
+            username,
+            password,
             database: self.get_field_value("database", cx),
             service_name: self.get_field_value("service_name", cx),
             sid: self.get_field_value("sid", cx),
+            credential_ref: selected_credential
+                .as_ref()
+                .map(CertificateReference::from_certificate),
+            ssh_tunnel_credential_ref: selected_ssh_credential
+                .as_ref()
+                .map(CertificateReference::from_certificate),
             workspace_id,
             extra_params,
         }
@@ -1461,6 +1661,30 @@ impl DbConnectionForm {
             .get_field_value("ssh_tunnel_enabled", cx)
             .map(|value| value == "true" || value == "1")
             .unwrap_or(false);
+        if !enabled {
+            return Ok(());
+        }
+
+        for field in ["ssh_host", "ssh_username"] {
+            let value = self
+                .get_field_value(field, cx)
+                .map(|value| value.trim().to_string())
+                .unwrap_or_default();
+            if value.is_empty() {
+                return Err(format!(
+                    "{}: {}",
+                    t!("ConnectionForm.ssh_tunnel_invalid"),
+                    t!("ConnectionForm.ssh_missing_required", field = field)
+                ));
+            }
+        }
+
+        if self
+            .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+            .is_some()
+        {
+            return Ok(());
+        }
         let auth_type = self
             .get_field_value("ssh_auth_type", cx)
             .unwrap_or_else(|| "password".to_string());
@@ -1503,7 +1727,7 @@ impl DbConnectionForm {
             .map(|e| e.to_string())
             .unwrap_or_else(|| err.to_string());
 
-        // Strip common wrapper prefixes and keep the most useful root-level message.
+        // 去掉常见包装前缀，只保留最有价值的底层异常信息。
         let prefixes = [
             "connection error: ",
             "query error: ",
@@ -1559,47 +1783,9 @@ impl DbConnectionForm {
             let manager = global_state.db_manager;
 
             let test_result = Tokio::spawn_result(cx, async move {
-                let test_started = Instant::now();
                 let db_plugin = manager.get_plugin(&db_type)?;
-                let connect_started = Instant::now();
-                let conn = match db_plugin.create_connection(connection).await {
-                    Ok(conn) => conn,
-                    Err(error) => {
-                        info!(
-                            "[DB][Timing] test_connection failed stage=create_connection db_type={:?} elapsed={}ms error={}",
-                            db_type,
-                            test_started.elapsed().as_millis(),
-                            error
-                        );
-                        return Err(Error::new(error));
-                    }
-                };
-                info!(
-                    "[DB][Timing] test_connection create_connection db_type={:?} elapsed={}ms",
-                    db_type,
-                    connect_started.elapsed().as_millis()
-                );
-
-                let ping_started = Instant::now();
-                if let Err(error) = conn.ping().await {
-                    info!(
-                        "[DB][Timing] test_connection failed stage=ping db_type={:?} elapsed={}ms error={}",
-                        db_type,
-                        test_started.elapsed().as_millis(),
-                        error
-                    );
-                    return Err(Error::new(error));
-                }
-                info!(
-                    "[DB][Timing] test_connection ping db_type={:?} elapsed={}ms",
-                    db_type,
-                    ping_started.elapsed().as_millis()
-                );
-                info!(
-                    "[DB][Timing] test_connection total db_type={:?} elapsed={}ms",
-                    db_type,
-                    test_started.elapsed().as_millis()
-                );
+                let conn = db_plugin.create_connection(connection).await?;
+                conn.ping().await?;
                 Ok::<bool, Error>(true)
             })
             .await;
@@ -1633,35 +1819,24 @@ impl DbConnectionForm {
         let remark = self.get_field_value("remark", cx);
         let is_update = self.editing_connection.is_some();
         let sync_enabled = *self.sync_enabled.read(cx);
-        let team_id = self
-            .team_select
-            .read(cx)
-            .selected_value()
-            .cloned()
-            .flatten();
 
         let mut stored = match &self.editing_connection {
             Some(conn) => {
                 let mut c = conn.clone();
                 c.name = connection.name.clone();
+                if c.workspace_id != connection.workspace_id {
+                    c.sort_order = None;
+                }
                 c.workspace_id = connection.workspace_id;
                 c.sync_enabled = sync_enabled;
-                c.team_id = team_id;
                 c.params = serde_json::to_string(&connection)
                     .map_err(|e| format!("{}: {}", t!("ConnectionForm.serialize_failed"), e))?;
-                // Keep selected_databases aligned with the current database config.
-                c.selected_databases = if let Some(database) = &connection.database {
-                    Some(format!("[\"{}\"]", database))
-                } else {
-                    None
-                };
                 c
             }
             None => {
                 let mut c = StoredConnection::from_db_connection(connection);
                 c.sync_enabled = sync_enabled;
-                c.team_id = team_id;
-                // Auto-fill owner_id for newly created connections.
+                // 新建时自动填充 owner_id
                 c.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
                 c
             }
@@ -1686,7 +1861,7 @@ impl DbConnectionForm {
         *self.is_testing.read(cx)
     }
 
-    /// Returns the display string for the test-connection result, or None if absent.
+    /// 返回测试连接结果的显示文字，无结果时返回 None
     pub fn test_result_msg(&self, cx: &App) -> Option<String> {
         self.test_result.read(cx).as_ref().map(|r| match r {
             Ok(true) => format!("✓ {}", t!("ConnectionForm.test_success")),
@@ -1888,7 +2063,23 @@ impl DbConnectionForm {
         }
     }
 
-    fn render_field_by_name(&self, field_name: &str) -> gpui_component::form::Field {
+    fn should_disable_field_with_certificate(&self, field_name: &str, cx: &App) -> bool {
+        match field_name {
+            "username" | "password" => self
+                .selected_certificate_by_field("credential_ref", cx)
+                .is_some(),
+            "ssh_username"
+            | "ssh_auth_type"
+            | "ssh_password"
+            | "ssh_private_key_path"
+            | "ssh_private_key_passphrase" => self
+                .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+                .is_some(),
+            _ => false,
+        }
+    }
+
+    fn render_field_by_name(&self, field_name: &str, cx: &App) -> gpui_component::form::Field {
         let Some(field_info) = self.find_field(field_name) else {
             return field();
         };
@@ -1896,6 +2087,7 @@ impl DbConnectionForm {
         let is_select = field_info.field_type == FormFieldType::Select;
         let is_password = field_info.field_type == FormFieldType::Password;
         let field_name = field_info.name.clone();
+        let disable_field = self.should_disable_field_with_certificate(&field_name, cx);
 
         field()
             .label(field_info.label.clone())
@@ -1908,16 +2100,16 @@ impl DbConnectionForm {
                     .gap_2()
                     .when(is_select, |el| {
                         if let Some(select_state) = self.field_selects.get(&field_name) {
-                            el.child(Select::new(select_state).w_full())
+                            el.child(Select::new(select_state).w_full().disabled(disable_field))
                         } else {
                             el
                         }
                     })
                     .when(!is_select, |el| {
                         if let Some(input_state) = self.get_input_by_name(&field_name) {
-                            let input = Input::new(&input_state).w_full();
+                            let input = Input::new(&input_state).w_full().disabled(disable_field);
                             let input = if is_password {
-                                input.mask_toggle()
+                                input.mask_toggle().disable_ime()
                             } else {
                                 input
                             };
@@ -1955,6 +2147,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
+            .text_color(app_style::text())
             .children(current_tab_fields.iter().enumerate().map(|(i, field_info)| {
                 let input_idx = field_input_offset + i;
                 let is_sqlite_path = matches!(db_type, DatabaseType::SQLite | DatabaseType::DuckDB)
@@ -1963,6 +2156,7 @@ impl DbConnectionForm {
                 let is_select = field_info.field_type == FormFieldType::Select;
                 let is_password = field_info.field_type == FormFieldType::Password;
                 let field_name = field_info.name.clone();
+                let disable_field = self.should_disable_field_with_certificate(&field_name, cx);
 
                 field()
                     .label(field_info.label.clone())
@@ -1977,16 +2171,21 @@ impl DbConnectionForm {
                             .when(is_textarea, |el| el.items_start())
                             .when(is_select, |el| {
                                 if let Some(select_state) = self.field_selects.get(&field_name) {
-                                    el.child(Select::new(select_state).w_full())
+                                    el.child(
+                                        self.styled_select(Select::new(select_state).w_full())
+                                            .disabled(disable_field),
+                                    )
                                 } else {
                                     el
                                 }
                             })
                             .when(!is_select, |el| {
                                 if let Some(Some(input_state)) = self.field_inputs.get(input_idx) {
-                                    let input = Input::new(input_state).w_full();
+                                    let input = self
+                                        .styled_input(Input::new(input_state).w_full())
+                                        .disabled(disable_field);
                                     let input = if is_password {
-                                        input.mask_toggle()
+                                        input.mask_toggle().disable_ime()
                                     } else {
                                         input
                                     };
@@ -2020,14 +2219,7 @@ impl DbConnectionForm {
                         .label(t!("ConnectionForm.workspace").to_string())
                         .items_center()
                         .label_justify_end()
-                        .child(Select::new(&self.workspace_select).w_full()),
-                )
-                .child(
-                    field()
-                        .label(t!("TeamSync.team_label").to_string())
-                        .items_center()
-                        .label_justify_end()
-                        .child(Select::new(&self.team_select).w_full()),
+                        .child(self.styled_select(Select::new(&self.workspace_select).w_full())),
                 )
                 .child(
                     field()
@@ -2050,7 +2242,7 @@ impl DbConnectionForm {
                                 .child(
                                     div()
                                         .text_sm()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .text_color(app_style::text_muted())
                                         .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
                                 ),
                         ),
@@ -2236,12 +2428,16 @@ impl DbConnectionForm {
             .get_field_value("ssh_auth_type", cx)
             .unwrap_or_else(|| "password".to_string());
         let ssh_auth_type = normalized_ssh_auth_type(&ssh_auth_type).to_string();
+        let use_ssh_certificate = self
+            .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
+            .is_some();
 
         v_form()
             .layout(Axis::Horizontal)
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
+            .text_color(app_style::text())
             .child(
                 field()
                     .label(self.field_label("ssh_tunnel_enabled"))
@@ -2262,9 +2458,10 @@ impl DbConnectionForm {
                     ),
             )
             .when(ssh_enabled, |form| {
-                form.child(self.render_field_by_name("ssh_host"))
-                    .child(self.render_field_by_name("ssh_port"))
-                    .child(self.render_field_by_name("ssh_username"))
+                form.child(self.render_field_by_name("ssh_host", cx))
+                    .child(self.render_field_by_name("ssh_port", cx))
+                    .child(self.render_field_by_name("ssh_tunnel_credential_ref", cx))
+                    .child(self.render_field_by_name("ssh_username", cx))
                     .child(
                         field()
                             .label(self.field_label("ssh_auth_type"))
@@ -2280,6 +2477,7 @@ impl DbConnectionForm {
                                                 t!("ConnectionForm.ssh_auth_password").to_string(),
                                             )
                                             .checked(ssh_auth_type == "password")
+                                            .disabled(use_ssh_certificate)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.set_field_value(
                                                     "ssh_auth_type",
@@ -2296,6 +2494,7 @@ impl DbConnectionForm {
                                                     .to_string(),
                                             )
                                             .checked(ssh_auth_type == "private_key")
+                                            .disabled(use_ssh_certificate)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.set_field_value(
                                                     "ssh_auth_type",
@@ -2309,6 +2508,7 @@ impl DbConnectionForm {
                                         Radio::new("db-ssh-auth-agent")
                                             .label(t!("ConnectionForm.ssh_auth_agent").to_string())
                                             .checked(ssh_auth_type == "agent")
+                                            .disabled(use_ssh_certificate)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.set_field_value(
                                                     "ssh_auth_type",
@@ -2321,14 +2521,14 @@ impl DbConnectionForm {
                             ),
                     )
                     .when(ssh_auth_type == "password", |form| {
-                        form.child(self.render_field_by_name("ssh_password"))
+                        form.child(self.render_field_by_name("ssh_password", cx))
                     })
                     .when(ssh_auth_type == "private_key", |form| {
-                        form.child(self.render_field_by_name("ssh_private_key_path"))
-                            .child(self.render_field_by_name("ssh_private_key_passphrase"))
+                        form.child(self.render_field_by_name("ssh_private_key_path", cx))
+                            .child(self.render_field_by_name("ssh_private_key_passphrase", cx))
                     })
-                    .child(self.render_field_by_name("ssh_target_host"))
-                    .child(self.render_field_by_name("ssh_target_port"))
+                    .child(self.render_field_by_name("ssh_target_host", cx))
+                    .child(self.render_field_by_name("ssh_target_port", cx))
             })
             .into_any_element()
     }
@@ -2345,6 +2545,7 @@ impl DbConnectionForm {
             .with_size(Size::Medium)
             .columns(1)
             .label_width(px(100.))
+            .text_color(app_style::text())
             .child(
                 field()
                     .label(t!("ConnectionForm.require_ssl").to_string())
@@ -2360,18 +2561,18 @@ impl DbConnectionForm {
             )
             .when(ssl_enabled, |form| match self.config.db_type {
                 DatabaseType::MySQL => form
-                    .child(self.render_field_by_name("verify_ca"))
-                    .child(self.render_field_by_name("verify_identity"))
-                    .child(self.render_field_by_name("ssl_root_cert_path"))
-                    .child(self.render_field_by_name("tls_hostname_override")),
+                    .child(self.render_field_by_name("verify_ca", cx))
+                    .child(self.render_field_by_name("verify_identity", cx))
+                    .child(self.render_field_by_name("ssl_root_cert_path", cx))
+                    .child(self.render_field_by_name("tls_hostname_override", cx)),
                 DatabaseType::PostgreSQL => form
-                    .child(self.render_field_by_name("ssl_mode"))
-                    .child(self.render_field_by_name("ssl_root_cert_path"))
-                    .child(self.render_field_by_name("ssl_accept_invalid_certs"))
-                    .child(self.render_field_by_name("ssl_accept_invalid_hostnames")),
+                    .child(self.render_field_by_name("ssl_mode", cx))
+                    .child(self.render_field_by_name("ssl_root_cert_path", cx))
+                    .child(self.render_field_by_name("ssl_accept_invalid_certs", cx))
+                    .child(self.render_field_by_name("ssl_accept_invalid_hostnames", cx)),
                 DatabaseType::MSSQL => form
-                    .child(self.render_field_by_name("encrypt"))
-                    .child(self.render_field_by_name("trust_cert")),
+                    .child(self.render_field_by_name("encrypt", cx))
+                    .child(self.render_field_by_name("trust_cert", cx)),
                 _ => form,
             })
             .into_any_element()
@@ -2416,19 +2617,28 @@ impl Render for DbConnectionForm {
             .child(
                 // Tab bar
                 div().flex().justify_center().child(
-                    TabBar::new("connection-tabs")
-                        .with_size(Size::Large)
-                        .underline()
-                        .selected_index(self.active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _window, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .children(
-                            self.config
-                                .tab_groups
-                                .iter()
-                                .map(|tab| Tab::new().label(tab.label.clone())),
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::surface())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("connection-tabs")
+                                .with_size(Size::Large)
+                                .underline()
+                                .selected_index(self.active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _window, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .children(
+                                    self.config
+                                        .tab_groups
+                                        .iter()
+                                        .map(|tab| Tab::new().label(tab.label.clone())),
+                                ),
                         ),
                 ),
             )
@@ -2471,7 +2681,7 @@ mod tests {
             .tab_groups
             .iter()
             .find(|group| group.name == "ssl")
-            .expect("MySQL should include the SSL tab");
+            .expect("MySQL 应包含 SSL 标签页");
 
         assert_eq!(
             field_names(ssl_tab),
@@ -2482,21 +2692,6 @@ mod tests {
                 "ssl_root_cert_path",
                 "tls_hostname_override"
             ]
-        );
-    }
-
-    #[test]
-    fn mysql_advanced_tab_exposes_charset_fields() {
-        let config = DbFormConfig::mysql();
-        let advanced_tab = config
-            .tab_groups
-            .iter()
-            .find(|group| group.name == "advanced")
-            .expect("MySQL should include the advanced tab");
-
-        assert_eq!(
-            field_names(advanced_tab),
-            vec!["connect_timeout", "charset", "collation", "read_timeout"]
         );
     }
 
@@ -2514,7 +2709,7 @@ mod tests {
             .tab_groups
             .iter()
             .find(|group| group.name == "ssh")
-            .expect("MySQL should include the SSH tab");
+            .expect("MySQL 应包含 SSH 标签页");
 
         assert_eq!(
             field_names(ssh_tab),
@@ -2522,6 +2717,7 @@ mod tests {
                 "ssh_tunnel_enabled",
                 "ssh_host",
                 "ssh_port",
+                "ssh_tunnel_credential_ref",
                 "ssh_username",
                 "ssh_auth_type",
                 "ssh_password",

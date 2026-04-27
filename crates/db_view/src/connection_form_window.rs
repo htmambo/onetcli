@@ -4,13 +4,13 @@ use gpui::{
     Styled, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, TitleBar,
+    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement,
     v_flex,
 };
-use one_core::cloud_sync::TeamOption;
+use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event};
 use one_core::storage::{DatabaseType, StoredConnection, Workspace};
 use rust_i18n::locale;
@@ -24,7 +24,6 @@ pub struct ConnectionFormWindowConfig {
     pub db_type: DatabaseType,
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 /// 连接表单窗口
@@ -56,7 +55,6 @@ impl ConnectionFormWindow {
 
         form.update(cx, |f, cx| {
             f.set_workspaces(config.workspaces.clone(), window, cx);
-            f.set_teams(config.teams.clone(), window, cx);
         });
 
         if let Some(ref conn) = config.editing_connection {
@@ -133,22 +131,32 @@ impl Render for ConnectionFormWindow {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
+            .rounded(cx.theme().radius_lg)
+            .bg(app_style::base())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text())
+                            .child(self.title.clone()),
+                    ),
             )
             .child(
                 div()
                     .flex_1()
+                    .m_4()
+                    .mb_2()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::surface())
                     .p_4()
                     .overflow_y_scrollbar()
                     .child(self.form.clone()),
@@ -163,14 +171,14 @@ impl Render for ConnectionFormWindow {
                         .py_2()
                         .rounded_md()
                         .bg(if is_success {
-                            gpui::rgb(0xdcfce7)
+                            app_style::accent_dim_strong()
                         } else {
-                            gpui::rgb(0xfee2e2)
+                            app_style::danger_dim()
                         })
                         .text_color(if is_success {
-                            gpui::rgb(0x166534)
+                            app_style::accent()
                         } else {
-                            gpui::rgb(0x991b1b)
+                            app_style::danger()
                         })
                         .child(msg),
                 )
@@ -181,10 +189,14 @@ impl Render for ConnectionFormWindow {
                     .gap_2()
                     .p_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_cancel(window, cx);
@@ -193,7 +205,7 @@ impl Render for ConnectionFormWindow {
                     .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(if is_testing {
                                 t!("Connection.testing").to_string()
                             } else {
@@ -205,9 +217,18 @@ impl Render for ConnectionFormWindow {
                             })),
                     )
                     .child(
+                        Button::new("manage-certificates")
+                            .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
+                            .label(t!("ConnectionForm.manage_certificates").to_string())
+                            .on_click(cx.listener(|_, _, window, cx| {
+                                open_certificate_manager_popup(window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.ok").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_save(window, cx);

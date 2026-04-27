@@ -13,24 +13,23 @@ use gpui::{
     MouseUpEvent, ParentElement, Pixels, Point, Render, SharedString, Style, Styled, Task, Window,
     div, prelude::FluentBuilder, px,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex, tokens::Radius, v_flex};
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::layout::{
-    SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
+    CHAT_SIDEBAR_DEFAULT_WIDTH, CHAT_SIDEBAR_MIN_WIDTH, PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH, TREE_PANEL_DEFAULT_SIZE,
+    TREE_PANEL_MAX_SIZE, TREE_PANEL_MIN_SIZE,
 };
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, Workspace};
 use one_core::{
     storage::StoredConnection,
-    tab_container::{TabContainer, TabContent, TabContentEvent, TabItem},
+    tab_container::{TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem},
 };
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use uuid::Uuid;
-
-const PANEL_MIN_SIZE: Pixels = px(100.0);
-const TREE_PANEL_DEFAULT_SIZE: Pixels = px(250.0);
-const CHAT_SIDEBAR_MIN_WIDTH: Pixels = px(360.0);
-const CHAT_SIDEBAR_DEFAULT_WIDTH: Pixels = px(420.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizingPanel {
@@ -40,6 +39,7 @@ enum ResizingPanel {
 
 pub struct DatabaseTabView {
     connections: Vec<StoredConnection>,
+    active_connection_id: Option<i64>,
     tab_container: Entity<TabContainer>,
     db_tree_view: Entity<DbTreeView>,
     status_msg: Entity<String>,
@@ -56,6 +56,12 @@ pub struct DatabaseTabView {
 }
 
 impl DatabaseTabView {
+    pub fn contains_connection_id(&self, connection_id: i64) -> bool {
+        self.connections
+            .iter()
+            .any(|connection| connection.id == Some(connection_id))
+    }
+
     pub fn new_with_active_conn(
         workspace: Option<Workspace>,
         connections: Vec<StoredConnection>,
@@ -63,7 +69,8 @@ impl DatabaseTabView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let db_tree_view = cx.new(|cx| DbTreeView::new(&connections, window, cx));
+        let db_tree_view =
+            cx.new(|cx| DbTreeView::new(&connections, window, cx, workspace.is_some()));
 
         let tab_container = cx.new(|cx| TabContainer::new(window, cx));
 
@@ -116,6 +123,20 @@ impl DatabaseTabView {
                 },
             ),
         );
+        subscriptions.push(cx.subscribe(
+            &tab_container,
+            |_this, _, event: &TabContainerEvent, cx| match event {
+                TabContainerEvent::LayoutChanged
+                | TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.emit(TabContentEvent::StateChanged);
+                    cx.notify();
+                }
+                TabContainerEvent::OpenSftpRequested { .. } => {}
+                TabContainerEvent::TabBarTrailingActionRequested => {}
+            },
+        ));
 
         let mut global_state = cx.global::<GlobalDbState>().clone();
 
@@ -137,6 +158,7 @@ impl DatabaseTabView {
 
         Self {
             connections: connections.clone(),
+            active_connection_id: active_conn_id,
             tab_container,
             db_tree_view,
             status_msg,
@@ -321,9 +343,10 @@ impl DatabaseTabView {
                 } else {
                     TOOLBAR_WIDTH
                 };
-                let max_size =
-                    (available_width - PANEL_MIN_SIZE - sidebar_width).max(PANEL_MIN_SIZE);
-                self.tree_panel_size = new_size.clamp(PANEL_MIN_SIZE, max_size);
+                let max_size = (available_width - PANEL_MIN_SIZE - sidebar_width)
+                    .max(TREE_PANEL_MIN_SIZE)
+                    .min(TREE_PANEL_MAX_SIZE);
+                self.tree_panel_size = new_size.clamp(TREE_PANEL_MIN_SIZE, max_size);
             }
             ResizingPanel::Sidebar => {
                 let new_size = self.bounds.right() - mouse_position.x;
@@ -372,7 +395,7 @@ impl DatabaseTabView {
                         div()
                             .w(px(48.0))
                             .h(px(48.0))
-                            .rounded(px(24.0))
+                            .rounded(Radius::Xl.px())
                             .flex()
                             .items_center()
                             .justify_center()
@@ -402,7 +425,7 @@ impl DatabaseTabView {
                     .gap_2()
                     .p_4()
                     .bg(cx.theme().muted)
-                    .rounded(px(8.0))
+                    .rounded(Radius::Lg.px())
                     .child(
                         h_flex()
                             .gap_2()
@@ -481,8 +504,88 @@ impl TabContent for DatabaseTabView {
         }
     }
 
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .current_status_summary(cx)
+            .or_else(|| tab_container.current_title(cx))
+    }
+
+    fn subtitle(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container.current_title(cx)
+    }
+
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn has_pending_changes(&self, cx: &App) -> bool {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .tabs()
+            .iter()
+            .any(|tab| tab.content().has_pending_changes(cx))
+    }
+
+    fn pending_change_level(&self, cx: &App) -> Option<one_core::PendingChangeLevel> {
+        let tab_container = self.tab_container.read(cx);
+        let mut max_level = None;
+        for tab in tab_container.tabs() {
+            if let Some(level) = tab.content().pending_change_level(cx) {
+                max_level = Some(match max_level {
+                    Some(current) if current > level => current,
+                    _ => level,
+                });
+            }
+        }
+        max_level
+    }
+
+    fn running_state(&self, cx: &App) -> Option<one_core::RunningState> {
+        let tab_container = self.tab_container.read(cx);
+        // First check for pending changes
+        if let Some(level) = self.pending_change_level(cx) {
+            let activity = t!(level.i18n_key()).into();
+            return one_core::RunningState::db_pending_changes(self.title(cx), activity, level);
+        }
+        // Then check for other running states
+        for tab in tab_container.tabs() {
+            if let Some(state) = tab.content().running_state(cx) {
+                return Some(state);
+            }
+        }
+        None
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let kind = if self.workspace.is_some() {
+            ConnectionRestoreKind::DatabaseWorkspace
+        } else {
+            ConnectionRestoreKind::Database
+        };
+        let connection_id = if kind.is_workspace() {
+            None
+        } else {
+            self.connections
+                .first()
+                .and_then(|connection| connection.id)
+        };
+
+        if !kind.is_workspace() && connection_id.is_none() {
+            return JsonValue::Null;
+        }
+
+        ConnectionRestorePayload {
+            kind,
+            connection_id,
+            workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
+            active_connection_id: self.active_connection_id,
+            local_terminal: None,
+            ssh_terminal: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn on_activate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -557,10 +660,13 @@ impl Render for DatabaseTabView {
         let view = cx.entity().clone();
         let sidebar_visible = self.sidebar.read(cx).is_panel_visible();
         let sidebar_panel_size = self.sidebar_panel_size;
+        let shell_bg = cx.theme().background;
+        let content_bg = cx.theme().muted;
 
         div()
             .track_focus(&self.focus_handle)
             .size_full()
+            .bg(shell_bg)
             .when(!is_connected_flag, |el: gpui::Div| {
                 el.child(self.render_connection_status(cx))
             })
@@ -587,6 +693,7 @@ impl Render for DatabaseTabView {
                                 .flex_1()
                                 .h_full()
                                 .min_w_0()
+                                .bg(content_bg)
                                 .child(self.tab_container.clone()),
                         )
                         .when(sidebar_visible, |this| {
