@@ -1,5 +1,6 @@
 [workspace]
 default-members = ["crates/ui", "crates/story", "crates/assets", "main"]
+exclude = ["vendor/zed"]
 members = [
     "crates/macros",
     "crates/story",
@@ -19,7 +20,7 @@ members = [
     "crates/db_view",
     "crates/terminal",
     "crates/terminal_view"
-    , "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/license_tool", "crates/mongodb_view", "crates/remote_file_editor"]
+    , "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/mongodb_view", "crates/remote_file_editor"]
 resolver = "2"
 
 [workspace.package]
@@ -110,6 +111,11 @@ clickhouse = { version = "0.14.1", features = ["rustls-tls-native-roots"] }
 sqlformat = "0.5.0"
 sqlparser = "0.60.0"
 uuid = { version = "1.18.0", features = ["v4", "serde"] }
+hkdf = "0.12"
+hostname = "0.4"
+argon2 = { version = "0.6.0-rc.8", features = ["password-hash"] }
+tiny_http = "0.12"
+urlencoding = "2"
 rust_xlsxwriter = "0.94.0"
 dashmap = "5.5.3"
 moka = { version = "0.12", features = ["sync"] }
@@ -149,6 +155,9 @@ version = "0.61.0"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
+[patch."https://github.com/zed-industries/zed"]
+gpui = { path = "vendor/zed/crates/gpui" }
 
 [workspace.lints.clippy]
 almost_complete_range = "allow"
@@ -192,6 +201,14 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 2
+lto = "thin"
+codegen-units = 16
+incremental = true
+strip = false
 
 [profile.dev.package]
 resvg = { opt-level = 3 }

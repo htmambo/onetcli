@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 # Async runtime
 tokio = { workspace = true }
+rust-i18n = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
 one-core = { workspace = true }
@@ -15,14 +16,19 @@ ssh = { workspace = true }
 # Terminal emulation
 alacritty_terminal.workspace = true
 serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 serialport = { workspace = true }
 base64 = { workspace = true }
 dirs = { workspace = true }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+portable-pty = "0.9.0"
 
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
 async-trait = { workspace = true }
