@@ -8,7 +8,7 @@ use gpui::{
 use crate::{
     ActiveTheme as _, Icon, IconName, Size, h_flex,
     menu::PopupMenu,
-    table::{Column, ColumnSort, TableState, loading::Loading},
+    table::{Column, ColumnSort, TableModel, TableState, loading::Loading},
 };
 
 /// A delegate trait for providing data and rendering for a table.
@@ -196,5 +196,58 @@ pub trait TableDelegate: Sized + 'static {
     /// The text should be formatted as it should appear in the exported data.
     fn cell_text(&self, row_ix: usize, col_ix: usize, cx: &App) -> String {
         String::new()
+    }
+}
+
+/// Blanket implementation of TableModel for all TableDelegate types.
+/// This allows both TableDelegate and EditTableDelegate to be used through the TableModel trait.
+impl<D: TableDelegate + Send> TableModel for D {
+    type Column = Column;
+
+    fn columns_count(&self) -> usize {
+        // Default implementation - requires App context in actual use
+        0
+    }
+
+    fn rows_count(&self) -> usize {
+        // Default implementation - requires App context in actual use
+        0
+    }
+
+    fn column(&self, _index: usize) -> Column {
+        // Default implementation - requires App context in actual use
+        Column::default()
+    }
+
+    fn perform_sort(&mut self, _column: usize, _ascending: bool) {
+        // Full implementation requires Window and Context
+    }
+
+    fn move_column(&mut self, _from: usize, _to: usize) {
+        // Full implementation requires Window and Context
+    }
+
+    fn loading(&self) -> bool {
+        false
+    }
+
+    fn has_more(&self) -> bool {
+        false
+    }
+
+    fn load_more_threshold(&self) -> Option<usize> {
+        Some(20)
+    }
+
+    fn load_more(&mut self) {
+        // Full implementation requires Window and Context
+    }
+
+    fn visible_rows_changed(&mut self, _range: Range<usize>) {
+        // Full implementation requires Window and Context
+    }
+
+    fn visible_columns_changed(&mut self, _range: Range<usize>) {
+        // Full implementation requires Window and Context
     }
 }

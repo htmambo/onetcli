@@ -1,14 +1,14 @@
 use crate::{
-    IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     input::{Input, InputState},
-    resizable::{h_resizable, resizable_panel},
+    resizable::{h_resizable, ResizablePanel},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    IconName, Sizable, Size, StyledExt,
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
+    div, prelude::FluentBuilder as _, px, relative, App, AppContext as _, Axis, ElementId, Entity,
+    IntoElement, ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window,
 };
 use rust_i18n::t;
 
@@ -32,6 +32,7 @@ pub struct Settings {
     size: Size,
     sidebar_width: Pixels,
     sidebar_style: StyleRefinement,
+    content_style: StyleRefinement,
     default_selected_index: SelectIndex,
     header_style: StyleRefinement,
 }
@@ -46,6 +47,7 @@ impl Settings {
             size: Size::default(),
             sidebar_width: px(250.0),
             sidebar_style: StyleRefinement::default(),
+            content_style: StyleRefinement::default(),
             default_selected_index: SelectIndex::default(),
             header_style: StyleRefinement::default(),
         }
@@ -80,6 +82,12 @@ impl Settings {
     /// Set the style refinement for the sidebar.
     pub fn sidebar_style(mut self, style: &StyleRefinement) -> Self {
         self.sidebar_style = style.clone();
+        self
+    }
+
+    /// Set the style refinement for the content area.
+    pub fn content_style(mut self, style: &StyleRefinement) -> Self {
+        self.content_style = style.clone();
         self
     }
 
@@ -162,7 +170,6 @@ impl Settings {
         Sidebar::new("settings-sidebar")
             .w(relative(1.))
             .border_0()
-            .refine_style(&self.sidebar_style)
             .collapsed(false)
             .header(
                 Input::new(&search_input)
@@ -279,18 +286,47 @@ impl RenderOnce for Settings {
             layout: Axis::Horizontal,
         };
 
-        h_resizable(self.id.clone())
+        div()
+            .flex_1()
+            .min_w_0()
+            .size_full()
+            .overflow_hidden()
             .child(
-                resizable_panel()
-                    .size(self.sidebar_width)
-                    .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                h_resizable(self.id.clone())
+                    .child(
+                        ResizablePanel::new()
+                            .size(self.sidebar_width)
+                            .size_range(px(120.)..px(400.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h_full()
+                                    .overflow_hidden()
+                                    .refine_style(&self.sidebar_style)
+                                    .child(self.render_sidebar(
+                                        &state,
+                                        &filtered_pages,
+                                        window,
+                                        cx,
+                                    )),
+                            ),
+                    )
+                    .child(
+                        ResizablePanel::new().child(
+                            div()
+                                .size_full()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .refine_style(&self.content_style)
+                                .child(self.render_active_page(
+                                    &state,
+                                    &filtered_pages,
+                                    &options,
+                                    window,
+                                    cx,
+                                )),
+                        ),
+                    ),
             )
-            .child(resizable_panel().child(self.render_active_page(
-                &state,
-                &filtered_pages,
-                &options,
-                window,
-                cx,
-            )))
     }
 }

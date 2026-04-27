@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use gpui::{
     App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
-    Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement,
+    StyleRefinement, Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
 };
 use rust_i18n::t;
 
@@ -22,6 +22,10 @@ use super::{
     ClosePanel, DockArea, DockPlacement, Panel, PanelControl, PanelEvent, PanelState, PanelStyle,
     PanelView, StackPanel, ToggleZoom,
 };
+
+const TAB_DRAG_THRESHOLD: f64 = 6.0;
+
+const DOCK_TAB_HEIGHT: f32 = 30.0;
 
 #[derive(Clone)]
 struct TabState {
@@ -59,7 +63,7 @@ impl Render for DragPanel {
             .rounded(cx.theme().radius)
             .text_color(cx.theme().tab_foreground)
             .bg(cx.theme().tab_active)
-            .opacity(0.75)
+            .opacity(0.90)
             .child(self.panel.title(window, cx))
     }
 }
@@ -611,6 +615,7 @@ impl TabPanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let view = cx.entity().clone();
+        let tab_bar_bg = cx.theme().tab_bar;
 
         let Some(dock_area) = self.dock_area.upgrade() else {
             return div().into_any_element();
@@ -638,7 +643,7 @@ impl TabPanel {
             return h_flex()
                 .justify_between()
                 .line_height(rems(1.0))
-                .h(px(30.))
+                .h(px(DOCK_TAB_HEIGHT))
                 .py_2()
                 .pl_3()
                 .pr_2()
@@ -706,7 +711,7 @@ impl TabPanel {
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
-                        .bg(cx.theme().tab_bar)
+                        .bg(tab_bar_bg)
                         .px_2()
                         .children(left_dock_button)
                         .children(bottom_dock_button),
@@ -725,6 +730,9 @@ impl TabPanel {
                     active = false;
                 }
 
+                let is_collapsed = self.collapsed;
+                let dock_area = self.dock_area.clone();
+
                 Some(
                     Tab::new()
                         .ix(ix)
@@ -737,23 +745,21 @@ impl TabPanel {
                             }
                         })
                         .selected(active)
-                        .on_click(cx.listener({
-                            let is_collapsed = self.collapsed;
-                            let dock_area = self.dock_area.clone();
-                            move |view, _, window, cx| {
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |view, _, window, cx| {
                                 view.set_active_ix(ix, window, cx);
 
-                                // Open dock if clicked on the collapsed bottom dock
                                 if is_bottom_dock && is_collapsed {
                                     _ = dock_area.update(cx, |dock_area, cx| {
                                         dock_area.toggle_dock(DockPlacement::Bottom, window, cx);
                                     });
                                 }
-                            }
-                        }))
+                            }),
+                        )
                         .when(!droppable, |this| {
-                            this.when(state.draggable, |this| {
-                                this.on_drag(
+                            this.when(state.draggable && active, |this| {
+                                this.drag_threshold(TAB_DRAG_THRESHOLD).on_drag(
                                     DragPanel::new(panel.clone(), view.clone()),
                                     |drag, _, _, cx| {
                                         cx.stop_propagation();
@@ -814,7 +820,7 @@ impl TabPanel {
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
-                        .bg(cx.theme().tab_bar)
+                        .bg(tab_bar_bg)
                         .px_2()
                         .gap_1()
                         .children(

@@ -249,21 +249,22 @@ impl SidebarItem for SidebarMenuItem {
                     .rounded(cx.theme().radius)
                     .text_sm()
                     .when(is_hoverable, |this| {
-                        this.hover(|this| {
-                            this.bg(cx.theme().sidebar_accent.opacity(0.8))
-                                .text_color(cx.theme().sidebar_accent_foreground)
-                        })
+                        this.hover(|this| this.bg(cx.theme().sidebar_accent))
                     })
                     .when(is_active, |this| {
                         this.font_medium()
-                            .bg(cx.theme().sidebar_accent)
-                            .text_color(cx.theme().sidebar_accent_foreground)
+                            .bg(cx.theme().list_active)
+                            .border_l_3()
+                            .border_color(cx.theme().list_active_border)
+                            .text_color(cx.theme().sidebar_foreground)
                     })
                     .when_some(self.icon.clone(), |this, icon| this.child(icon))
                     .when(is_collapsed, |this| {
                         this.justify_center().when(is_active, |this| {
-                            this.bg(cx.theme().sidebar_accent)
-                                .text_color(cx.theme().sidebar_accent_foreground)
+                            this.bg(cx.theme().list_active)
+                                .border_l_3()
+                                .border_color(cx.theme().list_active_border)
+                                .text_color(cx.theme().sidebar_foreground)
                         })
                     })
                     .when(!is_collapsed, |this| {

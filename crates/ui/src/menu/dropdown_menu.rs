@@ -5,7 +5,7 @@ use gpui::{
     RenderOnce, SharedString, StyleRefinement, Styled, Window,
 };
 
-use crate::{Selectable, button::Button, menu::PopupMenu, popover::Popover};
+use crate::{Selectable, button::Button, menu::{PopupMenu, MenuRebuildEvent}, popover::Popover};
 
 /// A dropdown menu trait for buttons and other interactive elements
 pub trait DropdownMenu: Styled + Selectable + InteractiveElement + IntoElement + 'static {
@@ -76,6 +76,7 @@ where
 #[derive(Default)]
 struct DropdownMenuState {
     menu: Option<Entity<PopupMenu>>,
+    rebuild_version: usize,
 }
 
 impl<T> RenderOnce for DropdownMenuPopover<T>
@@ -86,6 +87,9 @@ where
         let builder = self.builder.clone();
         let menu_state =
             window.use_keyed_state(self.id.clone(), cx, |_, _| DropdownMenuState::default());
+
+        // Check if we need to rebuild the menu
+        let rebuild_version = menu_state.read(cx).rebuild_version;
 
         Popover::new(SharedString::from(format!("popover:{}", self.id)))
             .appearance(false)
@@ -100,33 +104,48 @@ where
                 //
                 // And we also need to rebuild the menu when it is dismissed, to rebuild menu items
                 // dynamically for support `dropdown_menu` method, so we listen for DismissEvent below.
-                let menu = match menu_state.read(cx).menu.clone() {
-                    Some(menu) => menu,
-                    None => {
+                let current_version = menu_state.read(cx).rebuild_version;
+                let needs_rebuild = current_version != rebuild_version;
+
+                let menu = match (menu_state.read(cx).menu.clone(), needs_rebuild) {
+                    (Some(menu), false) => menu,
+                    _ => {
                         let builder = builder.clone();
                         let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
                             builder(menu, window, cx)
                         });
-                        menu_state.update(cx, |state, _| {
-                            state.menu = Some(menu.clone());
-                        });
-                        menu.focus_handle(cx).focus(window, cx);
+
+                        // Listen for rebuild requests from the menu (for keep_open mode)
+                        let menu_state_clone = menu_state.clone();
+                        window
+                            .subscribe(&menu, cx, move |_, _: &MenuRebuildEvent, _window, cx| {
+                                menu_state_clone.update(cx, |state, _| {
+                                    state.rebuild_version += 1;
+                                });
+                            })
+                            .detach();
 
                         // Listen for dismiss events from the PopupMenu to close the popover.
                         let popover_state = cx.entity();
+                        let menu_state_for_dismiss = menu_state.clone();
                         window
                             .subscribe(&menu, cx, {
-                                let menu_state = menu_state.clone();
                                 move |_, _: &DismissEvent, window, cx| {
                                     popover_state.update(cx, |state, cx| {
                                         state.dismiss(window, cx);
                                     });
-                                    menu_state.update(cx, |state, _| {
+                                    menu_state_for_dismiss.update(cx, |state, _| {
                                         state.menu = None;
                                     });
                                 }
                             })
                             .detach();
+
+                        menu_state.update(cx, |state, _| {
+                            state.menu = Some(menu.clone());
+                            state.rebuild_version = current_version;
+                        });
+                        menu.focus_handle(cx).focus(window, cx);
 
                         menu.clone()
                     }

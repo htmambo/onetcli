@@ -28,6 +28,7 @@ impl<T> StringField<T> {
 
 struct State {
     input: Entity<InputState>,
+    initial_value: SharedString,
     _subscription: gpui::Subscription,
 }
 
@@ -45,33 +46,54 @@ where
     ) -> AnyElement {
         let value = get_value::<T>(&field, cx);
         let set_value = set_value::<T>(&field, cx);
+        let current_value: SharedString = value.clone().into();
 
-        let state = window
-            .use_keyed_state(
-                SharedString::from(format!(
-                    "string-state-{}-{}-{}",
-                    options.page_ix, options.group_ix, options.item_ix
-                )),
-                cx,
-                |window, cx| {
-                    let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
-                    let _subscription = cx.subscribe(&input, {
-                        move |_, input, event: &InputEvent, cx| match event {
-                            InputEvent::Change => {
-                                let value = input.read(cx).value();
-                                set_value(value.into(), cx);
+        let state = window.use_keyed_state(
+            SharedString::from(format!(
+                "string-state-{}-{}-{}",
+                options.page_ix, options.group_ix, options.item_ix
+            )),
+            cx,
+            |window, cx| {
+                let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
+                let _subscription = cx.subscribe(&input, {
+                    move |state: &mut State, input, event: &InputEvent, cx| match event {
+                        InputEvent::Change => {
+                            let value = input.read(cx).value();
+                            if value == state.initial_value {
+                                return;
                             }
-                            _ => {}
+                            state.initial_value = value.clone();
+                            set_value(value.into(), cx);
                         }
-                    });
-
-                    State {
-                        input,
-                        _subscription,
+                        _ => {}
                     }
-                },
-            )
-            .read(cx);
+                });
+
+                State {
+                    input,
+                    initial_value: current_value.clone(),
+                    _subscription,
+                }
+            },
+        );
+
+        let cached_input_value = state.read(cx).input.read(cx).value();
+        let should_sync = {
+            let state = state.read(cx);
+            state.initial_value != current_value || cached_input_value != current_value
+        };
+        if should_sync {
+            let next_value = current_value.clone();
+            state.update(cx, |state, cx| {
+                state.initial_value = next_value.clone();
+                state.input.update(cx, |input, cx| {
+                    input.set_value(next_value.clone(), window, cx);
+                });
+            });
+        }
+
+        let state = state.read(cx);
 
         Input::new(&state.input)
             .with_size(options.size)
