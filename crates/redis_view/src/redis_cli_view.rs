@@ -60,7 +60,6 @@ const REDIS_CLI_CONTEXT: &str = "RedisCli";
 /// 双击判定时间（毫秒）
 const DOUBLE_CLICK_THRESHOLD_MS: u128 = 500;
 const REDIS_CLI_CONTENT_PADDING: Pixels = px(12.0);
-const REDIS_CLI_SCROLLBAR_WIDTH: Pixels = px(12.0);
 const REDIS_CLI_SCROLLBAR_RIGHT: Pixels = px(4.0);
 
 struct CommandHint {
@@ -1898,7 +1897,7 @@ impl Render for RedisCliView {
                         .top(REDIS_CLI_CONTENT_PADDING)
                         .right(REDIS_CLI_SCROLLBAR_RIGHT)
                         .bottom(REDIS_CLI_CONTENT_PADDING)
-                        .w(REDIS_CLI_SCROLLBAR_WIDTH)
+                        .w(Scrollbar::width())
                         .child(
                             Scrollbar::vertical(&self.scrollbar_handle)
                                 .scrollbar_show(ScrollbarShow::Always),
