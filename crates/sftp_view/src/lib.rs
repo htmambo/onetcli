@@ -1760,6 +1760,7 @@ impl SftpView {
         let local_panel = self.local_panel.clone();
         let cancelled = shared_progress.cancelled.clone();
         let progress_for_callback = shared_progress.clone();
+        let local_dir_for_result = local_dir.clone();
 
         if is_dir {
             shared_progress.scanning.store(true, Ordering::Relaxed);
@@ -1814,40 +1815,49 @@ impl SftpView {
                 cx.notify();
             });
 
-            if should_refresh {
-                if let Ok(dir_entries) = std::fs::read_dir(&local_dir) {
-                    let mut entries = Vec::new();
-                    for entry in dir_entries.flatten() {
-                        if let Ok(metadata) = entry.metadata() {
-                            let is_dir = metadata.is_dir();
-                            entries.push(LocalFileEntry {
-                                name: entry.file_name().to_string_lossy().to_string(),
-                                size: metadata.len(),
-                                modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                                is_dir,
-                                permissions: format_local_permissions(&metadata, is_dir),
-                            });
-                        }
+            if !should_refresh {
+                return;
+            }
+
+            if let Ok(dir_entries) = std::fs::read_dir(&local_dir) {
+                let mut entries = Vec::new();
+                for entry in dir_entries.flatten() {
+                    if let Ok(metadata) = entry.metadata() {
+                        let is_dir = metadata.is_dir();
+                        entries.push(LocalFileEntry {
+                            name: entry.file_name().to_string_lossy().to_string(),
+                            size: metadata.len(),
+                            modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                            is_dir,
+                            permissions: format_local_permissions(&metadata, is_dir),
+                        });
                     }
-                    entries.sort_by(|a, b| {
-                        if a.is_dir == b.is_dir {
-                            a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                        } else if a.is_dir {
-                            std::cmp::Ordering::Less
-                        } else {
-                            std::cmp::Ordering::Greater
-                        }
-                    });
-                    let items: Vec<FileItem> = entries
-                        .into_iter()
-                        .map(|e| FileItem {
-                            name: e.name,
-                            size: e.size,
-                            modified: e.modified,
-                            is_dir: e.is_dir,
-                            permissions: e.permissions,
-                        })
-                        .collect();
+                }
+                entries.sort_by(|a, b| {
+                    if a.is_dir == b.is_dir {
+                        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                    } else if a.is_dir {
+                        std::cmp::Ordering::Less
+                    } else {
+                        std::cmp::Ordering::Greater
+                    }
+                });
+                let items: Vec<FileItem> = entries
+                    .into_iter()
+                    .map(|e| FileItem {
+                        name: e.name,
+                        size: e.size,
+                        modified: e.modified,
+                        is_dir: e.is_dir,
+                        permissions: e.permissions,
+                    })
+                    .collect();
+                let _ = this.update(cx, |this, cx| {
+                    if !should_apply_local_listing(&this.local_current_path, &local_dir_for_result)
+                    {
+                        return;
+                    }
+
                     let _ = local_panel.update(cx, |panel, cx| {
                         panel.set_items(items, cx);
                     });

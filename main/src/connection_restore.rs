@@ -397,7 +397,11 @@ impl ConnectionRestoreDialogContent {
                 home.restore_saved_connection_sessions(&selected_snapshot_ids, window, cx);
             });
         }
-        window.remove_window();
+        // 将窗口关闭延迟到 defer 中，确保 restore_database_tab/redis/mongodb
+        // 等在同一个 window 上 defer 的恢复任务能先执行
+        window.defer(cx, |window, _cx| {
+            window.remove_window();
+        });
     }
 }
 

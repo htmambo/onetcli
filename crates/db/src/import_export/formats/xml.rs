@@ -10,6 +10,7 @@ use crate::import_export::{
     ExportConfig, ExportProgressEvent, ExportProgressSender, ExportResult, FormatHandler,
     ImportConfig, ImportResult,
 };
+use crate::DatabasePlugin;
 
 pub struct XmlFormatHandler;
 
