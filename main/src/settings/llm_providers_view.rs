@@ -1,27 +1,26 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, AsyncApp, Context, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement, Render, SharedString, Styled, WeakEntity, Window, div, px,
+    App, AppContext, AsyncApp, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, WindowExt,
+    ActiveTheme, Disableable, Sizable, StyledExt as _, app_style,
     button::{Button, ButtonVariant, ButtonVariants},
-    dialog::DialogButtonProps,
-    h_flex, v_flex,
+    h_flex, v_flex, TitleBar,
 };
 use one_core::llm::{storage::ProviderRepository, types::ProviderConfig};
+use one_core::popup_window::{PopupWindowOptions, open_popup_window, request_popup_window_close};
 use one_core::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use rust_i18n::t;
 
 use super::provider_form_dialog::ProviderForm;
-use crate::setting_tab::GlobalCurrentUser;
 
 pub struct LlmProvidersView {
     focus_handle: FocusHandle,
     storage_manager: StorageManager,
     providers: Vec<ProviderConfig>,
     loading: bool,
-    is_logged_in: bool,
 }
 
 impl LlmProvidersView {
@@ -35,7 +34,6 @@ impl LlmProvidersView {
             storage_manager,
             providers: vec![],
             loading: false,
-            is_logged_in: GlobalCurrentUser::get_user(cx).is_some(),
         };
         cx.spawn(async move |entity: WeakEntity<Self>, cx: &mut AsyncApp| {
             let _ = entity.update(cx, |this, cx| {
@@ -49,27 +47,13 @@ impl LlmProvidersView {
 
     fn load_providers(&mut self, cx: &mut Context<Self>) {
         self.loading = true;
-        let is_logged_in = GlobalCurrentUser::get_user(cx).is_some();
-        self.is_logged_in = is_logged_in;
-
         let repo = self
             .storage_manager
             .get::<ProviderRepository>()
             .expect("ProviderRepository not found");
 
-        if is_logged_in {
-            if let Err(e) = repo.ensure_onetcli_provider() {
-                tracing::error!("Failed to ensure OnetCli provider: {}", e);
-            }
-        }
-
         match repo.list() {
-            Ok(mut providers) => {
-                if !is_logged_in {
-                    providers.retain(|p| !p.is_builtin());
-                }
-                self.providers = providers;
-            }
+            Ok(providers) => self.providers = providers,
             Err(e) => {
                 tracing::error!("Failed to load providers: {}", e);
             }
@@ -95,84 +79,26 @@ impl LlmProvidersView {
     ) {
         let is_update = provider.is_some();
         let storage_manager = self.storage_manager.clone();
-        let form = cx.new(|cx| ProviderForm::new_with_config(provider, window, cx));
-        let form_for_ok = form.clone();
         let view = cx.entity().clone();
 
-        window.open_dialog(cx, move |dialog, _, _| {
-            let form_clone = form_for_ok.clone();
-            let storage_clone = storage_manager.clone();
-            let view_clone = view.clone();
-
-            dialog
-                .title(if is_update {
-                    t!("LlmProviders.dialog_edit_title").to_string()
-                } else {
-                    t!("LlmProviders.dialog_add_title").to_string()
+        open_popup_window(
+            window,
+            PopupWindowOptions::new(if is_update {
+                t!("LlmProviders.dialog_edit_title").to_string()
+            } else {
+                t!("LlmProviders.dialog_add_title").to_string()
+            })
+            .size(560.0, 560.0),
+            move |window, cx| {
+                cx.new(|cx| {
+                    ProviderEditorView::new(provider, storage_manager, view, window, cx)
                 })
-                .child(form.clone())
-                .confirm()
-                .button_props(DialogButtonProps::default().ok_text(if is_update {
-                    t!("Common.save")
-                } else {
-                    t!("LlmProviders.dialog_add_action")
-                }))
-                .on_ok(move |_, window, cx| {
-                    let config_opt = form_clone.update(cx, |form, cx| form.get_config(cx));
-
-                    let Some(mut config) = config_opt else {
-                        window
-                            .push_notification(t!("LlmProviders.required_notice").to_string(), cx);
-                        return false;
-                    };
-
-                    let repo = storage_clone
-                        .get::<ProviderRepository>()
-                        .expect("ProviderRepository not found");
-
-                    if config.is_default {
-                        if let Ok(existing) = repo.list() {
-                            for mut item in existing {
-                                if item.id != config.id && item.is_default {
-                                    item.is_default = false;
-                                    if let Err(e) = repo.update(&item) {
-                                        tracing::error!("Failed to unset default provider: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    let result = if is_update {
-                        repo.update(&config)
-                    } else {
-                        repo.insert(&mut config).map(|_| ())
-                    };
-
-                    match result {
-                        Ok(_) => {
-                            _ = view_clone.update(cx, |view, cx| {
-                                view.load_providers(cx);
-                            });
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to save provider: {}", e);
-                        }
-                    }
-                    true
-                })
-        });
+            },
+            cx,
+        );
     }
 
     fn delete_provider(&mut self, provider_id: i64, cx: &mut Context<Self>) {
-        // 内置 provider 不可删除
-        if self
-            .providers
-            .iter()
-            .any(|p| p.id == provider_id && p.is_builtin())
-        {
-            return;
-        }
         let repo = self
             .storage_manager
             .get::<ProviderRepository>()
@@ -216,10 +142,6 @@ impl LlmProvidersView {
     }
 
     fn toggle_provider(&mut self, provider: &ProviderConfig, cx: &mut Context<Self>) {
-        if provider.is_builtin() {
-            return;
-        }
-
         let mut updated = provider.clone();
         updated.enabled = !updated.enabled;
 
@@ -237,10 +159,12 @@ impl LlmProvidersView {
 
 impl Render for LlmProvidersView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+
         v_flex()
             .size_full()
             .gap_4()
             .p_6()
+            .bg(cx.theme().background)
             .child(
                 h_flex()
                     .justify_between()
@@ -313,7 +237,6 @@ impl LlmProvidersView {
         provider: &ProviderConfig,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let is_builtin = provider.is_builtin();
         let provider_id = provider.id;
         let provider_for_default = provider.clone();
         let provider_for_toggle = provider.clone();
@@ -324,13 +247,9 @@ impl LlmProvidersView {
             .child(self.render_provider_header(provider, cx))
             .child(self.render_provider_details(provider, cx));
 
-        let actions = if is_builtin {
-            self.render_builtin_actions(&provider_for_default, cx)
-                .into_any_element()
-        } else {
-            self.render_custom_actions(provider_id, &provider_for_toggle, &provider_for_default, cx)
-                .into_any_element()
-        };
+        let actions = self
+            .render_provider_actions(provider_id, &provider_for_toggle, &provider_for_default, cx)
+            .into_any_element();
 
         div()
             .flex()
@@ -339,6 +258,7 @@ impl LlmProvidersView {
             .rounded_lg()
             .border_1()
             .border_color(cx.theme().border)
+            // Layer 5: 卡片 - 0.18
             .bg(cx.theme().background)
             .child(info)
             .child(actions)
@@ -448,47 +368,8 @@ impl LlmProvidersView {
             })
     }
 
-    /// 内置 provider（OnetCli）支持设置/取消默认和编辑，不可删除和禁用
-    fn render_builtin_actions(
-        &self,
-        provider: &ProviderConfig,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let provider_clone = provider.clone();
-        let provider_id = provider.id;
-        let is_default = provider.is_default;
-
-        h_flex()
-            .gap_2()
-            .items_center()
-            .child(
-                Button::new(SharedString::from(format!("default-{}", provider_id)))
-                    .with_variant(if is_default {
-                        ButtonVariant::Secondary
-                    } else {
-                        ButtonVariant::Primary
-                    })
-                    .label(if is_default {
-                        t!("LlmProviders.action_unset_default")
-                    } else {
-                        t!("LlmProviders.action_set_default")
-                    })
-                    .on_click(cx.listener(move |view, _, _, cx| {
-                        view.toggle_default(&provider_clone, cx);
-                    })),
-            )
-            .child(
-                Button::new(SharedString::from(format!("edit-{}", provider_id)))
-                    .with_variant(ButtonVariant::Secondary)
-                    .label(t!("LlmProviders.action_edit"))
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.edit_provider(provider_id, window, cx);
-                    })),
-            )
-    }
-
-    /// 用户自定义 provider 支持启用/禁用、设置默认、编辑、删除
-    fn render_custom_actions(
+    /// 设置页中的 provider 统一支持启用/禁用、设置默认、编辑、删除
+    fn render_provider_actions(
         &self,
         provider_id: i64,
         provider_for_toggle: &ProviderConfig,
@@ -557,3 +438,189 @@ impl Focusable for LlmProvidersView {
 }
 
 impl EventEmitter<()> for LlmProvidersView {}
+
+struct ProviderEditorView {
+    focus_handle: FocusHandle,
+    form: Entity<ProviderForm>,
+    is_update: bool,
+    storage_manager: StorageManager,
+    view: WeakEntity<LlmProvidersView>,
+    is_saving: bool,
+    error_message: Option<String>,
+}
+
+impl ProviderEditorView {
+    fn new(
+        provider: Option<ProviderConfig>,
+        storage_manager: StorageManager,
+        view: Entity<LlmProvidersView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let is_update = provider.is_some();
+        let form = cx.new(|cx| ProviderForm::new_with_config(provider, window, cx));
+
+        Self {
+            focus_handle: cx.focus_handle(),
+            form,
+            is_update,
+            storage_manager,
+            view: view.downgrade(),
+            is_saving: false,
+            error_message: None,
+        }
+    }
+
+    fn on_cancel(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
+        window.remove_window();
+    }
+
+    fn on_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mut config) = self.form.update(cx, |form: &mut ProviderForm, cx: &mut Context<ProviderForm>| form.get_config(cx)) else {
+            self.error_message = Some(t!("LlmProviders.required_notice").to_string());
+            cx.notify();
+            return;
+        };
+
+        self.is_saving = true;
+        self.error_message = None;
+        cx.notify();
+
+        let repo = self
+            .storage_manager
+            .get::<ProviderRepository>()
+            .expect("ProviderRepository not found");
+
+        if config.is_default {
+            if let Ok(existing) = repo.list() {
+                for mut item in existing {
+                    if item.id != config.id && item.is_default {
+                        item.is_default = false;
+                        if let Err(e) = repo.update(&item) {
+                            tracing::error!("Failed to unset default provider: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = if self.is_update {
+            repo.update(&config)
+        } else {
+            repo.insert(&mut config).map(|_| ())
+        };
+
+        self.is_saving = false;
+
+        match result {
+            Ok(_) => {
+                if let Some(view) = self.view.upgrade() {
+                    let _ = view.update(cx, |view, cx| {
+                        view.load_providers(cx);
+                    });
+                }
+                request_popup_window_close(window, cx);
+            }
+            Err(e) => {
+                tracing::error!("Failed to save provider: {}", e);
+                cx.notify();
+            }
+        }
+    }
+}
+
+impl Focusable for ProviderEditorView {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for ProviderEditorView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_saving = self.is_saving;
+        let title = if self.is_update {
+            t!("LlmProviders.dialog_edit_title").to_string()
+        } else {
+            t!("LlmProviders.dialog_add_title").to_string()
+        };
+
+        let error_element = self.error_message.as_ref().map(|error_message| {
+            div()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .bg(app_style::danger_dim())
+                .text_sm()
+                .text_color(app_style::danger())
+                .child(error_message.clone())
+        });
+
+        v_flex()
+            .justify_center()
+            .size_full()
+            .rounded(cx.theme().radius_lg)
+            .bg(app_style::base())
+            .child(
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(app_style::text())
+                            .child(title),
+                    ),
+            )
+            .child(
+                div()
+                    .id("provider-form-content")
+                    .flex_1()
+                    .p_4()
+                    .overflow_y_scroll()
+                    .child(self.form.clone()),
+            )
+            .when_some(error_element, |this, elem| {
+                this.child(h_flex().justify_center().pb_2().child(elem))
+            })
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap_2()
+                    .px_6()
+                    .py_4()
+                    .border_t_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
+                    .child(
+                        Button::new("provider-editor-cancel")
+                            .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
+                            .label(t!("Common.cancel").to_string())
+                            .disabled(is_saving)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.on_cancel(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("provider-editor-save")
+                            .small()
+                            .with_variant(app_style::primary_button_variant(cx))
+                            .label(if self.is_update {
+                                t!("Common.save").to_string()
+                            } else {
+                                t!("LlmProviders.dialog_add_action").to_string()
+                            })
+                            .disabled(is_saving)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.on_save(window, cx);
+                            })),
+                    ),
+            )
+    }
+}
