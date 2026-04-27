@@ -1,3 +1,5 @@
+rust_i18n::i18n!("../ui/locales", fallback = "en");
+
 pub mod edit_table;
 pub mod resize_handle;
 mod time;
