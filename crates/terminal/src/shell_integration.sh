@@ -27,6 +27,16 @@ __onetcli_update_cwd() {
     __onetcli_emit_osc "7;file://${HOSTNAME:-$(hostname)}$PWD"
 }
 
+__onetcli_write_cwd_file() {
+    [[ -n "${ONETCLI_CWD_FILE:-}" ]] || return 0
+    printf '%s\n' "$PWD" > "${ONETCLI_CWD_FILE}" 2>/dev/null || true
+}
+
+# 脚本被 source 时立即写一次初始 cwd
+if [[ -n "${ONETCLI_CWD_FILE:-}" ]]; then
+    printf '%s\n' "$PWD" > "${ONETCLI_CWD_FILE}"
+fi
+
 __onetcli_encode_command() {
     command -v base64 >/dev/null 2>&1 || return 1
     printf '%s' "$1" | base64 | tr -d '\r\n'
@@ -58,6 +68,7 @@ __onetcli_precmd_common() {
         __onetcli_emit_recorded_command
         unset __ONETCLI_COMMAND_STARTED
     fi
+    __onetcli_write_cwd_file
     __onetcli_update_cwd
     __onetcli_prompt_start
 }

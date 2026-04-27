@@ -385,6 +385,7 @@ mod tests {
             timeout: None,
             keepalive_interval: None,
             keepalive_max: None,
+            enable_legacy_kex: false,
             jump_server: None::<JumpServerConnectConfig>,
             proxy: None::<ProxyConnectConfig>,
         }

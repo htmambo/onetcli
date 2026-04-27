@@ -560,7 +560,11 @@ impl DatabasePlugin for OraclePlugin {
 
         let data_sql = format!(
             "SELECT ROWID AS \"__rowid__\", t.* FROM {} t{}{} OFFSET {} ROWS FETCH NEXT {} ROWS ONLY",
-            table_ref, where_clause, order_by, offset, request.page_size
+            table_ref,
+            where_clause,
+            order_by,
+            offset,
+            request.page_size
         );
 
         let sql_result = connection.query(&data_sql).await?;
@@ -1866,28 +1870,6 @@ impl DatabasePlugin for OraclePlugin {
         )
     }
 
-    fn build_backup_table_sql(
-        &self,
-        _database: &str,
-        schema: Option<&str>,
-        source_table: &str,
-        target_table: &str,
-    ) -> String {
-        let qualify = |table: &str| match schema {
-            Some(schema) => format!(
-                "{}.{}",
-                self.quote_identifier(schema),
-                self.quote_identifier(table)
-            ),
-            None => self.quote_identifier(table),
-        };
-        format!(
-            "CREATE TABLE {} AS SELECT * FROM {};",
-            qualify(target_table),
-            qualify(source_table)
-        )
-    }
-
     fn drop_view(&self, _database: &str, view: &str) -> String {
         format!("DROP VIEW {}", self.quote_identifier(view))
     }
@@ -2207,16 +2189,6 @@ mod tests {
         assert!(sql.contains("RENAME TO"));
         assert!(sql.contains("\"old_name\""));
         assert!(sql.contains("\"new_name\""));
-    }
-
-    #[test]
-    fn test_build_backup_table_sql() {
-        let plugin = create_plugin();
-        let sql = plugin.build_backup_table_sql("test_db", Some("APP"), "orders", "orders_bak");
-        assert_eq!(
-            sql,
-            "CREATE TABLE \"APP\".\"orders_bak\" AS SELECT * FROM \"APP\".\"orders\";"
-        );
     }
 
     #[test]

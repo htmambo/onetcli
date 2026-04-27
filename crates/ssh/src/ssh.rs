@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -44,6 +45,7 @@ pub struct SshConnectConfig {
     pub timeout: Option<Duration>,
     pub keepalive_interval: Option<Duration>,
     pub keepalive_max: Option<usize>,
+    pub enable_legacy_kex: bool,
     /// 跳板机配置
     pub jump_server: Option<JumpServerConnectConfig>,
     /// 代理配置
@@ -99,6 +101,130 @@ pub struct AuthFailureMessages {
     pub auto_publickey_failed: String,
     pub no_local_identity: String,
     pub auto_publickey_next_step: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SshConnectionStage {
+    ConnectingToJumpServer,
+    ConnectingToJumpServerViaProxy,
+    HandshakingJumpServer,
+    AuthenticatingJumpServer,
+    OpeningJumpTunnel,
+    ConnectingToTarget,
+    ConnectingToTargetViaProxy,
+    HandshakingTarget,
+    AuthenticatingTarget,
+    OpeningSessionChannel,
+    RequestingPty,
+    StartingShell,
+    RunningInitCommands,
+}
+
+impl SshConnectionStage {
+    pub fn initial_for_config(config: &SshConnectConfig) -> Self {
+        if config.jump_server.is_some() {
+            if config.proxy.is_some() {
+                Self::ConnectingToJumpServerViaProxy
+            } else {
+                Self::ConnectingToJumpServer
+            }
+        } else if config.proxy.is_some() {
+            Self::ConnectingToTargetViaProxy
+        } else {
+            Self::ConnectingToTarget
+        }
+    }
+
+    pub fn description(self) -> String {
+        match self {
+            Self::ConnectingToJumpServer => t!("SshProgress.connecting_jump_server").to_string(),
+            Self::ConnectingToJumpServerViaProxy => {
+                t!("SshProgress.connecting_jump_server_via_proxy").to_string()
+            }
+            Self::HandshakingJumpServer => t!("SshProgress.handshaking_jump_server").to_string(),
+            Self::AuthenticatingJumpServer => {
+                t!("SshProgress.authenticating_jump_server").to_string()
+            }
+            Self::OpeningJumpTunnel => t!("SshProgress.opening_jump_tunnel").to_string(),
+            Self::ConnectingToTarget => t!("SshProgress.connecting_target").to_string(),
+            Self::ConnectingToTargetViaProxy => {
+                t!("SshProgress.connecting_target_via_proxy").to_string()
+            }
+            Self::HandshakingTarget => t!("SshProgress.handshaking_target").to_string(),
+            Self::AuthenticatingTarget => t!("SshProgress.authenticating_target").to_string(),
+            Self::OpeningSessionChannel => t!("SshProgress.opening_session_channel").to_string(),
+            Self::RequestingPty => t!("SshProgress.requesting_pty").to_string(),
+            Self::StartingShell => t!("SshProgress.starting_shell").to_string(),
+            Self::RunningInitCommands => t!("SshProgress.running_init_commands").to_string(),
+        }
+    }
+}
+
+const LEGACY_KEX_ORDER: &[kex::Name] = &[kex::DH_G14_SHA1, kex::DH_GEX_SHA1, kex::DH_G1_SHA1];
+const LEGACY_CIPHER_ORDER: &[cipher::Name] = &[
+    cipher::AES_128_CBC,
+    cipher::AES_192_CBC,
+    cipher::AES_256_CBC,
+];
+
+fn build_preferred_algorithms(enable_legacy_kex: bool) -> Preferred {
+    let mut preferred = Preferred::default();
+    if !enable_legacy_kex {
+        return preferred;
+    }
+
+    let mut kex_list = preferred.kex.into_owned();
+    for legacy_kex in LEGACY_KEX_ORDER {
+        if !kex_list.iter().any(|candidate| candidate == legacy_kex) {
+            kex_list.push(*legacy_kex);
+        }
+    }
+    preferred.kex = Cow::Owned(kex_list);
+
+    let mut cipher_list = preferred.cipher.into_owned();
+    for legacy_cipher in LEGACY_CIPHER_ORDER {
+        if !cipher_list
+            .iter()
+            .any(|candidate| candidate == legacy_cipher)
+        {
+            cipher_list.push(*legacy_cipher);
+        }
+    }
+    preferred.cipher = Cow::Owned(cipher_list);
+
+    preferred
+}
+
+pub fn build_client_config(config: &SshConnectConfig) -> client::Config {
+    let gex = if config.enable_legacy_kex {
+        client::GexParams::new(2048, 4096, 8192).expect("旧版 SSH 兼容模式的 GEX 参数必须有效")
+    } else {
+        Default::default()
+    };
+
+    client::Config {
+        inactivity_timeout: config.timeout.or(Some(defaults::INACTIVITY_TIMEOUT)),
+        keepalive_interval: config
+            .keepalive_interval
+            .or(Some(defaults::KEEPALIVE_INTERVAL)),
+        keepalive_max: config.keepalive_max.unwrap_or(defaults::KEEPALIVE_MAX),
+        preferred: build_preferred_algorithms(config.enable_legacy_kex),
+        gex,
+        ..<_>::default()
+    }
+}
+
+pub fn format_connection_progress_message(message: &str, elapsed_secs: u64) -> String {
+    if elapsed_secs == 0 {
+        message.to_string()
+    } else {
+        t!(
+            "SshProgress.status_with_elapsed",
+            stage = message,
+            seconds = elapsed_secs
+        )
+        .to_string()
+    }
 }
 
 #[derive(Clone)]
@@ -175,16 +301,57 @@ pub trait SshClient: Send + Sync {
     }
 }
 
-struct RusshHandler;
+pub fn verify_server_key(
+    host: &str,
+    port: u16,
+    server_public_key: &PublicKey,
+) -> std::result::Result<bool, russh::Error> {
+    match russh::keys::check_known_hosts(host, port, server_public_key) {
+        Ok(true) => Ok(true),
+        Ok(false) => {
+            tracing::warn!(
+                "首次连接 SSH 主机 {}:{}，自动写入 known_hosts 指纹",
+                host,
+                port
+            );
+            russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
+            Ok(true)
+        }
+        Err(russh::keys::Error::KeyChanged { line }) => {
+            tracing::error!(
+                "SSH 主机 {}:{} 的指纹发生变化，拒绝连接（known_hosts 第 {} 行）",
+                host,
+                port,
+                line
+            );
+            Err(russh::Error::KeyChanged { line })
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+struct RusshHandler {
+    host: String,
+    port: u16,
+}
+
+impl RusshHandler {
+    fn new(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            host: host.into(),
+            port,
+        }
+    }
+}
 
 impl client::Handler for RusshHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        verify_server_key(&self.host, self.port, server_public_key)
     }
 }
 
@@ -955,11 +1122,11 @@ impl SshClient for RusshClient {
             let jump_session = if let Some(ref proxy) = config.proxy {
                 tracing::info!("通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
                 let stream = connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                let handler = RusshHandler;
+                let handler = RusshHandler::new(&jump.host, jump.port);
                 client::connect_stream(russh_config.clone(), stream, handler).await?
             } else {
                 let addrs = (jump.host.as_str(), jump.port);
-                let handler = RusshHandler;
+                let handler = RusshHandler::new(&jump.host, jump.port);
                 client::connect(russh_config.clone(), addrs, handler).await?
             };
 
@@ -980,7 +1147,7 @@ impl SshClient for RusshClient {
                 .await?;
 
             // 使用转发通道创建SSH会话
-            let handler = RusshHandler;
+            let handler = RusshHandler::new(&config.host, config.port);
             let mut session =
                 client::connect_stream(russh_config, forwarded_channel.into_stream(), handler)
                     .await?;
@@ -1009,7 +1176,7 @@ impl SshClient for RusshClient {
                 config.port
             );
             let stream = connect_via_proxy(proxy, &config.host, config.port).await?;
-            let handler = RusshHandler;
+            let handler = RusshHandler::new(&config.host, config.port);
             let mut session = client::connect_stream(russh_config, stream, handler).await?;
 
             authenticate_with_strategy(
@@ -1028,7 +1195,7 @@ impl SshClient for RusshClient {
         // 情况3: 直接连接
         else {
             let addrs = (config.host.as_str(), config.port);
-            let handler = RusshHandler;
+            let handler = RusshHandler::new(&config.host, config.port);
             let mut session = client::connect(russh_config, addrs, handler).await?;
 
             authenticate_with_strategy(
@@ -1075,8 +1242,23 @@ impl SshClient for RusshClient {
 }
 
 impl RusshClient {
+    pub async fn connect_with_progress(
+        config: SshConnectConfig,
+        mut on_progress: impl FnMut(SshConnectionStage) + Send + 'static,
+    ) -> Result<Self> {
+        on_progress(SshConnectionStage::ConnectingToTarget);
+        Self::connect(config).await
+    }
+
     pub async fn open_raw_channel(&mut self) -> Result<Channel<client::Msg>> {
         Ok(self.session.channel_open_session().await?)
+    }
+
+    pub async fn disconnect(&mut self) -> Result<()> {
+        self.session
+            .disconnect(Disconnect::ByApplication, "", "English")
+            .await?;
+        Ok(())
     }
 }
 

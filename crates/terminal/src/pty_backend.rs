@@ -9,7 +9,66 @@ use std::thread;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{TerminalBackend, TerminalSize};
+use crate::local_pty_protocol::LocalPtyHostRequest;
+use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
+
+/// 从 PowerShell/pwsh 窗口标题中提取工作目录
+///
+/// PowerShell 格式: "PS C:\path\to\dir" 或 "PS ~/path"
+/// pwsh 格式: "pwsh in D:\path" 或 "pwsh in C:/path"
+fn extract_path_from_powershell_title(title: &str) -> Option<String> {
+    // 去掉 ANSI 颜色序列
+    let title = strip_ansi(title);
+
+    // pwsh: "pwsh in D:\path" 或 "pwsh in C:/path" 或 "pwsh in /home/user"
+    if let Some(pos) = title.strip_prefix("pwsh in ") {
+        let path = pos.trim();
+        if !path.is_empty() && path.len() < 256 {
+            // 验证是绝对路径：包含分隔符 或 : 或以 ~ 开头
+            if path.contains('\\')
+                || path.contains('/')
+                || path.contains(':')
+                || path.starts_with('~')
+            {
+                return Some(path.to_string());
+            }
+        }
+    }
+
+    // PowerShell: "PS C:\path" 或 "PS C:/path"
+    if let Some(pos) = title.strip_prefix("PS ") {
+        let path = pos.trim();
+        if !path.is_empty() && path.len() < 256 {
+            // 验证是路径：包含 \ 或 / 或 :
+            if path.contains('\\') || path.contains('/') || path.contains(':') {
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 去掉 ANSI 转义序列
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&ch) = chars.peek() {
+                    chars.next();
+                    if ch.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
 
 /// 终端事件类型
 #[derive(Debug, Clone)]
@@ -20,6 +79,8 @@ pub enum TerminalEvent {
     PromptStart,
     /// shell prompt 已渲染完成，进入可输入状态（OSC 133;B）
     InputStart,
+    /// 命令开始执行（OSC 133;C）
+    CommandStart,
     /// 终端标题已更改
     TitleChanged(String),
     /// 终端响铃
@@ -32,6 +93,8 @@ pub enum TerminalEvent {
     ClipboardLoad(ClipboardType),
     /// 远程工作目录变更（OSC 7）
     WorkingDirChanged(String),
+    /// SSH 远端 shell 已回到提示符，可视为空闲态（向后兼容 fallback）
+    SshPromptReady,
     /// 命令执行完毕（OSC 133;D）
     CommandFinished { exit_code: i32 },
     /// 记录 shell 实际执行过的命令
@@ -50,11 +113,17 @@ pub enum PtyCommand {
 /// 当 alacritty_terminal 处理 DA 查询等序列时，会生成 PtyWrite 事件，
 /// 需要通过此通道将响应写回终端。
 #[derive(Clone)]
+#[allow(dead_code)]
 enum PtyWriteBack {
     /// 本地 PTY：通过 EventLoopSender 写回
     Local(EventLoopSender),
     /// SSH：通过 UnboundedSender 写回
     Ssh(UnboundedSender<Vec<u8>>),
+    /// Hosted 本地 PTY：通过 host client 回写
+    Hosted {
+        sender: UnboundedSender<LocalPtyHostRequest>,
+        session_id: String,
+    },
 }
 
 impl PtyWriteBack {
@@ -65,6 +134,12 @@ impl PtyWriteBack {
             }
             PtyWriteBack::Ssh(sender) => {
                 let _ = sender.send(data);
+            }
+            PtyWriteBack::Hosted { sender, session_id } => {
+                let _ = sender.send(LocalPtyHostRequest::Input {
+                    session_id: session_id.clone(),
+                    data,
+                });
             }
         }
     }
@@ -79,6 +154,7 @@ impl PtyWriteBack {
 pub struct LocalPtyBackend {
     event_loop_sender: EventLoopSender,
     _event_loop_handle: JoinHandle<()>,
+    child_pid: Option<u32>,
 }
 
 impl LocalPtyBackend {
@@ -103,6 +179,10 @@ impl LocalPtyBackend {
         );
 
         let pty = tty::new(&pty_options, window_size, 0)?;
+        #[cfg(unix)]
+        let child_pid = Some(pty.child().id());
+        #[cfg(not(unix))]
+        let child_pid = None;
         let event_loop = EventLoop::new(term, event_proxy.clone(), pty, true, false)?;
         let event_loop_sender = event_loop.channel();
 
@@ -116,7 +196,12 @@ impl LocalPtyBackend {
         Ok(Self {
             event_loop_sender,
             _event_loop_handle: handle,
+            child_pid,
         })
+    }
+
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
     }
 
     pub fn write(&self, data: Vec<u8>) {
@@ -178,6 +263,16 @@ impl TerminalBackend for LocalPtyBackend {
         let _ = self.event_loop_sender.send(Msg::Resize(window_size));
     }
 
+    fn close(&self, mode: TerminalCloseMode) {
+        match mode {
+            TerminalCloseMode::Kill => LocalPtyBackend::shutdown(self),
+            TerminalCloseMode::Detach => {
+                // 本地 PTY 旧后端直接在 UI 进程内运行，detach 语义与 kill 相同。
+                LocalPtyBackend::shutdown(self)
+            }
+        }
+    }
+
     fn shutdown(&self) {
         LocalPtyBackend::shutdown(self);
     }
@@ -211,6 +306,16 @@ impl GpuiEventProxy {
         self.set_write_back(PtyWriteBack::Ssh(sender));
     }
 
+    /// 设置 Hosted 本地 PTY 回写通道
+    #[allow(dead_code)]
+    pub(crate) fn set_hosted_write_back(
+        &self,
+        sender: UnboundedSender<LocalPtyHostRequest>,
+        session_id: String,
+    ) {
+        self.set_write_back(PtyWriteBack::Hosted { sender, session_id });
+    }
+
     fn write_back(&self, data: Vec<u8>) {
         if let Some(wb) = self.write_back.lock().unwrap().as_ref() {
             wb.write(data);
@@ -241,7 +346,15 @@ impl EventListener for GpuiEventProxy {
                 return;
             }
             AlacTermEvent::Wakeup => TerminalEvent::Wakeup,
-            AlacTermEvent::Title(title) => TerminalEvent::TitleChanged(title),
+            AlacTermEvent::Title(title) => {
+                // 尝试从标题中提取工作目录
+                // PowerShell 格式: "PS C:\path\to\dir" 或 "PS ~/path"
+                // pwsh 格式: "pwsh in D:\path"
+                if let Some(cwd) = extract_path_from_powershell_title(&title) {
+                    let _ = self.event_tx.send(TerminalEvent::WorkingDirChanged(cwd));
+                }
+                TerminalEvent::TitleChanged(title)
+            }
             AlacTermEvent::Bell => TerminalEvent::Bell,
             AlacTermEvent::ClipboardStore(ty, data) => TerminalEvent::ClipboardStore(ty, data),
             AlacTermEvent::ClipboardLoad(ty, _) => TerminalEvent::ClipboardLoad(ty),

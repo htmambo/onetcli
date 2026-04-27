@@ -50,40 +50,45 @@ impl FormatHandler for SqlFormatHandler {
             file: file_name.to_string(),
         });
 
+        let mut transactional_prefix = Vec::new();
         if config.truncate_before_import {
             if let Some(table) = &config.table {
                 let table_ref = format_import_table_reference(plugin, config, table);
                 let truncate_sql = format!("TRUNCATE TABLE {}", table_ref);
-                send_progress(ImportProgressEvent::ExecutingStatement {
-                    file: file_name.to_string(),
-                    statement_index: 0,
-                    total_statements: 1,
-                });
+                if config.use_transaction {
+                    transactional_prefix.push(truncate_sql);
+                } else {
+                    send_progress(ImportProgressEvent::ExecutingStatement {
+                        file: file_name.to_string(),
+                        statement_index: 0,
+                        total_statements: 1,
+                    });
 
-                let results = connection
-                    .execute(plugin, &truncate_sql, ExecOptions::default())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Truncate failed: {}", e))?;
+                    let results = connection
+                        .execute(plugin, &truncate_sql, ExecOptions::default())
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Truncate failed: {}", e))?;
 
-                for result in results {
-                    if let SqlResult::Error(err) = result {
-                        let error_msg = format!("Truncate failed: {}", err.message);
-                        errors.push(error_msg.clone());
-                        send_progress(ImportProgressEvent::Error {
-                            file: file_name.to_string(),
-                            message: error_msg,
-                        });
-                        if config.stop_on_error {
-                            send_progress(ImportProgressEvent::Finished {
-                                total_rows: 0,
-                                elapsed_ms: start.elapsed().as_millis(),
+                    for result in results {
+                        if let SqlResult::Error(err) = result {
+                            let error_msg = format!("Truncate failed: {}", err.message);
+                            errors.push(error_msg.clone());
+                            send_progress(ImportProgressEvent::Error {
+                                file: file_name.to_string(),
+                                message: error_msg,
                             });
-                            return Ok(ImportResult {
-                                success: false,
-                                rows_imported: 0,
-                                errors,
-                                elapsed_ms: start.elapsed().as_millis(),
-                            });
+                            if config.stop_on_error {
+                                send_progress(ImportProgressEvent::Finished {
+                                    total_rows: 0,
+                                    elapsed_ms: start.elapsed().as_millis(),
+                                });
+                                return Ok(ImportResult {
+                                    success: false,
+                                    rows_imported: 0,
+                                    errors,
+                                    elapsed_ms: start.elapsed().as_millis(),
+                                });
+                            }
                         }
                     }
                 }
@@ -93,35 +98,36 @@ impl FormatHandler for SqlFormatHandler {
         let parser = plugin
             .create_parser(SqlSource::Script(data.to_string()))
             .map_err(|e| DbError::query(format!("Failed to create parser: {}", e)))?;
-        let statements: Vec<String> = parser
+        let mut statements: Vec<String> = parser
             .filter_map(|r| r.ok())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+        if !transactional_prefix.is_empty() {
+            let mut prefixed = transactional_prefix;
+            prefixed.extend(statements);
+            statements = prefixed;
+        }
         let total_statements = statements.len();
 
-        for (idx, stmt) in statements.iter().enumerate() {
-            let stmt = stmt.trim();
-            if stmt.is_empty() {
-                continue;
-            }
-
-            send_progress(ImportProgressEvent::ExecutingStatement {
-                file: file_name.to_string(),
-                statement_index: idx,
-                total_statements,
-            });
-
+        if config.use_transaction {
             let exec_options = ExecOptions {
                 stop_on_error: config.stop_on_error,
-                transactional: false,
+                transactional: true,
                 max_rows: None,
                 streaming: false,
             };
+            let script = statements.join(";\n");
 
-            match connection.execute(plugin, stmt, exec_options).await {
+            match connection.execute(plugin, &script, exec_options).await {
                 Ok(results) => {
-                    for result in results {
+                    for (idx, result) in results.into_iter().enumerate() {
+                        send_progress(ImportProgressEvent::ExecutingStatement {
+                            file: file_name.to_string(),
+                            statement_index: idx,
+                            total_statements,
+                        });
+
                         match result {
                             SqlResult::Exec(exec_result) => {
                                 total_rows += exec_result.rows_affected;
@@ -172,6 +178,83 @@ impl FormatHandler for SqlFormatHandler {
                             errors,
                             elapsed_ms: start.elapsed().as_millis(),
                         });
+                    }
+                }
+            }
+        } else {
+            for (idx, stmt) in statements.iter().enumerate() {
+                let stmt = stmt.trim();
+                if stmt.is_empty() {
+                    continue;
+                }
+
+                send_progress(ImportProgressEvent::ExecutingStatement {
+                    file: file_name.to_string(),
+                    statement_index: idx,
+                    total_statements,
+                });
+
+                let exec_options = ExecOptions {
+                    stop_on_error: config.stop_on_error,
+                    transactional: false,
+                    max_rows: None,
+                    streaming: false,
+                };
+
+                match connection.execute(plugin, stmt, exec_options).await {
+                    Ok(results) => {
+                        for result in results {
+                            match result {
+                                SqlResult::Exec(exec_result) => {
+                                    total_rows += exec_result.rows_affected;
+                                    send_progress(ImportProgressEvent::StatementExecuted {
+                                        file: file_name.to_string(),
+                                        rows_affected: exec_result.rows_affected,
+                                    });
+                                }
+                                SqlResult::Error(err) => {
+                                    let error_msg = err.message.clone();
+                                    errors.push(error_msg.clone());
+                                    send_progress(ImportProgressEvent::Error {
+                                        file: file_name.to_string(),
+                                        message: error_msg,
+                                    });
+                                    if config.stop_on_error {
+                                        send_progress(ImportProgressEvent::Finished {
+                                            total_rows,
+                                            elapsed_ms: start.elapsed().as_millis(),
+                                        });
+                                        return Ok(ImportResult {
+                                            success: false,
+                                            rows_imported: total_rows,
+                                            errors,
+                                            elapsed_ms: start.elapsed().as_millis(),
+                                        });
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        errors.push(error_msg.clone());
+                        send_progress(ImportProgressEvent::Error {
+                            file: file_name.to_string(),
+                            message: error_msg,
+                        });
+                        if config.stop_on_error {
+                            send_progress(ImportProgressEvent::Finished {
+                                total_rows,
+                                elapsed_ms: start.elapsed().as_millis(),
+                            });
+                            return Ok(ImportResult {
+                                success: false,
+                                rows_imported: total_rows,
+                                errors,
+                                elapsed_ms: start.elapsed().as_millis(),
+                            });
+                        }
                     }
                 }
             }

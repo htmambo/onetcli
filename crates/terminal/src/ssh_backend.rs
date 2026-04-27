@@ -6,8 +6,10 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
+use crate::TerminalCloseMode;
 use ssh::{
-    ChannelEvent, PtyConfig, ShellIntegrationSetup, SshChannel, SshClient, SshSessionManager,
+    ChannelEvent, PtyConfig, ShellIntegrationSetup, SshChannel, SshClient, SshConnectionStage,
+    SshSessionManager,
 };
 
 use crate::osc::{extract_osc_events, OscEvent};
@@ -89,12 +91,16 @@ fn build_shell_integration_setup_script(
     let session_marker = shell_single_quote(session_marker);
     let shell_marker = shell_single_quote(shell_marker);
     let zshenv = shell_single_quote(
-        "ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
-         [[ -f \"$ZDOTDIR/.zshenv\" ]] && . \"$ZDOTDIR/.zshenv\"\n",
+        "_ONETCLI_SESSION_ZDOTDIR=\"$ZDOTDIR\"\n\
+         _ONETCLI_ORIG_ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
+         [[ -f \"$_ONETCLI_ORIG_ZDOTDIR/.zshenv\" ]] && . \"$_ONETCLI_ORIG_ZDOTDIR/.zshenv\"\n\
+         ZDOTDIR=\"$_ONETCLI_SESSION_ZDOTDIR\"\n\
+         export ZDOTDIR\n\
+         unset _ONETCLI_SESSION_ZDOTDIR _ONETCLI_ORIG_ZDOTDIR\n",
     );
     let zshrc = shell_single_quote(&format!(
-        "ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
-             [[ -f \"$ZDOTDIR/.zshrc\" ]] && . \"$ZDOTDIR/.zshrc\"\n\
+        "_ONETCLI_ORIG_ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
+             [[ -f \"$_ONETCLI_ORIG_ZDOTDIR/.zshrc\" ]] && . \"$_ONETCLI_ORIG_ZDOTDIR/.zshrc\"\n\
              . \"{integration_source}\"\n"
     ));
     let bashrc = shell_single_quote(&format!(
@@ -148,6 +154,18 @@ fn format_setup_failure_context(script: &str, stdout: &[u8], stderr: &[u8]) -> S
         stderr.trim(),
         stdout.trim(),
         format_numbered_script(script)
+    )
+}
+
+fn build_zsh_interactive_command(setup: &ShellIntegrationSetup) -> String {
+    let shell_path = setup.login_shell.as_deref().unwrap_or("zsh");
+    let zsh_dir = format!("{}/zsh", setup.session_dir);
+
+    format!(
+        "exec env ONETCLI_SHELL_INTEGRATION=1 ONETCLI_ORIG_ZDOTDIR={} ZDOTDIR={} {} -i",
+        shell_single_quote(&setup.home_dir),
+        shell_single_quote(&zsh_dir),
+        shell_single_quote(shell_path)
     )
 }
 
@@ -243,6 +261,9 @@ impl SshBackend {
                                         OscEvent::WorkingDirChanged(path) => {
                                             let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
                                         }
+                                        OscEvent::SshPromptReady => {
+                                            let _ = event_tx.send(TerminalEvent::SshPromptReady);
+                                        }
                                         OscEvent::PromptStart => {
                                             let _ = event_tx.send(TerminalEvent::PromptStart);
                                         }
@@ -272,6 +293,143 @@ impl SshBackend {
                                 }
 
                                 // shell ready 后发送 init_commands（只发一次）
+                                if shell_ready && !init_sent {
+                                    init_sent = true;
+                                    if let Some(ref commands) = pending_init {
+                                        for line in commands.lines() {
+                                            if !line.trim().is_empty() {
+                                                let mut cmd_data = line.as_bytes().to_vec();
+                                                cmd_data.push(b'\n');
+                                                let _ = channel.send_data(&cmd_data).await;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                processor.advance(&mut *term.lock(), &data);
+                                let _ = notify_tx.send(());
+                            }
+                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) | None => {
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            if !shutdown {
+                let _ = session_manager.invalidate().await;
+            }
+            if let Some(tx) = on_disconnect {
+                let _ = tx.send(());
+            }
+        });
+
+        Ok(Self { command_tx })
+    }
+
+    pub async fn connect_with_progress(
+        session_manager: Arc<SshSessionManager>,
+        pty_config: PtyConfig,
+        connection_id: Option<i64>,
+        term: Arc<FairMutex<Term<GpuiEventProxy>>>,
+        event_proxy: GpuiEventProxy,
+        event_tx: UnboundedSender<TerminalEvent>,
+        notify_tx: UnboundedSender<()>,
+        on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
+        init_commands: Option<String>,
+        _on_progress: impl FnMut(SshConnectionStage) + Send + 'static,
+    ) -> anyhow::Result<Self> {
+        let (client, mut channel) =
+            Self::establish_channel(&session_manager, &pty_config, connection_id)
+                .await
+                .map_err(add_connect_error_context)?;
+        let _keep_client = client;
+
+        let pending_init = init_commands;
+        let (command_tx, mut command_rx) = unbounded_channel::<SshCommand>();
+        let (pty_write_tx, mut pty_write_rx) = unbounded_channel::<Vec<u8>>();
+        event_proxy.set_ssh_write_back(pty_write_tx);
+
+        tokio::spawn(async move {
+            let mut shutdown = false;
+            let mut processor: Processor<StdSyncHandler> = Processor::new();
+            let mut shell_ready = false;
+            let mut init_sent = false;
+
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(cmd) = command_rx.recv() => {
+                        match cmd {
+                            SshCommand::Write(data) => {
+                                let send_result = tokio::time::timeout(
+                                    Duration::from_secs(30),
+                                    channel.send_data(&data)
+                                ).await;
+                                if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                                    break;
+                                }
+                            }
+                            SshCommand::Resize(size) => {
+                                let _ = channel.resize_pty(size.cols as u32, size.rows as u32).await;
+                            }
+                            SshCommand::Shutdown => {
+                                shutdown = true;
+                                let _ = channel.close().await;
+                                break;
+                            }
+                        }
+                    }
+                    Some(data) = pty_write_rx.recv() => {
+                        let send_result = tokio::time::timeout(
+                            Duration::from_secs(30),
+                            channel.send_data(&data)
+                        ).await;
+                        if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                            break;
+                        }
+                    }
+                    event = channel.recv() => {
+                        match event {
+                            Some(ChannelEvent::Data(data)) | Some(ChannelEvent::ExtendedData { data, .. }) => {
+                                for osc_event in extract_osc_events(&data) {
+                                    tracing::debug!(
+                                        target: "terminal.history_prompt.osc",
+                                        event = ?osc_event,
+                                        "ssh backend observed osc event"
+                                    );
+                                    match osc_event {
+                                        OscEvent::WorkingDirChanged(path) => {
+                                            let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
+                                        }
+                                        OscEvent::SshPromptReady => {
+                                            let _ = event_tx.send(TerminalEvent::SshPromptReady);
+                                        }
+                                        OscEvent::PromptStart => {
+                                            let _ = event_tx.send(TerminalEvent::PromptStart);
+                                        }
+                                        OscEvent::InputStart => {
+                                            let _ = event_tx.send(TerminalEvent::InputStart);
+                                            if !shell_ready {
+                                                shell_ready = true;
+                                            }
+                                        }
+                                        OscEvent::CommandStart => {}
+                                        OscEvent::CommandFinished { exit_code } => {
+                                            let _ = event_tx.send(
+                                                TerminalEvent::CommandFinished { exit_code }
+                                            );
+                                        }
+                                        OscEvent::CommandRecorded(command) => {
+                                            let _ = event_tx.send(
+                                                TerminalEvent::CommandRecorded(command)
+                                            );
+                                        }
+                                    }
+                                }
+
                                 if shell_ready && !init_sent {
                                     init_sent = true;
                                     if let Some(ref commands) = pending_init {
@@ -527,11 +685,9 @@ impl SshBackend {
 
         match setup.login_shell.as_deref().map(shell_basename) {
             Some("zsh") => {
-                channel
-                    .set_env("ZDOTDIR", &format!("{}/zsh", setup.session_dir))
-                    .await?;
                 channel.request_pty(pty_config).await?;
-                channel.request_shell().await?;
+                let command = build_zsh_interactive_command(setup);
+                channel.exec(&command).await?;
             }
             Some("bash") => {
                 channel.request_pty(pty_config).await?;
@@ -579,6 +735,7 @@ mod tests {
     #[derive(Default)]
     struct MockChannelState {
         ops: Vec<ChannelOp>,
+        exec_commands: Vec<String>,
         events: VecDeque<ChannelEvent>,
         exec_consumes_session: bool,
         recv_delay: Option<Duration>,
@@ -603,6 +760,7 @@ mod tests {
         ) -> (Self, Arc<Mutex<MockChannelState>>) {
             let state = Arc::new(Mutex::new(MockChannelState {
                 ops: Vec::new(),
+                exec_commands: Vec::new(),
                 events: events.into_iter().collect(),
                 exec_consumes_session,
                 recv_delay,
@@ -630,6 +788,7 @@ mod tests {
         async fn exec(&mut self, _command: &str) -> Result<()> {
             let mut state = self.state.lock().expect("mock channel state should lock");
             state.ops.push(ChannelOp::Exec);
+            state.exec_commands.push(_command.to_string());
             Ok(())
         }
 
@@ -738,6 +897,14 @@ mod tests {
             .clone()
     }
 
+    fn recorded_exec_commands(state: &Arc<Mutex<MockChannelState>>) -> Vec<String> {
+        state
+            .lock()
+            .expect("mock channel state should lock")
+            .exec_commands
+            .clone()
+    }
+
     #[tokio::test]
     async fn prepare_ssh_channel_uses_dedicated_setup_channel_for_zsh() {
         let (setup_channel, setup_state) = MockChannel::new(
@@ -772,13 +939,28 @@ mod tests {
             vec![
                 ChannelOp::SetEnv("ONETCLI_SHELL_INTEGRATION".into(), "1".into()),
                 ChannelOp::SetEnv("ONETCLI_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::SetEnv(
-                    "ZDOTDIR".into(),
-                    "/tmp/home/.config/onetcli/sessions/42/zsh".into(),
-                ),
                 ChannelOp::RequestPty,
-                ChannelOp::RequestShell,
+                ChannelOp::Exec,
             ]
+        );
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        assert_eq!(exec_commands.len(), 1, "zsh 交互通道应只执行一次启动命令");
+        let command = &exec_commands[0];
+        assert!(
+            command.contains("exec env ONETCLI_SHELL_INTEGRATION=1"),
+            "zsh 应通过显式 env 命令启动集成 shell: {command}"
+        );
+        assert!(
+            command.contains("ONETCLI_ORIG_ZDOTDIR='/tmp/home'"),
+            "zsh 启动命令应内联原始 ZDOTDIR: {command}"
+        );
+        assert!(
+            command.contains("ZDOTDIR='/tmp/home/.config/onetcli/sessions/42/zsh'"),
+            "zsh 启动命令应内联 session ZDOTDIR: {command}"
+        );
+        assert!(
+            command.contains("'/bin/zsh' -i"),
+            "zsh 启动命令应显式执行交互式 zsh: {command}"
         );
     }
 
@@ -1051,6 +1233,10 @@ mod tests {
             fs::read_to_string(&integration_path).expect("应写入 integration 文件"),
             script
         );
+        let session_zshenv =
+            fs::read_to_string(session_dir.join("zsh/.zshenv")).expect("应读取 zshenv wrapper");
+        let session_zshrc =
+            fs::read_to_string(session_dir.join("zsh/.zshrc")).expect("应读取 zshrc wrapper");
         assert!(
             session_dir.join("zsh/.zshenv").is_file(),
             "应写入 zsh session wrapper"
@@ -1070,6 +1256,26 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&zshrc_path).expect("应保留用户 zshrc"),
             "# user zshrc\n"
+        );
+        assert!(
+            session_zshenv.contains("_ONETCLI_SESSION_ZDOTDIR=\"$ZDOTDIR\""),
+            "zshenv wrapper 应保留 session ZDOTDIR"
+        );
+        assert!(
+            session_zshenv.contains("$_ONETCLI_ORIG_ZDOTDIR/.zshenv"),
+            "zshenv wrapper 应按原始目录加载用户 zshenv"
+        );
+        assert!(
+            session_zshenv.contains("ZDOTDIR=\"$_ONETCLI_SESSION_ZDOTDIR\""),
+            "zshenv wrapper 应恢复 session ZDOTDIR"
+        );
+        assert!(
+            session_zshrc.contains("$_ONETCLI_ORIG_ZDOTDIR/.zshrc"),
+            "zshrc wrapper 应按原始目录加载用户 zshrc"
+        );
+        assert!(
+            session_zshrc.contains(". \"$HOME/.config/onetcli/sessions/42/shell_integration.sh\""),
+            "zshrc wrapper 应加载 onetcli shell integration"
         );
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).trim(),
@@ -1176,6 +1382,10 @@ impl TerminalBackend for SshBackend {
     }
 
     fn shutdown(&self) {
+        let _ = self.command_tx.send(SshCommand::Shutdown);
+    }
+
+    fn close(&self, _mode: TerminalCloseMode) {
         let _ = self.command_tx.send(SshCommand::Shutdown);
     }
 }
