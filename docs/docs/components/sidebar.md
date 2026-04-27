@@ -317,8 +317,8 @@ cx.theme().sidebar_foreground         // Text color
 cx.theme().sidebar_border            // Border color
 cx.theme().sidebar_accent            // Hover/active background
 cx.theme().sidebar_accent_foreground // Hover/active text
-cx.theme().sidebar_primary           // Primary elements
-cx.theme().sidebar_primary_foreground // Primary text
+cx.theme().sidebar_accent            // Hover/active background
+cx.theme().sidebar_accent_foreground  // Hover/active text
 ```
 
 ## Examples

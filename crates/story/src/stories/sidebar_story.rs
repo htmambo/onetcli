@@ -108,7 +108,6 @@ enum SubItem {
     History,
     Starred,
     General,
-    Team,
     Billing,
     Limits,
     Settings,
@@ -181,12 +180,7 @@ impl Item {
                 SubItem::Tutorial,
                 SubItem::Changelog,
             ],
-            Self::Settings => vec![
-                SubItem::General,
-                SubItem::Team,
-                SubItem::Billing,
-                SubItem::Limits,
-            ],
+            Self::Settings => vec![SubItem::General, SubItem::Billing, SubItem::Limits],
             _ => Vec::new(),
         }
     }
@@ -205,7 +199,6 @@ impl SubItem {
             Self::GetStarted => "Get Started",
             Self::Tutorial => "Tutorial",
             Self::Changelog => "Changelog",
-            Self::Team => "Team",
             Self::Billing => "Billing",
             Self::Limits => "Limits",
             Self::General => "General",
