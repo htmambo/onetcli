@@ -124,6 +124,7 @@ pub struct Globals {
     pub layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     pub blur_manager: Option<org_kde_kwin_blur_manager::OrgKdeKwinBlurManager>,
     pub text_input_manager: Option<zwp_text_input_manager_v3::ZwpTextInputManagerV3>,
+    #[allow(dead_code)]
     pub dialog: Option<xdg_wm_dialog_v1::XdgWmDialogV1>,
     pub executor: ForegroundExecutor,
 }

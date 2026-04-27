@@ -191,17 +191,14 @@ impl WaylandSurfaceState {
         }
 
         let dialog = if params.kind == WindowKind::Dialog {
-            let dialog = globals.dialog.as_ref().map(|dialog| {
-                let xdg_dialog = dialog.get_xdg_dialog(&toplevel, &globals.qh, ());
-                xdg_dialog.set_modal();
-                xdg_dialog
-            });
-
             if let Some(parent) = parent.as_ref() {
                 parent.add_child(surface.id());
             }
 
-            dialog
+            // KWin/Wayland 下，xdg_dialog 的 modal 语义会让 compositor 额外介入对话框效果，
+            // 与客户端自绘圆角/透明背景叠加后会出现角落显示异常。
+            // 这里保留父子窗口关系和应用侧阻塞语义，但不注册 xdg_dialog 协议对象。
+            None
         } else {
             None
         };
@@ -1586,25 +1583,21 @@ fn blur_row_geometry(
     bottom_left: i32,
 ) -> Option<(i32, i32)> {
     let bottom_offset = height - 1 - row;
-    let left_inset =
-        rounded_corner_inset(row, top_left).max(rounded_corner_inset(bottom_offset, bottom_left));
-    let right_inset = kwin_guarded_right_corner_inset(
-        rounded_corner_inset(row, top_right)
-            .max(rounded_corner_inset(bottom_offset, bottom_right)),
+    let left_inset = kwin_guarded_corner_inset(
+        rounded_corner_inset(row, top_left).max(rounded_corner_inset(bottom_offset, bottom_left)),
+    );
+    let right_inset = kwin_guarded_corner_inset(
+        rounded_corner_inset(row, top_right).max(rounded_corner_inset(bottom_offset, bottom_right)),
     );
     let row_width = width - left_inset - right_inset;
 
     (row_width > 0).then_some((left_inset, row_width))
 }
 
-fn kwin_guarded_right_corner_inset(inset: i32) -> i32 {
-    // KWin 的 Wayland blur region 在右侧圆角上偶尔会残留 1px 外溢，
-    // 给右侧圆角额外收一列，避免右上/右下角露出背景。
-    if inset > 0 {
-        inset + 1
-    } else {
-        inset
-    }
+fn kwin_guarded_corner_inset(inset: i32) -> i32 {
+    // KWin 的 Wayland blur region 在圆角边缘偶尔会残留 1px 外溢。
+    // 对所有圆角行统一额外收一列，避免左右角都露出背景。
+    if inset > 0 { inset + 1 } else { inset }
 }
 
 fn rounded_corner_inset(offset_from_edge: i32, radius: i32) -> i32 {
@@ -1698,7 +1691,7 @@ fn inset_by_tiling(
 mod tests {
     use super::{
         blur_row_geometry, compute_outer_size, content_bounds_with_tiling,
-        kwin_guarded_right_corner_inset, normalize_csd_tiling, rounded_corner_inset,
+        kwin_guarded_corner_inset, normalize_csd_tiling, rounded_corner_inset,
     };
     use crate::{Bounds, Edges, Point, Size, Tiling, px};
 
@@ -1829,8 +1822,8 @@ mod tests {
     }
 
     #[test]
-    fn kwin_guarded_right_corner_inset_仅在右侧圆角时增加安全边() {
-        assert_eq!(kwin_guarded_right_corner_inset(0), 0);
-        assert_eq!(kwin_guarded_right_corner_inset(3), 4);
+    fn kwin_guarded_corner_inset_仅在圆角时增加安全边() {
+        assert_eq!(kwin_guarded_corner_inset(0), 0);
+        assert_eq!(kwin_guarded_corner_inset(3), 4);
     }
 }
