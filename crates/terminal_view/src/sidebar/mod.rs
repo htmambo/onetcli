@@ -23,7 +23,10 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
-use gpui_component::{v_flex, ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, layered_level_surface_color};
+use gpui_component::{
+    layered_level_surface_color, v_flex, ActiveTheme, Icon, IconName, Sizable, Size,
+    WindowsSurfaceLayer,
+};
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};

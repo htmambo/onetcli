@@ -4,9 +4,9 @@ use super::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
 use super::data_grid::DataGrid;
 use db::{ColumnInfo, FieldType};
 use gpui::{
-    div, prelude::FluentBuilder, px, App, AppContext, ClipboardItem, Context, InteractiveElement,
-    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window,
+    App, AppContext, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement as _,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
@@ -15,12 +15,12 @@ use gpui_component::input::{InputEvent, InputState, MaskPattern};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::time_picker::{TimePickerEvent, TimePickerState};
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{h_flex, ActiveTheme, WindowExt};
-use one_core::storage::DatabaseType;
+use gpui_component::{ActiveTheme, WindowExt, h_flex};
 use one_core::PendingChangeLevel;
+use one_core::storage::DatabaseType;
 use one_ui::edit_table::{
-    filter_panel::FilterValue, CellEditor, Column, ColumnSort, EditTableDelegate, EditTableEvent,
-    EditTableState,
+    CellEditor, Column, ColumnSort, EditTableDelegate, EditTableEvent, EditTableState,
+    filter_panel::FilterValue,
 };
 use rust_i18n::t;
 use uuid::Uuid;

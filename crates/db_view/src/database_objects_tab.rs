@@ -929,9 +929,8 @@ impl DatabaseObjects {
                         .with_size(Size::Medium)
                         .icon(btn_config.icon)
                         .tooltip(btn_config.tooltip)
-                        .on_click(window.listener_for(
-                            &cx.entity(),
-                            move |this, _, window, cx| {
+                        .on_click(
+                            window.listener_for(&cx.entity(), move |this, _, window, cx| {
                                 let nodes = this.build_nodes_for_selected_rows();
                                 if nodes.is_empty() {
                                     window.push_notification(
@@ -966,8 +965,8 @@ impl DatabaseObjects {
                                     let event = event_fn(node);
                                     cx.emit(event);
                                 }
-                            },
-                        ))
+                            }),
+                        )
                         .into_any_element()
                 }
             };

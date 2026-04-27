@@ -9,14 +9,14 @@ use gpui::{
     prelude::FluentBuilder, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, WindowExt as _,
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowExt as _, WindowsSurfaceLayer,
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputEvent, InputState},
+    layered_level_surface_color,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     notification::Notification,
     scroll::Scrollbar,
-    WindowsSurfaceLayer, layered_level_surface_color,
     spinner::Spinner,
     v_flex,
 };

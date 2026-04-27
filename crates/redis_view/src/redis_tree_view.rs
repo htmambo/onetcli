@@ -9,15 +9,15 @@ use gpui::{
     prelude::FluentBuilder, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, Sizable, Size,
+    ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     h_flex,
     input::{Input, InputEvent, InputState},
+    layered_level_surface_color,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     popover::Popover,
     scroll::ScrollableElement,
-    WindowsSurfaceLayer, layered_level_surface_color,
     spinner::Spinner,
     v_flex,
 };
@@ -1729,16 +1729,16 @@ impl RedisTreeView {
                         .bg(cx.theme().list_active_border),
                 )
                 .bg({
-                let blur_enabled = cx.theme().window_blur_enabled;
-                let window_opacity = cx.theme().backdrop_opacity;
-                layered_level_surface_color(
-                    cx.theme().list_active,
-                    blur_enabled,
-                    window_opacity,
-                    2,
-                    WindowsSurfaceLayer::ContentBase,
-                )
-            })
+                    let blur_enabled = cx.theme().window_blur_enabled;
+                    let window_opacity = cx.theme().backdrop_opacity;
+                    layered_level_surface_color(
+                        cx.theme().list_active,
+                        blur_enabled,
+                        window_opacity,
+                        2,
+                        WindowsSurfaceLayer::ContentBase,
+                    )
+                })
             })
             .when(!is_selected, |this| {
                 this.hover(|style| {

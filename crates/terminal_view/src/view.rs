@@ -10,9 +10,9 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
-    ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
-    Theme as UiTheme, WindowExt, WindowsSurfaceLayer, kbd::Kbd, terminal_canvas_surface_opacity,
-    windows_surface_color,
+    kbd::Kbd, terminal_canvas_surface_opacity, windows_surface_color, ActiveTheme, BlinkCursor,
+    Icon, IconName, Root, Sizable, SystemNotificationOptions, Theme as UiTheme, WindowExt,
+    WindowsSurfaceLayer,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -24,42 +24,42 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::addon::{
-    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
-    TerminalAddonMouseContext, register_default_addons,
+    register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
+    TerminalAddonFrameContext, TerminalAddonMouseContext,
 };
 use crate::cd_completion::{
-    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
+    build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
 };
 use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
 use crate::settings::{
-    GlobalTerminalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
-    current_settings, update_settings,
+    current_settings, update_settings, GlobalTerminalSettings, TerminalHighlightRule,
+    TerminalSettings, TerminalSettingsEvent,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{RenderCache, TerminalElement, terminal_font_features};
+use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
 use crate::theme::{
-    DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
-    MIN_LINE_HEIGHT_SCALE, TerminalTheme,
+    TerminalTheme, DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE,
+    MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
 };
 use gpui::AnyWindowHandle;
-use one_core::RunningState;
 use one_core::connection_restore::{
-    ConnectionRestoreKind, ConnectionRestorePayload, LocalTerminalRestoreState,
-    SshTerminalRestoreState, restore_payload_from_tab_data,
+    restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
+    LocalTerminalRestoreState, SshTerminalRestoreState,
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
-use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
+use one_core::RunningState;
+use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
-use terminal::LocalConfig;
 use terminal::terminal::{
-    ConnectionState, DEFAULT_RECOVERY_SCROLLBACK_LINES, SshSessionManager, Terminal,
-    TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy, TerminalScrollSnapshot,
+    ConnectionState, SshSessionManager, Terminal, TerminalConnectionKind, TerminalModelEvent,
+    TerminalScrollProxy, TerminalScrollSnapshot, DEFAULT_RECOVERY_SCROLLBACK_LINES,
 };
+use terminal::LocalConfig;
 use tokio::sync::Mutex;
 
 actions!(
@@ -4180,9 +4180,7 @@ impl Render for TerminalView {
                                                 .child(tooltip.action_hint),
                                         )
                                         .child(
-                                            div()
-                                                .text_color(text_muted)
-                                                .child(tooltip.action_text),
+                                            div().text_color(text_muted).child(tooltip.action_text),
                                         ),
                                 )
                                 .child(
@@ -4422,31 +4420,30 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
-        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
-        history_prompt_dropdown_origin, history_prompt_overlay_bounds,
-        multiline_non_empty_line_count, preserve_theme_typography,
+        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
+        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
+        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars,
+        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
     #[cfg(target_os = "macos")]
     use gpui::TestAppContext;
-    use gpui::{Bounds, Keystroke, MouseButton, Point, SharedString, px, size};
+    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{
         thread,
         time::{Duration, Instant},
     };
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
-    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {

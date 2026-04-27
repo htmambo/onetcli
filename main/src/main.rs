@@ -19,7 +19,6 @@ use crate::onetcli_app::OnetCliApp;
 use crate::setting_tab::AppSettings;
 use db::GlobalDbState;
 use gpui::*;
-
 use gpui_component::Root;
 use gpui_component_assets::Assets;
 
@@ -97,7 +96,8 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
-                window.set_blur_behind_corner_radius(AppSettings::global(cx).window_corner_radius());
+                window
+                    .set_blur_behind_corner_radius(AppSettings::global(cx).window_corner_radius());
                 window.activate_window();
                 app_init::init_window_systems(window, cx);
                 update::schedule_update_check(window, cx);

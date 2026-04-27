@@ -2770,34 +2770,32 @@ impl TabContainer {
                                     .hover(cx.theme().warning)
                                     .active(cx.theme().warning_active);
                                 group.child(
-                                    Button::new(SharedString::from(format!(
-                                        "tab-close-btn-{idx}"
-                                    )))
-                                    .icon(IconName::Close)
-                                    .custom(close_button_style)
-                                    .compact()
-                                    .tab_stop(false)
-                                    .occlude()
-                                    .flex_shrink_0()
-                                    .w(px(16.0))
-                                    .h(px(16.0))
-                                    .min_w(px(16.0))
-                                    .p_0()
-                                    .rounded(px(2.0))
-                                    .cursor_pointer()
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        move |_event, window, cx| {
-                                            window.prevent_default();
+                                    Button::new(SharedString::from(format!("tab-close-btn-{idx}")))
+                                        .icon(IconName::Close)
+                                        .custom(close_button_style)
+                                        .compact()
+                                        .tab_stop(false)
+                                        .occlude()
+                                        .flex_shrink_0()
+                                        .w(px(16.0))
+                                        .h(px(16.0))
+                                        .min_w(px(16.0))
+                                        .p_0()
+                                        .rounded(px(2.0))
+                                        .cursor_pointer()
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            move |_event, window, cx| {
+                                                window.prevent_default();
+                                                cx.stop_propagation();
+                                            },
+                                        )
+                                        .on_click(move |_, window, cx| {
                                             cx.stop_propagation();
-                                        },
-                                    )
-                                    .on_click(move |_, window, cx| {
-                                        cx.stop_propagation();
-                                        view_clone.update(cx, |this, cx| {
-                                            this.close_tab(idx, window, cx).detach();
-                                        });
-                                    }),
+                                            view_clone.update(cx, |this, cx| {
+                                                this.close_tab(idx, window, cx).detach();
+                                            });
+                                        }),
                                 )
                             })
                             .context_menu(move |menu, window, cx| {

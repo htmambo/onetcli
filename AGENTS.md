@@ -325,6 +325,15 @@
   - **验证方式**：如何确认这次处理是对的
   - **适用范围**：影响哪些模块、页面、链路或命令
 
+### 已验证经验
+
+- **标题**：Wayland 下 `popup_window` 圆角背景外溢时，优先检查内容层背景，不要先猜协议层。
+- **触发信号**：KDE Wayland / KWin 下 popup 四角出现背景溢出；仅给 `PopupWindowView` 增加 `.rounded(...).overflow_hidden()`、调整 `window_background`、切换 modal / titlebar 策略后仍无效。
+- **根因 / 约束**：GPUI 当前 `overflow_hidden` 只支持矩形 content mask，不能把子视图裁成圆角；因此父级 popup 壳层即使是圆角，子内容最外层的 `size_full().bg(...)`、标题栏背景、footer 背景仍可能直接把四角画满。
+- **正确做法**：先检查具体 popup 内容视图是否自己绘制整块顶层背景；标题栏要自己带上圆角，内容根容器要自己带整体圆角，底部 footer 要自己带下圆角；popup 壳层只负责统一边框、阴影和外框背景，不要假设它能替子视图完成圆角裁切；只有内容层修正后仍有残留时，再检查 Wayland 的 `blur_region` / `opaque_region`。
+- **验证方式**：优先手工复测四角最容易暴露问题的 popup，例如恢复弹窗、新建 LLM 提供商弹窗、新建凭证弹窗；确认四角不再有背景出血后，再执行 `cargo check -p one-core` 和 `cargo check -p main`。
+- **适用范围**：所有通过 `one_core::popup_window` 打开的独立 popup，尤其是包含 `TitleBar`、顶层背景和 footer 背景的表单类窗口。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。

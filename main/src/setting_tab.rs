@@ -7,11 +7,10 @@ use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
 use gpui::http_client::{AsyncBody, Method, Request, Url};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke,
-    ParentElement, Pixels, Render, SharedString, StyleRefinement, Styled,
-    WeakEntity, Window, WindowAppearance, WindowBackgroundAppearance, WindowBounds, div, point,
-    px, size,
+    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
+    Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, div, point, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
@@ -3585,6 +3584,7 @@ impl Render for GlobalProxySettingsView {
 
         v_flex()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(cx.theme().background)
             .child(
                 TitleBar::new().child(

@@ -2,7 +2,6 @@ use crate::table_data::filter_types::{
     ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, LogicOperator,
     OperatorCategory, operators_for_column, uuid_simple,
 };
-use rust_i18n::t;
 #[cfg(test)]
 use crate::table_data::filter_types::{is_datetime_type, is_numeric_type, is_string_type};
 use db::ColumnInfo;
@@ -16,13 +15,16 @@ use gpui_component::{ActiveTheme, IconName, Sizable, checkbox::Checkbox};
 use gpui_component::{
     IndexPath,
     button::{Button, ButtonVariants as _},
-    select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectGroup, SelectItem, SelectState},
+    select::{
+        SearchableVec, Select, SelectDelegate, SelectEvent, SelectGroup, SelectItem, SelectState,
+    },
 };
 #[cfg(test)]
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, InsertReplaceEdit, Range,
 };
 use one_ui::edit_table::ColumnSort;
+use rust_i18n::t;
 
 #[derive(Clone)]
 pub struct TableSchema {
@@ -809,8 +811,10 @@ pub struct VisualFilterBuilder {
     column_selects:
         std::collections::HashMap<String, Entity<SelectState<SearchableVec<FilterColumnItem>>>>,
     /// 操作符选择器实体，按行 ID 索引（分组的）
-    operator_selects:
-        std::collections::HashMap<String, Entity<SelectState<SearchableVec<SelectGroup<FilterOperatorItem>>>>>,
+    operator_selects: std::collections::HashMap<
+        String,
+        Entity<SelectState<SearchableVec<SelectGroup<FilterOperatorItem>>>>,
+    >,
     /// 值输入框实体，按行 ID 索引
     value_inputs: std::collections::HashMap<String, Entity<InputState>>,
     /// 范围起始值输入框实体，按行 ID 索引（BETWEEN 时使用）
@@ -1253,10 +1257,12 @@ impl VisualFilterBuilder {
         .detach();
 
         // 创建范围值输入框（BETWEEN 时使用）
-        let value_start_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter.placeholder_start").into_owned()));
-        let value_end_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter.placeholder_end").into_owned()));
+        let value_start_input_entity = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("Filter.placeholder_start").into_owned())
+        });
+        let value_end_input_entity = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("Filter.placeholder_end").into_owned())
+        });
 
         // 观察范围起始值输入变化
         let row_id_clone_for_val_start = row_id.clone();
@@ -1281,20 +1287,17 @@ impl VisualFilterBuilder {
 
         let selected_op_index = operator_groups.position(&first_op);
 
-        let operator_select_entity = cx.new(|cx| {
-            SelectState::new(
-                operator_groups,
-                selected_op_index,
-                window,
-                cx,
-            )
-        });
+        let operator_select_entity =
+            cx.new(|cx| SelectState::new(operator_groups, selected_op_index, window, cx));
 
         // 订阅操作符选择事件
         let row_id_clone_for_op = row_id.clone();
         cx.subscribe(
             &operator_select_entity,
-            move |this, _, event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>, _cx| {
+            move |this,
+                  _,
+                  event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>,
+                  _cx| {
                 let SelectEvent::Confirm(value) = event;
                 if let Some(op) = value {
                     this.update_condition_operator(&row_id_clone_for_op, *op);
@@ -1304,8 +1307,9 @@ impl VisualFilterBuilder {
         .detach();
 
         // 创建值输入框
-        let value_input_entity =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Filter.placeholder_value").into_owned()));
+        let value_input_entity = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("Filter.placeholder_value").into_owned())
+        });
 
         // 观察值输入变化
         let row_id_clone_for_val = row_id.clone();
@@ -1424,156 +1428,144 @@ impl VisualFilterBuilder {
         cx: &mut Context<Self>,
     ) {
         if let Some(parent) = find_group_row_mut(&mut self.root_items, parent_group_id) {
-                let schema = self.schema.clone();
-                let first_col = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.first())
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                let first_op = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.first())
-                    .map(operators_for_column)
-                    .and_then(|ops| ops.first().copied())
-                    .unwrap_or(FilterOperator::Equal);
+            let schema = self.schema.clone();
+            let first_col = schema
+                .as_ref()
+                .and_then(|s| s.columns.first())
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+            let first_op = schema
+                .as_ref()
+                .and_then(|s| s.columns.first())
+                .map(operators_for_column)
+                .and_then(|ops| ops.first().copied())
+                .unwrap_or(FilterOperator::Equal);
 
-                let row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
-                let row_id = row.id.clone();
+            let row = ConditionRow::new(first_col.clone(), first_op, LogicOperator::And);
+            let row_id = row.id.clone();
 
-                // 创建列选择器
-                let column_items: Vec<FilterColumnItem> = schema
-                    .as_ref()
-                    .map(|s| {
-                        s.columns
-                            .iter()
-                            .map(|c| FilterColumnItem {
-                                name: c.name.clone(),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+            // 创建列选择器
+            let column_items: Vec<FilterColumnItem> = schema
+                .as_ref()
+                .map(|s| {
+                    s.columns
+                        .iter()
+                        .map(|c| FilterColumnItem {
+                            name: c.name.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
 
-                let selected_col_index = schema
-                    .as_ref()
-                    .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
-                    .map(|i| IndexPath::new(i));
+            let selected_col_index = schema
+                .as_ref()
+                .and_then(|s| s.columns.iter().position(|c| c.name == first_col))
+                .map(|i| IndexPath::new(i));
 
-                let column_select_entity = cx.new(|cx| {
-                    SelectState::new(
-                        SearchableVec::new(column_items),
-                        selected_col_index,
-                        window,
-                        cx,
-                    )
-                });
-
-                // 订阅列选择事件
-                let row_id_clone = row_id.clone();
-                cx.subscribe_in(
-                    &column_select_entity,
+            let column_select_entity = cx.new(|cx| {
+                SelectState::new(
+                    SearchableVec::new(column_items),
+                    selected_col_index,
                     window,
-                    move |this,
-                          _,
-                          event: &SelectEvent<SearchableVec<FilterColumnItem>>,
-                          window,
-                          cx| {
-                        let SelectEvent::Confirm(value) = event;
-                        if let Some(col_name) = value {
-                            this.update_condition_column(
-                                &row_id_clone,
-                                col_name.clone(),
-                                window,
-                                cx,
-                            );
-                        }
-                    },
+                    cx,
                 )
-                .detach();
+            });
 
-                // 创建范围值输入框
-                let value_start_input_entity =
-                    cx.new(|cx| InputState::new(window, cx).placeholder("起始值".to_string()));
-                let value_end_input_entity =
-                    cx.new(|cx| InputState::new(window, cx).placeholder("结束值".to_string()));
+            // 订阅列选择事件
+            let row_id_clone = row_id.clone();
+            cx.subscribe_in(
+                &column_select_entity,
+                window,
+                move |this, _, event: &SelectEvent<SearchableVec<FilterColumnItem>>, window, cx| {
+                    let SelectEvent::Confirm(value) = event;
+                    if let Some(col_name) = value {
+                        this.update_condition_column(&row_id_clone, col_name.clone(), window, cx);
+                    }
+                },
+            )
+            .detach();
 
-                // 观察范围起始值输入变化
-                let row_id_clone_start = row_id.clone();
-                let value_start_input_clone = value_start_input_entity.clone();
-                let val_start_sub = cx.observe(&value_start_input_entity, move |this, _, cx| {
-                    let text = value_start_input_clone.read(cx).text().to_string();
-                    this.update_condition_value_start(&row_id_clone_start, text);
-                    cx.notify();
-                });
+            // 创建范围值输入框
+            let value_start_input_entity =
+                cx.new(|cx| InputState::new(window, cx).placeholder("起始值".to_string()));
+            let value_end_input_entity =
+                cx.new(|cx| InputState::new(window, cx).placeholder("结束值".to_string()));
 
-                // 观察范围结束值输入变化
-                let row_id_clone_end = row_id.clone();
-                let value_end_input_clone = value_end_input_entity.clone();
-                let val_end_sub = cx.observe(&value_end_input_entity, move |this, _, cx| {
-                    let text = value_end_input_clone.read(cx).text().to_string();
-                    this.update_condition_value_end(&row_id_clone_end, text);
-                    cx.notify();
-                });
-
-                // 创建操作符选择器（分组）
-                let operator_groups = operator_groups_for_column(schema.as_ref(), &first_col);
-
-                let selected_op_index = operator_groups.position(&first_op);
-
-                let operator_select_entity = cx.new(|cx| {
-                    SelectState::new(
-                        operator_groups,
-                        selected_op_index,
-                        window,
-                        cx,
-                    )
-                });
-
-                // 订阅操作符选择事件
-                let row_id_clone_op = row_id.clone();
-                cx.subscribe(
-                    &operator_select_entity,
-                    move |this, _, event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>, _cx| {
-                        let SelectEvent::Confirm(value) = event;
-                        if let Some(op) = value {
-                            this.update_condition_operator(&row_id_clone_op, *op);
-                        }
-                    },
-                )
-                .detach();
-
-                // 创建值输入框
-                let value_input_entity =
-                    cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
-
-                // 观察值输入变化
-                let row_id_clone_val = row_id.clone();
-                let value_input_clone = value_input_entity.clone();
-                let val_sub = cx.observe(&value_input_entity, move |this, _, cx| {
-                    let text = value_input_clone.read(cx).text().to_string();
-                    this.update_condition_value(&row_id_clone_val, text);
-                    cx.notify();
-                });
-
-                parent.children.push(FilterItem::Condition(row));
-                self.column_selects
-                    .insert(row_id.clone(), column_select_entity);
-                self.operator_selects
-                    .insert(row_id.clone(), operator_select_entity);
-                self.value_inputs.insert(row_id.clone(), value_input_entity);
-                self.value_start_inputs
-                    .insert(row_id.clone(), value_start_input_entity);
-                self.value_end_inputs
-                    .insert(row_id.clone(), value_end_input_entity);
-                self.value_subscriptions.insert(row_id.clone(), val_sub);
-                self.value_subscriptions
-                    .insert(format!("{}_start", row_id), val_start_sub);
-                self.value_subscriptions
-                    .insert(format!("{}_end", row_id), val_end_sub);
-                // 添加条件后展开分组（避免用户看不到刚添加的条件）
-                self.collapsed_groups.remove(parent_group_id);
-                self.sync_filter_state();
+            // 观察范围起始值输入变化
+            let row_id_clone_start = row_id.clone();
+            let value_start_input_clone = value_start_input_entity.clone();
+            let val_start_sub = cx.observe(&value_start_input_entity, move |this, _, cx| {
+                let text = value_start_input_clone.read(cx).text().to_string();
+                this.update_condition_value_start(&row_id_clone_start, text);
                 cx.notify();
-            }
+            });
+
+            // 观察范围结束值输入变化
+            let row_id_clone_end = row_id.clone();
+            let value_end_input_clone = value_end_input_entity.clone();
+            let val_end_sub = cx.observe(&value_end_input_entity, move |this, _, cx| {
+                let text = value_end_input_clone.read(cx).text().to_string();
+                this.update_condition_value_end(&row_id_clone_end, text);
+                cx.notify();
+            });
+
+            // 创建操作符选择器（分组）
+            let operator_groups = operator_groups_for_column(schema.as_ref(), &first_col);
+
+            let selected_op_index = operator_groups.position(&first_op);
+
+            let operator_select_entity =
+                cx.new(|cx| SelectState::new(operator_groups, selected_op_index, window, cx));
+
+            // 订阅操作符选择事件
+            let row_id_clone_op = row_id.clone();
+            cx.subscribe(
+                &operator_select_entity,
+                move |this,
+                      _,
+                      event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>,
+                      _cx| {
+                    let SelectEvent::Confirm(value) = event;
+                    if let Some(op) = value {
+                        this.update_condition_operator(&row_id_clone_op, *op);
+                    }
+                },
+            )
+            .detach();
+
+            // 创建值输入框
+            let value_input_entity =
+                cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
+
+            // 观察值输入变化
+            let row_id_clone_val = row_id.clone();
+            let value_input_clone = value_input_entity.clone();
+            let val_sub = cx.observe(&value_input_entity, move |this, _, cx| {
+                let text = value_input_clone.read(cx).text().to_string();
+                this.update_condition_value(&row_id_clone_val, text);
+                cx.notify();
+            });
+
+            parent.children.push(FilterItem::Condition(row));
+            self.column_selects
+                .insert(row_id.clone(), column_select_entity);
+            self.operator_selects
+                .insert(row_id.clone(), operator_select_entity);
+            self.value_inputs.insert(row_id.clone(), value_input_entity);
+            self.value_start_inputs
+                .insert(row_id.clone(), value_start_input_entity);
+            self.value_end_inputs
+                .insert(row_id.clone(), value_end_input_entity);
+            self.value_subscriptions.insert(row_id.clone(), val_sub);
+            self.value_subscriptions
+                .insert(format!("{}_start", row_id), val_start_sub);
+            self.value_subscriptions
+                .insert(format!("{}_end", row_id), val_end_sub);
+            // 添加条件后展开分组（避免用户看不到刚添加的条件）
+            self.collapsed_groups.remove(parent_group_id);
+            self.sync_filter_state();
+            cx.notify();
+        }
     }
 
     fn toggle_group_collapse(&mut self, group_id: &str, cx: &mut Context<Self>) {
@@ -1658,7 +1650,7 @@ impl VisualFilterBuilder {
             group.logic_operator = match group.logic_operator {
                 LogicOperator::And => LogicOperator::Or,
                 LogicOperator::Or => LogicOperator::And,
-                };
+            };
         }
         self.sync_filter_state();
         cx.notify();
@@ -2180,7 +2172,7 @@ impl Render for VisualFilterBuilder {
                                         )
                                     }),
                             ),
-                    )
+                    ),
             )
     }
 }

@@ -161,13 +161,8 @@ mod tests {
             a: 0.21,
         };
 
-        let result = layered_level_surface_color(
-            color,
-            true,
-            0.84,
-            2,
-            WindowsSurfaceLayer::ContentSection,
-        );
+        let result =
+            layered_level_surface_color(color, true, 0.84, 2, WindowsSurfaceLayer::ContentSection);
 
         if cfg!(target_os = "windows") {
             assert_alpha_eq(result.a, 0.84 * 0.48);

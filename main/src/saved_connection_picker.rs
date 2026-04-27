@@ -18,8 +18,8 @@ use gpui_component::{
     v_flex,
 };
 use one_core::storage::{ActiveConnections, ConnectionType, StoredConnection, Workspace};
-use rust_i18n::t;
 use one_core::tab_container::WINDOW_CONTROL_BUTTON_SIZE;
+use rust_i18n::t;
 
 #[derive(Clone)]
 pub(crate) enum SavedConnectionPickerEvent {

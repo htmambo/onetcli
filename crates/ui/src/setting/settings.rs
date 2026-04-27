@@ -1,14 +1,14 @@
 use crate::{
+    IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     input::{Input, InputState},
-    resizable::{h_resizable, ResizablePanel},
+    resizable::{ResizablePanel, h_resizable},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
-    IconName, Sizable, Size, StyledExt,
 };
 use gpui::{
-    div, prelude::FluentBuilder as _, px, relative, App, AppContext as _, Axis, ElementId, Entity,
-    IntoElement, ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window,
+    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
 

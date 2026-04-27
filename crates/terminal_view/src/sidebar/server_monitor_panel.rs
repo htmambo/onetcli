@@ -11,12 +11,11 @@ use gpui::{
 use gpui_component::{
     button::{Button, ButtonVariants},
     chart::{AreaChart, LineChart, PieChart},
-    h_flex,
+    h_flex, layered_level_surface_color,
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Disableable, IconName, Sizable, StyledExt,
-    layered_level_surface_color, WindowsSurfaceLayer,
+    v_flex, ActiveTheme, Disableable, IconName, Sizable, StyledExt, WindowsSurfaceLayer,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::get_config_dir;

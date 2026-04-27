@@ -20,8 +20,8 @@ use gpui_component::{
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
 use one_core::layout::{
-    PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
-    TOOLBAR_WIDTH, TREE_PANEL_DEFAULT_SIZE, TREE_PANEL_MAX_SIZE, TREE_PANEL_MIN_SIZE,
+    PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
+    TREE_PANEL_DEFAULT_SIZE, TREE_PANEL_MAX_SIZE, TREE_PANEL_MIN_SIZE,
 };
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, StoredConnection, Workspace};

@@ -107,9 +107,11 @@ impl FilterOperator {
     pub fn category(&self) -> OperatorCategory {
         match self {
             Self::Equal | Self::NotEqual => OperatorCategory::Comparison,
-            Self::GreaterThan | Self::LessThan | Self::GreaterOrEqual | Self::LessOrEqual | Self::Between => {
-                OperatorCategory::Range
-            }
+            Self::GreaterThan
+            | Self::LessThan
+            | Self::GreaterOrEqual
+            | Self::LessOrEqual
+            | Self::Between => OperatorCategory::Range,
             Self::Like | Self::NotLike => OperatorCategory::Pattern,
             Self::In | Self::NotIn => OperatorCategory::List,
             Self::IsNull | Self::IsNotNull => OperatorCategory::Null,

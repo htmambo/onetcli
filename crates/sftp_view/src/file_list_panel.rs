@@ -1021,15 +1021,14 @@ impl FileListPanel {
             menu = menu.item(
                 PopupMenuItem::new(t!("File.change_permission").to_string())
                     .icon(IconName::Key)
-                    .on_click(window.listener_for(
-                        &view_permissions,
-                        move |_this, _, _, cx| {
+                    .on_click(
+                        window.listener_for(&view_permissions, move |_this, _, _, cx| {
                             cx.emit(FileListPanelEvent::ChangePermissions {
                                 name: name_for_permissions.clone(),
                                 full_path: path_for_permissions.clone(),
                             });
-                        },
-                    )),
+                        }),
+                    ),
             );
         } else {
             menu = menu.item(
