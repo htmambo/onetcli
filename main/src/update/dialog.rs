@@ -353,6 +353,7 @@ impl Render for UpdateDialogView {
         v_flex()
             .gap_3()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(cx.theme().background)
             .child(
                 TitleBar::new().child(

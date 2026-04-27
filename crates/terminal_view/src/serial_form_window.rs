@@ -10,7 +10,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     select::{Select, SelectDelegate, SelectItem, SelectState},
-    v_flex, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
+    v_flex, ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
 };
 use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
@@ -681,6 +681,7 @@ impl Render for SerialFormWindow {
         v_flex()
             .justify_center()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(app_style::base())
             .child(
                 TitleBar::new()
@@ -810,6 +811,8 @@ impl Render for SerialFormWindow {
                     .border_t_1()
                     .border_color(app_style::border())
                     .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("cancel")
                             .small()

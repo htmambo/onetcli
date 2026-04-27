@@ -7,7 +7,7 @@ use gpui::{
     div, px,
 };
 use gpui_component::{
-    Disableable, Sizable, Size, StyledExt, TitleBar, app_style,
+    ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -1029,6 +1029,7 @@ impl Render for RedisFormWindow {
         v_flex()
             .justify_center()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(app_style::base())
             .child(
                 TitleBar::new()
@@ -1106,6 +1107,8 @@ impl Render for RedisFormWindow {
                     .border_t_1()
                     .border_color(app_style::border())
                     .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("cancel")
                             .small()

@@ -4,7 +4,7 @@ use gpui::{
     Styled, Window, div,
 };
 use gpui_component::{
-    Disableable, Sizable, StyledExt, TitleBar, app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement,
@@ -131,6 +131,7 @@ impl Render for ConnectionFormWindow {
 
         v_flex()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(app_style::base())
             .child(
                 TitleBar::new()
@@ -190,6 +191,8 @@ impl Render for ConnectionFormWindow {
                     .border_t_1()
                     .border_color(app_style::border())
                     .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("cancel")
                             .small()

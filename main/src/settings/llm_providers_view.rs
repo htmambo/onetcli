@@ -5,9 +5,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, StyledExt as _, app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt as _, TitleBar, app_style,
     button::{Button, ButtonVariant, ButtonVariants},
-    h_flex, v_flex, TitleBar,
+    h_flex, v_flex,
 };
 use one_core::llm::{storage::ProviderRepository, types::ProviderConfig};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window, request_popup_window_close};
@@ -90,9 +90,7 @@ impl LlmProvidersView {
             })
             .size(560.0, 560.0),
             move |window, cx| {
-                cx.new(|cx| {
-                    ProviderEditorView::new(provider, storage_manager, view, window, cx)
-                })
+                cx.new(|cx| ProviderEditorView::new(provider, storage_manager, view, window, cx))
             },
             cx,
         );
@@ -488,7 +486,10 @@ impl ProviderEditorView {
     }
 
     fn on_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(mut config) = self.form.update(cx, |form: &mut ProviderForm, cx: &mut Context<ProviderForm>| form.get_config(cx)) else {
+        let Some(mut config) = self.form.update(
+            cx,
+            |form: &mut ProviderForm, cx: &mut Context<ProviderForm>| form.get_config(cx),
+        ) else {
             self.error_message = Some(t!("LlmProviders.required_notice").to_string());
             cx.notify();
             return;
@@ -570,6 +571,7 @@ impl Render for ProviderEditorView {
         v_flex()
             .justify_center()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(app_style::base())
             .child(
                 TitleBar::new()
@@ -606,6 +608,8 @@ impl Render for ProviderEditorView {
                     .border_t_1()
                     .border_color(app_style::border())
                     .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("provider-editor-cancel")
                             .small()

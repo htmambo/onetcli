@@ -332,6 +332,8 @@ impl RenderOnce for TitleBar {
                 .border_b_1()
                 .border_color(cx.theme().title_bar_border)
                 .bg(cx.theme().title_bar)
+                .rounded_tl(cx.theme().radius_lg)
+                .rounded_tr(cx.theme().radius_lg)
                 .refine_style(&style)
                 .when(is_linux, |this| {
                     this.on_double_click(|_, window, _| window.zoom_window())

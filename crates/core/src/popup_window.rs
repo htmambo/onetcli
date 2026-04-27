@@ -3,9 +3,12 @@ use std::sync::Arc;
 use gpui::{
     AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable, InteractiveElement,
     IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Subscription,
-    Window, WindowBounds, WindowKind, WindowOptions, actions, div, px, size,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, actions, div, px,
+    size,
 };
-use gpui_component::{ActiveTheme as _, FocusTrapElement, Root, TitleBar, app_style, modal_surface_palette, v_flex};
+use gpui_component::{
+    ActiveTheme as _, FocusTrapElement, Root, TitleBar, app_style, modal_surface_palette, v_flex,
+};
 
 actions!(popup_window, [CancelPopup]);
 
@@ -67,6 +70,19 @@ fn centered_popup_bounds(
     }
 
     Bounds::centered(None, requested_size, cx)
+}
+
+fn popup_window_background(cx: &App) -> WindowBackgroundAppearance {
+    #[cfg(target_os = "macos")]
+    {
+        return WindowBackgroundAppearance::Blurred;
+    }
+
+    if cx.theme().window_blur_enabled {
+        WindowBackgroundAppearance::Blurred
+    } else {
+        WindowBackgroundAppearance::Opaque
+    }
 }
 
 struct PopupWindowView {
@@ -138,6 +154,8 @@ impl Render for PopupWindowView {
             .rounded(cx.theme().radius_lg)
             .text_color(app_style::text())
             .overflow_hidden()
+            // Root 已经改为透明，仅负责承接窗口级圆角与阴影；
+            // popup 壳层自己仍保留圆角与矩形 overflow mask，用于约束壳层背景和滚动区域。
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .focus_trap("popup-window-root", &self.focus_handle)
@@ -278,6 +296,8 @@ pub fn open_popup_window_with_should_close<F, E, H>(
     let title = options.title.clone();
     let on_should_close = Arc::new(on_should_close);
     let kind = options.kind.clone();
+    let corner_radius = cx.theme().radius_lg;
+    let window_background = popup_window_background(cx);
 
     cx.spawn(async move |cx| {
         let on_should_close = Arc::clone(&on_should_close);
@@ -289,7 +309,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
             titlebar: Some(TitleBar::title_bar_options()),
             window_min_size: Some(min_size),
             kind,
-            window_background: gpui::WindowBackgroundAppearance::Transparent,
+            window_background,
             #[cfg(target_os = "linux")]
             window_decorations: Some(gpui::WindowDecorations::Client),
             ..Default::default()
@@ -298,10 +318,19 @@ pub fn open_popup_window_with_should_close<F, E, H>(
         let window = cx.open_window(window_opts, move |window, cx| {
             let on_should_close = Arc::clone(&on_should_close);
             window.on_window_should_close(cx, move |window, cx| on_should_close(window, cx));
+            window.set_blur_behind_corner_radius(corner_radius);
             let view = create_view_fn(window, cx).into();
             let popup_view =
                 cx.new(|cx| PopupWindowView::new(view, Some(content_size), window, cx));
-            cx.new(|cx| Root::new(popup_view, window, cx))
+            cx.new(|cx| {
+                let mut root = Root::new(popup_view, window, cx);
+                #[cfg(target_os = "linux")]
+                {
+                    // popup 的可见底色由 PopupWindowView 承担，避免 Root 底色在圆角处透出。
+                    root = root.bg(gpui::transparent_black());
+                }
+                root
+            })
         })?;
 
         window.update(cx, |_, window, _| {

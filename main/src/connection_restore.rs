@@ -6,10 +6,10 @@ use gpui::{
     Render, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, StyledExt, app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex, v_flex, TitleBar,
+    h_flex, v_flex,
 };
 use one_core::{
     connection_restore::{
@@ -467,6 +467,7 @@ impl Render for ConnectionRestoreDialogContent {
         v_flex()
             .justify_center()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(app_style::base())
             .child(
                 TitleBar::new()
@@ -514,21 +515,32 @@ impl Render for ConnectionRestoreDialogContent {
                                                 Checkbox::new("restore-select-all")
                                                     .checked(all_selected)
                                                     .on_click(move |_, _, cx| {
-                                                        view_for_select_all.update(cx, |view, cx| {
-                                                            if view.all_selected() {
-                                                                view.selected_snapshot_ids.clear();
-                                                            } else {
-                                                                view.selected_snapshot_ids = view
-                                                                    .items
-                                                                    .iter()
-                                                                    .map(|item| item.snapshot_id.clone())
-                                                                    .collect();
-                                                            }
-                                                            cx.notify();
-                                                        });
+                                                        view_for_select_all.update(
+                                                            cx,
+                                                            |view, cx| {
+                                                                if view.all_selected() {
+                                                                    view.selected_snapshot_ids
+                                                                        .clear();
+                                                                } else {
+                                                                    view.selected_snapshot_ids =
+                                                                        view.items
+                                                                            .iter()
+                                                                            .map(|item| {
+                                                                                item.snapshot_id
+                                                                                    .clone()
+                                                                            })
+                                                                            .collect();
+                                                                }
+                                                                cx.notify();
+                                                            },
+                                                        );
                                                     })
                                             })
-                                            .child(div().text_sm().child(t!("ConnectionRestore.select_all"))),
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .child(t!("ConnectionRestore.select_all")),
+                                            ),
                                     )
                                     .child(
                                         div()
@@ -536,7 +548,10 @@ impl Render for ConnectionRestoreDialogContent {
                                             .text_color(cx.theme().muted_foreground)
                                             .child(
                                                 t!("ConnectionRestore.selected_count")
-                                                    .replace("%{selected}", &selected_count.to_string())
+                                                    .replace(
+                                                        "%{selected}",
+                                                        &selected_count.to_string(),
+                                                    )
                                                     .replace("%{total}", &total_count.to_string()),
                                             ),
                                     ),
@@ -565,6 +580,8 @@ impl Render for ConnectionRestoreDialogContent {
                     .border_t_1()
                     .border_color(app_style::border())
                     .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         div()
                             .text_xs()

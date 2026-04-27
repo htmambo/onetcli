@@ -5,14 +5,15 @@ use gpui::{
     Subscription, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, WindowExt, app_style,
+    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, TitleBar, WindowExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
+    modal_surface_palette,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
-    v_flex, modal_surface_palette, TitleBar,
+    v_flex,
 };
 use rust_i18n::t;
 
@@ -853,6 +854,7 @@ impl Render for CertificateEditorView {
         v_flex()
             .justify_center()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(app_style::base())
             .child(
                 TitleBar::new()
@@ -889,6 +891,8 @@ impl Render for CertificateEditorView {
                     .border_t_1()
                     .border_color(app_style::border())
                     .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("certificate-editor-cancel")
                             .small()
