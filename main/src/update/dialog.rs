@@ -29,9 +29,13 @@ use super::util::{UpdateInstallAction, format_bytes};
 
 const DOWNLOAD_PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub(super) fn show_update_dialog(info: UpdateDialogInfo, cx: &mut App) {
+pub(super) fn show_update_dialog(info: UpdateDialogInfo, window: &mut Window, cx: &mut App) {
     open_popup_window(
-        PopupWindowOptions::new(t!("Update.title").to_string()).size(480.0, 300.0),
+        window,
+        PopupWindowOptions::new(t!("Update.title").to_string())
+            .size(480.0, 260.0)
+            .min_width(420.0)
+            .min_height(220.0),
         move |_window, cx| cx.new(|cx| UpdateDialogView::new(info, cx)),
         cx,
     );
@@ -349,6 +353,7 @@ impl Render for UpdateDialogView {
         v_flex()
             .gap_3()
             .size_full()
+            .rounded(cx.theme().radius_lg)
             .bg(cx.theme().background)
             .child(
                 TitleBar::new().child(

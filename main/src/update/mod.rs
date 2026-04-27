@@ -27,6 +27,26 @@ use util::parse_version;
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPLY_UPDATE_FLAG: &str = "--apply-update";
 
+/// 检测当前是否以 `cargo run` 方式运行（开发模式）。
+/// 原理：若当前可执行文件位于 workspace 的 `target/` 目录下，则判定为开发模式。
+fn is_dev_mode() -> bool {
+    let Ok(exe_path) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(target_dir) = exe_path
+        .parent()
+        .and_then(|p| p.ancestors().find(|path| {
+            path.file_name().and_then(|name| name.to_str()) == Some("target")
+        }))
+    else {
+        return false;
+    };
+    let Some(workspace_dir) = target_dir.parent() else {
+        return false;
+    };
+    workspace_dir.join("Cargo.toml").is_file()
+}
+
 /// 当前使用的更新源。修改此常量即可切换更新渠道。
 const ACTIVE_UPDATE_SOURCE: UpdateSource = UpdateSource::GitHub;
 
@@ -76,7 +96,7 @@ pub fn handle_update_command() -> bool {
     }
 
     let Some(download_path) = args.next().map(PathBuf::from) else {
-        eprintln!("缺少更新包路径");
+        tracing::error!("缺少更新包路径");
         return true;
     };
 
@@ -87,13 +107,18 @@ pub fn handle_update_command() -> bool {
         .unwrap_or_else(|| download_path.clone());
 
     if let Err(err) = apply_update_helper(&download_path, &target_path) {
-        eprintln!("更新失败: {}", err);
+        tracing::error!("更新失败: {}", err);
     }
 
     true
 }
 
 pub fn schedule_update_check(window: &mut Window, cx: &mut App) {
+    if is_dev_mode() {
+        tracing::info!("开发模式，跳过自动更新检查");
+        return;
+    }
+
     if !should_run_update_check(
         UpdateCheckTrigger::Automatic,
         AppSettings::global(cx).auto_update,
@@ -265,7 +290,11 @@ async fn fetch_custom_dialog_info(
 
 fn show_update_dialog_on_active_window(info: UpdateDialogInfo, cx: &mut gpui::AsyncApp) {
     let _ = cx.update(|cx| {
-        show_update_dialog(info.clone(), cx);
+        if let Some(window_id) = cx.active_window() {
+            let _ = cx.update_window(window_id, |_, window, cx| {
+                show_update_dialog(info.clone(), window, cx);
+            });
+        }
     });
 }
 
