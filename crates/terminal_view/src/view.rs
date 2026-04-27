@@ -1771,7 +1771,10 @@ impl TerminalView {
             }
             TerminalModelEvent::ChildExit(_) => {
                 // 用户通过 exit 命令退出时，如果设置了直接关闭行为，则自动关闭 tab
-                if self.exit_behavior == "close" {
+                // 本地终端 exit 后直接关闭标签；SSH 根据 exit_behavior 设置决定
+                let is_local = self.terminal.read(cx).connection_kind()
+                    == terminal::TerminalConnectionKind::Local;
+                if is_local || self.exit_behavior == "close" {
                     self.request_close_from_event(_window, cx);
                 }
                 cx.notify();
