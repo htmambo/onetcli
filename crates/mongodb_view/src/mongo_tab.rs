@@ -6,12 +6,16 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Axis, Bounds, Context, Element, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, SharedString, Style, Styled, Subscription, Task, Window, div, px,
+    Render, SharedString, Style, Styled, Subscription, Task, Window, div,
 };
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;
+use one_core::serde_json::Value as JsonValue;
 use one_core::storage::{ActiveConnections, StoredConnection, Workspace};
-use one_core::tab_container::{TabContainer, TabContent, TabContentEvent, TabItem};
+use one_core::tab_container::{
+    TabContainer, TabContainerEvent, TabContent, TabContentEvent, TabItem,
+};
 use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use tracing::warn;
 
@@ -21,11 +25,9 @@ use crate::mongo_tree_event::MongoEventHandler;
 use crate::mongo_tree_view::MongoTreeView;
 use crate::sidebar::{MongoSidebar, MongoSidebarEvent};
 use one_core::layout::{
-    SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
+    PANEL_MIN_SIZE, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
+    TREE_PANEL_DEFAULT_SIZE, TREE_PANEL_MAX_SIZE, TREE_PANEL_MIN_SIZE,
 };
-
-const PANEL_MIN_SIZE: Pixels = px(100.0);
-const TREE_PANEL_DEFAULT_SIZE: Pixels = px(250.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResizingPanel {
@@ -50,6 +52,12 @@ pub struct MongoTabView {
 }
 
 impl MongoTabView {
+    pub fn contains_connection_id(&self, connection_id: i64) -> bool {
+        self.connections
+            .iter()
+            .any(|connection| connection.id == Some(connection_id))
+    }
+
     pub fn new_with_active_conn(
         workspace: Option<Workspace>,
         connections: Vec<StoredConnection>,
@@ -89,6 +97,20 @@ impl MongoTabView {
                 },
             ),
         );
+        subscriptions.push(cx.subscribe(
+            &tab_container,
+            |_this, _, event: &TabContainerEvent, cx| match event {
+                TabContainerEvent::LayoutChanged
+                | TabContainerEvent::ActiveContentChanged
+                | TabContainerEvent::TabActivated { .. }
+                | TabContainerEvent::TabClosed { .. } => {
+                    cx.emit(TabContentEvent::StateChanged);
+                    cx.notify();
+                }
+                TabContainerEvent::OpenSftpRequested { .. } => {}
+                TabContainerEvent::TabBarTrailingActionRequested => {}
+            },
+        ));
 
         let active_connection = connections
             .iter()
@@ -191,9 +213,10 @@ impl MongoTabView {
                 } else {
                     TOOLBAR_WIDTH
                 };
-                let max_size =
-                    (available_width - PANEL_MIN_SIZE - sidebar_width).max(PANEL_MIN_SIZE);
-                self.tree_panel_size = new_size.clamp(PANEL_MIN_SIZE, max_size);
+                let max_size = (available_width - PANEL_MIN_SIZE - sidebar_width)
+                    .max(TREE_PANEL_MIN_SIZE)
+                    .min(TREE_PANEL_MAX_SIZE);
+                self.tree_panel_size = new_size.clamp(TREE_PANEL_MIN_SIZE, max_size);
             }
             ResizingPanel::Sidebar => {
                 let new_size = self.bounds.right() - mouse_position.x;
@@ -245,8 +268,47 @@ impl TabContent for MongoTabView {
         }
     }
 
+    fn status_summary(&self, cx: &App) -> Option<SharedString> {
+        let tab_container = self.tab_container.read(cx);
+        tab_container
+            .current_status_summary(cx)
+            .or_else(|| tab_container.current_title(cx))
+    }
+
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let kind = if self.workspace.is_some() {
+            ConnectionRestoreKind::MongoDbWorkspace
+        } else {
+            ConnectionRestoreKind::MongoDb
+        };
+        let connection_id = if kind.is_workspace() {
+            None
+        } else {
+            self.active_connection_id.or_else(|| {
+                self.connections
+                    .first()
+                    .and_then(|connection| connection.id)
+            })
+        };
+
+        if !kind.is_workspace() && connection_id.is_none() {
+            return JsonValue::Null;
+        }
+
+        ConnectionRestorePayload {
+            kind,
+            connection_id,
+            workspace_id: self.workspace.as_ref().and_then(|workspace| workspace.id),
+            active_connection_id: self.active_connection_id,
+            local_terminal: None,
+            ssh_terminal: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn on_activate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -316,11 +378,18 @@ impl Render for MongoTabView {
         let tree_panel_size = self.tree_panel_size;
         let sidebar_visible = self.sidebar.read(cx).is_panel_visible();
         let sidebar_panel_size = self.sidebar_panel_size;
+        let shell_bg = if cfg!(target_os = "windows") {
+            cx.theme().transparent
+        } else {
+            cx.theme().background
+        };
+        let content_bg = cx.theme().muted;
 
         div()
             .id("mongodb-tab-view")
             .track_focus(&self.focus_handle)
             .size_full()
+            .bg(shell_bg)
             .child(
                 h_flex()
                     .size_full()
@@ -340,6 +409,7 @@ impl Render for MongoTabView {
                             .flex_1()
                             .h_full()
                             .min_w_0()
+                            .bg(content_bg)
                             .child(self.tab_container.clone()),
                     )
                     .when(sidebar_visible, |this| {

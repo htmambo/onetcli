@@ -3,24 +3,32 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    div, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IconName, Sizable, Size, TitleBar,
+    ActiveTheme, Disableable, IconName, Sizable, Size, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     scroll::ScrollableElement,
-    select::{Select, SelectItem, SelectState},
+    select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     tab::{Tab, TabBar},
     v_flex,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::certificate_manager::open_certificate_manager_popup;
+use one_core::certificate_notifier::{
+    CertificateDataEvent, get_notifier as get_certificate_notifier,
+};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
-use one_core::storage::{MongoDBParams, StoredConnection, Workspace};
+use one_core::storage::{
+    Certificate, CertificateKind, CertificateReference, CertificateRepository, MongoDBParams,
+    StoredConnection, Workspace,
+};
 use rust_i18n::t;
 use tracing::error;
 
@@ -30,7 +38,6 @@ use crate::MongoManager;
 pub struct MongoFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -68,32 +75,32 @@ impl SelectItem for WorkspaceSelectItem {
 }
 
 #[derive(Clone, Default, PartialEq)]
-struct TeamSelectItem {
-    id: Option<String>,
-    name: String,
+struct CertificateSelectItem {
+    id: Option<i64>,
+    label: String,
 }
 
-impl TeamSelectItem {
-    fn personal() -> Self {
+impl CertificateSelectItem {
+    fn none() -> Self {
         Self {
             id: None,
-            name: t!("TeamSync.personal").to_string(),
+            label: t!("MongoForm.certificate_none").to_string(),
         }
     }
 
-    fn from_team(team: &TeamOption) -> Self {
+    fn from_certificate(certificate: &Certificate) -> Self {
         Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
+            id: certificate.id,
+            label: format!("{} · {}", certificate.name, certificate.kind.label()),
         }
     }
 }
 
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
+impl SelectItem for CertificateSelectItem {
+    type Value = Option<i64>;
 
     fn title(&self) -> SharedString {
-        self.name.clone().into()
+        self.label.clone().into()
     }
 
     fn value(&self) -> &Self::Value {
@@ -118,6 +125,8 @@ pub struct MongoFormWindow {
     database_input: Entity<InputState>,
     username_input: Entity<InputState>,
     password_input: Entity<InputState>,
+    certificates: Vec<Certificate>,
+    credential_select: Entity<SelectState<Vec<CertificateSelectItem>>>,
     authentication_source_input: Entity<InputState>,
     replica_set_input: Entity<InputState>,
     read_preference_input: Entity<InputState>,
@@ -129,12 +138,12 @@ pub struct MongoFormWindow {
     use_tls: bool,
 
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
     remark_input: Entity<InputState>,
     sync_enabled: bool,
 
     is_testing: bool,
     test_result: Option<Result<(), String>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl MongoFormWindow {
@@ -161,6 +170,21 @@ impl MongoFormWindow {
             .editing_connection
             .as_ref()
             .and_then(|connection| connection.to_mongodb_params().ok());
+        let certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+        let mut certificate_items = vec![CertificateSelectItem::none()];
+        certificate_items.extend(
+            certificates
+                .iter()
+                .filter(|certificate| certificate.kind == CertificateKind::UsernamePassword)
+                .map(CertificateSelectItem::from_certificate),
+        );
+        let credential_select =
+            cx.new(|cx| SelectState::new(certificate_items, Some(Default::default()), window, cx));
 
         let name_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
@@ -334,24 +358,6 @@ impl MongoFormWindow {
             state
         });
 
-        let team_items = {
-            let mut items = vec![TeamSelectItem::personal()];
-            items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-            items
-        };
-
-        let team_select = cx.new(|cx| {
-            let mut state = SelectState::new(team_items, None, window, cx);
-            if let Some(team_id) = config
-                .editing_connection
-                .as_ref()
-                .and_then(|c| c.team_id.clone())
-            {
-                state.set_selected_value(&Some(team_id), window, cx);
-            }
-            state
-        });
-
         let sync_enabled = config
             .editing_connection
             .as_ref()
@@ -371,7 +377,11 @@ impl MongoFormWindow {
             .map(|parameters| parameters.use_tls)
             .unwrap_or(false);
 
-        Self {
+        let editing_credential_ref = existing_parameters
+            .as_ref()
+            .and_then(|parameters| parameters.credential_ref.clone());
+
+        let mut view = Self {
             focus_handle: cx.focus_handle(),
             title,
             is_editing,
@@ -385,6 +395,8 @@ impl MongoFormWindow {
             database_input,
             username_input,
             password_input,
+            certificates,
+            credential_select,
             authentication_source_input,
             replica_set_input,
             read_preference_input,
@@ -394,12 +406,37 @@ impl MongoFormWindow {
             direct_connection,
             use_tls,
             workspace_select,
-            team_select,
             remark_input,
             sync_enabled,
             is_testing: false,
             test_result: None,
+            _subscriptions: Vec::new(),
+        };
+
+        cx.subscribe_in(
+            &view.credential_select,
+            window,
+            |this, _select, event: &SelectEvent<Vec<CertificateSelectItem>>, window, cx| {
+                let SelectEvent::Confirm(_) = event;
+                this.sync_selected_certificate_inputs(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+
+        if let Some(notifier) = get_certificate_notifier(cx) {
+            view._subscriptions.push(cx.subscribe_in(
+                &notifier,
+                window,
+                |this, _, _event: &CertificateDataEvent, window, cx| {
+                    this.reload_certificates(window, cx);
+                },
+            ));
         }
+
+        view.restore_selected_certificate(editing_credential_ref.as_ref(), window, cx);
+        view.sync_selected_certificate_inputs(window, cx);
+        view
     }
 
     fn get_workspace_id(&self, cx: &App) -> Option<i64> {
@@ -410,15 +447,87 @@ impl MongoFormWindow {
             .flatten()
     }
 
-    fn get_team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
+    fn restore_selected_certificate(
+        &mut self,
+        reference: Option<&CertificateReference>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(reference) = reference else {
+            return;
+        };
+
+        let selected_id = self
+            .certificates
+            .iter()
+            .find(|certificate| reference.matches_certificate(certificate))
+            .and_then(|certificate| certificate.id);
+        self.credential_select.update(cx, |select, cx| {
+            select.set_selected_value(&selected_id, window, cx);
+        });
+    }
+
+    fn selected_certificate(&self, cx: &App) -> Option<Certificate> {
+        let selected_id = self
+            .credential_select
             .read(cx)
             .selected_value()
             .cloned()
-            .flatten()
+            .flatten();
+
+        self.certificates
+            .iter()
+            .find(|certificate| certificate.id == selected_id)
+            .cloned()
+    }
+
+    fn reload_certificates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_id = self
+            .credential_select
+            .read(cx)
+            .selected_value()
+            .cloned()
+            .flatten();
+
+        self.certificates = cx
+            .global::<one_core::storage::GlobalStorageState>()
+            .storage
+            .get::<CertificateRepository>()
+            .and_then(|repo| repo.list().ok())
+            .unwrap_or_default();
+
+        let mut items = vec![CertificateSelectItem::none()];
+        items.extend(
+            self.certificates
+                .iter()
+                .filter(|certificate| certificate.kind == CertificateKind::UsernamePassword)
+                .map(CertificateSelectItem::from_certificate),
+        );
+
+        self.credential_select.update(cx, |select, cx| {
+            select.set_items(items, window, cx);
+            select.set_selected_value(&selected_id, window, cx);
+        });
+        self.sync_selected_certificate_inputs(window, cx);
+        cx.notify();
+    }
+
+    fn sync_selected_certificate_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(certificate) = self.selected_certificate(cx) else {
+            return;
+        };
+
+        let username = certificate.username().unwrap_or("").to_string();
+        let password = certificate.password().unwrap_or("").to_string();
+        self.username_input
+            .update(cx, |state, cx| state.set_value(username, window, cx));
+        self.password_input.update(cx, |state, cx| {
+            state.set_value(password, window, cx);
+        });
     }
 
     fn build_parameters(&self, cx: &App) -> Result<MongoDBParams, String> {
+        let selected_certificate = self.selected_certificate(cx);
         let host_value = self.host_input.read(cx).text().to_string();
         let host_value = host_value.trim().to_string();
         if host_value.is_empty() {
@@ -445,21 +554,31 @@ impl MongoFormWindow {
             Some(database_value)
         };
 
-        let username_value = self.username_input.read(cx).text().to_string();
-        let username_value = username_value.trim().to_string();
-        let username = if username_value.is_empty() {
-            None
-        } else {
-            Some(username_value)
-        };
+        let username = selected_certificate
+            .as_ref()
+            .and_then(|certificate| certificate.username().map(|s| s.to_string()))
+            .or_else(|| {
+                let username_value = self.username_input.read(cx).text().to_string();
+                let username_value = username_value.trim().to_string();
+                if username_value.is_empty() {
+                    None
+                } else {
+                    Some(username_value)
+                }
+            });
 
-        let password_value = self.password_input.read(cx).text().to_string();
-        let password_value = password_value.trim().to_string();
-        let password = if password_value.is_empty() {
-            None
-        } else {
-            Some(password_value)
-        };
+        let password = selected_certificate
+            .as_ref()
+            .and_then(|certificate| certificate.password().map(|s| s.to_string()))
+            .or_else(|| {
+                let password_value = self.password_input.read(cx).text().to_string();
+                let password_value = password_value.trim().to_string();
+                if password_value.is_empty() {
+                    None
+                } else {
+                    Some(password_value)
+                }
+            });
 
         let auth_source_value = self.authentication_source_input.read(cx).text().to_string();
         let auth_source_value = auth_source_value.trim().to_string();
@@ -516,6 +635,9 @@ impl MongoFormWindow {
             database,
             username,
             password,
+            credential_ref: selected_certificate
+                .as_ref()
+                .map(CertificateReference::from_certificate),
             auth_source,
             replica_set,
             read_preference,
@@ -588,7 +710,6 @@ impl MongoFormWindow {
         };
 
         let workspace_id = self.get_workspace_id(cx);
-        let team_id = self.get_team_id(cx);
         let owner_id = if !self.is_editing {
             GlobalCloudUser::get_user(cx).map(|u| u.id)
         } else {
@@ -618,7 +739,6 @@ impl MongoFormWindow {
                 let mut connection = StoredConnection::new_mongodb(name, parameters, workspace_id);
                 connection.sync_enabled = sync_enabled;
                 connection.remark = remark;
-                connection.team_id = team_id;
                 if !is_editing {
                     connection.owner_id = owner_id;
                 }
@@ -676,49 +796,71 @@ impl MongoFormWindow {
                     .w(px(120.0))
                     .text_sm()
                     .text_right()
+                    .text_color(app_style::text_muted())
                     .child(label.to_string()),
             )
             .child(div().flex_1().child(child))
     }
 
+    fn styled_input(&self, input: Input) -> Input {
+        input.refine_style(&app_style::control_style())
+    }
+
+    fn styled_select<D>(&self, select: Select<D>) -> Select<D>
+    where
+        D: SelectDelegate + 'static,
+    {
+        select.refine_style(&app_style::control_style())
+    }
+
     fn render_basic_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let use_certificate = self.selected_certificate(cx).is_some();
+
         v_flex()
             .gap_2()
             .child(self.render_form_row(
                 t!("MongoForm.name_label").as_ref(),
-                Input::new(&self.name_input),
+                self.styled_input(Input::new(&self.name_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.host_label").as_ref(),
-                Input::new(&self.host_input),
+                self.styled_input(Input::new(&self.host_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.port_label").as_ref(),
-                Input::new(&self.port_input),
+                self.styled_input(Input::new(&self.port_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.database_label").as_ref(),
-                Input::new(&self.database_input),
+                self.styled_input(Input::new(&self.database_input)),
             ))
             .child(self.render_form_row(
-                t!("MongoForm.username_label").as_ref(),
-                Input::new(&self.username_input),
+                t!("MongoForm.certificate_label").as_ref(),
+                self.styled_select(Select::new(&self.credential_select).w_full()),
             ))
-            .child(self.render_form_row(
-                t!("MongoForm.password_label").as_ref(),
-                Input::new(&self.password_input).mask_toggle(),
-            ))
+            .child(
+                self.render_form_row(
+                    t!("MongoForm.username_label").as_ref(),
+                    self.styled_input(Input::new(&self.username_input))
+                        .disabled(use_certificate),
+                ),
+            )
+            .child(
+                self.render_form_row(
+                    t!("MongoForm.password_label").as_ref(),
+                    self.styled_input(Input::new(&self.password_input))
+                        .mask_toggle()
+                        .disable_ime()
+                        .disabled(use_certificate),
+                ),
+            )
             .child(self.render_form_row(
                 t!("MongoForm.auth_source_label").as_ref(),
-                Input::new(&self.authentication_source_input),
+                self.styled_input(Input::new(&self.authentication_source_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.workspace_label").as_ref(),
-                Select::new(&self.workspace_select).w_full(),
-            ))
-            .child(self.render_form_row(
-                t!("TeamSync.team_label").as_ref(),
-                Select::new(&self.team_select).w_full(),
+                self.styled_select(Select::new(&self.workspace_select).w_full()),
             ))
             .child(
                 self.render_form_row(
@@ -736,7 +878,7 @@ impl MongoFormWindow {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(app_style::text_muted())
                                 .child(t!("MongoForm.cloud_sync_enabled").to_string()),
                         ),
                 ),
@@ -770,11 +912,11 @@ impl MongoFormWindow {
             )
             .child(self.render_form_row(
                 t!("MongoForm.replica_set_label").as_ref(),
-                Input::new(&self.replica_set_input),
+                self.styled_input(Input::new(&self.replica_set_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.read_preference_label").as_ref(),
-                Input::new(&self.read_preference_input),
+                self.styled_input(Input::new(&self.read_preference_input)),
             ))
     }
 
@@ -794,18 +936,18 @@ impl MongoFormWindow {
             )
             .child(self.render_form_row(
                 t!("MongoForm.connect_timeout_label").as_ref(),
-                Input::new(&self.connect_timeout_seconds_input),
+                self.styled_input(Input::new(&self.connect_timeout_seconds_input)),
             ))
             .child(self.render_form_row(
                 t!("MongoForm.app_name_label").as_ref(),
-                Input::new(&self.application_name_input),
+                self.styled_input(Input::new(&self.application_name_input)),
             ))
     }
 
     fn render_remark_tab(&self) -> impl IntoElement {
         v_flex().gap_2().child(self.render_form_row(
             t!("MongoForm.remark_label").as_ref(),
-            Input::new(&self.remark_input),
+            self.styled_input(Input::new(&self.remark_input)),
         ))
     }
 }
@@ -823,23 +965,31 @@ impl Render for MongoFormWindow {
 
         let test_result_element = match &self.test_result {
             Some(Ok(())) => Some(
-                div()
-                    .w_full()
-                    .px_6()
-                    .pb_2()
-                    .text_sm()
-                    .text_color(cx.theme().success)
-                    .child(t!("MongoForm.test_success").to_string()),
+                div().w_full().px_6().pb_2().child(
+                    div()
+                        .w_full()
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .bg(app_style::accent_dim_strong())
+                        .text_sm()
+                        .text_color(app_style::accent())
+                        .child(t!("MongoForm.test_success").to_string()),
+                ),
             ),
             Some(Err(error)) => Some(
                 div().w_full().px_6().pb_2().child(
                     div()
                         .w_full()
                         .max_h(px(120.0))
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .bg(app_style::danger_dim())
                         .overflow_y_scrollbar()
                         .whitespace_normal()
                         .text_sm()
-                        .text_color(cx.theme().danger)
+                        .text_color(app_style::danger())
                         .child(error.clone()),
                 ),
             ),
@@ -849,39 +999,58 @@ impl Render for MongoFormWindow {
         v_flex()
             .justify_center()
             .size_full()
-            .bg(cx.theme().background)
+            .rounded(cx.theme().radius_lg)
+            .bg(app_style::base())
             .child(
-                TitleBar::new().child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_1()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(self.title.clone()),
-                ),
+                TitleBar::new()
+                    .refine_style(&app_style::title_bar_style())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(app_style::text())
+                            .child(self.title.clone()),
+                    ),
             )
             .child(
-                div().flex().justify_center().px_3().pt_2().child(
-                    TabBar::new("mongodb-form-tabs")
-                        .with_size(Size::Small)
-                        .underline()
-                        .selected_index(active_tab)
-                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                            this.active_tab = *ix;
-                            cx.notify();
-                        }))
-                        .child(Tab::new().label(t!("MongoForm.tab_basic").to_string()))
-                        .child(Tab::new().label(t!("MongoForm.tab_cluster").to_string()))
-                        .child(Tab::new().label(t!("MongoForm.tab_advanced").to_string()))
-                        .child(Tab::new().label(t!("MongoForm.tab_remark").to_string())),
+                div().flex().justify_center().px_4().pt_3().pb_1().child(
+                    div()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(app_style::border())
+                        .bg(app_style::surface())
+                        .px_2()
+                        .py_2()
+                        .child(
+                            TabBar::new("mongodb-form-tabs")
+                                .with_size(Size::Small)
+                                .underline()
+                                .selected_index(active_tab)
+                                .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                                    this.active_tab = *ix;
+                                    cx.notify();
+                                }))
+                                .child(Tab::new().label(t!("MongoForm.tab_basic").to_string()))
+                                .child(Tab::new().label(t!("MongoForm.tab_cluster").to_string()))
+                                .child(Tab::new().label(t!("MongoForm.tab_advanced").to_string()))
+                                .child(Tab::new().label(t!("MongoForm.tab_remark").to_string())),
+                        ),
                 ),
             )
             .child(
                 div()
                     .id("mongo-form-content")
                     .flex_1()
+                    .mx_4()
+                    .mb_4()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(app_style::border())
+                    .bg(app_style::surface())
                     .p_4()
                     .overflow_y_scroll()
                     .child(match active_tab {
@@ -900,10 +1069,14 @@ impl Render for MongoFormWindow {
                     .px_6()
                     .py_4()
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(app_style::border())
+                    .bg(app_style::surface())
+                    .rounded_bl(cx.theme().radius_lg)
+                    .rounded_br(cx.theme().radius_lg)
                     .child(
                         Button::new("cancel")
                             .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .label(t!("Common.cancel").to_string())
                             .on_click(|_, window, _cx| {
                                 window.remove_window();
@@ -912,7 +1085,7 @@ impl Render for MongoFormWindow {
                     .child(
                         Button::new("test")
                             .small()
-                            .outline()
+                            .with_variant(app_style::secondary_button_variant(cx))
                             .icon(IconName::Refresh)
                             .label(if is_testing {
                                 t!("MongoForm.testing").to_string()
@@ -925,9 +1098,18 @@ impl Render for MongoFormWindow {
                             })),
                     )
                     .child(
+                        Button::new("manage-certificates")
+                            .small()
+                            .with_variant(app_style::secondary_button_variant(cx))
+                            .label(t!("MongoForm.manage_certificates").to_string())
+                            .on_click(cx.listener(|_, _, window, cx| {
+                                open_certificate_manager_popup(window, cx);
+                            })),
+                    )
+                    .child(
                         Button::new("ok")
                             .small()
-                            .primary()
+                            .with_variant(app_style::primary_button_variant(cx))
                             .label(t!("Common.save").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.on_save(window, cx);

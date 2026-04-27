@@ -4,6 +4,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
+use gpui_component::tokens::spacing::TOOLBAR_HEIGHT;
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, v_flex};
 use one_core::ai_chat::ask_ai::{AskAiEvent, get_ask_ai_notifier};
 use one_core::ai_chat::{AiChatPanel, AiChatPanelEvent};
@@ -117,10 +118,10 @@ impl MongoSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_active = self.active_panel == Some(panel);
-        let accent_color = cx.theme().accent;
-        let accent_fg = cx.theme().accent_foreground;
+        let active_bg = cx.theme().list_active;
+        let hover_bg = cx.theme().sidebar_accent;
+        let active_fg = cx.theme().sidebar_foreground;
         let muted_fg = cx.theme().muted_foreground;
-        let muted_bg = cx.theme().muted;
 
         div()
             .id(SharedString::from(format!(
@@ -128,33 +129,33 @@ impl MongoSidebar {
                 panel
             )))
             .w(px(36.0))
-            .h(px(36.0))
+            .h(px(TOOLBAR_HEIGHT))
             .flex()
             .items_center()
             .justify_center()
             .rounded_md()
             .cursor_pointer()
-            .when(is_active, |this| this.bg(accent_color))
-            .when(!is_active, |this| this.hover(|s| s.bg(muted_bg)))
+            .when(is_active, |this| this.bg(active_bg))
+            .when(!is_active, |this| this.hover(|s| s.bg(hover_bg)))
             .on_click(cx.listener(move |this, _event, _window, cx| {
                 this.toggle_panel(panel, cx);
             }))
             .child(
                 Icon::new(panel.icon())
                     .with_size(Size::Medium)
-                    .text_color(if is_active { accent_fg } else { muted_fg }),
+                    .text_color(if is_active { active_fg } else { muted_fg }),
             )
     }
 
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let muted_bg = cx.theme().muted;
+        let rail_bg = cx.theme().sidebar;
 
         v_flex()
             .flex_shrink_0()
             .w(TOOLBAR_WIDTH)
             .h_full()
-            .bg(muted_bg)
+            .bg(rail_bg)
             .border_l_1()
             .border_color(border_color)
             .items_center()
@@ -187,7 +188,7 @@ impl Focusable for MongoSidebar {
 impl Render for MongoSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let bg_color = cx.theme().muted;
 
         div()
             .h_full()
