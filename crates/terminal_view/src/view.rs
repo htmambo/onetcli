@@ -10,9 +10,9 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
-    kbd::Kbd, terminal_canvas_surface_opacity, windows_surface_color, ActiveTheme, BlinkCursor,
-    Icon, IconName, Root, Sizable, SystemNotificationOptions, Theme as UiTheme, WindowExt,
-    WindowsSurfaceLayer,
+    kbd::Kbd, ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
+    Theme as UiTheme, WindowExt,
+    WindowsSurfaceLayer, terminal_canvas_surface_opacity, windows_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -1197,7 +1197,7 @@ impl TerminalView {
             query = %self.history_prompt.query_input(),
             dropdown_visible = self.history_prompt.dropdown_visible(),
             matches_len = self.history_prompt.matches().len(),
-            selected_index = ?self.history_prompt.selected_index(),
+            selected_index = self.history_prompt.selected_index(),
             selected_match = ?selected_match,
             "history prompt state"
         );
@@ -1670,7 +1670,7 @@ impl TerminalView {
                             )
                         })
                         .children(matches.into_iter().enumerate().map(|(index, command)| {
-                            let active = selected_index == Some(index);
+                            let active = index == selected_index;
                             div()
                                 .on_mouse_move({
                                     let view = view.clone();
@@ -3620,12 +3620,13 @@ impl TerminalView {
     }
 
     fn send_tab(&mut self, _: &SendTab, _window: &mut Window, cx: &mut Context<Self>) {
-        self.dismiss_history_prompt();
+        if self.try_accept_history_prompt(cx) {
+            return;
+        }
         self.write_to_pty(b"\x09".to_vec(), cx);
     }
 
     fn send_shift_tab(&mut self, _: &SendShiftTab, _window: &mut Window, cx: &mut Context<Self>) {
-        self.dismiss_history_prompt();
         self.write_to_pty(b"\x1b[Z".to_vec(), cx);
     }
 
@@ -4180,7 +4181,9 @@ impl Render for TerminalView {
                                                 .child(tooltip.action_hint),
                                         )
                                         .child(
-                                            div().text_color(text_muted).child(tooltip.action_text),
+                                            div()
+                                                .text_color(text_muted)
+                                                .child(tooltip.action_text),
                                         ),
                                 )
                                 .child(
@@ -4420,30 +4423,31 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
-        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
-        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
+        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
+        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
+        history_prompt_dropdown_origin, history_prompt_overlay_bounds,
+        multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
+        trim_recovery_content_to_recent_chars,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;
     use alacritty_terminal::term::TermMode;
     #[cfg(target_os = "macos")]
     use gpui::TestAppContext;
-    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
+    use gpui::{Bounds, Keystroke, MouseButton, Point, SharedString, px, size};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{
         thread,
         time::{Duration, Instant},
     };
-    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
 
     #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {

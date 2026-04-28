@@ -564,15 +564,16 @@ impl GlobalNodeCache {
         let node_cache_dir = self.node_cache.cache_dir().clone();
         let metadata_cache_dir = self.metadata_cache.cache_dir().clone();
 
-        cx.background_executor().spawn(async move {
-            let interval = std::time::Duration::from_secs(5 * 60);
-            loop {
-                smol::Timer::after(interval).await;
-                debug!("Running periodic cache cleanup");
-                Self::cleanup_expired_files(&node_cache_dir).await;
-                Self::cleanup_expired_files(&metadata_cache_dir.join("metadata")).await;
-            }
-        })
+        cx.background_executor()
+            .spawn(async move {
+                let interval = std::time::Duration::from_secs(5 * 60);
+                loop {
+                    smol::Timer::after(interval).await;
+                    debug!("Running periodic cache cleanup");
+                    Self::cleanup_expired_files(&node_cache_dir).await;
+                    Self::cleanup_expired_files(&metadata_cache_dir.join("metadata")).await;
+                }
+            })
     }
 
     /// 扫描目录并清理过期的缓存 JSON 文件

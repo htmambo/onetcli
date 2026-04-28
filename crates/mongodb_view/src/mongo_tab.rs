@@ -9,8 +9,8 @@ use gpui::{
     Render, SharedString, Style, Styled, Subscription, Task, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
-    layered_level_surface_color,
+    ActiveTheme, Icon, IconName, Sizable, Size, h_flex,
+    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
 use one_core::gpui_tokio::Tokio;

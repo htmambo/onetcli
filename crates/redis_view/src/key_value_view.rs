@@ -9,18 +9,18 @@ use gpui::{
     StatefulInteractiveElement, Styled, Task, Window, div, prelude::FluentBuilder, px, relative,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _, WindowsSurfaceLayer,
+    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     dialog::DialogButtonProps,
     h_flex,
     highlighter::Language,
     input::{Input, InputEvent, InputState},
-    layered_level_surface_color,
     radio::Radio,
     select::{Select, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     v_flex,
+    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::tab_container::{TabContent, TabContentEvent};

@@ -7,23 +7,23 @@ use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
 use gpui::http_client::{AsyncBody, Method, Request, Url};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
-    Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, div, point, px, size,
+    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity,
+    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke,
+    ParentElement, Pixels, Render, SharedString, StyleRefinement, Styled,
+    WeakEntity, Window, WindowAppearance, WindowBounds, div, point,
+    px, size, WindowBackgroundAppearance,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IndexPath, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
-    Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar, WindowExt, WindowsSurfaceLayer,
+    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, Theme, ThemeMode,
+    ThemeRegistry, TitleBar, WindowExt,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
     h_flex,
     input::{Input, InputState},
     kbd::Kbd,
-    layered_level_surface_color,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     setting::{
@@ -33,6 +33,7 @@ use gpui_component::{
     switch::Switch,
     tokens::Radius,
     v_flex,
+    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::certificate_manager::CertificateManagerView;
 use one_core::cloud_sync::{
@@ -3246,22 +3247,18 @@ impl Render for SettingsPanel {
             .text_color(cx.theme().sidebar_foreground);
         let content_style = StyleRefinement::default().bg(page_bg);
 
-        div()
-            .track_focus(&self.focus_handle)
-            .size_full()
-            // .bg(if blur_enabled { cx.theme().transparent } else { cx.theme().background })
-            .child(
-                div().size_full().child(
-                    Settings::new("main-app-settings")
-                        .with_size(self.size)
-                        .with_group_variant(self.group_variant)
-                        .sidebar_style(&sidebar_style)
-                        .content_style(&content_style)
-                        .header_style(&sync_server_theme::control_style())
-                        .default_selected_index(self.selected_page.select_index())
-                        .pages(self.setting_pages(window, cx)),
-                ),
-            )
+        div().track_focus(&self.focus_handle).size_full().child(
+            div().size_full().child(
+                Settings::new("main-app-settings")
+                    .with_size(self.size)
+                    .with_group_variant(self.group_variant)
+                    .sidebar_style(&sidebar_style)
+                    .content_style(&content_style)
+                    .header_style(&sync_server_theme::control_style())
+                    .default_selected_index(self.selected_page.select_index())
+                    .pages(self.setting_pages(window, cx)),
+            ),
+        )
     }
 }
 

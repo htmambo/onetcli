@@ -14,8 +14,8 @@ use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
-    Sizable, Size, WindowExt as _, WindowsSurfaceLayer, h_flex, layered_level_surface_color,
-    linux_prefers_system_window_controls, should_render_custom_window_controls, v_flex,
+    Sizable, Size, WindowExt as _, h_flex, linux_prefers_system_window_controls,
+    should_render_custom_window_controls, v_flex, WindowsSurfaceLayer, layered_level_surface_color,
 };
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};

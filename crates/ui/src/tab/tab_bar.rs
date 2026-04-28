@@ -9,10 +9,7 @@ use std::rc::Rc;
 use super::{Tab, TabVariant};
 use crate::button::{Button, ButtonVariants as _};
 use crate::menu::{DropdownMenu as _, PopupMenuItem};
-use crate::{
-    ActiveTheme, IconName, Selectable, Sizable, Size, StyledExt, WindowsSurfaceLayer, h_flex,
-    layered_level_surface_color,
-};
+use crate::{ActiveTheme, IconName, Selectable, Sizable, Size, StyledExt, h_flex, WindowsSurfaceLayer, layered_level_surface_color};
 
 /// A TabBar element that contains multiple [`Tab`] items.
 #[derive(IntoElement)]

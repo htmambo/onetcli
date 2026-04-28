@@ -1,12 +1,12 @@
 use crate::{
-    ActiveTheme, Anchor, ElementExt, Placement, StyledExt, WindowsSurfaceLayer,
+    ActiveTheme, Anchor, ElementExt, Placement, StyledExt,
     dialog::{ANIMATION_DURATION, Dialog},
     focus_trap::FocusTrapManager,
     input::InputState,
-    layered_level_surface_color,
     notification::{Notification, NotificationList},
     sheet::Sheet,
     window_border,
+    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use gpui::{
     AnyView, App, AppContext, Context, DefiniteLength, Entity, FocusHandle, InteractiveElement,

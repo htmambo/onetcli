@@ -10,16 +10,16 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, Size, StyledExt, WindowExt as _,
-    WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputEvent, InputState},
-    layered_level_surface_color,
     notification::Notification,
     spinner::Spinner,
     tab::{Tab, TabBar},
     v_flex,
+    WindowsSurfaceLayer,
+    layered_level_surface_color,
 };
 use mongodb::bson::{Bson, Document};
 use mongodb::options::FindOptions;

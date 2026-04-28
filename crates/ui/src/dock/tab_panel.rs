@@ -9,13 +9,14 @@ use gpui::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable, WindowsSurfaceLayer,
+    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     dock::PanelInfo,
-    h_flex, layered_level_surface_color,
+    h_flex,
     menu::{DropdownMenu, PopupMenu},
     tab::{Tab, TabBar},
     v_flex,
+    WindowsSurfaceLayer, layered_level_surface_color,
 };
 
 use super::{

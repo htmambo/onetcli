@@ -20,6 +20,7 @@ use gpui_component::{
     scroll::ScrollableElement,
     spinner::Spinner,
     v_flex,
+    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::{ActiveConnections, StoredConnection};

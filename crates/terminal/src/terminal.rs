@@ -1716,6 +1716,34 @@ impl Terminal {
         (Arc::new(FairMutex::new(term)), event_proxy, colors)
     }
 
+    fn reset_terminal_surface(&mut self) {
+        let Some(event_tx) = self.event_tx.clone() else {
+            return;
+        };
+
+        let event_proxy = self
+            .event_proxy
+            .clone()
+            .unwrap_or_else(|| GpuiEventProxy::new(event_tx.clone()));
+        let term_config = TermConfig {
+            scrolling_history: 10000,
+            ..Default::default()
+        };
+        let new_term = Term::new(
+            term_config,
+            &TermDimensions {
+                cols: self.cols,
+                rows: self.rows,
+            },
+            event_proxy,
+        );
+
+        *self.term.lock() = new_term;
+        self.title.clear();
+        self.current_working_dir = None;
+        self.child_exited = None;
+    }
+
     fn spawn_local_history_loader(preferred_shell: Option<&str>, cx: &mut Context<Self>) {
         let preferred_shell = preferred_shell.map(str::to_string);
         cx.spawn(async move |this: WeakEntity<Self>, cx| {

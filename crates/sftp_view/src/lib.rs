@@ -14,20 +14,18 @@ use gpui::{
     actions, div, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, OverlayScrimLevel, Sizable, Size, WindowExt,
-    WindowsSurfaceLayer,
+    ActiveTheme, Disableable, Icon, IconName, Sizable, Size, WindowExt,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputState},
-    layered_surface_color,
     notification::Notification,
-    overlay_scrim_color,
     progress::Progress,
     spinner::Spinner,
     tooltip::Tooltip,
     v_flex,
+    OverlayScrimLevel, WindowsSurfaceLayer, layered_surface_color, overlay_scrim_color,
 };
 use one_core::RunningState;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};

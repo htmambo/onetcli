@@ -14,8 +14,8 @@ use gpui_component::label::Label;
 use gpui_component::notification::Notification;
 use gpui_component::table::{Table, TableDelegate, TableEvent, TableState};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
-    layered_level_surface_color, table::Column, v_flex,
+    ActiveTheme, Icon, IconName, Sizable, Size, h_flex, table::Column, v_flex,
+    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::storage::manager::get_queries_dir;
 use one_core::storage::{
