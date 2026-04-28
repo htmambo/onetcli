@@ -1670,7 +1670,7 @@ impl TerminalView {
                             )
                         })
                         .children(matches.into_iter().enumerate().map(|(index, command)| {
-                            let active = index == selected_index;
+                            let active = Some(index) == selected_index;
                             div()
                                 .on_mouse_move({
                                     let view = view.clone();

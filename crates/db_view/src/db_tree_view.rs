@@ -28,7 +28,6 @@ use gpui_component::{
     tokens::Radius,
     tooltip::Tooltip,
     v_flex,
-    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use rust_i18n::t;
 use tracing::log::{error, info, trace, warn};
