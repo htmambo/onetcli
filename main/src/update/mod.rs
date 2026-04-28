@@ -33,12 +33,10 @@ fn is_dev_mode() -> bool {
     let Ok(exe_path) = std::env::current_exe() else {
         return false;
     };
-    let Some(target_dir) = exe_path
-        .parent()
-        .and_then(|p| p.ancestors().find(|path| {
-            path.file_name().and_then(|name| name.to_str()) == Some("target")
-        }))
-    else {
+    let Some(target_dir) = exe_path.parent().and_then(|p| {
+        p.ancestors()
+            .find(|path| path.file_name().and_then(|name| name.to_str()) == Some("target"))
+    }) else {
         return false;
     };
     let Some(workspace_dir) = target_dir.parent() else {

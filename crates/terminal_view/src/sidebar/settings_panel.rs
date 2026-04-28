@@ -14,7 +14,7 @@ use gpui_component::{
     color_picker::{ColorPicker, ColorPickerState},
     dialog::DialogButtonProps,
     h_flex,
-    input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
+    input::{Escape, Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
     notification::Notification,
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
@@ -689,6 +689,14 @@ impl SettingsPanel {
         self.search_input_state.update(cx, |state, cx| {
             state.set_value(&value, window, cx);
         });
+    }
+
+    pub fn focus_default(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_input_state.focus_handle(cx).focus(window, cx);
+    }
+
+    fn on_action_escape(&mut self, _: &Escape, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(SettingsPanelEvent::Close);
     }
 
     /// 设置主题（用户点击主题时调用）
@@ -1401,6 +1409,7 @@ impl Render for SettingsPanel {
         v_flex()
             .size_full()
             .text_color(cx.theme().foreground)
+            .on_action(cx.listener(Self::on_action_escape))
             .child(self.render_header(cx))
             .child(
                 div()

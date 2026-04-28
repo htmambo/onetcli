@@ -901,78 +901,74 @@ impl DatabaseObjects {
         let toolbar_buttons =
             build_toolbar_buttons_for(database_type, node_type, data_db_node_type);
 
-            for btn_config in toolbar_buttons {
-                let button = match btn_config.button_type {
-                    ToolbarButtonType::CurrentNode => {
-                        let node = current_node.clone();
-                        let event_fn = btn_config.event_fn;
-                        Button::new(btn_config.id)
-                            .ghost()
-                            .with_size(Size::Medium)
-                            .icon(btn_config.icon)
-                            .tooltip(btn_config.tooltip)
-                            .on_click(window.listener_for(&cx.entity(), move |_this, _, _, cx| {
-                                if let Some(ref node) = node {
-                                    let event = event_fn(node.clone());
+        for btn_config in toolbar_buttons {
+            let button = match btn_config.button_type {
+                ToolbarButtonType::CurrentNode => {
+                    let node = current_node.clone();
+                    let event_fn = btn_config.event_fn;
+                    Button::new(btn_config.id)
+                        .ghost()
+                        .with_size(Size::Medium)
+                        .icon(btn_config.icon)
+                        .tooltip(btn_config.tooltip)
+                        .on_click(window.listener_for(&cx.entity(), move |_this, _, _, cx| {
+                            if let Some(ref node) = node {
+                                let event = event_fn(node.clone());
+                                cx.emit(event);
+                            }
+                        }))
+                        .into_any_element()
+                }
+                ToolbarButtonType::SelectedRow => {
+                    let event_fn = btn_config.event_fn;
+                    Button::new(btn_config.id)
+                        .ghost()
+                        .with_size(Size::Medium)
+                        .icon(btn_config.icon)
+                        .tooltip(btn_config.tooltip)
+                        .on_click(
+                            window.listener_for(&cx.entity(), move |this, _, window, cx| {
+                                let nodes = this.build_nodes_for_selected_rows();
+                                if nodes.is_empty() {
+                                    window.push_notification(
+                                        Notification::warning(t!("Common.select_row")),
+                                        cx,
+                                    );
+                                    return;
+                                }
+                                if nodes.len() == 1 {
+                                    let event = event_fn(nodes[0].clone());
+                                    cx.emit(event);
+                                    return;
+                                }
+
+                                let sample_event = event_fn(nodes[0].clone());
+                                if let Some(action) = Self::batch_action_for_event(&sample_event) {
+                                    cx.emit(DatabaseObjectsEvent::Batch { action, nodes });
+                                    return;
+                                }
+
+                                if !Self::allow_multi_event(&sample_event) {
+                                    window.push_notification(
+                                        Notification::warning(
+                                            t!("DatabaseObjects.batch_not_supported").to_string(),
+                                        ),
+                                        cx,
+                                    );
+                                    return;
+                                }
+
+                                for node in nodes {
+                                    let event = event_fn(node);
                                     cx.emit(event);
                                 }
-                            }))
-                            .into_any_element()
-                    }
-                    ToolbarButtonType::SelectedRow => {
-                        let event_fn = btn_config.event_fn;
-                        Button::new(btn_config.id)
-                            .ghost()
-                            .with_size(Size::Medium)
-                            .icon(btn_config.icon)
-                            .tooltip(btn_config.tooltip)
-                            .on_click(window.listener_for(
-                                &cx.entity(),
-                                move |this, _, window, cx| {
-                                    let nodes = this.build_nodes_for_selected_rows();
-                                    if nodes.is_empty() {
-                                        window.push_notification(
-                                            Notification::warning(t!("Common.select_row")),
-                                            cx,
-                                        );
-                                        return;
-                                    }
-                                    if nodes.len() == 1 {
-                                        let event = event_fn(nodes[0].clone());
-                                        cx.emit(event);
-                                        return;
-                                    }
-
-                                    let sample_event = event_fn(nodes[0].clone());
-                                    if let Some(action) =
-                                        Self::batch_action_for_event(&sample_event)
-                                    {
-                                        cx.emit(DatabaseObjectsEvent::Batch { action, nodes });
-                                        return;
-                                    }
-
-                                    if !Self::allow_multi_event(&sample_event) {
-                                        window.push_notification(
-                                            Notification::warning(
-                                                t!("DatabaseObjects.batch_not_supported")
-                                                    .to_string(),
-                                            ),
-                                            cx,
-                                        );
-                                        return;
-                                    }
-
-                                    for node in nodes {
-                                        let event = event_fn(node);
-                                        cx.emit(event);
-                                    }
-                                },
-                            ))
-                            .into_any_element()
-                    }
-                };
-                buttons.push(button);
-            }
+                            }),
+                        )
+                        .into_any_element()
+                }
+            };
+            buttons.push(button);
+        }
 
         buttons
     }

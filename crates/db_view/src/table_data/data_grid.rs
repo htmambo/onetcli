@@ -2596,7 +2596,9 @@ impl DataGrid {
                                         let check_icon = if is_hidden {
                                             Icon::empty().xsmall()
                                         } else {
-                                            Icon::new(IconName::Check).xsmall().text_color(cx.theme().success_foreground)
+                                            Icon::new(IconName::Check)
+                                                .xsmall()
+                                                .text_color(cx.theme().success_foreground)
                                         };
 
                                         h_flex()
@@ -2606,22 +2608,29 @@ impl DataGrid {
                                             .child(check_icon)
                                             .child(div().flex_1().child(col_name.clone()))
                                     })
-                                    .on_click(move |_, _, cx| {
-                                        if is_pk {
-                                            return;
-                                        }
-                                        if let Some(dg) = dg_weak_for_click.upgrade() {
-                                            dg.update(cx, |grid, cx| {
-                                                if grid.hidden_columns.contains(&col_key_for_click) {
-                                                    grid.hidden_columns.remove(&col_key_for_click);
-                                                } else {
-                                                    grid.hidden_columns.insert(col_key_for_click.clone());
-                                                }
-                                                grid.apply_column_visibility(cx);
-                                                grid.save_column_visibility(cx);
-                                            });
-                                        }
-                                    }),
+                                    .on_click(
+                                        move |_, _, cx| {
+                                            if is_pk {
+                                                return;
+                                            }
+                                            if let Some(dg) = dg_weak_for_click.upgrade() {
+                                                dg.update(cx, |grid, cx| {
+                                                    if grid
+                                                        .hidden_columns
+                                                        .contains(&col_key_for_click)
+                                                    {
+                                                        grid.hidden_columns
+                                                            .remove(&col_key_for_click);
+                                                    } else {
+                                                        grid.hidden_columns
+                                                            .insert(col_key_for_click.clone());
+                                                    }
+                                                    grid.apply_column_visibility(cx);
+                                                    grid.save_column_visibility(cx);
+                                                });
+                                            }
+                                        },
+                                    ),
                                 )
                             })
                             .separator()

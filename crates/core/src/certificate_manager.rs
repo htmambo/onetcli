@@ -5,14 +5,14 @@ use gpui::{
     Subscription, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, WindowExt, app_style,
+    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, TitleBar, WindowExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
-    v_flex, TitleBar
+    v_flex,
 };
 use rust_i18n::t;
 

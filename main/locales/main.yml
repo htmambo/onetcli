@@ -1064,6 +1064,22 @@ Settings:
         en: Limit how many recent local terminal lines are saved for restore prompts (0-5000)
         zh-CN: 限制本地终端在恢复弹窗中可恢复的最近历史行数（0-5000）
         zh-HK: 限制本地終端在恢復彈窗中可恢復的最近歷史行數（0-5000）
+      restore_connections_on_startup:
+        en: Restore previous connections on startup
+        zh-CN: 启动时恢复关闭前连接
+        zh-HK: 啟動時恢復關閉前連線
+      restore_connections_on_startup_desc:
+        en: Show the restore dialog for connections and terminals from the previous session when the app starts
+        zh-CN: 应用启动时，显示上次关闭前连接与终端的恢复弹窗
+        zh-HK: 應用啟動時，顯示上次關閉前連線與終端的恢復彈窗
+      restore_session_content:
+        en: Restore connection sessions
+        zh-CN: 恢复连接中的会话
+        zh-HK: 恢復連線中的工作階段
+      restore_session_content_desc:
+        en: Reuse terminal session content when available; when disabled, only reopen the connection
+        zh-CN: 可用时恢复终端中的会话内容；关闭后仅重新打开连接
+        zh-HK: 可用時恢復終端中的工作階段內容；關閉後僅重新開啟連線
 
     # 数据库设置
     Database:

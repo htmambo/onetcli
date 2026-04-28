@@ -7,11 +7,10 @@ use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
 use gpui::http_client::{AsyncBody, Method, Request, Url};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity,
-    EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke,
-    ParentElement, Pixels, Render, SharedString, StyleRefinement, Styled,
-    WeakEntity, Window, WindowAppearance, WindowBounds, div, point,
-    px, size,
+    AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
+    Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance,
+    WindowBounds, div, point, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
@@ -496,6 +495,10 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub terminal_confirm_high_risk_command: bool,
     #[serde(default = "default_true")]
+    pub restore_connections_on_startup: bool,
+    #[serde(default = "default_true")]
+    pub restore_session_content: bool,
+    #[serde(default = "default_true")]
     pub auto_update: bool,
     #[serde(default)]
     pub sync_server_url: String,
@@ -822,6 +825,8 @@ impl Default for AppSettings {
             terminal_recovery_scrollback_lines: default_terminal_recovery_scrollback_lines(),
             terminal_confirm_multiline_paste: default_true(),
             terminal_confirm_high_risk_command: default_true(),
+            restore_connections_on_startup: default_true(),
+            restore_session_content: default_true(),
             auto_update: true,
             sync_server_url: String::new(),
             sync_backend_type: default_sync_backend_type(),
@@ -2441,6 +2446,50 @@ impl SettingsPanel {
                                 t!("Settings.General.Terminal.recovery_scrollback_lines_desc")
                                     .to_string(),
                             ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.restore_connections_on_startup"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx).restore_connections_on_startup
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        let should_clear_pending_snapshot = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.restore_connections_on_startup = val;
+                                            settings.save();
+                                            !val
+                                        };
+
+                                        if should_clear_pending_snapshot {
+                                            crate::connection_restore::clear_pending_connection_restore_snapshot();
+                                        }
+                                    },
+                                )
+                                .default_value(default_settings.restore_connections_on_startup),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.restore_connections_on_startup_desc")
+                                    .to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.restore_session_content"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).restore_session_content,
+                                    |val: bool, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.restore_session_content = val;
+                                        settings.save();
+                                    },
+                                )
+                                .default_value(default_settings.restore_session_content),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.restore_session_content_desc")
+                                    .to_string(),
+                            )
+                            .visible_when(|cx| {
+                                AppSettings::global(cx).restore_connections_on_startup
+                            }),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Database.group_title"))
@@ -2707,12 +2756,12 @@ mod tests {
     use super::parse_deepin_theme_appearance;
     use super::{
         AppSettings, GlobalProxySettings, ProxyType, SavedWindowBounds, SavedWindowDisplayState,
-        centered_window_bounds_within_visible_area, clamp_glass_opacity, editable_sync_server_url,
+        centered_window_bounds_within_visible_area, editable_sync_server_url,
         normalize_sync_server_url,
     };
     use gpui::{Bounds, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
-    use gpui_component::{MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, ThemeMode};
+    use gpui_component::ThemeMode;
 
     #[test]
     fn 自动切换关闭时沿用手动主题() {

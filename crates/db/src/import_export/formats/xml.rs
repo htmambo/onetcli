@@ -1,16 +1,16 @@
 use std::time::Instant;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
 use super::build_export_select_sql;
-use crate::DatabasePlugin;
 use crate::connection::DbConnection;
 use crate::executor::SqlResult;
 use crate::import_export::{
     ExportConfig, ExportProgressEvent, ExportProgressSender, ExportResult, FormatHandler,
     ImportConfig, ImportResult,
 };
+use crate::DatabasePlugin;
 
 pub struct XmlFormatHandler;
 

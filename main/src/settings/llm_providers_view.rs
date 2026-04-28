@@ -5,9 +5,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, StyledExt as _, app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt as _, TitleBar, app_style,
     button::{Button, ButtonVariant, ButtonVariants},
-    h_flex, v_flex, TitleBar,
+    h_flex, v_flex,
 };
 use one_core::llm::{storage::ProviderRepository, types::ProviderConfig};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window, request_popup_window_close};
@@ -90,9 +90,7 @@ impl LlmProvidersView {
             })
             .size(560.0, 560.0),
             move |window, cx| {
-                cx.new(|cx| {
-                    ProviderEditorView::new(provider, storage_manager, view, window, cx)
-                })
+                cx.new(|cx| ProviderEditorView::new(provider, storage_manager, view, window, cx))
             },
             cx,
         );
@@ -159,7 +157,6 @@ impl LlmProvidersView {
 
 impl Render for LlmProvidersView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-
         v_flex()
             .size_full()
             .gap_4()
@@ -476,7 +473,10 @@ impl ProviderEditorView {
     }
 
     fn on_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(mut config) = self.form.update(cx, |form: &mut ProviderForm, cx: &mut Context<ProviderForm>| form.get_config(cx)) else {
+        let Some(mut config) = self.form.update(
+            cx,
+            |form: &mut ProviderForm, cx: &mut Context<ProviderForm>| form.get_config(cx),
+        ) else {
             self.error_message = Some(t!("LlmProviders.required_notice").to_string());
             cx.notify();
             return;

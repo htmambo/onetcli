@@ -355,6 +355,39 @@ impl TerminalSidebar {
         }
     }
 
+    pub fn focus_active_panel(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.active_panel {
+            Some(SidebarPanel::Settings) => {
+                self.settings_panel.update(cx, |panel, cx| {
+                    panel.focus_default(window, cx);
+                });
+            }
+            Some(SidebarPanel::QuickCommand) => {
+                self.quick_command_panel.update(cx, |panel, cx| {
+                    panel.focus_default(window, cx);
+                });
+            }
+            Some(SidebarPanel::AiChat) => {
+                self.ai_chat_panel.focus_handle(cx).focus(window, cx);
+            }
+            Some(SidebarPanel::FileManager) => {
+                if let Some(ref panel) = self.file_manager_panel {
+                    panel.focus_handle(cx).focus(window, cx);
+                }
+            }
+            Some(SidebarPanel::ServerMonitor) => {
+                if let Some(ref panel) = self.server_monitor_panel {
+                    panel.update(cx, |panel, cx| {
+                        panel.focus_default(window, cx);
+                    });
+                }
+            }
+            None => {
+                self.focus_handle.focus(window, cx);
+            }
+        }
+    }
+
     /// 切换面板
     pub fn toggle_panel(&mut self, panel: SidebarPanel, cx: &mut Context<Self>) {
         if self.active_panel == Some(panel) {

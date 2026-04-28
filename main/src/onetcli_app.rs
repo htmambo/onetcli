@@ -148,7 +148,7 @@ use one_core::storage::ActiveConnections;
 use one_core::tab_container::{
     TabContainer, TabContainerEvent, TabContainerState, TabContentRegistry, TabItem,
 };
-use one_core::tab_persistence::{load_tabs, save_tab_state, schedule_save};
+use one_core::tab_persistence::{load_tab_state, save_tab_state, schedule_save};
 use one_core::utils::debouncer::Debouncer;
 use one_core::{PendingChangeLevel, RunningKind, RunningState};
 use rust_i18n::t;
@@ -162,6 +162,27 @@ const BACKGROUND_RECOVERY_SAVE_INTERVAL_SECS: u64 = 30;
 const BACKGROUND_TERMINAL_RECOVERY_SCROLLBACK_LINES: usize = 200;
 const BACKGROUND_TERMINAL_RECOVERY_MAX_CHARS: usize = 128 * 1024;
 const WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS: usize = 256 * 1024;
+
+fn load_startup_tabs_without_connection_restore(
+    tab_container: &Entity<TabContainer>,
+    registry: &TabContentRegistry,
+    window: &mut Window,
+    cx: &mut App,
+) -> anyhow::Result<usize> {
+    let mut state = load_tab_state()?;
+    crate::connection_restore::strip_restorable_tabs_from_tab_state(&mut state);
+
+    let active_index = state.active_index;
+    if state.tabs.is_empty() {
+        return Ok(0);
+    }
+
+    tab_container.update(cx, |container, cx| {
+        container.load(state, registry, window, cx);
+    });
+
+    Ok(active_index)
+}
 
 /// 连接类型统计
 #[derive(Default, Clone)]
@@ -837,7 +858,12 @@ impl OnetCliApp {
 
         let registry = cx.global::<TabContentRegistry>().clone();
 
-        let saved_active_index = match load_tabs(&tab_container, &registry, window, cx) {
+        let saved_active_index = match load_startup_tabs_without_connection_restore(
+            &tab_container,
+            &registry,
+            window,
+            cx,
+        ) {
             Ok(active_index) => {
                 tracing::info!("Tab layout loaded successfully");
                 Some(active_index)

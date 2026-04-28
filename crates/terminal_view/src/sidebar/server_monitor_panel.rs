@@ -1111,6 +1111,22 @@ impl ServerMonitorPanel {
             ))
             .into_any_element()
     }
+
+    pub fn focus_default(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
+    }
+
+    fn handle_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.key == "escape" {
+            cx.emit(ServerMonitorPanelEvent::Close);
+            cx.notify();
+        }
+    }
 }
 
 impl EventEmitter<ServerMonitorPanelEvent> for ServerMonitorPanel {}
@@ -1125,6 +1141,8 @@ impl Render for ServerMonitorPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
+            .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::handle_key_down))
             .text_color(cx.theme().foreground)
             .child(self.render_header(cx))
             .child(

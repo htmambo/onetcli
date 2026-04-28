@@ -6,23 +6,24 @@ use gpui::{
     Render, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Sizable, StyledExt, app_style,
+    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex, v_flex, TitleBar,
+    h_flex, v_flex,
 };
 use one_core::{
     connection_restore::{
         ConnectionRestoreItem, ConnectionRestoreKind, ConnectionRestoreSnapshot,
         LocalTerminalRestoreState, SshTerminalRestoreState, clear_connection_restore_snapshot,
-        load_connection_restore_snapshot, snapshot_from_tab_state,
+        load_connection_restore_snapshot, restore_payload_from_tab_data, snapshot_from_tab_state,
     },
     popup_window::{PopupWindowOptions, open_popup_window},
     storage::{StoredConnection, Workspace},
+    tab_container::TabContainerState,
     tab_persistence::load_tab_state,
 };
 
-use crate::home_tab::HomePage;
+use crate::{home_tab::HomePage, onetcli_app::GlobalMainWindowHandle};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConnectionRestoreItem {
@@ -77,6 +78,41 @@ pub fn clear_pending_connection_restore_snapshot() {
     if let Err(error) = clear_connection_restore_snapshot() {
         tracing::warn!("清理连接恢复快照失败：{}", error);
     }
+}
+
+pub fn strip_restorable_tabs_from_tab_state(state: &mut TabContainerState) {
+    if state.tabs.is_empty() {
+        state.active_index = 0;
+        return;
+    }
+
+    let original_tabs = std::mem::take(&mut state.tabs);
+    let original_active = state
+        .active_index
+        .min(original_tabs.len().saturating_sub(1));
+    let tabs_with_keep_flag = original_tabs
+        .into_iter()
+        .map(|tab| (restore_payload_from_tab_data(&tab.data).is_none(), tab))
+        .collect::<Vec<_>>();
+    let active_was_kept = tabs_with_keep_flag
+        .get(original_active)
+        .map(|(keep, _)| *keep)
+        .unwrap_or(false);
+    let kept_before_active = tabs_with_keep_flag
+        .iter()
+        .take(original_active + 1)
+        .filter(|(keep, _)| *keep)
+        .count();
+
+    state.tabs = tabs_with_keep_flag
+        .into_iter()
+        .filter_map(|(keep, tab)| keep.then_some(tab))
+        .collect();
+    state.active_index = match state.tabs.len() {
+        0 => 0,
+        _ if active_was_kept => kept_before_active.saturating_sub(1),
+        len => kept_before_active.min(len - 1),
+    };
 }
 
 pub fn resolve_restore_items(
@@ -376,13 +412,43 @@ impl ConnectionRestoreDialogContent {
             return;
         }
         self.restoring = true;
+        let home_page = self.home_page.upgrade();
+        let main_window_handle = cx.try_global::<GlobalMainWindowHandle>().copied();
 
-        if let Some(home_page) = self.home_page.upgrade() {
-            home_page.update(cx, |home, cx| {
-                home.skip_pending_connection_restore(window, cx);
+        window.defer(cx, move |window, cx| {
+            window.remove_window();
+            let Some(home_page) = home_page else {
+                return;
+            };
+
+            let Some(main_window_handle) = main_window_handle else {
+                cx.defer(move |cx| {
+                    let Some(window_id) = cx.active_window() else {
+                        return;
+                    };
+                    let _ = cx.update_window(window_id, move |_, main_window, cx| {
+                        home_page.update(cx, |home, cx| {
+                            home.skip_pending_connection_restore(main_window, cx);
+                        });
+                    });
+                });
+                return;
+            };
+
+            cx.defer(move |cx| {
+                if let Err(error) =
+                    main_window_handle
+                        .window_handle
+                        .update(cx, |_, main_window, cx| {
+                            home_page.update(cx, |home, cx| {
+                                home.skip_pending_connection_restore(main_window, cx);
+                            });
+                        })
+                {
+                    tracing::warn!("在主窗口执行跳过恢复失败：{}", error);
+                }
             });
-        }
-        window.remove_window();
+        });
     }
 
     fn on_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -392,15 +458,49 @@ impl ConnectionRestoreDialogContent {
         self.restoring = true;
 
         let selected_snapshot_ids = self.selected_snapshot_ids();
-        if let Some(home_page) = self.home_page.upgrade() {
-            home_page.update(cx, |home, cx| {
-                home.restore_saved_connection_sessions(&selected_snapshot_ids, window, cx);
-            });
-        }
-        // 将窗口关闭延迟到 defer 中，确保 restore_database_tab/redis/mongodb
-        // 等在同一个 window 上 defer 的恢复任务能先执行
-        window.defer(cx, |window, _cx| {
+        let home_page = self.home_page.upgrade();
+        let main_window_handle = cx.try_global::<GlobalMainWindowHandle>().copied();
+        window.defer(cx, move |window, cx| {
             window.remove_window();
+            let Some(home_page) = home_page else {
+                return;
+            };
+
+            let Some(main_window_handle) = main_window_handle else {
+                cx.defer(move |cx| {
+                    let Some(window_id) = cx.active_window() else {
+                        return;
+                    };
+                    let _ = cx.update_window(window_id, move |_, main_window, cx| {
+                        home_page.update(cx, |home, cx| {
+                            home.restore_saved_connection_sessions(
+                                &selected_snapshot_ids,
+                                main_window,
+                                cx,
+                            );
+                        });
+                    });
+                });
+                return;
+            };
+
+            cx.defer(move |cx| {
+                if let Err(error) =
+                    main_window_handle
+                        .window_handle
+                        .update(cx, |_, main_window, cx| {
+                            home_page.update(cx, |home, cx| {
+                                home.restore_saved_connection_sessions(
+                                    &selected_snapshot_ids,
+                                    main_window,
+                                    cx,
+                                );
+                            });
+                        })
+                {
+                    tracing::warn!("在主窗口执行连接恢复失败：{}", error);
+                }
+            });
         });
     }
 }
@@ -515,21 +615,32 @@ impl Render for ConnectionRestoreDialogContent {
                                                 Checkbox::new("restore-select-all")
                                                     .checked(all_selected)
                                                     .on_click(move |_, _, cx| {
-                                                        view_for_select_all.update(cx, |view, cx| {
-                                                            if view.all_selected() {
-                                                                view.selected_snapshot_ids.clear();
-                                                            } else {
-                                                                view.selected_snapshot_ids = view
-                                                                    .items
-                                                                    .iter()
-                                                                    .map(|item| item.snapshot_id.clone())
-                                                                    .collect();
-                                                            }
-                                                            cx.notify();
-                                                        });
+                                                        view_for_select_all.update(
+                                                            cx,
+                                                            |view, cx| {
+                                                                if view.all_selected() {
+                                                                    view.selected_snapshot_ids
+                                                                        .clear();
+                                                                } else {
+                                                                    view.selected_snapshot_ids =
+                                                                        view.items
+                                                                            .iter()
+                                                                            .map(|item| {
+                                                                                item.snapshot_id
+                                                                                    .clone()
+                                                                            })
+                                                                            .collect();
+                                                                }
+                                                                cx.notify();
+                                                            },
+                                                        );
                                                     })
                                             })
-                                            .child(div().text_sm().child(t!("ConnectionRestore.select_all"))),
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .child(t!("ConnectionRestore.select_all")),
+                                            ),
                                     )
                                     .child(
                                         div()
@@ -537,7 +648,10 @@ impl Render for ConnectionRestoreDialogContent {
                                             .text_color(cx.theme().muted_foreground)
                                             .child(
                                                 t!("ConnectionRestore.selected_count")
-                                                    .replace("%{selected}", &selected_count.to_string())
+                                                    .replace(
+                                                        "%{selected}",
+                                                        &selected_count.to_string(),
+                                                    )
                                                     .replace("%{total}", &total_count.to_string()),
                                             ),
                                     ),
@@ -604,5 +718,55 @@ impl Render for ConnectionRestoreDialogContent {
                             ),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use one_core::tab_container::{TabContainerConfig, TabItemState};
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn 启动时直接恢复会过滤连接类标签并修正激活索引() {
+        let mut state = TabContainerState {
+            version: Some(1),
+            tabs: vec![
+                TabItemState {
+                    id: "settings".into(),
+                    from: "home".into(),
+                    key: "Settings".into(),
+                    data: serde_json::Value::Null,
+                },
+                TabItemState {
+                    id: "local-terminal".into(),
+                    from: "terminal".into(),
+                    key: "Terminal".into(),
+                    data: json!({
+                        "kind": "local_terminal",
+                        "title": "Local Terminal",
+                        "local_terminal": {
+                            "working_dir": "/tmp"
+                        }
+                    }),
+                },
+                TabItemState {
+                    id: "notes".into(),
+                    from: "notes".into(),
+                    key: "Notes".into(),
+                    data: serde_json::Value::Null,
+                },
+            ],
+            active_index: 1,
+            config: TabContainerConfig::default(),
+        };
+
+        strip_restorable_tabs_from_tab_state(&mut state);
+
+        assert_eq!(state.tabs.len(), 2);
+        assert_eq!(state.tabs[0].id.as_ref(), "settings");
+        assert_eq!(state.tabs[1].id.as_ref(), "notes");
+        assert_eq!(state.active_index, 1);
     }
 }
