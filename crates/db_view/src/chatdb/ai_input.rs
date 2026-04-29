@@ -268,6 +268,7 @@ impl AIInput {
             schema_sync_seq: 0,
         };
 
+        instance.configure_chat_editor(window, cx);
         instance.apply_editor_mode(window, cx);
 
         instance
@@ -335,6 +336,13 @@ impl AIInput {
         self.update_sql_editor_schema(window, cx);
         cx.emit(AIInputEvent::ModeChanged { mode });
         cx.notify();
+    }
+
+    fn configure_chat_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sql_editor.update(cx, |editor, cx| {
+            editor.set_line_number(false, window, cx);
+            editor.set_soft_wrap(true, window, cx);
+        });
     }
 
     fn apply_editor_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -609,6 +617,7 @@ impl AIInput {
     fn render_header(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .w_full()
+            .min_w_0()
             .items_center()
             .px_3()
             .pt_3()
@@ -618,16 +627,24 @@ impl AIInput {
     }
 
     fn render_input_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div().w_full().px_3().pt_2().pb_2().min_h(px(80.0)).child(
-            div()
-                .w_full()
-                .h(px(120.0))
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(cx.theme().border)
-                .overflow_hidden()
-                .child(self.sql_editor.clone()),
-        )
+        div()
+            .w_full()
+            .min_w_0()
+            .px_3()
+            .pt_2()
+            .pb_2()
+            .min_h(px(80.0))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(120.0))
+                    .rounded(cx.theme().radius)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .overflow_hidden()
+                    .child(self.sql_editor.clone()),
+            )
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -639,6 +656,7 @@ impl AIInput {
 
         h_flex()
             .w_full()
+            .min_w_0()
             .px_3()
             .pb_3()
             .items_center()
@@ -719,6 +737,7 @@ impl Render for AIInput {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .w_full()
+            .min_w_0()
             .bg(cx.theme().background)
             .rounded_lg()
             .border_1()

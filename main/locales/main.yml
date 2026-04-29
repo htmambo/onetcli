@@ -679,14 +679,6 @@ Settings:
     en: File Manager
     zh-CN: 文件管理器
     zh-HK: 檔案管理器
-  sync_path_with_terminal:
-    en: Sync path with terminal
-    zh-CN: 与终端同步路径
-    zh-HK: 與終端同步路徑
-  sync_path_help:
-    en: Automatically sync current directory with the terminal
-    zh-CN: 自动与终端同步当前目录
-    zh-HK: 自動與終端同步當前目錄
   theme:
     en: Theme
     zh-CN: 主题

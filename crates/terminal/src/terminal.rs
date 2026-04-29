@@ -357,9 +357,6 @@ fn build_cd_command(dir: &str) -> String {
     format!("cd -- {}", shell_escape_arg(dir))
 }
 
-const SSH_PROMPT_READY_COMMAND: &str = r#"printf "\033]1337;OnetcliPromptReady=1\007""#;
-const SSH_PROMPT_HOOK_NAME: &str = "onetcli_prompt_hook";
-
 fn compose_ssh_init_commands(
     base_init_commands: Option<&str>,
     _sync_path_with_terminal: bool,
@@ -370,26 +367,9 @@ fn compose_ssh_init_commands(
         commands.push(base_commands.to_string());
     }
 
-    commands.push(build_ssh_prompt_hook_command());
+    // commands.push(build_ssh_prompt_hook_command());
 
     (!commands.is_empty()).then(|| commands.join("\n"))
-}
-
-fn build_ssh_prompt_hook_command() -> String {
-    format!(
-        "\
-type {hook_name} >/dev/null 2>&1 || {{ \
-{hook_name}() {{ {hook_body}; }}; \
-if [ -n \"$ZSH_VERSION\" ]; then \
-typeset -ga precmd_functions; \
-precmd_functions+=({hook_name}); \
-else \
-PROMPT_COMMAND='{hook_name}'${{PROMPT_COMMAND:+\";$PROMPT_COMMAND\"}}; export PROMPT_COMMAND; \
-fi; \
-}}",
-        hook_name = SSH_PROMPT_HOOK_NAME,
-        hook_body = SSH_PROMPT_READY_COMMAND,
-    )
 }
 
 fn read_local_working_dir(path: &std::path::Path) -> Option<String> {
@@ -667,28 +647,6 @@ fn init_local_cwd_file(cwd_file: Option<String>) -> Option<PathBuf> {
 fn init_local_cwd_file(cwd_file: Option<String>) -> Option<PathBuf> {
     let _ = cwd_file;
     None
-}
-
-#[cfg(test)]
-fn build_local_cwd_tracking_init_command(cwd_file_path: &str) -> String {
-    let mut command = format!(
-        "ONETCLI_CWD_FILE={}; export ONETCLI_CWD_FILE; ",
-        shell_escape_arg(cwd_file_path)
-    );
-    command.push_str("if [ -n \"$ZSH_VERSION\" ]; then ");
-    command.push_str("onetcli_cwd_write() { pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null; }; ");
-    command.push_str("typeset -ga precmd_functions; ");
-    command.push_str(
-        "case \" ${precmd_functions[*]} \" in *\" onetcli_cwd_write \"*) ;; *) precmd_functions+=(onetcli_cwd_write) ;; esac; ",
-    );
-    command.push_str("else ");
-    command.push_str(
-        "PROMPT_COMMAND='pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null'${PROMPT_COMMAND:+\";$PROMPT_COMMAND\"}; ",
-    );
-    command.push_str("export PROMPT_COMMAND; ");
-    command.push_str("fi; ");
-    command.push_str("pwd > \"$ONETCLI_CWD_FILE\" 2>/dev/null\n");
-    command
 }
 
 fn note_ssh_user_input(
@@ -2788,7 +2746,6 @@ mod tests {
         build_ssh_init_commands, compose_ssh_init_commands, format_connection_error,
         is_osc_palette_line, resolve_default_windows_shell_from_env, sanitize_recovery_content,
         shell_escape_arg, should_report_ssh_running_processes, SshProcessState, Terminal,
-        SSH_PROMPT_HOOK_NAME, SSH_PROMPT_READY_COMMAND,
     };
     use crate::history::{
         collect_history_suggestions, normalize_history_command, parse_shell_history,
@@ -2838,26 +2795,6 @@ mod tests {
         assert!(commands.contains("cd -- '/workspace'"));
         assert!(!commands.contains("/default"));
         assert!(!commands.contains("echo ready"));
-    }
-
-    #[test]
-    fn compose_ssh_init_commands_supports_sync_only_mode() {
-        let commands =
-            compose_ssh_init_commands(None, true).expect("启用同步时应生成 SSH prompt hook");
-        assert!(commands.contains(SSH_PROMPT_HOOK_NAME));
-        assert!(commands.contains(SSH_PROMPT_READY_COMMAND));
-
-        assert!(
-            compose_ssh_init_commands(None, false)
-                .expect("关闭路径同步时仍应生成 SSH prompt hook")
-                .contains(SSH_PROMPT_READY_COMMAND),
-            "关闭路径同步时仍应注入 SSH 空闲探针"
-        );
-
-        let with_base = compose_ssh_init_commands(Some("echo ready"), true)
-            .expect("带基础命令时应继续注入 SSH prompt hook");
-        assert!(with_base.contains("echo ready"));
-        assert!(with_base.contains(SSH_PROMPT_HOOK_NAME));
     }
 
     #[test]

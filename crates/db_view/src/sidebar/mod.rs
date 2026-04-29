@@ -208,6 +208,7 @@ impl Render for DatabaseSidebar {
                 this.flex_1().child(
                     v_flex()
                         .size_full()
+                        .min_w_0()
                         .border_l_1()
                         .border_color(border_color)
                         .bg(bg_color)

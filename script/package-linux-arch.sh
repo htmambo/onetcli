@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROFILE_NAME="${ONETCLI_BUILD_PROFILE:-release-fast}"
 SKIP_BUILD="${ONETCLI_SKIP_BUILD:-false}"
+ALLOW_DIRTY="${ONETCLI_ARCH_ALLOW_DIRTY:-false}"
 MAINTAINER="${ONETCLI_ARCH_MAINTAINER:-OnetCli <xiaofei.hf@gmail.com>}"
 
 usage() {
@@ -24,6 +25,7 @@ usage() {
   ONETCLI_BUILD_PROFILE    构建 profile，默认 release，可选 dev/debug/release/release-fast
   ONETCLI_SKIP_BUILD       为 true 时跳过项目目录预构建，默认 false
   ONETCLI_VERSION          覆盖版本号，默认读取 main/Cargo.toml
+  ONETCLI_ARCH_ALLOW_DIRTY 为 true 时允许脏工作树继续打包，默认 false
   ONETCLI_ARCH_OUTPUT_DIR  包输出目录，默认 target/dist
   ONETCLI_ARCH_STAGING_DIR 构建暂存目录，默认使用 /tmp（空间不足时自动切换到项目目录）
 EOF
@@ -87,6 +89,46 @@ create_source_tarball() {
 
     cd "${PROJECT_DIR}"
     git archive --prefix="${PACKAGE_NAME}-${VERSION}/" -o "${tarball_path}" HEAD
+}
+
+print_dirty_worktree_summary() {
+    local status_lines="$1"
+    local line_count
+
+    printf '%s\n' "${status_lines}" | sed -n '1,20p'
+    line_count="$(printf '%s\n' "${status_lines}" | wc -l | tr -d ' ')"
+    if [[ "${line_count}" -gt 20 ]]; then
+        echo "..."
+    fi
+}
+
+ensure_archive_input_is_clean() {
+    local status_lines
+
+    if ! git -C "${PROJECT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        return
+    fi
+
+    status_lines="$(git -C "${PROJECT_DIR}" status --short --untracked-files=all)"
+    if [[ -z "${status_lines}" ]]; then
+        return
+    fi
+
+    if [[ "${ALLOW_DIRTY}" == "true" ]]; then
+        echo "警告：检测到工作树存在未提交改动，源码 tarball 仍将基于 HEAD 导出。" >&2
+        echo "警告：未提交的文件改动不会自动进入 Arch 安装包，请确认这是你期望的行为。" >&2
+        print_dirty_worktree_summary "${status_lines}" >&2
+        return
+    fi
+
+    echo "错误：检测到工作树存在未提交改动，默认 Arch 打包会通过 git archive 导出 HEAD。" >&2
+    echo "错误：这些未提交改动不会进入安装包，因此产物可能与本地验证结果不一致。" >&2
+    if [[ "${SKIP_BUILD}" == "true" ]]; then
+        echo "提示：即使启用了 ONETCLI_SKIP_BUILD=true，脚本也只会覆盖预构建二进制，其它未提交文件仍不会进入安装包。" >&2
+    fi
+    echo "请先提交改动后重试，或显式设置 ONETCLI_ARCH_ALLOW_DIRTY=true 继续。" >&2
+    print_dirty_worktree_summary "${status_lines}" >&2
+    exit 1
 }
 
 write_pkgbuild() {
@@ -175,6 +217,7 @@ PROFILE_DIR="$(profile_output_dir)"
 BINARY_PATH="${PROJECT_DIR}/target/${PROFILE_DIR}/${BINARY_NAME}"
 
 cd "${PROJECT_DIR}"
+ensure_archive_input_is_clean
 build_binary
 
 if [[ ! -f "${BINARY_PATH}" ]]; then
