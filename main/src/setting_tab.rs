@@ -547,7 +547,7 @@ pub struct AppSettings {
 }
 
 pub(crate) const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
-pub(crate) const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
+pub(crate) const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-alt-m";
 
 fn default_font_family() -> String {
     "Arial".to_string()

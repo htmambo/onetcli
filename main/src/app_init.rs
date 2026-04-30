@@ -279,18 +279,20 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
     fn parse_project_hotkey_supports_named_keys() {
-        let hotkey = system_hotkey::parse_project_hotkey("ctrl-space").unwrap();
+        let hotkey = system_hotkey::parse_project_hotkey("ctrl-alt-m").unwrap();
 
-        assert_eq!(hotkey.key, HotkeyCode::Space);
+        assert_eq!(hotkey.key, HotkeyCode::KeyM);
         assert!(hotkey.mods.contains(HotkeyModifiers::CONTROL));
+        assert!(hotkey.mods.contains(HotkeyModifiers::ALT));
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
     fn toggle_hotkey_from_config_falls_back_to_default_when_invalid() {
-        let hotkey = system_hotkey::toggle_hotkey_from_config("cmd-alt-invalid", "ctrl-space");
+        let hotkey = system_hotkey::toggle_hotkey_from_config("cmd-alt-invalid", "ctrl-alt-m");
 
-        assert_eq!(hotkey.key, HotkeyCode::Space);
+        assert_eq!(hotkey.key, HotkeyCode::KeyM);
         assert!(hotkey.mods.contains(HotkeyModifiers::CONTROL));
+        assert!(hotkey.mods.contains(HotkeyModifiers::ALT));
     }
 }
