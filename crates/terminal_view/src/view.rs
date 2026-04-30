@@ -927,6 +927,8 @@ impl TerminalView {
                 ssh_config,
                 ssh_session_manager,
                 &default_theme,
+                default_theme.font_size.into(),
+                default_theme.font_family.clone(),
                 sync_path_enabled,
                 window,
                 cx,
@@ -1789,6 +1791,9 @@ impl TerminalView {
                     sidebar.sync_file_manager_path(path, cx);
                 });
                 cx.emit(TabContentEvent::StateChanged);
+                cx.notify();
+            }
+            TerminalModelEvent::SshMfaChanged => {
                 cx.notify();
             }
         }

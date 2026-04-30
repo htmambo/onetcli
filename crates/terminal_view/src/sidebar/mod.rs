@@ -157,8 +157,8 @@ impl TerminalSidebar {
         ssh_config: Option<SshTerminalConfig>,
         ssh_session_manager: Option<Arc<SshSessionManager>>,
         initial_theme: &TerminalTheme,
-        initial_font_size: Pixels,
-        initial_font_family: SharedString,
+        _initial_font_size: Pixels,
+        _initial_font_family: SharedString,
         sync_path_enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -168,8 +168,6 @@ impl TerminalSidebar {
         let settings_panel = cx.new(|cx| {
             SettingsPanel::new(
                 initial_theme,
-                initial_font_size,
-                initial_font_family,
                 has_file_manager,
                 true,
                 true,

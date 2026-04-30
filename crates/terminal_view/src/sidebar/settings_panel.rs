@@ -372,6 +372,16 @@ impl SettingsPanel {
         cx.notify();
     }
 
+    pub fn set_font_size(&mut self, font_size: f32, window: &mut Window, cx: &mut Context<Self>) {
+        self.current_theme.font_size = px(font_size);
+        self.suppress_font_size_change = true;
+        self.font_size_input_state.update(cx, |state, cx| {
+            state.set_value(&format!("{:.0}", font_size), window, cx);
+        });
+        self.suppress_font_size_change = false;
+        cx.notify();
+    }
+
     pub fn set_auto_copy(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.auto_copy = enabled;
         cx.notify();
