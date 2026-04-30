@@ -302,6 +302,8 @@ pub enum TerminalModelEvent {
     ClipboardStore(String),
     /// 远程工作目录变更（OSC 7）
     WorkingDirChanged(String),
+    /// SSH MFA 请求状态变更
+    SshMfaChanged,
 }
 
 /// 终端连接状态
@@ -1569,6 +1571,7 @@ impl Terminal {
                     password: p.password,
                 }
             }),
+            keyboard_interactive_responder: None,
         };
 
         let pty_config = PtyConfig::default();
@@ -2268,6 +2271,9 @@ impl Terminal {
             }
             TerminalEvent::CommandRecorded(command) => {
                 self.record_history_entry(&command, cx);
+            }
+            TerminalEvent::SshMfaChanged => {
+                cx.emit(TerminalModelEvent::SshMfaChanged);
             }
         }
     }

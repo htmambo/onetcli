@@ -9,6 +9,7 @@ tokio = { workspace = true }
 rust-i18n = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 one-core = { workspace = true }
 gpui = { workspace = true }
 ssh = { workspace = true }

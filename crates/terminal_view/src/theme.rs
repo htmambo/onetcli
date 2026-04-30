@@ -17,9 +17,6 @@
 use gpui::{rgb, Hsla, Pixels, Rgba, SharedString};
 use gpui_component::Theme as UiTheme;
 
-// 包含由 build.rs 生成的 tabby 配色方案
-include!(concat!(env!("OUT_DIR"), "/tabby_themes.rs"));
-
 pub const FOLLOW_APP_THEME_NAME: &str = "App Theme";
 
 /// 终端主题配色类型
@@ -368,7 +365,7 @@ impl TerminalTheme {
         self.name == FOLLOW_APP_THEME_NAME
     }
 
-    /// 获取所有可用主题（包括内置主题和 tabby 导入的主题）
+    /// 获取所有可用主题
     pub fn all() -> Vec<Self> {
         let mut themes = vec![
             Self::midnight(),
@@ -383,15 +380,6 @@ impl TerminalTheme {
             Self::crimson(),
         ];
 
-        // 添加 tabby 导入的主题。
-        // 这里使用精确匹配，允许像 "Matrix" 与 "matrix" 这种仅大小写不同、
-        // 但语义上确实代表不同主题的条目同时存在。
-        let built_in_names: std::collections::HashSet<_> = themes.iter().map(|t| t.name).collect();
-        for tabby_theme in tabby_all() {
-            if !built_in_names.contains(&tabby_theme.name) {
-                themes.push(tabby_theme);
-            }
-        }
         // 按名称字母顺序排列
         themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         themes
@@ -421,7 +409,7 @@ impl TerminalTheme {
         }
     }
 
-    /// 创建带有自定义 ANSI 调色板的主题（用于 tabby 导入的主题）
+    /// 创建带有自定义 ANSI 调色板的主题
     fn with_palette(
         name: &'static str,
         variant: ThemeVariant,

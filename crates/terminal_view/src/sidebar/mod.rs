@@ -20,7 +20,7 @@ use crate::{theme::TerminalTheme, TerminalHighlightRule};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_component::{
@@ -160,6 +160,8 @@ impl TerminalSidebar {
         ssh_config: Option<SshTerminalConfig>,
         ssh_session_manager: Option<Arc<SshSessionManager>>,
         initial_theme: &TerminalTheme,
+        _initial_font_size: Pixels,
+        _initial_font_family: SharedString,
         sync_path_enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -435,6 +437,12 @@ impl TerminalSidebar {
         });
 
         cx.notify();
+    }
+
+    pub fn set_font_size(&mut self, font_size: f32, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_panel.update(cx, |panel, cx| {
+            panel.set_font_size(font_size, window, cx);
+        });
     }
 
     pub fn set_auto_copy(&mut self, enabled: bool, cx: &mut Context<Self>) {

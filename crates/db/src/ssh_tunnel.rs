@@ -73,6 +73,7 @@ pub async fn resolve_connection_target(
         enable_legacy_kex: false,
         jump_server: None,
         proxy: None,
+        keyboard_interactive_responder: None,
     };
 
     // Wrap tunnel setup with an explicit timeout.

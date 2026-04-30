@@ -788,7 +788,11 @@ impl TerminalView {
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
         let recovery_content = restore_state.buffer_content.clone();
-        let pty_session_id = restore_state.pty_session_id.clone();
+        let pty_session_id = restore_state
+            .prefer_live_restore
+            .unwrap_or(true)
+            .then_some(restore_state.pty_session_id.clone())
+            .flatten();
         let terminal = cx.new(move |cx| {
             #[cfg(unix)]
             if let Some(session_id) = pty_session_id.clone() {
@@ -930,6 +934,8 @@ impl TerminalView {
                 ssh_config,
                 ssh_session_manager,
                 &default_theme,
+                default_theme.font_size.into(),
+                default_theme.font_family.clone(),
                 sync_path_enabled,
                 window,
                 cx,
@@ -1056,7 +1062,14 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            TerminalSidebarEvent::PanelChanged(_panel) => {
+            TerminalSidebarEvent::PanelChanged(panel) => {
+                if panel.is_some() {
+                    self.sidebar.update(cx, |sidebar, cx| {
+                        sidebar.focus_active_panel(window, cx);
+                    });
+                } else {
+                    window.focus(&self.focus_handle, cx);
+                }
                 cx.notify();
             }
             TerminalSidebarEvent::SearchPatternChanged(pattern) => {
@@ -1197,7 +1210,7 @@ impl TerminalView {
             query = %self.history_prompt.query_input(),
             dropdown_visible = self.history_prompt.dropdown_visible(),
             matches_len = self.history_prompt.matches().len(),
-            selected_index = self.history_prompt.selected_index(),
+            selected_index = ?self.history_prompt.selected_index(),
             selected_match = ?selected_match,
             "history prompt state"
         );
@@ -1785,6 +1798,9 @@ impl TerminalView {
                     sidebar.sync_file_manager_path(path, cx);
                 });
                 cx.emit(TabContentEvent::StateChanged);
+                cx.notify();
+            }
+            TerminalModelEvent::SshMfaChanged => {
                 cx.notify();
             }
         }

@@ -1853,6 +1853,7 @@ impl SftpView {
                         permissions: e.permissions,
                     })
                     .collect();
+                let local_dir_for_result = local_dir.clone();
                 let _ = this.update(cx, |this, cx| {
                     if !should_apply_local_listing(&this.local_current_path, &local_dir_for_result)
                     {

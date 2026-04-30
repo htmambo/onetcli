@@ -903,6 +903,7 @@ impl SshFormWindow {
             enable_legacy_kex: params.enable_legacy_kex,
             jump_server,
             proxy,
+            keyboard_interactive_responder: None,
         }
     }
 
