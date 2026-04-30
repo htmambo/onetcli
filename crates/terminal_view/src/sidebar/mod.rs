@@ -97,6 +97,8 @@ pub enum TerminalSidebarEvent {
     SearchNext,
     /// 字体大小变更
     FontSizeChanged(f32),
+    /// 行高比例变更
+    LineHeightScaleChanged(f32),
     /// 字体变更
     FontFamilyChanged(String),
     /// 主题变更
@@ -160,8 +162,8 @@ impl TerminalSidebar {
         ssh_config: Option<SshTerminalConfig>,
         ssh_session_manager: Option<Arc<SshSessionManager>>,
         initial_theme: &TerminalTheme,
-        initial_font_size: Pixels,
-        initial_font_family: SharedString,
+        _initial_font_size: Pixels,
+        _initial_font_family: SharedString,
         sync_path_enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -172,8 +174,6 @@ impl TerminalSidebar {
         let settings_panel = cx.new(|cx| {
             SettingsPanel::new(
                 initial_theme,
-                initial_font_size,
-                initial_font_family,
                 has_file_manager,
                 true,
                 true,
@@ -240,6 +240,9 @@ impl TerminalSidebar {
                 }
                 settings_panel::SettingsPanelEvent::FontSizeChanged(size) => {
                     cx.emit(TerminalSidebarEvent::FontSizeChanged(*size));
+                }
+                settings_panel::SettingsPanelEvent::LineHeightScaleChanged(scale) => {
+                    cx.emit(TerminalSidebarEvent::LineHeightScaleChanged(*scale));
                 }
                 settings_panel::SettingsPanelEvent::FontFamilyChanged(family) => {
                     cx.emit(TerminalSidebarEvent::FontFamilyChanged(family.clone()));
@@ -359,6 +362,39 @@ impl TerminalSidebar {
             self.active_panel = panel;
             cx.emit(TerminalSidebarEvent::PanelChanged(panel));
             cx.notify();
+        }
+    }
+
+    pub fn focus_active_panel(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.active_panel {
+            Some(SidebarPanel::Settings) => {
+                self.settings_panel.update(cx, |panel, cx| {
+                    panel.focus_default(window, cx);
+                });
+            }
+            Some(SidebarPanel::QuickCommand) => {
+                self.quick_command_panel.update(cx, |panel, cx| {
+                    panel.focus_default(window, cx);
+                });
+            }
+            Some(SidebarPanel::AiChat) => {
+                self.ai_chat_panel.focus_handle(cx).focus(window, cx);
+            }
+            Some(SidebarPanel::FileManager) => {
+                if let Some(ref panel) = self.file_manager_panel {
+                    panel.focus_handle(cx).focus(window, cx);
+                }
+            }
+            Some(SidebarPanel::ServerMonitor) => {
+                if let Some(ref panel) = self.server_monitor_panel {
+                    panel.update(cx, |panel, cx| {
+                        panel.focus_default(window, cx);
+                    });
+                }
+            }
+            None => {
+                self.focus_handle.focus(window, cx);
+            }
         }
     }
 

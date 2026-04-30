@@ -10,7 +10,7 @@ pub use file_list_panel::{
 
 use gpui::{
     App, AsyncApp, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
-    FontWeight, Hsla, IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
+    FontWeight, IntoElement, ParentElement, Render, SharedString, Styled, WeakEntity, Window,
     actions, div, prelude::*, px,
 };
 use gpui_component::{
@@ -26,16 +26,22 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex,
 };
+use one_core::RunningState;
+use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};
+use one_core::connection_state::{ConnectionState, set_connection_active};
 use one_core::gpui_tokio::Tokio;
-use one_core::storage::models::{
-    ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
-};
+use one_core::serde_json::Value as JsonValue;
+use one_core::storage::models::StoredConnection;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use remote_file_editor::open_remote_file_editor;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
-use ssh::{JumpServerConnectConfig, ProxyConnectConfig, ProxyType, SshAuth, SshConnectConfig};
+use ssh::SshConnectConfig;
 use std::collections::VecDeque;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -67,11 +73,44 @@ pub enum SftpViewEvent {
     },
 }
 
-#[derive(Clone, PartialEq)]
-enum ConnectionState {
-    Connecting,
-    Connected,
-    Disconnected { error: Option<String> },
+impl SharedProgress {
+    /// 创建目录传输进度回调（含当前文件详情）。
+    ///
+    /// 消除 upload_dir/download_dir/delete_recursive 中重复的进度回调闭包。
+    /// 注意：speed 字段在 delete_recursive 中也会被更新（原实现未更新，现统一处理）。
+    pub fn dir_callback(self: &Arc<Self>) -> sftp::ProgressCallback {
+        let progress = self.clone();
+        Box::new(move |p: TransferProgress| {
+            progress.scanning.store(false, Ordering::Relaxed);
+            progress.transferred.store(p.transferred, Ordering::Relaxed);
+            progress.total.store(p.total, Ordering::Relaxed);
+            progress.speed.store(p.speed.to_bits(), Ordering::Relaxed);
+            if let Some(file) = p.current_file {
+                if let Ok(mut guard) = progress.current_file.write() {
+                    *guard = Some(file);
+                }
+            }
+            progress
+                .current_file_transferred
+                .store(p.current_file_transferred, Ordering::Relaxed);
+            progress
+                .current_file_total
+                .store(p.current_file_total, Ordering::Relaxed);
+        })
+    }
+
+    /// 创建单文件传输进度回调（不含当前文件详情）。
+    ///
+    /// 消除 upload/download 中重复的进度回调闭包。
+    pub fn file_callback(self: &Arc<Self>) -> sftp::ProgressCallback {
+        let progress = self.clone();
+        Box::new(move |p: TransferProgress| {
+            progress.scanning.store(false, Ordering::Relaxed);
+            progress.transferred.store(p.transferred, Ordering::Relaxed);
+            progress.total.store(p.total, Ordering::Relaxed);
+            progress.speed.store(p.speed.to_bits(), Ordering::Relaxed);
+        })
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -164,6 +203,7 @@ struct LocalFileEntry {
     size: u64,
     modified: SystemTime,
     is_dir: bool,
+    permissions: String,
 }
 
 impl TransferClientPool {
@@ -295,6 +335,82 @@ fn format_permissions(mode: u32, is_dir: bool) -> String {
     result
 }
 
+fn format_local_permissions(metadata: &std::fs::Metadata, is_dir: bool) -> String {
+    #[cfg(unix)]
+    {
+        format_permissions(metadata.permissions().mode(), is_dir)
+    }
+
+    #[cfg(windows)]
+    {
+        format_windows_permissions(metadata, is_dir)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let mut result = String::with_capacity(10);
+        result.push(if is_dir { 'd' } else { '-' });
+        if metadata.permissions().readonly() {
+            result.push_str("r--r--r--");
+        } else {
+            result.push_str("rw-rw-rw-");
+        }
+        result
+    }
+}
+
+#[cfg(windows)]
+fn format_windows_permissions(metadata: &std::fs::Metadata, is_dir: bool) -> String {
+    const FILE_ATTRIBUTE_READONLY: u32 = 0x0000_0001;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0000_0002;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
+    const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x0000_0020;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0000_0800;
+    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x0000_4000;
+
+    let attributes = metadata.file_attributes();
+    let readonly = attributes & FILE_ATTRIBUTE_READONLY != 0 || metadata.permissions().readonly();
+
+    let mut result = String::with_capacity(10);
+    result.push(if is_dir { 'd' } else { '-' });
+    result.push('r');
+    result.push(if readonly { '-' } else { 'w' });
+    result.push(if is_dir { 'x' } else { '-' });
+    result.push(if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+        'h'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+        's'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_ARCHIVE != 0 {
+        'a'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        'l'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_COMPRESSED != 0 {
+        'c'
+    } else {
+        '-'
+    });
+    result.push(if attributes & FILE_ATTRIBUTE_ENCRYPTED != 0 {
+        'e'
+    } else {
+        '-'
+    });
+
+    result
+}
+
 fn format_speed(bytes_per_sec: f64) -> String {
     if bytes_per_sec >= 1024.0 * 1024.0 {
         format!("{:.1} MB/s", bytes_per_sec / (1024.0 * 1024.0))
@@ -319,7 +435,10 @@ fn should_apply_remote_listing(current_path: &str, listed_path: &str) -> bool {
     current_path == listed_path
 }
 
-fn should_apply_local_listing(current_path: &std::path::Path, listed_path: &std::path::Path) -> bool {
+fn should_apply_local_listing(
+    current_path: &std::path::Path,
+    listed_path: &std::path::Path,
+) -> bool {
     current_path == listed_path
 }
 
@@ -457,7 +576,23 @@ pub struct SftpView {
     tab_index: Option<usize>,
 }
 
+fn initial_remote_path(configured_path: Option<&str>) -> String {
+    configured_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".")
+        .to_string()
+}
+
+fn resolved_remote_path(requested_path: &str, real_path: Option<String>) -> String {
+    real_path.unwrap_or_else(|| requested_path.to_string())
+}
+
 impl SftpView {
+    pub fn connection_id(&self) -> Option<i64> {
+        self.stored_connection.id
+    }
+
     pub fn new(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_index(conn, None, window, cx)
     }
@@ -472,67 +607,15 @@ impl SftpView {
             .to_ssh_params()
             .expect("StoredConnection should contain valid SSH params");
 
-        let auth = match ssh_params.auth_method {
-            SshAuthMethod::Password { password } => SshAuth::Password(password),
-            SshAuthMethod::PrivateKey {
-                key_path,
-                passphrase,
-            } => SshAuth::PrivateKey {
-                key_path,
-                passphrase,
-                certificate_path: None,
-            },
-            SshAuthMethod::Agent => SshAuth::Agent,
-            SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
-        };
-
-        let config = SshConnectConfig {
-            host: ssh_params.host,
-            port: ssh_params.port,
-            username: ssh_params.username,
-            auth,
-            timeout: ssh_params.connect_timeout.map(Duration::from_secs),
-            keepalive_interval: ssh_params.keepalive_interval.map(Duration::from_secs),
-            keepalive_max: ssh_params.keepalive_max,
-            jump_server: ssh_params.jump_server.map(|jump| {
-                let jump_auth = match jump.auth_method {
-                    SshAuthMethod::Password { password } => SshAuth::Password(password),
-                    SshAuthMethod::PrivateKey {
-                        key_path,
-                        passphrase,
-                    } => SshAuth::PrivateKey {
-                        key_path,
-                        passphrase,
-                        certificate_path: None,
-                    },
-                    SshAuthMethod::Agent => SshAuth::Agent,
-                    SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
-                };
-                JumpServerConnectConfig {
-                    host: jump.host,
-                    port: jump.port,
-                    username: jump.username,
-                    auth: jump_auth,
-                }
-            }),
-            proxy: ssh_params.proxy.map(|p| {
-                let proxy_type = match p.proxy_type {
-                    StorageProxyType::Socks5 => ProxyType::Socks5,
-                    StorageProxyType::Http => ProxyType::Http,
-                };
-                ProxyConnectConfig {
-                    proxy_type,
-                    host: p.host,
-                    port: p.port,
-                    username: p.username,
-                    password: p.password,
-                }
-            }),
-            keyboard_interactive_responder: None,
-        };
+        let config = ssh_params.to_connect_config();
 
         let focus_handle = cx.focus_handle();
-        let local_current_path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let local_current_path = ssh_params
+            .sftp_local_directory
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
+        let remote_current_path = initial_remote_path(ssh_params.sftp_remote_directory.as_deref());
 
         let local_panel = cx.new(|cx| {
             FileListPanel::new(
@@ -543,12 +626,14 @@ impl SftpView {
             )
         });
 
-        let remote_panel = cx.new(|cx| FileListPanel::new("/root".to_string(), true, window, cx));
+        let remote_panel_path = remote_current_path.clone();
+        let remote_panel =
+            cx.new(|cx| FileListPanel::new(remote_panel_path.clone(), true, window, cx));
 
         let local_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
         let remote_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Enter path..."));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("Placeholder.path")));
 
         let mut subscriptions = Vec::new();
 
@@ -637,10 +722,10 @@ impl SftpView {
             sftp_client: None,
             stored_connection: conn.clone(),
             local_current_path: local_current_path.clone(),
-            remote_current_path: ".".to_string(),
+            remote_current_path: remote_current_path.clone(),
             local_history: vec![local_current_path.clone()],
             local_history_index: 0,
-            remote_history: vec![".".to_string()],
+            remote_history: vec![remote_current_path],
             remote_history_index: 0,
             local_panel,
             remote_panel,
@@ -670,6 +755,7 @@ impl SftpView {
     fn connect(&mut self, cx: &mut Context<Self>) {
         self.connection_state = ConnectionState::Connecting;
         let config = self.sftp_config.clone();
+        let requested_remote_path = self.remote_current_path.clone();
 
         tracing::info!(
             "Connecting to SFTP server: {}@{}",
@@ -679,13 +765,23 @@ impl SftpView {
 
         let task = Tokio::spawn(cx, async move {
             let mut client = RusshSftpClient::connect(config).await?;
-            // 连接成功后立即获取当前工作目录的真实路径
-            let real_path = client.realpath(".").await.ok();
-            Ok::<_, anyhow::Error>((client, real_path))
+            // 优先解析用户配置的初始目录；留空时回退到服务器默认目录 `.`
+            let real_path = match client.realpath(&requested_remote_path).await {
+                Ok(path) => Some(path),
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to resolve remote path {}: {}",
+                        requested_remote_path,
+                        err
+                    );
+                    None
+                }
+            };
+            Ok::<_, anyhow::Error>((client, real_path, requested_remote_path))
         });
 
         cx.spawn(async move |this, cx| match task.await {
-            Ok(Ok((client, real_path))) => {
+            Ok(Ok((client, real_path, requested_remote_path))) => {
                 tracing::info!("SFTP connection established successfully");
                 let client = Arc::new(Mutex::new(client));
 
@@ -694,13 +790,11 @@ impl SftpView {
                     this.connection_state = ConnectionState::Connected;
                     this.set_connection_active(true, cx);
 
-                    // 如果成功获取了真实路径，更新远程路径和历史记录
-                    if let Some(path) = real_path {
-                        tracing::info!("Remote working directory: {}", path);
-                        this.remote_current_path = path.clone();
-                        this.remote_history = vec![path];
-                        this.remote_history_index = 0;
-                    }
+                    let path = resolved_remote_path(&requested_remote_path, real_path);
+                    tracing::info!("Initial remote directory: {}", path);
+                    this.remote_current_path = path.clone();
+                    this.remote_history = vec![path];
+                    this.remote_history_index = 0;
 
                     cx.notify();
                 });
@@ -735,16 +829,7 @@ impl SftpView {
     }
 
     fn set_connection_active(&self, active: bool, cx: &mut Context<Self>) {
-        let Some(connection_id) = self.stored_connection.id else {
-            return;
-        };
-
-        let global_state = cx.global_mut::<ActiveConnections>();
-        if active {
-            global_state.add(connection_id);
-        } else {
-            global_state.remove(connection_id);
-        }
+        set_connection_active(self.stored_connection.id, active, cx);
     }
 
     fn reconnect(&mut self, cx: &mut Context<Self>) {
@@ -779,12 +864,13 @@ impl SftpView {
             Ok(dir_entries) => {
                 for entry in dir_entries.flatten() {
                     if let Ok(metadata) = entry.metadata() {
+                        let is_dir = metadata.is_dir();
                         entries.push(FileItem {
                             name: entry.file_name().to_string_lossy().to_string(),
                             size: metadata.len(),
                             modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                            is_dir: metadata.is_dir(),
-                            permissions: String::new(),
+                            is_dir,
+                            permissions: format_local_permissions(&metadata, is_dir),
                         });
                     }
                 }
@@ -957,7 +1043,11 @@ impl SftpView {
     }
 
     fn go_up_local(&mut self, cx: &mut Context<Self>) {
-        if let Some(parent) = self.local_current_path.parent() {
+        if let Some(parent) = self
+            .local_current_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
             self.local_current_path = parent.to_path_buf();
             self.push_local_history(self.local_current_path.clone());
             self.refresh_local_dir(cx);
@@ -1573,33 +1663,7 @@ impl SftpView {
                             local_path.to_string_lossy().as_ref(),
                             &remote_path,
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                                if let Some(file) = progress.current_file {
-                                    if let Ok(mut guard) =
-                                        progress_for_callback.current_file.write()
-                                    {
-                                        *guard = Some(file);
-                                    }
-                                }
-                                progress_for_callback
-                                    .current_file_transferred
-                                    .store(progress.current_file_transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .current_file_total
-                                    .store(progress.current_file_total, Ordering::Relaxed);
-                            }),
+                            progress_for_callback.dir_callback(),
                         )
                         .await
                 } else {
@@ -1608,20 +1672,7 @@ impl SftpView {
                             local_path.to_string_lossy().as_ref(),
                             &remote_path,
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                            }),
+                            progress_for_callback.file_callback(),
                         )
                         .await
                 }
@@ -1729,33 +1780,7 @@ impl SftpView {
                             &remote_path,
                             local_path.to_string_lossy().as_ref(),
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                                if let Some(file) = progress.current_file {
-                                    if let Ok(mut guard) =
-                                        progress_for_callback.current_file.write()
-                                    {
-                                        *guard = Some(file);
-                                    }
-                                }
-                                progress_for_callback
-                                    .current_file_transferred
-                                    .store(progress.current_file_transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .current_file_total
-                                    .store(progress.current_file_total, Ordering::Relaxed);
-                            }),
+                            progress_for_callback.dir_callback(),
                         )
                         .await
                 } else {
@@ -1764,20 +1789,7 @@ impl SftpView {
                             &remote_path,
                             local_path.to_string_lossy().as_ref(),
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_for_callback
-                                    .scanning
-                                    .store(false, Ordering::Relaxed);
-                                progress_for_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_for_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                progress_for_callback
-                                    .speed
-                                    .store(progress.speed.to_bits(), Ordering::Relaxed);
-                            }),
+                            progress_for_callback.file_callback(),
                         )
                         .await
                 }
@@ -1810,11 +1822,13 @@ impl SftpView {
                 let mut entries = Vec::new();
                 for entry in dir_entries.flatten() {
                     if let Ok(metadata) = entry.metadata() {
+                        let is_dir = metadata.is_dir();
                         entries.push(LocalFileEntry {
                             name: entry.file_name().to_string_lossy().to_string(),
                             size: metadata.len(),
                             modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                            is_dir: metadata.is_dir(),
+                            is_dir,
+                            permissions: format_local_permissions(&metadata, is_dir),
                         });
                     }
                 }
@@ -1834,12 +1848,13 @@ impl SftpView {
                         size: e.size,
                         modified: e.modified,
                         is_dir: e.is_dir,
-                        permissions: String::new(),
+                        permissions: e.permissions,
                     })
                     .collect();
                 let local_dir_for_result = local_dir.clone();
                 let _ = this.update(cx, |this, cx| {
-                    if !should_apply_local_listing(&this.local_current_path, &local_dir_for_result) {
+                    if !should_apply_local_listing(&this.local_current_path, &local_dir_for_result)
+                    {
                         return;
                     }
 
@@ -1975,8 +1990,6 @@ impl SftpView {
                 }
 
                 let path = join_remote_path(&remote_dir, &entry.name);
-                let progress_callback = progress_for_task.clone();
-
                 let result = if entry.is_dir {
                     progress_for_task.scanning.store(true, Ordering::Relaxed);
                     progress_for_task.transferred.store(0, Ordering::Relaxed);
@@ -1995,26 +2008,7 @@ impl SftpView {
                         .delete_recursive(
                             &path,
                             cancelled.clone(),
-                            Box::new(move |progress: TransferProgress| {
-                                progress_callback.scanning.store(false, Ordering::Relaxed);
-                                progress_callback
-                                    .transferred
-                                    .store(progress.transferred, Ordering::Relaxed);
-                                progress_callback
-                                    .total
-                                    .store(progress.total, Ordering::Relaxed);
-                                if let Some(file) = progress.current_file {
-                                    if let Ok(mut guard) = progress_callback.current_file.write() {
-                                        *guard = Some(file);
-                                    }
-                                }
-                                progress_callback
-                                    .current_file_transferred
-                                    .store(progress.current_file_transferred, Ordering::Relaxed);
-                                progress_callback
-                                    .current_file_total
-                                    .store(progress.current_file_total, Ordering::Relaxed);
-                            }),
+                            progress_for_task.dir_callback(),
                         )
                         .await
                 } else {
@@ -2798,9 +2792,9 @@ impl SftpView {
             .inset_0()
             .m_4()
             .border_2()
-            .border_color(cx.theme().link)
+            .border_color(cx.theme().drag_border)
             .rounded_lg()
-            .bg(gpui::rgba(0x3b82f610))
+            .bg(cx.theme().drop_target)
             .flex()
             .flex_col()
             .items_center()
@@ -3137,19 +3131,13 @@ impl SftpView {
             ConnectionState::Disconnected { error } => error.clone(),
             _ => None,
         };
-
         div()
             .absolute()
             .inset_0()
             .flex()
             .items_center()
             .justify_center()
-            .bg(Hsla {
-                h: 0.,
-                s: 0.,
-                l: 0.,
-                a: 0.7,
-            })
+            .bg(cx.theme().overlay)
             .child(
                 v_flex()
                     .gap_4()
@@ -3531,7 +3519,6 @@ impl SftpView {
         let is_dragging = self.is_dragging_over_local;
         let can_go_back = self.can_go_back_local();
         let can_go_forward = self.can_go_forward_local();
-
         v_flex()
             .flex_1()
             .min_w(px(0.))
@@ -3652,8 +3639,8 @@ impl SftpView {
                     .id("local-drop-zone")
                     .flex_1()
                     .relative()
-                    .drag_over::<ExternalPaths>(|el, _, _, _cx| el.bg(gpui::rgba(0x3b82f620)))
-                    .drag_over::<DraggedFileItems>(|el, _, _, _cx| el.bg(gpui::rgba(0x3b82f620)))
+                    .drag_over::<ExternalPaths>(|el, _, _, cx| el.bg(cx.theme().drop_target))
+                    .drag_over::<DraggedFileItems>(|el, _, _, cx| el.bg(cx.theme().drop_target))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                         this.is_dragging_over_local = false;
                         this.handle_local_drop(paths.paths().to_vec(), window, cx);
@@ -3680,7 +3667,6 @@ impl SftpView {
         let is_dragging = self.is_dragging_over_remote;
         let can_go_back = self.can_go_back_remote();
         let can_go_forward = self.can_go_forward_remote();
-
         v_flex()
             .flex_1()
             .min_w(px(0.))
@@ -3806,9 +3792,9 @@ impl SftpView {
                     .flex_1()
                     .relative()
                     .when(is_connected, |el| {
-                        el.drag_over::<ExternalPaths>(|el, _, _, _cx| el.bg(gpui::rgba(0x3b82f620)))
-                            .drag_over::<DraggedFileItems>(|el, _, _, _cx| {
-                                el.bg(gpui::rgba(0x3b82f620))
+                        el.drag_over::<ExternalPaths>(|el, _, _, cx| el.bg(cx.theme().drop_target))
+                            .drag_over::<DraggedFileItems>(|el, _, _, cx| {
+                                el.bg(cx.theme().drop_target)
                             })
                             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                                 this.is_dragging_over_remote = false;
@@ -3835,7 +3821,7 @@ impl SftpView {
                                     div()
                                         .absolute()
                                         .inset_0()
-                                        .bg(gpui::rgba(0x00000040))
+                                        .bg(cx.theme().overlay)
                                         .flex()
                                         .items_center()
                                         .justify_center()
@@ -3879,6 +3865,31 @@ impl SftpView {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{initial_remote_path, resolved_remote_path};
+
+    #[test]
+    fn initial_remote_path_prefers_configured_directory() {
+        assert_eq!(initial_remote_path(Some("/srv/www")), "/srv/www");
+    }
+
+    #[test]
+    fn initial_remote_path_defaults_to_server_directory_when_empty() {
+        assert_eq!(initial_remote_path(None), ".");
+        assert_eq!(initial_remote_path(Some("   ")), ".");
+    }
+
+    #[test]
+    fn resolved_remote_path_prefers_realpath_result() {
+        assert_eq!(
+            resolved_remote_path("logs", Some("/home/demo/logs".to_string())),
+            "/home/demo/logs"
+        );
+        assert_eq!(resolved_remote_path("logs", None), "logs");
+    }
+}
+
 impl EventEmitter<TabContentEvent> for SftpView {}
 impl EventEmitter<SftpViewEvent> for SftpView {}
 
@@ -3902,6 +3913,23 @@ impl TabContent for SftpView {
 
     fn closeable(&self, _cx: &App) -> bool {
         true
+    }
+
+    fn dump(&self, cx: &App) -> JsonValue {
+        let Some(connection_id) = self.stored_connection.id else {
+            return JsonValue::Null;
+        };
+
+        ConnectionRestorePayload {
+            kind: ConnectionRestoreKind::Sftp,
+            connection_id: Some(connection_id),
+            workspace_id: None,
+            active_connection_id: None,
+            local_terminal: None,
+            ssh_terminal: None,
+            title: self.title(cx).to_string(),
+        }
+        .into_tab_data()
     }
 
     fn try_close(
@@ -3959,7 +3987,7 @@ impl TabContent for SftpView {
                         true
                     })
                     .overlay_closable(false)
-                    .close_button(false)
+                    .close_button(true)
             });
 
             let client = self.sftp_client.take();
@@ -4017,6 +4045,44 @@ impl TabContent for SftpView {
         self.set_connection_active(false, cx);
         gpui::Task::ready(true)
     }
+
+    fn force_close(
+        &mut self,
+        _tab_id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Task<bool> {
+        self.cancel_all_transfers();
+        let client = self.sftp_client.take();
+        self.set_connection_active(false, cx);
+
+        if let Some(client) = client {
+            let task = Tokio::spawn(cx, async move {
+                let mut guard = client.lock().await;
+                if let Err(e) = guard.disconnect().await {
+                    tracing::error!("强制关闭 SFTP 连接失败: {}", e);
+                }
+            });
+            return cx.spawn(async move |_this, _cx| {
+                let _ = task.await;
+                true
+            });
+        }
+
+        gpui::Task::ready(true)
+    }
+
+    fn running_state(&self, cx: &App) -> Option<RunningState> {
+        let active_count = self.transfer_queue.active_tasks().len();
+        if active_count == 0 {
+            return None;
+        }
+
+        RunningState::sftp(
+            self.title(cx),
+            t!("RunningState.sftp.activity", count = active_count).into(),
+        )
+    }
 }
 
 impl Focusable for SftpView {
@@ -4028,7 +4094,6 @@ impl Focusable for SftpView {
 impl Render for SftpView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_disconnected = matches!(self.connection_state, ConnectionState::Disconnected { .. });
-
         v_flex()
             .size_full()
             .relative()
@@ -4059,7 +4124,13 @@ mod tests {
 
     #[test]
     fn only_apply_local_listing_for_active_path() {
-        assert!(should_apply_local_listing(Path::new("/tmp/a"), Path::new("/tmp/a")));
-        assert!(!should_apply_local_listing(Path::new("/tmp/b"), Path::new("/tmp/a")));
+        assert!(should_apply_local_listing(
+            Path::new("/tmp/a"),
+            Path::new("/tmp/a")
+        ));
+        assert!(!should_apply_local_listing(
+            Path::new("/tmp/b"),
+            Path::new("/tmp/a")
+        ));
     }
 }
