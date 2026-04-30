@@ -1,19 +1,19 @@
 use std::time::Instant;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
 use super::{
     build_export_select_sql, build_insert_statement, execute_import_statements,
     format_import_table_reference, quote_sql_string,
 };
-use crate::DatabasePlugin;
 use crate::connection::DbConnection;
 use crate::executor::{ExecOptions, SqlResult};
 use crate::import_export::{
     ExportConfig, ExportProgressEvent, ExportProgressSender, ExportResult, FormatHandler,
     ImportConfig, ImportResult,
 };
+use crate::DatabasePlugin;
 
 pub struct CsvFormatHandler;
 

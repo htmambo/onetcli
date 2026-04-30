@@ -115,6 +115,7 @@ impl HistoryPromptState {
         if self.tracking_state == TrackingState::Active {
             self.dropdown_visible = false;
             self.selected = None;
+            self.matches.clear();
         }
     }
 

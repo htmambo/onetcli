@@ -67,6 +67,7 @@ pub fn open_remote_file_editor<T: 'static>(
                     height: px(480.0),
                 }),
                 kind: WindowKind::Normal,
+                #[cfg(target_os = "linux")]
                 window_background: gpui::WindowBackgroundAppearance::Transparent,
                 #[cfg(target_os = "linux")]
                 window_decorations: Some(gpui::WindowDecorations::Client),

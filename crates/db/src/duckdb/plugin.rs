@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use gpui_component::table::Column;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
@@ -1552,12 +1552,10 @@ mod tests {
             .expect("list_views should succeed");
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].name, "test_view");
-        assert!(
-            views[0]
-                .definition
-                .as_deref()
-                .is_some_and(|definition| definition.contains("SELECT id, email FROM test"))
-        );
+        assert!(views[0]
+            .definition
+            .as_deref()
+            .is_some_and(|definition| definition.contains("SELECT id, email FROM test")));
 
         let ddl = plugin
             .export_table_create_sql(&connection, "main", Some("main"), "test")
@@ -1633,11 +1631,9 @@ mod tests {
                     .default_value("'anon'"),
                 ColumnDefinition::new("email").data_type("VARCHAR"),
             ],
-            indexes: vec![
-                IndexDefinition::new("idx_name")
-                    .columns(vec!["name".to_string()])
-                    .unique(true),
-            ],
+            indexes: vec![IndexDefinition::new("idx_name")
+                .columns(vec!["name".to_string()])
+                .unique(true)],
             foreign_keys: vec![],
             options: TableOptions::default(),
         };

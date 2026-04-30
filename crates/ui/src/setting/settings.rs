@@ -192,6 +192,7 @@ impl Settings {
                                         page_ix,
                                         ..Default::default()
                                     };
+                                    state.deferred_scroll_group_ix = Some(0);
                                     cx.notify();
                                 })
                             }

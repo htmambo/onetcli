@@ -2687,6 +2687,14 @@ ChatPanel:
     en: Operation cancelled
     zh-CN: 操作已取消
     zh-HK: 操作已取消
+  empty_title:
+    en: Start a new session
+    zh-CN: 开始一个新会话
+    zh-HK: 開始一個新會話
+  empty_description:
+    en: Ask a question below, or switch to SQL mode to run a query directly.
+    zh-CN: 在下方输入问题，或切换到 SQL 模式直接执行查询。
+    zh-HK: 在下方輸入問題，或切換到 SQL 模式直接執行查詢。
   select_ai_model_first:
     en: Please select an AI model first
     zh-CN: 请先选择 AI 模型

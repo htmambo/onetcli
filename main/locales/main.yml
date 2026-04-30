@@ -679,14 +679,6 @@ Settings:
     en: File Manager
     zh-CN: 文件管理器
     zh-HK: 檔案管理器
-  sync_path_with_terminal:
-    en: Sync path with terminal
-    zh-CN: 与终端同步路径
-    zh-HK: 與終端同步路徑
-  sync_path_help:
-    en: Automatically sync current directory with the terminal
-    zh-CN: 自动与终端同步当前目录
-    zh-HK: 自動與終端同步當前目錄
   theme:
     en: Theme
     zh-CN: 主题
@@ -1064,6 +1056,22 @@ Settings:
         en: Limit how many recent local terminal lines are saved for restore prompts (0-5000)
         zh-CN: 限制本地终端在恢复弹窗中可恢复的最近历史行数（0-5000）
         zh-HK: 限制本地終端在恢復彈窗中可恢復的最近歷史行數（0-5000）
+      restore_connections_on_startup:
+        en: Restore previous connections on startup
+        zh-CN: 启动时恢复关闭前连接
+        zh-HK: 啟動時恢復關閉前連線
+      restore_connections_on_startup_desc:
+        en: Show the restore dialog for connections and terminals from the previous session when the app starts
+        zh-CN: 应用启动时，显示上次关闭前连接与终端的恢复弹窗
+        zh-HK: 應用啟動時，顯示上次關閉前連線與終端的恢復彈窗
+      restore_session_content:
+        en: Restore connection sessions
+        zh-CN: 恢复连接中的会话
+        zh-HK: 恢復連線中的工作階段
+      restore_session_content_desc:
+        en: Reuse terminal session content when available; when disabled, only reopen the connection
+        zh-CN: 可用时恢复终端中的会话内容；关闭后仅重新打开连接
+        zh-HK: 可用時恢復終端中的工作階段內容；關閉後僅重新開啟連線
 
     # 数据库设置
     Database:
@@ -1259,9 +1267,9 @@ Settings:
       zh-CN: 系统热键
       zh-HK: 系統熱鍵
     system_hotkey_desc:
-      en: Customize the global window toggle hotkey with keystroke syntax like cmd-alt-m or ctrl-space. Changes take effect after restarting the app, and invalid input is ignored.
-      zh-CN: 使用类似 cmd-alt-m 或 ctrl-space 的快捷键格式自定义全局窗口切换热键。修改后需重启应用生效，非法输入不会保存。
-      zh-HK: 使用類似 cmd-alt-m 或 ctrl-space 的快捷鍵格式自定義全域視窗切換熱鍵。修改後需重新啟動應用生效，非法輸入不會保存。
+      en: Customize the global window toggle hotkey with keystroke syntax like cmd-alt-m or ctrl-alt-m. Changes take effect after restarting the app, and invalid input is ignored.
+      zh-CN: 使用类似 cmd-alt-m 或 ctrl-alt-m 的快捷键格式自定义全局窗口切换热键。修改后需重启应用生效，非法输入不会保存。
+      zh-HK: 使用類似 cmd-alt-m 或 ctrl-alt-m 的快捷鍵格式自定義全域視窗切換熱鍵。修改後需重新啟動應用生效，非法輸入不會保存。
     window:
       en: Window Management
       zh-CN: 窗口管理

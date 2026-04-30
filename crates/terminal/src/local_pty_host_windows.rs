@@ -61,14 +61,18 @@ async fn handle_client(registry: Arc<SessionRegistry>, server: NamedPipeServer) 
                                 active_session = Some(session_id.clone());
                                 output_rx = subscribe_output(&registry, session_id).await;
                             }
-                            LocalPtyHostRequest::Spawn { .. } => {
-                                active_session = None;
-                                output_rx = None;
-                            }
                             _ => {}
                         }
 
-                        if let Some(event) = dispatch_request(&registry, request).await {
+                        let response = dispatch_request(&registry, request).await;
+                        if let Some(LocalPtyHostEvent::Spawned { session_id, .. }) =
+                            response.as_ref()
+                        {
+                            active_session = Some(session_id.clone());
+                            output_rx = subscribe_output(&registry, session_id).await;
+                        }
+
+                        if let Some(event) = response {
                             if write_event(&mut writer, event).await.is_err() {
                                 break;
                             }

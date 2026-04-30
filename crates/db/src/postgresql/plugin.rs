@@ -1917,6 +1917,29 @@ impl DatabasePlugin for PostgresPlugin {
         )
     }
 
+    fn build_backup_table_sql(
+        &self,
+        _database: &str,
+        schema: Option<&str>,
+        source_table: &str,
+        target_table: &str,
+    ) -> String {
+        let qualify = |table: &str| match schema {
+            Some(schema) => format!(
+                "{}.{}",
+                self.quote_identifier(schema),
+                self.quote_identifier(table)
+            ),
+            None => self.quote_identifier(table),
+        };
+        let source = qualify(source_table);
+        let target = qualify(target_table);
+        format!(
+            "CREATE TABLE {} (LIKE {} INCLUDING ALL);\nINSERT INTO {} SELECT * FROM {};",
+            target, source, target, source
+        )
+    }
+
     fn build_column_def(&self, col: &ColumnDefinition) -> String {
         let mut def = String::new();
         def.push_str(&self.quote_identifier(&col.name));
@@ -2281,6 +2304,18 @@ mod tests {
     }
 
     #[test]
+    fn test_build_backup_table_sql() {
+        let plugin = create_plugin();
+        let sql = plugin.build_backup_table_sql("test_db", Some("public"), "orders", "orders_bak");
+        assert!(sql.contains(
+            "CREATE TABLE \"public\".\"orders_bak\" (LIKE \"public\".\"orders\" INCLUDING ALL);"
+        ));
+        assert!(sql.contains(
+            "INSERT INTO \"public\".\"orders_bak\" SELECT * FROM \"public\".\"orders\";"
+        ));
+    }
+
+    #[test]
     fn test_drop_view() {
         let plugin = create_plugin();
         let sql = plugin.drop_view("test_db", "my_view");
@@ -2578,11 +2613,9 @@ mod tests {
         let original = TableDesign {
             database_name: "test_db".to_string(),
             table_name: "users".to_string(),
-            columns: vec![
-                ColumnDefinition::new("name")
-                    .data_type("VARCHAR")
-                    .length(50),
-            ],
+            columns: vec![ColumnDefinition::new("name")
+                .data_type("VARCHAR")
+                .length(50)],
             indexes: vec![],
             foreign_keys: vec![],
             options: TableOptions::default(),
@@ -2591,11 +2624,9 @@ mod tests {
         let new = TableDesign {
             database_name: "test_db".to_string(),
             table_name: "users".to_string(),
-            columns: vec![
-                ColumnDefinition::new("name")
-                    .data_type("VARCHAR")
-                    .length(100),
-            ],
+            columns: vec![ColumnDefinition::new("name")
+                .data_type("VARCHAR")
+                .length(100)],
             indexes: vec![],
             foreign_keys: vec![],
             options: TableOptions::default(),
@@ -2650,11 +2681,9 @@ mod tests {
         let original = TableDesign {
             database_name: "test_db".to_string(),
             table_name: "users".to_string(),
-            columns: vec![
-                ColumnDefinition::new("name")
-                    .data_type("VARCHAR")
-                    .length(50),
-            ],
+            columns: vec![ColumnDefinition::new("name")
+                .data_type("VARCHAR")
+                .length(50)],
             indexes: vec![],
             foreign_keys: vec![],
             options: TableOptions::default(),
@@ -2663,13 +2692,11 @@ mod tests {
         let new = TableDesign {
             database_name: "test_db".to_string(),
             table_name: "users".to_string(),
-            columns: vec![
-                ColumnDefinition::new("name")
-                    .data_type("VARCHAR")
-                    .length(50)
-                    .nullable(false)
-                    .default_value("'guest'"),
-            ],
+            columns: vec![ColumnDefinition::new("name")
+                .data_type("VARCHAR")
+                .length(50)
+                .nullable(false)
+                .default_value("'guest'")],
             indexes: vec![],
             foreign_keys: vec![],
             options: TableOptions::default(),
@@ -2711,10 +2738,9 @@ mod tests {
         assert!(!info.snippets.is_empty());
 
         assert!(info.keywords.iter().any(|(k, _)| *k == "RETURNING"));
-        assert!(
-            info.functions
-                .iter()
-                .any(|(f, _)| f.starts_with("ARRAY_AGG"))
-        );
+        assert!(info
+            .functions
+            .iter()
+            .any(|(f, _)| f.starts_with("ARRAY_AGG")));
     }
 }

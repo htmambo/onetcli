@@ -66,6 +66,17 @@ use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestoreSnaps
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
 
+fn pending_connection_restore_snapshot(
+    settings: &AppSettings,
+) -> Option<ConnectionRestoreSnapshot> {
+    if !settings.restore_connections_on_startup {
+        crate::connection_restore::clear_pending_connection_restore_snapshot();
+        return None;
+    }
+
+    load_pending_connection_restore_snapshot()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncFeedbackLevel {
     Info,
@@ -278,6 +289,7 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let settings = AppSettings::global(cx).clone();
         let search_query = cx.new(|_| String::new());
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -337,7 +349,7 @@ impl HomePage {
             current_user: None,
             logging_in: false,
             auth_error: None,
-            pending_connection_restore_snapshot: load_pending_connection_restore_snapshot(),
+            pending_connection_restore_snapshot: pending_connection_restore_snapshot(&settings),
             saved_active_tab_index: None,
             workspaces_loaded: false,
             connections_loaded: false,
@@ -627,12 +639,94 @@ impl HomePage {
         }
     }
 
+    fn restore_connection_without_session(
+        &mut self,
+        item: ResolvedConnectionRestoreItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match item.kind {
+            ConnectionRestoreKind::LocalTerminal => {
+                let _ = item.local_terminal;
+                self.open_local_terminal(None, "home", window, cx);
+            }
+            ConnectionRestoreKind::SshTerminal => {
+                if let Some(connection) = item.connection {
+                    self.open_ssh_terminal(connection, window, cx);
+                } else {
+                    tracing::warn!("恢复 SSH 终端时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::SerialTerminal => {
+                if let Some(connection) = item.connection {
+                    self.open_serial_terminal(connection, window, cx);
+                } else {
+                    tracing::warn!("恢复串口终端时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::Sftp => {
+                if let Some(connection) = item.connection {
+                    self.open_sftp_view(connection, window, cx);
+                } else {
+                    tracing::warn!("恢复 SFTP 时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::Database => {
+                if let Some(connection) = item.connection {
+                    self.add_item_to_tab(&connection, None, window, cx);
+                } else {
+                    tracing::warn!("恢复数据库页时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::DatabaseWorkspace => {
+                if let Some(connection) = item.connection {
+                    self.add_item_to_tab(&connection, item.workspace, window, cx);
+                } else {
+                    tracing::warn!("恢复数据库工作区时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::Redis => {
+                if let Some(connection) = item.connection {
+                    self.open_redis_tab(connection, None, window, cx);
+                } else {
+                    tracing::warn!("恢复 Redis 页时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::RedisWorkspace => {
+                if let Some(connection) = item.connection {
+                    self.open_redis_tab(connection, item.workspace, window, cx);
+                } else {
+                    tracing::warn!("恢复 Redis 工作区时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::MongoDb => {
+                if let Some(connection) = item.connection {
+                    self.open_mongodb_tab(connection, None, window, cx);
+                } else {
+                    tracing::warn!("恢复 MongoDB 页时缺少连接信息");
+                }
+            }
+            ConnectionRestoreKind::MongoDbWorkspace => {
+                if let Some(connection) = item.connection {
+                    self.open_mongodb_tab(connection, item.workspace, window, cx);
+                } else {
+                    tracing::warn!("恢复 MongoDB 工作区时缺少连接信息");
+                }
+            }
+        }
+    }
+
     fn restore_connection_restore_item(
         &mut self,
         item: ResolvedConnectionRestoreItem,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !AppSettings::global(cx).restore_session_content {
+            self.restore_connection_without_session(item, window, cx);
+            return;
+        }
+
         let ResolvedConnectionRestoreItem {
             kind,
             connection,

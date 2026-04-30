@@ -252,6 +252,7 @@ impl LocalPtyClientBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[tokio::test]
     async fn client_spawn_returns_session_id() {
         let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());
@@ -273,6 +274,52 @@ mod tests {
 
         let (session_id, _pid) = result.expect("spawn 应成功");
         assert!(session_id.starts_with("local-pty-"));
+
+        host.abort();
+        let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn client_spawn_split_receives_output_from_spawned_session() {
+        let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());
+        let host = tokio::spawn(async {
+            let _ = crate::run_local_pty_host().await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let marker = format!("__onetcli_spawn_output_{}__", std::process::id());
+        let result = tokio::task::spawn_blocking(move || -> Result<bool> {
+            let mut client = LocalPtyClient::connect()?;
+            let mut config = crate::LocalConfig::default();
+            config.shell = Some("/bin/sh".to_string());
+            let (session_id, _) = client.spawn_sync(config, crate::TerminalSize::default())?;
+            let (request_tx, mut event_rx) = client.split();
+
+            request_tx
+                .send(LocalPtyHostRequest::Input {
+                    session_id: session_id.clone(),
+                    data: format!("echo {marker}\n").into_bytes(),
+                })
+                .map_err(|_| anyhow::anyhow!("发送测试输入失败"))?;
+
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                if let Ok(LocalPtyHostEvent::Output { data, .. }) = event_rx.try_recv() {
+                    if String::from_utf8_lossy(&data).contains(&marker) {
+                        return Ok(true);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            Ok(false)
+        })
+        .await
+        .unwrap();
+
+        assert!(result.expect("spawn 后应能收到输出事件"));
 
         host.abort();
         let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());

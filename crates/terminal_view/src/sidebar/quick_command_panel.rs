@@ -6,13 +6,13 @@ use gpui::prelude::*;
 use gpui::{
     div, px, uniform_list, App, AppContext, ClipboardItem, Context, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton,
-    ParentElement, Render, SharedString, Styled, UniformListScrollHandle, Window,
+    ParentElement, Render, ScrollStrategy, SharedString, Styled, UniformListScrollHandle, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp},
     notification::Notification,
     tooltip::Tooltip,
     v_flex, ActiveTheme, Icon, IconName, Sizable, Size, WindowExt,
@@ -56,6 +56,8 @@ pub struct QuickCommandPanel {
     show_add_input: bool,
     /// 列表滚动句柄
     scroll_handle: UniformListScrollHandle,
+    /// 当前键盘选中的命令
+    selected_index: Option<usize>,
 }
 
 impl QuickCommandPanel {
@@ -94,6 +96,7 @@ impl QuickCommandPanel {
             search_query: String::new(),
             show_add_input: false,
             scroll_handle: UniformListScrollHandle::new(),
+            selected_index: None,
         };
 
         // 初始加载
@@ -259,6 +262,88 @@ impl QuickCommandPanel {
                 .cloned()
                 .collect();
         }
+        self.sync_selected_index();
+    }
+
+    fn sync_selected_index(&mut self) {
+        self.selected_index = match (self.selected_index, self.filtered_commands.is_empty()) {
+            (_, true) => None,
+            (Some(index), false) => Some(index.min(self.filtered_commands.len().saturating_sub(1))),
+            (None, false) => Some(0),
+        };
+    }
+
+    fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.show_add_input || self.filtered_commands.is_empty() {
+            return;
+        }
+
+        let len = self.filtered_commands.len() as isize;
+        let current = self.selected_index.unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, len.saturating_sub(1)) as usize;
+        self.selected_index = Some(next);
+        self.scroll_handle
+            .scroll_to_item(next, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    fn paste_selected_command(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_index else {
+            return;
+        };
+        let Some(command) = self.filtered_commands.get(index) else {
+            return;
+        };
+        self.paste_command(command.command.clone(), cx);
+    }
+
+    fn on_action_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_selection(-1, cx);
+    }
+
+    fn on_action_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_selection(1, cx);
+    }
+
+    fn on_action_enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.show_add_input && self.add_input_state.focus_handle(cx).is_focused(window) {
+            let value = self.add_input_state.read(cx).value().to_string();
+            if value.trim().is_empty() {
+                return;
+            }
+
+            self.add_command(value, cx);
+            self.add_input_state.update(cx, |state, cx| {
+                state.set_value("", window, cx);
+            });
+            self.search_input_state.focus_handle(cx).focus(window, cx);
+            return;
+        }
+
+        self.paste_selected_command(cx);
+    }
+
+    fn on_action_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        if self.show_add_input {
+            self.add_input_state.update(cx, |state, cx| {
+                state.set_value("", window, cx);
+            });
+            self.show_add_input = false;
+            self.search_input_state.focus_handle(cx).focus(window, cx);
+            cx.notify();
+            return;
+        }
+
+        cx.emit(QuickCommandPanelEvent::Close);
+    }
+
+    pub fn focus_default(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let focus_handle = if self.show_add_input {
+            self.add_input_state.focus_handle(cx)
+        } else {
+            self.search_input_state.focus_handle(cx)
+        };
+        focus_handle.focus(window, cx);
     }
 
     /// 粘贴命令到终端输入区（不自动回车）
@@ -475,11 +560,13 @@ impl QuickCommandPanel {
         let command_for_tooltip = command.clone();
         let id = cmd.id.unwrap_or(0);
         let is_pinned = cmd.pinned;
+        let is_selected = self.selected_index == Some(index);
         let item_id = SharedString::from(format!("quick-cmd-item-{}", index));
         let group_name = SharedString::from(format!("quick-cmd-group-{}", index));
 
         let pin_color = cx.theme().warning;
         let muted_bg = cx.theme().muted;
+        let selected_bg = cx.theme().selection;
 
         div()
             .id(item_id)
@@ -489,10 +576,22 @@ impl QuickCommandPanel {
             .py_2()
             .rounded_md()
             .cursor_pointer()
+            .bg(if is_selected {
+                selected_bg
+            } else {
+                muted_bg.opacity(0.0)
+            })
             .hover(|s| s.bg(muted_bg))
+            .on_mouse_move(cx.listener(move |this, _, _, cx| {
+                if this.selected_index != Some(index) {
+                    this.selected_index = Some(index);
+                    cx.notify();
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| {
+                    this.selected_index = Some(index);
                     this.paste_command(command_for_paste.clone(), cx);
                 }),
             )
@@ -658,6 +757,10 @@ impl Render for QuickCommandPanel {
         v_flex()
             .size_full()
             .text_color(cx.theme().foreground)
+            .on_action(cx.listener(Self::on_action_up))
+            .on_action(cx.listener(Self::on_action_down))
+            .on_action(cx.listener(Self::on_action_enter))
+            .on_action(cx.listener(Self::on_action_escape))
             .child(self.render_header(cx))
             .child(self.render_search_bar(cx))
             .when(show_add, |this| this.child(self.render_add_input(cx)))

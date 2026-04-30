@@ -20,7 +20,7 @@ members = [
     "crates/db_view",
     "crates/terminal",
     "crates/terminal_view"
-    , "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/mongodb_view", "crates/mcp", "crates/remote_file_editor"]
+    , "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/mongodb_view", "crates/remote_file_editor"]
 resolver = "2"
 
 [workspace.package]
@@ -80,7 +80,6 @@ terminal_view = { path = "crates/terminal_view" }
 sftp_view = { path = "crates/sftp_view" }
 one-core = { path = "crates/core" }
 mongodb_view = {path = "crates/mongodb_view"}
-mcp = { path = "crates/mcp" }
 remote_file_editor = { path = "crates/remote_file_editor" }
 
 
@@ -112,6 +111,11 @@ clickhouse = { version = "0.14.1", features = ["rustls-tls-native-roots"] }
 sqlformat = "0.5.0"
 sqlparser = "0.60.0"
 uuid = { version = "1.18.0", features = ["v4", "serde"] }
+hkdf = "0.12"
+hostname = "0.4"
+argon2 = { version = "0.6.0-rc.8", features = ["password-hash"] }
+tiny_http = "0.12"
+urlencoding = "2"
 rust_xlsxwriter = "0.94.0"
 dashmap = "5.5.3"
 moka = { version = "0.12", features = ["sync"] }
@@ -129,9 +133,6 @@ aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
-hkdf = "0.12"
-hostname = "0.4"
-argon2 = { version = "0.6.0-rc.8", features = ["password-hash"] }
 
 # Terminal emulation
 alacritty_terminal = "0.26"
@@ -147,8 +148,6 @@ mongodb = "3.5.1"
 futures-util="0.3.31"
 url = "2.5.4"
 percent-encoding = "2.3.1"
-tiny_http = "0.8"
-urlencoding = "2.1"
 global-hotkey = "0.7.0"
 [workspace.dependencies.windows]
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]

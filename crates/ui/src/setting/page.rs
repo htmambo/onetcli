@@ -1,5 +1,5 @@
 use gpui::{
-    App, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListState,
+    App, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListOffset, ListState,
     ParentElement as _, SharedString, StyleRefinement, Styled, Window, div, list,
     prelude::FluentBuilder as _, px,
 };
@@ -128,7 +128,10 @@ impl SettingPage {
             state.update(cx, |state, _| {
                 state.deferred_scroll_group_ix = None;
             });
-            list_state.scroll_to_reveal_item(ix);
+            list_state.scroll_to(ListOffset {
+                item_ix: ix,
+                offset_in_item: px(0.),
+            });
         }
 
         v_flex()

@@ -179,19 +179,12 @@ impl Element for Anchored {
             }
         }
 
-        let client_inset = window
-            .client_inset_edges()
-            .unwrap_or_else(|| Edges::all(window.client_inset().unwrap_or(px(0.))));
-        let margins = match self.fit_mode {
+        let client_inset = window.client_inset().unwrap_or(px(0.));
+        let edges = match self.fit_mode {
             AnchoredFitMode::SnapToWindowWithMargin(edges) => edges,
             _ => Edges::default(),
-        };
-        let edges = Edges {
-            top: margins.top + client_inset.top,
-            right: margins.right + client_inset.right,
-            bottom: margins.bottom + client_inset.bottom,
-            left: margins.left + client_inset.left,
-        };
+        }
+        .map(|edge| *edge + client_inset);
 
         // Snap the horizontal edges of the anchored element to the horizontal edges of the window if
         // its horizontal bounds overflow, aligning to the left if it is wider than the limits.

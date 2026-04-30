@@ -7,6 +7,8 @@ index.scip
 *.log
 node_modules/
 
+.worktrees/
+
 # Rust build artifacts
 target/
 **/target/
@@ -61,3 +63,4 @@ resources/macos/OnetCli.icns
 .claude/
 .ace-tool/
 .superpowers/
+.codex

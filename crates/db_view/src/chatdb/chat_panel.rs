@@ -311,15 +311,31 @@ impl ChatPanel {
     // 历史会话
     // ========================================================================
 
-    pub fn start_new_session(&mut self, cx: &mut Context<Self>) {
+    fn reset_session_runtime_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(token) = self.cancel_token.take() {
+            token.cancel();
+        }
+
+        self.is_loading = false;
+        self.is_new_session = false;
+        self.last_user_input = None;
+        self.latest_ai_message_id = None;
+        self.render_limit = MESSAGE_RENDER_LIMIT;
+        self.is_at_bottom = true;
+        self.session_affinity.reset();
+
+        self.ai_input.update(cx, |input, cx| {
+            input.set_loading(false, window, cx);
+        });
+    }
+
+    pub fn start_new_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_session_runtime_state(window, cx);
         self.session_id = None;
         self.messages.clear();
         self.chat_history.clear();
         self.sql_result_views.clear();
         self.sql_block_results.clear();
-        self.latest_ai_message_id = None;
-        self.render_limit = MESSAGE_RENDER_LIMIT;
-        self.session_affinity.reset();
         cx.notify();
     }
 
@@ -1387,6 +1403,9 @@ impl ChatPanel {
                         v_flex()
                             .w_full()
                             .gap_4()
+                            .when(self.messages.is_empty(), |this| {
+                                this.child(self.render_empty_state(cx))
+                            })
                             .when(hidden_count > 0 || can_collapse, |this| {
                                 this.child(
                                     h_flex().w_full().justify_center().gap_2().child(
@@ -1438,12 +1457,14 @@ impl ChatPanel {
                                     ),
                                 )
                             })
-                            .children(
-                                self.messages
-                                    .iter()
-                                    .skip(hidden_count)
-                                    .map(|msg| self.render_message(msg, &panel, cx)),
-                            ),
+                            .when(!self.messages.is_empty(), |this| {
+                                this.children(
+                                    self.messages
+                                        .iter()
+                                        .skip(hidden_count)
+                                        .map(|msg| self.render_message(msg, &panel, cx)),
+                                )
+                            }),
                     ),
             )
             .child(
@@ -1455,6 +1476,36 @@ impl ChatPanel {
                     .w(Scrollbar::width())
                     .child(Scrollbar::vertical(&self.scroll_handle)),
             )
+    }
+
+    fn render_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex().w_full().justify_center().child(
+            v_flex()
+                .w_full()
+                .items_center()
+                .gap_2()
+                .pt_8()
+                .child(
+                    Icon::new(IconName::Database)
+                        .with_size(Size::Medium)
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(t!("ChatPanel.empty_title").to_string()),
+                )
+                .child(
+                    div()
+                        .max_w(px(360.0))
+                        .text_sm()
+                        .text_center()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t!("ChatPanel.empty_description").to_string()),
+                ),
+        )
     }
 
     fn render_history_sidebar(
@@ -1498,8 +1549,8 @@ impl ChatPanel {
                             .icon(IconName::Plus)
                             .ghost()
                             .xsmall()
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.start_new_session(cx);
+                            .on_click(cx.listener(|this, _event, window, cx| {
+                                this.start_new_session(window, cx);
                             })),
                     ),
             )
@@ -1556,8 +1607,8 @@ impl ChatPanel {
                             .icon(IconName::Plus)
                             .ghost()
                             .small()
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.start_new_session(cx);
+                            .on_click(cx.listener(|this, _event, window, cx| {
+                                this.start_new_session(window, cx);
                             })),
                     )
                     .child(
@@ -2055,7 +2106,12 @@ impl ChatPanel {
     }
 
     fn render_input(&self, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().w_full().px_2().py_2().child(self.ai_input.clone())
+        div()
+            .w_full()
+            .min_w_0()
+            .px_2()
+            .py_2()
+            .child(self.ai_input.clone())
     }
 }
 

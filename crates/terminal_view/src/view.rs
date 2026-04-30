@@ -1767,7 +1767,12 @@ impl TerminalView {
                 // 可选：播放声音或闪烁标签
             }
             TerminalModelEvent::ChildExit(_) => {
-                self.request_close_from_event(_window, cx);
+                // 仅本地终端在 shell 退出时自动关闭标签。
+                // SSH / 串口连接失败或远端会话结束时需要保留标签，
+                // 以便用户查看错误信息或执行重连。
+                if self.connection_kind(cx) == TerminalConnectionKind::Local {
+                    self.request_close_from_event(_window, cx);
+                }
                 cx.notify();
             }
             TerminalModelEvent::ClipboardStore(data) => {
@@ -2295,7 +2300,9 @@ impl TerminalView {
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if !text.is_empty() {
-            self.apply_inline_input_to_history_prompt(text, cx);
+            if self.history_prompt_enabled(cx) {
+                self.apply_inline_input_to_history_prompt(text, cx);
+            }
             self.write_to_pty(text.as_bytes().to_vec(), cx);
         }
     }
@@ -2453,6 +2460,9 @@ impl TerminalView {
                     }
                 }
                 "enter" => {
+                    if self.try_accept_history_prompt(cx) {
+                        return;
+                    }
                     if self.connection_kind(cx) == TerminalConnectionKind::Local
                         && self.history_prompt.is_valid()
                     {
@@ -2471,6 +2481,7 @@ impl TerminalView {
                 }
                 "escape" => {
                     self.dismiss_history_prompt();
+                    return;
                 }
                 _ => {
                     if should_defer_inline_history_prompt_input_to_text_system(&event.keystroke) {
@@ -2873,6 +2884,13 @@ impl TerminalView {
     }
 
     fn clear_selection(&mut self, _: &ClearSelection, window: &mut Window, cx: &mut Context<Self>) {
+        // 优先关闭 history prompt 补全弹窗
+        if self.history_prompt.dropdown_visible() {
+            self.hide_history_prompt_dropdown();
+            cx.notify();
+            return;
+        }
+
         // 如果侧边栏有激活的面板，按 Escape 关闭它
         if self.sidebar.read(cx).active_panel().is_some() {
             self.sidebar.update(cx, |sidebar, cx| {
@@ -3620,13 +3638,12 @@ impl TerminalView {
     }
 
     fn send_tab(&mut self, _: &SendTab, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.try_accept_history_prompt(cx) {
-            return;
-        }
+        self.dismiss_history_prompt();
         self.write_to_pty(b"\x09".to_vec(), cx);
     }
 
     fn send_shift_tab(&mut self, _: &SendShiftTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_history_prompt();
         self.write_to_pty(b"\x1b[Z".to_vec(), cx);
     }
 
@@ -4181,9 +4198,7 @@ impl Render for TerminalView {
                                                 .child(tooltip.action_hint),
                                         )
                                         .child(
-                                            div()
-                                                .text_color(text_muted)
-                                                .child(tooltip.action_text),
+                                            div().text_color(text_muted).child(tooltip.action_text),
                                         ),
                                 )
                                 .child(

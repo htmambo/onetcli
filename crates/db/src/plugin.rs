@@ -1,19 +1,19 @@
-use crate::QueryResult;
 use crate::connection::{DbConnection, DbError};
 use crate::executor::{SqlResult, SqlSource, StatementType};
 use crate::import_export::{
-    DataFormat, ExportConfig, ExportProgressSender, ExportResult, FormatHandler, ImportConfig,
-    ImportProgressSender, ImportResult,
     formats::{
         CsvFormatHandler, JsonFormatHandler, SqlFormatHandler, TxtFormatHandler, XmlFormatHandler,
     },
+    DataFormat, ExportConfig, ExportProgressSender, ExportResult, FormatHandler, ImportConfig,
+    ImportProgressSender, ImportResult,
 };
 use crate::plugin_manifest::{
     DatabaseUiCapabilities, DatabaseUiManifest, FormSelectOption, ReferenceDataKind,
 };
 use crate::streaming_parser::StreamingSqlParser;
 use crate::types::*;
-use anyhow::{Error, Result, anyhow, bail};
+use crate::QueryResult;
+use anyhow::{anyhow, bail, Error, Result};
 use async_trait::async_trait;
 use one_core::storage::manager::get_queries_dir;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
@@ -597,7 +597,7 @@ pub trait DatabasePlugin: Send + Sync {
 
     async fn build_database_or_schema_children(
         &self,
-        _connection: &dyn DbConnection,
+        connection: &dyn DbConnection,
         node: &DbNode,
         schema: Option<String>,
     ) -> Result<Vec<DbNode>> {
@@ -612,7 +612,11 @@ pub trait DatabasePlugin: Send + Sync {
             metadata.insert("schema".to_string(), s.to_string());
         }
 
-        let table_folder = DbNode::new(
+        let tables = self
+            .list_tables(connection, database, schema.clone())
+            .await?;
+        let table_count = tables.len();
+        let mut table_folder = DbNode::new(
             format!("{}:table_folder", id),
             "DbTree.Tables".to_string(),
             DbNodeType::TablesFolder,
@@ -621,9 +625,37 @@ pub trait DatabasePlugin: Send + Sync {
         )
         .with_parent_context(id)
         .with_metadata(metadata.clone());
+        if table_count > 0 {
+            let children: Vec<DbNode> = tables
+                .into_iter()
+                .map(|table_info| {
+                    let mut meta: HashMap<String, String> = metadata.clone();
+                    if let Some(comment) = &table_info.comment {
+                        if !comment.is_empty() {
+                            meta.insert("comment".to_string(), comment.clone());
+                        }
+                    }
+
+                    DbNode::new(
+                        format!("{}:table_folder:{}", id, table_info.name),
+                        table_info.name.clone(),
+                        DbNodeType::Table,
+                        node.connection_id.clone(),
+                        node.database_type,
+                    )
+                    .with_parent_context(format!("{}:table_folder", id))
+                    .with_metadata(meta)
+                })
+                .collect();
+            table_folder.set_children(children)
+        }
         nodes.push(table_folder);
 
-        let views_folder = DbNode::new(
+        let views = self
+            .list_views(connection, database, schema.clone())
+            .await?;
+        let view_count = views.len();
+        let mut views_folder = DbNode::new(
             format!("{}:views_folder", id),
             "DbTree.Views".to_string(),
             DbNodeType::ViewsFolder,
@@ -632,11 +664,42 @@ pub trait DatabasePlugin: Send + Sync {
         )
         .with_parent_context(id)
         .with_metadata(metadata.clone());
+        if view_count > 0 {
+            let children: Vec<DbNode> = views
+                .into_iter()
+                .map(|view| {
+                    let mut meta: HashMap<String, String> = metadata.clone();
+                    if let Some(comment) = view.comment {
+                        meta.insert("comment".to_string(), comment);
+                    }
+
+                    let mut vnode = DbNode::new(
+                        format!("{}:views_folder:{}", id, view.name),
+                        view.name.clone(),
+                        DbNodeType::View,
+                        node.connection_id.clone(),
+                        node.database_type,
+                    )
+                    .with_parent_context(format!("{}:views_folder", id));
+
+                    if !meta.is_empty() {
+                        vnode = vnode.with_metadata(meta);
+                    }
+                    vnode
+                })
+                .collect();
+            views_folder.set_children(children);
+        }
         nodes.push(views_folder);
 
         // Functions folder
         if self.supports_functions() {
-            let functions_folder = DbNode::new(
+            let functions = self
+                .list_functions(connection, database)
+                .await
+                .unwrap_or_default();
+            let function_count = functions.len();
+            let mut functions_folder = DbNode::new(
                 format!("{}:functions_folder", id),
                 "DbTree.Functions".to_string(),
                 DbNodeType::FunctionsFolder,
@@ -645,12 +708,34 @@ pub trait DatabasePlugin: Send + Sync {
             )
             .with_parent_context(id)
             .with_metadata(metadata.clone());
+            if function_count > 0 {
+                let children: Vec<DbNode> = functions
+                    .into_iter()
+                    .map(|func| {
+                        DbNode::new(
+                            format!("{}:functions_folder:{}", id, func.name),
+                            func.name.clone(),
+                            DbNodeType::Function,
+                            node.connection_id.clone(),
+                            node.database_type,
+                        )
+                        .with_parent_context(format!("{}:functions_folder", id))
+                        .with_metadata(metadata.clone())
+                    })
+                    .collect();
+                functions_folder.set_children(children);
+            }
             nodes.push(functions_folder);
         }
 
         // Procedures folder
         if self.supports_procedures() {
-            let procedures_folder = DbNode::new(
+            let procedures = self
+                .list_procedures(connection, database)
+                .await
+                .unwrap_or_default();
+            let procedure_count = procedures.len();
+            let mut procedures_folder = DbNode::new(
                 format!("{}:procedures_folder", id),
                 "DbTree.Procedures".to_string(),
                 DbNodeType::ProceduresFolder,
@@ -659,12 +744,34 @@ pub trait DatabasePlugin: Send + Sync {
             )
             .with_parent_context(id)
             .with_metadata(metadata.clone());
+            if procedure_count > 0 {
+                let children: Vec<DbNode> = procedures
+                    .into_iter()
+                    .map(|proc| {
+                        DbNode::new(
+                            format!("{}:procedures_folder:{}", id, proc.name),
+                            proc.name.clone(),
+                            DbNodeType::Procedure,
+                            node.connection_id.clone(),
+                            node.database_type,
+                        )
+                        .with_parent_context(format!("{}:procedures_folder", id))
+                        .with_metadata(metadata.clone())
+                    })
+                    .collect();
+                procedures_folder.set_children(children);
+            }
             nodes.push(procedures_folder);
         }
 
         // Sequences folder (only for databases that support sequences)
         if self.supports_sequences() {
-            let sequences_folder = DbNode::new(
+            let sequences = self
+                .list_sequences(connection, database, schema)
+                .await
+                .unwrap_or_default();
+            let sequence_count = sequences.len();
+            let mut sequences_folder = DbNode::new(
                 format!("{}:sequences_folder", id),
                 "DbTree.Sequences".to_string(),
                 DbNodeType::SequencesFolder,
@@ -673,6 +780,36 @@ pub trait DatabasePlugin: Send + Sync {
             )
             .with_parent_context(id)
             .with_metadata(metadata.clone());
+            if sequence_count > 0 {
+                let children: Vec<DbNode> = sequences
+                    .into_iter()
+                    .map(|seq| {
+                        let mut seq_meta: HashMap<String, String> = metadata.clone();
+                        if let Some(start) = seq.start_value {
+                            seq_meta.insert("start_value".to_string(), start.to_string());
+                        }
+                        if let Some(inc) = seq.increment {
+                            seq_meta.insert("increment".to_string(), inc.to_string());
+                        }
+                        if let Some(min) = seq.min_value {
+                            seq_meta.insert("min_value".to_string(), min.to_string());
+                        }
+                        if let Some(max) = seq.max_value {
+                            seq_meta.insert("max_value".to_string(), max.to_string());
+                        }
+                        DbNode::new(
+                            format!("{}:sequences_folder:{}", id, seq.name),
+                            seq.name.clone(),
+                            DbNodeType::Sequence,
+                            node.connection_id.clone(),
+                            node.database_type,
+                        )
+                        .with_parent_context(format!("{}:sequences_folder", id))
+                        .with_metadata(seq_meta)
+                    })
+                    .collect();
+                sequences_folder.set_children(children);
+            }
             nodes.push(sequences_folder);
         }
 
@@ -960,10 +1097,14 @@ pub trait DatabasePlugin: Send + Sync {
 
     async fn load_table_children(
         &self,
-        _connection: &dyn DbConnection,
+        connection: &dyn DbConnection,
         node: &DbNode,
         id: &str,
     ) -> Result<Vec<DbNode>> {
+        let db = &*node
+            .get_database_name()
+            .ok_or_else(|| anyhow::anyhow!("Database name not found"))?;
+        let schema = node.get_schema_name();
         let table = &*node
             .get_table_name()
             .ok_or_else(|| anyhow::anyhow!("Table name not found"))?;
@@ -973,55 +1114,139 @@ pub trait DatabasePlugin: Send + Sync {
 
         let mut children = Vec::new();
 
-        children.push(self.build_table_subfolder(
-            node,
-            id,
-            "columns_folder",
-            "DbTree.Columns",
-            DbNodeType::ColumnsFolder,
-            &folder_metadata,
-            Vec::new(),
-        ));
+        let columns = self
+            .list_columns(connection, db, schema.clone(), table)
+            .await?;
+        children.push(
+            self.build_table_subfolder(
+                node,
+                id,
+                "columns_folder",
+                "DbTree.Columns",
+                DbNodeType::ColumnsFolder,
+                &folder_metadata,
+                columns
+                    .into_iter()
+                    .map(|c| {
+                        (c.name.clone(), DbNodeType::Column, {
+                            let mut m = folder_metadata.clone();
+                            m.insert("type".to_string(), c.data_type);
+                            m.insert("is_nullable".to_string(), c.is_nullable.to_string());
+                            m.insert("is_primary_key".to_string(), c.is_primary_key.to_string());
+                            m
+                        })
+                    })
+                    .collect(),
+            ),
+        );
 
-        children.push(self.build_table_subfolder(
-            node,
-            id,
-            "indexes_folder",
-            "DbTree.Indexes",
-            DbNodeType::IndexesFolder,
-            &folder_metadata,
-            Vec::new(),
-        ));
+        let indexes: Vec<_> = self
+            .list_indexes(connection, db, schema.clone(), table)
+            .await?
+            .into_iter()
+            .filter(|idx| idx.name.to_uppercase() != "PRIMARY")
+            .collect();
+        children.push(
+            self.build_table_subfolder(
+                node,
+                id,
+                "indexes_folder",
+                "DbTree.Indexes",
+                DbNodeType::IndexesFolder,
+                &folder_metadata,
+                indexes
+                    .into_iter()
+                    .map(|idx| {
+                        (idx.name.clone(), DbNodeType::Index, {
+                            let mut m = folder_metadata.clone();
+                            m.insert("unique".to_string(), idx.is_unique.to_string());
+                            m.insert("columns".to_string(), idx.columns.join(", "));
+                            m
+                        })
+                    })
+                    .collect(),
+            ),
+        );
 
-        children.push(self.build_table_subfolder(
-            node,
-            id,
-            "foreign_keys_folder",
-            "DbTree.ForeignKeys",
-            DbNodeType::ForeignKeysFolder,
-            &folder_metadata,
-            Vec::new(),
-        ));
+        let foreign_keys = self
+            .list_foreign_keys(connection, db, schema.clone(), table)
+            .await
+            .unwrap_or_default();
+        children.push(
+            self.build_table_subfolder(
+                node,
+                id,
+                "foreign_keys_folder",
+                "DbTree.ForeignKeys",
+                DbNodeType::ForeignKeysFolder,
+                &folder_metadata,
+                foreign_keys
+                    .into_iter()
+                    .map(|fk| {
+                        (fk.name.clone(), DbNodeType::ForeignKey, {
+                            let mut m = folder_metadata.clone();
+                            m.insert("columns".to_string(), fk.columns.join(", "));
+                            m.insert("ref_table".to_string(), fk.ref_table.clone());
+                            m.insert("ref_columns".to_string(), fk.ref_columns.join(", "));
+                            m
+                        })
+                    })
+                    .collect(),
+            ),
+        );
 
-        children.push(self.build_table_subfolder(
-            node,
-            id,
-            "triggers_folder",
-            "DbTree.Triggers",
-            DbNodeType::TriggersFolder,
-            &folder_metadata,
-            Vec::new(),
-        ));
+        let triggers = self
+            .list_table_triggers(connection, db, schema.clone(), table)
+            .await
+            .unwrap_or_default();
+        children.push(
+            self.build_table_subfolder(
+                node,
+                id,
+                "triggers_folder",
+                "DbTree.Triggers",
+                DbNodeType::TriggersFolder,
+                &folder_metadata,
+                triggers
+                    .into_iter()
+                    .map(|t| {
+                        (t.name.clone(), DbNodeType::Trigger, {
+                            let mut m = folder_metadata.clone();
+                            m.insert("event".to_string(), t.event.clone());
+                            m.insert("timing".to_string(), t.timing.clone());
+                            m
+                        })
+                    })
+                    .collect(),
+            ),
+        );
 
-        children.push(self.build_table_subfolder(
-            node,
-            id,
-            "checks_folder",
-            "DbTree.Checks",
-            DbNodeType::ChecksFolder,
-            &folder_metadata,
-            Vec::new(),
-        ));
+        let checks = self
+            .list_table_checks(connection, db, schema.clone(), table)
+            .await
+            .unwrap_or_default();
+        children.push(
+            self.build_table_subfolder(
+                node,
+                id,
+                "checks_folder",
+                "DbTree.Checks",
+                DbNodeType::ChecksFolder,
+                &folder_metadata,
+                checks
+                    .into_iter()
+                    .map(|c| {
+                        (c.name.clone(), DbNodeType::Check, {
+                            let mut m = folder_metadata.clone();
+                            if let Some(def) = &c.definition {
+                                m.insert("definition".to_string(), def.clone());
+                            }
+                            m
+                        })
+                    })
+                    .collect(),
+            ),
+        );
 
         Ok(children)
     }
@@ -2584,206 +2809,9 @@ pub fn analyze_select_editability_fallback(sql: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connection::{DbConnection, DbError, StreamingProgress};
-    use crate::executor::{ExecOptions, QueryResult, SqlResult, SqlSource};
-    use async_trait::async_trait;
+    use crate::mysql::MySqlPlugin;
     use sqlparser::dialect::MySqlDialect;
     use sqlparser::parser::Parser;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
-    use tokio::sync::mpsc;
-
-    struct CountingConnection {
-        config: DbConnectionConfig,
-        queries: Arc<AtomicUsize>,
-    }
-
-    impl CountingConnection {
-        fn new(database: Option<&str>) -> Self {
-            Self {
-                config: DbConnectionConfig {
-                    id: "test-conn".to_string(),
-                    database_type: DatabaseType::MySQL,
-                    name: "test".to_string(),
-                    host: "127.0.0.1".to_string(),
-                    port: 3306,
-                    username: "root".to_string(),
-                    password: String::new(),
-                    database: database.map(str::to_string),
-                    service_name: None,
-                    sid: None,
-                    credential_ref: None,
-                    ssh_tunnel_credential_ref: None,
-                    workspace_id: None,
-                    extra_params: HashMap::new(),
-                },
-                queries: Arc::new(AtomicUsize::new(0)),
-            }
-        }
-
-        fn query_count(&self) -> usize {
-            self.queries.load(Ordering::SeqCst)
-        }
-
-        fn empty_query_result(sql: &str) -> SqlResult {
-            SqlResult::Query(QueryResult {
-                sql: sql.to_string(),
-                columns: Vec::new(),
-                column_meta: Vec::new(),
-                rows: Vec::new(),
-                elapsed_ms: 0,
-            })
-        }
-    }
-
-    #[async_trait]
-    impl DbConnection for CountingConnection {
-        fn config(&self) -> &DbConnectionConfig {
-            &self.config
-        }
-
-        fn set_config_database(&mut self, database: Option<String>) {
-            self.config.database = database;
-        }
-
-        async fn connect(&mut self) -> Result<(), DbError> {
-            Ok(())
-        }
-
-        async fn disconnect(&mut self) -> Result<(), DbError> {
-            Ok(())
-        }
-
-        async fn execute(
-            &self,
-            _plugin: &dyn DatabasePlugin,
-            _script: &str,
-            _options: ExecOptions,
-        ) -> Result<Vec<SqlResult>, DbError> {
-            Err(DbError::NotSupported("test connection".to_string()))
-        }
-
-        async fn query(&self, query: &str) -> Result<SqlResult, DbError> {
-            self.queries.fetch_add(1, Ordering::SeqCst);
-
-            if query.starts_with("SHOW FULL TABLES FROM") {
-                return Ok(SqlResult::Query(QueryResult {
-                    sql: query.to_string(),
-                    columns: vec!["Tables_in_hongshu2".to_string(), "Table_type".to_string()],
-                    column_meta: Vec::new(),
-                    rows: vec![vec![
-                        Some("users".to_string()),
-                        Some("BASE TABLE".to_string()),
-                    ]],
-                    elapsed_ms: 0,
-                }));
-            }
-
-            if query.contains("INFORMATION_SCHEMA.TABLES") {
-                return Ok(SqlResult::Query(QueryResult {
-                    sql: query.to_string(),
-                    columns: vec![
-                        "TABLE_NAME".to_string(),
-                        "TABLE_COMMENT".to_string(),
-                        "ENGINE".to_string(),
-                        "TABLE_ROWS".to_string(),
-                        "CREATE_TIME".to_string(),
-                        "TABLE_COLLATION".to_string(),
-                    ],
-                    column_meta: Vec::new(),
-                    rows: vec![vec![
-                        Some("users".to_string()),
-                        Some("User table".to_string()),
-                        Some("InnoDB".to_string()),
-                        Some("42".to_string()),
-                        Some("2026-04-07 15:00:00".to_string()),
-                        Some("utf8mb4_general_ci".to_string()),
-                    ]],
-                    elapsed_ms: 0,
-                }));
-            }
-
-            if query.starts_with("SHOW FULL COLUMNS FROM") {
-                return Ok(SqlResult::Query(QueryResult {
-                    sql: query.to_string(),
-                    columns: vec![
-                        "Field".to_string(),
-                        "Type".to_string(),
-                        "Collation".to_string(),
-                        "Null".to_string(),
-                        "Key".to_string(),
-                        "Default".to_string(),
-                        "Extra".to_string(),
-                        "Privileges".to_string(),
-                        "Comment".to_string(),
-                    ],
-                    column_meta: Vec::new(),
-                    rows: vec![vec![
-                        Some("id".to_string()),
-                        Some("bigint".to_string()),
-                        None,
-                        Some("NO".to_string()),
-                        Some("PRI".to_string()),
-                        None,
-                        Some("auto_increment".to_string()),
-                        Some("select,insert,update,references".to_string()),
-                        Some("pk".to_string()),
-                    ]],
-                    elapsed_ms: 0,
-                }));
-            }
-
-            if query.contains("INFORMATION_SCHEMA.COLUMNS") {
-                return Ok(SqlResult::Query(QueryResult {
-                    sql: query.to_string(),
-                    columns: vec![
-                        "COLUMN_NAME".to_string(),
-                        "COLUMN_TYPE".to_string(),
-                        "IS_NULLABLE".to_string(),
-                        "COLUMN_KEY".to_string(),
-                        "COLUMN_DEFAULT".to_string(),
-                        "COLUMN_COMMENT".to_string(),
-                        "CHARACTER_SET_NAME".to_string(),
-                        "COLLATION_NAME".to_string(),
-                    ],
-                    column_meta: Vec::new(),
-                    rows: vec![vec![
-                        Some("id".to_string()),
-                        Some("bigint".to_string()),
-                        Some("NO".to_string()),
-                        Some("PRI".to_string()),
-                        None,
-                        Some("pk".to_string()),
-                        None,
-                        None,
-                    ]],
-                    elapsed_ms: 0,
-                }));
-            }
-
-            Ok(Self::empty_query_result(query))
-        }
-
-        async fn current_database(&self) -> Result<Option<String>, DbError> {
-            Ok(self.config.database.clone())
-        }
-
-        async fn switch_database(&self, _database: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-
-        async fn execute_streaming(
-            &self,
-            _plugin: &dyn DatabasePlugin,
-            _source: SqlSource,
-            _options: ExecOptions,
-            _sender: mpsc::Sender<StreamingProgress>,
-        ) -> Result<(), DbError> {
-            Err(DbError::NotSupported("test connection".to_string()))
-        }
-    }
 
     // ==================== is_query_stmt tests (AST-based) ====================
 
@@ -3191,137 +3219,5 @@ mod tests {
             analyze_select_editability_fallback("UPDATE users SET name = 'test'"),
             None
         );
-    }
-
-    #[tokio::test]
-    async fn test_database_children_are_built_without_prefetching_objects() {
-        let plugin = crate::mysql::MySqlPlugin::new();
-        let connection = CountingConnection::new(Some("hongshu2"));
-        let node = DbNode::new(
-            "52:hongshu2",
-            "hongshu2",
-            DbNodeType::Database,
-            "52".to_string(),
-            DatabaseType::MySQL,
-        )
-        .with_metadata(HashMap::from([(
-            "database".to_string(),
-            "hongshu2".to_string(),
-        )]));
-
-        let children = plugin
-            .build_database_or_schema_children(&connection, &node, None)
-            .await
-            .expect("database children should build");
-
-        assert_eq!(connection.query_count(), 0);
-        assert_eq!(
-            children
-                .iter()
-                .map(|child| child.node_type.clone())
-                .collect::<Vec<_>>(),
-            vec![
-                DbNodeType::TablesFolder,
-                DbNodeType::ViewsFolder,
-                DbNodeType::FunctionsFolder,
-                DbNodeType::ProceduresFolder,
-                DbNodeType::QueriesFolder,
-            ]
-        );
-        assert!(children.iter().all(|child| child.children.is_empty()));
-        assert!(children.iter().all(|child| !child.children_loaded));
-    }
-
-    #[tokio::test]
-    async fn test_table_children_are_built_without_prefetching_metadata() {
-        let plugin = crate::mysql::MySqlPlugin::new();
-        let connection = CountingConnection::new(Some("hongshu2"));
-        let node = DbNode::new(
-            "52:hongshu2:table_folder:users",
-            "users",
-            DbNodeType::Table,
-            "52".to_string(),
-            DatabaseType::MySQL,
-        )
-        .with_metadata(HashMap::from([
-            ("database".to_string(), "hongshu2".to_string()),
-            ("table".to_string(), "users".to_string()),
-        ]));
-
-        let children = plugin
-            .load_table_children(&connection, &node, &node.id)
-            .await
-            .expect("table children should build");
-
-        assert_eq!(connection.query_count(), 0);
-        assert_eq!(
-            children
-                .iter()
-                .map(|child| child.node_type.clone())
-                .collect::<Vec<_>>(),
-            vec![
-                DbNodeType::ColumnsFolder,
-                DbNodeType::IndexesFolder,
-                DbNodeType::ForeignKeysFolder,
-                DbNodeType::TriggersFolder,
-                DbNodeType::ChecksFolder,
-            ]
-        );
-        assert!(children.iter().all(|child| child.children.is_empty()));
-        assert!(children.iter().all(|child| !child.children_loaded));
-    }
-
-    #[tokio::test]
-    async fn test_tables_folder_fetches_children_on_demand() {
-        let plugin = crate::mysql::MySqlPlugin::new();
-        let connection = CountingConnection::new(Some("hongshu2"));
-        let node = DbNode::new(
-            "52:hongshu2:table_folder",
-            "DbTree.Tables",
-            DbNodeType::TablesFolder,
-            "52".to_string(),
-            DatabaseType::MySQL,
-        )
-        .with_metadata(HashMap::from([(
-            "database".to_string(),
-            "hongshu2".to_string(),
-        )]));
-
-        let children = plugin
-            .load_schema_folder_children(&connection, &node, &node.id)
-            .await
-            .expect("tables folder should load");
-
-        assert_eq!(connection.query_count(), 1);
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].name, "users");
-        assert_eq!(children[0].node_type, DbNodeType::Table);
-    }
-
-    #[tokio::test]
-    async fn test_columns_folder_fetches_children_on_demand() {
-        let plugin = crate::mysql::MySqlPlugin::new();
-        let connection = CountingConnection::new(Some("hongshu2"));
-        let node = DbNode::new(
-            "52:hongshu2:table_folder:users:columns_folder",
-            "DbTree.Columns",
-            DbNodeType::ColumnsFolder,
-            "52".to_string(),
-            DatabaseType::MySQL,
-        )
-        .with_metadata(HashMap::from([
-            ("database".to_string(), "hongshu2".to_string()),
-            ("table".to_string(), "users".to_string()),
-        ]));
-
-        let children = plugin
-            .load_table_folder_children(&connection, &node, &node.id)
-            .await
-            .expect("columns folder should load");
-
-        assert_eq!(connection.query_count(), 1);
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].name, "id");
-        assert_eq!(children[0].node_type, DbNodeType::Column);
     }
 }
