@@ -75,6 +75,8 @@ fn strip_ansi(s: &str) -> String {
 pub enum TerminalEvent {
     /// 终端内容已更新，需要重新渲染
     Wakeup,
+    /// SSH keyboard-interactive/MFA 请求状态变化
+    SshMfaChanged,
     /// shell 开始渲染新的 prompt（OSC 133;A）
     PromptStart,
     /// shell prompt 已渲染完成，进入可输入状态（OSC 133;B）
