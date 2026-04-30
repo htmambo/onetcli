@@ -84,6 +84,7 @@ impl SshParams {
             enable_legacy_kex: self.enable_legacy_kex,
             jump_server: self.jump_server.clone().map(ssh_jump_config_from_storage),
             proxy: self.proxy.clone().map(ssh_proxy_config_from_storage),
+            keyboard_interactive_responder: None,
         }
     }
 }
