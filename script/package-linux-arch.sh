@@ -9,6 +9,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROFILE_NAME="${ONETCLI_BUILD_PROFILE:-release-fast}"
 SKIP_BUILD="${ONETCLI_SKIP_BUILD:-false}"
 ALLOW_DIRTY="${ONETCLI_ARCH_ALLOW_DIRTY:-false}"
+SOURCE_MODE="${ONETCLI_ARCH_SOURCE:-worktree}"
 MAINTAINER="${ONETCLI_ARCH_MAINTAINER:-OnetCli <xiaofei.hf@gmail.com>}"
 
 usage() {
@@ -20,12 +21,14 @@ usage() {
   script/package-linux-arch.sh
   ONETCLI_BUILD_PROFILE=release-fast script/package-linux-arch.sh
   ONETCLI_SKIP_BUILD=true script/package-linux-arch.sh
+  ONETCLI_ARCH_SOURCE=head script/package-linux-arch.sh
 
 可选环境变量：
-  ONETCLI_BUILD_PROFILE    构建 profile，默认 release，可选 dev/debug/release/release-fast
+  ONETCLI_BUILD_PROFILE    构建 profile，默认 release-fast，可选 dev/debug/release/release-fast
   ONETCLI_SKIP_BUILD       为 true 时跳过项目目录预构建，默认 false
   ONETCLI_VERSION          覆盖版本号，默认读取 main/Cargo.toml
   ONETCLI_ARCH_ALLOW_DIRTY 为 true 时允许脏工作树继续打包，默认 false
+  ONETCLI_ARCH_SOURCE      源码来源，默认 worktree，可选 worktree/head
   ONETCLI_ARCH_OUTPUT_DIR  包输出目录，默认 target/dist
   ONETCLI_ARCH_STAGING_DIR 构建暂存目录，默认使用 /tmp（空间不足时自动切换到项目目录）
 EOF
@@ -88,7 +91,39 @@ create_source_tarball() {
     echo "创建源码 tarball: ${tarball_path}"
 
     cd "${PROJECT_DIR}"
-    git archive --prefix="${PACKAGE_NAME}-${VERSION}/" -o "${tarball_path}" HEAD
+    case "${SOURCE_MODE}" in
+        worktree)
+            create_worktree_tarball "${tarball_path}"
+            ;;
+        head)
+            git archive --prefix="${PACKAGE_NAME}-${VERSION}/" -o "${tarball_path}" HEAD
+            ;;
+        *)
+            echo "错误：不支持的 ONETCLI_ARCH_SOURCE=${SOURCE_MODE}，可选值为 worktree/head" >&2
+            exit 1
+            ;;
+    esac
+}
+
+create_worktree_tarball() {
+    local tarball_path="$1"
+    local manifest_path="${tarball_path}.manifest"
+
+    rm -f "${manifest_path}"
+
+    while IFS= read -r -d '' path; do
+        if [[ -e "${PROJECT_DIR}/${path}" ]]; then
+            printf '%s\0' "${path}" >> "${manifest_path}"
+        fi
+    done < <(git -C "${PROJECT_DIR}" ls-files -z --cached --others --exclude-standard)
+
+    tar \
+        --null \
+        --files-from "${manifest_path}" \
+        --transform "s|^|${PACKAGE_NAME}-${VERSION}/|" \
+        -czf "${tarball_path}"
+
+    rm -f "${manifest_path}"
 }
 
 print_dirty_worktree_summary() {
@@ -104,6 +139,10 @@ print_dirty_worktree_summary() {
 
 ensure_archive_input_is_clean() {
     local status_lines
+
+    if [[ "${SOURCE_MODE}" == "worktree" ]]; then
+        return
+    fi
 
     if ! git -C "${PROJECT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         return
@@ -254,6 +293,7 @@ trap cleanup EXIT
 echo "开始打包 Arch Linux 包"
 echo "目标架构：${ARCH}"
 echo "构建 Profile：${PROFILE_NAME}"
+echo "源码来源：${SOURCE_MODE}"
 echo "版本：${VERSION}"
 echo "输出目录：${OUTPUT_DIR}"
 echo "暂存目录：${STAGING_DIR}"

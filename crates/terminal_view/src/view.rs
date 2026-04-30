@@ -2304,7 +2304,9 @@ impl TerminalView {
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if !text.is_empty() {
-            self.apply_inline_input_to_history_prompt(text, cx);
+            if self.history_prompt_enabled(cx) {
+                self.apply_inline_input_to_history_prompt(text, cx);
+            }
             self.write_to_pty(text.as_bytes().to_vec(), cx);
         }
     }
@@ -2886,6 +2888,13 @@ impl TerminalView {
     }
 
     fn clear_selection(&mut self, _: &ClearSelection, window: &mut Window, cx: &mut Context<Self>) {
+        // 优先关闭 history prompt 补全弹窗
+        if self.history_prompt.dropdown_visible() {
+            self.hide_history_prompt_dropdown();
+            cx.notify();
+            return;
+        }
+
         // 如果侧边栏有激活的面板，按 Escape 关闭它
         if self.sidebar.read(cx).active_panel().is_some() {
             self.sidebar.update(cx, |sidebar, cx| {
