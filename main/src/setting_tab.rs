@@ -564,14 +564,6 @@ fn default_font_size() -> f64 {
     14.0
 }
 
-fn _default_window_opacity() -> f64 {
-    0.84
-}
-
-fn _clamp_window_opacity(opacity: f64) -> f64 {
-    opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
-}
-
 fn clamp_ui_font_size(size: f64) -> f32 {
     size.clamp(12.0, 32.0) as f32
 }

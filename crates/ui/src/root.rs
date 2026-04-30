@@ -458,13 +458,6 @@ impl Styled for Root {
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(cx.theme().font_size);
-        let root_surface_bg = layered_level_surface_color(
-            cx.theme().background,
-            cx.theme().window_blur_enabled,
-            cx.theme().backdrop_opacity,
-            1,
-            WindowsSurfaceLayer::ContentBase,
-        );
 
         window_border().shadow_size(self.window_shadow_size).child(
             div()
@@ -475,7 +468,7 @@ impl Render for Root {
                 .relative()
                 .size_full()
                 .font_family(cx.theme().font_family.clone())
-                .bg(root_surface_bg)
+                .bg(cx.theme().transparent)
                 .rounded(cx.theme().radius_lg)
                 .overflow_hidden()
                 .text_color(cx.theme().foreground)

@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROFILE_NAME="${ONETCLI_BUILD_PROFILE:-release-fast}"
 SKIP_BUILD="${ONETCLI_SKIP_BUILD:-false}"
+ALLOW_DIRTY="${ONETCLI_ARCH_ALLOW_DIRTY:-false}"
+SOURCE_MODE="${ONETCLI_ARCH_SOURCE:-worktree}"
 MAINTAINER="${ONETCLI_ARCH_MAINTAINER:-OnetCli <xiaofei.hf@gmail.com>}"
 
 usage() {
@@ -19,11 +21,14 @@ usage() {
   script/package-linux-arch.sh
   ONETCLI_BUILD_PROFILE=release-fast script/package-linux-arch.sh
   ONETCLI_SKIP_BUILD=true script/package-linux-arch.sh
+  ONETCLI_ARCH_SOURCE=head script/package-linux-arch.sh
 
 可选环境变量：
-  ONETCLI_BUILD_PROFILE    构建 profile，默认 release，可选 dev/debug/release/release-fast
+  ONETCLI_BUILD_PROFILE    构建 profile，默认 release-fast，可选 dev/debug/release/release-fast
   ONETCLI_SKIP_BUILD       为 true 时跳过项目目录预构建，默认 false
   ONETCLI_VERSION          覆盖版本号，默认读取 main/Cargo.toml
+  ONETCLI_ARCH_ALLOW_DIRTY 为 true 时允许脏工作树继续打包，默认 false
+  ONETCLI_ARCH_SOURCE      源码来源，默认 worktree，可选 worktree/head
   ONETCLI_ARCH_OUTPUT_DIR  包输出目录，默认 target/dist
   ONETCLI_ARCH_STAGING_DIR 构建暂存目录，默认使用 /tmp（空间不足时自动切换到项目目录）
 EOF
@@ -86,7 +91,83 @@ create_source_tarball() {
     echo "创建源码 tarball: ${tarball_path}"
 
     cd "${PROJECT_DIR}"
-    git archive --prefix="${PACKAGE_NAME}-${VERSION}/" -o "${tarball_path}" HEAD
+    case "${SOURCE_MODE}" in
+        worktree)
+            create_worktree_tarball "${tarball_path}"
+            ;;
+        head)
+            git archive --prefix="${PACKAGE_NAME}-${VERSION}/" -o "${tarball_path}" HEAD
+            ;;
+        *)
+            echo "错误：不支持的 ONETCLI_ARCH_SOURCE=${SOURCE_MODE}，可选值为 worktree/head" >&2
+            exit 1
+            ;;
+    esac
+}
+
+create_worktree_tarball() {
+    local tarball_path="$1"
+    local manifest_path="${tarball_path}.manifest"
+
+    rm -f "${manifest_path}"
+
+    while IFS= read -r -d '' path; do
+        if [[ -e "${PROJECT_DIR}/${path}" ]]; then
+            printf '%s\0' "${path}" >> "${manifest_path}"
+        fi
+    done < <(git -C "${PROJECT_DIR}" ls-files -z --cached --others --exclude-standard)
+
+    tar \
+        --null \
+        --files-from "${manifest_path}" \
+        --transform "s|^|${PACKAGE_NAME}-${VERSION}/|" \
+        -czf "${tarball_path}"
+
+    rm -f "${manifest_path}"
+}
+
+print_dirty_worktree_summary() {
+    local status_lines="$1"
+    local line_count
+
+    printf '%s\n' "${status_lines}" | sed -n '1,20p'
+    line_count="$(printf '%s\n' "${status_lines}" | wc -l | tr -d ' ')"
+    if [[ "${line_count}" -gt 20 ]]; then
+        echo "..."
+    fi
+}
+
+ensure_archive_input_is_clean() {
+    local status_lines
+
+    if [[ "${SOURCE_MODE}" == "worktree" ]]; then
+        return
+    fi
+
+    if ! git -C "${PROJECT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        return
+    fi
+
+    status_lines="$(git -C "${PROJECT_DIR}" status --short --untracked-files=all)"
+    if [[ -z "${status_lines}" ]]; then
+        return
+    fi
+
+    if [[ "${ALLOW_DIRTY}" == "true" ]]; then
+        echo "警告：检测到工作树存在未提交改动，源码 tarball 仍将基于 HEAD 导出。" >&2
+        echo "警告：未提交的文件改动不会自动进入 Arch 安装包，请确认这是你期望的行为。" >&2
+        print_dirty_worktree_summary "${status_lines}" >&2
+        return
+    fi
+
+    echo "错误：检测到工作树存在未提交改动，默认 Arch 打包会通过 git archive 导出 HEAD。" >&2
+    echo "错误：这些未提交改动不会进入安装包，因此产物可能与本地验证结果不一致。" >&2
+    if [[ "${SKIP_BUILD}" == "true" ]]; then
+        echo "提示：即使启用了 ONETCLI_SKIP_BUILD=true，脚本也只会覆盖预构建二进制，其它未提交文件仍不会进入安装包。" >&2
+    fi
+    echo "请先提交改动后重试，或显式设置 ONETCLI_ARCH_ALLOW_DIRTY=true 继续。" >&2
+    print_dirty_worktree_summary "${status_lines}" >&2
+    exit 1
 }
 
 write_pkgbuild() {
@@ -175,6 +256,7 @@ PROFILE_DIR="$(profile_output_dir)"
 BINARY_PATH="${PROJECT_DIR}/target/${PROFILE_DIR}/${BINARY_NAME}"
 
 cd "${PROJECT_DIR}"
+ensure_archive_input_is_clean
 build_binary
 
 if [[ ! -f "${BINARY_PATH}" ]]; then
@@ -211,6 +293,7 @@ trap cleanup EXIT
 echo "开始打包 Arch Linux 包"
 echo "目标架构：${ARCH}"
 echo "构建 Profile：${PROFILE_NAME}"
+echo "源码来源：${SOURCE_MODE}"
 echo "版本：${VERSION}"
 echo "输出目录：${OUTPUT_DIR}"
 echo "暂存目录：${STAGING_DIR}"
