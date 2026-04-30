@@ -8,8 +8,7 @@ pub use ssh::{
     AuthFailureMessages, ChannelEvent, JumpServerConnectConfig, KeyboardInteractivePrompt,
     KeyboardInteractiveRequest, KeyboardInteractiveResponder, KeyboardInteractiveTarget,
     LocalPortForwardTunnel, ProxyConnectConfig, ProxyType, PtyConfig, RusshChannel, RusshClient,
-    ShellIntegrationSetup, SshAuth, SshChannel, SshClient, SshConnectConfig, SshConnectionStage,
-    authenticate_session, authenticate_session_with_fallbacks, authenticate_with_strategy,
-    build_client_config, defaults, expand_auto_publickey_auth, format_connection_progress_message,
-    start_local_port_forward, verify_server_key,
+    ShellIntegrationSetup, SshAuth, SshChannel, SshClient, SshConnectConfig, authenticate_session,
+    authenticate_session_with_fallbacks, authenticate_with_strategy, defaults,
+    expand_auto_publickey_auth, start_local_port_forward,
 };
