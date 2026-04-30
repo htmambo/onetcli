@@ -1,6 +1,6 @@
 # Maintainer: OnetCli <xiaofei.hf@gmail.com>
 pkgname=onetcli
-pkgver=0.3.2
+pkgver=0.3.3
 pkgrel=1
 pkgdesc="One Net Client - Database, SSH, Terminal, AI Tools"
 arch=('x86_64' 'aarch64')
