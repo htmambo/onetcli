@@ -551,6 +551,7 @@ impl CodeBlock {
 
         div()
             .when(!options.is_last, |this| this.pb(style.paragraph_gap))
+            .mb(px(4.))
             .child(
                 div()
                     .id(("codeblock", options.ix))

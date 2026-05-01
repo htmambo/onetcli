@@ -254,7 +254,6 @@ impl SidebarItem for SidebarMenuItem {
                     .when(is_active, |this| {
                         this.font_medium()
                             .bg(cx.theme().list_active)
-                            .border_l_3()
                             .border_color(cx.theme().list_active_border)
                             .text_color(cx.theme().sidebar_foreground)
                     })
@@ -262,7 +261,6 @@ impl SidebarItem for SidebarMenuItem {
                     .when(is_collapsed, |this| {
                         this.justify_center().when(is_active, |this| {
                             this.bg(cx.theme().list_active)
-                                .border_l_3()
                                 .border_color(cx.theme().list_active_border)
                                 .text_color(cx.theme().sidebar_foreground)
                         })

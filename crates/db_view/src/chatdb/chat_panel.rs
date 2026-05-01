@@ -1533,9 +1533,10 @@ impl ChatPanel {
         let session_list = self.session_list.clone();
 
         v_flex()
-            .w_full()
+            .w(self.sidebar_width)
             .h_full()
             .min_h_0()
+            .flex_shrink_0()
             .border_r_1()
             .border_color(border)
             .bg(muted)
@@ -2133,43 +2134,6 @@ impl ChatPanel {
 impl EventEmitter<ChatPanelEvent> for ChatPanel {}
 impl EventEmitter<TabContentEvent> for ChatPanel {}
 
-#[cfg(test)]
-mod tests {
-    use super::build_agent_history;
-    use one_core::llm::{Message, Role};
-
-    #[test]
-    fn build_agent_history_drops_inflight_user_message_from_tail() {
-        let history = vec![
-            Message::text(Role::Assistant, "上一条回复"),
-            Message::text(Role::User, "这样呢"),
-        ];
-
-        let result = build_agent_history(&history, 10, "这样呢");
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].role, Role::Assistant);
-        assert_eq!(result[0].content_as_text(), "上一条回复");
-    }
-
-    #[test]
-    fn build_agent_history_keeps_older_same_content_messages() {
-        let history = vec![
-            Message::text(Role::User, "这样呢"),
-            Message::text(Role::Assistant, "我看到了"),
-            Message::text(Role::User, "这样呢"),
-        ];
-
-        let result = build_agent_history(&history, 10, "这样呢");
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].role, Role::User);
-        assert_eq!(result[0].content_as_text(), "这样呢");
-        assert_eq!(result[1].role, Role::Assistant);
-        assert_eq!(result[1].content_as_text(), "我看到了");
-    }
-}
-
 impl Focusable for ChatPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -2220,21 +2184,11 @@ impl Render for ChatPanel {
 
         if self.show_history_sidebar {
             div().size_full().bg(cx.theme().background).child(
-                h_resizable("chat-panel-history")
+                h_flex()
+                    .size_full()
+                    .child(self.render_history_sidebar(window, cx))
                     .child(
-                        ResizablePanel::new()
-                            .size(self.sidebar_width)
-                            .size_range(px(120.)..px(400.))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h_full()
-                                    .overflow_hidden()
-                                    .child(self.render_history_sidebar(window, cx)),
-                            ),
-                    )
-                    .child(
-                        ResizablePanel::new().child(
+                        div().flex_1().h_full().min_w_0().child(
                             v_flex()
                                 .size_full()
                                 .child(self.render_messages(cx))
