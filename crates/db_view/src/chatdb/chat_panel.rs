@@ -36,7 +36,6 @@ use gpui_component::{
     input::{Input, InputState},
     list::{List, ListState},
     popover::Popover,
-    resizable::{ResizablePanel, h_resizable},
     scroll::Scrollbar,
     text::TextView,
     v_flex,
@@ -64,7 +63,8 @@ use one_core::ai_chat::components::{
     ModelSettings, ProviderItem, SessionData, SessionListConfig, SessionListDelegate,
     SessionListHost,
 };
-use one_core::ai_chat::services::{SessionService, extract_session_name};
+use one_core::ai_chat::services::{SessionConnectionInfo, SessionError, SessionService, extract_session_name, generate_ai_session_title};
+use one_core::llm::chat_history::SessionRepository;
 
 // ============================================================================
 // 事件定义
@@ -714,6 +714,7 @@ impl ChatPanel {
         let session_id = self.session_id;
         let provider_id_str_clone = provider_id_str.clone();
         let message_content = content.clone();
+        let ai_title_enabled = cx.global::<one_core::ai_chat::GlobalChatSettings>().ai_auto_generate_session_title;
 
         // 创建取消令牌
         let cancel_token = CancellationToken::new();
@@ -723,6 +724,21 @@ impl ChatPanel {
         let registry = cx.global::<AgentRegistry>().clone();
 
         let mut affinity = self.session_affinity.clone();
+
+        // 组装连接信息（用于入库 chat_sessions）
+        let connection_info = ai_input.read(cx).get_connection_info().and_then(
+            |(conn_id, database, _schema)| {
+                let db_state = cx.global::<GlobalDbState>().clone();
+                let db_type = db_state
+                    .get_config(&conn_id)
+                    .map(|c| c.database_type.as_str().to_string());
+                Some(SessionConnectionInfo {
+                    connection_id: Some(conn_id),
+                    database_name: database,
+                    database_type: db_type,
+                })
+            },
+        );
 
         // 注入数据库元数据 capability（如果有数据库连接）
         let db_metadata =
@@ -761,6 +777,7 @@ impl ChatPanel {
                 session_id,
                 &provider_id_str_clone,
                 t!("ChatPanel.sql_session_name").as_ref(),
+                connection_info,
             ) {
                 Ok(id) => {
                     if session_id.is_none() {
@@ -804,17 +821,48 @@ impl ChatPanel {
             // 如果是新会话的第一条消息，更新会话名称
             if is_new_session {
                 let session_name = extract_session_name(&message_content);
-                if session_service
-                    .update_session_name(session_db_id, session_name)
-                    .is_ok()
-                {
-                    if let Some(entity) = this.upgrade() {
-                        let _ = cx.update(|cx| {
-                            entity.update(cx, |content, cx| {
-                                content.is_new_session = false;
-                                content.load_history_sessions(cx);
-                            });
+                let _ = session_service.update_session_name(session_db_id, session_name.clone());
+
+                if let Some(entity) = this.upgrade() {
+                    let _ = cx.update(|cx| {
+                        entity.update(cx, |content, cx| {
+                            content.is_new_session = false;
+                            content.load_history_sessions(cx);
                         });
+                    });
+                }
+
+                // 若开启 AI 标题生成，后台异步调用 AI 优化标题
+                if ai_title_enabled {
+                    let ai_title = generate_ai_session_title(
+                        &provider_id_str_clone,
+                        &message_content,
+                        &global_provider_state,
+                        &storage_manager,
+                    )
+                    .await;
+
+                    if let Some(title) = ai_title {
+                        if let Ok(mut session) = session_service
+                            .get_session(session_db_id)
+                            .ok()
+                            .flatten()
+                            .ok_or(SessionError::SessionNotFound)
+                        {
+                            session.name = title;
+                            session.title_source = "ai_generated".to_string();
+                            let _ = session_service.storage_manager()
+                                .get::<SessionRepository>()
+                                .map(|repo| repo.update(&session));
+
+                            if let Some(entity) = this.upgrade() {
+                                let _ = cx.update(|cx| {
+                                    entity.update(cx, |content, cx| {
+                                        content.load_history_sessions(cx);
+                                    });
+                                });
+                            }
+                        }
                     }
                 }
             }

@@ -359,6 +359,14 @@ Please help me analyze this error and provide a solution."
     en: "Maximum number of tokens in the output."
     zh-CN: "模型输出的最大 token 数"
     zh-HK: "模型輸出的最大 token 數"
+  ai_title_label:
+    en: "AI auto title"
+    zh-CN: "AI 自动生成标题"
+    zh-HK: "AI 自動生成標題"
+  ai_title_desc:
+    en: "Let AI generate session title based on your first message."
+    zh-CN: "根据首条消息由 AI 生成会话标题"
+    zh-HK: "根據首條消息由 AI 生成會話標題"
   settings_footer_notice:
     en: "Settings take effect immediately."
     zh-CN: "设置将立即生效"

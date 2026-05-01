@@ -43,6 +43,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260418000001",
         include_str!("../../migrations/20260418000001_drop_old_certificate_columns.sql"),
     ),
+    (
+        "20260502000001",
+        include_str!("../../migrations/20260502000001_chat_session_connection.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
