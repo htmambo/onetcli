@@ -192,7 +192,7 @@ pub struct ResizablePanel {
 
 impl ResizablePanel {
     /// Create a new resizable panel.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             panel_ix: 0,
             initial_size: None,
