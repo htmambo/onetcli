@@ -593,11 +593,7 @@ impl TerminalSidebar {
             .justify_center()
             .rounded_md()
             .cursor_pointer()
-            .when(is_active, |this| {
-                this.bg(active_bg)
-                    .border_l_3()
-                    .border_color(cx.theme().list_active_border)
-            })
+            .when(is_active, |this| this.bg(active_bg))
             .when(!is_active, |this| this.hover(|s| s.bg(hover_bg)))
             .on_click(cx.listener(move |this, _event, _window, cx| {
                 this.toggle_panel(panel, cx);
@@ -612,9 +608,9 @@ impl TerminalSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = cx.theme().border;
-        let toolbar_bg = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
+        let toolbar_bg = cx.theme().sidebar.blend(cx.theme().secondary.opacity(0.72));
 
         v_flex()
             .flex_shrink_0()
@@ -678,7 +674,7 @@ impl Focusable for TerminalSidebar {
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().muted;
+        let bg_color = cx.theme().sidebar;
 
         div()
             .h_full()

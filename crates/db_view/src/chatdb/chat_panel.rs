@@ -284,16 +284,26 @@ impl ChatPanel {
             }
         };
 
-        let providers = match repo.list() {
+        let mut providers = match repo.list() {
             Ok(all_providers) => all_providers
                 .into_iter()
-                .filter(|provider| provider.is_runtime_available())
+                .filter(|p| p.enabled)
                 .collect::<Vec<_>>(),
             Err(e) => {
                 tracing::error!("Failed to load providers: {}", e);
                 Vec::new()
             }
         };
+
+        if is_logged_in {
+            if let Ok(provider) = repo.ensure_onetcli_provider() {
+                if !providers.iter().any(|p| p.id == provider.id) {
+                    providers.insert(0, provider);
+                }
+            }
+        } else {
+            providers.retain(|p| !p.is_builtin());
+        }
 
         let items: Vec<ProviderItem> = providers.iter().map(ProviderItem::from_config).collect();
         if items.is_empty() {
@@ -817,8 +827,8 @@ impl ChatPanel {
                 global_provider_state,
                 storage_manager,
                 cancel_token,
-            )
-            .with_session_id(session_db_id.to_string());
+            );
+            ctx_agent.set_capability("session_id", session_db_id.to_string());
 
             if let Some(db_meta) = db_metadata {
                 ctx_agent.set_capability(CAP_DB_METADATA, db_meta);
@@ -2107,11 +2117,16 @@ impl ChatPanel {
 
     fn render_input(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .flex_shrink_0()
             .w_full()
-            .min_w_0()
             .px_2()
             .py_2()
-            .child(self.ai_input.clone())
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .child(self.ai_input.clone()),
+            )
     }
 }
 
@@ -2220,12 +2235,10 @@ impl Render for ChatPanel {
                     )
                     .child(
                         ResizablePanel::new().child(
-                            div().size_full().min_w_0().child(
-                                v_flex()
-                                    .size_full()
-                                    .child(self.render_messages(cx))
-                                    .child(self.render_input(cx)),
-                            ),
+                            v_flex()
+                                .size_full()
+                                .child(self.render_messages(cx))
+                                .child(self.render_input(cx)),
                         ),
                     ),
             )

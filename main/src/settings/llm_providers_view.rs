@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, AsyncApp, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
+    App, AppContext, AsyncApp, Context, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
+    Entity, FontWeight, InteractiveElement, 
 };
 use gpui_component::{
     ActiveTheme, Disableable, Sizable, StyledExt as _, TitleBar, app_style,

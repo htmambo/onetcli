@@ -920,7 +920,7 @@ impl Element for TerminalElementImpl {
                 top: px(0.0).into(),
                 right: px(0.0).into(),
                 bottom: px(0.0).into(),
-                left: px(0.0).into(),
+                left: px(8.0).into(),
             },
             ..Default::default()
         };

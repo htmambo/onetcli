@@ -747,7 +747,7 @@ impl SettingsPanel {
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(fg)
-                            .child(t!("Common.settings")),
+                            .child(t!("Settings.title")),
                     ),
             )
             .child(
@@ -802,7 +802,7 @@ impl SettingsPanel {
                     div()
                         .text_xs()
                         .text_color(muted_fg)
-                        .child(t!("Settings.search_hint")),
+                        .child(t!("Settings.search_shortcuts_hint")),
                 ),
         )
     }
@@ -1418,6 +1418,7 @@ impl Render for SettingsPanel {
 
         v_flex()
             .size_full()
+            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(Self::on_action_escape))
             .child(self.render_header(cx))

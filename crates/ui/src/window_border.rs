@@ -16,6 +16,19 @@ pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
 const BORDER_SIZE: Pixels = px(1.0);
 
+#[cfg(target_os = "linux")]
+fn linux_uses_wayland_session() -> bool {
+    std::env::var("XDG_SESSION_TYPE")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("wayland"))
+        || std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_uses_wayland_session() -> bool {
+    false
+}
+
 /// Create a new window border.
 pub fn window_border() -> WindowBorder {
     WindowBorder::new()
@@ -91,15 +104,19 @@ impl RenderOnce for WindowBorder {
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
         #[cfg(not(target_os = "linux"))]
         let prefers_system_frame = matches!(decorations, Decorations::Server);
-        let shadow_size = match decorations {
-            Decorations::Client { tiling }
-                if tiling.top && tiling.bottom && tiling.left && tiling.right =>
-            {
-                px(0.0)
+        let shadow_size = if cfg!(target_os = "linux") && linux_uses_wayland_session() {
+            px(2.0)
+        } else {
+            match decorations {
+                Decorations::Client { tiling }
+                    if tiling.top && tiling.bottom && tiling.left && tiling.right =>
+                {
+                    px(0.0)
+                }
+                _ => shadow_size,
             }
-            _ => shadow_size,
         };
-        let client_inset = if prefers_system_frame {
+        let client_inset = if prefers_system_frame || (cfg!(target_os = "linux") && linux_uses_wayland_session()) {
             px(0.0)
         } else {
             shadow_size
@@ -109,7 +126,18 @@ impl RenderOnce for WindowBorder {
 
         // Deepin/X11 的系统标题栏路径下不要继续声明自绘边框范围，
         // 否则窗口管理器可能把窗口当成仍在使用客户端边框。
-        window.set_client_inset(client_inset);
+        if prefers_system_frame {
+            window.set_client_inset(px(0.0));
+        } else if linux_uses_wayland_session() {
+            window.set_client_inset_edges(Edges {
+                top: px(0.0),
+                right: client_inset,
+                bottom: client_inset,
+                left: client_inset,
+            });
+        } else {
+            window.set_client_inset(client_inset);
+        }
 
         div()
             .id("window-backdrop")
@@ -176,10 +204,10 @@ impl RenderOnce for WindowBorder {
                     .when(!(tiling.bottom || tiling.left), |div| {
                         div.rounded_bl(border_radius)
                     })
+                    .when(!tiling.bottom, |div| div.pt(shadow_size))
                     .when(!tiling.bottom, |div| div.pb(shadow_size))
                     .when(!tiling.left, |div| div.pl(shadow_size))
                     .when(!tiling.right, |div| div.pr(shadow_size))
-                    .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, move |_, window, _| {
                         let Decorations::Client { tiling } = window.window_decorations() else {
                             return;

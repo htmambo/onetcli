@@ -183,6 +183,8 @@ pub struct ThemeColor {
     pub sidebar_border: Hsla,
     /// Sidebar text color.
     pub sidebar_foreground: Hsla,
+    /// Sidebar active text color.
+    pub sidebar_active_foreground: Hsla,
     /// Skeleton background color.
     pub skeleton: Hsla,
     /// Slider bar background color.

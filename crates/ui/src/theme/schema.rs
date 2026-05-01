@@ -255,6 +255,9 @@ pub struct ThemeConfigColors {
     /// Sidebar text color.
     #[serde(rename = "sidebar.foreground")]
     pub sidebar_foreground: Option<SharedString>,
+    // Sidebar active text color.
+    #[serde(rename = "sidebar.active.foreground")]
+    pub sidebar_active_foreground: Option<SharedString>,
     /// Skeleton background color.
     #[serde(rename = "skeleton.background")]
     pub skeleton: Option<SharedString>,
@@ -595,7 +598,8 @@ impl ThemeColor {
         apply_color!(sidebar_accent, fallback = self.accent);
         apply_color!(sidebar_accent_foreground, fallback = self.accent_foreground);
         apply_color!(sidebar_border, fallback = self.border);
-        apply_color!(sidebar_foreground, fallback = self.foreground);
+        apply_color!(sidebar_foreground, fallback = self.sidebar_foreground);
+        apply_color!(sidebar_active_foreground, fallback = self.sidebar_active_foreground);
         apply_color!(skeleton, fallback = self.secondary);
         apply_color!(slider_bar, fallback = self.primary);
         apply_color!(slider_thumb, fallback = self.primary_foreground);

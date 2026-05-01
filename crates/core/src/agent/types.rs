@@ -7,7 +7,6 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::security::{CommandBlacklist, CommandCheckResult, PermissionMode, check_command};
 use crate::llm::manager::GlobalProviderState;
 use crate::llm::{Message, ProviderConfig};
 use crate::storage::StorageManager;
@@ -49,12 +48,6 @@ pub struct AgentContext {
     pub cancel_token: CancellationToken,
     /// Dynamic capabilities map — agents can check for domain-specific resources.
     capabilities: HashMap<String, Box<dyn Any + Send + Sync>>,
-    /// Agent execution security mode.
-    pub permission_mode: PermissionMode,
-    /// Command blacklist for security checks.
-    pub command_blacklist: CommandBlacklist,
-    /// Agent-level session ID for cross-session state persistence.
-    pub session_id: Option<String>,
 }
 
 impl AgentContext {
@@ -74,9 +67,6 @@ impl AgentContext {
             storage_manager,
             cancel_token,
             capabilities: HashMap::new(),
-            permission_mode: PermissionMode::default(),
-            command_blacklist: CommandBlacklist::new(),
-            session_id: None,
         }
     }
 
@@ -95,29 +85,6 @@ impl AgentContext {
         self.capabilities
             .get(key)
             .and_then(|v| v.downcast_ref::<T>())
-    }
-
-    /// Set the permission mode for this agent execution.
-    pub fn with_permission_mode(mut self, mode: PermissionMode) -> Self {
-        self.permission_mode = mode;
-        self
-    }
-
-    /// Set a custom command blacklist.
-    pub fn with_command_blacklist(mut self, blacklist: CommandBlacklist) -> Self {
-        self.command_blacklist = blacklist;
-        self
-    }
-
-    /// Set the agent session ID for cross-session state persistence.
-    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
-        self.session_id = Some(session_id.into());
-        self
-    }
-
-    /// Check whether a command is allowed to execute under the current security policy.
-    pub fn check_command(&self, cmd: &str) -> CommandCheckResult {
-        check_command(cmd, self.permission_mode, &self.command_blacklist)
     }
 }
 

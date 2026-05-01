@@ -297,16 +297,4 @@ mod tests {
 
         assert!(!aliyun_prefers_compatible_mode(&config));
     }
-
-    #[test]
-    fn thinking_budget_serde_roundtrip() {
-        let config = ProviderConfig {
-            provider_type: ProviderType::Anthropic,
-            thinking_budget: Some(16000),
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        let restored: ProviderConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.thinking_budget, Some(16000));
-    }
 }

@@ -363,3 +363,33 @@ Please help me analyze this error and provide a solution."
     en: "Settings take effect immediately."
     zh-CN: "设置将立即生效"
     zh-HK: "設定將立即生效"
+
+ConnectionType:
+  all:
+    en: "All"
+    zh-CN: "全部"
+    zh-HK: "全部"
+  database:
+    en: "Database"
+    zh-CN: "数据库"
+    zh-HK: "數據庫"
+  ssh_sftp:
+    en: "SSH/SFTP"
+    zh-CN: "SSH/SFTP"
+    zh-HK: "SSH/SFTP"
+  redis:
+    en: "Redis"
+    zh-CN: "Redis"
+    zh-HK: "Redis"
+  mongodb:
+    en: "MongoDB"
+    zh-CN: "MongoDB"
+    zh-HK: "MongoDB"
+  chatdb:
+    en: "ChatDB"
+    zh-CN: "ChatDB"
+    zh-HK: "ChatDB"
+  serial:
+    en: "Serial"
+    zh-CN: "串口"
+    zh-HK: "串口"
