@@ -3,6 +3,7 @@ use crate::crypto;
 use crate::storage::traits::Entity;
 use gpui_component::Size::Large;
 use gpui_component::{Icon, IconName, Sizable};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -61,15 +62,15 @@ impl ConnectionType {
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            ConnectionType::All => "All",
-            ConnectionType::Database => "Database",
-            ConnectionType::SshSftp => "SSH/SFTP",
-            ConnectionType::Redis => "Redis",
-            ConnectionType::MongoDB => "MongoDB",
-            ConnectionType::ChatDB => "ChatDB",
-            ConnectionType::Serial => "Serial",
+            ConnectionType::All => t!("ConnectionType.all").to_string(),
+            ConnectionType::Database => t!("ConnectionType.database").to_string(),
+            ConnectionType::SshSftp => t!("ConnectionType.ssh_sftp").to_string(),
+            ConnectionType::Redis => t!("ConnectionType.redis").to_string(),
+            ConnectionType::MongoDB => t!("ConnectionType.mongodb").to_string(),
+            ConnectionType::ChatDB => t!("ConnectionType.chatdb").to_string(),
+            ConnectionType::Serial => t!("ConnectionType.serial").to_string(),
         }
     }
 

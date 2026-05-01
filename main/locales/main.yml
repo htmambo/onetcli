@@ -388,6 +388,43 @@ Auth:
     en: Authentication Failed
     zh-CN: 认证失败
     zh-HK: 認證失敗
+  # OTP 相关
+  otp_placeholder:
+    en: Enter verification code
+    zh-CN: 输入验证码
+    zh-HK: 輸入驗證碼
+  otp_code:
+    en: Verification Code
+    zh-CN: 验证码
+    zh-HK: 驗證碼
+  otp_required:
+    en: Please enter the verification code
+    zh-CN: 请输入验证码
+    zh-HK: 請輸入驗證碼
+  send_otp:
+    en: Send Code
+    zh-CN: 发送验证码
+    zh-HK: 發送驗證碼
+  sending_otp:
+    en: Sending...
+    zh-CN: 发送中...
+    zh-HK: 發送中...
+  resend_otp:
+    en: Resend Code
+    zh-CN: 重新发送
+    zh-HK: 重新發送
+  verify_otp:
+    en: Verify Code
+    zh-CN: 验证
+    zh-HK: 驗證
+  otp_sent_hint:
+    en: A verification code has been sent to your email
+    zh-CN: 验证码已发送到您的邮箱
+    zh-HK: 驗證碼已發送到您的電郵
+  change_email:
+    en: Change email
+    zh-CN: 更换邮箱
+    zh-HK: 更換電郵
 
 # 主密钥
 Encryption:
@@ -724,6 +761,22 @@ Settings:
         en: Appearance
         zh-CN: 外观
         zh-HK: 外觀
+      dark_mode:
+        en: Dark Mode
+        zh-CN: 深色模式
+        zh-HK: 深色模式
+      dark_mode_desc:
+        en: Switch between light and dark themes
+        zh-CN: 在浅色和深色主题之间切换
+        zh-HK: 在淺色和深色主題之間切換
+      auto_switch_theme:
+        en: Auto Switch Theme
+        zh-CN: 自动切换主题
+        zh-HK: 自動切換主題
+      auto_switch_theme_desc:
+        en: Automatically switch theme based on system settings
+        zh-CN: 根据系统设置自动切换主题
+        zh-HK: 根據系統設定自動切換主題
       theme_mode:
         en: Theme Mode
         zh-CN: 主题模式

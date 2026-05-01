@@ -1,6 +1,4 @@
 fn main() {
-    println!("cargo:rerun-if-changed=locales");
-
     #[cfg(target_os = "windows")]
     {
         let mut res = winresource::WindowsResource::new();
