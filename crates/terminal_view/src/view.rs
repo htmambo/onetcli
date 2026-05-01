@@ -4145,7 +4145,7 @@ impl Render for TerminalView {
                         div()
                             .bg(terminal_bg) // 终端背景色，避免 Canvas 层未覆盖时闪烁
                             .absolute()
-                            .left_1()
+                            .left_10()
                             .right_0()
                             .top_0()
                             .bottom_0()

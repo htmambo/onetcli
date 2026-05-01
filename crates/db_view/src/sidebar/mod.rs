@@ -203,12 +203,13 @@ impl Render for DatabaseSidebar {
         gpui_component::h_flex()
             .h_full()
             .flex_shrink_0()
-            .child(self.render_toolbar(window, cx))
+            .when(self.active_panel.is_none(), |this| {
+                this.child(self.render_toolbar(window, cx))
+            })
             .when_some(self.active_panel, |this, panel| {
                 this.flex_1().child(
                     v_flex()
                         .size_full()
-                        .min_w_0()
                         .border_l_1()
                         .border_color(border_color)
                         .bg(bg_color)
