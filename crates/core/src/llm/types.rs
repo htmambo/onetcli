@@ -151,9 +151,4 @@ impl ProviderConfig {
     pub fn is_builtin(&self) -> bool {
         self.provider_type.is_builtin()
     }
-
-    /// 是否可在聊天等运行时入口中使用
-    pub fn is_runtime_available(&self) -> bool {
-        self.enabled && !self.is_builtin()
-    }
 }

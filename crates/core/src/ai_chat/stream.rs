@@ -106,30 +106,25 @@ impl ChatStreamProcessor {
         let cancel_clone = cancel_token.clone();
 
         tokio::spawn(async move {
-            let cancel_guard = cancel_token.clone();
-            tokio::select! {
-                result = Self::run_stream(
-                    provider_id,
-                    selected_model,
-                    messages,
-                    max_tokens,
-                    temperature,
-                    global_provider_state,
-                    storage_manager,
-                    tx.clone(),
-                    cancel_clone,
-                ) => {
-                    if let Err(e) = result {
-                        let _ = tx
-                            .send(StreamEvent::Error {
-                                message: e.to_string(),
-                            })
-                            .await;
-                    }
-                },
-                _ = cancel_guard.cancelled() => {
-                    // 任务被外部取消
-                }
+            let result = Self::run_stream(
+                provider_id,
+                selected_model,
+                messages,
+                max_tokens,
+                temperature,
+                global_provider_state,
+                storage_manager,
+                tx.clone(),
+                cancel_clone,
+            )
+            .await;
+
+            if let Err(e) = result {
+                let _ = tx
+                    .send(StreamEvent::Error {
+                        message: e.to_string(),
+                    })
+                    .await;
             }
         });
 
