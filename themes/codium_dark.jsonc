@@ -156,9 +156,9 @@
         // 侧边栏强调色文字
         "sidebar.accent.foreground": "#785485",
         // 侧边栏背景
-        "sidebar.background": "#230431",
+        "sidebar.background": "#5c047c66",
         // 侧边栏边框
-        "sidebar.border": "#3d2049",
+        "sidebar.border": "#230431",
         // 侧边栏文字
         "sidebar.foreground": "#e7bbf7",
 
@@ -208,7 +208,7 @@
 
         // === 表格 ===
         // 表格默认背景
-        "table.background": "#450b58",
+        "table.background": "#31053f66",
         // 表格选中行背景
         "table.active.background": "#75219433",
         // 表格选中行边框

@@ -147,7 +147,7 @@ impl DatabaseSidebar {
             2,
             WindowsSurfaceLayer::ContentBase,
         );
-        let active_fg = cx.theme().sidebar_foreground;
+        let active_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
 
         div()

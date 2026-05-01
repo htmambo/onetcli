@@ -108,15 +108,19 @@ impl RenderOnce for WindowBorder {
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
         #[cfg(not(target_os = "linux"))]
         let prefers_system_frame = matches!(decorations, Decorations::Server);
-        let shadow_size = match decorations {
-            Decorations::Client { tiling }
-                if tiling.top && tiling.bottom && tiling.left && tiling.right =>
-            {
-                px(0.0)
+        let shadow_size = if cfg!(target_os = "linux") && linux_uses_wayland_session() {
+            px(2.0)
+        } else {
+            match decorations {
+                Decorations::Client { tiling }
+                    if tiling.top && tiling.bottom && tiling.left && tiling.right =>
+                {
+                    px(0.0)
+                }
+                _ => shadow_size,
             }
-            _ => shadow_size,
         };
-        let client_inset = if prefers_system_frame {
+        let client_inset = if prefers_system_frame || (cfg!(target_os = "linux") && linux_uses_wayland_session()) {
             px(0.0)
         } else {
             shadow_size
@@ -204,10 +208,10 @@ impl RenderOnce for WindowBorder {
                     .when(!(tiling.bottom || tiling.left), |div| {
                         div.rounded_bl(border_radius)
                     })
+                    .when(!tiling.bottom, |div| div.pt(shadow_size))
                     .when(!tiling.bottom, |div| div.pb(shadow_size))
                     .when(!tiling.left, |div| div.pl(shadow_size))
                     .when(!tiling.right, |div| div.pr(shadow_size))
-                    .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, move |_, window, _| {
                         let Decorations::Client { tiling } = window.window_decorations() else {
                             return;

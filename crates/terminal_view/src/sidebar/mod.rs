@@ -621,12 +621,16 @@ impl TerminalSidebar {
         let muted_bg = self.colors.background;
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
+        let toolbar_bg = gpui::Hsla {
+            a: 0.72,  // ← 单独设置 Toolbar 透明度（0.0 ~ 1.0）
+            ..cx.theme().sidebar
+        };
 
         v_flex()
             .flex_shrink_0()
             .w(TOOLBAR_WIDTH)
             .h_full()
-            .bg(muted_bg)
+            .bg(toolbar_bg)
             .border_l_1()
             .border_color(border_color)
             .items_center()
@@ -684,7 +688,7 @@ impl Focusable for TerminalSidebar {
 impl Render for TerminalSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border_color = cx.theme().border;
-        let bg_color = cx.theme().background;
+        let bg_color = cx.theme().sidebar;
 
         div()
             .h_full()

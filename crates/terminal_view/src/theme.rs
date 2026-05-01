@@ -15,7 +15,7 @@
 //! - 在 `accent` 上使用 `accent_foreground`
 
 use gpui::{rgb, Hsla, Pixels, Rgba, SharedString};
-use gpui_component::Theme as UiTheme;
+use gpui_component::{Theme as UiTheme, level_surface_color};
 
 pub const FOLLOW_APP_THEME_NAME: &str = "App Theme";
 
@@ -297,6 +297,14 @@ impl TerminalTheme {
             .style
             .editor_background
             .unwrap_or_else(|| theme.input_background());
+        // Apply level_surface_color to make terminal background transparent like other UI surfaces.
+        // Level 1 = lightest/most transparent (root background level).
+        let editor_background = level_surface_color(
+            editor_background,
+            theme.window_blur_enabled,
+            theme.backdrop_opacity,
+            1,
+        );
         let editor_foreground = theme
             .highlight_theme
             .style

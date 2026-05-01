@@ -79,6 +79,7 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         }
         "sidebar_border" => ("Sidebar", "Border", "sidebar.border"),
         "sidebar_foreground" => ("Sidebar", "Foreground", "sidebar.foreground"),
+        "sidebar_active_foreground" => ("Sidebar", "Active Foreground", "sidebar.active.foreground"),
         // List
         "list" => ("List", "Background", "list.background"),
         "list_active" => ("List", "Active Background", "list.active.background"),
