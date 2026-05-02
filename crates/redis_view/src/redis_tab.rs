@@ -409,11 +409,6 @@ impl Render for RedisTabView {
         let sidebar_panel_size = self.sidebar_panel_size;
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
-        let shell_bg = if cfg!(target_os = "windows") || blur_enabled {
-            cx.theme().transparent
-        } else {
-            cx.theme().background
-        };
         let content_bg = layered_level_surface_color(
             cx.theme().muted,
             blur_enabled,

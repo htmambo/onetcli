@@ -2134,7 +2134,6 @@ impl CollectionView {
 
         h_flex()
             .items_center()
-            .gap_2()
             .child(
                 Icon::new(IconName::MongoDB)
                     .color()
@@ -2812,7 +2811,6 @@ impl CollectionView {
         v_flex()
             .flex_1()
             .min_h_0()
-            .gap_2()
             .child(
                 h_flex()
                     .w_full()
@@ -2833,10 +2831,8 @@ impl CollectionView {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.0))
-                    .child(Table::new(&self.table)),
+
+                    .child(Table::new(&self.table).bordered(false).stripe(true)),
             )
             .into_any_element()
     }
@@ -3338,22 +3334,17 @@ impl Render for CollectionView {
         let section_bg = content_section_bg(cx);
         let container = v_flex().size_full();
         if self.collection_name.is_none() {
-            container.child(v_flex().size_full().p_2().gap_2().child(body))
+            container.child(v_flex().size_full().child(body))
         } else {
             container
                 .child(
                     v_flex()
                         .w_full()
-                        .px_3()
-                        .py_2()
-                        .gap_2()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
                         .bg(section_bg)
                         .child(self.render_header(cx))
                         .child(self.render_tab_bar(cx)),
                 )
-                .child(v_flex().flex_1().min_h_0().p_2().gap_2().child(body))
+                .child(v_flex().flex_1().min_h_0().child(body))
         }
     }
 }

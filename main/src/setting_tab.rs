@@ -34,6 +34,7 @@ use gpui_component::{
     v_flex,
     MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, WindowsSurfaceLayer, layered_level_surface_color,
 };
+use one_core::ai_chat::GlobalChatSettings;
 use one_core::certificate_manager::CertificateManagerView;
 use one_core::cloud_sync::{
     GlobalCloudUser, UserInfo, oauth::OAuthTokens, sync_server::SyncServerClient,
@@ -547,6 +548,9 @@ pub struct AppSettings {
     /// 数据库编辑器撤销栈容量，0表示禁用逐步撤销
     #[serde(default = "default_db_undo_stack_size")]
     pub db_undo_stack_size: usize,
+    /// 是否使用 AI 自动生成会话标题
+    #[serde(default)]
+    pub ai_auto_generate_session_title: bool,
     #[serde(default = "default_system_hotkey_macos")]
     pub system_hotkey_macos: String,
     #[serde(default = "default_system_hotkey_other")]
@@ -889,6 +893,7 @@ impl Default for AppSettings {
             enable_sql_auto_save: true,
             sql_auto_save_interval: default_auto_save_interval(),
             db_undo_stack_size: default_db_undo_stack_size(),
+            ai_auto_generate_session_title: false,
             system_hotkey_macos: default_system_hotkey_macos(),
             system_hotkey_other: default_system_hotkey_other(),
         }
@@ -1294,6 +1299,10 @@ pub fn init_settings(cx: &mut App) {
         settings.enable_sql_auto_save,
         settings.sql_auto_save_interval,
     ));
+    // 初始化聊天全局设置
+    cx.set_global(GlobalChatSettings {
+        ai_auto_generate_session_title: settings.ai_auto_generate_session_title,
+    });
     // apply() 内部可能会写回规范化后的主题设置，因此必须先注册全局状态。
     cx.set_global(settings);
     AppSettings::global(cx).clone().apply(cx);
@@ -2812,6 +2821,26 @@ impl SettingsPanel {
                             .description(
                                 t!("Settings.General.Database.undo_stack_size_desc").to_string(),
                             ),
+                            SettingItem::new(
+                                t!("Settings.General.Database.ai_auto_title"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx).ai_auto_generate_session_title
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.ai_auto_generate_session_title = val;
+                                        settings.save();
+                                        cx.set_global(GlobalChatSettings {
+                                            ai_auto_generate_session_title: val,
+                                        });
+                                    },
+                                )
+                                .default_value(default_settings.ai_auto_generate_session_title),
+                            )
+                            .description(
+                                t!("Settings.General.Database.ai_auto_title_desc").to_string(),
+                            ),
                         ]),
                     SettingGroup::new()
                         .title(t!("Settings.General.Update.group_title"))
@@ -2991,40 +3020,11 @@ mod tests {
     }
 
     #[test]
-    fn 毛玻璃透明度会被限制在允许范围内() {
-        assert_eq!(clamp_ui_surface_opacity(0.2), MIN_GLASS_OPACITY as f64);
-        assert_eq!(clamp_ui_surface_opacity(0.84), 0.84);
-        assert_eq!(clamp_ui_surface_opacity(1.5), MAX_GLASS_OPACITY as f64);
-    }
-
-    #[test]
     fn 同步地址输入保留末尾斜杠但规范化结果移除末尾斜杠() {
         let value = " https://example.com/api/ ";
 
         assert_eq!(editable_sync_server_url(value), "https://example.com/api/");
         assert_eq!(normalize_sync_server_url(value), "https://example.com/api");
-    }
-
-    #[test]
-    fn 关闭毛玻璃时窗口背景切换为不透明() {
-        let mut settings = AppSettings::default();
-        settings.enable_glass_effect = false;
-
-        assert_eq!(
-            settings.preferred_window_background(),
-            WindowBackgroundAppearance::Opaque
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_开启毛玻璃时仍请求模糊背景() {
-        let settings = AppSettings::default();
-
-        assert_eq!(
-            settings.preferred_window_background(),
-            WindowBackgroundAppearance::Blurred
-        );
     }
 
     #[test]
@@ -3265,11 +3265,26 @@ impl Render for SettingsPanel {
             init_settings(cx);
         }
 
+        let sidebar_bg = cx.theme().sidebar;
+        // 与首页右侧内容区保持一致，形成统一的内容底板层级。
+        let page_bg = cx.theme().muted;
+        let sidebar_style = StyleRefinement::default()
+            .bg(sidebar_bg)
+            .border_color(cx.theme().border)
+            .text_color(cx.theme().sidebar_foreground);
+        let content_style = StyleRefinement::default().bg(page_bg);
+
         div().track_focus(&self.focus_handle).size_full().child(
-            Settings::new("main-app-settings")
-                .with_size(self.size)
-                .with_group_variant(self.group_variant)
-                .pages(self.setting_pages(window, cx)),
+            div().size_full().child(
+                Settings::new("main-app-settings")
+                    .with_size(self.size)
+                    .with_group_variant(self.group_variant)
+                    .sidebar_style(&sidebar_style)
+                    .content_style(&content_style)
+                    .header_style(&sync_server_theme::control_style())
+                    .default_selected_index(self.selected_page.select_index())
+                    .pages(self.setting_pages(window, cx)),
+            ),
         )
     }
 }

@@ -4065,8 +4065,6 @@ impl Render for TerminalView {
         let sidebar_panel_size = self.sidebar_panel_size;
         let view = cx.entity().clone();
         let show_scrollbar = !terminal_mode.contains(TermMode::ALT_SCREEN) && history_size > 0;
-        let ui_theme = UiTheme::global(cx);
-        let bg_color = cx.theme().sidebar.clone();
 
         div()
             .size_full()
