@@ -160,7 +160,7 @@ impl RenderOnce for ProgressCircle {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| ProgressState { value });
         let prev_value = state.read(cx).value;
 
-        let color = self.color.unwrap_or(cx.theme().progress_bar);
+        let color = self.color.unwrap_or(cx.theme().primary);
         let has_changed = prev_value != value;
 
         div()

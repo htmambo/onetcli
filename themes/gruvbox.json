@@ -46,8 +46,6 @@
         "tab.foreground": "#928374",
         "tab_bar.background": "#28282899",
         "tab_bar.segmented.background": "#32302F",
-        "title_bar.background": "#252525",
-        "title_bar.border": "#3e3936",
         "base.magenta.light": "#D3869B66",
         "base.red": "#f06555",
         "base.green": "#98971a",
@@ -57,12 +55,9 @@
         "base.cyan": "#689d6a",
         "group.background": "#282828",
         "overlay": "#00000099",
-        "caret": "#d79921",
-        "group.foreground": "#ebdbb2",
         "info.background": "#689d6a",
         "info.foreground": "#282828",
         "warning.foreground": "#282828",
-        "table.background": "#1d2021",
         "table.even.background": "#282828",
         "table.head.background": "#3c383655",
         "table.hover.background": "#303030"
@@ -128,7 +123,7 @@
             "color": "#E19773"
           },
           "string": {
-            "color": "#76BA53"
+            "color": "#97e76f"
           },
           "string.escape": {
             "color": "#76BA53"
@@ -156,7 +151,7 @@
             "color": "#A86D3B"
           },
           "property": {
-            "color": "#CACCCA"
+            "color": "#ffffff"
           },
           "variable.special": {
             "color": "#E19773"

@@ -343,7 +343,7 @@ impl SidebarItem for SidebarMenuItem {
                     v_flex()
                         .id("submenu")
                         .border_l_1()
-                        .border_color(cx.theme().sidebar_border)
+                        .border_color(cx.theme().border)
                         .gap_1()
                         .ml_3p5()
                         .pl_2p5()

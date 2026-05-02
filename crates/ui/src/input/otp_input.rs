@@ -298,7 +298,7 @@ impl RenderOnce for OtpInput {
                                     .h_4()
                                     .w_0()
                                     .border_l_3()
-                                    .border_color(cx.theme().caret),
+                                    .border_color(cx.theme().primary),
                             )
                         }),
                     })

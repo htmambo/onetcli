@@ -120,7 +120,7 @@ impl Render for GroupBoxStory {
                     section("Custom style").w_128().child(
                         GroupBox::new()
                             .outline()
-                            .bg(cx.theme().group)
+                            .bg(cx.theme().secondary)
                             .rounded_xl()
                             .p_5()
                             .title("This is a custom style")

@@ -310,8 +310,8 @@ impl TerminalTheme {
             .style
             .editor_foreground
             .unwrap_or(theme.foreground);
-        let cursor = if theme.caret.a > 0.0 {
-            theme.caret
+        let cursor = if theme.primary.a > 0.0 {
+            theme.primary
         } else {
             editor_foreground
         };

@@ -4480,7 +4480,7 @@ impl HomePage {
         let blur_enabled = cx.theme().window_blur_enabled;
         let window_opacity = cx.theme().backdrop_opacity;
         let workspace_bg = layered_level_surface_color(
-            cx.theme().table,
+            cx.theme().list,
             blur_enabled,
             window_opacity,
             3,

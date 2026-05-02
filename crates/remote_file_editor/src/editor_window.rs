@@ -486,7 +486,7 @@ impl RemoteFileEditorWindow {
             .py_2()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().title_bar)
+            .bg(cx.theme().background)
             .child(
                 Button::new("remote-file-save")
                     .label(t!("RemoteFileEditor.action.save"))

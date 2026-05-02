@@ -313,7 +313,7 @@ impl RenderOnce for DescriptionList {
                                                     this.h_full()
                                                 })
                                                 .text_color(
-                                                    cx.theme().description_list_label_foreground,
+                                                    cx.theme().muted_foreground,
                                                 )
                                                 .text_sm()
                                                 .px(padding_x)

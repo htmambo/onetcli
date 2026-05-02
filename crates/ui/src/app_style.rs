@@ -45,7 +45,7 @@ pub fn base() -> Hsla {
 
 /// 通用面板/卡片背景（设置页面板、弹窗内容区等）
 pub fn surface() -> Hsla {
-    active_theme().group
+    active_theme().secondary
 }
 
 /// 替代/区分面板背景（页面头部、工具栏、分组背景）
@@ -84,7 +84,7 @@ pub fn border_strong() -> Hsla {
 
 /// 侧边栏专属边框
 pub fn chrome_border() -> Hsla {
-    active_theme().sidebar_border
+    active_theme().border
 }
 
 // =============================================================================
@@ -177,8 +177,8 @@ pub fn page_header_style() -> StyleRefinement {
 /// 标题栏样式
 pub fn title_bar_style() -> StyleRefinement {
     StyleRefinement::default()
-        .bg(active_theme().title_bar)
-        .border_color(active_theme().title_bar_border)
+        .bg(active_theme().background)
+        .border_color(active_theme().border)
         .text_color(text())
 }
 

@@ -531,7 +531,7 @@ impl FileListPanel {
         let blur_enabled = cx.theme().window_blur_enabled;
         let surface_opacity = cx.theme().ui_surface_opacity;
         let header_bg = layered_surface_color(
-            cx.theme().title_bar,
+            cx.theme().background,
             blur_enabled,
             surface_opacity,
             WindowsSurfaceLayer::ContentSection,

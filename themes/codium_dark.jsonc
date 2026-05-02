@@ -90,7 +90,6 @@
         // 列表偶数行背景
         "list.even.background": "#321548",
         // 列表头部背景
-        "list.head.background": "#321548",
         // 列表项悬停背景
         "list.hover.background": "#3d204966",
 
@@ -108,7 +107,6 @@
         // 面板背景（GroupBox/侧边栏等）
         "group.background": "#2c1438",
         // 面板文字
-        "group.foreground": "#f7eded",
         // 弹窗背景
         "popover.background": "#2c1438",
         // 弹窗文字
@@ -208,7 +206,6 @@
 
         // === 表格 ===
         // 表格默认背景
-        "table.background": "#31053f66",
         // 表格选中行背景
         "table.active.background": "#75219433",
         // 表格选中行边框
@@ -230,16 +227,11 @@
 
         // === 标题栏 ===
         // 标题栏背景
-        "title_bar.background": "#340f42",
         // 标题栏边框
-        "title_bar.border": "#3d2049",
-
         // === 输入框 ===
         // 输入框边框
         "input.border": "#3d2049",
         // 光标/插入符颜色
-        "caret": "#c678dd",
-
         // === 信息色 ===
         // 信息按钮默认背景
         "info.background": "#481359",
@@ -336,7 +328,7 @@
           // HTML/XML 属性
           "attribute": { "color": "#e7bbf7" },
           // 布尔值
-          "boolean": { "color": "#e7bbf7" },
+          "boolean": { "color": "#f80808" },
           // 注释
           "comment": { "color": "#724582", "font_style": "italic" },
           // 文档注释
@@ -358,7 +350,7 @@
           // 数字
           "number": { "color": "#e7bbf7" },
           // 字符串
-          "string": { "color": "#c678dd" },
+          "string": { "color": "#eae601" },
           // 转义字符
           "string.escape": { "color": "#c678dd" },
           // 正则表达式

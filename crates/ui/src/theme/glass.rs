@@ -47,7 +47,6 @@ pub(crate) fn apply_glass_tuning(
     colors.input = with_alpha(colors.input, tuning.border);
     colors.list = surface_color(colors.list, mode, blur_enabled, tuning.base, 0.88);
     colors.list_even = surface_color(colors.list_even, mode, blur_enabled, tuning.base, 0.84);
-    colors.list_head = surface_color(colors.list_head, mode, blur_enabled, tuning.elevated, 1.0);
     colors.list_hover = surface_color(colors.list_hover, mode, blur_enabled, tuning.hover, 0.72);
     colors.muted = surface_color(colors.muted, mode, blur_enabled, tuning.elevated, 0.82);
     colors.popover = surface_color(colors.popover, mode, blur_enabled, 1.0, 1.0);
@@ -67,7 +66,7 @@ pub(crate) fn apply_glass_tuning(
         0.72,
     );
     colors.sidebar = surface_color(colors.sidebar, mode, blur_enabled, tuning.chrome, 1.0);
-    colors.sidebar_border = with_alpha(colors.sidebar_border, tuning.divider);
+    colors.sidebar = surface_color(colors.sidebar, mode, blur_enabled, tuning.chrome, 1.0);
     colors.tab = surface_color(colors.tab, mode, blur_enabled, tuning.chrome, 0.92);
     colors.tab_active = surface_color(colors.tab_active, mode, blur_enabled, tuning.elevated, 1.0);
     colors.tab_hover = surface_color(colors.tab_hover, mode, blur_enabled, tuning.hover, 0.82);
@@ -79,15 +78,12 @@ pub(crate) fn apply_glass_tuning(
         tuning.chrome,
         0.6,
     );
-    colors.table = surface_color(colors.table, mode, blur_enabled, tuning.base, 0.88);
+    colors.table_head = surface_color(colors.table_head, mode, blur_enabled, 0.5, 1.0);
     colors.table_even = surface_color(colors.table_even, mode, blur_enabled, 0.3, 0.84);
     colors.table_head = surface_color(colors.table_head, mode, blur_enabled, 0.5, 1.0);
     colors.table_hover = surface_color(colors.table_hover, mode, blur_enabled, tuning.hover, 0.72);
     colors.table_row_border = with_alpha(colors.table_row_border, tuning.divider);
-    colors.title_bar = surface_color(colors.title_bar, mode, blur_enabled, tuning.chrome, 1.0);
-    colors.title_bar_border = with_alpha(colors.title_bar_border, tuning.border);
-    colors.tiles = surface_color(colors.tiles, mode, blur_enabled, tuning.chrome, 0.94);
-    colors.window_border = with_alpha(colors.window_border, tuning.divider);
+
 }
 
 pub(crate) fn apply_glass_highlight_tuning(
@@ -136,7 +132,7 @@ pub fn modal_surface_palette(theme: &Theme) -> ModalSurfacePalette {
 
     ModalSurfacePalette {
         content: dialog_content_surface_color(colors.background, blur_enabled, opacity),
-        title_bar: dialog_chrome_surface_color(colors.title_bar, blur_enabled, opacity),
+        title_bar: dialog_chrome_surface_color(colors.background, blur_enabled, opacity),
         footer: dialog_chrome_surface_color(colors.secondary, blur_enabled, opacity),
     }
 }
@@ -407,9 +403,9 @@ mod tests {
         assert_eq!(palette.content.l, raw_colors.background.l);
         assert_alpha_eq(palette.content.a, 0.84);
 
-        assert_eq!(palette.title_bar.h, raw_colors.title_bar.h);
-        assert_eq!(palette.title_bar.s, raw_colors.title_bar.s);
-        assert_eq!(palette.title_bar.l, raw_colors.title_bar.l);
+        assert_eq!(palette.title_bar.h, raw_colors.background.h);
+        assert_eq!(palette.title_bar.s, raw_colors.background.s);
+        assert_eq!(palette.title_bar.l, raw_colors.background.l);
         assert_alpha_eq(palette.title_bar.a, 1.0);
 
         assert_eq!(palette.footer.h, raw_colors.secondary.h);

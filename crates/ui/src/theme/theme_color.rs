@@ -67,20 +67,14 @@ pub struct ThemeColor {
     pub accent: Hsla,
     /// Used for accent text color.
     pub accent_foreground: Hsla,
-    /// Accordion background color.
-    pub accordion: Hsla,
-    /// Accordion hover background color.
-    pub accordion_hover: Hsla,
+
     /// Default background color.
     pub background: Hsla,
     /// Default border color
     pub border: Hsla,
     /// Background color for GroupBox / Panel.
     pub group: Hsla,
-    /// Text color for GroupBox.
-    pub group_foreground: Hsla,
-    /// Input caret color (Blinking cursor).
-    pub caret: Hsla,
+
     /// Chart 1 color.
     pub chart_1: Hsla,
     /// Chart 2 color.
@@ -101,8 +95,7 @@ pub struct ThemeColor {
     pub danger_hover: Hsla,
     /// Description List label background color.
     pub description_list_label: Hsla,
-    /// Description List label foreground color.
-    pub description_list_label_foreground: Hsla,
+
     /// Drag border color.
     pub drag_border: Hsla,
     /// Drop target background color.
@@ -133,8 +126,6 @@ pub struct ThemeColor {
     pub list_active_border: Hsla,
     /// Stripe background color for even ListItem.
     pub list_even: Hsla,
-    /// Background color for List header.
-    pub list_head: Hsla,
     /// Hover background color for ListItem.
     pub list_hover: Hsla,
     /// Muted backgrounds such as Skeleton and Switch.
@@ -153,8 +144,7 @@ pub struct ThemeColor {
     pub primary_foreground: Hsla,
     /// Hover primary background color.
     pub primary_hover: Hsla,
-    /// Progress bar background color.
-    pub progress_bar: Hsla,
+
     /// Used for focus ring.
     pub ring: Hsla,
     /// Scrollbar background color.
@@ -179,14 +169,10 @@ pub struct ThemeColor {
     pub sidebar_accent: Hsla,
     /// Sidebar accent text color.
     pub sidebar_accent_foreground: Hsla,
-    /// Sidebar border color.
-    pub sidebar_border: Hsla,
+
     /// Sidebar text color.
     pub sidebar_foreground: Hsla,
-    /// Sidebar active text color.
-    pub sidebar_active_foreground: Hsla,
-    /// Skeleton background color.
-    pub skeleton: Hsla,
+
     /// Slider bar background color.
     pub slider_bar: Hsla,
     /// Slider thumb background color.
@@ -203,10 +189,7 @@ pub struct ThemeColor {
     pub bullish: Hsla,
     /// Bearish color for candlestick charts (downward price movement).
     pub bearish: Hsla,
-    /// Switch background color.
-    pub switch: Hsla,
-    /// Switch thumb background color.
-    pub switch_thumb: Hsla,
+
     /// Tab background color.
     pub tab: Hsla,
     /// Tab active background color.
@@ -221,8 +204,7 @@ pub struct ThemeColor {
     pub tab_bar_segmented: Hsla,
     /// Tab text color.
     pub tab_foreground: Hsla,
-    /// Table background color.
-    pub table: Hsla,
+
     /// Table active item background color.
     pub table_active: Hsla,
     /// Table active item border color.
@@ -237,12 +219,8 @@ pub struct ThemeColor {
     pub table_hover: Hsla,
     /// Table row border color.
     pub table_row_border: Hsla,
-    /// TitleBar background color, use for Window title bar.
-    pub title_bar: Hsla,
-    /// TitleBar border color.
-    pub title_bar_border: Hsla,
-    /// Background color for Tiles.
-    pub tiles: Hsla,
+
+
     /// Warning background color.
     pub warning: Hsla,
     /// Warning active background color.
@@ -253,12 +231,7 @@ pub struct ThemeColor {
     pub warning_foreground: Hsla,
     /// Overlay background color.
     pub overlay: Hsla,
-    /// Window border color.
-    ///
-    /// # Platform specific:
-    ///
-    /// This is only works on Linux, other platforms we can't change the window border color.
-    pub window_border: Hsla,
+
 
     /// The base red color.
     pub red: Hsla,
