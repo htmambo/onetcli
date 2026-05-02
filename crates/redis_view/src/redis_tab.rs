@@ -404,18 +404,12 @@ impl Render for RedisTabView {
         let tree_panel_size = self.tree_panel_size;
         let sidebar_visible = self.sidebar.read(cx).is_panel_visible();
         let sidebar_panel_size = self.sidebar_panel_size;
-        let shell_bg = if cfg!(target_os = "windows") {
-            cx.theme().transparent
-        } else {
-            cx.theme().background
-        };
         let content_bg = cx.theme().muted;
 
         div()
             .id("redis-tab-view")
             .track_focus(&self.focus_handle)
             .size_full()
-            //.bg(shell_bg)
             .child(
                 h_flex()
                     .size_full()
