@@ -46,10 +46,10 @@ enum LoadState {
 
 fn content_section_bg(cx: &App) -> gpui::Hsla {
     layered_level_surface_color(
-        cx.theme().background,
+        cx.theme().muted,
         cx.theme().window_blur_enabled,
         cx.theme().backdrop_opacity,
-        3,
+        1,
         WindowsSurfaceLayer::ContentSection,
     )
 }
@@ -2111,7 +2111,7 @@ impl KeyValueView {
 
     /// 渲染 String 编辑器（使用 Input 组件）
     fn render_string_editor(&self, _cx: &mut Context<Self>) -> impl IntoElement {
-        Input::new(&self.string_editor).size_full().cleanable(false)
+        Input::new(&self.string_editor).size_full().cleanable(false).rounded(px(0.0))
     }
 
     /// 渲染底部状态栏
@@ -2816,7 +2816,7 @@ impl Render for KeyValueView {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
+            //.bg(cx.theme().muted)
             .when(matches!(self.load_state, LoadState::Empty), |this| {
                 this.child(self.render_empty_state(cx))
             })

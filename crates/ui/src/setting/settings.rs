@@ -1,8 +1,8 @@
 use crate::{
-    IconName, Sizable, Size, StyledExt,
+    ActiveTheme, IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     input::{Input, InputState},
-    resizable::{ResizablePanel, h_resizable},
+    resizable::{h_resizable, resizable_panel},
     setting::{SettingGroup, SettingPage},
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
@@ -287,47 +287,18 @@ impl RenderOnce for Settings {
             layout: Axis::Horizontal,
         };
 
-        div()
-            .flex_1()
-            .min_w_0()
-            .size_full()
-            .overflow_hidden()
+        h_resizable(self.id.clone())
             .child(
-                h_resizable(self.id.clone())
-                    .child(
-                        ResizablePanel::new()
-                            .size(self.sidebar_width)
-                            .size_range(px(120.)..px(400.))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h_full()
-                                    .overflow_hidden()
-                                    .refine_style(&self.sidebar_style)
-                                    .child(self.render_sidebar(
-                                        &state,
-                                        &filtered_pages,
-                                        window,
-                                        cx,
-                                    )),
-                            ),
-                    )
-                    .child(
-                        ResizablePanel::new().child(
-                            div()
-                                .size_full()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .refine_style(&self.content_style)
-                                .child(self.render_active_page(
-                                    &state,
-                                    &filtered_pages,
-                                    &options,
-                                    window,
-                                    cx,
-                                )),
-                        ),
-                    ),
+                resizable_panel()
+                    .size(self.sidebar_width)
+                    .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
             )
+            .child(resizable_panel().child(div().size_full().bg(cx.theme().muted).child(self.render_active_page(
+                &state,
+                &filtered_pages,
+                &options,
+                window,
+                cx,
+            ))))
     }
 }
