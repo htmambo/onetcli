@@ -83,3 +83,14 @@ pub use components::{ModelItem, ProviderItem};
 
 // 导出服务层
 pub use services::{SessionError, SessionService, extract_session_name};
+
+use gpui::Global;
+
+/// 全局聊天设置
+#[derive(Clone, Debug, Default)]
+pub struct GlobalChatSettings {
+    /// 是否使用 AI 自动生成会话标题
+    pub ai_auto_generate_session_title: bool,
+}
+
+impl Global for GlobalChatSettings {}

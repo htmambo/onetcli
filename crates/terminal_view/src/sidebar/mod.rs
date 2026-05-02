@@ -17,7 +17,7 @@ pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
 use crate::{
-    theme::{TerminalColors, TerminalTheme},
+    theme::{TerminalTheme, TerminalColors},
     TerminalHighlightRule,
 };
 use gpui::prelude::FluentBuilder;
@@ -618,7 +618,6 @@ impl TerminalSidebar {
     /// 渲染工具栏
     pub fn render_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let border_color = self.colors.border;
-        let muted_bg = self.colors.background;
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
         let toolbar_bg = gpui::Hsla {

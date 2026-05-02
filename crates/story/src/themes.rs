@@ -4,11 +4,6 @@ use gpui::{Action, App, SharedString};
 use gpui_component::{ActiveTheme, Theme, ThemeMode, ThemeRegistry, scroll::ScrollbarShow};
 use serde::{Deserialize, Serialize};
 
-/// 主题目录。
-/// 开发态（cargo run）：使用工作区的 `./themes`。
-/// 安装态：由 one-core 的 storage/manager 在运行时决定，Storybook 不参与。
-const THEMES_DIR: &str = "./themes";
-
 const STATE_FILE: &str = "target/state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,12 +22,11 @@ impl Default for State {
 }
 
 pub fn init(cx: &mut App) {
+    // Load last theme state
     let json = std::fs::read_to_string(STATE_FILE).unwrap_or(String::default());
     tracing::info!("Load themes...");
     let state = serde_json::from_str::<State>(&json).unwrap_or_default();
-
-    tracing::info!("Watching themes dir: {}", THEMES_DIR);
-    if let Err(err) = ThemeRegistry::watch_dir(PathBuf::from(THEMES_DIR), cx, move |cx| {
+    if let Err(err) = ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
         if let Some(theme) = ThemeRegistry::global(cx)
             .themes()
             .get(&state.theme)
@@ -56,6 +50,7 @@ pub fn init(cx: &mut App) {
         };
 
         if let Ok(json) = serde_json::to_string_pretty(&state) {
+            // Ignore write errors - if STATE_FILE doesn't exist or can't be written, do nothing
             let _ = std::fs::write(STATE_FILE, json);
         }
     })

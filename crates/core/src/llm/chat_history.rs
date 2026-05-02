@@ -13,6 +13,10 @@ pub struct ChatSession {
     pub id: i64,
     pub name: String,
     pub provider_id: String,
+    pub connection_id: Option<String>,
+    pub database_name: Option<String>,
+    pub database_type: Option<String>,
+    pub title_source: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -23,6 +27,10 @@ impl FromSqliteRow for ChatSession {
             id: row.get("id")?,
             name: row.get("name")?,
             provider_id: row.get("provider_id")?,
+            connection_id: row.get("connection_id").ok(),
+            database_name: row.get("database_name").ok(),
+            database_type: row.get("database_type").ok(),
+            title_source: row.get("title_source").unwrap_or_else(|_| "extracted".to_string()),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -50,9 +58,27 @@ impl ChatSession {
             id: 0,
             name,
             provider_id,
+            connection_id: None,
+            database_name: None,
+            database_type: None,
+            title_source: "extracted".to_string(),
             created_at: now,
             updated_at: now,
         }
+    }
+
+    pub fn with_connection_info(
+        name: String,
+        provider_id: String,
+        connection_id: Option<String>,
+        database_name: Option<String>,
+        database_type: Option<String>,
+    ) -> Self {
+        let mut session = Self::new(name, provider_id);
+        session.connection_id = connection_id;
+        session.database_name = database_name;
+        session.database_type = database_type;
+        session
     }
 }
 
@@ -136,13 +162,17 @@ impl Repository for SessionRepository {
     fn insert(&self, item: &mut Self::Entity) -> Result<i64> {
         let name = item.name.clone();
         let provider_id = item.provider_id.clone();
+        let connection_id = item.connection_id.clone();
+        let database_name = item.database_name.clone();
+        let database_type = item.database_type.clone();
+        let title_source = item.title_source.clone();
         let created_at = item.created_at;
         let updated_at = item.updated_at;
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO chat_sessions (name, provider_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-                params![name, provider_id, created_at, updated_at],
+                "INSERT INTO chat_sessions (name, provider_id, connection_id, database_name, database_type, title_source, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![name, provider_id, connection_id, database_name, database_type, title_source, created_at, updated_at],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
@@ -155,12 +185,16 @@ impl Repository for SessionRepository {
         let id = item.id;
         let name = item.name.clone();
         let provider_id = item.provider_id.clone();
+        let connection_id = item.connection_id.clone();
+        let database_name = item.database_name.clone();
+        let database_type = item.database_type.clone();
+        let title_source = item.title_source.clone();
         let updated_at = now();
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE chat_sessions SET name = ?1, provider_id = ?2, updated_at = ?3 WHERE id = ?4",
-                params![name, provider_id, updated_at, id],
+                "UPDATE chat_sessions SET name = ?1, provider_id = ?2, connection_id = ?3, database_name = ?4, database_type = ?5, title_source = ?6, updated_at = ?7 WHERE id = ?8",
+                params![name, provider_id, connection_id, database_name, database_type, title_source, updated_at, id],
             )?;
             Ok(())
         })
@@ -175,7 +209,7 @@ impl Repository for SessionRepository {
 
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, provider_id, created_at, updated_at FROM chat_sessions WHERE id = ?1")?;
+            let mut stmt = conn.prepare("SELECT id, name, provider_id, connection_id, database_name, database_type, title_source, created_at, updated_at FROM chat_sessions WHERE id = ?1")?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
                 Ok(Some(ChatSession::from_row(row)?))
@@ -187,7 +221,7 @@ impl Repository for SessionRepository {
 
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, provider_id, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC")?;
+            let mut stmt = conn.prepare("SELECT id, name, provider_id, connection_id, database_name, database_type, title_source, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC")?;
             let rows = stmt.query_map([], |row| ChatSession::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -221,7 +255,7 @@ impl SessionRepository {
     pub fn list_by_provider(&self, provider_id: &str) -> Result<Vec<ChatSession>> {
         let provider_id = provider_id.to_string();
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, name, provider_id, created_at, updated_at FROM chat_sessions WHERE provider_id = ?1 ORDER BY updated_at DESC")?;
+            let mut stmt = conn.prepare("SELECT id, name, provider_id, connection_id, database_name, database_type, title_source, created_at, updated_at FROM chat_sessions WHERE provider_id = ?1 ORDER BY updated_at DESC")?;
             let rows = stmt.query_map(params![provider_id], |row| ChatSession::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {

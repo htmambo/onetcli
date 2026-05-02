@@ -8,7 +8,6 @@ use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window,
-    MouseButton, Pixels
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -21,7 +20,6 @@ use gpui_component::{
     switch::Switch,
     try_parse_color, v_flex, ActiveTheme, Colorize, Icon, IconName, Sizable, Size,
     Theme as UiTheme, WindowExt,
-    scroll::ScrollableElement,
 };
 use rust_i18n::t;
 use std::time::{SystemTime, UNIX_EPOCH};

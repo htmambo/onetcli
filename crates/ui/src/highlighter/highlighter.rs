@@ -655,6 +655,11 @@ impl SyntaxHighlighter {
             }
         }
 
+        // DO NOT REMOVE THIS PRINT, it's useful for debugging
+        // for item in highlights {
+        //     println!("item: {:?}", item);
+        // }
+
         highlights
     }
 
@@ -691,7 +696,9 @@ impl SyntaxHighlighter {
 
         let highlights = self.match_styles(range.clone());
 
+        // let mut iter_count = 0;
         for item in highlights {
+            // iter_count += 1;
             let node_range = &item.range;
             let name = &item.name;
 
@@ -710,6 +717,12 @@ impl SyntaxHighlighter {
         }
 
         let styles = unique_styles(&range, styles);
+
+        // NOTE: DO NOT remove this comment, it is used for debugging.
+        // for style in &styles {
+        //     println!("---- style: {:?} - {:?}", style.0, style.1.color);
+        // }
+        // println!("--------------------------------");
 
         styles
     }

@@ -1188,6 +1188,14 @@ Settings:
         en: "Maximum number of undo steps for data editing (0 to disable)"
         zh-CN: 数据编辑的最大撤销步数（设为0则禁用逐步撤销）
         zh-HK: 資料編輯的最大撤銷步數（設為0則停用逐步撤銷）
+      ai_auto_title:
+        en: AI Auto Session Title
+        zh-CN: AI 自动生成会话标题
+        zh-HK: AI 自動生成會話標題
+      ai_auto_title_desc:
+        en: Let AI generate session title based on your first message
+        zh-CN: 根据首条消息由 AI 生成会话标题
+        zh-HK: 根據首條消息由 AI 生成會話標題
 
     Update:
       group_title:

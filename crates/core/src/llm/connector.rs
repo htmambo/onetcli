@@ -161,6 +161,14 @@ impl LlmConnector {
             request.temperature = Some(temperature);
         }
 
+        // Anthropic 专属：thinking budget 仅对 Anthropic provider 生效
+        if self.provider_type == ProviderType::Anthropic {
+            if let Some(budget) = config.thinking_budget {
+                // llm-connector 1.1.17+ 的 ChatRequest 支持 thinking_budget 字段
+                request.thinking_budget = Some(budget as u32);
+            }
+        }
+
         request
     }
 }

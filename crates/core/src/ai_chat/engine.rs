@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::ai_chat::components::ModelSettings;
 use crate::ai_chat::panel::CodeBlockActionRegistry;
-use crate::ai_chat::services::{SessionService, extract_session_name};
+use crate::ai_chat::services::{SessionConnectionInfo, SessionService, extract_session_name};
 use crate::ai_chat::types::{ChatMessageUIGeneric, ChatRole, MessageExtension, NoExtension};
 use crate::llm::ProviderConfig;
 use crate::llm::chat_history::ChatSession;
@@ -92,14 +92,19 @@ impl<E: MessageExtension + Default> ChatEngine<E> {
     /// 确保会话存在，如果不存在则创建新会话
     ///
     /// 返回会话 ID。如果创建失败则返回 None。
-    pub fn ensure_session_id(&mut self, provider_id: &str, default_name: &str) -> Option<i64> {
+    pub fn ensure_session_id(
+        &mut self,
+        provider_id: &str,
+        default_name: &str,
+        connection_info: Option<SessionConnectionInfo>,
+    ) -> Option<i64> {
         if let Some(id) = self.session_id {
             return Some(id);
         }
 
         match self
             .session_service
-            .ensure_session(None, provider_id, default_name)
+            .ensure_session(None, provider_id, default_name, connection_info)
         {
             Ok(id) => {
                 self.session_id = Some(id);

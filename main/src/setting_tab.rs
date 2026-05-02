@@ -3265,40 +3265,11 @@ impl Render for SettingsPanel {
             init_settings(cx);
         }
 
-        let blur_enabled = cx.theme().window_blur_enabled;
-        let window_opacity = cx.theme().backdrop_opacity;
-        let sidebar_bg = layered_level_surface_color(
-            cx.theme().sidebar,
-            blur_enabled,
-            window_opacity,
-            1,
-            WindowsSurfaceLayer::ContentBase,
-        );
-        // 与首页右侧内容区保持一致，形成统一的内容底板层级。
-        let page_bg = layered_level_surface_color(
-            cx.theme().muted,
-            blur_enabled,
-            window_opacity,
-            1,
-            WindowsSurfaceLayer::ContentBase,
-        );
-        let sidebar_style = StyleRefinement::default()
-            .bg(sidebar_bg)
-            .border_color(cx.theme().border)
-            .text_color(cx.theme().sidebar_foreground);
-        let content_style = StyleRefinement::default().bg(page_bg);
-
         div().track_focus(&self.focus_handle).size_full().child(
-            div().size_full().child(
-                Settings::new("main-app-settings")
-                    .with_size(self.size)
-                    .with_group_variant(self.group_variant)
-                    .sidebar_style(&sidebar_style)
-                    .content_style(&content_style)
-                    .header_style(&sync_server_theme::control_style())
-                    .default_selected_index(self.selected_page.select_index())
-                    .pages(self.setting_pages(window, cx)),
-            ),
+            Settings::new("main-app-settings")
+                .with_size(self.size)
+                .with_group_variant(self.group_variant)
+                .pages(self.setting_pages(window, cx)),
         )
     }
 }
