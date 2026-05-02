@@ -207,6 +207,22 @@ MongoTree:
     en: "Metrics are not implemented yet."
     zh-CN: "指标功能尚未实现。"
     zh-HK: "指標功能尚未實作。"
+  loading_metrics:
+    en: "Loading metrics..."
+    zh-CN: "正在加载指标..."
+    zh-HK: "正在載入指標..."
+  metrics_title:
+    en: "Database Metrics"
+    zh-CN: "数据库指标"
+    zh-HK: "資料庫指標"
+  server_metrics_label:
+    en: "Server Status"
+    zh-CN: "服务器状态"
+    zh-HK: "伺服器狀態"
+  db_metrics_label:
+    en: "Database Stats"
+    zh-CN: "数据库统计"
+    zh-HK: "資料庫統計"
   menu_show_connection_info:
     en: "Show connection info"
     zh-CN: "查看连接信息"
@@ -309,6 +325,18 @@ MongoConnection:
     en: "Explain query failed."
     zh-CN: "执行计划查询失败。"
     zh-HK: "執行計畫查詢失敗。"
+  server_status_failed:
+    en: "Failed to get server status."
+    zh-CN: "获取服务器状态失败。"
+    zh-HK: "獲取伺服器狀態失敗。"
+  db_stats_failed:
+    en: "Failed to get database stats."
+    zh-CN: "获取数据库统计失败。"
+    zh-HK: "獲取資料庫統計失敗。"
+  collection_stats_failed:
+    en: "Failed to get collection stats."
+    zh-CN: "获取集合统计失败。"
+    zh-HK: "獲取集合統計失敗。"
 
 MongoManager:
   connection_id_required:
@@ -871,3 +899,27 @@ MongoCollection:
     en: "Please select a collection."
     zh-CN: "请选择一个集合。"
     zh-HK: "請選擇一個集合。"
+  no_collections:
+    en: "No collections."
+    zh-CN: "暂无集合。"
+    zh-HK: "暫無集合。"
+  collections_title:
+    en: "Collections (%{count})"
+    zh-CN: "集合 (%{count})"
+    zh-HK: "集合 (%{count})"
+  collection_name_header:
+    en: "Collection"
+    zh-CN: "集合"
+    zh-HK: "集合"
+  document_count_header:
+    en: "Documents"
+    zh-CN: "文档数"
+    zh-HK: "文件數"
+  data_size_header:
+    en: "Data Size"
+    zh-CN: "数据大小"
+    zh-HK: "資料大小"
+  index_size_header:
+    en: "Index Size"
+    zh-CN: "索引大小"
+    zh-HK: "索引大小"

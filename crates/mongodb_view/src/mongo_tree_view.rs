@@ -33,6 +33,8 @@ pub enum MongoTreeViewEvent {
     CollectionSelected { node_id: String },
     /// 集合在新标签页打开
     CollectionOpenInTab { node_id: String },
+    /// 数据库选中
+    DatabaseSelected { node_id: String },
     /// 连接建立
     ConnectionEstablished { node_id: String },
 }
@@ -569,11 +571,12 @@ impl MongoTreeView {
                 self.toggle_expand(&node.id);
                 cx.notify();
                 if should_load {
-                    self.load_collections(node, cx);
+                    self.load_collections(node.clone(), cx);
                 }
+                cx.emit(MongoTreeViewEvent::DatabaseSelected { node_id });
             }
             MongoNodeType::Collection => {
-                cx.emit(MongoTreeViewEvent::CollectionSelected { node_id });
+                cx.emit(MongoTreeViewEvent::CollectionOpenInTab { node_id });
             }
         }
     }
@@ -1196,20 +1199,131 @@ impl MongoTreeView {
         }
     }
 
+    fn open_metrics_dialog(
+        &mut self,
+        node_id: String,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node) = self.nodes.get(&node_id).cloned() else {
+            return;
+        };
+        let connection_id = node.connection_id.clone();
+        let database_name = node.database_name.clone().unwrap_or_default();
+        if database_name.is_empty() {
+            return;
+        }
+
+        let global_state = cx.global::<GlobalMongoState>().clone();
+        Self::notify_info(t!("MongoTree.loading_metrics").as_ref(), cx);
+
+        cx.spawn(async move |_, cx: &mut AsyncApp| {
+            let server_status_doc = Tokio::spawn_result(cx, {
+                let connection_id = connection_id.clone();
+                let global_state = global_state.clone();
+                async move {
+                    let connection = global_state
+                        .get_connection(&connection_id)
+                        .ok_or_else(|| anyhow::anyhow!(t!("MongoTree.connection_missing")))?;
+                    let guard = connection.read().await;
+                    guard.server_status().await.map_err(|e| anyhow::anyhow!("{}", e))
+                }
+            })
+            .await;
+
+            let db_stats_doc = Tokio::spawn_result(cx, {
+                let connection_id = connection_id.clone();
+                let database_name = database_name.clone();
+                let global_state = global_state.clone();
+                async move {
+                    let connection = global_state
+                        .get_connection(&connection_id)
+                        .ok_or_else(|| anyhow::anyhow!(t!("MongoTree.connection_missing")))?;
+                    let guard = connection.read().await;
+                    guard.db_stats(&database_name).await.map_err(|e| anyhow::anyhow!("{}", e))
+                }
+            })
+            .await;
+
+            let server_json = match server_status_doc {
+                Ok(doc) => crate::types::document_to_pretty_json(&doc)
+                    .unwrap_or_else(|_| "{}".to_string()),
+                Err(e) => format!("{{\"error\": \"{}\"}}", e),
+            };
+            let db_json = match db_stats_doc {
+                Ok(doc) => crate::types::document_to_pretty_json(&doc)
+                    .unwrap_or_else(|_| "{}".to_string()),
+                Err(e) => format!("{{\"error\": \"{}\"}}", e),
+            };
+
+            let _ = cx.update(|cx| {
+                if let Some(window) = cx.active_window() {
+                    let server_json = server_json.clone();
+                    let db_json = db_json.clone();
+                    let _ = window.update(cx, |_, window, cx| {
+                        let server_input = cx.new(|cx| {
+                            let mut state = InputState::new(window, cx)
+                                .code_editor("json")
+                                .line_number(false)
+                                .rows(12)
+                                .soft_wrap(true);
+                            state.set_value(server_json, window, cx);
+                            state
+                        });
+                        let db_input = cx.new(|cx| {
+                            let mut state = InputState::new(window, cx)
+                                .code_editor("json")
+                                .line_number(false)
+                                .rows(12)
+                                .soft_wrap(true);
+                            state.set_value(db_json, window, cx);
+                            state
+                        });
+
+                        window.open_dialog(cx, move |dialog, _window, _cx| {
+                            dialog
+                                .title(t!("MongoTree.metrics_title").to_string())
+                                .w(px(800.0))
+                                .child(
+                                    v_flex()
+                                        .gap_3()
+                                        .child(
+                                            v_flex()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .child(t!("MongoTree.server_metrics_label")),
+                                                )
+                                                .child(Input::new(&server_input).w_full().disabled(true)),
+                                        )
+                                        .child(
+                                            v_flex()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .child(t!("MongoTree.db_metrics_label")),
+                                                )
+                                                .child(Input::new(&db_input).w_full().disabled(true)),
+                                        ),
+                                )
+                                .button_props(
+                                    DialogButtonProps::default()
+                                        .ok_text(t!("Common.close").to_string()),
+                                )
+                        });
+                    });
+                }
+            });
+        })
+        .detach();
+    }
+
     fn open_collection(&mut self, node_id: &str, cx: &mut Context<Self>) {
         if let Some(node) = self.nodes.get(node_id) {
             if node.node_type == MongoNodeType::Collection {
                 cx.emit(MongoTreeViewEvent::CollectionSelected {
-                    node_id: node_id.to_string(),
-                });
-            }
-        }
-    }
-
-    fn open_collection_in_tab(&mut self, node_id: &str, cx: &mut Context<Self>) {
-        if let Some(node) = self.nodes.get(node_id) {
-            if node.node_type == MongoNodeType::Collection {
-                cx.emit(MongoTreeViewEvent::CollectionOpenInTab {
                     node_id: node_id.to_string(),
                 });
             }
@@ -1410,6 +1524,7 @@ impl MongoTreeView {
                 let node_id_for_drop_database = node_id.to_string();
                 let view_for_shell = view.clone();
                 let view_for_metrics = view.clone();
+                let node_id_for_metrics = node_id.to_string();
                 let view_for_connection_info = view.clone();
                 let connection_id_for_connection_info = connection_id.clone();
                 let view_for_refresh = view.clone();
@@ -1470,11 +1585,8 @@ impl MongoTreeView {
                     )
                     .item(
                         PopupMenuItem::new(t!("MongoTree.menu_show_metrics").to_string()).on_click(
-                            window.listener_for(&view_for_metrics, move |_, _, _, cx| {
-                                Self::notify_info(
-                                    t!("MongoTree.metrics_not_implemented").as_ref(),
-                                    cx,
-                                );
+                            window.listener_for(&view_for_metrics, move |view, _, window, cx| {
+                                view.open_metrics_dialog(node_id_for_metrics.clone(), window, cx);
                             }),
                         ),
                     )
@@ -1515,24 +1627,15 @@ impl MongoTreeView {
             MongoNodeType::Collection => {
                 let view_for_action = view.clone();
                 let node_id_for_action = node_id.to_string();
-                let view_for_tab = view.clone();
-                let node_id_for_tab = node_id.to_string();
-                menu = menu
-                    .item(
-                        PopupMenuItem::new(t!("MongoTree.menu_open_collection").to_string())
-                            .on_click(window.listener_for(
-                                &view_for_action,
-                                move |view, _, _, cx| {
-                                    view.open_collection(&node_id_for_action, cx);
-                                },
-                            )),
-                    )
-                    .item(
-                        PopupMenuItem::new(t!("MongoTree.menu_open_in_new_tab").to_string())
-                            .on_click(window.listener_for(&view_for_tab, move |view, _, _, cx| {
-                                view.open_collection_in_tab(&node_id_for_tab, cx);
-                            })),
-                    );
+                menu = menu.item(
+                    PopupMenuItem::new(t!("MongoTree.menu_open_collection").to_string())
+                        .on_click(window.listener_for(
+                            &view_for_action,
+                            move |view, _, _, cx| {
+                                view.open_collection(&node_id_for_action, cx);
+                            },
+                        )),
+                );
             }
         }
 
