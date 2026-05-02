@@ -589,7 +589,7 @@ impl RenderOnce for Dialog {
                                         .items_center()
                                         .cursor_move()
                                         .refine_style(&app_style::title_bar_style())
-                                        .bg(cx.theme().title_bar)
+                                        .bg(cx.theme().background)
                                         .rounded_tl(cx.theme().radius_lg)
                                         .rounded_tr(cx.theme().radius_lg)
                                         .border_b_1()

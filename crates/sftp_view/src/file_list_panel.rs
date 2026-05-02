@@ -524,7 +524,7 @@ impl FileListPanel {
             .items_center()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().title_bar)
+            .bg(cx.theme().background)
             .child(self.render_header_cell(
                 t!("FileList.header_name").into(),
                 FileListColumn::Name,

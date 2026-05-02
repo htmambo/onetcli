@@ -2104,7 +2104,7 @@ impl KeyValueView {
 
     /// 渲染 String 编辑器（使用 Input 组件）
     fn render_string_editor(&self, _cx: &mut Context<Self>) -> impl IntoElement {
-        Input::new(&self.string_editor).size_full().cleanable(false)
+        Input::new(&self.string_editor).size_full().cleanable(false).rounded(px(0.0))
     }
 
     /// 渲染底部状态栏
@@ -2809,7 +2809,7 @@ impl Render for KeyValueView {
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
+            //.bg(cx.theme().background)
             .when(matches!(self.load_state, LoadState::Empty), |this| {
                 this.child(self.render_empty_state(cx))
             })

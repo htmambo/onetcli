@@ -213,8 +213,9 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
             .h_full()
             .overflow_hidden()
             .relative()
+            .bg(cx.theme().sidebar)
             .text_color(cx.theme().sidebar_foreground)
-            .border_color(cx.theme().sidebar_border)
+            .border_color(cx.theme().border)
             .map(|this| match self.side {
                 Side::Left => this.border_r_1(),
                 Side::Right => this.border_l_1(),

@@ -40,9 +40,9 @@ impl RenderOnce for Skeleton {
             .w_full()
             .h_4()
             .bg(if self.secondary {
-                cx.theme().skeleton.opacity(0.5)
+                cx.theme().secondary.opacity(0.5)
             } else {
-                cx.theme().skeleton
+                cx.theme().secondary
             })
             .refine_style(&self.style)
             .with_animation(

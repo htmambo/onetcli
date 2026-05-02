@@ -415,7 +415,7 @@ impl Render for RedisTabView {
             .id("redis-tab-view")
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(shell_bg)
+            //.bg(shell_bg)
             .child(
                 h_flex()
                     .size_full()

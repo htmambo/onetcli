@@ -511,8 +511,8 @@ fn render_inspector(
                 .overflow_x_hidden()
                 .px_2()
                 .border_b_1()
-                .border_color(cx.theme().title_bar_border)
-                .bg(cx.theme().title_bar)
+                .border_color(cx.theme().border)
+                .bg(cx.theme().background)
                 .child(
                     h_flex()
                         .gap_2()

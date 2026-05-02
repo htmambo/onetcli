@@ -4448,7 +4448,7 @@ impl HomePage {
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let workspace_bg = cx.theme().table;
+        let workspace_bg = cx.theme().list;
         let workspace_hover_bg = cx.theme().table_hover;
         let workspace_id = workspace.id;
         let is_collapsed = workspace_id

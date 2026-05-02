@@ -130,7 +130,7 @@ impl Render for PopupWindowView {
         v_flex()
             .id("popup-window-root")
             .size_full()
-            .bg(cx.theme().background)
+            .bg(cx.theme().muted)
             .border_1()
             .border_color(app_style::border_strong())
             .rounded(cx.theme().radius_lg)

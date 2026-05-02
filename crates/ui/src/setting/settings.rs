@@ -1,5 +1,5 @@
 use crate::{
-    IconName, Sizable, Size, StyledExt,
+    ActiveTheme, IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
     input::{Input, InputState},
     resizable::{h_resizable, resizable_panel},
@@ -293,12 +293,12 @@ impl RenderOnce for Settings {
                     .size(self.sidebar_width)
                     .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
             )
-            .child(resizable_panel().child(self.render_active_page(
+            .child(resizable_panel().child(div().size_full().bg(cx.theme().muted).child(self.render_active_page(
                 &state,
                 &filtered_pages,
                 &options,
                 window,
                 cx,
-            )))
+            ))))
     }
 }

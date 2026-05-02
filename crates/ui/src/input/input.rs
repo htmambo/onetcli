@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, DefiniteLength, Edges, EdgesRefinement, Entity, Hsla, InteractiveElement as _,
-    IntoElement, IsZero, MouseButton, ParentElement as _, Rems, RenderOnce, StyleRefinement,
+    IntoElement, IsZero, MouseButton, ParentElement as _, Pixels, Rems, RenderOnce, StyleRefinement,
     Styled, TextAlign, Window, div, px, relative,
 };
 
@@ -45,11 +45,13 @@ pub struct Input {
     cleanable: bool,
     mask_toggle: bool,
     disabled: bool,
+    dim_when_disabled: bool,
     bordered: bool,
     focus_bordered: bool,
     tab_index: isize,
     selected: bool,
     disable_ime: bool,
+    rounded: Option<Pixels>,
 }
 
 impl Sizable for Input {
@@ -84,11 +86,13 @@ impl Input {
             cleanable: false,
             mask_toggle: false,
             disabled: false,
+            dim_when_disabled: true,
             bordered: true,
             focus_bordered: true,
             tab_index: 0,
             selected: false,
             disable_ime: false,
+            rounded: None,
         }
     }
 
@@ -157,9 +161,22 @@ impl Input {
         self
     }
 
+    /// Set whether to dim the input when disabled (apply opacity).
+    /// Default is `true`.
+    pub fn dim_when_disabled(mut self, dim: bool) -> Self {
+        self.dim_when_disabled = dim;
+        self
+    }
+
     /// Set the tab index for the input, default is 0.
     pub fn tab_index(mut self, index: isize) -> Self {
         self.tab_index = index;
+        self
+    }
+
+    /// Set the border radius for the input, overrides theme default.
+    pub fn rounded(mut self, radius: impl Into<Pixels>) -> Self {
+        self.rounded = Some(radius.into());
         self
     }
 
@@ -397,12 +414,15 @@ impl RenderOnce for Input {
             .when(self.appearance, |this| {
                 this.bg(bg)
                     .text_color(fg)
-                    .when(self.disabled, |this| this.opacity(0.5))
-                    .rounded(cx.theme().radius)
+                    .when(self.disabled && self.dim_when_disabled, |this| this.opacity(0.5))
                     .when(self.bordered, |this| {
                         this.border_color(cx.theme().input)
                             .border_1()
                             .when(cx.theme().shadow, |this| this.shadow_xs())
+                    })
+                    .when_some(self.rounded, |this, r| this.rounded(r))
+                    .when(self.rounded.is_none(), |this| {
+                        this.rounded(cx.theme().radius)
                     })
             })
             .items_center()

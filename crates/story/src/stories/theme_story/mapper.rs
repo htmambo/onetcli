@@ -77,19 +77,15 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         "sidebar_accent_foreground" => {
             ("Sidebar", "Accent Foreground", "sidebar.accent.foreground")
         }
-        "sidebar_border" => ("Sidebar", "Border", "sidebar.border"),
         "sidebar_foreground" => ("Sidebar", "Foreground", "sidebar.foreground"),
-        "sidebar_active_foreground" => ("Sidebar", "Active Foreground", "sidebar.active.foreground"),
         // List
         "list" => ("List", "Background", "list.background"),
         "list_active" => ("List", "Active Background", "list.active.background"),
         "list_active_border" => ("List", "Active Border", "list.active.border"),
         "list_even" => ("List", "Even Background", "list.even.background"),
-        "list_head" => ("List", "Head Background", "list.head.background"),
         "list_hover" => ("List", "Hover Background", "list.hover.background"),
 
         // Table
-        "table" => ("Table", "Background", "table.background"),
         "table_active" => ("Table", "Active Background", "table.active.background"),
         "table_active_border" => ("Table", "Active Border", "table.active.border"),
         "table_even" => ("Table", "Even Background", "table.even.background"),
@@ -112,7 +108,7 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
 
         // Input
         "input" => ("Input", "Border", "input.border"),
-        "caret" => ("Input", "Caret", "caret"),
+
         "selection" => ("Input", "Selection", "selection.background"),
 
         // Slider / Switch
@@ -124,7 +120,7 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         // Muted / Skeleton
         "muted" => ("Muted", "Background", "muted.background"),
         "muted_foreground" => ("Muted", "Foreground", "muted.foreground"),
-        "skeleton" => ("Skeleton", "Background", "skeleton.background"),
+
 
         // Charts
         "chart_1" => ("Chart", "Color 1", "chart.1"),

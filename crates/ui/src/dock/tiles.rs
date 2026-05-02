@@ -1178,7 +1178,7 @@ impl Render for Tiles {
 
         div()
             .relative()
-            .bg(cx.theme().tiles)
+            .bg(cx.theme().background)
             .child(
                 div()
                     .id("tiles")

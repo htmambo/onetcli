@@ -120,7 +120,7 @@ impl MongoSidebar {
         let is_active = self.active_panel == Some(panel);
         let active_bg = cx.theme().list_active;
         let hover_bg = cx.theme().sidebar_accent;
-        let active_fg = cx.theme().sidebar_foreground;
+        let active_fg = cx.theme().accent_foreground;
         let muted_fg = cx.theme().muted_foreground;
 
         div()

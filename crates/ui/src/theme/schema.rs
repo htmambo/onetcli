@@ -77,12 +77,6 @@ pub struct ThemeConfigColors {
     /// Used for accent text color.
     #[serde(rename = "accent.foreground")]
     pub accent_foreground: Option<SharedString>,
-    /// Accordion background color.
-    #[serde(rename = "accordion.background")]
-    pub accordion: Option<SharedString>,
-    /// Accordion hover background color.
-    #[serde(rename = "accordion.hover.background")]
-    pub accordion_hover: Option<SharedString>,
     /// Default background color.
     #[serde(rename = "background")]
     pub background: Option<SharedString>,
@@ -96,12 +90,7 @@ pub struct ThemeConfigColors {
         alias = "group_box.background"
     )]
     pub group: Option<SharedString>,
-    /// Text color for GroupBox.
-    #[serde(rename = "group.foreground", alias = "group_box.foreground")]
-    pub group_foreground: Option<SharedString>,
-    /// Input caret color (Blinking cursor).
-    #[serde(rename = "caret")]
-    pub caret: Option<SharedString>,
+    /// Chart 1 color.
     /// Chart 1 color.
     #[serde(rename = "chart.1")]
     pub chart_1: Option<SharedString>,
@@ -132,9 +121,6 @@ pub struct ThemeConfigColors {
     /// Description List label background color.
     #[serde(rename = "description_list.label.background")]
     pub description_list_label: Option<SharedString>,
-    /// Description List label foreground color.
-    #[serde(rename = "description_list.label.foreground")]
-    pub description_list_label_foreground: Option<SharedString>,
     /// Drag border color.
     #[serde(rename = "drag.border")]
     pub drag_border: Option<SharedString>,
@@ -180,9 +166,6 @@ pub struct ThemeConfigColors {
     /// Stripe background color for even ListItem.
     #[serde(rename = "list.even.background")]
     pub list_even: Option<SharedString>,
-    /// Background color for List header.
-    #[serde(rename = "list.head.background")]
-    pub list_head: Option<SharedString>,
     /// Hover background color for ListItem.
     #[serde(rename = "list.hover.background")]
     pub list_hover: Option<SharedString>,
@@ -210,9 +193,6 @@ pub struct ThemeConfigColors {
     /// Hover primary background color.
     #[serde(rename = "primary.hover.background")]
     pub primary_hover: Option<SharedString>,
-    /// Progress bar background color.
-    #[serde(rename = "progress.bar.background")]
-    pub progress_bar: Option<SharedString>,
     /// Used for focus ring.
     #[serde(rename = "ring")]
     pub ring: Option<SharedString>,
@@ -249,18 +229,9 @@ pub struct ThemeConfigColors {
     /// Sidebar accent text color.
     #[serde(rename = "sidebar.accent.foreground")]
     pub sidebar_accent_foreground: Option<SharedString>,
-    /// Sidebar border color.
-    #[serde(rename = "sidebar.border")]
-    pub sidebar_border: Option<SharedString>,
     /// Sidebar text color.
     #[serde(rename = "sidebar.foreground")]
     pub sidebar_foreground: Option<SharedString>,
-    // Sidebar active text color.
-    #[serde(rename = "sidebar.active.foreground")]
-    pub sidebar_active_foreground: Option<SharedString>,
-    /// Skeleton background color.
-    #[serde(rename = "skeleton.background")]
-    pub skeleton: Option<SharedString>,
     /// Slider bar background color.
     #[serde(rename = "slider.background")]
     pub slider_bar: Option<SharedString>,
@@ -285,12 +256,6 @@ pub struct ThemeConfigColors {
     /// Bearish color for candlestick charts (downward price movement).
     #[serde(rename = "bearish.background")]
     pub bearish: Option<SharedString>,
-    /// Switch background color.
-    #[serde(rename = "switch.background")]
-    pub switch: Option<SharedString>,
-    /// Switch thumb background color.
-    #[serde(rename = "switch.thumb.background")]
-    pub switch_thumb: Option<SharedString>,
     /// Tab background color.
     #[serde(rename = "tab.background")]
     pub tab: Option<SharedString>,
@@ -312,9 +277,6 @@ pub struct ThemeConfigColors {
     /// Tab text color.
     #[serde(rename = "tab.foreground")]
     pub tab_foreground: Option<SharedString>,
-    /// Table background color.
-    #[serde(rename = "table.background")]
-    pub table: Option<SharedString>,
     /// Table active item background color.
     #[serde(rename = "table.active.background")]
     pub table_active: Option<SharedString>,
@@ -336,15 +298,6 @@ pub struct ThemeConfigColors {
     /// Table row border color.
     #[serde(rename = "table.row.border")]
     pub table_row_border: Option<SharedString>,
-    /// TitleBar background color, use for Window title bar.
-    #[serde(rename = "title_bar.background")]
-    pub title_bar: Option<SharedString>,
-    /// TitleBar border color.
-    #[serde(rename = "title_bar.border")]
-    pub title_bar_border: Option<SharedString>,
-    /// Background color for Tiles.
-    #[serde(rename = "tiles.background")]
-    pub tiles: Option<SharedString>,
     /// Warning background color.
     #[serde(rename = "warning.background")]
     pub warning: Option<SharedString>,
@@ -360,13 +313,7 @@ pub struct ThemeConfigColors {
     /// Overlay background color.
     #[serde(rename = "overlay")]
     pub overlay: Option<SharedString>,
-    /// Window border color.
-    ///
-    /// # Platform specific:
-    ///
-    /// This is only works on Linux, other platforms we can't change the window border color.
-    #[serde(rename = "window.border", alias = "window_border")]
-    pub window_border: Option<SharedString>,
+
 
     /// Base blue color.
     #[serde(rename = "base.blue")]
@@ -532,8 +479,7 @@ impl ThemeColor {
         // Other colors
         apply_color!(accent, fallback = self.secondary);
         apply_color!(accent_foreground, fallback = self.foreground);
-        apply_color!(accordion, fallback = self.background);
-        apply_color!(accordion_hover, fallback = self.accent.opacity(0.8));
+
         apply_color!(
             group,
             fallback = self
@@ -543,8 +489,7 @@ impl ThemeColor {
                         .opacity(if config.mode.is_dark() { 0.3 } else { 0.4 })
                 )
         );
-        apply_color!(group_foreground, fallback = self.foreground);
-        apply_color!(caret, fallback = self.primary);
+
         apply_color!(chart_1, fallback = self.blue.lighten(0.4));
         apply_color!(chart_2, fallback = self.blue.lighten(0.2));
         apply_color!(chart_3, fallback = self.blue);
@@ -561,10 +506,7 @@ impl ThemeColor {
             description_list_label,
             fallback = self.background.blend(self.border.opacity(0.2))
         );
-        apply_color!(
-            description_list_label_foreground,
-            fallback = self.muted_foreground
-        );
+
         apply_color!(drag_border, fallback = self.primary.opacity(0.65));
         apply_color!(drop_target, fallback = self.primary.opacity(0.2));
         apply_color!(input, fallback = self.border);
@@ -581,11 +523,10 @@ impl ThemeColor {
             fallback = self.background.blend(self.primary.opacity(0.6))
         );
         apply_color!(list_even, fallback = self.list);
-        apply_color!(list_head, fallback = self.list);
         apply_color!(list_hover, fallback = self.accent.opacity(0.6));
         apply_color!(popover, fallback = self.background);
         apply_color!(popover_foreground, fallback = self.foreground);
-        apply_color!(progress_bar, fallback = self.primary);
+
         apply_color!(ring, fallback = self.blue);
         apply_color!(scrollbar, fallback = self.background);
         apply_color!(scrollbar_thumb, fallback = self.accent);
@@ -597,14 +538,12 @@ impl ThemeColor {
         );
         apply_color!(sidebar_accent, fallback = self.accent);
         apply_color!(sidebar_accent_foreground, fallback = self.accent_foreground);
-        apply_color!(sidebar_border, fallback = self.border);
-        apply_color!(sidebar_foreground, fallback = self.sidebar_foreground);
-        apply_color!(sidebar_active_foreground, fallback = self.sidebar_active_foreground);
-        apply_color!(skeleton, fallback = self.secondary);
+
+        apply_color!(sidebar_foreground, fallback = self.foreground);
+
         apply_color!(slider_bar, fallback = self.primary);
         apply_color!(slider_thumb, fallback = self.primary_foreground);
-        apply_color!(switch, fallback = self.secondary_active);
-        apply_color!(switch_thumb, fallback = self.background);
+
         if config.mode.is_dark() {
             apply_color!(
                 tab,
@@ -620,19 +559,18 @@ impl ThemeColor {
         apply_color!(tab_bar, fallback = self.background);
         apply_color!(tab_bar_segmented, fallback = self.secondary);
         apply_color!(tab_foreground, fallback = self.foreground);
-        apply_color!(table, fallback = self.list);
+
         apply_color!(table_active, fallback = self.list_active);
         apply_color!(table_active_border, fallback = self.list_active_border);
         apply_color!(table_even, fallback = self.list_even);
-        apply_color!(table_head, fallback = self.list_head);
+        apply_color!(table_head, fallback = self.list);
         apply_color!(table_head_foreground, fallback = self.muted_foreground);
         apply_color!(table_hover, fallback = self.list_hover);
         apply_color!(table_row_border, fallback = self.border);
-        apply_color!(title_bar, fallback = self.background);
-        apply_color!(title_bar_border, fallback = self.border);
-        apply_color!(tiles, fallback = self.background);
+
+
         apply_color!(overlay, fallback = gpui::hsla(0., 0., 0., 0.4));
-        apply_color!(window_border, fallback = self.border);
+
 
         // Sync base palette after all colors are applied
         self.sync_base_palette();

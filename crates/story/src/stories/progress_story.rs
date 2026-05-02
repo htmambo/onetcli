@@ -178,7 +178,7 @@ impl Render for ProgressStory {
                                 .child(
                                     div()
                                         .child(format!("{}%", self.value))
-                                        .text_color(cx.theme().progress_bar),
+                                        .text_color(cx.theme().primary),
                                 )
                                 .child(div().child("Loading").text_xs()),
                         ),

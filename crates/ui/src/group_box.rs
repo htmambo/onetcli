@@ -154,7 +154,7 @@ impl RenderOnce for GroupBox {
                 v_flex()
                     .when_some(bg, |this, bg| this.bg(bg))
                     .when_some(border, |this, border| this.border_color(border).border_1())
-                    .text_color(cx.theme().group_foreground)
+                    .text_color(cx.theme().foreground)
                     .when(has_paddings, |this| this.p_4())
                     .gap_4()
                     .rounded(cx.theme().radius)

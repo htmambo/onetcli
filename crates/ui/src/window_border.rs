@@ -244,7 +244,7 @@ impl RenderOnce for WindowBorder {
                             .when(!(tiling.bottom || tiling.left), |div| {
                                 div.rounded_bl(border_radius)
                             })
-                            .border_color(cx.theme().window_border)
+                            .border_color(cx.theme().border)
                             .when(!tiling.top, |div| div.border_t(BORDER_SIZE))
                             .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
                             .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
@@ -267,7 +267,7 @@ impl RenderOnce for WindowBorder {
                     // 系统装饰路径下补一层可见内边框，避免窗口边界过弱。
                     .when(show_content_border, |div| {
                         div.border_1()
-                            .border_color(cx.theme().window_border)
+                            .border_color(cx.theme().border)
                             .rounded(border_radius)
                     })
                     .overflow_hidden()
