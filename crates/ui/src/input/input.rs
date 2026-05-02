@@ -45,6 +45,7 @@ pub struct Input {
     cleanable: bool,
     mask_toggle: bool,
     disabled: bool,
+    dim_when_disabled: bool,
     bordered: bool,
     focus_bordered: bool,
     tab_index: isize,
@@ -85,6 +86,7 @@ impl Input {
             cleanable: false,
             mask_toggle: false,
             disabled: false,
+            dim_when_disabled: true,
             bordered: true,
             focus_bordered: true,
             tab_index: 0,
@@ -156,6 +158,13 @@ impl Input {
     /// Set to disable the input field.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Set whether to dim the input when disabled (apply opacity).
+    /// Default is `true`.
+    pub fn dim_when_disabled(mut self, dim: bool) -> Self {
+        self.dim_when_disabled = dim;
         self
     }
 
@@ -405,7 +414,7 @@ impl RenderOnce for Input {
             .when(self.appearance, |this| {
                 this.bg(bg)
                     .text_color(fg)
-                    .when(self.disabled, |this| this.opacity(0.5))
+                    .when(self.disabled && self.dim_when_disabled, |this| this.opacity(0.5))
                     .when(self.bordered, |this| {
                         this.border_color(cx.theme().input)
                             .border_1()

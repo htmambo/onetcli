@@ -2679,11 +2679,13 @@ impl CollectionView {
             Input::new(&self.explain_input)
                 .h_full()
                 .disabled(true)
+                .dim_when_disabled(false)
                 .into_any_element()
         } else if is_editing || self.selected_index.is_some() {
             Input::new(&self.editor_input)
                 .h_full()
                 .disabled(!is_editing)
+                .dim_when_disabled(false)
                 .into_any_element()
         } else {
             self.render_empty_state(t!("MongoCollection.select_document").as_ref(), cx)
