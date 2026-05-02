@@ -119,6 +119,16 @@ pub trait MongoConnection: Send + Sync {
         filter: Option<Document>,
         options: FindOptions,
     ) -> Result<Document, MongoError>;
+
+    async fn server_status(&self) -> Result<Document, MongoError>;
+
+    async fn db_stats(&self, database_name: &str) -> Result<Document, MongoError>;
+
+    async fn collection_stats(
+        &self,
+        database_name: &str,
+        collection_name: &str,
+    ) -> Result<Document, MongoError>;
 }
 
 /// MongoDB 连接实现
@@ -770,6 +780,52 @@ impl MongoConnection for MongoConnectionImpl {
             .await
             .map_err(|e| {
                 MongoError::command_with_source(t!("MongoConnection.explain_failed").to_string(), e)
+            })
+    }
+
+    async fn server_status(&self) -> Result<Document, MongoError> {
+        let client = self.client()?;
+        client
+            .database("admin")
+            .run_command(doc! { "serverStatus": 1 })
+            .await
+            .map_err(|e| {
+                MongoError::command_with_source(
+                    t!("MongoConnection.server_status_failed").to_string(),
+                    e,
+                )
+            })
+    }
+
+    async fn db_stats(&self, database_name: &str) -> Result<Document, MongoError> {
+        let client = self.client()?;
+        client
+            .database(database_name)
+            .run_command(doc! { "dbStats": 1 })
+            .await
+            .map_err(|e| {
+                MongoError::command_with_source(
+                    t!("MongoConnection.db_stats_failed").to_string(),
+                    e,
+                )
+            })
+    }
+
+    async fn collection_stats(
+        &self,
+        database_name: &str,
+        collection_name: &str,
+    ) -> Result<Document, MongoError> {
+        let client = self.client()?;
+        client
+            .database(database_name)
+            .run_command(doc! { "collStats": collection_name })
+            .await
+            .map_err(|e| {
+                MongoError::command_with_source(
+                    t!("MongoConnection.collection_stats_failed").to_string(),
+                    e,
+                )
             })
     }
 }

@@ -14,9 +14,11 @@ use gpui_component::{
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputEvent, InputState},
+    label::Label,
     notification::Notification,
     spinner::Spinner,
     tab::{Tab, TabBar},
+    table::{Column, Table, TableDelegate, TableState},
     v_flex,
     WindowsSurfaceLayer,
     layered_level_surface_color,
@@ -58,6 +60,133 @@ struct DocumentItem {
     pretty_json: String,
 }
 
+#[derive(Clone)]
+pub struct DatabaseCollectionItem {
+    pub name: String,
+    pub count: i64,
+    pub size: i64,
+    pub avg_size: i64,
+    pub storage_size: i64,
+    pub index_size: i64,
+}
+
+#[derive(Clone)]
+pub struct MongoDbCollectionsTableDelegate {
+    rows: Vec<DatabaseCollectionItem>,
+}
+
+impl Default for MongoDbCollectionsTableDelegate {
+    fn default() -> Self {
+        Self { rows: Vec::new() }
+    }
+}
+
+impl TableDelegate for MongoDbCollectionsTableDelegate {
+    fn columns_count(&self, _cx: &App) -> usize {
+        5
+    }
+
+    fn rows_count(&self, _cx: &App) -> usize {
+        self.rows.len()
+    }
+
+    fn column(&self, col_ix: usize, _cx: &App) -> Column {
+        match col_ix {
+            0 => Column::new("#", "#").width(px(48.)).resizable(false),
+            1 => Column::new("name", t!("MongoCollection.collection_name_header")).width(px(240.)),
+            2 => Column::new("count", t!("MongoCollection.document_count_header")).width(px(120.)),
+            3 => Column::new("size", t!("MongoCollection.data_size_header")).width(px(120.)),
+            4 => Column::new("index", t!("MongoCollection.index_size_header")).width(px(120.)),
+            _ => Column::new("col", "col"),
+        }
+    }
+
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let column = self.column(col_ix, cx);
+        let is_last = col_ix == self.columns_count(cx) - 1;
+        div()
+            .when(!is_last, |el| el.w(column.width))
+            .when(is_last, |el| el.flex_1())
+            .h_full()
+            .px_2()
+            .flex()
+            .items_center()
+            .text_sm()
+            .text_color(cx.theme().table_head_foreground)
+            .child(column.name.clone())
+    }
+
+    fn render_tr(
+        &mut self,
+        row_ix: usize,
+        _window: &mut Window,
+        _cx: &mut Context<TableState<Self>>,
+    ) -> gpui::Stateful<gpui::Div> {
+        div().id(row_ix)
+    }
+
+    fn render_td(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let Some(item) = self.rows.get(row_ix) else {
+            return div().size_full().into_any_element();
+        };
+
+        if col_ix == 0 {
+            return div()
+                .size_full()
+                .px_2()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child((row_ix + 1).to_string())
+                .into_any_element();
+        }
+
+        let cell = match col_ix {
+            1 => h_flex()
+                .size_full()
+                .gap_2()
+                .items_center()
+                .child(
+                    Icon::new(IconName::FolderOpen)
+                        .with_size(Size::Small)
+                        .text_color(cx.theme().muted_foreground),
+                )
+                .child(Label::new(item.name.clone()))
+                .into_any_element(),
+            2 => div()
+                .size_full()
+                .px_2()
+                .text_sm()
+                .child(format!("{}", item.count))
+                .into_any_element(),
+            3 => div()
+                .size_full()
+                .px_2()
+                .text_sm()
+                .child(format_size(item.size))
+                .into_any_element(),
+            4 => div()
+                .size_full()
+                .px_2()
+                .text_sm()
+                .child(format_size(item.index_size))
+                .into_any_element(),
+            _ => div().size_full().into_any_element(),
+        };
+        cell
+    }
+}
+
 #[derive(Default, Clone)]
 struct FieldStats {
     count: usize,
@@ -93,6 +222,18 @@ fn truncate_summary(value: &str, max_len: usize) -> String {
         summary.push_str("...");
     }
     summary
+}
+
+fn format_size(bytes: i64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
 }
 
 fn parse_optional_document(text: &str, label: &str) -> Result<Option<Document>, MongoError> {
@@ -345,9 +486,29 @@ pub struct CollectionView {
     list_scroll_handle: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
     focus_handle: FocusHandle,
+    database_collections: Vec<DatabaseCollectionItem>,
+    db_collections_loading: bool,
+    db_collections_error: Option<String>,
+    table: Entity<TableState<MongoDbCollectionsTableDelegate>>,
 }
 
 impl CollectionView {
+    pub fn table_entity(&self) -> Entity<TableState<MongoDbCollectionsTableDelegate>> {
+        self.table.clone()
+    }
+
+    pub fn database_collection_at(&self, index: usize) -> Option<&DatabaseCollectionItem> {
+        self.database_collections.get(index)
+    }
+
+    pub fn current_connection_id(&self) -> Option<&String> {
+        self.connection_id.as_ref()
+    }
+
+    pub fn current_database_name(&self) -> Option<&String> {
+        self.database_name.as_ref()
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -447,6 +608,11 @@ impl CollectionView {
                 .soft_wrap(false)
                 .placeholder(t!("MongoCollection.validation_placeholder").to_string())
         });
+        let table = cx.new(|cx| {
+            TableState::new(MongoDbCollectionsTableDelegate::default(), window, cx)
+                .row_selectable(true)
+                .cell_selectable(false)
+        });
         let mut subscriptions = Vec::new();
         let mut subscribe_enter = |subscriptions: &mut Vec<Subscription>,
                                    input: &Entity<InputState>| {
@@ -515,6 +681,10 @@ impl CollectionView {
             list_scroll_handle: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
             focus_handle: cx.focus_handle(),
+            database_collections: Vec::new(),
+            db_collections_loading: false,
+            db_collections_error: None,
+            table,
         }
     }
 
@@ -550,6 +720,124 @@ impl CollectionView {
         self.validation_error = None;
         self.pending_validation_value = Some("{}".to_string());
         self.run_query(cx);
+    }
+
+    pub fn load_database_collections(
+        &mut self,
+        connection_id: String,
+        database_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.connection_id = Some(connection_id.clone());
+        self.database_name = Some(database_name.clone());
+        self.collection_name = None;
+        self.database_collections.clear();
+        self.db_collections_loading = true;
+        self.db_collections_error = None;
+        self.documents.clear();
+        self.selected_index = None;
+        self.total_count = None;
+        cx.notify();
+
+        let global_state = cx.global::<GlobalMongoState>().clone();
+        let database_name_for_list = database_name.clone();
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let collection_names = Tokio::spawn_result(cx, {
+                let connection_id = connection_id.clone();
+                let database_name = database_name_for_list.clone();
+                let global_state = global_state.clone();
+                async move {
+                    let connection = global_state
+                        .get_connection(&connection_id)
+                        .ok_or_else(|| anyhow::anyhow!(t!("MongoTree.connection_missing")))?;
+                    let guard = connection.read().await;
+                    guard
+                        .list_collections(&database_name)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("{}", e))
+                }
+            })
+            .await;
+
+            let names = match collection_names {
+                Ok(names) => names,
+                Err(e) => {
+                    _ = this.update(cx, |view, cx| {
+                        view.db_collections_loading = false;
+                        view.db_collections_error = Some(e.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+
+            let mut items = Vec::with_capacity(names.len());
+            for name in names {
+                let stats = Tokio::spawn_result(cx, {
+                    let connection_id = connection_id.clone();
+                    let database_name = database_name.clone();
+                    let global_state = global_state.clone();
+                    let name = name.clone();
+                    async move {
+                        let connection = global_state
+                            .get_connection(&connection_id)
+                            .ok_or_else(|| anyhow::anyhow!(t!("MongoTree.connection_missing")))?;
+                        let guard = connection.read().await;
+                        guard
+                            .collection_stats(&database_name, &name)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{}", e))
+                    }
+                })
+                .await;
+
+                let doc_count = stats
+                    .as_ref()
+                    .ok()
+                    .and_then(|d| d.get_i64("count").ok())
+                    .unwrap_or(0);
+                let size = stats
+                    .as_ref()
+                    .ok()
+                    .and_then(|d| d.get_i64("size").ok())
+                    .unwrap_or(0);
+                let avg_size = stats
+                    .as_ref()
+                    .ok()
+                    .and_then(|d| d.get_i64("avgObjSize").ok())
+                    .unwrap_or(0);
+                let storage_size = stats
+                    .as_ref()
+                    .ok()
+                    .and_then(|d| d.get_i64("storageSize").ok())
+                    .unwrap_or(0);
+                let index_size = stats
+                    .as_ref()
+                    .ok()
+                    .and_then(|d| d.get_i64("totalIndexSize").ok())
+                    .unwrap_or(0);
+
+                items.push(DatabaseCollectionItem {
+                    name,
+                    count: doc_count,
+                    size,
+                    avg_size,
+                    storage_size,
+                    index_size,
+                });
+            }
+
+            _ = this.update(cx, |view, cx| {
+                view.db_collections_loading = false;
+                view.database_collections = items.clone();
+                view.table.update(cx, |state, cx| {
+                    state.delegate_mut().rows = items;
+                    state.refresh(cx);
+                });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn read_query_inputs(&self, cx: &mut Context<Self>) -> Result<QueryInputs, MongoError> {
@@ -1840,6 +2128,7 @@ impl CollectionView {
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let title = match (&self.database_name, &self.collection_name) {
             (Some(database), Some(collection)) => format!("{} / {}", database, collection),
+            (Some(database), None) => database.clone(),
             _ => t!("MongoCollection.select_collection").to_string(),
         };
 
@@ -2491,6 +2780,67 @@ impl CollectionView {
             .into_any_element()
     }
 
+    fn render_database_collections(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_bg = content_section_bg(cx);
+
+        if self.db_collections_loading {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Spinner::new())
+                .into_any_element();
+        }
+
+        if let Some(error) = &self.db_collections_error {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(cx.theme().danger)
+                .child(error.clone())
+                .into_any_element();
+        }
+
+        let item_count = self.database_collections.len();
+        if item_count == 0 {
+            return self.render_empty_state(t!("MongoCollection.no_collections").as_ref(), cx);
+        }
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .gap_2()
+            .child(
+                h_flex()
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .bg(section_bg)
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child(t!("MongoCollection.collections_title", count = item_count).to_string()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .rounded(px(6.0))
+                    .child(Table::new(&self.table)),
+            )
+            .into_any_element()
+    }
+
     fn render_document_row(
         &mut self,
         index: usize,
@@ -2968,8 +3318,12 @@ impl Render for CollectionView {
         self.apply_pending_reload(cx);
 
         let body = if self.collection_name.is_none() {
-            self.render_empty_state(t!("MongoCollection.select_collection_prompt").as_ref(), cx)
-                .into_any_element()
+            if self.database_name.is_some() {
+                self.render_database_collections(cx).into_any_element()
+            } else {
+                self.render_empty_state(t!("MongoCollection.select_collection_prompt").as_ref(), cx)
+                    .into_any_element()
+            }
         } else {
             match self.active_tab {
                 TAB_DOCUMENTS => self.render_documents_tab(cx).into_any_element(),
