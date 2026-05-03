@@ -17,6 +17,7 @@ pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
 use crate::{
+    settings::current_settings,
     theme::{TerminalTheme, TerminalColors},
     TerminalHighlightRule,
 };
@@ -171,13 +172,14 @@ impl TerminalSidebar {
         let colors = initial_theme.colors();
         let has_file_manager = stored_connection.is_some();
         let auto_show_server_monitor = ServerMonitorPanel::load_monitor_enabled(connection_id);
+        let settings = current_settings(cx);
         let settings_panel = cx.new(|cx| {
             SettingsPanel::new(
                 initial_theme,
                 has_file_manager,
-                true,
-                true,
-                true,
+                settings.auto_copy,
+                settings.enable_autocomplete,
+                settings.middle_click_paste,
                 sync_path_enabled,
                 window,
                 cx,

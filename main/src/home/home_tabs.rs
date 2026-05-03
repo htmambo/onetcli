@@ -185,20 +185,22 @@ impl HomePage {
             }
         });
 
-        // 从 AppSettings 读取所有终端设置并应用
+        // 从 AppSettings 读取终端外观设置，从 TerminalSettings 读取行为开关
         if cx.has_global::<AppSettings>() {
-            let settings = AppSettings::global(cx);
-            let font_size = settings.terminal_font_size as f32;
-            let font_family = settings.terminal_font_family.clone();
-            let font_ligatures = settings.terminal_font_ligatures;
-            let line_height_scale = settings.terminal_line_height_scale as f32;
-            let auto_copy = settings.terminal_auto_copy;
-            let autocomplete_enabled = settings.terminal_enable_autocomplete;
-            let middle_click_paste = settings.terminal_middle_click_paste;
-            let sync_path = settings.terminal_sync_path_with_terminal;
-            let cursor_blink = settings.terminal_cursor_blink;
-            let confirm_multiline = settings.terminal_confirm_multiline_paste;
-            let confirm_high_risk = settings.terminal_confirm_high_risk_command;
+            let app_settings = AppSettings::global(cx);
+            let font_size = app_settings.terminal_font_size as f32;
+            let font_family = app_settings.terminal_font_family.clone();
+            let font_ligatures = app_settings.terminal_font_ligatures;
+            let line_height_scale = app_settings.terminal_line_height_scale as f32;
+            let cursor_blink = app_settings.terminal_cursor_blink;
+            let confirm_multiline = app_settings.terminal_confirm_multiline_paste;
+            let confirm_high_risk = app_settings.terminal_confirm_high_risk_command;
+
+            let term_settings = terminal_view::current_settings(cx);
+            let auto_copy = term_settings.auto_copy;
+            let autocomplete_enabled = term_settings.enable_autocomplete;
+            let middle_click_paste = term_settings.middle_click_paste;
+            let sync_path = term_settings.sync_path_with_terminal;
 
             terminal_view.update(cx, |view, cx| {
                 view.apply_terminal_settings(
@@ -254,6 +256,14 @@ impl HomePage {
                     TerminalViewEvent::AutoCopyChanged { enabled } => {
                         cx.update_global::<AppSettings, _>(|s, _| {
                             s.terminal_auto_copy = *enabled;
+                            s.save();
+                        });
+                        let settings = AppSettings::global(cx).clone();
+                        this.apply_terminal_settings_to_all(&settings, window, cx);
+                    }
+                    TerminalViewEvent::AutocompleteChanged { enabled } => {
+                        cx.update_global::<AppSettings, _>(|s, _| {
+                            s.terminal_enable_autocomplete = *enabled;
                             s.save();
                         });
                         let settings = AppSettings::global(cx).clone();
