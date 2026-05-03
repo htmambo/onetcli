@@ -86,6 +86,7 @@ pub enum TerminalViewEvent {
     FontFamilyChanged { family: String },
     LineHeightScaleChanged { scale: f32 },
     AutoCopyChanged { enabled: bool },
+    AutocompleteChanged { enabled: bool },
     MiddleClickPasteChanged { enabled: bool },
     SyncPathChanged { enabled: bool },
     CursorBlinkChanged { enabled: bool },
@@ -2149,6 +2150,7 @@ impl TerminalView {
         let _ = update_settings(cx, move |settings| {
             settings.enable_autocomplete = enabled;
         });
+        cx.emit(TerminalViewEvent::AutocompleteChanged { enabled });
     }
 
     pub fn set_middle_click_paste(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -2408,7 +2410,9 @@ impl TerminalView {
         }
 
         if self.history_prompt.mode() == HistoryPromptMode::Search {
-            if !modifiers.control && !modifiers.alt && !modifiers.platform {
+            if !self.history_prompt_enabled(cx) {
+                self.hide_history_prompt_dropdown();
+            } else if !modifiers.control && !modifiers.alt && !modifiers.platform {
                 match key {
                     "up" if self.try_navigate_history_prompt(false, cx) => return,
                     "down" if self.try_navigate_history_prompt(true, cx) => return,

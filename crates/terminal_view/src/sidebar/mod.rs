@@ -16,7 +16,11 @@ pub use quick_command_panel::QuickCommandPanel;
 pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
-use crate::{theme::TerminalTheme, TerminalHighlightRule};
+use crate::{
+    settings::current_settings,
+    theme::TerminalTheme,
+    TerminalHighlightRule,
+};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -165,13 +169,14 @@ impl TerminalSidebar {
     ) -> Self {
         let has_file_manager = stored_connection.is_some();
         let auto_show_server_monitor = ServerMonitorPanel::load_monitor_enabled(connection_id);
+        let settings = current_settings(cx);
         let settings_panel = cx.new(|cx| {
             SettingsPanel::new(
                 initial_theme,
                 has_file_manager,
-                true,
-                true,
-                true,
+                settings.auto_copy,
+                settings.enable_autocomplete,
+                settings.middle_click_paste,
                 sync_path_enabled,
                 window,
                 cx,
