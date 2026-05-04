@@ -391,10 +391,10 @@ Settings:
     en: Search...
     zh-CN: 搜索...
     zh-HK: 搜尋...
-  search_hint:
-    en: Press Enter for next, Shift+Enter for previous
-    zh-CN: 回车搜索下一个，Shift+回车搜索上一个
-    zh-HK: 按 Enter 搜尋下一個，Shift+Enter 搜尋上一個
+  search_shortcuts_hint:
+    en: Press ⌘G for next, ⇧⌘G for previous
+    zh-CN: 按 ⌘G 跳到下一个，按 ⇧⌘G 跳到上一个
+    zh-HK: 按 ⌘G 跳到下一個，按 ⇧⌘G 跳到上一個
   font_size:
     en: Font Size
     zh-CN: 字号
