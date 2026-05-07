@@ -284,7 +284,15 @@ pub fn open_popup_window_with_should_close<F, E, H>(
         });
         let window_opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(window_bounds)),
-            titlebar: Some(TitleBar::title_bar_options()),
+            // Dialog windows on macOS are created as sheets (beginSheet) which
+            // don't have standard window buttons — passing a titlebar with
+            // traffic_light_position causes a nil pointer dereference in
+            // MacWindowState::move_traffic_light.
+            titlebar: if matches!(kind, WindowKind::Dialog) {
+                None
+            } else {
+                Some(TitleBar::title_bar_options())
+            },
             window_min_size: Some(min_size),
             kind,
             window_background: gpui::WindowBackgroundAppearance::Transparent,
