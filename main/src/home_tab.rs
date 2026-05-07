@@ -10,12 +10,11 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div, px,
 };
-use gpui_component::button::ButtonVariant;
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
     StyledExt, WindowExt, app_style,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariant},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
