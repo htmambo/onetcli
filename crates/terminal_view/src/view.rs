@@ -47,7 +47,8 @@ use one_core::connection_restore::{
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
-use one_core::storage::models::{ActiveConnections, StoredConnection};
+use one_core::storage::ActiveConnections;
+use one_core::storage::models::StoredConnection;
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use one_core::RunningState;
 use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
