@@ -203,12 +203,6 @@ impl Render for DatabaseSidebar {
         div()
             .h_full()
             .flex_shrink_0()
-<<<<<<< HEAD
-            .when(self.active_panel.is_none(), |this| {
-                this.child(self.render_toolbar(window, cx))
-            })
-=======
->>>>>>> origin/dev
             .when_some(self.active_panel, |this, panel| {
                 this.w_full().child(
                     v_flex()

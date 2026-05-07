@@ -1,7 +1,6 @@
 use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
 use gpui::{AnyView, AnyWindowHandle, AppContext, Context, Entity, Window};
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
-use one_core::cloud_sync::get_cached_team_options;
 use one_core::storage::{ConnectionType, DatabaseType};
 use redis_view::{RedisFormWindow, RedisFormWindowConfig};
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig, SshFormWindow, SshFormWindowConfig};
@@ -82,7 +81,6 @@ fn build_database_form(
             external_driver_id: external_driver_id.clone(),
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         })
     }) else {
         return NewConnectionFormResult::Blocked;
@@ -114,7 +112,6 @@ fn build_ssh_form(
         Some(SshFormWindowConfig {
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         })
     }) else {
         return NewConnectionFormResult::Blocked;
@@ -143,7 +140,6 @@ fn build_redis_form(
         Some(RedisFormWindowConfig {
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         })
     }) else {
         return NewConnectionFormResult::Blocked;
@@ -172,7 +168,6 @@ fn build_mongo_form(
         Some(MongoFormWindowConfig {
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         })
     }) else {
         return NewConnectionFormResult::Blocked;
@@ -201,7 +196,6 @@ fn build_serial_form(
         Some(SerialFormWindowConfig {
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
         })
     }) else {
         return NewConnectionFormResult::Blocked;

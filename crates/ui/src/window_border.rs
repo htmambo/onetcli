@@ -129,12 +129,7 @@ impl RenderOnce for WindowBorder {
         if prefers_system_frame {
             window.set_client_inset(px(0.0));
         } else if linux_uses_wayland_session() {
-            window.set_client_inset_edges(Edges {
-                top: px(0.0),
-                right: client_inset,
-                bottom: client_inset,
-                left: client_inset,
-            });
+            window.set_client_inset(client_inset);
         } else {
             window.set_client_inset(client_inset);
         }

@@ -6,7 +6,7 @@ use gpui::{
 };
 use gpui_component::{
     app_style,
-    ActiveTheme, Disableable, Sizable, Size, TitleBar,
+    ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -15,13 +15,13 @@ use gpui_component::{
     select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
+    v_flex,
 };
 use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::certificate_notifier::{
     get_notifier as get_certificate_notifier, CertificateDataEvent,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
@@ -32,13 +32,8 @@ use one_core::storage::{
 use rust_i18n::t;
 use ssh::{
     format_connection_progress_message, JumpServerConnectConfig, ProxyConnectConfig, ProxyType,
-    RusshClient, SshAuth, SshClient, SshConnectConfig, SshConnectionStage,
+    RusshClient, SshAuth, SshConnectConfig, SshConnectionStage,
 };
-use crate::ssh_form_mfa::{
-    CapturedMfaRequest, FormMfaPrompt, FormMfaRequest, JumpServerMfaResponder,
-    form_mfa_request_from_keyboard_interactive, is_jump_mfa_required_error,
-};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub struct SshFormWindowConfig {
@@ -672,7 +667,6 @@ impl SshFormWindow {
                     key_path: certificate.key_path().unwrap_or("").to_string(),
                     passphrase: certificate.passphrase().map(|s| s.to_string()),
                 },
-            }
             }
         } else {
             match self.auth_method {

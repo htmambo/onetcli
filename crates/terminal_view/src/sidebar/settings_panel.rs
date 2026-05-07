@@ -19,8 +19,8 @@ use gpui_component::{
     notification::Notification,
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
-    try_parse_color, v_flex, ActiveTheme, Colorize, Icon, IconName, Sizable, Size,
-    Theme as UiTheme, WindowExt,
+    try_parse_color, v_flex,
+    Theme as UiTheme,
 };
 use rust_i18n::t;
 use std::time::{SystemTime, UNIX_EPOCH};

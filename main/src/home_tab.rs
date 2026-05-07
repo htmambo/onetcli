@@ -11,14 +11,16 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div, px,
 };
 use gpui_component::button::ButtonVariant;
+use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
     StyledExt, WindowExt, app_style,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
     list::{List, ListState},
+    menu::PopupMenuItem,
     popover::Popover,
     tokens::Radius,
     tooltip::Tooltip,
@@ -53,14 +55,11 @@ use crate::connection_restore::{
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
-use crate::home::workspace_form_window::{WorkspaceFormWindow, WorkspaceFormWindowConfig};
-use crate::license::{get_license_service, is_feature_enabled, show_upgrade_dialog};
 use crate::new_connection::NewConnectionWindow;
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
     GlobalCurrentUser,
 };
-use crate::user_avatar::render_user_avatar;
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestoreSnapshot};
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
@@ -1920,6 +1919,7 @@ impl HomePage {
 
                 let config = ConnectionFormWindowConfig {
                     db_type,
+                    external_driver_id: None,
                     editing_connection: Some(connection),
                     workspaces: self.workspaces.clone(),
                 };
@@ -2021,8 +2021,6 @@ impl HomePage {
         .detach();
     }
 
-    }
-
     pub(crate) fn show_connection_quick_open(
         &mut self,
         window: &mut Window,
@@ -2072,13 +2070,12 @@ impl HomePage {
     ) {
         self.editing_connection_id = None;
         let parent = cx.entity();
-        self.editing_connection_id = None;
-        let parent = cx.entity();
         let parent_window = window.window_handle();
         open_popup_window(
+            window,
             PopupWindowOptions::new(t!("Home.new_connection").to_string()).size(1100.0, 700.0),
-            move |window, cx| {
-                cx.new(|cx| NewConnectionWindow::new(parent, parent_window, window, cx))
+            move |win, app| {
+                app.new(|app| NewConnectionWindow::new(parent, parent_window, win, app))
             },
             cx,
         );
@@ -2750,7 +2747,14 @@ impl HomePage {
                                             .on_click(window.listener_for(
                                                 &view_for_new_connection,
                                                 move |this, _, window, cx| {
-                                                    this.show_workspace_form(None, window, cx);
+                                                    let parent = cx.entity();
+                                                    show_workspace_dialog(
+                                                        parent,
+                                                        None,
+                                                        String::new(),
+                                                        window,
+                                                        cx,
+                                                    );
                                                 },
                                             )),
                                     )
@@ -4725,8 +4729,11 @@ impl HomePage {
                                         .ghost()
                                         .tooltip(t!("Workspace.edit"))
                                         .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.show_workspace_form(
+                                            let parent = cx.entity();
+                                            show_workspace_dialog(
+                                                parent,
                                                 Some(workspace_id),
+                                                String::new(),
                                                 window,
                                                 cx,
                                             );
@@ -6264,6 +6271,18 @@ fn compare_workspaces(
 /// 生成复制连接的唯一名称
 fn generate_duplicate_name(original_name: &str, existing_names: &HashSet<String>) -> String {
     let base_name = format!("{} (副本)", original_name);
+    if !existing_names.contains(&base_name) {
+        return base_name;
+    }
+    let mut counter = 2;
+    loop {
+        let name = format!("{} ({})", base_name, counter);
+        if !existing_names.contains(&name) {
+            return name;
+        }
+        counter += 1;
+    }
+}
 
 fn compare_connections(
     a: &StoredConnection,

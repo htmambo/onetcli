@@ -2809,7 +2809,6 @@ impl Render for KeyValueView {
 
         v_flex()
             .size_full()
-            //.bg(cx.theme().background)
             .when(matches!(self.load_state, LoadState::Empty), |this| {
                 this.child(self.render_empty_state(cx))
             })

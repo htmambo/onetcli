@@ -6,7 +6,7 @@ use gpui::prelude::*;
 use gpui::{
     App, AppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, ParentElement, Render,
-    SharedString, Styled, UniformListScrollHandle, Window, div, px, uniform_list,
+    ScrollStrategy, SharedString, Styled, UniformListScrollHandle, Window, div, px, uniform_list,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, WindowExt,

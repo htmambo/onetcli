@@ -10,7 +10,7 @@ use gpui::{
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListState};
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
@@ -551,7 +551,7 @@ fn should_render_inline_drag_spacer(
     show_window_controls && (is_windows || is_linux)
 }
 
-const TAB_REORDER_DRAG_THRESHOLD: f64 = 6.0;
+
 const TAB_ITEM_GAP: Pixels = px(8.0);
 const TAB_HORIZONTAL_PADDING: Pixels = px(24.0);
 const TAB_ICON_WIDTH: Pixels = px(16.0);
@@ -803,17 +803,15 @@ impl RenderOnce for TabListItem {
             .when(!selected, |el| {
                 el.hover(|style| style.bg(cx.theme().list_hover))
             })
-            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
-            .on_drag(
+            .on_drag::<DragTab, DragTab>(
                 DragTab::new(tab_index, drag_title),
-                |drag, _, window, cx| {
-                    window.prevent_default();
+                |drag, _style, _window, cx| {
                     cx.stop_propagation();
                     cx.new(|_| drag.clone())
                 },
             )
-            .drag_over::<DragTab>(move |el, _, _, _cx| {
-                el.border_t_2().border_color(drag_border_color)
+            .drag_over::<DragTab>(move |style, _, _, _cx| {
+                style.border_t_2().border_color(drag_border_color)
             })
             .on_drop(
                 window.listener_for(&container, move |this, drag: &DragTab, window, cx| {
@@ -2661,14 +2659,13 @@ impl TabContainer {
                                 this.set_active_index(idx, window, cx);
                             }))
                             .cursor_grab()
-                            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
-                            .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
+                            .on_drag::<DragTab, DragTab>(DragTab::new(idx, title.clone()), |drag, _style, _window, cx| {
                                 cx.stop_propagation();
                                 cx.new(|_| drag.clone())
                             })
                             // on_drop 和 drag_over 在所有 tab 上注册，接收来自其他 tab 的 drop 事件
-                            .drag_over::<DragTab>(move |el, _, _, _cx| {
-                                el.border_l_2().border_color(drag_border_color)
+                            .drag_over::<DragTab>(move |style, _, _, _cx| {
+                                style.border_l_2().border_color(drag_border_color)
                             })
                             .on_drop(cx.listener(move |this, drag: &DragTab, window, cx| {
                                 let from_idx = drag.tab_index;
@@ -2749,7 +2746,7 @@ impl TabContainer {
                                         }),
                                 )
                             })
-                            .context_menu(move |menu, window, cx| {
+                            .context_menu(move |menu: PopupMenu, window: &mut Window, cx| {
                                 let view_for_menu = view_clone.clone();
                                 let (tab_count, closeable, is_ssh_tab, tab_id) = {
                                     let view = view_for_menu.read(cx);
@@ -2772,7 +2769,7 @@ impl TabContainer {
                                                 )
                                                 .on_click(window.listener_for(
                                                     &view_for_menu,
-                                                    move |_this, _, _window, cx| {
+                                                    move |_this: &mut TabContainer, _, _window, cx| {
                                                         cx.emit(
                                                             TabContainerEvent::OpenSftpRequested {
                                                                 tab_id: tab_id.clone(),
@@ -2794,7 +2791,7 @@ impl TabContainer {
                                         .disabled(!closeable)
                                         .on_click(window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_tab(idx, window, cx).detach();
                                             },
                                         )),
@@ -2806,7 +2803,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_all_tabs(window, cx).detach();
                                             },
                                         ),
@@ -2820,7 +2817,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_other_tabs(idx, window, cx).detach();
                                             },
                                         ),
@@ -2834,7 +2831,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_tabs_to_left(idx, window, cx).detach();
                                             },
                                         ),
@@ -2848,7 +2845,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_tabs_to_right(idx, window, cx).detach();
                                             },
                                         ),

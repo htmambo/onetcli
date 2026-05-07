@@ -60,7 +60,7 @@ impl ErCardTheme {
             header_background: ui.muted,
             header_text: ui.foreground,
             header_border: ui.border,
-            row_odd: ui.table,
+            row_odd: ui.muted,
             row_even: ui.background,
             row_border: ui.border,
             column_text: ui.foreground,

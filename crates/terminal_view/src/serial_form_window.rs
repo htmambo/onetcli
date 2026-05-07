@@ -5,15 +5,15 @@ use gpui::{
 };
 use gpui_component::{
     app_style,
-    ActiveTheme, Disableable, IndexPath, Sizable, TitleBar,
+    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     select::{Select, SelectDelegate, SelectItem, SelectState},
-    v_flex, ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
+    v_flex,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
+use one_core::cloud_sync::GlobalCloudUser;
 use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
