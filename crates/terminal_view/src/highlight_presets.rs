@@ -183,7 +183,7 @@ pub fn builtin_highlight_presets() -> Vec<HighlightPreset> {
                 preset_rule(
                     "time_and_numbers",
                     "clock",
-                    r"\b:?\d{2}:\d{2}:\d{2}\b",
+                    r"\b:?\d{2}:\d{2}(:\d{2})?\b",
                     Some("#22d3ee"),
                     None,
                     48,
@@ -192,7 +192,7 @@ pub fn builtin_highlight_presets() -> Vec<HighlightPreset> {
                 preset_rule(
                     "time_and_numbers",
                     "quantity",
-                    r"\b\d+(?:\.\d+)?(?:ms|s|m|h|KB|MB|GB|TB|%)\b",
+                    r"\b\d+(?:\.\d+)?(?:ms|s|m|h|K|KB|MB|GB|TB|%)\b",
                     Some("#f59e0b"),
                     None,
                     36,

@@ -18,8 +18,9 @@ use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
+use one_core::storage::ActiveConnections;
 use one_core::storage::models::{
-    ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
+    ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
 use std::cell::Cell;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

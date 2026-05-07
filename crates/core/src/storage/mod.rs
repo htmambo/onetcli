@@ -15,6 +15,9 @@ pub use models::*;
 pub use quick_command::*;
 pub use repository::*;
 
+// 从 connection_state 重新导出，确保全局状态类型唯一
+pub use crate::connection_state::ActiveConnections;
+
 pub fn init(cx: &mut App) {
     cx.set_global(ActiveConnections::new());
     manager::init(cx);

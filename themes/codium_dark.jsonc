@@ -154,7 +154,7 @@
         // 侧边栏强调色文字
         "sidebar.accent.foreground": "#785485",
         // 侧边栏背景
-        "sidebar.background": "#4d056766",
+        "sidebar.background": "#4d325733",
         // 侧边栏边框
         "sidebar.border": "#230431",
         // 侧边栏文字
@@ -254,7 +254,7 @@
 
         // === 基础色板 ===
         // 基础蓝色
-        "base.blue": "#582572",
+        "base.blue": "#c886e9",
         // 基础浅蓝色
         "base.blue.light": "#7a4a9a",
         // 基础青色
