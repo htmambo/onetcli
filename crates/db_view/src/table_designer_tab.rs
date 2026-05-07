@@ -3287,6 +3287,7 @@ mod tests {
             DatabaseType::MSSQL => Box::new(MsSqlPlugin::new()),
             DatabaseType::Oracle => Box::new(OraclePlugin::new()),
             DatabaseType::ClickHouse => Box::new(ClickHousePlugin::new()),
+            DatabaseType::External => Box::new(MySqlPlugin::new()),
         }
     }
 
@@ -3344,6 +3345,7 @@ mod tests {
                     "ClickHouse 应使用 RENAME COLUMN: {sql}"
                 );
             }
+            _ => {}
         }
     }
 

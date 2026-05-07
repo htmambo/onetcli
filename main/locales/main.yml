@@ -66,6 +66,10 @@ Common:
     en: Retry
     zh-CN: 重试
     zh-HK: 重試
+  next:
+    en: Next
+    zh-CN: 下一步
+    zh-HK: 下一步
 
 # 首页
 Home:

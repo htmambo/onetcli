@@ -11,7 +11,7 @@ use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     kbd::Kbd, ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
-    Theme as UiTheme, WindowExt,
+    Theme as UiTheme, WindowExt, h_flex, v_flex,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -23,22 +23,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::addon::{
-    register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
-    TerminalAddonFrameContext, TerminalAddonMouseContext,
+    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
+    TerminalAddonMouseContext, register_default_addons,
 };
 use crate::cd_completion::{
-    build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
+    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
 };
 use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
 use crate::settings::{
-    current_settings, update_settings, GlobalTerminalSettings, TerminalHighlightRule,
-    TerminalSettings, TerminalSettingsEvent,
+    GlobalTerminalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
+    current_settings, update_settings,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
 use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE,
-    MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    TerminalTheme, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE, FOLLOW_APP_THEME_NAME,
+    MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    default_font_fallbacks, default_monospace_font,
 };
 use gpui::AnyWindowHandle;
 use one_core::connection_restore::{
@@ -46,20 +47,18 @@ use one_core::connection_restore::{
     LocalTerminalRestoreState, SshTerminalRestoreState,
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
-use one_core::serde_json::Value as JsonValue;
-use one_core::storage::ActiveConnections;
-use one_core::storage::models::StoredConnection;
+use one_core::storage::models::{ActiveConnections, StoredConnection};
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use one_core::RunningState;
 use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
+use terminal::LocalConfig;
 use terminal::terminal::{
     ConnectionState, SshSessionManager, Terminal, TerminalConnectionKind, TerminalModelEvent,
     TerminalScrollProxy, TerminalScrollSnapshot, DEFAULT_RECOVERY_SCROLLBACK_LINES,
 };
-use terminal::LocalConfig;
 use tokio::sync::Mutex;
 
 actions!(
@@ -2236,29 +2235,31 @@ impl TerminalView {
             terminal.reconnect(cx);
         });
 
-        cx.spawn(async move |this, cx| loop {
-            let state = match this.update(cx, |this, cx| {
-                this.terminal.read(cx).connection_state().clone()
-            }) {
-                Ok(state) => state,
-                Err(_) => break,
-            };
+        cx.spawn(async move |this, cx| {
+            loop {
+                let state = match this.update(cx, |this, cx| {
+                    this.terminal.read(cx).connection_state().clone()
+                }) {
+                    Ok(state) => state,
+                    Err(_) => break,
+                };
 
-            match state {
-                ConnectionState::Connected => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.sidebar.update(cx, |sidebar, cx| {
-                            sidebar.reconnect_file_manager(working_dir.clone(), cx);
-                            sidebar.reconnect_server_monitor(cx);
+                match state {
+                    ConnectionState::Connected => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.sidebar.update(cx, |sidebar, cx| {
+                                sidebar.reconnect_file_manager(working_dir.clone(), cx);
+                                sidebar.reconnect_server_monitor(cx);
+                            });
                         });
-                    });
-                    break;
-                }
-                ConnectionState::Disconnected { .. } => break,
-                ConnectionState::Connecting => {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(100))
-                        .await;
+                        break;
+                    }
+                    ConnectionState::Disconnected { .. } => break,
+                    ConnectionState::Connecting => {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                    }
                 }
             }
         })
@@ -4438,14 +4439,15 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
-        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
-        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
+        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
+        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
+        history_prompt_dropdown_origin, history_prompt_overlay_bounds,
+        multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
+        trim_recovery_content_to_recent_chars,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;

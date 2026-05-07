@@ -8,6 +8,8 @@ mod app_init;
 mod connection_restore;
 mod home;
 mod home_tab;
+mod license;
+pub mod new_connection;
 mod onetcli_app;
 mod saved_connection_picker;
 mod setting_tab;

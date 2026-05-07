@@ -200,14 +200,17 @@ impl Render for DatabaseSidebar {
         let border_color = cx.theme().border;
         let bg_color = cx.theme().muted;
 
-        gpui_component::h_flex()
+        div()
             .h_full()
             .flex_shrink_0()
+<<<<<<< HEAD
             .when(self.active_panel.is_none(), |this| {
                 this.child(self.render_toolbar(window, cx))
             })
+=======
+>>>>>>> origin/dev
             .when_some(self.active_panel, |this, panel| {
-                this.flex_1().child(
+                this.w_full().child(
                     v_flex()
                         .size_full()
                         .border_l_1()
@@ -215,6 +218,9 @@ impl Render for DatabaseSidebar {
                         .bg(bg_color)
                         .child(self.render_panel_content(panel, window, cx)),
                 )
+            })
+            .when(!self.is_panel_visible(), |this| {
+                this.child(self.render_toolbar(window, cx))
             })
     }
 }

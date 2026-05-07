@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
@@ -12,7 +12,7 @@ use ssh::{
     SshSessionManager,
 };
 
-use crate::osc::{extract_osc_events, OscEvent};
+use crate::osc::{OscEvent, extract_osc_events};
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
 use crate::shell_integration::{
     embedded_shell_integration_script, normalized_shell_integration_script,
@@ -714,7 +714,7 @@ impl SshBackend {
 mod tests {
     use super::*;
     use crate::osc::parse_osc_payload;
-    use anyhow::{anyhow, Result};
+    use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use ssh::SshConnectConfig;
     use std::collections::VecDeque;
