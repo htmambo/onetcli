@@ -11,7 +11,7 @@ use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     kbd::Kbd, ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
-    Theme as UiTheme, WindowExt, h_flex, v_flex,
+    Theme as UiTheme, WindowExt,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -37,9 +37,8 @@ use crate::settings::{
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
 use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE, FOLLOW_APP_THEME_NAME,
-    MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
-    default_font_fallbacks, default_monospace_font,
+    TerminalTheme, DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE,
+    MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
 };
 use gpui::AnyWindowHandle;
 use one_core::connection_restore::{

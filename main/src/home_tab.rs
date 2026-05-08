@@ -14,7 +14,7 @@ use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
     StyledExt, WindowExt, app_style,
-    button::{Button, ButtonCustomVariant, ButtonVariant},
+    button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -1714,62 +1714,6 @@ impl HomePage {
         }
     }
 
-    /// 复制连接，创建一个副本
-    fn duplicate_connection(
-        &mut self,
-        conn: StoredConnection,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let storage = cx.global::<GlobalStorageState>().storage.clone();
-        let current_user = self.current_user.clone();
-
-        cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let result: anyhow::Result<StoredConnection> = (|| {
-                let repo = storage
-                    .get::<ConnectionRepository>()
-                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
-
-                let existing_names: HashSet<String> = repo
-                    .list()
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|c| c.name.clone())
-                    .collect();
-
-                let new_name = generate_duplicate_name(&conn.name, &existing_names);
-
-                let mut new_conn = conn.clone();
-                new_conn.id = None;
-                new_conn.cloud_id = None;
-                new_conn.last_synced_at = None;
-                new_conn.name = new_name;
-                new_conn.owner_id = current_user.map(|u| u.id);
-
-                repo.insert(&mut new_conn)?;
-                Ok(new_conn)
-            })();
-
-            match result {
-                Ok(saved_conn) => {
-                    _ = this.update(cx, |_this, cx| {
-                        if let Some(notifier) = get_notifier(cx) {
-                            notifier.update(cx, |_, cx| {
-                                cx.emit(ConnectionDataEvent::ConnectionCreated {
-                                    connection: saved_conn,
-                                });
-                            });
-                        }
-                    });
-                }
-                Err(e) => {
-                    tracing::error!("复制连接失败: {}", e);
-                }
-            }
-        })
-        .detach();
-    }
-
     fn confirm_delete_connection(
         &mut self,
         conn_id: i64,
@@ -2745,7 +2689,7 @@ impl HomePage {
                                             )
                                             .on_click(window.listener_for(
                                                 &view_for_new_connection,
-                                                move |this, _, window, cx| {
+                                                move |_this, _, window, cx| {
                                                     let parent = cx.entity();
                                                     show_workspace_dialog(
                                                         parent,
@@ -4727,7 +4671,7 @@ impl HomePage {
                                         .xsmall()
                                         .ghost()
                                         .tooltip(t!("Workspace.edit"))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                        .on_click(cx.listener(move |_this, _, window, cx| {
                                             let parent = cx.entity();
                                             show_workspace_dialog(
                                                 parent,
@@ -6264,22 +6208,6 @@ fn compare_workspaces(
     match sort_order {
         ConnectionListSortOrder::Ascending => cmp,
         ConnectionListSortOrder::Descending => cmp.reverse(),
-    }
-}
-
-/// 生成复制连接的唯一名称
-fn generate_duplicate_name(original_name: &str, existing_names: &HashSet<String>) -> String {
-    let base_name = format!("{} (副本)", original_name);
-    if !existing_names.contains(&base_name) {
-        return base_name;
-    }
-    let mut counter = 2;
-    loop {
-        let name = format!("{} ({})", base_name, counter);
-        if !existing_names.contains(&name) {
-            return name;
-        }
-        counter += 1;
     }
 }
 

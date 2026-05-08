@@ -189,11 +189,6 @@ fn build_connection_test_signature(params: &SshParams) -> String {
     format!("{:?}", params)
 }
 
-fn validate_save_state(is_testing: bool) -> Result<(), &'static str> {
-    if is_testing { Err("testing") } else { Ok(()) }
-}
-
-
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProxyTypeSelection {
     #[default]

@@ -1,6 +1,5 @@
 use anyhow::Error;
 use std::collections::HashMap;
-use std::time::Instant;
 
 use db::{GlobalDbState, oracle};
 use gpui::prelude::FluentBuilder;

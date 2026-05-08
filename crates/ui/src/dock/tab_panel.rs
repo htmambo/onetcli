@@ -23,8 +23,6 @@ use super::{
     PanelView, StackPanel, ToggleZoom,
 };
 
-const TAB_DRAG_THRESHOLD: f64 = 6.0;
-
 const DOCK_TAB_HEIGHT: f32 = 30.0;
 
 #[derive(Clone)]

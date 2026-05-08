@@ -19,7 +19,7 @@ pub use settings_panel::SettingsPanel;
 use crate::{
     settings::current_settings,
     TerminalHighlightRule,
-    theme::{TerminalColors, TerminalTheme},
+    theme::TerminalTheme,
 };
 use gpui::prelude::FluentBuilder;
 use gpui::{

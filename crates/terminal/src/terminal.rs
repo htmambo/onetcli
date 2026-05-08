@@ -15,8 +15,7 @@ use alacritty_terminal::term::cell::{Flags, LineLength};
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty::{self, Options as PtyOptions};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
+use anyhow::Result;
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
@@ -30,10 +29,9 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
 use tokio::time::interval;
 
 #[cfg(any(test, target_os = "windows"))]
