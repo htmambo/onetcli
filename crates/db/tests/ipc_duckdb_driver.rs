@@ -53,6 +53,7 @@ async fn duckdb_driver_ipc_full_integration() {
             working_dir: None,
         },
         dialect: Default::default(),
+        capabilities: None,
         ui: Default::default(),
         transport: IpcDriverTransport::local_socket(socket),
         manifest_dir: temp.path().to_path_buf(),
