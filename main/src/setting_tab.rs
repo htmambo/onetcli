@@ -495,6 +495,8 @@ pub struct AppSettings {
     pub terminal_confirm_multiline_paste: bool,
     #[serde(default = "default_true")]
     pub terminal_confirm_high_risk_command: bool,
+    #[serde(default)]
+    pub log_file_path: String,
     #[serde(default = "default_true")]
     pub restore_connections_on_startup: bool,
     #[serde(default = "default_true")]
@@ -834,6 +836,7 @@ impl Default for AppSettings {
             terminal_confirm_high_risk_command: default_true(),
             restore_connections_on_startup: default_true(),
             restore_session_content: default_true(),
+            log_file_path: String::new(),
             auto_update: true,
             sync_server_url: String::new(),
             sync_backend_type: default_sync_backend_type(),
@@ -2679,6 +2682,27 @@ impl SettingsPanel {
                                 t!("Settings.General.Database.ai_auto_title_desc").to_string(),
                             ),
                         ]),
+                    SettingGroup::new()
+                        .title(t!("Settings.General.Log.group_title"))
+                        .item(
+                            SettingItem::new(
+                                t!("Settings.General.Log.file_path"),
+                                SettingField::input(
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).log_file_path.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.log_file_path = val.trim().to_string();
+                                        settings.save();
+                                    },
+                                )
+                                .default_value(SharedString::from("")),
+                            )
+                            .description(t!("Settings.General.Log.file_path_desc").to_string()),
+                        ),
                     SettingGroup::new()
                         .title(t!("Settings.General.Update.group_title"))
                         .items(vec![
