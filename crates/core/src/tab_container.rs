@@ -551,7 +551,7 @@ fn should_render_inline_drag_spacer(
     show_window_controls && (is_windows || is_linux)
 }
 
-
+const TAB_REORDER_DRAG_THRESHOLD: f64 = 6.0;
 const TAB_ITEM_GAP: Pixels = px(8.0);
 const TAB_HORIZONTAL_PADDING: Pixels = px(24.0);
 const TAB_ICON_WIDTH: Pixels = px(16.0);
@@ -803,15 +803,17 @@ impl RenderOnce for TabListItem {
             .when(!selected, |el| {
                 el.hover(|style| style.bg(cx.theme().list_hover))
             })
-            .on_drag::<DragTab, DragTab>(
+            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
+            .on_drag(
                 DragTab::new(tab_index, drag_title),
-                |drag, _style, _window, cx| {
+                |drag, _, window, cx| {
+                    window.prevent_default();
                     cx.stop_propagation();
                     cx.new(|_| drag.clone())
                 },
             )
-            .drag_over::<DragTab>(move |style, _, _, _cx| {
-                style.border_t_2().border_color(drag_border_color)
+            .drag_over::<DragTab>(move |el, _, _, _cx| {
+                el.border_t_2().border_color(drag_border_color)
             })
             .on_drop(
                 window.listener_for(&container, move |this, drag: &DragTab, window, cx| {
@@ -2708,13 +2710,14 @@ impl TabContainer {
                                 this.set_active_index(idx, window, cx);
                             }))
                             .cursor_grab()
-                            .on_drag::<DragTab, DragTab>(DragTab::new(idx, title.clone()), |drag, _style, _window, cx| {
+                            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
+                            .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
                                 cx.stop_propagation();
                                 cx.new(|_| drag.clone())
                             })
                             // on_drop 和 drag_over 在所有 tab 上注册，接收来自其他 tab 的 drop 事件
-                            .drag_over::<DragTab>(move |style, _, _, _cx| {
-                                style.border_l_2().border_color(drag_border_color)
+                            .drag_over::<DragTab>(move |el, _, _, _cx| {
+                                el.border_l_2().border_color(drag_border_color)
                             })
                             .on_drop(cx.listener(move |this, drag: &DragTab, window, cx| {
                                 let from_idx = drag.tab_index;
@@ -3184,9 +3187,13 @@ mod tests {
         default_inactive_tab_color, is_regular_tab_active, resolve_inactive_tab_color,
         resolve_tab_bar_color, should_render_inline_drag_spacer, should_render_windows_drag_spacer,
         should_suppress_duplicate_status_summary, tab_chrome_width, tab_title_measure_font_size,
-        tab_title_text_scale, uses_manual_window_move,
+        tab_title_text_scale, uses_manual_window_move, inactive_tab_background_alpha,
     };
     use gpui::{hsla, px};
+
+    fn assert_f32_close(actual: f32, expected: f32) {
+        assert!((actual - expected).abs() < 1e-6);
+    }
 
     #[test]
     fn windows_仅渲染独立拖窗热区() {
@@ -3282,9 +3289,21 @@ mod tests {
     }
 
     #[test]
+    fn inactive_tab_alpha_整体仍透明时加_point_four() {
+        assert_f32_close(inactive_tab_background_alpha(0.4, 0.7), 0.8);
+        assert_f32_close(inactive_tab_background_alpha(0.55, 0.85), 0.95);
+    }
+
+    #[test]
+    fn inactive_tab_alpha_整体不透明时加_point_two() {
+        assert_f32_close(inactive_tab_background_alpha(0.4, 1.0), 0.6);
+        assert_f32_close(inactive_tab_background_alpha(0.84, 1.0), 1.0);
+    }
+
+    #[test]
     fn 暗色主题inactive_tab比tab_bar更亮() {
         let tab_bar = hsla(0.0, 0.0, 0.16, 1.0);
-        let inactive = default_inactive_tab_color(tab_bar, true);
+        let inactive = default_inactive_tab_color(tab_bar, 0.84, true);
 
         assert!(inactive.l > tab_bar.l);
         assert_eq!(inactive.a, 1.0);
@@ -3293,7 +3312,7 @@ mod tests {
     #[test]
     fn 亮色主题inactive_tab比tab_bar更暗() {
         let tab_bar = hsla(0.0, 0.0, 0.96, 1.0);
-        let inactive = default_inactive_tab_color(tab_bar, false);
+        let inactive = default_inactive_tab_color(tab_bar, 0.84, false);
 
         assert!(inactive.l < tab_bar.l);
         assert_eq!(inactive.a, 1.0);
@@ -3309,8 +3328,14 @@ mod tests {
     #[test]
     fn 默认inactive_tab直接使用主题tab颜色() {
         let theme_tab = hsla(0.63, 0.18, 0.18, 0.94);
-        let resolved =
-            resolve_inactive_tab_color(None, None, theme_tab, hsla(0.63, 0.18, 0.12, 0.91), true);
+        let resolved = resolve_inactive_tab_color(
+            None,
+            None,
+            theme_tab,
+            hsla(0.63, 0.18, 0.12, 0.91),
+            0.84,
+            true,
+        );
 
         assert_eq!(resolved, theme_tab);
     }
@@ -3318,12 +3343,13 @@ mod tests {
     #[test]
     fn 显式覆盖tab_bar时inactive_tab仍按tab_bar推导() {
         let custom_tab_bar = hsla(0.0, 0.0, 0.16, 0.7);
-        let expected = default_inactive_tab_color(custom_tab_bar, true);
+        let expected = default_inactive_tab_color(custom_tab_bar, 0.84, true);
         let resolved = resolve_inactive_tab_color(
             None,
             Some(custom_tab_bar),
             hsla(0.0, 0.0, 0.22, 0.92),
             custom_tab_bar,
+            0.84,
             true,
         );
 

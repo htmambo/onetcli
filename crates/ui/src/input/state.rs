@@ -2048,7 +2048,10 @@ impl InputState {
             && window.is_window_active()
     }
 
-    fn on_focus(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disable_ime {
+            window.disable_ime();
+        }
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });
