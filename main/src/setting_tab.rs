@@ -548,6 +548,9 @@ pub struct AppSettings {
     pub system_hotkey_macos: String,
     #[serde(default = "default_system_hotkey_other")]
     pub system_hotkey_other: String,
+    /// SSH 自动接受新密钥（密钥变更时自动替换）
+    #[serde(default)]
+    pub ssh_auto_accept_new_keys: bool,
 }
 
 pub(crate) const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
@@ -851,6 +854,7 @@ impl Default for AppSettings {
             ai_auto_generate_session_title: false,
             system_hotkey_macos: default_system_hotkey_macos(),
             system_hotkey_other: default_system_hotkey_other(),
+            ssh_auto_accept_new_keys: false,
         }
     }
 }
@@ -2702,6 +2706,25 @@ impl SettingsPanel {
                         .item(SettingItem::render(move |_options, _window, cx| {
                             render_global_proxy_settings_item(cx)
                         })),
+                    SettingGroup::new()
+                        .title(t!("Settings.General.SSH.group_title"))
+                        .item(
+                            SettingItem::new(
+                                t!("Settings.General.SSH.auto_accept_new_keys"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).ssh_auto_accept_new_keys,
+                                    |val: bool, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.ssh_auto_accept_new_keys = val;
+                                        settings.save();
+                                    },
+                                )
+                                .default_value(default_settings.ssh_auto_accept_new_keys),
+                            )
+                            .description(
+                                t!("Settings.General.SSH.auto_accept_new_keys_desc").to_string(),
+                            ),
+                        ),
                 ]),
             // 快捷键页面
             themed_setting_page(SettingPage::new(t!("Settings.Shortcuts.title")), cx).group(

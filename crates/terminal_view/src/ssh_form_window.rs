@@ -877,6 +877,10 @@ impl SshFormWindow {
             }
         });
 
+        // 测试连接时使用默认值 false（安全优先）
+        // 实际连接时会在更高层从 AppSettings 读取
+        let auto_accept_new_keys = false;
+
         SshConnectConfig {
             host: params.host.clone(),
             port: params.port,
@@ -889,6 +893,7 @@ impl SshFormWindow {
             jump_server,
             proxy,
             keyboard_interactive_responder: None,
+            auto_accept_new_keys,
         }
     }
 
