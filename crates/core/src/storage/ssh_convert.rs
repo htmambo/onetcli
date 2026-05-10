@@ -73,6 +73,11 @@ pub(crate) fn ssh_proxy_config_from_storage(proxy: ProxyConfig) -> ProxyConnectC
 impl SshParams {
     /// 从存储层的 SSH 参数构建连接层的 SSH 配置。
     pub fn to_connect_config(&self) -> SshConnectConfig {
+        self.to_connect_config_with_options(false)
+    }
+
+    /// 从存储层的 SSH 参数构建连接层的 SSH 配置，支持自定义选项。
+    pub fn to_connect_config_with_options(&self, auto_accept_new_keys: bool) -> SshConnectConfig {
         SshConnectConfig {
             host: self.host.clone(),
             port: self.port,
@@ -85,6 +90,7 @@ impl SshParams {
             jump_server: self.jump_server.clone().map(ssh_jump_config_from_storage),
             proxy: self.proxy.clone().map(ssh_proxy_config_from_storage),
             keyboard_interactive_responder: None,
+            auto_accept_new_keys,
         }
     }
 }

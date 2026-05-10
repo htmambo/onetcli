@@ -389,6 +389,7 @@ mod tests {
             jump_server: None::<JumpServerConnectConfig>,
             proxy: None::<ProxyConnectConfig>,
             keyboard_interactive_responder: None,
+            auto_accept_new_keys: false,
         }
     }
 

@@ -1574,6 +1574,7 @@ impl Terminal {
                 }
             }),
             keyboard_interactive_responder: None,
+            auto_accept_new_keys: false,
         };
 
         let pty_config = PtyConfig::default();

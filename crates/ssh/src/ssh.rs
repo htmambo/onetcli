@@ -52,6 +52,8 @@ pub struct SshConnectConfig {
     pub proxy: Option<ProxyConnectConfig>,
     /// keyboard-interactive/MFA 输入回调。用于跳板机或目标服务器按需请求二次认证。
     pub keyboard_interactive_responder: Option<Arc<dyn KeyboardInteractiveResponder>>,
+    /// 是否自动接受新的 SSH 主机密钥（密钥变更时自动替换）
+    pub auto_accept_new_keys: bool,
 }
 
 /// 跳板机连接配置
@@ -335,6 +337,7 @@ pub fn verify_server_key(
     host: &str,
     port: u16,
     server_public_key: &PublicKey,
+    auto_accept_new_keys: bool,
 ) -> std::result::Result<bool, russh::Error> {
     match russh::keys::check_known_hosts(host, port, server_public_key) {
         Ok(true) => Ok(true),
@@ -348,13 +351,24 @@ pub fn verify_server_key(
             Ok(true)
         }
         Err(russh::keys::Error::KeyChanged { line }) => {
-            tracing::error!(
-                "SSH 主机 {}:{} 的指纹发生变化，拒绝连接（known_hosts 第 {} 行）",
-                host,
-                port,
-                line
-            );
-            Err(russh::Error::KeyChanged { line })
+            if auto_accept_new_keys {
+                tracing::warn!(
+                    "SSH 主机 {}:{} 的指纹发生变化，自动接受新密钥（known_hosts 第 {} 行）",
+                    host,
+                    port,
+                    line
+                );
+                russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
+                Ok(true)
+            } else {
+                tracing::error!(
+                    "SSH 主机 {}:{} 的指纹发生变化，拒绝连接（known_hosts 第 {} 行）",
+                    host,
+                    port,
+                    line
+                );
+                Err(russh::Error::KeyChanged { line })
+            }
         }
         Err(err) => Err(err.into()),
     }
@@ -363,13 +377,15 @@ pub fn verify_server_key(
 struct RusshHandler {
     host: String,
     port: u16,
+    auto_accept_new_keys: bool,
 }
 
 impl RusshHandler {
-    fn new(host: impl Into<String>, port: u16) -> Self {
+    fn new(host: impl Into<String>, port: u16, auto_accept_new_keys: bool) -> Self {
         Self {
             host: host.into(),
             port,
+            auto_accept_new_keys,
         }
     }
 }
@@ -381,7 +397,7 @@ impl client::Handler for RusshHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        verify_server_key(&self.host, self.port, server_public_key)
+        verify_server_key(&self.host, self.port, server_public_key, self.auto_accept_new_keys)
     }
 }
 
@@ -1387,11 +1403,11 @@ impl SshClient for RusshClient {
             let jump_session = if let Some(ref proxy) = config.proxy {
                 tracing::info!("通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
                 let stream = connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                let handler = RusshHandler::new(&jump.host, jump.port);
+                let handler = RusshHandler::new(&jump.host, jump.port, config.auto_accept_new_keys);
                 client::connect_stream(russh_config.clone(), stream, handler).await?
             } else {
                 let addrs = (jump.host.as_str(), jump.port);
-                let handler = RusshHandler::new(&jump.host, jump.port);
+                let handler = RusshHandler::new(&jump.host, jump.port, config.auto_accept_new_keys);
                 client::connect(russh_config.clone(), addrs, handler).await?
             };
 
@@ -1414,7 +1430,7 @@ impl SshClient for RusshClient {
                 .await?;
 
             // 使用转发通道创建SSH会话
-            let handler = RusshHandler::new(&config.host, config.port);
+            let handler = RusshHandler::new(&config.host, config.port, config.auto_accept_new_keys);
             let mut session =
                 client::connect_stream(russh_config, forwarded_channel.into_stream(), handler)
                     .await?;
@@ -1445,7 +1461,7 @@ impl SshClient for RusshClient {
                 config.port
             );
             let stream = connect_via_proxy(proxy, &config.host, config.port).await?;
-            let handler = RusshHandler::new(&config.host, config.port);
+            let handler = RusshHandler::new(&config.host, config.port, config.auto_accept_new_keys);
             let mut session = client::connect_stream(russh_config, stream, handler).await?;
 
             authenticate_with_strategy_for_target(
@@ -1466,7 +1482,7 @@ impl SshClient for RusshClient {
         // 情况3: 直接连接
         else {
             let addrs = (config.host.as_str(), config.port);
-            let handler = RusshHandler::new(&config.host, config.port);
+            let handler = RusshHandler::new(&config.host, config.port, config.auto_accept_new_keys);
             let mut session = client::connect(russh_config, addrs, handler).await?;
 
             authenticate_with_strategy_for_target(

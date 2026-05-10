@@ -839,7 +839,7 @@ impl SshFormWindow {
         })
     }
 
-    fn build_ssh_connect_config(&self, params: &SshParams) -> SshConnectConfig {
+    fn build_ssh_connect_config(&self, params: &SshParams, _cx: &App) -> SshConnectConfig {
         let auth = match &params.auth_method {
             SshAuthMethod::Password { password } => SshAuth::Password(password.clone()),
             SshAuthMethod::PrivateKey {
@@ -892,6 +892,10 @@ impl SshFormWindow {
             }
         });
 
+        // 测试连接时使用默认值 false（安全优先）
+        // 实际连接时会在更高层从 AppSettings 读取
+        let auto_accept_new_keys = false;
+
         SshConnectConfig {
             host: params.host.clone(),
             port: params.port,
@@ -904,6 +908,7 @@ impl SshFormWindow {
             jump_server,
             proxy,
             keyboard_interactive_responder: None,
+            auto_accept_new_keys,
         }
     }
 
@@ -918,7 +923,7 @@ impl SshFormWindow {
         };
 
         let signature = build_connection_test_signature(&params);
-        let config = self.build_ssh_connect_config(&params);
+        let config = self.build_ssh_connect_config(&params, cx);
         let initial_status = SshConnectionStage::initial_for_config(&config).description();
         let (progress_tx, mut progress_rx) =
             tokio::sync::mpsc::unbounded_channel::<SshConnectionStage>();
