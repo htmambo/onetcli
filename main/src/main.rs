@@ -8,6 +8,7 @@ mod app_init;
 mod connection_restore;
 mod home;
 mod home_tab;
+pub mod new_connection;
 mod onetcli_app;
 mod saved_connection_picker;
 mod setting_tab;
@@ -19,6 +20,7 @@ use crate::onetcli_app::OnetCliApp;
 use crate::setting_tab::AppSettings;
 use db::GlobalDbState;
 use gpui::*;
+
 use gpui_component::Root;
 use gpui_component_assets::Assets;
 
@@ -96,6 +98,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
+                // 消除linux中可能出现的窗口直角
                 window
                     .set_blur_behind_corner_radius(AppSettings::global(cx).window_corner_radius());
                 window.activate_window();

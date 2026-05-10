@@ -10,7 +10,7 @@ use gpui::{
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListState};
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
@@ -551,7 +551,7 @@ fn should_render_inline_drag_spacer(
     show_window_controls && (is_windows || is_linux)
 }
 
-const TAB_REORDER_DRAG_THRESHOLD: f64 = 6.0;
+
 const TAB_ITEM_GAP: Pixels = px(8.0);
 const TAB_HORIZONTAL_PADDING: Pixels = px(24.0);
 const TAB_ICON_WIDTH: Pixels = px(16.0);
@@ -803,17 +803,15 @@ impl RenderOnce for TabListItem {
             .when(!selected, |el| {
                 el.hover(|style| style.bg(cx.theme().list_hover))
             })
-            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
-            .on_drag(
+            .on_drag::<DragTab, DragTab>(
                 DragTab::new(tab_index, drag_title),
-                |drag, _, window, cx| {
-                    window.prevent_default();
+                |drag, _style, _window, cx| {
                     cx.stop_propagation();
                     cx.new(|_| drag.clone())
                 },
             )
-            .drag_over::<DragTab>(move |el, _, _, _cx| {
-                el.border_t_2().border_color(drag_border_color)
+            .drag_over::<DragTab>(move |style, _, _, _cx| {
+                style.border_t_2().border_color(drag_border_color)
             })
             .on_drop(
                 window.listener_for(&container, move |this, drag: &DragTab, window, cx| {
@@ -2710,14 +2708,13 @@ impl TabContainer {
                                 this.set_active_index(idx, window, cx);
                             }))
                             .cursor_grab()
-                            .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
-                            .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
+                            .on_drag::<DragTab, DragTab>(DragTab::new(idx, title.clone()), |drag, _style, _window, cx| {
                                 cx.stop_propagation();
                                 cx.new(|_| drag.clone())
                             })
                             // on_drop 和 drag_over 在所有 tab 上注册，接收来自其他 tab 的 drop 事件
-                            .drag_over::<DragTab>(move |el, _, _, _cx| {
-                                el.border_l_2().border_color(drag_border_color)
+                            .drag_over::<DragTab>(move |style, _, _, _cx| {
+                                style.border_l_2().border_color(drag_border_color)
                             })
                             .on_drop(cx.listener(move |this, drag: &DragTab, window, cx| {
                                 let from_idx = drag.tab_index;
@@ -2761,7 +2758,7 @@ impl TabContainer {
                                         )
                                     }),
                             )
-                            .when(closeable, |group| {
+                            .when(closeable, |el| {
                                 let view_clone = view_clone.clone();
                                 let close_button_style = ButtonCustomVariant::new(cx)
                                     .color(cx.theme().transparent)
@@ -2769,7 +2766,7 @@ impl TabContainer {
                                     .border(cx.theme().transparent)
                                     .hover(cx.theme().warning)
                                     .active(cx.theme().warning_active);
-                                group.child(
+                                el.child(
                                     Button::new(SharedString::from(format!("tab-close-btn-{idx}")))
                                         .icon(IconName::Close)
                                         .custom(close_button_style)
@@ -2798,7 +2795,7 @@ impl TabContainer {
                                         }),
                                 )
                             })
-                            .context_menu(move |menu, window, cx| {
+                            .context_menu(move |menu: PopupMenu, window: &mut Window, cx| {
                                 let view_for_menu = view_clone.clone();
                                 let (tab_count, closeable, is_ssh_tab, tab_id) = {
                                     let view = view_for_menu.read(cx);
@@ -2821,7 +2818,7 @@ impl TabContainer {
                                                 )
                                                 .on_click(window.listener_for(
                                                     &view_for_menu,
-                                                    move |_this, _, _window, cx| {
+                                                    move |_this: &mut TabContainer, _, _window, cx| {
                                                         cx.emit(
                                                             TabContainerEvent::OpenSftpRequested {
                                                                 tab_id: tab_id.clone(),
@@ -2843,7 +2840,7 @@ impl TabContainer {
                                         .disabled(!closeable)
                                         .on_click(window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_tab(idx, window, cx).detach();
                                             },
                                         )),
@@ -2855,7 +2852,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_all_tabs(window, cx).detach();
                                             },
                                         ),
@@ -2869,7 +2866,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_other_tabs(idx, window, cx).detach();
                                             },
                                         ),
@@ -2883,7 +2880,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_tabs_to_left(idx, window, cx).detach();
                                             },
                                         ),
@@ -2897,7 +2894,7 @@ impl TabContainer {
                                     .on_click(
                                         window.listener_for(
                                             &view_for_menu,
-                                            move |this, _, window, cx| {
+                                            move |this: &mut TabContainer, _, window, cx| {
                                                 this.close_tabs_to_right(idx, window, cx).detach();
                                             },
                                         ),
@@ -3184,15 +3181,12 @@ impl Render for TabContainer {
 mod tests {
     use super::{
         TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
-        default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
-        resolve_inactive_tab_color, resolve_tab_bar_color, should_render_windows_drag_spacer,
-        should_suppress_duplicate_status_summary, uses_manual_window_move,
+        default_inactive_tab_color, is_regular_tab_active, resolve_inactive_tab_color,
+        resolve_tab_bar_color, should_render_inline_drag_spacer, should_render_windows_drag_spacer,
+        should_suppress_duplicate_status_summary, tab_chrome_width, tab_title_measure_font_size,
+        tab_title_text_scale, uses_manual_window_move,
     };
-    use gpui::hsla;
-
-    fn assert_f32_close(actual: f32, expected: f32) {
-        assert!((actual - expected).abs() < 1e-6);
-    }
+    use gpui::{hsla, px};
 
     #[test]
     fn windows_仅渲染独立拖窗热区() {
@@ -3256,21 +3250,41 @@ mod tests {
     }
 
     #[test]
-    fn inactive_tab_alpha_整体仍透明时加_point_four() {
-        assert_f32_close(inactive_tab_background_alpha(0.4, 0.7), 0.8);
-        assert_f32_close(inactive_tab_background_alpha(0.55, 0.85), 0.95);
+    fn close_button_宽度估算使用四像素紧凑间距() {
+        assert_eq!(tab_chrome_width(false, false, true), px(44.0));
+        assert_eq!(tab_chrome_width(true, false, true), px(68.0));
     }
 
     #[test]
-    fn inactive_tab_alpha_整体不透明时加_point_two() {
-        assert_f32_close(inactive_tab_background_alpha(0.4, 1.0), 0.6);
-        assert_f32_close(inactive_tab_background_alpha(0.84, 1.0), 1.0);
+    fn pending_indicator_与_close_button_宽度估算都使用四像素间距() {
+        assert_eq!(tab_chrome_width(false, true, true), px(56.0));
+        assert_eq!(tab_chrome_width(true, true, true), px(80.0));
+    }
+
+    #[test]
+    fn tab_title_宽度估算保留平台基准倍率() {
+        assert_eq!(tab_title_text_scale(true, false), 0.875);
+        assert_eq!(tab_title_text_scale(false, false), 1.0);
+        assert_eq!(tab_title_text_scale(false, true), 1.275);
+    }
+
+    #[test]
+    fn tab_title_宽度估算在大字号下递增补偿() {
+        assert_eq!(
+            tab_title_measure_font_size(px(18.0), false, false),
+            px(18.0)
+        );
+        assert_eq!(
+            tab_title_measure_font_size(px(16.0), false, false),
+            px(16.0)
+        );
+        assert!(tab_title_measure_font_size(px(24.0), false, false) > px(24.0));
     }
 
     #[test]
     fn 暗色主题inactive_tab比tab_bar更亮() {
         let tab_bar = hsla(0.0, 0.0, 0.16, 1.0);
-        let inactive = default_inactive_tab_color(tab_bar, 0.84, true);
+        let inactive = default_inactive_tab_color(tab_bar, true);
 
         assert!(inactive.l > tab_bar.l);
         assert_eq!(inactive.a, 1.0);
@@ -3279,7 +3293,7 @@ mod tests {
     #[test]
     fn 亮色主题inactive_tab比tab_bar更暗() {
         let tab_bar = hsla(0.0, 0.0, 0.96, 1.0);
-        let inactive = default_inactive_tab_color(tab_bar, 0.84, false);
+        let inactive = default_inactive_tab_color(tab_bar, false);
 
         assert!(inactive.l < tab_bar.l);
         assert_eq!(inactive.a, 1.0);
@@ -3295,14 +3309,8 @@ mod tests {
     #[test]
     fn 默认inactive_tab直接使用主题tab颜色() {
         let theme_tab = hsla(0.63, 0.18, 0.18, 0.94);
-        let resolved = resolve_inactive_tab_color(
-            None,
-            None,
-            theme_tab,
-            hsla(0.63, 0.18, 0.12, 0.91),
-            0.84,
-            true,
-        );
+        let resolved =
+            resolve_inactive_tab_color(None, None, theme_tab, hsla(0.63, 0.18, 0.12, 0.91), true);
 
         assert_eq!(resolved, theme_tab);
     }
@@ -3310,13 +3318,12 @@ mod tests {
     #[test]
     fn 显式覆盖tab_bar时inactive_tab仍按tab_bar推导() {
         let custom_tab_bar = hsla(0.0, 0.0, 0.16, 0.7);
-        let expected = default_inactive_tab_color(custom_tab_bar, 0.84, true);
+        let expected = default_inactive_tab_color(custom_tab_bar, true);
         let resolved = resolve_inactive_tab_color(
             None,
             Some(custom_tab_bar),
             hsla(0.0, 0.0, 0.22, 0.92),
             custom_tab_bar,
-            0.84,
             true,
         );
 

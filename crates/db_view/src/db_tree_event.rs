@@ -7,6 +7,7 @@ use crate::{
         create_schema_editor_view_for,
     },
     db_tree_view::{DbTreeView, DbTreeViewEvent},
+    er_diagram::{ErDiagramConfig, open_er_diagram_tab},
     sql_editor_view::SqlEditorTab,
     table_designer_tab::{TableDesigner, TableDesignerConfig},
 };
@@ -97,6 +98,11 @@ impl DatabaseEventHandler {
                     DbTreeViewEvent::CreateNewQuery { node_id } => {
                         if let Some(node) = get_node(&node_id, cx) {
                             Self::handle_create_new_query(node, tab_container, window, cx);
+                        }
+                    }
+                    DbTreeViewEvent::OpenErDiagram { node_id } => {
+                        if let Some(node) = get_node(&node_id, cx) {
+                            Self::handle_open_er_diagram(node, tab_container, window, cx);
                         }
                     }
                     DbTreeViewEvent::OpenTableData { node_id } => {
@@ -591,6 +597,29 @@ impl DatabaseEventHandler {
                 cx,
             );
         });
+    }
+
+    fn handle_open_er_diagram(
+        node: DbNode,
+        tab_container: Entity<TabContainer>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some(database) = node.get_database_name() else {
+            Self::show_error(window, t!("Common.error_info").to_string(), cx);
+            return;
+        };
+        let schema = node.get_schema_name();
+        open_er_diagram_tab(
+            ErDiagramConfig {
+                connection_id: node.connection_id,
+                database_name: database,
+                schema_name: schema,
+            },
+            tab_container,
+            window,
+            cx,
+        );
     }
 
     /// 处理打开表数据事件

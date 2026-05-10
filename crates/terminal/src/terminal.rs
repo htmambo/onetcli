@@ -15,6 +15,7 @@ use alacritty_terminal::term::cell::{Flags, LineLength};
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty::{self, Options as PtyOptions};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+use anyhow::Result;
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
@@ -43,9 +44,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::history::{
+    HistoryEntry, PERSISTED_HISTORY_LIMIT, SESSION_HISTORY_LIMIT, ShellHistoryFormat,
     collect_history_search_results, collect_history_suggestions_with_cwd, parse_shell_history,
-    push_rich_history_entry, HistoryEntry, ShellHistoryFormat, PERSISTED_HISTORY_LIMIT,
-    SESSION_HISTORY_LIMIT,
+    push_rich_history_entry,
 };
 #[cfg(unix)]
 use crate::local_pty_client::{LocalPtyClient, LocalPtyClientBackend};
@@ -2753,12 +2754,17 @@ mod tests {
         build_ssh_init_commands, compose_ssh_init_commands, format_connection_error,
         is_osc_palette_line, resolve_default_windows_shell_from_env, sanitize_recovery_content,
         shell_escape_arg, should_report_ssh_running_processes, SshProcessState, Terminal,
+        ConnectionState, TerminalConnectionKind, TerminalMfaPrompt, TerminalMfaRequest,
+        TerminalMfaResponder, keyboard_interactive_answers_for_terminal,
     };
+    use crate::TerminalEvent;
     use crate::history::{
-        collect_history_suggestions, normalize_history_command, parse_shell_history,
-        push_history_entry, HistoryEntry, ShellHistoryFormat,
+        HistoryEntry, ShellHistoryFormat, collect_history_suggestions, normalize_history_command,
+        parse_shell_history, push_history_entry,
     };
-    use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
+    use alacritty_terminal::grid::Dimensions;
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::vte::ansi::{NamedColor, Processor, Rgb, StdSyncHandler};
     use anyhow::anyhow;
     use std::collections::VecDeque;
     use std::fs;

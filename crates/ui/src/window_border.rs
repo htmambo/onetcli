@@ -66,13 +66,11 @@ impl WindowBorder {
 
 /// Get the window paddings.
 pub fn window_paddings(window: &Window) -> Edges<Pixels> {
-    let shadow_size = window
-        .client_inset_edges()
-        .unwrap_or_else(|| Edges::all(window.client_inset().unwrap_or(SHADOW_SIZE)));
+    let shadow_size = window.client_inset().unwrap_or(SHADOW_SIZE);
     match window.window_decorations() {
         Decorations::Server => Edges::all(px(0.0)),
         Decorations::Client { tiling } => {
-            let mut paddings = shadow_size;
+            let mut paddings = Edges::all(shadow_size);
             if tiling.top {
                 paddings.top = px(0.0);
             }
@@ -101,8 +99,6 @@ impl RenderOnce for WindowBorder {
         let decorations = window.window_decorations();
         let shadow_size = self.shadow_size;
         let border_radius = cx.theme().radius_lg;
-        let hide_client_top_border =
-            cfg!(target_os = "linux") && matches!(decorations, Decorations::Client { .. });
         #[cfg(target_os = "linux")]
         let prefers_system_frame =
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();
@@ -133,12 +129,7 @@ impl RenderOnce for WindowBorder {
         if prefers_system_frame {
             window.set_client_inset(px(0.0));
         } else if linux_uses_wayland_session() {
-            window.set_client_inset_edges(Edges {
-                top: px(0.0),
-                right: client_inset,
-                bottom: client_inset,
-                left: client_inset,
-            });
+            window.set_client_inset(client_inset);
         } else {
             window.set_client_inset(client_inset);
         }
@@ -249,9 +240,7 @@ impl RenderOnce for WindowBorder {
                                 div.rounded_bl(border_radius)
                             })
                             .border_color(cx.theme().border)
-                            .when(!tiling.top && !hide_client_top_border, |div| {
-                                div.border_t(BORDER_SIZE)
-                            })
+                            .when(!tiling.top, |div| div.border_t(BORDER_SIZE))
                             .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
                             .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
                             .when(!tiling.right, |div| div.border_r(BORDER_SIZE))

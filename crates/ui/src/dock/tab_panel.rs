@@ -24,8 +24,6 @@ use super::{
     PanelView, StackPanel, ToggleZoom,
 };
 
-const TAB_DRAG_THRESHOLD: f64 = 6.0;
-
 const DOCK_TAB_HEIGHT: f32 = 30.0;
 
 #[derive(Clone)]
@@ -768,9 +766,9 @@ impl TabPanel {
                         )
                         .when(!droppable, |this| {
                             this.when(state.draggable && active, |this| {
-                                this.drag_threshold(TAB_DRAG_THRESHOLD).on_drag(
+                                this.on_drag::<DragPanel, DragPanel>(
                                     DragPanel::new(panel.clone(), view.clone()),
-                                    |drag, _, _, cx| {
+                                    |drag, _style, _window, cx| {
                                         cx.stop_propagation();
                                         cx.new(|_| drag.clone())
                                     },

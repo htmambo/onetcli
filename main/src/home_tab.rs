@@ -10,12 +10,11 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, actions, div, px,
 };
-use gpui_component::button::{ButtonCustomVariant, ButtonVariant};
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
     StyledExt, WindowExt, app_style,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -54,10 +53,9 @@ use crate::connection_restore::{
     open_connection_restore_dialog, resolve_restore_items,
 };
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
-use crate::home::home_new_connection::NewConnectionDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
-use crate::home::home_workspace_filter::WorkspaceFilterDelegate;
-use crate::home::workspace_form_window::{WorkspaceFormWindow, WorkspaceFormWindowConfig};
+use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
+use crate::new_connection::NewConnectionWindow;
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
     GlobalCurrentUser,
@@ -1865,6 +1863,7 @@ impl HomePage {
 
                 let config = ConnectionFormWindowConfig {
                     db_type,
+                    external_driver_id: None,
                     editing_connection: Some(connection),
                     workspaces: self.workspaces.clone(),
                 };
@@ -1966,37 +1965,6 @@ impl HomePage {
         .detach();
     }
 
-    pub(crate) fn show_workspace_form(
-        &mut self,
-        workspace_id: Option<i64>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let workspace_data =
-            workspace_id.and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
-        let config = WorkspaceFormWindowConfig {
-            parent: cx.entity().clone(),
-            workspace_id,
-            initial_name: workspace_data
-                .map(|workspace| workspace.name)
-                .unwrap_or_default(),
-        };
-
-        open_popup_window(
-            window,
-            PopupWindowOptions::new(if config.workspace_id.is_some() {
-                t!("Workspace.edit").to_string()
-            } else {
-                t!("Workspace.new").to_string()
-            })
-            .size(420.0, 200.0)
-            .min_width(420.0)
-            .min_height(200.0),
-            move |window, cx| cx.new(|cx| WorkspaceFormWindow::new(config, window, cx)),
-            cx,
-        );
-    }
-
     pub(crate) fn show_connection_quick_open(
         &mut self,
         window: &mut Window,
@@ -2044,39 +2012,17 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.editing_connection_id = None;
         let parent = cx.entity();
-        let list = cx.new(|cx| {
-            let delegate = NewConnectionDelegate::new(parent);
-            ListState::new(delegate, window, cx).searchable(true)
-        });
-
-        let list_for_focus = list.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            dialog
-                .title(t!("Home.new_connection").to_string())
-                .w(px(360.0))
-                .child(
-                    v_flex().gap_2().child(
-                        List::new(&list)
-                            .w_full()
-                            .max_h(px(360.0))
-                            .p(px(8.0))
-                            .bg(cx.theme().list)
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .rounded(cx.theme().radius),
-                    ),
-                )
-                .alert()
-                .button_props(
-                    gpui_component::dialog::DialogButtonProps::default()
-                        .ok_text(t!("Common.close")),
-                )
-        });
-        // 将焦点设置到 List 搜索框，使上下键和 Enter 键可用
-        list_for_focus.update(cx, |state, cx| {
-            state.focus(window, cx);
-        });
+        let parent_window = window.window_handle();
+        open_popup_window(
+            window,
+            PopupWindowOptions::new(t!("Home.new_connection").to_string()).size(1100.0, 700.0),
+            move |win, app| {
+                app.new(|app| NewConnectionWindow::new(parent, parent_window, win, app))
+            },
+            cx,
+        );
     }
 
     pub(crate) fn open_connection_from_quick(
@@ -2345,6 +2291,7 @@ impl HomePage {
 
         let config = ConnectionFormWindowConfig {
             db_type,
+            external_driver_id: None,
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
         };
@@ -2500,7 +2447,7 @@ impl HomePage {
         );
     }
 
-    fn ensure_master_key_ready_for_new_connection(
+    pub(crate) fn ensure_master_key_ready_for_new_connection(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2733,6 +2680,7 @@ impl HomePage {
                     .child(
                         Button::new("new-connect-button")
                             .icon(IconName::Plus)
+                            .primary()
                             .label(t!("Home.new_connection"))
                             .text_color(cx.theme().primary_foreground)
                             .bg(cx.theme().primary)
@@ -2750,8 +2698,15 @@ impl HomePage {
                                             )
                                             .on_click(window.listener_for(
                                                 &view_for_new_connection,
-                                                move |this, _, window, cx| {
-                                                    this.show_workspace_form(None, window, cx);
+                                                move |_this, _, window, cx| {
+                                                    let parent = cx.entity();
+                                                    show_workspace_dialog(
+                                                        parent,
+                                                        None,
+                                                        String::new(),
+                                                        window,
+                                                        cx,
+                                                    );
                                                 },
                                             )),
                                     )
@@ -3068,6 +3023,7 @@ impl HomePage {
         let view = cx.entity();
         let view_for_select = view.clone();
         let view_for_clear = view.clone();
+        let view_for_new = view.clone();
 
         let list = self.ensure_workspace_filter_list(window, cx);
 
@@ -3136,18 +3092,38 @@ impl HomePage {
                                         t!("Workspace.select_all").to_string().into_any_element(),
                                     )),
                             )
-                            .child({
-                                let view_clear = view_for_clear.clone();
-                                Button::new("clear-ws-filter")
-                                    .ghost()
-                                    .small()
-                                    .label(t!("Workspace.clear_filter"))
-                                    .on_click(move |_, _, cx| {
-                                        view_clear.update(cx, |this, cx| {
-                                            this.clear_workspace_filter(cx);
-                                        });
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child({
+                                        let view_new = view_for_new.clone();
+                                        Button::new("new-workspace-from-filter")
+                                            .primary()
+                                            .small()
+                                            .label(t!("Common.new"))
+                                            .on_click(move |_, window, cx| {
+                                                show_workspace_dialog(
+                                                    view_new.clone(),
+                                                    None,
+                                                    String::new(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
                                     })
-                            }),
+                                    .child({
+                                        let view_clear = view_for_clear.clone();
+                                        Button::new("clear-ws-filter")
+                                            .ghost()
+                                            .small()
+                                            .label(t!("Workspace.clear_filter"))
+                                            .on_click(move |_, _, cx| {
+                                                view_clear.update(cx, |this, cx| {
+                                                    this.clear_workspace_filter(cx);
+                                                });
+                                            })
+                                    }),
+                            ),
                     )
                     .child(div().border_t_1().border_color(cx.theme().border))
                     .child(
@@ -4738,9 +4714,12 @@ impl HomePage {
                                         .xsmall()
                                         .ghost()
                                         .tooltip(t!("Workspace.edit"))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.show_workspace_form(
+                                        .on_click(cx.listener(move |_this, _, window, cx| {
+                                            let parent = cx.entity();
+                                            show_workspace_dialog(
+                                                parent,
                                                 Some(workspace_id),
+                                                String::new(),
                                                 window,
                                                 cx,
                                             );
@@ -6264,7 +6243,6 @@ fn compare_workspaces(
     sort_field: ConnectionListSortField,
     sort_order: ConnectionListSortOrder,
 ) -> Ordering {
-    // 未分配工作区（id == None）始终排最后
     match (a.id, b.id) {
         (None, Some(_)) => return Ordering::Greater,
         (Some(_), None) => return Ordering::Less,

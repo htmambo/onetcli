@@ -306,7 +306,15 @@ pub fn open_popup_window_with_should_close<F, E, H>(
         });
         let window_opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(window_bounds)),
-            titlebar: Some(TitleBar::title_bar_options()),
+            // Dialog windows on macOS are created as sheets (beginSheet) which
+            // don't have standard window buttons — passing a titlebar with
+            // traffic_light_position causes a nil pointer dereference in
+            // MacWindowState::move_traffic_light.
+            titlebar: if matches!(kind, WindowKind::Dialog) {
+                None
+            } else {
+                Some(TitleBar::title_bar_options())
+            },
             window_min_size: Some(min_size),
             kind,
             window_background,
@@ -318,6 +326,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
         let window = cx.open_window(window_opts, move |window, cx| {
             let on_should_close = Arc::clone(&on_should_close);
             window.on_window_should_close(cx, move |window, cx| on_should_close(window, cx));
+	    // 消除linux中可能出现的窗口直角
             window.set_blur_behind_corner_radius(corner_radius);
             let view = create_view_fn(window, cx).into();
             let popup_view =

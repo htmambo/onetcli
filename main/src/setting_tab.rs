@@ -1225,10 +1225,8 @@ impl AppSettings {
 
     fn apply_window_background_preferences(&self, cx: &mut App) {
         let background = self.preferred_window_background();
-        let corner_radius = self.window_corner_radius();
         for window_handle in cx.windows() {
             let _ = window_handle.update(cx, |_, window, _| {
-                window.set_blur_behind_corner_radius(corner_radius);
                 window.set_background_appearance(background);
                 window.refresh();
             });
