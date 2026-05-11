@@ -1031,6 +1031,9 @@ pub struct Terminal {
     /// 终端尺寸
     cols: usize,
     rows: usize,
+    /// 最近一次同步给 PTY 的像素尺寸,用于 nudge_resize 重发 SIGWINCH
+    pixel_width: u16,
+    pixel_height: u16,
 
     /// SSH 配置（用于重连）
     ssh_config: Option<SshTerminalConfig>,
@@ -1164,6 +1167,8 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
@@ -1280,6 +1285,8 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
@@ -1644,7 +1651,9 @@ impl Terminal {
             connection_wait_started_at: Some(Instant::now()),
             cols,
             rows,
-            ssh_config: Some(config.clone()),
+            pixel_width: 0,
+            pixel_height: 0,
+            ssh_config: Some(config),
             ssh_session_manager: Some(ssh_session_manager),
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
@@ -1701,6 +1710,8 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
@@ -2535,21 +2546,33 @@ impl Terminal {
     /// 调整终端大小
     pub fn resize(&mut self, cols: usize, rows: usize, pixel_width: u16, pixel_height: u16) {
         if self.cols == cols && self.rows == rows {
+            // 单元格行列数未变,但仍记录最新像素尺寸,供 nudge_resize 复用
+            self.pixel_width = pixel_width;
+            self.pixel_height = pixel_height;
+            tracing::debug!(
+                target: "terminal_residue",
+                cols, rows, pixel_width, pixel_height,
+                "Terminal::resize noop (cells unchanged, pixels cached)"
+            );
             return;
         }
 
         tracing::info!(
-            "Terminal::resize: {}x{} -> {}x{}, pixel={}x{}",
+            target: "terminal_residue",
+            "Terminal::resize: {}x{} -> {}x{}, pixel={}x{}, backend={}",
             self.cols,
             self.rows,
             cols,
             rows,
             pixel_width,
-            pixel_height
+            pixel_height,
+            self.backend.is_some()
         );
 
         self.cols = cols;
         self.rows = rows;
+        self.pixel_width = pixel_width;
+        self.pixel_height = pixel_height;
 
         self.term.lock().resize(TermDimensions { cols, rows });
 
@@ -2561,6 +2584,32 @@ impl Terminal {
                 pixel_height,
             });
         }
+    }
+
+    /// 重新向 PTY 后端发送当前尺寸,不修改 alacritty grid。
+    ///
+    /// 用于在 alt screen 切换等场景下触发 SIGWINCH,
+    /// 让 TUI 应用(opencode/lazygit/vim 等)重新查询尺寸并刷新整屏画面,
+    /// 避免出现底部残留旧画面的问题。
+    pub fn nudge_resize(&self) {
+        let Some(ref backend) = self.backend else {
+            tracing::warn!(target: "terminal_residue", "nudge_resize skipped: no backend");
+            return;
+        };
+        tracing::info!(
+            target: "terminal_residue",
+            cols = self.cols,
+            rows = self.rows,
+            pixel_width = self.pixel_width,
+            pixel_height = self.pixel_height,
+            "Terminal::nudge_resize -> backend.resize"
+        );
+        backend.resize(TerminalSize {
+            rows: self.rows as u16,
+            cols: self.cols as u16,
+            pixel_width: self.pixel_width,
+            pixel_height: self.pixel_height,
+        });
     }
 
     /// 重新连接 SSH 或串口
@@ -3110,6 +3159,8 @@ mod tests {
             connection_state: ConnectionState::Connected,
             cols: 80,
             rows: 24,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             serial_params: None,
