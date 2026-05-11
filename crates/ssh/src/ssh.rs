@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -86,7 +87,7 @@ pub struct ProxyConnectConfig {
 pub enum SshAuth {
     Password(String),
     PrivateKey {
-        key_path: String,
+        key_content: String,
         passphrase: Option<String>,
         certificate_path: Option<String>,
     },
@@ -578,11 +579,27 @@ where
             .await?;
         }
         SshAuth::PrivateKey {
-            key_path,
+            key_content,
             passphrase,
             certificate_path,
         } => {
-            let key_pair = load_secret_key(key_path, passphrase.as_deref())?;
+            // Write key content to a temp file since russh's decode_secret_key reads from a file path.
+            let temp_dir = std::env::temp_dir();
+            let temp_key_path = temp_dir.join(format!(
+                "onetcli_ssh_key_{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::write(&temp_key_path, &key_content)?;
+            let key_pair = match load_secret_key(&temp_key_path, passphrase.as_deref()) {
+                Ok(kp) => {
+                    let _ = std::fs::remove_file(&temp_key_path);
+                    kp
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&temp_key_path);
+                    return Err(e.into());
+                }
+            };
 
             if let Some(cert_path) = certificate_path {
                 let cert = load_openssh_certificate(cert_path)?;
@@ -733,6 +750,7 @@ async fn request_keyboard_interactive_responses(
         .context(t!("Ssh.auth_keyboard_interactive_cancelled").to_string())
 }
 
+#[cfg(test)]
 pub fn discover_default_private_keys() -> Vec<String> {
     let Some(home_dir) = dirs::home_dir() else {
         return Vec::new();
@@ -749,13 +767,22 @@ pub fn discover_default_private_keys() -> Vec<String> {
 
 pub fn expand_auto_publickey_auth() -> Vec<SshAuth> {
     let mut auth_candidates = vec![SshAuth::Agent];
-    auth_candidates.extend(discover_default_private_keys().into_iter().map(|key_path| {
-        SshAuth::PrivateKey {
-            key_path,
-            passphrase: None,
-            certificate_path: None,
+    let Some(home_dir) = dirs::home_dir() else {
+        return auth_candidates;
+    };
+    let ssh_dir = home_dir.join(".ssh");
+    for file_name in ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"] {
+        let key_path = ssh_dir.join(file_name);
+        if key_path.is_file() {
+            if let Ok(key_content) = std::fs::read_to_string(&key_path) {
+                auth_candidates.push(SshAuth::PrivateKey {
+                    key_content,
+                    passphrase: None,
+                    certificate_path: None,
+                });
+            }
         }
-    }));
+    }
     auth_candidates
 }
 
@@ -829,6 +856,7 @@ fn build_auto_publickey_failure_message(
     parts.join(": ")
 }
 
+#[cfg(test)]
 fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().to_string()
 }
@@ -999,7 +1027,6 @@ mod tests {
     #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
 
-    #[cfg(unix)]
     fn test_auth_failure_messages() -> AuthFailureMessages {
         AuthFailureMessages {
             password_failed: "password".to_string(),
@@ -1054,6 +1081,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn discover_default_private_keys_returns_expected_order() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1100,6 +1128,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn expand_auto_publickey_auth_contains_agent_and_default_keys() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1140,7 +1169,7 @@ mod tests {
         assert!(matches!(expanded.first(), Some(SshAuth::Agent)));
         assert!(expanded.iter().any(|auth| matches!(
             auth,
-            SshAuth::PrivateKey { key_path: path, .. } if path == &key_path.to_string_lossy().to_string()
+            SshAuth::PrivateKey { key_content, .. } if key_content == "ed25519"
         )));
     }
 

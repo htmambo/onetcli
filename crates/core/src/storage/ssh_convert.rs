@@ -25,10 +25,10 @@ pub(crate) fn ssh_auth_from_method(method: SshAuthMethod) -> SshAuth {
     match method {
         SshAuthMethod::Password { password } => SshAuth::Password(password),
         SshAuthMethod::PrivateKey {
-            key_path,
+            ssh_private_key,
             passphrase,
         } => SshAuth::PrivateKey {
-            key_path,
+            key_content: ssh_private_key,
             passphrase,
             certificate_path: None,
         },
@@ -111,17 +111,17 @@ mod tests {
     #[test]
     fn ssh_auth_method_private_key_converts() {
         let method = SshAuthMethod::PrivateKey {
-            key_path: "/home/user/.ssh/id_rsa".to_string(),
+            ssh_private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\ncontent\n-----END OPENSSH PRIVATE KEY-----".to_string(),
             passphrase: Some("pass123".to_string()),
         };
         let auth = ssh_auth_from_method(method);
         match auth {
             SshAuth::PrivateKey {
-                key_path,
+                key_content,
                 passphrase,
                 certificate_path,
             } => {
-                assert_eq!(key_path, "/home/user/.ssh/id_rsa");
+                assert!(key_content.contains("BEGIN OPENSSH PRIVATE KEY"));
                 assert_eq!(passphrase, Some("pass123".to_string()));
                 assert!(certificate_path.is_none());
             }

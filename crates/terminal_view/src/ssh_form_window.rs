@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     div, px, App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
 };
 use gpui_component::{
@@ -163,6 +163,9 @@ pub struct SshFormWindow {
     // 其他设置
     remark_input: Entity<InputState>,
 
+    // 私钥文件浏览挂起内容
+    pending_key_content: Entity<Option<String>>,
+
     last_tested_signature: Option<String>,
 
     // 云同步开关
@@ -233,7 +236,8 @@ impl SshFormWindow {
                 .masked(true)
         });
         let key_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("SSH.key_path_placeholder")));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("SSH.key_path_placeholder")).multi_line(true));
+        let pending_key_content = cx.new(|_| None);
         let passphrase_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(t!("SSH.passphrase_placeholder"))
@@ -364,11 +368,11 @@ impl SshFormWindow {
                         password_input.update(cx, |s, cx| s.set_value(password, window, cx));
                     }
                     SshAuthMethod::PrivateKey {
-                        ref key_path,
+                        ref ssh_private_key,
                         ref passphrase,
                     } => {
                         auth_method = AuthMethodSelection::PrivateKey;
-                        key_path_input.update(cx, |s, cx| s.set_value(key_path, window, cx));
+                        key_path_input.update(cx, |s, cx| s.set_value(ssh_private_key, window, cx));
                         if let Some(ref pass) = passphrase {
                             passphrase_input.update(cx, |s, cx| s.set_value(pass, window, cx));
                         }
@@ -493,6 +497,7 @@ impl SshFormWindow {
             sftp_local_directory_input,
             sftp_remote_directory_input,
             remark_input,
+            pending_key_content,
             last_tested_signature: None,
             sync_enabled,
             is_testing: false,
@@ -621,10 +626,10 @@ impl SshFormWindow {
             }
             one_core::storage::CertificateKind::SshPrivateKey => {
                 self.auth_method = AuthMethodSelection::PrivateKey;
-                let key_path = certificate.key_path().unwrap_or("").to_string();
+                let key_content = certificate.ssh_private_key().unwrap_or("").to_string();
                 let passphrase = certificate.passphrase().unwrap_or("").to_string();
                 self.key_path_input.update(cx, |state, cx| {
-                    state.set_value(key_path, window, cx);
+                    state.set_value(key_content, window, cx);
                 });
                 self.passphrase_input.update(cx, |state, cx| {
                     state.set_value(passphrase, window, cx);
@@ -658,7 +663,7 @@ impl SshFormWindow {
                     password: certificate.password().unwrap_or("").to_string(),
                 },
                 one_core::storage::CertificateKind::SshPrivateKey => SshAuthMethod::PrivateKey {
-                    key_path: certificate.key_path().unwrap_or("").to_string(),
+                    ssh_private_key: certificate.ssh_private_key().unwrap_or("").to_string(),
                     passphrase: certificate.passphrase().map(|s| s.to_string()),
                 },
             }
@@ -669,7 +674,7 @@ impl SshFormWindow {
                     SshAuthMethod::Password { password }
                 }
                 AuthMethodSelection::PrivateKey => {
-                    let key_path = self.key_path_input.read(cx).text().to_string();
+                    let key_content = self.key_path_input.read(cx).text().to_string();
                     let passphrase = {
                         let p = self.passphrase_input.read(cx).text().to_string();
                         if p.is_empty() {
@@ -679,7 +684,7 @@ impl SshFormWindow {
                         }
                     };
                     SshAuthMethod::PrivateKey {
-                        key_path,
+                        ssh_private_key: key_content,
                         passphrase,
                     }
                 }
@@ -843,10 +848,10 @@ impl SshFormWindow {
         let auth = match &params.auth_method {
             SshAuthMethod::Password { password } => SshAuth::Password(password.clone()),
             SshAuthMethod::PrivateKey {
-                key_path,
+                ssh_private_key,
                 passphrase,
             } => SshAuth::PrivateKey {
-                key_path: key_path.clone(),
+                key_content: ssh_private_key.clone(),
                 passphrase: passphrase.clone(),
                 certificate_path: None,
             },
@@ -859,10 +864,10 @@ impl SshFormWindow {
             let jump_auth = match &jump.auth_method {
                 SshAuthMethod::Password { password } => SshAuth::Password(password.clone()),
                 SshAuthMethod::PrivateKey {
-                    key_path,
+                    ssh_private_key,
                     passphrase,
                 } => SshAuth::PrivateKey {
-                    key_path: key_path.clone(),
+                    key_content: ssh_private_key.clone(),
                     passphrase: passphrase.clone(),
                     certificate_path: None,
                 },
@@ -1093,6 +1098,34 @@ impl SshFormWindow {
         select.refine_style(&app_style::control_style())
     }
 
+    fn browse_key_file(&mut self, _window: &mut Window, cx: &mut App) {
+        let pending = self.pending_key_content.clone();
+        let future = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            multiple: false,
+            directories: false,
+            prompt: Some(t!("SSH.select_private_key_file").into()),
+        });
+        cx.spawn(async move |cx| {
+            if let Ok(Ok(Some(paths))) = future.await {
+                if let Some(path) = paths.first() {
+                    let path_str = path.to_string_lossy().to_string();
+                    match std::fs::read_to_string(&path_str) {
+                        Ok(content) => {
+                            let _ = cx.update(|cx| {
+                                pending.update(cx, |p, _| *p = Some(content));
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to read private key file: {}", e);
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
     fn render_form_row(&self, label: &str, child: impl IntoElement) -> impl IntoElement {
         h_flex()
             .gap_3()
@@ -1208,8 +1241,23 @@ impl SshFormWindow {
                 this.child(
                     self.render_form_row(
                         &t!("SSH.key_path"),
-                        self.styled_input(Input::new(&self.key_path_input))
-                            .disabled(use_certificate),
+                        h_flex()
+                            .flex_1()
+                            .gap_2()
+                            .child(
+                                self.styled_input(Input::new(&self.key_path_input))
+                                    .h(px(80.))
+                                    .disabled(use_certificate),
+                            )
+                            .child(
+                                Button::new("browse-key-file")
+                                    .small()
+                                    .label("...")
+                                    .disabled(use_certificate)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.browse_key_file(window, cx);
+                                    })),
+                            ),
                     ),
                 )
                 .child(
@@ -1455,7 +1503,15 @@ impl Focusable for SshFormWindow {
 }
 
 impl Render for SshFormWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Check if there's pending key content to apply
+        if let Some(content) = self.pending_key_content.read(cx).clone() {
+            self.key_path_input.update(cx, |state, cx| {
+                state.set_value(content, window, cx);
+            });
+            self.pending_key_content.update(cx, |p, _| *p = None);
+        }
+
         let is_testing = self.is_testing;
         let active_tab = self.active_tab;
         let test_status_message = self

@@ -167,6 +167,10 @@ SSH:
     en: Enter private key path
     zh-CN: 请输入私钥路径
     zh-HK: 請輸入私鑰路徑
+  select_private_key_file:
+    en: Select private key file
+    zh-CN: 选择私钥文件
+    zh-HK: 選擇私鑰檔案
   passphrase:
     en: Passphrase
     zh-CN: 密钥密码

@@ -307,10 +307,10 @@ ConnectionForm:
     en: SSH Agent
     zh-CN: SSH Agent
     zh-HK: SSH Agent
-  ssh_private_key_path:
-    en: Private Key Path
-    zh-CN: 私钥路径
-    zh-HK: 私鑰路徑
+  ssh_private_key:
+    en: Private Key
+    zh-CN: 私钥内容
+    zh-HK: 私鑰內容
   ssh_private_key_passphrase:
     en: Key Passphrase
     zh-CN: 私钥口令
@@ -331,6 +331,10 @@ ConnectionForm:
     en: "Missing required field: %{field}"
     zh-CN: "缺少必填字段：%{field}"
     zh-HK: "缺少必填欄位：%{field}"
+  select_private_key_file:
+    en: "Select private key file"
+    zh-CN: "选择私钥文件"
+    zh-HK: "選擇私鑰檔案"
   manage_certificates:
     en: Manage Certificates
     zh-CN: 管理证书

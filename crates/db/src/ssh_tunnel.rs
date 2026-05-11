@@ -12,7 +12,7 @@ const SSH_PORT: &str = "ssh_port";
 const SSH_USERNAME: &str = "ssh_username";
 const SSH_AUTH_TYPE: &str = "ssh_auth_type";
 const SSH_PASSWORD: &str = "ssh_password";
-const SSH_PRIVATE_KEY_PATH: &str = "ssh_private_key_path";
+const SSH_PRIVATE_KEY_CONTENT: &str = "ssh_private_key";
 const SSH_PRIVATE_KEY_PASSPHRASE: &str = "ssh_private_key_passphrase";
 const SSH_TARGET_HOST: &str = "ssh_target_host";
 const SSH_TARGET_PORT: &str = "ssh_target_port";
@@ -136,13 +136,13 @@ fn build_auth(config: &DbConnectionConfig) -> Result<SshAuth, DbError> {
     match auth_type.as_str() {
         "agent" => Ok(SshAuth::Agent),
         "private_key" => {
-            let key_path = required_param(config, SSH_PRIVATE_KEY_PATH)?;
+            let key_content = required_param(config, SSH_PRIVATE_KEY_CONTENT)?;
             let passphrase = config
                 .get_param(SSH_PRIVATE_KEY_PASSPHRASE)
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
             Ok(SshAuth::PrivateKey {
-                key_path,
+                key_content,
                 passphrase,
                 certificate_path: None,
             })

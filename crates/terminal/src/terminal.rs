@@ -1522,10 +1522,10 @@ impl Terminal {
         let auth = match ssh_params.auth_method.clone() {
             SshAuthMethod::Password { password } => SshAuth::Password(password),
             SshAuthMethod::PrivateKey {
-                key_path,
+                ssh_private_key,
                 passphrase,
             } => SshAuth::PrivateKey {
-                key_path,
+                key_content: ssh_private_key,
                 passphrase,
                 certificate_path: None,
             },
@@ -1553,10 +1553,10 @@ impl Terminal {
                 let jump_auth = match jump.auth_method {
                     SshAuthMethod::Password { password } => SshAuth::Password(password),
                     SshAuthMethod::PrivateKey {
-                        key_path,
+                        ssh_private_key,
                         passphrase,
                     } => SshAuth::PrivateKey {
-                        key_path,
+                        key_content: ssh_private_key,
                         passphrase,
                         certificate_path: None,
                     },
