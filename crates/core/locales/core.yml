@@ -126,13 +126,13 @@ CertificateManager:
     zh-CN: "登录密码"
     zh-HK: "登入密碼"
   key_path:
-    en: "Private Key Path"
-    zh-CN: "私钥路径"
-    zh-HK: "私鑰路徑"
+    en: "Private Key"
+    zh-CN: "私钥内容"
+    zh-HK: "私鑰內容"
   key_path_placeholder:
-    en: "Private key file path"
-    zh-CN: "私钥文件路径"
-    zh-HK: "私鑰檔案路徑"
+    en: "Paste private key content here"
+    zh-CN: "粘贴私钥内容"
+    zh-HK: "粘貼私鑰內容"
   passphrase:
     en: "Private Key Passphrase"
     zh-CN: "私钥口令"
@@ -141,6 +141,10 @@ CertificateManager:
     en: "Private key passphrase"
     zh-CN: "私钥口令"
     zh-HK: "私鑰口令"
+  select_private_key_file:
+    en: "Select private key file"
+    zh-CN: "选择私钥文件"
+    zh-HK: "選擇私鑰檔案"
   scope:
     en: "Scope"
     zh-CN: "归属范围"

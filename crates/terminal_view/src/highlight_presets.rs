@@ -280,14 +280,14 @@ mod tests {
 
         assert!(
             preset
-                .rules
-                .iter()
+            .rules
+            .iter()
                 .any(|rule| rule.id == "preset:ip_addresses:ipv4")
         );
         assert!(
             preset
-                .rules
-                .iter()
+            .rules
+            .iter()
                 .any(|rule| rule.id == "preset:ip_addresses:ipv6")
         );
     }

@@ -241,7 +241,7 @@ pub enum SshAuthMethod {
         password: String,
     },
     PrivateKey {
-        key_path: String,
+        ssh_private_key: String,
         passphrase: Option<String>,
     },
     Agent,
@@ -610,7 +610,7 @@ impl Certificate {
         self.params.get("password")?.as_str()
     }
     pub fn key_path(&self) -> Option<&str> {
-        self.params.get("key_path")?.as_str()
+        self.params.get("ssh_private_key")?.as_str()
     }
     pub fn passphrase(&self) -> Option<&str> {
         self.params.get("passphrase")?.as_str()
@@ -635,8 +635,8 @@ impl Certificate {
     pub fn set_key_path(&mut self, value: Option<String>) {
         let obj = self.params.as_object_mut().unwrap();
         match value {
-            Some(v) => obj.insert("key_path".to_string(), serde_json::Value::String(v)),
-            None => obj.remove("key_path"),
+            Some(v) => obj.insert("ssh_private_key".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("ssh_private_key"),
         };
     }
     pub fn set_passphrase(&mut self, value: Option<String>) {
@@ -655,11 +655,9 @@ impl Certificate {
             }
             CertificateKind::SshPrivateKey => {
                 let username = self.username().unwrap_or("");
-                let key_path = self
-                    .key_path()
-                    .filter(|path| !path.is_empty())
-                    .unwrap_or("未设置私钥路径");
-                format!("{} / {}", username, key_path)
+                let has_key = self.key_path().map(|k| !k.is_empty()).unwrap_or(false);
+                let key_info = if has_key { "[已存储私钥]" } else { "未设置私钥" };
+                format!("{} / {}", username, key_info)
             }
         }
     }
@@ -1231,7 +1229,7 @@ fn apply_certificate_to_db_config(
                             .insert("ssh_password".to_string(), cert_pass.to_string());
                         changed = true;
                     }
-                    changed |= config.extra_params.remove("ssh_private_key_path").is_some();
+                    changed |= config.extra_params.remove("ssh_private_key").is_some();
                     changed |= config
                         .extra_params
                         .remove("ssh_private_key_passphrase")
@@ -1246,13 +1244,13 @@ fn apply_certificate_to_db_config(
                             .insert("ssh_auth_type".to_string(), "private_key".to_string());
                         changed = true;
                     }
-                    let key_path = certificate.key_path().unwrap_or("");
-                    if config.extra_params.get("ssh_private_key_path")
-                        != Some(&key_path.to_string())
+                    let key_content = certificate.ssh_private_key().unwrap_or("");
+                    if config.extra_params.get("ssh_private_key")
+                        != Some(&key_content.to_string())
                     {
                         config
                             .extra_params
-                            .insert("ssh_private_key_path".to_string(), key_path.to_string());
+                            .insert("ssh_private_key".to_string(), key_content.to_string());
                         changed = true;
                     }
                     match certificate.passphrase() {
@@ -1344,21 +1342,21 @@ fn apply_certificate_to_ssh_params(params: &mut SshParams, certificate: &Certifi
             }
         }
         CertificateKind::SshPrivateKey => {
-            let key_path = certificate.key_path().unwrap_or("");
+            let key_content = certificate.key_path().unwrap_or("");
             let passphrase = certificate.passphrase().map(|s| s.to_string());
             if !matches!(params.auth_method, SshAuthMethod::PrivateKey { .. }) {
                 params.auth_method = SshAuthMethod::PrivateKey {
-                    key_path: key_path.to_string(),
+                    ssh_private_key: key_content.to_string(),
                     passphrase,
                 };
                 changed = true;
             } else if let SshAuthMethod::PrivateKey {
-                key_path: existing_path,
+                ssh_private_key: existing_key,
                 passphrase: existing_passphrase,
             } = &mut params.auth_method
             {
-                if *existing_path != key_path {
-                    *existing_path = key_path.to_string();
+                if *existing_key != key_content {
+                    *existing_key = key_content.to_string();
                     changed = true;
                 }
                 if *existing_passphrase != passphrase {

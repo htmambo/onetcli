@@ -1372,26 +1372,26 @@ impl FileManagerPanel {
 
         self.progress_refresh_task = Some(cx.spawn(async move |this, cx| {
             loop {
-                let should_continue = this
-                    .update(cx, |this, cx| {
-                        let has_active = this.transfer_queue.has_active();
-                        if has_active {
-                            cx.notify();
-                            true
-                        } else {
-                            this.progress_refresh_task = None;
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
+            let should_continue = this
+                .update(cx, |this, cx| {
+                    let has_active = this.transfer_queue.has_active();
+                    if has_active {
+                        cx.notify();
+                        true
+                    } else {
+                        this.progress_refresh_task = None;
+                        false
+                    }
+                })
+                .unwrap_or(false);
 
-                if !should_continue {
-                    break;
-                }
+            if !should_continue {
+                break;
+            }
 
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
             }
         }));
     }

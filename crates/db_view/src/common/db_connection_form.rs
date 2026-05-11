@@ -280,12 +280,13 @@ impl DbFormConfig {
             .optional()
             .placeholder("Enter SSH password"),
             FormField::new(
-                "ssh_private_key_path",
-                t!("ConnectionForm.ssh_private_key_path"),
-                FormFieldType::Text,
+                "ssh_private_key",
+                t!("ConnectionForm.ssh_private_key"),
+                FormFieldType::TextArea,
             )
             .optional()
-            .placeholder("~/.ssh/id_rsa"),
+            .placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
+            .rows(4),
             FormField::new(
                 "ssh_private_key_passphrase",
                 t!("ConnectionForm.ssh_private_key_passphrase"),
@@ -981,7 +982,7 @@ fn missing_ssh_tunnel_required_field(
     ssh_host: &str,
     ssh_username: &str,
     auth_type: &str,
-    ssh_private_key_path: &str,
+    ssh_private_key: &str,
     ssh_password: &str,
 ) -> Option<&'static str> {
     if !enabled {
@@ -996,8 +997,8 @@ fn missing_ssh_tunnel_required_field(
         return Some("ssh_username");
     }
 
-    if ssh_auth_requires_private_key(auth_type) && ssh_private_key_path.trim().is_empty() {
-        return Some("ssh_private_key_path");
+    if ssh_auth_requires_private_key(auth_type) && ssh_private_key.trim().is_empty() {
+        return Some("ssh_private_key");
     }
 
     if ssh_auth_requires_password(auth_type) && ssh_password.trim().is_empty() {
@@ -1136,6 +1137,8 @@ impl DbConnectionForm {
                         if field.field_type == FormFieldType::TextArea {
                             if field.name == "remark" {
                                 input_state = input_state.auto_grow(3, 10);
+                            } else if field.name == "ssh_private_key" {
+                                input_state = input_state.multi_line(true).rows(4);
                             } else if field.rows == 14 {
                                 input_state = input_state.rows(14);
                             } else {
@@ -1244,6 +1247,34 @@ impl DbConnectionForm {
                 }),
         );
         items
+    }
+
+    fn browse_ssh_private_key(&mut self, _window: &mut Window, cx: &mut App) {
+        let pending = self.pending_file_path.clone();
+        let future = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            multiple: false,
+            directories: false,
+            prompt: Some(t!("ConnectionForm.select_private_key_file").into()),
+        });
+        cx.spawn(async move |cx| {
+            if let Ok(Ok(Some(paths))) = future.await {
+                if let Some(path) = paths.first() {
+                    let path_str = path.to_string_lossy().to_string();
+                    match std::fs::read_to_string(&path_str) {
+                        Ok(content) => {
+                            let _ = cx.update(|cx| {
+                                pending.update(cx, |p, _| *p = Some(content));
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to read SSH private key file: {}", e);
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
     }
 
     fn refresh_oracle_client_status(&self, cx: &mut Context<Self>) {
@@ -1474,7 +1505,7 @@ impl DbConnectionForm {
 
         let username = certificate.username().unwrap_or("").to_string();
         let password = certificate.password().unwrap_or("").to_string();
-        let key_path = certificate.key_path().unwrap_or("").to_string();
+        let key_content = certificate.ssh_private_key().unwrap_or("").to_string();
         let passphrase = certificate.passphrase().unwrap_or("").to_string();
 
         match field_name {
@@ -1488,12 +1519,12 @@ impl DbConnectionForm {
                     CertificateKind::UsernamePassword => {
                         self.set_field_value("ssh_auth_type", "password", window, cx);
                         self.set_field_value("ssh_password", &password, window, cx);
-                        self.set_field_value("ssh_private_key_path", "", window, cx);
+                        self.set_field_value("ssh_private_key", "", window, cx);
                         self.set_field_value("ssh_private_key_passphrase", "", window, cx);
                     }
                     CertificateKind::SshPrivateKey => {
                         self.set_field_value("ssh_auth_type", "private_key", window, cx);
-                        self.set_field_value("ssh_private_key_path", &key_path, window, cx);
+                        self.set_field_value("ssh_private_key", &key_content, window, cx);
                         self.set_field_value("ssh_private_key_passphrase", &passphrase, window, cx);
                         self.set_field_value("ssh_password", "", window, cx);
                     }
@@ -1609,14 +1640,14 @@ impl DbConnectionForm {
                         "ssh_password".to_string(),
                         certificate.password().unwrap_or("").to_string(),
                     );
-                    extra_params.remove("ssh_private_key_path");
+                    extra_params.remove("ssh_private_key");
                     extra_params.remove("ssh_private_key_passphrase");
                 }
                 CertificateKind::SshPrivateKey => {
                     extra_params.insert("ssh_auth_type".to_string(), "private_key".to_string());
                     extra_params.insert(
-                        "ssh_private_key_path".to_string(),
-                        certificate.key_path().unwrap_or("").to_string(),
+                        "ssh_private_key".to_string(),
+                        certificate.ssh_private_key().unwrap_or("").to_string(),
                     );
                     extra_params.insert(
                         "ssh_private_key_passphrase".to_string(),
@@ -1704,7 +1735,7 @@ impl DbConnectionForm {
             &self.get_field_value("ssh_username", cx).unwrap_or_default(),
             &auth_type,
             &self
-                .get_field_value("ssh_private_key_path", cx)
+                .get_field_value("ssh_private_key", cx)
                 .unwrap_or_default(),
             &self.get_field_value("ssh_password", cx).unwrap_or_default(),
         );
@@ -2081,7 +2112,7 @@ impl DbConnectionForm {
             "ssh_username"
             | "ssh_auth_type"
             | "ssh_password"
-            | "ssh_private_key_path"
+            | "ssh_private_key"
             | "ssh_private_key_passphrase" => self
                 .selected_certificate_by_field("ssh_tunnel_credential_ref", cx)
                 .is_some(),
@@ -2429,10 +2460,32 @@ impl DbConnectionForm {
     }
 
     fn render_ssh_tab_content(
-        &self,
-        _window: &mut Window,
+        &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        // Check if there's pending SSH key content to apply
+        if let Some(content) = self.pending_file_path.read(cx).clone() {
+            // Update field_values for the ssh_private_key field
+            if let Some((_, value_entity)) = self
+                .field_values
+                .iter_mut()
+                .find(|(name, _)| name == "ssh_private_key")
+            {
+                value_entity.update(cx, |v, cx| {
+                    *v = content.clone();
+                    cx.notify();
+                });
+            }
+            // Also update the InputState if it exists
+            if let Some(input_state) = self.get_input_by_name("ssh_private_key") {
+                input_state.update(cx, |state, cx| {
+                    state.set_value(content, window, cx);
+                });
+            }
+            self.pending_file_path.update(cx, |p, _| *p = None);
+        }
+
         let ssh_enabled = self.field_bool_value("ssh_tunnel_enabled", cx);
         let ssh_auth_type = self
             .get_field_value("ssh_auth_type", cx)
@@ -2534,8 +2587,36 @@ impl DbConnectionForm {
                         form.child(self.render_field_by_name("ssh_password", cx))
                     })
                     .when(ssh_auth_type == "private_key", |form| {
-                        form.child(self.render_field_by_name("ssh_private_key_path", cx))
-                            .child(self.render_field_by_name("ssh_private_key_passphrase", cx))
+                        form.child(
+                            field()
+                                .label(self.field_label("ssh_private_key"))
+                                .items_center()
+                                .label_justify_end()
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .gap_2()
+                                        .child(
+                                            Input::new(
+                                                &self.get_input_by_name("ssh_private_key")
+                                                    .unwrap(),
+                                            )
+                                            .flex_1()
+                                            .h(px(80.))
+                                            .disabled(use_ssh_certificate),
+                                        )
+                                        .child(
+                                            Button::new("browse-ssh-key")
+                                                .small()
+                                                .label("...")
+                                                .disabled(use_ssh_certificate)
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.browse_ssh_private_key(window, cx);
+                                                })),
+                                        ),
+                                ),
+                        )
+                        .child(self.render_field_by_name("ssh_private_key_passphrase", cx))
                     })
                     .child(self.render_field_by_name("ssh_target_host", cx))
                     .child(self.render_field_by_name("ssh_target_port", cx))
@@ -2731,7 +2812,7 @@ mod tests {
                 "ssh_username",
                 "ssh_auth_type",
                 "ssh_password",
-                "ssh_private_key_path",
+                "ssh_private_key",
                 "ssh_private_key_passphrase",
                 "ssh_target_host",
                 "ssh_target_port"

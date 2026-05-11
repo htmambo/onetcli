@@ -19,6 +19,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
+use rust_i18n::t;
 use one_core::storage::ActiveConnections;
 use one_core::storage::models::{
     ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
@@ -1494,8 +1495,16 @@ impl Terminal {
         cx: &mut Context<Self>,
         working_dir: Option<&str>,
         sync_path_with_terminal: bool,
+        auto_accept_new_keys: bool,
     ) -> Self {
-        Self::new_ssh_with_recovery(conn, cx, working_dir, sync_path_with_terminal, None)
+        Self::new_ssh_with_recovery(
+            conn,
+            cx,
+            working_dir,
+            sync_path_with_terminal,
+            None,
+            auto_accept_new_keys,
+        )
     }
 
     pub fn new_ssh_with_recovery(
@@ -1504,6 +1513,7 @@ impl Terminal {
         working_dir: Option<&str>,
         sync_path_with_terminal: bool,
         recovery_content: Option<&str>,
+        auto_accept_new_keys: bool,
     ) -> Self {
         let ssh_params = conn
             .to_ssh_params()
@@ -1512,10 +1522,10 @@ impl Terminal {
         let auth = match ssh_params.auth_method.clone() {
             SshAuthMethod::Password { password } => SshAuth::Password(password),
             SshAuthMethod::PrivateKey {
-                key_path,
+                ssh_private_key,
                 passphrase,
             } => SshAuth::PrivateKey {
-                key_path,
+                key_content: ssh_private_key,
                 passphrase,
                 certificate_path: None,
             },
@@ -1543,10 +1553,10 @@ impl Terminal {
                 let jump_auth = match jump.auth_method {
                     SshAuthMethod::Password { password } => SshAuth::Password(password),
                     SshAuthMethod::PrivateKey {
-                        key_path,
+                        ssh_private_key,
                         passphrase,
                     } => SshAuth::PrivateKey {
-                        key_path,
+                        key_content: ssh_private_key,
                         passphrase,
                         certificate_path: None,
                     },
@@ -1574,7 +1584,7 @@ impl Terminal {
                 }
             }),
             keyboard_interactive_responder: None,
-            auto_accept_new_keys: false,
+            auto_accept_new_keys,
         };
 
         let pty_config = PtyConfig::default();
@@ -2546,17 +2556,35 @@ impl Terminal {
 
     /// 重新连接 SSH 或串口
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
-        if let Some(config) = self.ssh_config.clone() {
+        self.reconnect_internal(false, cx);
+    }
+
+    /// 接受新主机密钥并重新连接。
+    /// 当用户因密钥变更导致连接失败、并主动选择接受新密钥时调用。
+    pub fn reconnect_with_auto_accept_keys(&mut self, cx: &mut Context<Self>) {
+        self.reconnect_internal(true, cx);
+    }
+
+    fn reconnect_internal(&mut self, auto_accept_keys: bool, cx: &mut Context<Self>) {
+        if let Some(mut config) = self.ssh_config.clone() {
+            if auto_accept_keys {
+                config.ssh_config.auto_accept_new_keys = true;
+            }
             let Some(event_tx) = self.event_tx.clone() else {
                 return;
             };
             let Some(event_proxy) = self.event_proxy.clone() else {
                 return;
             };
-            let session_manager = self
-                .ssh_session_manager
-                .clone()
-                .unwrap_or_else(|| Arc::new(SshSessionManager::new(config.ssh_config.clone())));
+            // 当临时开启 auto_accept_new_keys 时，必须创建新的 session manager，
+            // 否则旧的缓存配置仍会导致 KeyChanged 失败。
+            let session_manager = if auto_accept_keys {
+                Arc::new(SshSessionManager::new(config.ssh_config.clone()))
+            } else {
+                self.ssh_session_manager
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(SshSessionManager::new(config.ssh_config.clone())))
+            };
             self.ssh_session_manager = Some(session_manager.clone());
 
             self.connection_state = ConnectionState::Connecting;
@@ -2743,7 +2771,15 @@ impl Terminal {
 }
 
 fn format_connection_error(err: &anyhow::Error) -> String {
-    format!("{err:#}")
+    let msg = format!("{err:#}");
+    if msg.contains("Key changed") {
+        return format!(
+            "{}\n{}",
+            msg,
+            t!("SshSession.key_changed_hint")
+        );
+    }
+    msg
 }
 
 impl EventEmitter<TerminalModelEvent> for Terminal {}

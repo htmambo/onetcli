@@ -233,8 +233,8 @@ fn mssql_connection_form() -> DatabaseFormManifest {
                     )
                     .with_visibility(ssh_auth_rules("password")),
                     ssh_field(
-                        "ssh_private_key_path",
-                        "ConnectionForm.ssh_private_key_path",
+                        "ssh_private_key",
+                        "ConnectionForm.ssh_private_key",
                     )
                     .with_placeholder("~/.ssh/id_rsa")
                     .with_visibility(ssh_auth_rules("private_key")),

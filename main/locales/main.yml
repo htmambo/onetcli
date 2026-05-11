@@ -1334,7 +1334,6 @@ Settings:
         en: "Automatically accept and replace SSH host keys when they change. Warning: This reduces security. Only enable if you trust your network."
         zh-CN: 当 SSH 服务器密钥变更时自动接受并替换。警告：这会降低安全性，仅在信任网络环境时启用。
         zh-HK: 當 SSH 伺服器密鑰變更時自動接受並替換。警告：這會降低安全性，僅在信任網路環境時啟用。
-
   # 快捷键
   Shortcuts:
     title:

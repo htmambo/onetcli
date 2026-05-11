@@ -167,6 +167,10 @@ SSH:
     en: Enter private key path
     zh-CN: 请输入私钥路径
     zh-HK: 請輸入私鑰路徑
+  select_private_key_file:
+    en: Select private key file
+    zh-CN: 选择私钥文件
+    zh-HK: 選擇私鑰檔案
   passphrase:
     en: Passphrase
     zh-CN: 密钥密码
@@ -391,10 +395,10 @@ Settings:
     en: Search...
     zh-CN: 搜索...
     zh-HK: 搜尋...
-  search_hint:
-    en: Press Enter for next, Shift+Enter for previous
-    zh-CN: 回车搜索下一个，Shift+回车搜索上一个
-    zh-HK: 按 Enter 搜尋下一個，Shift+Enter 搜尋上一個
+  search_shortcuts_hint:
+    en: Press ⌘G for next, ⇧⌘G for previous
+    zh-CN: 按 ⌘G 跳到下一个，按 ⇧⌘G 跳到上一个
+    zh-HK: 按 ⌘G 跳到下一個，按 ⇧⌘G 跳到上一個
   font_size:
     en: Font Size
     zh-CN: 字号
@@ -1107,6 +1111,10 @@ SshSession:
     en: "Click 'Close' to exit."
     zh-CN: 点击"关闭"退出。
     zh-HK: 點擊"關閉"退出。
+  accept_new_key:
+    en: Accept new key and reconnect
+    zh-CN: 接受新密钥并重新连接
+    zh-HK: 接受新密鑰並重新連接
 
 # 文件管理器
 FileManager:

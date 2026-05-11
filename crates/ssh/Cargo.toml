@@ -12,10 +12,15 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 rust-i18n = { workspace = true }
 dirs = { workspace = true }
+uuid = { workspace = true }
 # SSH and SFTP
 russh.workspace = true
 # Proxy support
 tokio-socks.workspace = true
+# known_hosts 处理
+data-encoding = "2.3"
+hmac = "0.12"
+sha1 = "0.10"
 
 [lints]
 workspace = true

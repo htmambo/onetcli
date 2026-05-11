@@ -23,16 +23,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::addon::{
-    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
-    TerminalAddonMouseContext, register_default_addons,
+    register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
+    TerminalAddonFrameContext, TerminalAddonMouseContext,
 };
 use crate::cd_completion::{
-    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
+    build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
 };
 use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
 use crate::settings::{
-    GlobalTerminalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
-    current_settings, update_settings,
+    current_settings, update_settings, GlobalTerminalSettings, TerminalHighlightRule,
+    TerminalSettings, TerminalSettingsEvent,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
 use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
@@ -55,11 +55,11 @@ use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
-use terminal::LocalConfig;
 use terminal::terminal::{
     ConnectionState, SshSessionManager, Terminal, TerminalConnectionKind, TerminalModelEvent,
     TerminalScrollProxy, TerminalScrollSnapshot, DEFAULT_RECOVERY_SCROLLBACK_LINES,
 };
+use terminal::LocalConfig;
 use tokio::sync::Mutex;
 
 actions!(
@@ -828,8 +828,13 @@ impl TerminalView {
         view
     }
 
-    pub fn new_ssh(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_ssh_with_index(conn, None, window, cx, None, true)
+    pub fn new_ssh(
+        conn: StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        auto_accept_new_keys: bool,
+    ) -> Self {
+        Self::new_ssh_with_index(conn, None, window, cx, None, true, auto_accept_new_keys)
     }
 
     pub fn new_ssh_with_index(
@@ -839,12 +844,14 @@ impl TerminalView {
         cx: &mut Context<Self>,
         working_dir: Option<&str>,
         sync_path_with_terminal: bool,
+        auto_accept_new_keys: bool,
     ) -> Self {
         // 创建 SSH Terminal Entity
         let connection_id = conn.id;
         let stored_conn = conn.clone();
-        let terminal =
-            cx.new(|cx| Terminal::new_ssh(conn, cx, working_dir, sync_path_with_terminal));
+        let terminal = cx.new(|cx| {
+            Terminal::new_ssh(conn, cx, working_dir, sync_path_with_terminal, auto_accept_new_keys)
+        });
         Self::new_with_terminal(
             terminal,
             connection_id,
@@ -864,6 +871,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
         sync_path_with_terminal: bool,
+        auto_accept_new_keys: bool,
     ) -> Self {
         let connection_id = conn.id;
         let stored_conn = conn.clone();
@@ -874,6 +882,7 @@ impl TerminalView {
                 working_dir,
                 sync_path_with_terminal,
                 recovery_content.as_deref(),
+                auto_accept_new_keys,
             )
         });
         Self::new_with_terminal(
@@ -2227,40 +2236,50 @@ impl TerminalView {
     }
 
     pub fn reconnect(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reconnect_internal(false, cx);
+    }
+
+    pub fn reconnect_with_auto_accept_keys(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reconnect_internal(true, cx);
+    }
+
+    fn reconnect_internal(&mut self, auto_accept_keys: bool, cx: &mut Context<Self>) {
         let working_dir = self
             .terminal
             .read(cx)
             .current_working_dir()
             .map(str::to_string);
         self.terminal.update(cx, |terminal, cx| {
-            terminal.reconnect(cx);
+            if auto_accept_keys {
+                terminal.reconnect_with_auto_accept_keys(cx);
+            } else {
+                terminal.reconnect(cx);
+            }
         });
 
-        cx.spawn(async move |this, cx| {
-            loop {
-                let state = match this.update(cx, |this, cx| {
-                    this.terminal.read(cx).connection_state().clone()
-                }) {
-                    Ok(state) => state,
-                    Err(_) => break,
-                };
+        cx.spawn(async move |this, cx| loop {
+            let state = match this.update(cx, |this, cx| {
+                this.terminal.read(cx).connection_state().clone()
+            }) {
+                Ok(state) => state,
+                Err(_) => break,
+            };
 
-                match state {
-                    ConnectionState::Connected => {
-                        let _ = this.update(cx, |this, cx| {
-                            this.sidebar.update(cx, |sidebar, cx| {
-                                sidebar.reconnect_file_manager(working_dir.clone(), cx);
-                                sidebar.reconnect_server_monitor(cx);
-                            });
+            match state {
+                ConnectionState::Connected => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.reconnect_file_manager(working_dir.clone(), cx);
+                            sidebar.reconnect_server_monitor(cx);
                         });
-                        break;
-                    }
-                    ConnectionState::Disconnected { .. } => break,
-                    ConnectionState::Connecting => {
-                        cx.background_executor()
-                            .timer(Duration::from_millis(100))
-                            .await;
-                    }
+                    });
+                    break;
+                }
+                ConnectionState::Disconnected { .. } => break,
+                ConnectionState::Connecting => {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(100))
+                        .await;
                 }
             }
         })
@@ -3205,6 +3224,10 @@ impl TerminalView {
             ConnectionState::Disconnected { error } => error.clone(),
             _ => None,
         };
+        let is_key_changed = error_msg
+            .as_ref()
+            .map(|m| m.contains("Key changed"))
+            .unwrap_or(false);
 
         // 区分用户 exit 和网络故障：child_exited 有值表示子进程已退出（用户 exit）
         let child_exited = terminal.child_exited();
@@ -3287,7 +3310,7 @@ impl TerminalView {
                                 .text_color(cx.theme().terminal_ui.status_disconnected)
                                 .max_w(px(350.0))
                                 .overflow_hidden()
-                                .text_ellipsis()
+                                .whitespace_normal()
                                 .child(msg),
                         )
                     })
@@ -3332,13 +3355,23 @@ impl TerminalView {
                                             this.request_close(window, cx);
                                         })),
                                 )
-                                .when(can_reconnect, |el| {
+                                .when(can_reconnect && !is_key_changed, |el| {
                                     el.child(
                                         Button::new("reconnect-btn")
                                             .label(t!("SshSession.reconnect"))
                                             .primary()
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.reconnect(window, cx);
+                                            })),
+                                    )
+                                })
+                                .when(is_key_changed, |el| {
+                                    el.child(
+                                        Button::new("accept-new-key-btn")
+                                            .label(t!("SshSession.accept_new_key"))
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reconnect_with_auto_accept_keys(window, cx);
                                             })),
                                     )
                                 }),
@@ -4440,15 +4473,14 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
-        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
-        history_prompt_dropdown_origin, history_prompt_overlay_bounds,
-        multiline_non_empty_line_count, preserve_theme_typography,
+        alt_screen_scroll_arrow, detect_unbracketed_paste_hazard, has_trailing_line_continuation,
+        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
+        history_prompt_overlay_bounds, multiline_non_empty_line_count, preserve_theme_typography,
         should_defer_inline_history_prompt_input_to_text_system,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, take_whole_scroll_lines,
-        trim_recovery_content_to_recent_chars,
+        trim_recovery_content_to_recent_chars, UnbracketedPasteHazard,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use crate::theme::TerminalTheme;

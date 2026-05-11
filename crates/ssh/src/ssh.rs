@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -86,7 +87,7 @@ pub struct ProxyConnectConfig {
 pub enum SshAuth {
     Password(String),
     PrivateKey {
-        key_path: String,
+        key_content: String,
         passphrase: Option<String>,
         certificate_path: Option<String>,
     },
@@ -333,6 +334,93 @@ pub trait SshClient: Send + Sync {
     }
 }
 
+/// 从 known_hosts 文件中移除匹配指定主机的所有条目。
+///
+/// 实现逻辑与 russh 的 `known_host_keys_path` 保持一致：
+/// - 支持 `[host]:port` 与 `host` 两种格式
+/// - 支持 hashed host（`|1|` 前缀）
+/// - 跳过注释行（以 `#` 开头）
+fn remove_known_hosts_entry(host: &str, port: u16) -> Result<(), russh::Error> {
+    use std::borrow::Cow;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Write};
+
+    let path = dirs::home_dir()
+        .map(|home| home.join(".ssh").join("known_hosts"))
+        .ok_or(russh::keys::Error::NoHomeDir)?;
+    let file = match File::open(&path) {
+        Ok(f) => BufReader::new(f),
+        Err(_) => return Ok(()), // 文件不存在，无需处理
+    };
+
+    let host_port = if port == 22 {
+        Cow::Borrowed(host)
+    } else {
+        Cow::Owned(format!("[{host}]:{port}"))
+    };
+
+    let mut remaining = Vec::new();
+
+    for line in file.lines() {
+        let line = line.map_err(russh::keys::Error::IO)?;
+        if line.as_bytes().first() == Some(&b'#') {
+            remaining.push(line);
+            continue;
+        }
+        let mut s = line.split(' ');
+        let hosts = s.next();
+        let _ = s.next();
+        let key = s.next();
+        if let (Some(h), Some(_)) = (hosts, key) {
+            if match_known_host(&host_port, h) {
+                tracing::debug!("从 known_hosts 移除条目: {}", line);
+                continue;
+            }
+        }
+        remaining.push(line);
+    }
+
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(&path)
+        .map_err(russh::keys::Error::IO)?;
+    for line in remaining {
+        writeln!(out, "{}", line).map_err(russh::keys::Error::IO)?;
+    }
+    Ok(())
+}
+
+/// 匹配 known_hosts 中的主机名条目。
+/// 逻辑与 russh `match_hostname` 保持一致，支持明文与 hashed host。
+fn match_known_host(host: &str, pattern: &str) -> bool {
+    use data_encoding::BASE64_MIME;
+    use hmac::{Hmac, Mac};
+    use sha1::Sha1;
+
+    for entry in pattern.split(',') {
+        if entry.starts_with("|1|") {
+            let mut parts = entry.split('|').skip(2);
+            let Some(Ok(salt)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
+                continue;
+            };
+            let Some(Ok(hash)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
+                continue;
+            };
+            if let Ok(mut hmac) = Hmac::<Sha1>::new_from_slice(&salt) {
+                hmac.update(host.as_bytes());
+                if hmac.verify_slice(&hash).is_ok() {
+                    return true;
+                }
+            }
+        } else if host == entry {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn verify_server_key(
     host: &str,
     port: u16,
@@ -353,11 +441,12 @@ pub fn verify_server_key(
         Err(russh::keys::Error::KeyChanged { line }) => {
             if auto_accept_new_keys {
                 tracing::warn!(
-                    "SSH 主机 {}:{} 的指纹发生变化，自动接受新密钥（known_hosts 第 {} 行）",
+                    "SSH 主机 {}:{} 的指纹发生变化，自动移除旧指纹并写入新指纹（known_hosts 第 {} 行）",
                     host,
                     port,
                     line
                 );
+                remove_known_hosts_entry(host, port)?;
                 russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
                 Ok(true)
             } else {
@@ -490,11 +579,27 @@ where
             .await?;
         }
         SshAuth::PrivateKey {
-            key_path,
+            key_content,
             passphrase,
             certificate_path,
         } => {
-            let key_pair = load_secret_key(key_path, passphrase.as_deref())?;
+            // Write key content to a temp file since russh's decode_secret_key reads from a file path.
+            let temp_dir = std::env::temp_dir();
+            let temp_key_path = temp_dir.join(format!(
+                "onetcli_ssh_key_{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::write(&temp_key_path, &key_content)?;
+            let key_pair = match load_secret_key(&temp_key_path, passphrase.as_deref()) {
+                Ok(kp) => {
+                    let _ = std::fs::remove_file(&temp_key_path);
+                    kp
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&temp_key_path);
+                    return Err(e.into());
+                }
+            };
 
             if let Some(cert_path) = certificate_path {
                 let cert = load_openssh_certificate(cert_path)?;
@@ -645,6 +750,7 @@ async fn request_keyboard_interactive_responses(
         .context(t!("Ssh.auth_keyboard_interactive_cancelled").to_string())
 }
 
+#[cfg(test)]
 pub fn discover_default_private_keys() -> Vec<String> {
     let Some(home_dir) = dirs::home_dir() else {
         return Vec::new();
@@ -661,13 +767,22 @@ pub fn discover_default_private_keys() -> Vec<String> {
 
 pub fn expand_auto_publickey_auth() -> Vec<SshAuth> {
     let mut auth_candidates = vec![SshAuth::Agent];
-    auth_candidates.extend(discover_default_private_keys().into_iter().map(|key_path| {
-        SshAuth::PrivateKey {
-            key_path,
-            passphrase: None,
-            certificate_path: None,
+    let Some(home_dir) = dirs::home_dir() else {
+        return auth_candidates;
+    };
+    let ssh_dir = home_dir.join(".ssh");
+    for file_name in ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"] {
+        let key_path = ssh_dir.join(file_name);
+        if key_path.is_file() {
+            if let Ok(key_content) = std::fs::read_to_string(&key_path) {
+                auth_candidates.push(SshAuth::PrivateKey {
+                    key_content,
+                    passphrase: None,
+                    certificate_path: None,
+                });
+            }
         }
-    }));
+    }
     auth_candidates
 }
 
@@ -741,6 +856,7 @@ fn build_auto_publickey_failure_message(
     parts.join(": ")
 }
 
+#[cfg(test)]
 fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().to_string()
 }
@@ -966,6 +1082,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn discover_default_private_keys_returns_expected_order() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1012,6 +1129,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn expand_auto_publickey_auth_contains_agent_and_default_keys() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1052,7 +1170,7 @@ mod tests {
         assert!(matches!(expanded.first(), Some(SshAuth::Agent)));
         assert!(expanded.iter().any(|auth| matches!(
             auth,
-            SshAuth::PrivateKey { key_path: path, .. } if path == &key_path.to_string_lossy().to_string()
+            SshAuth::PrivateKey { key_content, .. } if key_content == "ed25519"
         )));
     }
 

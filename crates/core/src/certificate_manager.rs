@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div,
+    IntoElement, ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, TitleBar, WindowExt, app_style,
@@ -359,6 +359,7 @@ struct CertificateForm {
     remark_input: Entity<InputState>,
     kind_select: Entity<SelectState<Vec<CertificateKindItem>>>,
     sync_enabled: bool,
+    pending_key_content: Entity<Option<String>>,
 }
 
 impl CertificateForm {
@@ -394,10 +395,11 @@ impl CertificateForm {
         });
         let key_path_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
-                .placeholder(t!("CertificateManager.key_path_placeholder"));
+                .placeholder(t!("CertificateManager.key_path_placeholder"))
+                .multi_line(true);
             if let Some(certificate) = &certificate {
-                if let Some(key_path) = certificate.key_path() {
-                    state.set_value(key_path.to_string(), window, cx);
+                if let Some(key_content) = certificate.ssh_private_key() {
+                    state.set_value(key_content.to_string(), window, cx);
                 }
             }
             state
@@ -441,6 +443,8 @@ impl CertificateForm {
         let kind_select =
             cx.new(|cx| SelectState::new(kind_items, selected_kind_index, window, cx));
 
+        let pending_key_content = cx.new(|_| None);
+
         Self {
             focus_handle: cx.focus_handle(),
             original: certificate.clone(),
@@ -454,6 +458,7 @@ impl CertificateForm {
             sync_enabled: certificate
                 .map(|certificate| certificate.sync_enabled)
                 .unwrap_or(true),
+            pending_key_content,
         }
     }
 
@@ -463,6 +468,34 @@ impl CertificateForm {
             .selected_value()
             .copied()
             .unwrap_or(CertificateKind::UsernamePassword)
+    }
+
+    fn browse_key_file(&mut self, _window: &mut Window, cx: &mut App) {
+        let pending = self.pending_key_content.clone();
+        let future = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            multiple: false,
+            directories: false,
+            prompt: Some(t!("CertificateManager.select_private_key_file").into()),
+        });
+        cx.spawn(async move |cx| {
+            if let Ok(Ok(Some(paths))) = future.await {
+                if let Some(path) = paths.first() {
+                    let path_str = path.to_string_lossy().to_string();
+                    match std::fs::read_to_string(&path_str) {
+                        Ok(content) => {
+                            let _ = cx.update(|cx| {
+                                pending.update(cx, |p, _| *p = Some(content));
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to read private key file: {}", e);
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
     }
 
     fn build_certificate(&self, cx: &App) -> Option<Certificate> {
@@ -493,7 +526,7 @@ impl CertificateForm {
                 Some(value)
             }
         };
-        let key_path = {
+        let key_content = {
             let value = self
                 .key_path_input
                 .read(cx)
@@ -511,7 +544,7 @@ impl CertificateForm {
                 Some(value)
             }
         };
-        if kind == CertificateKind::SshPrivateKey && key_path.is_none() {
+        if kind == CertificateKind::SshPrivateKey && key_content.is_none() {
             return None;
         }
 
@@ -538,10 +571,10 @@ impl CertificateForm {
             }
         }
         if kind == CertificateKind::SshPrivateKey {
-            if let Some(ref kp) = key_path {
+            if let Some(ref kc) = key_content {
                 params_map.insert(
-                    "key_path".to_string(),
-                    serde_json::Value::String(kp.clone()),
+                    "ssh_private_key".to_string(),
+                    serde_json::Value::String(kc.clone()),
                 );
             }
             if let Some(ref ph) = passphrase {
@@ -579,16 +612,18 @@ impl CertificateForm {
                     } else {
                         obj.remove("password");
                     }
-                    obj.remove("key_path");
+                    obj.remove("ssh_private_key");
                     obj.remove("passphrase");
                 }
                 CertificateKind::SshPrivateKey => {
                     obj.remove("password");
-                    if let Some(ref kp) = key_path {
+                    if let Some(ref kc) = key_content {
                         obj.insert(
-                            "key_path".to_string(),
-                            serde_json::Value::String(kp.clone()),
+                            "ssh_private_key".to_string(),
+                            serde_json::Value::String(kc.clone()),
                         );
+                    } else {
+                        obj.remove("ssh_private_key");
                     }
                     if let Some(ref ph) = passphrase {
                         obj.insert(
@@ -615,7 +650,15 @@ impl Focusable for CertificateForm {
 }
 
 impl Render for CertificateForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Check if there's pending key content to apply
+        if let Some(content) = self.pending_key_content.read(cx).clone() {
+            self.key_path_input.update(cx, |state, cx| {
+                state.set_value(content, window, cx);
+            });
+            self.pending_key_content.update(cx, |p, _| *p = None);
+        }
+
         let selected_kind = self.selected_kind(cx);
 
         v_flex()
@@ -676,7 +719,24 @@ impl Render for CertificateForm {
                                 .text_sm()
                                 .child(t!("CertificateManager.key_path").to_string()),
                         )
-                        .child(Input::new(&self.key_path_input).w_full()),
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .gap_2()
+                                .child(
+                                    Input::new(&self.key_path_input)
+                                        .flex_1()
+                                        .h(px(80.)),
+                                )
+                                .child(
+                                    Button::new("browse-key-file")
+                                        .small()
+                                        .label("...")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.browse_key_file(window, cx);
+                                        })),
+                                ),
+                        ),
                 )
                 .child(
                     v_flex()
