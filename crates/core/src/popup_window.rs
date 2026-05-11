@@ -126,7 +126,10 @@ impl Focusable for PopupWindowView {
 }
 
 impl Render for PopupWindowView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialog_layer = Root::render_dialog_layer(window, cx);
+        let sheet_layer = Root::render_sheet_layer(window, cx);
+
         v_flex()
             .id("popup-window-root")
             .size_full()
@@ -136,11 +139,15 @@ impl Render for PopupWindowView {
             .rounded(cx.theme().radius_lg)
             .text_color(app_style::text())
             .overflow_hidden()
+            // Root 已经改为透明，仅负责承接窗口级圆角与阴影；
+            // popup 壳层自己仍保留圆角与矩形 overflow mask，用于约束壳层背景和滚动区域。
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .focus_trap("popup-window-root", &self.focus_handle)
             .on_action(cx.listener(Self::on_cancel_popup))
             .child(div().size_full().child(self.content.clone()))
+            .children(dialog_layer)
+            .children(sheet_layer)
     }
 }
 

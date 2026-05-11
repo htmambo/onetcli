@@ -14,7 +14,7 @@ use crate::title_bar::linux_prefers_system_window_controls;
 pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 #[cfg(target_os = "linux")]
 pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
-const BORDER_SIZE: Pixels = px(1.0);
+const BORDER_SIZE: Pixels = px(4.0);
 
 #[cfg(target_os = "linux")]
 fn linux_uses_wayland_session() -> bool {
@@ -240,20 +240,23 @@ impl RenderOnce for WindowBorder {
                                 div.rounded_bl(border_radius)
                             })
                             .border_color(cx.theme().border)
-                            .when(!tiling.top, |div| div.border_t(BORDER_SIZE))
-                            .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
-                            .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
-                            .when(!tiling.right, |div| div.border_r(BORDER_SIZE))
-                            .when(!tiling.is_tiled(), |div| {
+                            // .when(!tiling.top && !hide_client_top_border, |div| {
+                            //     div.border_t(BORDER_SIZE)
+                            // })
+                            // .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
+                            // .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
+                            // .when(!tiling.right, |div| div.border_r(BORDER_SIZE))
+                            .when(true, |div| div.border(BORDER_SIZE))
+                            .when(!tiling.is_tiled() && cx.theme().shadow, |div| {
                                 div.shadow(vec![gpui::BoxShadow {
                                     color: Hsla {
                                         h: 0.,
                                         s: 0.,
                                         l: 0.,
-                                        a: 0.3,
+                                        a: 0.14,
                                     },
-                                    blur_radius: shadow_size / 2.,
-                                    spread_radius: px(0.),
+                                    blur_radius: shadow_size * 0.75,
+                                    spread_radius: -shadow_size / 3.,
                                     offset: point(px(0.0), px(0.0)),
                                 }])
                             }),
@@ -261,7 +264,7 @@ impl RenderOnce for WindowBorder {
                     })
                     // 系统装饰路径下补一层可见内边框，避免窗口边界过弱。
                     .when(show_content_border, |div| {
-                        div.border_1()
+                        div.border_4()
                             .border_color(cx.theme().border)
                             .rounded(border_radius)
                     })
@@ -269,7 +272,7 @@ impl RenderOnce for WindowBorder {
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
                     })
-                    .bg(cx.theme().background)
+                    .bg(cx.theme().transparent)
                     .size_full()
                     .children(self.children),
             )
