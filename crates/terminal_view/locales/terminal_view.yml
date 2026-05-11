@@ -1107,6 +1107,10 @@ SshSession:
     en: "Click 'Close' to exit."
     zh-CN: 点击"关闭"退出。
     zh-HK: 點擊"關閉"退出。
+  accept_new_key:
+    en: Accept new key and reconnect
+    zh-CN: 接受新密钥并重新连接
+    zh-HK: 接受新密鑰並重新連接
 
 # 文件管理器
 FileManager:

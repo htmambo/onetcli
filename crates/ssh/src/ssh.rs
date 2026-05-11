@@ -333,6 +333,93 @@ pub trait SshClient: Send + Sync {
     }
 }
 
+/// 从 known_hosts 文件中移除匹配指定主机的所有条目。
+///
+/// 实现逻辑与 russh 的 `known_host_keys_path` 保持一致：
+/// - 支持 `[host]:port` 与 `host` 两种格式
+/// - 支持 hashed host（`|1|` 前缀）
+/// - 跳过注释行（以 `#` 开头）
+fn remove_known_hosts_entry(host: &str, port: u16) -> Result<(), russh::Error> {
+    use std::borrow::Cow;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader, Write};
+
+    let path = dirs::home_dir()
+        .map(|home| home.join(".ssh").join("known_hosts"))
+        .ok_or(russh::keys::Error::NoHomeDir)?;
+    let file = match File::open(&path) {
+        Ok(f) => BufReader::new(f),
+        Err(_) => return Ok(()), // 文件不存在，无需处理
+    };
+
+    let host_port = if port == 22 {
+        Cow::Borrowed(host)
+    } else {
+        Cow::Owned(format!("[{host}]:{port}"))
+    };
+
+    let mut remaining = Vec::new();
+
+    for line in file.lines() {
+        let line = line.map_err(russh::keys::Error::IO)?;
+        if line.as_bytes().first() == Some(&b'#') {
+            remaining.push(line);
+            continue;
+        }
+        let mut s = line.split(' ');
+        let hosts = s.next();
+        let _ = s.next();
+        let key = s.next();
+        if let (Some(h), Some(_)) = (hosts, key) {
+            if match_known_host(&host_port, h) {
+                tracing::debug!("从 known_hosts 移除条目: {}", line);
+                continue;
+            }
+        }
+        remaining.push(line);
+    }
+
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(&path)
+        .map_err(russh::keys::Error::IO)?;
+    for line in remaining {
+        writeln!(out, "{}", line).map_err(russh::keys::Error::IO)?;
+    }
+    Ok(())
+}
+
+/// 匹配 known_hosts 中的主机名条目。
+/// 逻辑与 russh `match_hostname` 保持一致，支持明文与 hashed host。
+fn match_known_host(host: &str, pattern: &str) -> bool {
+    use data_encoding::BASE64_MIME;
+    use hmac::{Hmac, Mac};
+    use sha1::Sha1;
+
+    for entry in pattern.split(',') {
+        if entry.starts_with("|1|") {
+            let mut parts = entry.split('|').skip(2);
+            let Some(Ok(salt)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
+                continue;
+            };
+            let Some(Ok(hash)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
+                continue;
+            };
+            if let Ok(mut hmac) = Hmac::<Sha1>::new_from_slice(&salt) {
+                hmac.update(host.as_bytes());
+                if hmac.verify_slice(&hash).is_ok() {
+                    return true;
+                }
+            }
+        } else if host == entry {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn verify_server_key(
     host: &str,
     port: u16,
@@ -353,11 +440,12 @@ pub fn verify_server_key(
         Err(russh::keys::Error::KeyChanged { line }) => {
             if auto_accept_new_keys {
                 tracing::warn!(
-                    "SSH 主机 {}:{} 的指纹发生变化，自动接受新密钥（known_hosts 第 {} 行）",
+                    "SSH 主机 {}:{} 的指纹发生变化，自动移除旧指纹并写入新指纹（known_hosts 第 {} 行）",
                     host,
                     port,
                     line
                 );
+                remove_known_hosts_entry(host, port)?;
                 russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
                 Ok(true)
             } else {

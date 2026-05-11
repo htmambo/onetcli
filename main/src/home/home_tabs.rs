@@ -552,6 +552,7 @@ impl HomePage {
             .map(str::to_string);
         let recovery_content = restore_state.and_then(|state| state.buffer_content.clone());
 
+        let auto_accept_new_keys = AppSettings::global(cx).ssh_auto_accept_new_keys;
         let terminal_view = cx.new(|cx| {
             if let Some(recovery_content) = recovery_content.clone() {
                 TerminalView::new_restored_ssh_with_index(
@@ -562,6 +563,7 @@ impl HomePage {
                     window,
                     cx,
                     sync_path,
+                    auto_accept_new_keys,
                 )
             } else {
                 TerminalView::new_ssh_with_index(
@@ -571,6 +573,7 @@ impl HomePage {
                     cx,
                     working_dir.as_deref(),
                     sync_path,
+                    auto_accept_new_keys,
                 )
             }
         });
@@ -689,6 +692,7 @@ impl HomePage {
                             None
                         };
                         let sync_path = HomePage::terminal_sync_path_enabled(cx);
+                        let auto_accept_new_keys = AppSettings::global(cx).ssh_auto_accept_new_keys;
                         let terminal_view = cx.new(|cx| {
                             TerminalView::new_ssh_with_index(
                                 conn,
@@ -697,6 +701,7 @@ impl HomePage {
                                 cx,
                                 Some(working_dir),
                                 sync_path,
+                                auto_accept_new_keys,
                             )
                         });
                         this.setup_terminal_view(&terminal_view, window, cx);

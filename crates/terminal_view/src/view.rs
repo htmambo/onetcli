@@ -828,8 +828,13 @@ impl TerminalView {
         view
     }
 
-    pub fn new_ssh(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_ssh_with_index(conn, None, window, cx, None, true)
+    pub fn new_ssh(
+        conn: StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        auto_accept_new_keys: bool,
+    ) -> Self {
+        Self::new_ssh_with_index(conn, None, window, cx, None, true, auto_accept_new_keys)
     }
 
     pub fn new_ssh_with_index(
@@ -839,12 +844,14 @@ impl TerminalView {
         cx: &mut Context<Self>,
         working_dir: Option<&str>,
         sync_path_with_terminal: bool,
+        auto_accept_new_keys: bool,
     ) -> Self {
         // 创建 SSH Terminal Entity
         let connection_id = conn.id;
         let stored_conn = conn.clone();
-        let terminal =
-            cx.new(|cx| Terminal::new_ssh(conn, cx, working_dir, sync_path_with_terminal));
+        let terminal = cx.new(|cx| {
+            Terminal::new_ssh(conn, cx, working_dir, sync_path_with_terminal, auto_accept_new_keys)
+        });
         Self::new_with_terminal(
             terminal,
             connection_id,
@@ -864,6 +871,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
         sync_path_with_terminal: bool,
+        auto_accept_new_keys: bool,
     ) -> Self {
         let connection_id = conn.id;
         let stored_conn = conn.clone();
@@ -874,6 +882,7 @@ impl TerminalView {
                 working_dir,
                 sync_path_with_terminal,
                 recovery_content.as_deref(),
+                auto_accept_new_keys,
             )
         });
         Self::new_with_terminal(
@@ -2227,13 +2236,25 @@ impl TerminalView {
     }
 
     pub fn reconnect(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reconnect_internal(false, cx);
+    }
+
+    pub fn reconnect_with_auto_accept_keys(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.reconnect_internal(true, cx);
+    }
+
+    fn reconnect_internal(&mut self, auto_accept_keys: bool, cx: &mut Context<Self>) {
         let working_dir = self
             .terminal
             .read(cx)
             .current_working_dir()
             .map(str::to_string);
         self.terminal.update(cx, |terminal, cx| {
-            terminal.reconnect(cx);
+            if auto_accept_keys {
+                terminal.reconnect_with_auto_accept_keys(cx);
+            } else {
+                terminal.reconnect(cx);
+            }
         });
 
         cx.spawn(async move |this, cx| loop {
@@ -3203,6 +3224,10 @@ impl TerminalView {
             ConnectionState::Disconnected { error } => error.clone(),
             _ => None,
         };
+        let is_key_changed = error_msg
+            .as_ref()
+            .map(|m| m.contains("Key changed"))
+            .unwrap_or(false);
 
         // 区分用户 exit 和网络故障：child_exited 有值表示子进程已退出（用户 exit）
         let child_exited = terminal.child_exited();
@@ -3285,7 +3310,7 @@ impl TerminalView {
                                 .text_color(cx.theme().terminal_ui.status_disconnected)
                                 .max_w(px(350.0))
                                 .overflow_hidden()
-                                .text_ellipsis()
+                                .whitespace_normal()
                                 .child(msg),
                         )
                     })
@@ -3330,13 +3355,23 @@ impl TerminalView {
                                             this.request_close(window, cx);
                                         })),
                                 )
-                                .when(can_reconnect, |el| {
+                                .when(can_reconnect && !is_key_changed, |el| {
                                     el.child(
                                         Button::new("reconnect-btn")
                                             .label(t!("SshSession.reconnect"))
                                             .primary()
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.reconnect(window, cx);
+                                            })),
+                                    )
+                                })
+                                .when(is_key_changed, |el| {
+                                    el.child(
+                                        Button::new("accept-new-key-btn")
+                                            .label(t!("SshSession.accept_new_key"))
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reconnect_with_auto_accept_keys(window, cx);
                                             })),
                                     )
                                 }),

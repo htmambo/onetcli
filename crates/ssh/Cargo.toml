@@ -16,6 +16,10 @@ dirs = { workspace = true }
 russh.workspace = true
 # Proxy support
 tokio-socks.workspace = true
+# known_hosts 处理
+data-encoding = "2.3"
+hmac = "0.12"
+sha1 = "0.10"
 
 [lints]
 workspace = true
