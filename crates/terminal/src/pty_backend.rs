@@ -311,7 +311,6 @@ impl GpuiEventProxy {
         self.set_write_back(PtyWriteBack::Ssh(sender));
     }
 
-<<<<<<< HEAD
     /// 设置 Hosted 本地 PTY 回写通道
     #[allow(dead_code)]
     pub(crate) fn set_hosted_write_back(
@@ -320,7 +319,8 @@ impl GpuiEventProxy {
         session_id: String,
     ) {
         self.set_write_back(PtyWriteBack::Hosted { sender, session_id });
-=======
+    }
+
     /// 同步当前真实窗口尺寸（含 cell 像素），后续 TextAreaSizeRequest 将以此回复
     pub(crate) fn set_window_size(&self, size: WindowSize) {
         *self.window_size.lock().unwrap() = size;
@@ -339,7 +339,6 @@ impl GpuiEventProxy {
 
     fn current_window_size(&self) -> WindowSize {
         *self.window_size.lock().unwrap()
->>>>>>> d0e858e4 (feat(terminal): 优化终端事件转发和块字符渲染)
     }
 
     fn write_back(&self, data: Vec<u8>) {

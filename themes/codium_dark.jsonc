@@ -84,18 +84,18 @@
         // 列表默认背景
         "list.background": "#2c1438",
         // 列表项激活背景
-        "list.active.background": "#75219433",
+        "list.active.background": "#752194",
         // 列表项激活边框
         "list.active.border": "#c678dd",
         // 列表偶数行背景
         "list.even.background": "#321548",
         // 列表头部背景
         // 列表项悬停背景
-        "list.hover.background": "#3d204966",
+        "list.hover.background": "#3d2049",
 
         // === 弱化色 ===
         // 次要/禁用区域背景
-        "muted.background": "#3d204966",
+        "muted.background": "#3d2049",
         // 次要/禁用文字
         "muted.foreground": "#9a7a9f",
 
@@ -150,11 +150,11 @@
 
         // === 侧边栏 ===
         // 侧边栏强调色背景
-        "sidebar.accent.background": "#2e0f3866",
+        "sidebar.accent.background": "#2e0f38",
         // 侧边栏强调色文字
         "sidebar.accent.foreground": "#785485",
         // 侧边栏背景
-        "sidebar.background": "#4d325733",
+        "sidebar.background": "#4d3257",
         // 侧边栏边框
         "sidebar.border": "#230431",
         // 侧边栏文字
@@ -162,7 +162,7 @@
 
         // === 骨架屏 ===
         // 加载骨架背景
-        "skeleton.background": "#3d204966",
+        "skeleton.background": "#3d2049",
 
         // === 滑块 ===
         // 滑块轨道背景
@@ -207,11 +207,11 @@
         // === 表格 ===
         // 表格默认背景
         // 表格选中行背景
-        "table.active.background": "#75219433",
+        "table.active.background": "#752194",
         // 表格选中行边框
         "table.active.border": "#5e0679",
         // 表格偶数行背景
-        "table.even.background": "#3d204966",
+        "table.even.background": "#3d2049",
         // 表格头部背景
         "table.head.background": "#2d0c2e",
         // 表格头部文字

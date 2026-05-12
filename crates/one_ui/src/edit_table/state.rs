@@ -2053,23 +2053,11 @@ where
             ),
         };
 
-        // 边框补偿：编辑态始终有 border_2；显示态仅选中时有
-        let (has_t, has_b, has_l, has_r) = if is_editing {
-            (true, true, true, true)
-        } else {
-            (
-                border_top || is_single_select_active,
-                border_bottom || is_single_select_active,
-                border_left || is_single_select_active,
-                border_right || is_single_select_active,
-            )
-        };
-        let b = px(2.);
         cell = cell
-            .pt(if has_t { (target_pt - b).max(px(0.)) } else { target_pt })
-            .pb(if has_b { (target_pb - b).max(px(0.)) } else { target_pb })
-            .pl(if has_l { (target_pl - b).max(px(0.)) } else { target_pl })
-            .pr(if has_r { (target_pr - b).max(px(0.)) } else { target_pr });
+            .pt(target_pt)
+            .pb(target_pb)
+            .pl(target_pl)
+            .pr(target_pr);
 
         // 编辑模式：嵌入轻量编辑器（无自带样式，由容器控制布局）
         if is_editing {

@@ -90,43 +90,22 @@ fn build_shell_integration_setup_script(
     let home_marker = shell_single_quote(home_marker);
     let session_marker = shell_single_quote(session_marker);
     let shell_marker = shell_single_quote(shell_marker);
-
-    // zsh wrapper 设计:让 ZDOTDIR 始终保持 session_dir/zsh,在该目录下放完整的 4 个 wrapper
-    // 文件,每个 fan-out 到 $ONETCLI_ORIG_ZDOTDIR 下的同名文件,保留完整 login shell 行为;
-    // 仅在 .zshrc 末尾追加 integration source,然后还原 ZDOTDIR 给后续 sub-shell。
     let zshenv = shell_single_quote(
-        "[[ -n \"${ONETCLI_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zshenv\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zshenv\"\n",
-    );
-    let zprofile = shell_single_quote(
-        "[[ -n \"${ONETCLI_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zprofile\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zprofile\"\n",
+        "_ONETCLI_SESSION_ZDOTDIR=\"$ZDOTDIR\"\n\
+         _ONETCLI_ORIG_ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
+         [[ -f \"$_ONETCLI_ORIG_ZDOTDIR/.zshenv\" ]] && . \"$_ONETCLI_ORIG_ZDOTDIR/.zshenv\"\n\
+         ZDOTDIR=\"$_ONETCLI_SESSION_ZDOTDIR\"\n\
+         export ZDOTDIR\n\
+         unset _ONETCLI_SESSION_ZDOTDIR _ONETCLI_ORIG_ZDOTDIR\n",
     );
     let zshrc = shell_single_quote(&format!(
-        "[[ -n \"${{ONETCLI_ORIG_ZDOTDIR:-}}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zshrc\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zshrc\"\n\
-         . \"{integration_source}\"\n\
-         ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n"
+        "_ONETCLI_ORIG_ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
+             [[ -f \"$_ONETCLI_ORIG_ZDOTDIR/.zshrc\" ]] && . \"$_ONETCLI_ORIG_ZDOTDIR/.zshrc\"\n\
+             . \"{integration_source}\"\n"
     ));
-    let zlogin = shell_single_quote(
-        "[[ -n \"${ONETCLI_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zlogin\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zlogin\"\n",
-    );
-    // bash wrapper:`exec bash --rcfile X -i` 是 interactive non-login,跳过 /etc/profile 与
-    // ~/.bash_profile 等。这里手动模拟 login chain,然后再显式 source ~/.bashrc + integration。
-    // ONETCLI_LOGIN_SIMULATED guard 防止 .bash_profile 内 `exec bash -l` 等场景二次进入时重复
-    // 加载 profile 链。
     let bashrc = shell_single_quote(&format!(
-        "if [ -z \"${{ONETCLI_LOGIN_SIMULATED:-}}\" ]; then\n\
-         \x20\x20\x20\x20export ONETCLI_LOGIN_SIMULATED=1\n\
-         \x20\x20\x20\x20[ -r /etc/profile ] && . /etc/profile\n\
-         \x20\x20\x20\x20for __onetcli_profile in \"$HOME/.bash_profile\" \"$HOME/.bash_login\" \"$HOME/.profile\"; do\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20if [ -r \"$__onetcli_profile\" ]; then . \"$__onetcli_profile\"; break; fi\n\
-         \x20\x20\x20\x20done\n\
-         \x20\x20\x20\x20unset __onetcli_profile\n\
-         fi\n\
-         [ -r \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
-         . \"{integration_source}\"\n"
+        "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
+             . \"{integration_source}\"\n"
     ));
 
     format!(
@@ -139,9 +118,7 @@ fn build_shell_integration_setup_script(
             "mkdir -p \"$zsh_dir\" \"$bash_dir\"\n",
             "printf %s {script} > \"$integration_path\"\n",
             "printf %s {zshenv} > \"$zsh_dir/.zshenv\"\n",
-            "printf %s {zprofile} > \"$zsh_dir/.zprofile\"\n",
             "printf %s {zshrc} > \"$zsh_dir/.zshrc\"\n",
-            "printf %s {zlogin} > \"$zsh_dir/.zlogin\"\n",
             "printf %s {bashrc} > \"$bash_dir/.bashrc\"\n",
             "printf '%s%s\\n' {home_marker} \"$HOME\"\n",
             "printf '%s%s\\n' {session_marker} \"$session_dir\"\n",
@@ -151,9 +128,7 @@ fn build_shell_integration_setup_script(
         session_key = session_key,
         script = script,
         zshenv = zshenv,
-        zprofile = zprofile,
         zshrc = zshrc,
-        zlogin = zlogin,
         bashrc = bashrc,
         success_marker = success_marker,
         home_marker = home_marker,
@@ -213,18 +188,13 @@ impl SshBackend {
         event_proxy: GpuiEventProxy,
         event_tx: UnboundedSender<TerminalEvent>,
         notify_tx: UnboundedSender<()>,
-        on_disconnect: Option<UnboundedSender<()>>,
+        on_disconnect: Option<tokio::sync::oneshot::Sender<bool>>,
         init_commands: Option<String>,
-        disable_shell_integration: bool,
     ) -> anyhow::Result<Self> {
-        let (client, mut channel) = Self::establish_channel(
-            &session_manager,
-            &pty_config,
-            connection_id,
-            disable_shell_integration,
-        )
-        .await
-        .map_err(add_connect_error_context)?;
+        let (client, mut channel) =
+            Self::establish_channel(&session_manager, &pty_config, connection_id)
+                .await
+                .map_err(add_connect_error_context)?;
         // 关联变量，避免 clippy 警告未使用。
         let _keep_client = client;
 
@@ -239,6 +209,7 @@ impl SshBackend {
 
         tokio::spawn(async move {
             let mut shutdown = false;
+            let mut is_graceful = false;
             let mut processor: Processor<StdSyncHandler> = Processor::new();
             // 用来判断 shell 是否已经 ready（收到第一个 133;B 后才发 init_commands）
             let mut shell_ready = false;
@@ -255,6 +226,7 @@ impl SshBackend {
                                     channel.send_data(&data)
                                 ).await;
                                 if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                                    is_graceful = false;
                                     break;
                                 }
                             }
@@ -264,6 +236,7 @@ impl SshBackend {
                             SshCommand::Shutdown => {
                                 shutdown = true;
                                 let _ = channel.close().await;
+                                is_graceful = true;
                                 break;
                             }
                         }
@@ -274,6 +247,7 @@ impl SshBackend {
                             channel.send_data(&data)
                         ).await;
                         if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                            is_graceful = false;
                             break;
                         }
                     }
@@ -339,7 +313,12 @@ impl SshBackend {
                                 processor.advance(&mut *term.lock(), &data);
                                 let _ = notify_tx.send(());
                             }
-                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) | None => {
+                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) => {
+                                is_graceful = true;
+                                break;
+                            }
+                            None => {
+                                is_graceful = false;
                                 break;
                             }
                             _ => {}
@@ -352,7 +331,7 @@ impl SshBackend {
                 let _ = session_manager.invalidate().await;
             }
             if let Some(tx) = on_disconnect {
-                let _ = tx.send(());
+                let _ = tx.send(is_graceful);
             }
         });
 
@@ -367,7 +346,7 @@ impl SshBackend {
         event_proxy: GpuiEventProxy,
         event_tx: UnboundedSender<TerminalEvent>,
         notify_tx: UnboundedSender<()>,
-        on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
+        on_disconnect: Option<tokio::sync::oneshot::Sender<bool>>,
         init_commands: Option<String>,
         _on_progress: impl FnMut(SshConnectionStage) + Send + 'static,
     ) -> anyhow::Result<Self> {
@@ -384,6 +363,7 @@ impl SshBackend {
 
         tokio::spawn(async move {
             let mut shutdown = false;
+            let mut is_graceful = false;
             let mut processor: Processor<StdSyncHandler> = Processor::new();
             let mut shell_ready = false;
             let mut init_sent = false;
@@ -399,6 +379,7 @@ impl SshBackend {
                                     channel.send_data(&data)
                                 ).await;
                                 if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                                    is_graceful = false;
                                     break;
                                 }
                             }
@@ -408,6 +389,7 @@ impl SshBackend {
                             SshCommand::Shutdown => {
                                 shutdown = true;
                                 let _ = channel.close().await;
+                                is_graceful = true;
                                 break;
                             }
                         }
@@ -418,6 +400,7 @@ impl SshBackend {
                             channel.send_data(&data)
                         ).await;
                         if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                            is_graceful = false;
                             break;
                         }
                     }
@@ -476,7 +459,12 @@ impl SshBackend {
                                 processor.advance(&mut *term.lock(), &data);
                                 let _ = notify_tx.send(());
                             }
-                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) | None => {
+                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) => {
+                                is_graceful = true;
+                                break;
+                            }
+                            None => {
+                                is_graceful = false;
                                 break;
                             }
                             _ => {}
@@ -489,7 +477,7 @@ impl SshBackend {
                 let _ = session_manager.invalidate().await;
             }
             if let Some(tx) = on_disconnect {
-                let _ = tx.send(());
+                let _ = tx.send(is_graceful);
             }
         });
 
@@ -502,7 +490,6 @@ impl SshBackend {
         session_manager: &Arc<SshSessionManager>,
         pty_config: &PtyConfig,
         connection_id: Option<i64>,
-        disable_shell_integration: bool,
     ) -> anyhow::Result<(Arc<tokio::sync::Mutex<ssh::RusshClient>>, ssh::RusshChannel)> {
         let mut attempt = 0usize;
         loop {
@@ -511,14 +498,7 @@ impl SshBackend {
 
             let result = {
                 let mut guard = client.lock().await;
-                Self::prepare_ssh_channel(
-                    &mut *guard,
-                    pty_config,
-                    connection_id,
-                    cached,
-                    disable_shell_integration,
-                )
-                .await
+                Self::prepare_ssh_channel(&mut *guard, pty_config, connection_id, cached).await
             };
 
             match result {
@@ -548,13 +528,8 @@ impl SshBackend {
         pty_config: &PtyConfig,
         connection_id: Option<i64>,
         cached: Option<ShellIntegrationSetup>,
-        disable_shell_integration: bool,
     ) -> anyhow::Result<(C::Channel, Option<ShellIntegrationSetup>)> {
-        let (setup, new_setup) = if disable_shell_integration {
-            // 用户在连接配置里显式关闭了 shell integration:跳过安装,走裸 request_shell 路径,
-            // 不向 manager 写入任何缓存,确保下次连接如果用户改回开启时还能正常走 setup。
-            (None, None)
-        } else if let Some(cached) = cached {
+        let (setup, new_setup) = if let Some(cached) = cached {
             (Some(cached), None)
         } else {
             // 首次连接：尝试安装 integration，失败降级为"无 integration"分支。
@@ -963,14 +938,9 @@ mod tests {
         let (interactive_channel, interactive_state) = MockChannel::new([], false);
         let mut client = MockClient::new([setup_channel, interactive_channel]);
 
-        let result = SshBackend::prepare_ssh_channel(
-            &mut client,
-            &PtyConfig::default(),
-            Some(42),
-            None,
-            false,
-        )
-        .await;
+        let result =
+            SshBackend::prepare_ssh_channel(&mut client, &PtyConfig::default(), Some(42), None)
+                .await;
 
         let (_channel, new_setup) =
             result.expect("安装 shell integration 不应占用交互 shell 的 channel");
@@ -1027,14 +997,9 @@ mod tests {
         let (interactive_channel, interactive_state) = MockChannel::new([], false);
         let mut client = MockClient::new([setup_channel, interactive_channel]);
 
-        let result = SshBackend::prepare_ssh_channel(
-            &mut client,
-            &PtyConfig::default(),
-            Some(42),
-            None,
-            false,
-        )
-        .await;
+        let result =
+            SshBackend::prepare_ssh_channel(&mut client, &PtyConfig::default(), Some(42), None)
+                .await;
 
         let (_channel, new_setup) = result.expect("bash shell wrapper 应通过独立交互 channel 启动");
         assert!(new_setup.is_some());
@@ -1137,15 +1102,10 @@ mod tests {
         let (interactive_channel, interactive_state) = MockChannel::new([], false);
         let mut client = MockClient::new([setup_channel, interactive_channel]);
 
-        let (_ch, new_setup) = SshBackend::prepare_ssh_channel(
-            &mut client,
-            &PtyConfig::default(),
-            Some(42),
-            None,
-            false,
-        )
-        .await
-        .expect("setup 失败时 prepare_ssh_channel 不应整体失败");
+        let (_ch, new_setup) =
+            SshBackend::prepare_ssh_channel(&mut client, &PtyConfig::default(), Some(42), None)
+                .await
+                .expect("setup 失败时 prepare_ssh_channel 不应整体失败");
 
         assert!(
             new_setup.is_none(),
@@ -1180,7 +1140,6 @@ mod tests {
             &PtyConfig::default(),
             Some(42),
             Some(cached),
-            false,
         )
         .await
         .expect("缓存命中时应直接复用 setup 结果");
@@ -1201,34 +1160,6 @@ mod tests {
                 ChannelOp::RequestPty,
                 ChannelOp::RequestShell,
             ]
-        );
-    }
-
-    #[tokio::test]
-    async fn prepare_ssh_channel_skips_setup_when_disabled() {
-        // 用户在连接配置里显式关闭 shell integration:不开 setup channel,只开 1 个 interactive
-        // channel 走裸 PTY + shell;且不向 manager 写入任何缓存。
-        let (interactive_channel, interactive_state) = MockChannel::new([], false);
-        let mut client = MockClient::new([interactive_channel]);
-
-        let (_ch, new_setup) = SshBackend::prepare_ssh_channel(
-            &mut client,
-            &PtyConfig::default(),
-            Some(42),
-            None,
-            true,
-        )
-        .await
-        .expect("禁用 shell integration 时仍应建立 interactive channel");
-
-        assert!(
-            new_setup.is_none(),
-            "禁用路径不应向 manager 写入任何 integration 缓存"
-        );
-        assert_eq!(
-            recorded_ops(&interactive_state),
-            vec![ChannelOp::RequestPty, ChannelOp::RequestShell],
-            "禁用路径只跑 pty + shell,不调 set_env / exec wrapper"
         );
     }
 
@@ -1326,49 +1257,15 @@ mod tests {
             fs::read_to_string(session_dir.join("zsh/.zshrc")).expect("应读取 zshrc wrapper");
         assert!(
             session_dir.join("zsh/.zshenv").is_file(),
-            "应写入 zsh session wrapper (.zshenv)"
-        );
-        assert!(
-            session_dir.join("zsh/.zprofile").is_file(),
-            "应写入 zsh session wrapper (.zprofile)"
+            "应写入 zsh session wrapper"
         );
         assert!(
             session_dir.join("zsh/.zshrc").is_file(),
             "应写入 zshrc session wrapper"
         );
         assert!(
-            session_dir.join("zsh/.zlogin").is_file(),
-            "应写入 zsh session wrapper (.zlogin)"
-        );
-        assert!(
             session_dir.join("bash/.bashrc").is_file(),
             "应写入 bash session wrapper"
-        );
-
-        let zshrc_wrapper =
-            fs::read_to_string(session_dir.join("zsh/.zshrc")).expect("应读取 zshrc wrapper");
-        assert!(
-            zshrc_wrapper.contains("shell_integration.sh"),
-            ".zshrc wrapper 应在末尾 source integration: {zshrc_wrapper}"
-        );
-        assert!(
-            zshrc_wrapper.contains("ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\""),
-            ".zshrc wrapper 应在末尾还原 ZDOTDIR: {zshrc_wrapper}"
-        );
-
-        let bashrc_wrapper =
-            fs::read_to_string(session_dir.join("bash/.bashrc")).expect("应读取 bashrc wrapper");
-        assert!(
-            bashrc_wrapper.contains("ONETCLI_LOGIN_SIMULATED"),
-            ".bashrc wrapper 应包含 ONETCLI_LOGIN_SIMULATED guard 模拟 login chain: {bashrc_wrapper}"
-        );
-        assert!(
-            bashrc_wrapper.contains("/etc/profile"),
-            ".bashrc wrapper 应模拟 login shell 加载 /etc/profile: {bashrc_wrapper}"
-        );
-        assert!(
-            bashrc_wrapper.contains(".bash_profile"),
-            ".bashrc wrapper 应模拟 login shell 尝试 ~/.bash_profile: {bashrc_wrapper}"
         );
         assert_eq!(
             fs::read_to_string(&bashrc_path).expect("应保留用户 bashrc"),
@@ -1452,189 +1349,6 @@ mod tests {
             fs::read_to_string(&integration_path).expect("应写入 integration 文件"),
             "echo one\necho two\n",
             "session integration 脚本应统一写成 LF，避免远端 bash 解析 $'\\r'"
-        );
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn bash_wrapper_runs_bash_profile_chain_and_integration() {
-        if Command::new("bash").arg("--version").output().is_err() {
-            eprintln!("跳过 bash wrapper 测试：当前环境未安装 bash");
-            return;
-        }
-        let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-bash-wrapper-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time should be after unix epoch")
-                .as_nanos()
-        ));
-        fs::create_dir_all(&temp_dir).expect("应创建临时目录");
-
-        let home_dir = temp_dir.join("home");
-        fs::create_dir_all(&home_dir).expect("应创建 home 目录");
-        fs::write(
-            home_dir.join(".bash_profile"),
-            "export __ONETCLI_BASH_PROFILE_LOADED=1\n",
-        )
-        .expect("应写入用户 .bash_profile");
-        fs::write(
-            home_dir.join(".bashrc"),
-            "[[ $- != *i* ]] && return\nexport __ONETCLI_USER_BASHRC=1\n",
-        )
-        .expect("应写入用户 .bashrc");
-
-        let script = "export __ONETCLI_INTEGRATION_LOADED=1\n";
-        let command = build_shell_integration_setup_script(
-            script,
-            "42",
-            "__TEST_OK__",
-            "__HOME__=",
-            "__SESSION__=",
-            "__SHELL__=",
-        );
-        let setup = Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .env("HOME", &home_dir)
-            .output()
-            .expect("应执行 setup 脚本");
-        assert!(
-            setup.status.success(),
-            "setup 脚本应成功: {}",
-            String::from_utf8_lossy(&setup.stderr)
-        );
-
-        let wrapper = home_dir.join(".config/onetcli/sessions/42/bash/.bashrc");
-        let output = Command::new("bash")
-            .arg("--rcfile")
-            .arg(&wrapper)
-            .arg("-i")
-            .arg("-c")
-            .arg(
-                "echo profile=$__ONETCLI_BASH_PROFILE_LOADED \
-                 rc=$__ONETCLI_USER_BASHRC \
-                 integration=$__ONETCLI_INTEGRATION_LOADED \
-                 login=$ONETCLI_LOGIN_SIMULATED",
-            )
-            .env("HOME", &home_dir)
-            .env("PS1", "$ ")
-            .output()
-            .expect("应执行 bash wrapper");
-
-        assert!(
-            output.status.success(),
-            "bash wrapper 应成功执行: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("profile=1"),
-            "bash wrapper 应模拟 login shell 加载 .bash_profile，实际: {stdout}"
-        );
-        assert!(
-            stdout.contains("rc=1"),
-            "bash wrapper 应显式 source 用户 .bashrc，实际: {stdout}"
-        );
-        assert!(
-            stdout.contains("integration=1"),
-            "bash wrapper 应在末尾 source shell integration，实际: {stdout}"
-        );
-        assert!(
-            stdout.contains("login=1"),
-            "bash wrapper 应设置 ONETCLI_LOGIN_SIMULATED guard，实际: {stdout}"
-        );
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn zsh_wrapper_loads_user_files_integration_and_restores_zdotdir() {
-        if Command::new("zsh").arg("--version").output().is_err() {
-            eprintln!("跳过 zsh wrapper 测试：当前环境未安装 zsh");
-            return;
-        }
-        let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-zsh-wrapper-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time should be after unix epoch")
-                .as_nanos()
-        ));
-        fs::create_dir_all(&temp_dir).expect("应创建临时目录");
-
-        let home_dir = temp_dir.join("home");
-        fs::create_dir_all(&home_dir).expect("应创建 home 目录");
-        fs::write(home_dir.join(".zshenv"), "export __ONETCLI_USER_ZSHENV=1\n")
-            .expect("应写入用户 .zshenv");
-        fs::write(home_dir.join(".zshrc"), "export __ONETCLI_USER_ZSHRC=1\n")
-            .expect("应写入用户 .zshrc");
-
-        let script = "export __ONETCLI_INTEGRATION_LOADED=1\n";
-        let command = build_shell_integration_setup_script(
-            script,
-            "42",
-            "__TEST_OK__",
-            "__HOME__=",
-            "__SESSION__=",
-            "__SHELL__=",
-        );
-        let setup = Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .env("HOME", &home_dir)
-            .output()
-            .expect("应执行 setup 脚本");
-        assert!(
-            setup.status.success(),
-            "setup 脚本应成功: {}",
-            String::from_utf8_lossy(&setup.stderr)
-        );
-
-        let zsh_dir = home_dir.join(".config/onetcli/sessions/42/zsh");
-        let output = Command::new("zsh")
-            .arg("-i")
-            .arg("-c")
-            .arg(
-                "echo zshenv=$__ONETCLI_USER_ZSHENV \
-                 zshrc=$__ONETCLI_USER_ZSHRC \
-                 integration=$__ONETCLI_INTEGRATION_LOADED \
-                 zdotdir=$ZDOTDIR",
-            )
-            .env("HOME", &home_dir)
-            .env("ZDOTDIR", &zsh_dir)
-            .env("ONETCLI_ORIG_ZDOTDIR", &home_dir)
-            .output()
-            .expect("应执行 zsh wrapper");
-
-        assert!(
-            output.status.success(),
-            "zsh wrapper 应成功执行: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("zshenv=1"),
-            "zsh wrapper 应通过 fan-out 加载用户 .zshenv，实际: {stdout}"
-        );
-        assert!(
-            stdout.contains("zshrc=1"),
-            "zsh wrapper 应通过 fan-out 加载用户 .zshrc，实际: {stdout}"
-        );
-        assert!(
-            stdout.contains("integration=1"),
-            "zsh wrapper 应在 .zshrc 末尾 source shell integration，实际: {stdout}"
-        );
-        assert!(
-            stdout.contains(&format!("zdotdir={}", home_dir.display())),
-            "zsh wrapper 应在 .zshrc 末尾把 ZDOTDIR 还原为 $HOME，实际: {stdout}"
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
