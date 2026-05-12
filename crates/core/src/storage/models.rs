@@ -193,12 +193,18 @@ pub struct SshParams {
     /// 初始化脚本
     #[serde(skip_serializing_if = "Option::is_none")]
     pub init_script: Option<String>,
+<<<<<<< HEAD
     /// SFTP 本地目录（留空则使用用户主目录）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sftp_local_directory: Option<String>,
     /// SFTP 远程目录（留空则使用服务器默认目录）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sftp_remote_directory: Option<String>,
+=======
+    /// 关闭 shell integration 注入(走裸 request_shell,牺牲 prompt hook / 命令记录 / vim 鼠标)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_shell_integration: Option<bool>,
+>>>>>>> bf9b852a (feat(terminal): 新增关闭 shell integration 功能)
     /// 跳板机配置
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jump_server: Option<JumpServerConfig>,

@@ -332,6 +332,8 @@ pub enum TerminalConnectionKind {
 pub struct SshTerminalConfig {
     pub ssh_config: SshConnectConfig,
     pub pty_config: PtyConfig,
+    /// 关闭 shell integration 注入:走裸 request_shell,失去 OSC 集成。
+    pub disable_shell_integration: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1600,6 +1602,7 @@ impl Terminal {
         let config = SshTerminalConfig {
             ssh_config,
             pty_config,
+            disable_shell_integration: ssh_params.disable_shell_integration.unwrap_or(false),
         };
 
         let cols = config.pty_config.width as usize;
@@ -2017,6 +2020,7 @@ impl Terminal {
                 move |stage| {
                     let _ = progress_tx.send(stage);
                 },
+                config.disable_shell_integration,
             )
             .await
         });
