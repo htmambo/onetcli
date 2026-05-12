@@ -44,6 +44,7 @@ impl CellEditor {
                 .h_full()
                 .text_base()
                 .appearance(false)
+<<<<<<< HEAD
                 .px_2()
                 .py_1()
                 .ml(px(1.))
@@ -60,6 +61,9 @@ impl CellEditor {
                 .ml(px(1.))
                 .mt(px(1.))
                 .items_center()
+=======
+                .bare()
+>>>>>>> ab8afce4 (fix(edit_table): 修复双击编辑时单元格内容位移)
                 .into_any_element(),
             CellEditor::DatePicker(picker) => DatePicker::new(picker)
                 .w_full()
