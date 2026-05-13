@@ -12,7 +12,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::selection::SelectionRange;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
-use alacritty_terminal::term::{RenderableContent, Term, TermDamage};
+use alacritty_terminal::term::{RenderableContent, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Rgb};
 use gpui::*;
 use std::collections::HashMap;
@@ -111,6 +111,79 @@ fn is_decorative_character(ch: char) -> bool {
     )
 }
 
+/// 为 Unicode 块字符（U+2580..U+259F）生成几何矩形序列。
+///
+/// 返回的 rect 坐标以 cell 自身宽高的 [0, 1] 归一化系数表示，
+/// 调用方在 paint 阶段乘以 cell_width / cell_height 得到像素矩形。
+///
+/// 几何绘制避免依赖字体字形，可解决字体回退时块状字符出现接缝、
+/// 抗锯齿不一致或 line-height gap 导致的视觉断层问题。
+fn block_element_geometry(c: char) -> Option<Vec<BlockRect>> {
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> BlockRect {
+        BlockRect { x, y, w, h }
+    }
+    fn lower(fraction: f32) -> Vec<BlockRect> {
+        vec![rect(0.0, 1.0 - fraction, 1.0, fraction)]
+    }
+    fn left(fraction: f32) -> Vec<BlockRect> {
+        vec![rect(0.0, 0.0, fraction, 1.0)]
+    }
+    const QUAD_UPPER_LEFT: u8 = 1 << 0;
+    const QUAD_UPPER_RIGHT: u8 = 1 << 1;
+    const QUAD_LOWER_LEFT: u8 = 1 << 2;
+    const QUAD_LOWER_RIGHT: u8 = 1 << 3;
+    fn quadrants(mask: u8) -> Vec<BlockRect> {
+        let mut out = Vec::with_capacity(4);
+        if mask & QUAD_UPPER_LEFT != 0 {
+            out.push(rect(0.0, 0.0, 0.5, 0.5));
+        }
+        if mask & QUAD_UPPER_RIGHT != 0 {
+            out.push(rect(0.5, 0.0, 0.5, 0.5));
+        }
+        if mask & QUAD_LOWER_LEFT != 0 {
+            out.push(rect(0.0, 0.5, 0.5, 0.5));
+        }
+        if mask & QUAD_LOWER_RIGHT != 0 {
+            out.push(rect(0.5, 0.5, 0.5, 0.5));
+        }
+        out
+    }
+
+    Some(match c {
+        '\u{2580}' => vec![rect(0.0, 0.0, 1.0, 0.5)], // ▀ upper half
+        '\u{2581}' => lower(1.0 / 8.0),               // ▁
+        '\u{2582}' => lower(2.0 / 8.0),               // ▂
+        '\u{2583}' => lower(3.0 / 8.0),               // ▃
+        '\u{2584}' => lower(4.0 / 8.0),               // ▄
+        '\u{2585}' => lower(5.0 / 8.0),               // ▅
+        '\u{2586}' => lower(6.0 / 8.0),               // ▆
+        '\u{2587}' => lower(7.0 / 8.0),               // ▇
+        '\u{2588}' => vec![rect(0.0, 0.0, 1.0, 1.0)], // █ full block
+        '\u{2589}' => left(7.0 / 8.0),                // ▉
+        '\u{258A}' => left(6.0 / 8.0),                // ▊
+        '\u{258B}' => left(5.0 / 8.0),                // ▋
+        '\u{258C}' => left(4.0 / 8.0),                // ▌
+        '\u{258D}' => left(3.0 / 8.0),                // ▍
+        '\u{258E}' => left(2.0 / 8.0),                // ▎
+        '\u{258F}' => left(1.0 / 8.0),                // ▏
+        '\u{2590}' => vec![rect(0.5, 0.0, 0.5, 1.0)], // ▐ right half
+        // U+2591..U+2593 阴影块由文本路径处理（依赖字体本身的密度图，更自然）
+        '\u{2594}' => vec![rect(0.0, 0.0, 1.0, 1.0 / 8.0)], // ▔ upper one-eighth
+        '\u{2595}' => vec![rect(7.0 / 8.0, 0.0, 1.0 / 8.0, 1.0)], // ▕ right one-eighth
+        '\u{2596}' => quadrants(QUAD_LOWER_LEFT),
+        '\u{2597}' => quadrants(QUAD_LOWER_RIGHT),
+        '\u{2598}' => quadrants(QUAD_UPPER_LEFT),
+        '\u{2599}' => quadrants(QUAD_UPPER_LEFT | QUAD_LOWER_LEFT | QUAD_LOWER_RIGHT),
+        '\u{259A}' => quadrants(QUAD_UPPER_LEFT | QUAD_LOWER_RIGHT),
+        '\u{259B}' => quadrants(QUAD_UPPER_LEFT | QUAD_UPPER_RIGHT | QUAD_LOWER_LEFT),
+        '\u{259C}' => quadrants(QUAD_UPPER_LEFT | QUAD_UPPER_RIGHT | QUAD_LOWER_RIGHT),
+        '\u{259D}' => quadrants(QUAD_UPPER_RIGHT),
+        '\u{259E}' => quadrants(QUAD_UPPER_RIGHT | QUAD_LOWER_LEFT),
+        '\u{259F}' => quadrants(QUAD_UPPER_RIGHT | QUAD_LOWER_LEFT | QUAD_LOWER_RIGHT),
+        _ => return None,
+    })
+}
+
 /// Manages decorations from all addons
 pub struct DecorationManager {
     // Decorations indexed by line number
@@ -206,6 +279,8 @@ impl DecorationManager {
 pub struct CachedLine {
     pub background_rects: Vec<(usize, usize, Hsla)>,
     pub text_runs: Vec<CachedTextRun>,
+    /// 块状字符（U+2580..U+259F）使用几何绘制，避免字体回退导致的接缝
+    pub block_glyphs: Vec<CachedBlockGlyph>,
 }
 
 #[derive(Clone)]
@@ -217,6 +292,25 @@ pub struct CachedTextRun {
     pub italic: bool,
     pub underline: bool,
     pub char_count: usize,
+}
+
+/// 单个 cell 内的几何块字符渲染数据
+///
+/// rects 中的坐标均归一化到 cell 自身的 [0, 1] 范围，
+/// paint 时再按当前 cell_width/cell_height 缩放为像素矩形。
+#[derive(Clone)]
+pub struct CachedBlockGlyph {
+    pub column: usize,
+    pub color: Hsla,
+    pub rects: Vec<BlockRect>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
 }
 
 /// Terminal rendering cache maintained by TerminalView
@@ -250,6 +344,23 @@ struct CachedCursor {
     shape: CursorShape,
 }
 
+enum DamageSnapshot {
+    Full,
+    Partial(Vec<usize>),
+}
+
+impl DamageSnapshot {
+    fn from_term_damage(damage: TermDamage<'_>) -> Self {
+        match damage {
+            TermDamage::Full => Self::Full,
+            TermDamage::Partial(iter) => {
+                let lines = iter.map(|line_damage| line_damage.line).collect();
+                Self::Partial(lines)
+            }
+        }
+    }
+}
+
 impl RenderCache {
     pub fn new(num_lines: usize, num_cols: usize, colors: Colors) -> Self {
         let default_bg = convert_color(Color::Named(NamedColor::Background), &colors);
@@ -257,7 +368,8 @@ impl RenderCache {
             lines: vec![
                 CachedLine {
                     background_rects: Vec::new(),
-                    text_runs: Vec::new()
+                    text_runs: Vec::new(),
+                    block_glyphs: Vec::new(),
                 };
                 num_lines
             ],
@@ -287,8 +399,19 @@ impl RenderCache {
 
         // Handle resize
         if num_lines != self.num_lines || num_cols != self.num_cols {
+            tracing::info!(
+                target: "terminal_residue",
+                old_lines = self.num_lines,
+                old_cols = self.num_cols,
+                new_lines = num_lines,
+                new_cols = num_cols,
+                "RenderCache::resize"
+            );
             self.resize(num_lines, num_cols);
         }
+
+        let damage = DamageSnapshot::from_term_damage(term.damage());
+        term.reset_damage();
 
         // Collect decorations from all addons
         let display_offset = term.grid().display_offset();
@@ -309,37 +432,51 @@ impl RenderCache {
         // 同步主题光标颜色
         self.custom_cursor = theme.cursor;
 
-        // Force full rebuild when theme colors or decorations changed
-        let has_decorations = !self.decoration_manager.decorations_by_line.is_empty();
-        if fg_changed || bg_changed || has_decorations {
-            self.rebuild_all(term);
-            self.update_last_selection(term);
-            return;
-        }
-
-        // Check terminal color palette changes
+        // 在任何 full rebuild 早返回之前同步终端调色板。
         let colors = term.colors();
-        if !colors_equal(&self.colors, colors) {
+        let colors_changed = !colors_equal(&self.colors, colors);
+        if colors_changed {
             self.colors = colors.clone();
             self.default_bg = convert_color(Color::Named(NamedColor::Background), &self.colors);
-            self.rebuild_all(term);
-            self.update_last_selection(term);
+        }
+
+        // 主题颜色变化或存在装饰时保守全量重建。
+        let has_decorations = !self.decoration_manager.decorations_by_line.is_empty();
+        if fg_changed || bg_changed || colors_changed || has_decorations {
+            tracing::debug!(
+                target: "terminal_residue",
+                fg_changed,
+                bg_changed,
+                colors_changed,
+                has_decorations,
+                num_lines,
+                "rebuild_all (forced by theme/decoration)"
+            );
+            self.rebuild_all_and_update_state(term);
             return;
         }
 
-        // Collect dirty lines from terminal damage
         let mut dirty_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        let damage = term.damage();
         match damage {
-            TermDamage::Full => {
-                self.rebuild_all(term);
-                self.update_last_selection(term);
+            DamageSnapshot::Full => {
+                tracing::debug!(
+                    target: "terminal_residue",
+                    num_lines,
+                    "rebuild_all (TermDamage::Full)"
+                );
+                self.rebuild_all_and_update_state(term);
                 return;
             }
-            TermDamage::Partial(iter) => {
-                for line_damage in iter {
-                    dirty_lines.insert(line_damage.line);
+            DamageSnapshot::Partial(lines) => {
+                if !lines.is_empty() {
+                    tracing::debug!(
+                        target: "terminal_residue",
+                        damaged = ?lines,
+                        num_lines,
+                        "Partial damage"
+                    );
                 }
+                dirty_lines.extend(lines);
             }
         }
 
@@ -389,9 +526,16 @@ impl RenderCache {
             CachedLine {
                 background_rects: Vec::new(),
                 text_runs: Vec::new(),
+                block_glyphs: Vec::new(),
             },
         );
         self.left_edge_fingerprint.resize(num_lines, 0);
+    }
+
+    fn rebuild_all_and_update_state(&mut self, term: &Term<GpuiEventProxy>) {
+        self.rebuild_all(term);
+        self.update_last_selection(term);
+        self.sync_left_edge_fingerprint(term, 4);
     }
 
     fn rebuild_all(&mut self, term: &Term<GpuiEventProxy>) {
@@ -403,6 +547,7 @@ impl RenderCache {
         for line in &mut self.lines {
             line.background_rects.clear();
             line.text_runs.clear();
+            line.block_glyphs.clear();
         }
 
         // Group cells by screen line
@@ -437,6 +582,34 @@ impl RenderCache {
         // Update cursor from a fresh content
         let content = term.renderable_content();
         self.update_cursor_from_content(&content);
+
+        // 调试日志:统计 cache 重建后各行的内容分布。
+        // 关注底部最后 8 行,若 TUI 仅画了上半部,底部 8 行的 text/bg 应该为空。
+        let total = self.lines.len();
+        let non_empty_lines = self
+            .lines
+            .iter()
+            .filter(|l| !l.text_runs.is_empty() || !l.background_rects.is_empty())
+            .count();
+        let mut tail_summary = Vec::new();
+        let tail_start = total.saturating_sub(8);
+        for idx in tail_start..total {
+            let l = &self.lines[idx];
+            tail_summary.push(format!(
+                "[{idx}] bg={} text={} chars={}",
+                l.background_rects.len(),
+                l.text_runs.len(),
+                l.text_runs.iter().map(|r| r.char_count).sum::<usize>(),
+            ));
+        }
+        tracing::debug!(
+            target: "terminal_residue",
+            total_lines = total,
+            non_empty_lines,
+            in_alt_screen = content.mode.contains(TermMode::ALT_SCREEN),
+            tail = tail_summary.join(" | "),
+            "rebuild_all done"
+        );
     }
 
     /// Rebuild specified lines
@@ -481,6 +654,7 @@ impl RenderCache {
             if line_idx < self.num_lines {
                 self.lines[line_idx].background_rects.clear();
                 self.lines[line_idx].text_runs.clear();
+                self.lines[line_idx].block_glyphs.clear();
                 let cells = std::mem::take(&mut line_cells[line_idx]);
                 self.build_line_cache(line_idx, cells);
             }
@@ -538,8 +712,39 @@ impl RenderCache {
         term: &Term<GpuiEventProxy>,
         probe_cols: usize,
     ) -> Vec<usize> {
+        let current = self.compute_left_edge_fingerprint(term, probe_cols);
+
+        if self.left_edge_fingerprint.len() != self.num_lines {
+            self.left_edge_fingerprint.resize(self.num_lines, 0);
+        }
+
+        let mut changed = Vec::new();
+        for (line_idx, (old, new)) in self
+            .left_edge_fingerprint
+            .iter()
+            .zip(current.iter())
+            .enumerate()
+        {
+            if old != new {
+                changed.push(line_idx);
+            }
+        }
+
+        self.left_edge_fingerprint = current;
+        changed
+    }
+
+    fn sync_left_edge_fingerprint(&mut self, term: &Term<GpuiEventProxy>, probe_cols: usize) {
+        self.left_edge_fingerprint = self.compute_left_edge_fingerprint(term, probe_cols);
+    }
+
+    fn compute_left_edge_fingerprint(
+        &self,
+        term: &Term<GpuiEventProxy>,
+        probe_cols: usize,
+    ) -> Vec<u64> {
         if self.num_lines == 0 || probe_cols == 0 {
-            return Vec::new();
+            return vec![0; self.num_lines];
         }
 
         let mut current = vec![0_u64; self.num_lines];
@@ -567,24 +772,7 @@ impl RenderCache {
                 .wrapping_add(piece.wrapping_add(1469598103934665603));
         }
 
-        if self.left_edge_fingerprint.len() != self.num_lines {
-            self.left_edge_fingerprint.resize(self.num_lines, 0);
-        }
-
-        let mut changed = Vec::new();
-        for (line_idx, (old, new)) in self
-            .left_edge_fingerprint
-            .iter()
-            .zip(current.iter())
-            .enumerate()
-        {
-            if old != new {
-                changed.push(line_idx);
-            }
-        }
-
-        self.left_edge_fingerprint = current;
-        changed
+        current
     }
 
     fn build_line_cache(&mut self, line_idx: usize, mut cells: Vec<CellData>) {
@@ -689,6 +877,19 @@ impl RenderCache {
                 if let Some(run) = text_run.take() {
                     line.text_runs.push(run);
                 }
+                continue;
+            }
+
+            // 块状字符走几何路径，避免不同字体渲染出现接缝
+            if let Some(rects) = block_element_geometry(cell.c) {
+                if let Some(run) = text_run.take() {
+                    line.text_runs.push(run);
+                }
+                line.block_glyphs.push(CachedBlockGlyph {
+                    column: cell.column,
+                    color: fg,
+                    rects,
+                });
                 continue;
             }
 
@@ -980,6 +1181,16 @@ impl Element for TerminalElementImpl {
 
         let intersection = content_mask.intersect(&terminal_bounds);
         if intersection.size.height <= px(0.) || intersection.size.width <= px(0.) {
+            tracing::debug!(
+                target: "terminal_residue",
+                lines = self.lines.len(),
+                num_cols = self.num_cols,
+                cell_w = ?tb.cell_width,
+                cell_h = ?tb.cell_height,
+                origin = ?tb.origin,
+                content_mask = ?content_mask,
+                "paint skipped (no intersection)"
+            );
             return; // 完全不可见，跳过渲染
         }
 
@@ -997,6 +1208,26 @@ impl Element for TerminalElementImpl {
             .ceil() as usize;
         let visible_end = last_visible.min(self.lines.len());
 
+        // 仅在统计行数 / 像素差异时记录一次,避免每帧爆量
+        let cm_h: f32 = content_mask.size.height.into();
+        let tb_h: f32 = terminal_height.into();
+        if (cm_h - tb_h).abs() > 0.5 || self.lines.len() < visible_end {
+            tracing::debug!(
+                target: "terminal_residue",
+                lines = self.lines.len(),
+                num_cols = self.num_cols,
+                cell_w = ?tb.cell_width,
+                cell_h = ?tb.cell_height,
+                origin = ?tb.origin,
+                terminal_bounds_h = ?terminal_height,
+                content_mask = ?content_mask,
+                first_visible,
+                visible_end,
+                bg_alpha = self.custom_background.a,
+                "paint metrics"
+            );
+        }
+
         // Paint backgrounds (only visible lines)
         for line_idx in first_visible..visible_end {
             let line = &self.lines[line_idx];
@@ -1006,6 +1237,24 @@ impl Element for TerminalElementImpl {
                     size(tb.cell_width * (end - start) as f32, tb.cell_height),
                 );
                 window.paint_quad(fill(rect, color));
+            }
+        }
+
+        // Paint block-element geometry（在文字之前，与背景同样的覆盖关系）
+        for line_idx in first_visible..visible_end {
+            let line = &self.lines[line_idx];
+            for glyph in &line.block_glyphs {
+                let cell_origin = tb.cell_origin(line_idx, glyph.column);
+                for r in &glyph.rects {
+                    let rect = Bounds::new(
+                        Point::new(
+                            cell_origin.x + tb.cell_width * r.x,
+                            cell_origin.y + tb.cell_height * r.y,
+                        ),
+                        size(tb.cell_width * r.w, tb.cell_height * r.h),
+                    );
+                    window.paint_quad(fill(rect, glyph.color));
+                }
             }
         }
 

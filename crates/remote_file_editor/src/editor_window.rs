@@ -122,6 +122,50 @@ fn clear_editor_window() {
     }
 }
 
+fn open_in_existing_window(remote_path: String, cx: &mut App) -> anyhow::Result<bool> {
+    let Some(editor_window) = current_editor_window() else {
+        return Ok(false);
+    };
+
+    let result = cx.update_window(editor_window.window, |_, window, cx| {
+        window.activate_window();
+        editor_window
+            .view
+            .update(cx, |this, cx| {
+                this.open_or_focus_tab(remote_path, window, cx);
+            })
+            .is_ok()
+    });
+
+    match result {
+        Ok(true) => Ok(true),
+        Ok(false) | Err(_) => {
+            clear_editor_window();
+            Ok(false)
+        }
+    }
+}
+
+fn editor_window_slot() -> &'static StdMutex<Option<RemoteEditorWindowRef>> {
+    REMOTE_EDITOR_WINDOW.get_or_init(|| StdMutex::new(None))
+}
+
+fn current_editor_window() -> Option<RemoteEditorWindowRef> {
+    editor_window_slot().lock().ok()?.clone()
+}
+
+fn set_editor_window(window: RemoteEditorWindowRef) {
+    if let Ok(mut slot) = editor_window_slot().lock() {
+        *slot = Some(window);
+    }
+}
+
+fn clear_editor_window() {
+    if let Ok(mut slot) = editor_window_slot().lock() {
+        *slot = None;
+    }
+}
+
 fn init_keybindings(cx: &mut App) {
     REMOTE_EDITOR_KEYBINDINGS_INIT.call_once(|| {
         cx.bind_keys([

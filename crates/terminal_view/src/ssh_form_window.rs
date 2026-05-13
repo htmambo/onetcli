@@ -171,6 +171,9 @@ pub struct SshFormWindow {
     // 云同步开关
     sync_enabled: bool,
 
+    // 关闭 shell integration 注入(走裸 request_shell,失去 OSC 集成)
+    disable_shell_integration: bool,
+
     is_testing: bool,
     test_status_message: Option<String>,
     test_started_at: Option<Instant>,
@@ -500,6 +503,7 @@ impl SshFormWindow {
             pending_key_content,
             last_tested_signature: None,
             sync_enabled,
+            disable_shell_integration,
             is_testing: false,
             test_status_message: None,
             test_started_at: None,
@@ -1299,7 +1303,7 @@ impl SshFormWindow {
     }
 
     /// 渲染初始化标签页
-    fn render_init_tab(&self) -> impl IntoElement {
+    fn render_init_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_2()
             .child(self.render_form_row(
@@ -1632,7 +1636,7 @@ impl Render for SshFormWindow {
                     .overflow_y_scroll()
                     .child(match active_tab {
                         0 => self.render_basic_tab(cx).into_any_element(),
-                        1 => self.render_init_tab().into_any_element(),
+                        1 => self.render_init_tab(cx).into_any_element(),
                         2 => self.render_jump_server_tab(cx).into_any_element(),
                         3 => self.render_proxy_tab(cx).into_any_element(),
                         4 => self.render_advanced_tab(cx).into_any_element(),

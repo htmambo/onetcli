@@ -1529,6 +1529,71 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{configured_log_file_path, default_log_file_path, log_file_appender};
+    use std::io::Write;
+
+    #[test]
+    fn configured_log_file_path_uses_default_for_empty_value() {
+        let default_path = default_log_file_path().expect("应返回默认日志路径");
+
+        assert_eq!(configured_log_file_path("").unwrap(), default_path);
+        assert_eq!(configured_log_file_path("   ").unwrap(), default_path);
+    }
+
+    #[test]
+    fn configured_log_file_path_trims_value() {
+        let path = configured_log_file_path("  /tmp/onetcli.log  ").expect("应返回日志路径");
+        assert_eq!(path, std::path::PathBuf::from("/tmp/onetcli.log"));
+    }
+
+    #[test]
+    fn log_file_appender_creates_parent_directories_and_appends() {
+        let path = std::env::temp_dir()
+            .join(format!("onetcli-log-test-{}", std::process::id()))
+            .join("nested")
+            .join("app.log");
+
+        {
+            let mut file = log_file_appender(&path).expect("应创建日志文件");
+            writeln!(file, "first").expect("应写入第一行");
+        }
+        {
+            let mut file = log_file_appender(&path).expect("应重新打开日志文件");
+            writeln!(file, "second").expect("应追加第二行");
+        }
+
+        let content = std::fs::read_to_string(&path).expect("应读取日志文件");
+        assert_eq!(content, "first\nsecond\n");
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_file_appender_creates_private_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = std::env::temp_dir()
+            .join(format!(
+                "onetcli-log-permission-test-{}",
+                std::process::id()
+            ))
+            .join("app.log");
+        let _file = log_file_appender(&path).expect("应创建日志文件");
+
+        let mode = std::fs::metadata(&path)
+            .expect("应读取日志文件元数据")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+}
+
 impl Render for OnetCliApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let next_window_title = {
