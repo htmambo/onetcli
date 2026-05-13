@@ -51,40 +51,31 @@ struct RemoteEditorWindowRef {
 pub fn open_remote_file_editor<T: 'static>(
     remote_path: String,
     client: Arc<Mutex<RusshSftpClient>>,
+    window: &mut Window,
     cx: &mut Context<T>,
 ) {
     init_keybindings(cx);
-    cx.spawn(async move |_this, cx| {
-        let remote_path_for_log = remote_path.clone();
-        let result = cx.update(|cx| {
-            if open_in_existing_window(remote_path.clone(), cx)? {
-                return Ok(());
-            }
+    let _ = remote_path.clone();
+    if let Ok(true) = open_in_existing_window(remote_path.clone(), cx) {
+        return;
+    }
 
-            let title = editor_window_title(&remote_path);
-            open_popup_window(
-                PopupWindowOptions::new(title).size(960.0, 720.0).min_width(640.0).min_height(480.0),
-                move |window, cx: &mut App| {
-                    let view = cx.new(|cx| {
-                        RemoteFileEditorWindow::new(remote_path, client, window, cx)
-                    });
-                    set_editor_window(RemoteEditorWindowRef {
-                        window: window.window_handle(),
-                        view: view.downgrade(),
-                    });
-                    view
-                },
-                cx,
-            );
-
-            Ok::<_, anyhow::Error>(())
-        });
-
-        if let Err(error) = result {
-            tracing::error!(path = %remote_path_for_log, ?error, "failed to open remote file editor");
-        }
-    })
-    .detach();
+    let title = editor_window_title(&remote_path);
+    open_popup_window(
+        window,
+        PopupWindowOptions::new(title).size(960.0, 720.0).min_width(640.0).min_height(480.0),
+        move |window, cx| {
+            let view = cx.new(|cx| {
+                RemoteFileEditorWindow::new(remote_path, client, window, cx)
+            });
+            set_editor_window(RemoteEditorWindowRef {
+                window: window.window_handle(),
+                view: view.downgrade(),
+            });
+            view
+        },
+        cx,
+    );
 }
 
 fn open_in_existing_window(remote_path: String, cx: &mut App) -> anyhow::Result<bool> {

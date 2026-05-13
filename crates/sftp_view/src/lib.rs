@@ -1009,7 +1009,7 @@ impl SftpView {
             return;
         };
 
-        open_remote_file_editor(full_path, client, cx);
+        open_remote_file_editor(full_path, client, window, cx);
     }
 
     fn navigate_local_to(&mut self, path: PathBuf, cx: &mut Context<Self>) {

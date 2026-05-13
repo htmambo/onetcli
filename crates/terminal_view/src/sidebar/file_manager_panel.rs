@@ -1890,7 +1890,7 @@ impl FileManagerPanel {
             return;
         };
 
-        open_remote_file_editor(full_path, client, cx);
+        open_remote_file_editor(full_path, client, window, cx);
     }
 
     // ── 渲染方法 ──────────────────────────────────────────────
