@@ -31,6 +31,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::interval;
@@ -42,7 +43,7 @@ use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
 use std::path::Path;
 #[cfg(any(test, not(target_os = "linux")))]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 use crate::history::{
     HistoryEntry, PERSISTED_HISTORY_LIMIT, SESSION_HISTORY_LIMIT, ShellHistoryFormat,
@@ -1143,10 +1144,10 @@ impl TerminalScrollProxy {
 impl Terminal {
     fn new_local_disconnected(error: String, cx: &mut Context<Self>) -> Self {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, _event_proxy, _colors) =
+        let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
 
         Self {
             term,
@@ -1256,10 +1257,10 @@ impl Terminal {
             #[cfg(target_os = "windows")]
             escape_args: true,
         };
-        let local_backend = LocalPtyBackend::new(term.clone(), event_proxy, pty_options)?;
+        let local_backend = LocalPtyBackend::new(term.clone(), event_proxy.clone(), pty_options)?;
         let local_shell_pid = local_backend.child_pid();
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1358,7 +1359,7 @@ impl Terminal {
         let local_backend = LocalPtyClientBackend::new(request_tx, session_id.clone(), child_pid);
         let local_shell_pid = local_backend.child_pid();
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1451,7 +1452,7 @@ impl Terminal {
         let local_shell_pid = local_backend.child_pid();
         let local_cwd_file = init_local_cwd_file(config.cwd_file.clone());
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1611,7 +1612,7 @@ impl Terminal {
         let ssh_session_manager = Arc::new(SshSessionManager::new(config.ssh_config.clone()));
 
         Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         Self::spawn_ssh_connect(
             ssh_session_manager.clone(),
             config.clone(),
@@ -1670,13 +1671,13 @@ impl Terminal {
             .expect("StoredConnection 应包含有效的 SerialParams");
 
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, _event_proxy, _colors) =
+        let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
         let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
         let connection_generation = 1;
 
         Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         Self::spawn_serial_connect(
             serial_params.clone(),
             term.clone(),
@@ -1805,7 +1806,11 @@ impl Terminal {
         .detach();
     }
 
-    fn spawn_event_loop(mut event_rx: UnboundedReceiver<TerminalEvent>, cx: &mut Context<Self>) {
+    fn spawn_event_loop(
+        mut event_rx: UnboundedReceiver<TerminalEvent>,
+        wakeup_pending: Arc<AtomicBool>,
+        cx: &mut Context<Self>,
+    ) {
         let _entity = cx.entity().downgrade();
         let (render_tx, mut render_rx) = futures::channel::mpsc::unbounded::<TerminalEvent>();
 
@@ -1838,6 +1843,9 @@ impl Terminal {
                         // 最后发送 Wakeup
                         if pending_wakeup {
                             pending_wakeup = false;
+                            // 转发完毕后允许 alacritty 线程的下一次 Wakeup 重新入队，
+                            // 避免高速输出时被 GpuiEventProxy 的去重永久吞掉
+                            wakeup_pending.store(false, Ordering::Release);
                             if render_tx.unbounded_send(TerminalEvent::Wakeup).is_err() {
                                 return;
                             }
