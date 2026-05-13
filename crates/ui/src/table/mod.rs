@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::{
     ActiveTheme, Sizable, Size,
     actions::{
@@ -22,66 +20,6 @@ pub use delegate::*;
 pub use state::*;
 
 const CONTEXT: &'static str = "Table";
-
-/// A trait that defines the data model interface for tables.
-///
-/// This trait extracts the common data-related functionality from both
-/// `TableDelegate` and `EditTableDelegate`, allowing for shared behavior
-/// between the basic `Table` and the editable `EditTable` components.
-///
-/// The trait uses an associated type `Column` to allow each implementation
-/// to use its own column type without requiring a unified Column struct.
-#[allow(unused)]
-pub trait TableModel: Send {
-    /// The column type used by this table model.
-    type Column;
-
-    /// Return the number of columns in the table.
-    fn columns_count(&self) -> usize;
-
-    /// Return the number of rows in the table.
-    fn rows_count(&self) -> usize;
-
-    /// Returns the table column at the given index.
-    fn column(&self, index: usize) -> Self::Column;
-
-    /// Perform sort on the column at the given index.
-    fn perform_sort(&mut self, column: usize, ascending: bool);
-
-    /// Move the column at the given index to a new position.
-    fn move_column(&mut self, from: usize, to: usize);
-
-    /// Return true if the table is currently loading data.
-    fn loading(&self) -> bool;
-
-    /// Return a view to display while loading, if any.
-    fn render_loading(&self) -> Option<gpui::AnyView> {
-        None
-    }
-
-    /// Return true if there is more data to load (for infinite scroll).
-    fn has_more(&self) -> bool {
-        false
-    }
-
-    /// Returns the threshold (in rows) that triggers loading more data.
-    ///
-    /// When the visible range is within this many rows from the end,
-    /// `load_more` will be called.
-    fn load_more_threshold(&self) -> Option<usize> {
-        Some(20)
-    }
-
-    /// Load more data when triggered by scroll position.
-    fn load_more(&mut self) {}
-
-    /// Called when the visible range of rows changes.
-    fn visible_rows_changed(&mut self, range: Range<usize>) {}
-
-    /// Called when the visible range of columns changes.
-    fn visible_columns_changed(&mut self, range: Range<usize>) {}
-}
-
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),

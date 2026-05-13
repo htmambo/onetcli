@@ -182,7 +182,7 @@ impl ListDelegate for WorkspaceFilterDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(Radius::Sm.px())
+                .rounded(cx.theme().radius_lg)
                 .on_click(move |_, _, cx| {
                     parent.update(cx, |this, cx| {
                         this.toggle_workspace_filter(item_id, cx);

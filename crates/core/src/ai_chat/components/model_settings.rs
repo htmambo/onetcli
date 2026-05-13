@@ -137,8 +137,6 @@ impl ModelSettingsPanel {
         Self::with_labels(settings, ModelSettingsLabels::default(), window, cx)
     }
 
-
-
     /// 使用自定义标签创建模型设置面板
     pub fn with_labels(
         settings: ModelSettings,
