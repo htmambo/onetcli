@@ -19,7 +19,7 @@ pub use one_core::layout::{
 };
 pub use serial_form_window::{SerialFormWindow, SerialFormWindowConfig};
 pub use settings::{
-    current_settings, init_settings, update_settings, TerminalHighlightRule, TerminalSettings,
+    TerminalHighlightRule, TerminalSettings, current_settings, init_settings, update_settings,
 };
 pub use sidebar::{SettingsPanel, SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
 pub use ssh_form_window::{SshFormWindow, SshFormWindowConfig};

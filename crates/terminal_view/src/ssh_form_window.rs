@@ -839,12 +839,13 @@ impl SshFormWindow {
             init_script,
             sftp_local_directory,
             sftp_remote_directory,
+            disable_shell_integration: None,
             jump_server,
             proxy,
         })
     }
 
-    fn build_ssh_connect_config(&self, params: &SshParams, _cx: &App) -> SshConnectConfig {
+    fn build_ssh_connect_config(&self, params: &SshParams) -> SshConnectConfig {
         let auth = match &params.auth_method {
             SshAuthMethod::Password { password } => SshAuth::Password(password.clone()),
             SshAuthMethod::PrivateKey {
@@ -928,7 +929,7 @@ impl SshFormWindow {
         };
 
         let signature = build_connection_test_signature(&params);
-        let config = self.build_ssh_connect_config(&params, cx);
+        let config = self.build_ssh_connect_config(&params);
         let initial_status = SshConnectionStage::initial_for_config(&config).description();
         let (progress_tx, mut progress_rx) =
             tokio::sync::mpsc::unbounded_channel::<SshConnectionStage>();

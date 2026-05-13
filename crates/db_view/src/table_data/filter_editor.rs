@@ -1739,11 +1739,16 @@ impl VisualFilterBuilder {
         let value_end_input = self.value_end_inputs.get(&row.id);
         let logic_is_and = matches!(row.logic_operator, LogicOperator::And);
 
+        const LOGIC_TOGGLE_WIDTH: gpui::Pixels = px(48.);
+
         // 逻辑操作符选择器（根级别的第一条条件不显示）
         let logic_toggle = if cr.idx > 0 {
             gpui::div()
+                .w(LOGIC_TOGGLE_WIDTH)
+                .flex()
+                .justify_center()
+                .items_center()
                 .text_xs()
-                .px_2()
                 .py_px()
                 .rounded_full()
                 .bg(if logic_is_and {
@@ -1761,7 +1766,7 @@ impl VisualFilterBuilder {
                 )
                 .child(if logic_is_and { "AND" } else { "OR" })
         } else {
-            gpui::div().w(px(48.))
+            gpui::div().w(LOGIC_TOGGLE_WIDTH)
         };
 
         // 值输入区域

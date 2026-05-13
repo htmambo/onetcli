@@ -31,6 +31,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::time::interval;
@@ -42,7 +43,7 @@ use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
 use std::path::Path;
 #[cfg(any(test, not(target_os = "linux")))]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 use crate::history::{
     HistoryEntry, PERSISTED_HISTORY_LIMIT, SESSION_HISTORY_LIMIT, ShellHistoryFormat,
@@ -330,6 +331,7 @@ pub enum TerminalConnectionKind {
 pub struct SshTerminalConfig {
     pub ssh_config: SshConnectConfig,
     pub pty_config: PtyConfig,
+    pub disable_shell_integration: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1142,10 +1144,10 @@ impl TerminalScrollProxy {
 impl Terminal {
     fn new_local_disconnected(error: String, cx: &mut Context<Self>) -> Self {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, _event_proxy, _colors) =
+        let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
 
         Self {
             term,
@@ -1255,10 +1257,10 @@ impl Terminal {
             #[cfg(target_os = "windows")]
             escape_args: true,
         };
-        let local_backend = LocalPtyBackend::new(term.clone(), event_proxy, pty_options)?;
+        let local_backend = LocalPtyBackend::new(term.clone(), event_proxy.clone(), pty_options)?;
         let local_shell_pid = local_backend.child_pid();
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1357,7 +1359,7 @@ impl Terminal {
         let local_backend = LocalPtyClientBackend::new(request_tx, session_id.clone(), child_pid);
         let local_shell_pid = local_backend.child_pid();
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1450,7 +1452,7 @@ impl Terminal {
         let local_shell_pid = local_backend.child_pid();
         let local_cwd_file = init_local_cwd_file(config.cwd_file.clone());
 
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         #[cfg(target_os = "macos")]
         Self::spawn_local_process_tree_settler(cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1591,6 +1593,7 @@ impl Terminal {
         let config = SshTerminalConfig {
             ssh_config,
             pty_config,
+            disable_shell_integration: false,
         };
 
         let cols = config.pty_config.width as usize;
@@ -1604,12 +1607,12 @@ impl Terminal {
             replay_term_output(&term, content.as_bytes(), None);
             replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
         }
-        let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+        let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
         let connection_generation = 1;
         let ssh_session_manager = Arc::new(SshSessionManager::new(config.ssh_config.clone()));
 
         Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         Self::spawn_ssh_connect(
             ssh_session_manager.clone(),
             config.clone(),
@@ -1668,13 +1671,13 @@ impl Terminal {
             .expect("StoredConnection 应包含有效的 SerialParams");
 
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, _event_proxy, _colors) =
+        let (term, event_proxy, _colors) =
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
-        let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+        let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
         let connection_generation = 1;
 
         Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
-        Self::spawn_event_loop(event_rx, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         Self::spawn_serial_connect(
             serial_params.clone(),
             term.clone(),
@@ -1803,7 +1806,11 @@ impl Terminal {
         .detach();
     }
 
-    fn spawn_event_loop(mut event_rx: UnboundedReceiver<TerminalEvent>, cx: &mut Context<Self>) {
+    fn spawn_event_loop(
+        mut event_rx: UnboundedReceiver<TerminalEvent>,
+        wakeup_pending: Arc<AtomicBool>,
+        cx: &mut Context<Self>,
+    ) {
         let _entity = cx.entity().downgrade();
         let (render_tx, mut render_rx) = futures::channel::mpsc::unbounded::<TerminalEvent>();
 
@@ -1836,6 +1843,9 @@ impl Terminal {
                         // 最后发送 Wakeup
                         if pending_wakeup {
                             pending_wakeup = false;
+                            // 转发完毕后允许 alacritty 线程的下一次 Wakeup 重新入队，
+                            // 避免高速输出时被 GpuiEventProxy 的去重永久吞掉
+                            wakeup_pending.store(false, Ordering::Release);
                             if render_tx.unbounded_send(TerminalEvent::Wakeup).is_err() {
                                 return;
                             }
@@ -1863,25 +1873,27 @@ impl Terminal {
     }
 
     fn spawn_disconnect_handler(
-        disconnect_rx: tokio::sync::oneshot::Receiver<()>,
+        disconnect_rx: tokio::sync::oneshot::Receiver<bool>,
         generation: u64,
         cx: &mut Context<Self>,
     ) {
         let entity = cx.entity().downgrade();
         cx.spawn(async move |_, cx| {
-            let _ = disconnect_rx.await;
+            let is_graceful = disconnect_rx.await.unwrap_or(false);
             let _ = entity.update(cx, |this, cx| {
                 if !this.is_current_connection_generation(generation) {
                     return;
+                }
+                if is_graceful {
+                    this.child_exited = Some(0);
+                    cx.emit(TerminalModelEvent::ChildExit(0));
                 }
                 this.connection_state = ConnectionState::Disconnected { error: None };
                 this.connection_status_message = None;
                 this.connection_wait_started_at = None;
                 this.backend = None;
-                this.child_exited = Some(0);
                 this.reset_ssh_process_tracking();
                 this.set_connection_active(false, cx);
-                cx.emit(TerminalModelEvent::ChildExit(0));
                 cx.emit(TerminalModelEvent::Wakeup);
             });
         })
@@ -1957,17 +1969,14 @@ impl Terminal {
         event_proxy: GpuiEventProxy,
         event_tx: UnboundedSender<TerminalEvent>,
         connection_id: Option<i64>,
-        on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
+        on_disconnect: Option<tokio::sync::oneshot::Sender<bool>>,
         init_commands: Option<String>,
         generation: u64,
         cx: &mut Context<Self>,
     ) {
-        // 创建 SSH 后端需要的通知通道
         let (notify_tx, mut notify_rx) = unbounded_channel::<()>();
-        let (progress_tx, mut progress_rx) = unbounded_channel::<SshConnectionStage>();
 
         let task = Tokio::spawn(cx, async move {
-            // 转发 SSH 通知到事件通道（必须在 tokio runtime 内部）
             let event_tx_clone = event_tx.clone();
             tokio::spawn(async move {
                 while notify_rx.recv().await.is_some() {
@@ -1976,15 +1985,15 @@ impl Terminal {
             });
 
             let disconnect_tx = on_disconnect.map(|tx| {
-                let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+                let (sender, mut receiver) = unbounded_channel::<()>();
                 tokio::spawn(async move {
-                    if receiver.await.is_ok() {
-                        let _ = tx.send(());
+                    if receiver.recv().await.is_some() {
+                        let _ = tx.send(true);
                     }
                 });
                 sender
             });
-            SshBackend::connect_with_progress(
+            SshBackend::connect(
                 session_manager,
                 config.pty_config,
                 connection_id,
@@ -1994,29 +2003,10 @@ impl Terminal {
                 notify_tx,
                 disconnect_tx,
                 init_commands,
-                move |stage| {
-                    let _ = progress_tx.send(stage);
-                },
+                config.disable_shell_integration,
             )
             .await
         });
-
-        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            while let Some(stage) = progress_rx.recv().await {
-                if this
-                    .update(cx, |this, cx| {
-                        if matches!(this.connection_state, ConnectionState::Connecting) {
-                            this.connection_status_message = Some(stage.description());
-                            cx.emit(TerminalModelEvent::Wakeup);
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = task.await;
@@ -2099,15 +2089,15 @@ impl Terminal {
         params: SerialParams,
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_tx: UnboundedSender<TerminalEvent>,
-        on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
+        on_disconnect: Option<tokio::sync::oneshot::Sender<bool>>,
         generation: u64,
         cx: &mut Context<Self>,
     ) {
         let disconnect_tx = on_disconnect.map(|tx| {
-            let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+            let (sender, receiver) = tokio::sync::oneshot::channel::<bool>();
             Tokio::spawn(cx, async move {
-                if receiver.await.is_ok() {
-                    let _ = tx.send(());
+                if let Ok(is_graceful) = receiver.await {
+                    let _ = tx.send(is_graceful);
                 }
             })
             .detach();
@@ -2610,7 +2600,7 @@ impl Terminal {
                         return;
                     }
 
-                    let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+                    let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
                     Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
                     Self::spawn_ssh_connect(
                         session_manager.clone(),
@@ -2643,7 +2633,7 @@ impl Terminal {
             self.reset_terminal_surface();
             let generation = self.next_connection_generation();
 
-            let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
+            let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
             Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
             Self::spawn_serial_connect(
                 params,

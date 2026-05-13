@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
-#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -750,7 +749,6 @@ async fn request_keyboard_interactive_responses(
         .context(t!("Ssh.auth_keyboard_interactive_cancelled").to_string())
 }
 
-#[cfg(test)]
 pub fn discover_default_private_keys() -> Vec<String> {
     let Some(home_dir) = dirs::home_dir() else {
         return Vec::new();
@@ -856,7 +854,6 @@ fn build_auto_publickey_failure_message(
     parts.join(": ")
 }
 
-#[cfg(test)]
 fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().to_string()
 }
@@ -1027,6 +1024,7 @@ mod tests {
     #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
 
+    #[cfg(unix)]
     fn test_auth_failure_messages() -> AuthFailureMessages {
         AuthFailureMessages {
             password_failed: "password".to_string(),
@@ -1081,7 +1079,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn discover_default_private_keys_returns_expected_order() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1128,7 +1125,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn expand_auto_publickey_auth_contains_agent_and_default_keys() {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

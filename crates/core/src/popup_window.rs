@@ -142,7 +142,9 @@ impl Focusable for PopupWindowView {
 }
 
 impl Render for PopupWindowView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dialog_layer = Root::render_dialog_layer(window, cx);
+        let sheet_layer = Root::render_sheet_layer(window, cx);
         let surface_palette = modal_surface_palette(cx.theme());
 
         v_flex()
@@ -161,6 +163,8 @@ impl Render for PopupWindowView {
             .focus_trap("popup-window-root", &self.focus_handle)
             .on_action(cx.listener(Self::on_cancel_popup))
             .child(div().size_full().child(self.content.clone()))
+            .children(dialog_layer)
+            .children(sheet_layer)
     }
 }
 

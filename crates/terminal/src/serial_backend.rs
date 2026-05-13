@@ -26,7 +26,7 @@ impl SerialBackend {
         params: SerialParams,
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_tx: UnboundedSender<TerminalEvent>,
-        on_disconnect: Option<oneshot::Sender<()>>,
+        on_disconnect: Option<oneshot::Sender<bool>>,
     ) -> anyhow::Result<Self> {
         let data_bits = match params.data_bits {
             5 => serialport::DataBits::Five,
@@ -99,7 +99,7 @@ impl SerialBackend {
                     }
                 }
                 if let Some(tx) = on_disconnect {
-                    let _ = tx.send(());
+                    let _ = tx.send(true);
                 }
             })?;
 

@@ -1,19 +1,20 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use gpui_component::{
     app_style,
+    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     select::{Select, SelectDelegate, SelectItem, SelectState},
-    v_flex, ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
+    v_flex,
 };
 use one_core::cloud_sync::GlobalCloudUser;
-use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
+use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
     SerialFlowControl, SerialParams, SerialParity, StoredConnection, Workspace,

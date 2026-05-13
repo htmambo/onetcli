@@ -101,8 +101,6 @@ impl RenderOnce for WindowBorder {
         let decorations = window.window_decorations();
         let shadow_size = self.shadow_size;
         let border_radius = cx.theme().radius_lg;
-        // let hide_client_top_border =
-        //     cfg!(target_os = "linux") && matches!(decorations, Decorations::Client { .. });
         #[cfg(target_os = "linux")]
         let prefers_system_frame =
             matches!(decorations, Decorations::Server) || linux_prefers_system_window_controls();

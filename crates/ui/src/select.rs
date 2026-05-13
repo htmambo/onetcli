@@ -789,7 +789,7 @@ where
             .background
             .clone()
             .and_then(|background| background.color())
-            .unwrap_or(cx.theme().background.into());
+            .unwrap_or(cx.theme().popover.into());
         let popup_border = self.options.style.border_color.unwrap_or(cx.theme().border);
         let (bg, fg) = input_style(self.options.disabled, cx);
 

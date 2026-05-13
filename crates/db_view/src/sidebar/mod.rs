@@ -244,5 +244,8 @@ impl Render for DatabaseSidebar {
                         .child(self.render_panel_content(panel, window, cx)),
                 )
             })
+            .when(!self.is_panel_visible(), |this| {
+                this.child(self.render_toolbar(window, cx))
+            })
     }
 }

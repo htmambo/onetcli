@@ -1784,10 +1784,10 @@ impl TerminalView {
                 // 可选：播放声音或闪烁标签
             }
             TerminalModelEvent::ChildExit(_) => {
-                // 仅本地终端在 shell 退出时自动关闭标签。
-                // SSH / 串口连接失败或远端会话结束时需要保留标签，
-                // 以便用户查看错误信息或执行重连。
-                if self.connection_kind(cx) == TerminalConnectionKind::Local {
+                // 本地终端 shell 退出，或 SSH / 串口用户主动 exit 时自动关闭标签。
+                // 网络故障等异常断开保留标签，以便用户查看错误信息或执行重连。
+                let should_close = self.terminal.read(cx).child_exited().is_some();
+                if should_close {
                     self.request_close_from_event(_window, cx);
                 }
                 cx.notify();
@@ -3355,7 +3355,7 @@ impl TerminalView {
                                             this.request_close(window, cx);
                                         })),
                                 )
-                                .when(can_reconnect && !is_key_changed, |el| {
+                                .when(can_reconnect && !is_key_changed && !is_user_exit, |el| {
                                     el.child(
                                         Button::new("reconnect-btn")
                                             .label(t!("SshSession.reconnect"))

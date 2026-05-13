@@ -84,7 +84,7 @@ impl ListDelegate for ConnectionQuickOpenDelegate {
             ListItem::new(ix)
                 .px_3()
                 .py_2()
-                .rounded(Radius::Md.px())
+                .rounded(cx.theme().radius_lg)
                 .on_click(move |_, window, cx| {
                     parent.update(cx, |this, cx| {
                         this.open_connection_from_quick(&connection_for_open, window, cx);
