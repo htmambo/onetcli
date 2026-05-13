@@ -1215,20 +1215,6 @@ Settings:
         zh-CN: 留空时写入默认配置目录下的 logs 文件夹，修改后重启应用生效。
         zh-HK: 留空時寫入默認配置目錄下的 logs 文件夾，修改後重啟應用生效。
 
-    Log:
-      group_title:
-        en: Log
-        zh-CN: 日志
-        zh-HK: 日誌
-      file_path:
-        en: Log File Path
-        zh-CN: 日志保存路径
-        zh-HK: 日誌保存路徑
-      file_path_desc:
-        en: Leave empty to write logs to the default config directory logs folder. Restart the app after changing this path.
-        zh-CN: 留空时写入默认配置目录下的 logs 文件夹，修改后重启应用生效。
-        zh-HK: 留空時寫入默認配置目錄下的 logs 文件夾，修改後重啟應用生效。
-
     Update:
       group_title:
         en: Update
