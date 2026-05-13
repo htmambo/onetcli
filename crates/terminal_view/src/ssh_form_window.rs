@@ -350,6 +350,7 @@ impl SshFormWindow {
         let mut proxy_type = ProxyTypeSelection::default();
         let mut enable_legacy_kex = false;
         let mut sync_enabled = true; // 默认启用云同步
+        let mut disable_shell_integration = false;
         let mut editing_credential_ref: Option<CertificateReference> = None;
 
         if let Some(ref conn) = config.editing_connection {
@@ -410,6 +411,7 @@ impl SshFormWindow {
                 if let Some(ref script) = params.init_script {
                     init_script_input.update(cx, |s, cx| s.set_value(script, window, cx));
                 }
+                disable_shell_integration = params.disable_shell_integration.unwrap_or(false);
                 if let Some(ref dir) = params.sftp_local_directory {
                     sftp_local_directory_input.update(cx, |s, cx| s.set_value(dir, window, cx));
                 }
@@ -843,7 +845,11 @@ impl SshFormWindow {
             init_script,
             sftp_local_directory,
             sftp_remote_directory,
-            disable_shell_integration: None,
+            disable_shell_integration: if self.disable_shell_integration {
+                Some(true)
+            } else {
+                None
+            },
             jump_server,
             proxy,
         })
@@ -1322,6 +1328,28 @@ impl SshFormWindow {
                 &t!("SSH.sftp_remote_directory"),
                 self.styled_input(Input::new(&self.sftp_remote_directory_input)),
             ))
+            .child(
+                self.render_form_row(
+                    &t!("SSH.disable_shell_integration"),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Checkbox::new("disable-shell-integration")
+                                .checked(self.disable_shell_integration)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.disable_shell_integration =
+                                        !this.disable_shell_integration;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("SSH.disable_shell_integration_desc").to_string()),
+                        ),
+                ),
+            )
     }
 
     /// 渲染跳板机标签页
@@ -1727,6 +1755,7 @@ mod tests {
             enable_legacy_kex: false,
             default_directory: Some("/tmp".to_string()),
             init_script: Some("pwd".to_string()),
+            disable_shell_integration: None,
             sftp_local_directory: None,
             sftp_remote_directory: None,
             jump_server: None,
