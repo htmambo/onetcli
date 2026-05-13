@@ -64,7 +64,7 @@ pub fn open_remote_file_editor<T: 'static>(
             let title = editor_window_title(&remote_path);
             open_popup_window(
                 PopupWindowOptions::new(title).size(960.0, 720.0).min_width(640.0).min_height(480.0),
-                move |window, cx| {
+                move |window, cx: &mut App| {
                     let view = cx.new(|cx| {
                         RemoteFileEditorWindow::new(remote_path, client, window, cx)
                     });

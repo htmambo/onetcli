@@ -330,6 +330,7 @@ pub enum TerminalConnectionKind {
 pub struct SshTerminalConfig {
     pub ssh_config: SshConnectConfig,
     pub pty_config: PtyConfig,
+    pub disable_shell_integration: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1591,6 +1592,7 @@ impl Terminal {
         let config = SshTerminalConfig {
             ssh_config,
             pty_config,
+            disable_shell_integration: false,
         };
 
         let cols = config.pty_config.width as usize;
@@ -1964,12 +1966,9 @@ impl Terminal {
         generation: u64,
         cx: &mut Context<Self>,
     ) {
-        // 创建 SSH 后端需要的通知通道
         let (notify_tx, mut notify_rx) = unbounded_channel::<()>();
-        let (progress_tx, mut progress_rx) = unbounded_channel::<SshConnectionStage>();
 
         let task = Tokio::spawn(cx, async move {
-            // 转发 SSH 通知到事件通道（必须在 tokio runtime 内部）
             let event_tx_clone = event_tx.clone();
             tokio::spawn(async move {
                 while notify_rx.recv().await.is_some() {
@@ -1978,15 +1977,15 @@ impl Terminal {
             });
 
             let disconnect_tx = on_disconnect.map(|tx| {
-                let (sender, receiver) = tokio::sync::oneshot::channel::<bool>();
+                let (sender, mut receiver) = unbounded_channel::<()>();
                 tokio::spawn(async move {
-                    if let Ok(is_graceful) = receiver.await {
-                        let _ = tx.send(is_graceful);
+                    if receiver.recv().await.is_some() {
+                        let _ = tx.send(true);
                     }
                 });
                 sender
             });
-            SshBackend::connect_with_progress(
+            SshBackend::connect(
                 session_manager,
                 config.pty_config,
                 connection_id,
@@ -1996,29 +1995,10 @@ impl Terminal {
                 notify_tx,
                 disconnect_tx,
                 init_commands,
-                move |stage| {
-                    let _ = progress_tx.send(stage);
-                },
+                config.disable_shell_integration,
             )
             .await
         });
-
-        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            while let Some(stage) = progress_rx.recv().await {
-                if this
-                    .update(cx, |this, cx| {
-                        if matches!(this.connection_state, ConnectionState::Connecting) {
-                            this.connection_status_message = Some(stage.description());
-                            cx.emit(TerminalModelEvent::Wakeup);
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let result = task.await;
