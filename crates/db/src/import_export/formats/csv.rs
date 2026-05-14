@@ -1,19 +1,16 @@
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 
-use super::{
-    build_export_select_sql, build_insert_statement, execute_import_statements,
-    format_import_table_reference, quote_sql_string,
-};
+use super::format_import_table_reference;
+use crate::DatabasePlugin;
 use crate::connection::DbConnection;
 use crate::executor::{ExecOptions, SqlResult};
 use crate::import_export::{
     ExportConfig, ExportProgressEvent, ExportProgressSender, ExportResult, FormatHandler,
     ImportConfig, ImportResult,
 };
-use crate::DatabasePlugin;
 
 pub struct CsvFormatHandler;
 
@@ -108,11 +105,15 @@ impl CsvFormatHandler {
         }
     }
 
-    fn sql_literal_from_option(value: &Option<String>) -> String {
+    fn append_sql_value(insert_sql: &mut String, value: &Option<String>) {
         match value {
-            None => "NULL".to_string(),
-            Some(v) if v.eq_ignore_ascii_case("null") => "NULL".to_string(),
-            Some(v) => quote_sql_string(v),
+            None => insert_sql.push_str("NULL"),
+            Some(v) if v.eq_ignore_ascii_case("null") => insert_sql.push_str("NULL"),
+            Some(v) => {
+                insert_sql.push('\'');
+                insert_sql.push_str(&v.replace('\'', "''"));
+                insert_sql.push('\'');
+            }
         }
     }
 }
@@ -195,7 +196,6 @@ impl FormatHandler for CsvFormatHandler {
             }
         }
 
-        let mut statements = Vec::new();
         for (record_num, values) in records.iter().skip(data_start_record).enumerate() {
             let record_number = record_num + data_start_record + 1;
             if values.len() != columns.len() {
@@ -206,33 +206,49 @@ impl FormatHandler for CsvFormatHandler {
                 continue;
             }
 
-            let sql_values = values
-                .iter()
-                .map(Self::sql_literal_from_option)
-                .collect::<Vec<_>>();
-            statements.push((
-                record_number,
-                build_insert_statement(plugin, &table_ref, &columns, &sql_values),
-            ));
-        }
-
-        let statement_sql = statements
-            .iter()
-            .map(|(_, sql)| sql.clone())
-            .collect::<Vec<_>>();
-        let results = execute_import_statements(plugin, connection, config, &statement_sql).await?;
-        for ((record_number, _), result) in statements.iter().zip(results.into_iter()) {
-            match result {
-                SqlResult::Exec(exec_result) => {
-                    total_rows += exec_result.rows_affected;
+            let mut insert_sql = format!("INSERT INTO {} (", table_ref);
+            for (i, col) in columns.iter().enumerate() {
+                if i > 0 {
+                    insert_sql.push_str(", ");
                 }
-                SqlResult::Error(err) => {
-                    errors.push(format!("Record {}: {}", record_number, err.message));
+                insert_sql.push_str(&plugin.quote_identifier(col));
+            }
+            insert_sql.push_str(") VALUES (");
+
+            for (i, val) in values.iter().enumerate() {
+                if i > 0 {
+                    insert_sql.push_str(", ");
+                }
+                Self::append_sql_value(&mut insert_sql, val);
+            }
+            insert_sql.push(')');
+
+            match connection
+                .execute(plugin, &insert_sql, ExecOptions::default())
+                .await
+            {
+                Ok(results) => {
+                    for result in results {
+                        match result {
+                            SqlResult::Exec(exec_result) => {
+                                total_rows += exec_result.rows_affected;
+                            }
+                            SqlResult::Error(err) => {
+                                errors.push(format!("Record {}: {}", record_number, err.message));
+                                if config.stop_on_error {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("Record {}: {}", record_number, e));
                     if config.stop_on_error {
                         break;
                     }
                 }
-                _ => {}
             }
         }
 
@@ -290,7 +306,26 @@ impl FormatHandler for CsvFormatHandler {
                 table: table.clone(),
             });
 
-            let select_sql = build_export_select_sql(plugin, config, table);
+            let table_ref = plugin.format_table_reference(&config.database, None, table);
+            let columns_str = if let Some(cols) = &config.columns {
+                cols.iter()
+                    .map(|c| plugin.quote_identifier(c))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                "*".to_string()
+            };
+
+            let mut select_sql = format!("SELECT {} FROM {}", columns_str, table_ref);
+            if let Some(where_clause) = &config.where_clause {
+                select_sql.push_str(" WHERE ");
+                select_sql.push_str(where_clause);
+            }
+            if let Some(limit) = config.limit {
+                let pagination = plugin.format_pagination(limit, 0, "");
+                select_sql.push_str(&pagination);
+            }
+
             let result = connection
                 .query(&select_sql)
                 .await
@@ -363,19 +398,21 @@ mod tests {
 
     #[test]
     fn test_append_sql_value_formats_option_string_correctly() {
-        assert_eq!(CsvFormatHandler::sql_literal_from_option(&None), "NULL");
-        assert_eq!(
-            CsvFormatHandler::sql_literal_from_option(&Some(String::new())),
-            "''"
-        );
-        assert_eq!(
-            CsvFormatHandler::sql_literal_from_option(&Some("null".to_string())),
-            "NULL"
-        );
-        assert_eq!(
-            CsvFormatHandler::sql_literal_from_option(&Some("O'Reilly".to_string())),
-            "'O''Reilly'"
-        );
+        let mut sql = String::new();
+        CsvFormatHandler::append_sql_value(&mut sql, &None);
+        assert_eq!(sql, "NULL");
+
+        sql.clear();
+        CsvFormatHandler::append_sql_value(&mut sql, &Some(String::new()));
+        assert_eq!(sql, "''");
+
+        sql.clear();
+        CsvFormatHandler::append_sql_value(&mut sql, &Some("null".to_string()));
+        assert_eq!(sql, "NULL");
+
+        sql.clear();
+        CsvFormatHandler::append_sql_value(&mut sql, &Some("O'Reilly".to_string()));
+        assert_eq!(sql, "'O''Reilly'");
     }
 
     #[test]

@@ -155,10 +155,6 @@ SSH:
     en: Auto Public Key
     zh-CN: 自动公钥认证
     zh-HK: 自動公鑰認證
-  auto_publickey_hint:
-    en: Try SSH Agent first, then default private keys under ~/.ssh.
-    zh-CN: 将优先尝试 SSH Agent，若不可用则尝试 ~/.ssh 下的默认私钥。
-    zh-HK: 將優先嘗試 SSH Agent，若不可用則嘗試 ~/.ssh 下的預設私鑰。
   key_path:
     en: Key Path
     zh-CN: 密钥路径
@@ -183,6 +179,26 @@ SSH:
     en: Authentication Method
     zh-CN: 认证方式
     zh-HK: 認證方式
+  auto_publickey_hint:
+    en: Try SSH Agent first, then default private keys under ~/.ssh.
+    zh-CN: 将优先尝试 SSH Agent，若不可用则尝试 ~/.ssh 下的默认私钥。
+    zh-HK: 將優先嘗試 SSH Agent，若不可用則嘗試 ~/.ssh 下的預設私鑰。
+  test_required_before_save:
+    en: Please complete a successful connection test before saving
+    zh-CN: 请先完成一次成功的连接测试再保存
+    zh-HK: 請先完成一次成功的連線測試再保存
+  retest_after_change:
+    en: Connection parameters changed, please test again before saving
+    zh-CN: 连接参数已变更，请重新测试后再保存
+    zh-HK: 連線參數已變更，請重新測試後再保存
+  save_failed:
+    en: "Failed to save SSH connection: %{error}"
+    zh-CN: 保存 SSH 连接失败：%{error}
+    zh-HK: 保存 SSH 連線失敗：%{error}
+  save_while_testing:
+    en: Please wait for the connection test to finish before saving
+    zh-CN: 请等待连接测试完成后再保存
+    zh-HK: 請等待連線測試完成後再保存
   workspace:
     en: Workspace
     zh-CN: 工作区
@@ -199,22 +215,6 @@ SSH:
     en: Connection test successful
     zh-CN: 连接测试成功
     zh-HK: 連線測試成功
-  save_failed:
-    en: "Failed to save SSH connection: %{error}"
-    zh-CN: 保存 SSH 连接失败：%{error}
-    zh-HK: 保存 SSH 連線失敗：%{error}
-  save_while_testing:
-    en: Please wait for the connection test to finish before saving
-    zh-CN: 请等待连接测试完成后再保存
-    zh-HK: 請等待連線測試完成後再保存
-  test_required_before_save:
-    en: Please complete a successful connection test before saving
-    zh-CN: 请先完成一次成功的连接测试再保存
-    zh-HK: 請先完成一次成功的連線測試再保存
-  retest_after_change:
-    en: Connection parameters changed, please test again before saving
-    zh-CN: 连接参数已变更，请重新测试后再保存
-    zh-HK: 連線參數已變更，請重新測試後再保存
   # 标签页
   tab_basic:
     en: Basic
@@ -360,6 +360,14 @@ SSH:
     en: Leave empty to use server default directory
     zh-CN: 留空则使用服务器默认目录
     zh-HK: 留空則使用伺服器預設目錄
+  disable_shell_integration:
+    en: Disable Shell Integration
+    zh-CN: 禁用 Shell 集成
+    zh-HK: 禁用 Shell 集成
+  disable_shell_integration_desc:
+    en: Run native login shell without OSC injection (no prompt hook, command recording, or vim mouse)
+    zh-CN: 走裸 login shell，不注入 OSC（失去命令记录 / prompt hook / vim 鼠标）
+    zh-HK: 走裸 login shell，不注入 OSC（失去命令記錄 / prompt hook / vim 鼠標）
   # 其他设置
   remark:
     en: Remark
@@ -1083,10 +1091,6 @@ Terminal:
 
 # SSH 会话状态
 SshSession:
-  reconnect:
-    en: Reconnect
-    zh-CN: 重新连接
-    zh-HK: 重新連接
   connecting:
     en: Connecting...
     zh-CN: 连接中...
@@ -1103,6 +1107,10 @@ SshSession:
     en: The SSH session has been disconnected.
     zh-CN: SSH 会话已断开连接。
     zh-HK: SSH 工作階段已斷開連接。
+  reconnect:
+    en: Reconnect
+    zh-CN: 重新连接
+    zh-HK: 重新連接
   session_ended:
     en: Session ended.
     zh-CN: 会话已结束。
