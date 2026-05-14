@@ -2049,8 +2049,15 @@ impl InputState {
     }
 
     fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        tracing::info!(
+            "InputState::on_focus — disable_ime={}, focus_handle={:?}",
+            self.disable_ime,
+            self.focus_handle,
+        );
         if self.disable_ime {
             window.disable_ime();
+        } else {
+            window.enable_ime();
         }
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);

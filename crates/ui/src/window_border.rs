@@ -14,7 +14,7 @@ use crate::title_bar::linux_prefers_system_window_controls;
 pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 #[cfg(target_os = "linux")]
 pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
-const BORDER_SIZE: Pixels = px(4.0);
+pub(crate) const BORDER_SIZE: Pixels = px(4.0);
 
 #[cfg(target_os = "linux")]
 fn linux_uses_wayland_session() -> bool {

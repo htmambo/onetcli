@@ -976,6 +976,8 @@ impl PlatformWindow for WindowsWindow {
             let _ = ImmAssociateContext(self.0.hwnd, HIMC::default());
         }
     }
+
+    fn enable_ime(&self) {}
 }
 
 #[implement(IDropTarget)]

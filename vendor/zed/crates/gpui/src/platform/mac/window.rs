@@ -435,6 +435,8 @@ struct MacWindowState {
     activated_least_once: bool,
     // The parent window if this window is a sheet (Dialog kind)
     sheet_parent: Option<id>,
+    // Whether IME is disabled for the current focused input handler
+    ime_disabled: bool,
 }
 
 impl MacWindowState {
@@ -757,6 +759,7 @@ impl MacWindow {
                 toggle_tab_bar_callback: None,
                 activated_least_once: false,
                 sheet_parent: None,
+                ime_disabled: false,
             })));
 
             (*native_window).set_ivar(
@@ -1573,6 +1576,7 @@ impl PlatformWindow for MacWindow {
     }
 
     fn disable_ime(&self) {
+        self.0.lock().ime_disabled = true;
         let executor = self.0.lock().foreground_executor.clone();
         executor
             .spawn(async move {
@@ -1586,6 +1590,10 @@ impl PlatformWindow for MacWindow {
                 }
             })
             .detach()
+    }
+
+    fn enable_ime(&self) {
+        self.0.lock().ime_disabled = false;
     }
 
     fn titlebar_double_click(&self) {
@@ -1798,7 +1806,28 @@ extern "C" fn handle_key_event(this: &Object, native_event: id, key_equivalent: 
                 return NO;
             }
 
+            // When IME is disabled, bypass the input context and handle key events directly.
+            // For printable keys: try key bindings first, then insert the character directly.
+            // For non-printable keys: dispatch normally via run_callback.
+            let ime_disabled = lock.ime_disabled;
             drop(lock);
+
+            if ime_disabled {
+                // First try key bindings (for shortcuts like cmd-c, escape, etc.)
+                let handled = run_callback(PlatformInput::KeyDown(key_down_event.clone()));
+                if handled == YES {
+                    return YES;
+                }
+                // For printable keys with no matching binding, insert the character directly
+                // bypassing IME entirely.
+                if let Some(key_char) = key_down_event.keystroke.key_char.as_ref() {
+                    with_input_handler(this, |input_handler| {
+                        input_handler.replace_text_in_range(None, key_char);
+                    });
+                    return YES;
+                }
+                return NO;
+            }
 
             let is_composing =
                 with_input_handler(this, |input_handler| input_handler.marked_text_range())

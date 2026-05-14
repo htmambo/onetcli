@@ -4521,6 +4521,12 @@ impl Window {
         self.platform_window.disable_ime();
     }
 
+    /// Re-enables IME for the current input context.
+    /// Called when a normal input field gains focus to restore IME functionality.
+    pub fn enable_ime(&self) {
+        self.platform_window.enable_ime();
+    }
+
     /// Present a platform dialog.
     /// The provided message will be presented, along with buttons for each answer.
     /// When a button is clicked, the returned Receiver will receive the index of the clicked button.

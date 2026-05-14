@@ -10,7 +10,7 @@ use crate::{
 use gpui::{
     AnyView, App, AppContext, Context, DefiniteLength, Entity, FocusHandle, InteractiveElement,
     IntoElement, KeyBinding, ParentElement as _, Pixels, Render, StyleRefinement, Styled,
-    WeakFocusHandle, Window, actions, div, prelude::FluentBuilder as _,
+    WeakFocusHandle, Window, actions, div, prelude::FluentBuilder as _, px
 };
 use std::{any::TypeId, cell::RefCell, rc::Rc};
 
@@ -467,9 +467,9 @@ impl Render for Root {
                 .relative()
                 .size_full()
                 .font_family(cx.theme().font_family.clone())
-                .bg(cx.theme().transparent)
-                .rounded(cx.theme().radius_lg)
-                .overflow_hidden()
+                .bg(cx.theme().background)
+                .rounded(cx.theme().radius_lg - px(4.0))
+                // .overflow_hidden()
                 .text_color(cx.theme().foreground)
                 .refine_style(&self.style)
                 .child(self.view.clone()),

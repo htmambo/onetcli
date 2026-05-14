@@ -301,6 +301,8 @@ impl PlatformWindow for TestWindow {
 
     fn disable_ime(&self) {}
 
+    fn enable_ime(&self) {}
+
     fn gpu_specs(&self) -> Option<GpuSpecs> {
         None
     }

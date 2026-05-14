@@ -2309,6 +2309,8 @@ impl PlatformWindow for X11Window {
         client.disable_ime();
     }
 
+    fn enable_ime(&self) {}
+
     fn gpu_specs(&self) -> Option<GpuSpecs> {
         self.0.state.borrow().renderer.gpu_specs().into()
     }
