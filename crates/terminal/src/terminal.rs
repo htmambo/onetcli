@@ -539,6 +539,10 @@ enum SshProcessState {
     Busy,
 }
 
+/// SSH 进程检测超时时间（秒）
+/// 如果连接建立后超过此时间仍未检测到任何提示符事件，认为 shell integration 不可用
+const SSH_DETECTION_TIMEOUT_SECS: u64 = 30;
+
 /// 将路径安全地转为 POSIX shell 单参数，避免命令注入。
 pub(crate) fn shell_escape_arg(arg: &str) -> String {
     if arg.is_empty() {
@@ -799,7 +803,26 @@ fn should_report_ssh_running_processes(
     ssh_prompt_detected: bool,
     interactive_mode_active: bool,
     command_submitted_without_prompt_sync: bool,
+    connection_established_at: Option<Instant>,
+    ssh_detection_disabled: bool,
 ) -> bool {
+    // 如果检测机制已被禁用，不报告进程
+    if ssh_detection_disabled {
+        return false;
+    }
+
+    // 检查是否超时：连接建立后超过 30 秒仍未检测到提示符事件
+    if let Some(established_at) = connection_established_at {
+        if !ssh_prompt_detected && established_at.elapsed().as_secs() > SSH_DETECTION_TIMEOUT_SECS {
+            tracing::warn!(
+                target: "terminal.ssh",
+                "SSH shell integration 未检测到（超时 {} 秒），禁用进程检查以避免误报",
+                SSH_DETECTION_TIMEOUT_SECS
+            );
+            return false;
+        }
+    }
+
     is_connected
         && ((ssh_prompt_detected && ssh_process_state == SshProcessState::Busy)
             || (interactive_mode_active && command_submitted_without_prompt_sync))
@@ -1242,9 +1265,13 @@ pub struct Terminal {
     /// 是否已从远端收到过 OSC 133;A/B prompt 事件。
     /// 用于防御 shell integration 不工作时的永久 Busy 误报。
     ssh_prompt_detected: bool,
-    /// 用户已提交命令，但会话尚未反馈“回到 prompt”。
+    /// 用户已提交命令，但会话尚未反馈”回到 prompt”。
     /// 用于补偿不支持 shell integration 的 SSH，会更保守地拦截关闭。
     ssh_command_submitted_without_prompt_sync: Cell<bool>,
+    /// SSH 连接建立的时间，用于超时检测
+    ssh_connection_established_at: Option<Instant>,
+    /// SSH 进程检测是否已禁用（当检测到 shell integration 不可用时）
+    ssh_detection_disabled: Cell<bool>,
     /// 串口参数（用于重连）
     serial_params: Option<SerialParams>,
     /// 事件发送器（用于 SSH 重连）
@@ -1372,6 +1399,8 @@ impl Terminal {
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1490,6 +1519,8 @@ impl Terminal {
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1591,6 +1622,8 @@ impl Terminal {
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1686,6 +1719,8 @@ impl Terminal {
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1878,6 +1913,8 @@ impl Terminal {
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1937,6 +1974,8 @@ impl Terminal {
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: Some(serial_params),
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -2268,6 +2307,12 @@ impl Terminal {
                 // 后端任务与这里并发执行，prompt 事件可能先于连接成功回调到达。
                 // 成功分支不能重置 SSH 跟踪状态，否则会把已收到的 Idle/prompt 信号抹掉，
                 // 导致 top 等前台程序运行时无法正确拦截关闭。
+
+                // 记录 SSH 连接建立时间，用于超时检测
+                if self.connection_kind == TerminalConnectionKind::Ssh {
+                    self.ssh_connection_established_at = Some(Instant::now());
+                }
+
                 tracing::debug!(
                     target: "terminal.ssh",
                     ssh_process_state = ?self.ssh_process_state.get(),
@@ -2621,13 +2666,32 @@ impl Terminal {
             let interactive_mode_active = has_ssh_interactive_program_mode(self.mode());
             let command_submitted_without_prompt_sync =
                 self.ssh_command_submitted_without_prompt_sync.get() && !self.ssh_prompt_detected;
-            let result = should_report_ssh_running_processes(
+
+            // 检查是否需要禁用检测（超时）
+            let should_disable = should_report_ssh_running_processes(
                 matches!(self.connection_state, ConnectionState::Connected),
                 ssh_process_state,
                 self.ssh_prompt_detected,
                 interactive_mode_active,
                 command_submitted_without_prompt_sync,
+                self.ssh_connection_established_at,
+                self.ssh_detection_disabled.get(),
             );
+
+            // 如果检测到超时，标记为已禁用
+            if !self.ssh_detection_disabled.get()
+                && self.ssh_connection_established_at.is_some()
+                && !self.ssh_prompt_detected
+                && self.ssh_connection_established_at.unwrap().elapsed().as_secs() > SSH_DETECTION_TIMEOUT_SECS
+            {
+                self.ssh_detection_disabled.set(true);
+                tracing::warn!(
+                    target: "terminal.ssh",
+                    "SSH shell integration 检测超时，已禁用进程检查"
+                );
+            }
+
+            let result = should_disable;
             if result {
                 tracing::debug!(
                     target: "terminal.ssh",
