@@ -1992,9 +1992,6 @@ where
         let is_editing = row_ix.is_some() && self.editing_cell == Some((row_ix.unwrap(), col_ix));
         let selection_border_color = cx.theme().table_active_border;
 
-        let is_single_select_active =
-            (is_active_cell || is_select_cell) && !is_editing && !is_multi_selection;
-
         let mut cell = div()
             .id(cell_id)
             .w(col_width)
