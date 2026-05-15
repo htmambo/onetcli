@@ -336,7 +336,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
             let popup_view =
                 cx.new(|cx| PopupWindowView::new(view, Some(content_size), window, cx));
             cx.new(|cx| {
-                let root = Root::new(popup_view, window, cx);
+                let mut root = Root::new(popup_view, window, cx);
                 #[cfg(target_os = "linux")]
                 {
                     // popup 的可见底色由 PopupWindowView 承担，避免 Root 底色在圆角处透出。
