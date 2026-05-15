@@ -1129,6 +1129,14 @@ Settings:
         en: Reuse terminal session content when available; when disabled, only reopen the connection
         zh-CN: 可用时恢复终端中的会话内容；关闭后仅重新打开连接
         zh-HK: 可用時恢復終端中的工作階段內容；關閉後僅重新開啟連線
+      check_running_processes_on_exit:
+        en: Check running processes on exit
+        zh-CN: 退出时检测运行中的进程
+        zh-HK: 退出時檢測運行中的進程
+      check_running_processes_on_exit_desc:
+        en: Detect running processes when closing terminal tabs to prevent accidental data loss
+        zh-CN: 关闭终端标签页时检测是否有运行中的进程，防止意外丢失数据
+        zh-HK: 關閉終端標籤頁時檢測是否有運行中的進程，防止意外丟失數據
 
     # 数据库设置
     Database:
@@ -1200,6 +1208,20 @@ Settings:
         en: Let AI generate session title based on your first message
         zh-CN: 根据首条消息由 AI 生成会话标题
         zh-HK: 根據首條消息由 AI 生成會話標題
+
+    Log:
+      group_title:
+        en: Log
+        zh-CN: 日志
+        zh-HK: 日誌
+      file_path:
+        en: Log File Path
+        zh-CN: 日志保存路径
+        zh-HK: 日誌保存路徑
+      file_path_desc:
+        en: Leave empty to write logs to the default config directory logs folder. Restart the app after changing this path.
+        zh-CN: 留空时写入默认配置目录下的 logs 文件夹，修改后重启应用生效。
+        zh-HK: 留空時寫入默認配置目錄下的 logs 文件夾，修改後重啟應用生效。
 
     Log:
       group_title:

@@ -1959,19 +1959,6 @@ where
             && (self.selection.ranges.len() > 1
                 || self.selection.ranges.iter().any(|r| !r.is_single()));
 
-        // 计算选区边框（只在选区边界显示，且仅限单元格选择模式）
-        let (border_top, border_bottom, border_left, border_right) =
-            if is_in_selection && row_ix.is_some() {
-                let r = row_ix.unwrap();
-                let top = r == 0 || !self.selection.contains(r - 1, col_ix);
-                let bottom = !self.selection.contains(r + 1, col_ix);
-                let left = col_ix == 0 || !self.selection.contains(r, col_ix - 1);
-                let right = !self.selection.contains(r, col_ix + 1);
-                (top, bottom, left, right)
-            } else {
-                (false, false, false, false)
-            };
-
         // 旧的单选逻辑（向后兼容）
         let is_select_cell = match self.selected_cell {
             None => false,
@@ -2005,9 +1992,6 @@ where
         let is_editing = row_ix.is_some() && self.editing_cell == Some((row_ix.unwrap(), col_ix));
         let selection_border_color = cx.theme().table_active_border;
 
-        let is_single_select_active =
-            (is_active_cell || is_select_cell) && !is_editing && !is_multi_selection;
-
         let mut cell = div()
             .id(cell_id)
             .w(col_width)
@@ -2019,31 +2003,34 @@ where
             .when(is_in_selection && !is_editing, |this| {
                 this.bg(cx.theme().table_active)
             })
-            // 选区边框 - 上边界
-            .when(border_top, |this| {
-                this.border_t_2().border_color(selection_border_color)
-            })
-            // 选区边框 - 下边界
-            .when(border_bottom, |this| {
-                this.border_b_2().border_color(selection_border_color)
-            })
-            // 选区边框 - 左边界
-            .when(border_left, |this| {
-                this.border_l_2().border_color(selection_border_color)
-            })
-            // 选区边框 - 右边界
-            .when(border_right, |this| {
-                this.border_r_2().border_color(selection_border_color)
-            })
-            // 活动单元格额外添加完整边框（仅在单选时显示）
-            .when(is_single_select_active, |this| {
-                this.border_2().border_color(selection_border_color)
-            })
-            // 编辑状态的单元格
+            // 活动单元格边框（用绝对定位子元素，不占用 content 区域）
+            .when(
+                (is_active_cell || is_select_cell) && !is_editing && !is_multi_selection,
+                |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .border_2()
+                            .border_color(selection_border_color),
+                    )
+                },
+            )
+            // 编辑状态边框（用绝对定位子元素，不占用 content 区域）
             .when(is_editing, |this| {
-                this.bg(cx.theme().background)
-                    .border_2()
-                    .border_color(cx.theme().ring)
+                this.bg(cx.theme().background).child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .border_2()
+                        .border_color(cx.theme().ring),
+                )
             })
             .when(is_modified && !is_editing && !is_in_selection, |this| {
                 this.bg(cx.theme().warning.opacity(0.15))
@@ -2063,23 +2050,11 @@ where
             ),
         };
 
-        // 边框补偿：编辑态始终有 border_2；显示态仅选中时有
-        let (has_t, has_b, has_l, has_r) = if is_editing {
-            (true, true, true, true)
-        } else {
-            (
-                border_top || is_single_select_active,
-                border_bottom || is_single_select_active,
-                border_left || is_single_select_active,
-                border_right || is_single_select_active,
-            )
-        };
-        let b = px(2.);
         cell = cell
-            .pt(if has_t { (target_pt - b).max(px(0.)) } else { target_pt })
-            .pb(if has_b { (target_pb - b).max(px(0.)) } else { target_pb })
-            .pl(if has_l { (target_pl - b).max(px(0.)) } else { target_pl })
-            .pr(if has_r { (target_pr - b).max(px(0.)) } else { target_pr });
+            .pt(target_pt)
+            .pb(target_pb)
+            .pl(target_pl)
+            .pr(target_pr);
 
         // 编辑模式：嵌入轻量编辑器（无自带样式，由容器控制布局）
         if is_editing {
@@ -2328,9 +2303,11 @@ where
                 })
                 .hover(|this| this.bg(cx.theme().secondary).opacity(7.))
                 .active(|this| this.bg(cx.theme().secondary_active).opacity(1.))
-                .on_click(
-                    cx.listener(move |table, _, window, cx| table.perform_sort(col_ix, window, cx)),
-                )
+                .on_click(cx.listener(move |table, _e: &ClickEvent, window, cx| {
+                    // 点击排序图标：循环切换排序方向
+                    cx.stop_propagation();
+                    table.perform_sort(col_ix, window, cx);
+                }))
                 .child(
                     Icon::new(icon)
                         .size_3()

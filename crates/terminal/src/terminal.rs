@@ -15,7 +15,8 @@ use alacritty_terminal::term::cell::{Flags, LineLength};
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty::{self, Options as PtyOptions};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
@@ -30,10 +31,11 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 use tokio::time::interval;
 
 #[cfg(any(test, target_os = "windows"))]
@@ -64,14 +66,15 @@ use crate::{
     LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent,
     TerminalSize,
 };
-use ssh::{ChannelEvent, RusshClient, SshChannel, SshClient};
+use ssh::{
+    ChannelEvent, KeyboardInteractiveRequest, KeyboardInteractiveResponder,
+    KeyboardInteractiveTarget, RusshClient, SshChannel, SshClient
+};
 pub use ssh::{
     JumpServerConnectConfig, ProxyConnectConfig, ProxyType, PtyConfig, SshAuth, SshConnectConfig,
     SshConnectionStage, SshSessionManager,
 };
 
-const DEFAULT_COLS: usize = 80;
-const DEFAULT_ROWS: usize = 24;
 pub const DEFAULT_RECOVERY_SCROLLBACK_LINES: usize = 2000;
 pub const MAX_RECOVERY_SCROLLBACK_LINES: usize = 5000;
 const HISTORY_RESTORED_BANNER: &str =
@@ -331,8 +334,203 @@ pub enum TerminalConnectionKind {
 pub struct SshTerminalConfig {
     pub ssh_config: SshConnectConfig,
     pub pty_config: PtyConfig,
+    /// 关闭 shell integration 注入:走裸 request_shell,失去 OSC 集成。
     pub disable_shell_integration: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalMfaPrompt {
+    pub prompt: String,
+    pub echo: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalMfaRequest {
+    pub name: String,
+    pub instructions: String,
+    pub prompts: Vec<TerminalMfaPrompt>,
+}
+
+#[derive(Clone, Default)]
+pub struct TerminalMfaResponder {
+    state: Arc<StdMutex<TerminalMfaState>>,
+    event_tx: Option<UnboundedSender<TerminalEvent>>,
+    jump_password: Option<String>,
+    target_password: Option<String>,
+}
+
+#[derive(Default)]
+struct TerminalMfaState {
+    pending: Option<TerminalMfaPending>,
+}
+
+struct TerminalMfaPending {
+    request: TerminalMfaRequest,
+    response_tx: Option<oneshot::Sender<Vec<String>>>,
+}
+
+impl TerminalMfaResponder {
+    pub fn new(
+        event_tx: UnboundedSender<TerminalEvent>,
+        jump_password: Option<String>,
+        target_password: Option<String>,
+    ) -> Self {
+        Self {
+            state: Arc::new(StdMutex::new(TerminalMfaState::default())),
+            event_tx: Some(event_tx),
+            jump_password,
+            target_password,
+        }
+    }
+
+    pub fn pending_request(&self) -> Option<TerminalMfaRequest> {
+        self.state
+            .lock()
+            .ok()?
+            .pending
+            .as_ref()
+            .map(|pending| pending.request.clone())
+    }
+
+    pub fn submit(&self, responses: Vec<String>) -> bool {
+        let Some(mut pending) = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|mut state| state.pending.take())
+        else {
+            return false;
+        };
+
+        let sent = pending
+            .response_tx
+            .take()
+            .is_some_and(|tx| tx.send(responses).is_ok());
+        self.notify_changed();
+        sent
+    }
+
+    pub fn cancel(&self) -> bool {
+        let cleared = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|mut state| state.pending.take())
+            .is_some();
+        if cleared {
+            self.notify_changed();
+        }
+        cleared
+    }
+
+    fn notify_changed(&self) {
+        if let Some(event_tx) = &self.event_tx {
+            let _ = event_tx.send(TerminalEvent::SshMfaChanged);
+        }
+    }
+}
+
+#[async_trait]
+impl KeyboardInteractiveResponder for TerminalMfaResponder {
+    async fn respond(&self, request: KeyboardInteractiveRequest) -> Result<Vec<String>> {
+        let terminal_prompts = request
+            .prompts
+            .iter()
+            .filter(|prompt| !is_ssh_password_prompt(&prompt.prompt))
+            .map(|prompt| TerminalMfaPrompt {
+                prompt: prompt.prompt.clone(),
+                echo: prompt.echo,
+            })
+            .collect::<Vec<_>>();
+
+        if terminal_prompts.is_empty() {
+            return keyboard_interactive_answers_for_terminal(
+                &request,
+                &[],
+                self.jump_password.as_deref(),
+                self.target_password.as_deref(),
+            );
+        }
+
+        let (response_tx, response_rx) = oneshot::channel();
+        let terminal_request = TerminalMfaRequest {
+            name: request.name.clone(),
+            instructions: request.instructions.clone(),
+            prompts: terminal_prompts,
+        };
+
+        if let Ok(mut state) = self.state.lock() {
+            state.pending = Some(TerminalMfaPending {
+                request: terminal_request,
+                response_tx: Some(response_tx),
+            });
+        } else {
+            return Err(anyhow!("failed to store SSH MFA request"));
+        }
+        self.notify_changed();
+
+        let responses = response_rx
+            .await
+            .map_err(|_| anyhow!("SSH MFA response was cancelled"))?;
+
+        keyboard_interactive_answers_for_terminal(
+            &request,
+            &responses,
+            self.jump_password.as_deref(),
+            self.target_password.as_deref(),
+        )
+    }
+}
+
+fn keyboard_interactive_answers_for_terminal(
+    request: &KeyboardInteractiveRequest,
+    responses: &[String],
+    jump_password: Option<&str>,
+    target_password: Option<&str>,
+) -> Result<Vec<String>> {
+    let mut response_index = 0;
+    let mut answers = Vec::with_capacity(request.prompts.len());
+
+    for prompt in &request.prompts {
+        if is_ssh_password_prompt(&prompt.prompt) {
+            let password = match request.target {
+                KeyboardInteractiveTarget::JumpServer => jump_password,
+                KeyboardInteractiveTarget::TargetServer => target_password,
+            };
+            answers.push(
+                password
+                    .ok_or_else(|| anyhow!("SSH password prompt has no configured password"))?
+                    .to_string(),
+            );
+        } else {
+            let response = responses
+                .get(response_index)
+                .ok_or_else(|| anyhow!("SSH MFA response is missing"))?;
+            if response.trim().is_empty() {
+                return Err(anyhow!("SSH MFA response is empty"));
+            }
+            answers.push(response.clone());
+            response_index += 1;
+        }
+    }
+
+    if response_index == responses.len() {
+        Ok(answers)
+    } else {
+        Err(anyhow!("SSH MFA response count does not match prompts"))
+    }
+}
+
+fn is_ssh_password_prompt(prompt: &str) -> bool {
+    prompt
+        .trim()
+        .trim_end_matches(':')
+        .to_ascii_lowercase()
+        .ends_with("password")
+}
+
+const DEFAULT_COLS: usize = 80;
+const DEFAULT_ROWS: usize = 24;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SshProcessState {
@@ -340,6 +538,10 @@ enum SshProcessState {
     Idle,
     Busy,
 }
+
+/// SSH 进程检测超时时间（秒）
+/// 如果连接建立后超过此时间仍未检测到任何提示符事件，认为 shell integration 不可用
+const SSH_DETECTION_TIMEOUT_SECS: u64 = 30;
 
 /// 将路径安全地转为 POSIX shell 单参数，避免命令注入。
 pub(crate) fn shell_escape_arg(arg: &str) -> String {
@@ -601,7 +803,26 @@ fn should_report_ssh_running_processes(
     ssh_prompt_detected: bool,
     interactive_mode_active: bool,
     command_submitted_without_prompt_sync: bool,
+    connection_established_at: Option<Instant>,
+    ssh_detection_disabled: bool,
 ) -> bool {
+    // 如果检测机制已被禁用，不报告进程
+    if ssh_detection_disabled {
+        return false;
+    }
+
+    // 检查是否超时：连接建立后超过 30 秒仍未检测到提示符事件
+    if let Some(established_at) = connection_established_at {
+        if !ssh_prompt_detected && established_at.elapsed().as_secs() > SSH_DETECTION_TIMEOUT_SECS {
+            tracing::warn!(
+                target: "terminal.ssh",
+                "SSH shell integration 未检测到（超时 {} 秒），禁用进程检查以避免误报",
+                SSH_DETECTION_TIMEOUT_SECS
+            );
+            return false;
+        }
+    }
+
     is_connected
         && ((ssh_prompt_detected && ssh_process_state == SshProcessState::Busy)
             || (interactive_mode_active && command_submitted_without_prompt_sync))
@@ -1031,6 +1252,9 @@ pub struct Terminal {
     /// 终端尺寸
     cols: usize,
     rows: usize,
+    /// 最近一次同步给 PTY 的像素尺寸,用于 nudge_resize 重发 SIGWINCH
+    pixel_width: u16,
+    pixel_height: u16,
 
     /// SSH 配置（用于重连）
     ssh_config: Option<SshTerminalConfig>,
@@ -1041,9 +1265,13 @@ pub struct Terminal {
     /// 是否已从远端收到过 OSC 133;A/B prompt 事件。
     /// 用于防御 shell integration 不工作时的永久 Busy 误报。
     ssh_prompt_detected: bool,
-    /// 用户已提交命令，但会话尚未反馈“回到 prompt”。
+    /// 用户已提交命令，但会话尚未反馈”回到 prompt”。
     /// 用于补偿不支持 shell integration 的 SSH，会更保守地拦截关闭。
     ssh_command_submitted_without_prompt_sync: Cell<bool>,
+    /// SSH 连接建立的时间，用于超时检测
+    ssh_connection_established_at: Option<Instant>,
+    /// SSH 进程检测是否已禁用（当检测到 shell integration 不可用时）
+    ssh_detection_disabled: Cell<bool>,
     /// 串口参数（用于重连）
     serial_params: Option<SerialParams>,
     /// 事件发送器（用于 SSH 重连）
@@ -1164,11 +1392,15 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1280,11 +1512,15 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -1379,11 +1615,15 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1472,11 +1712,15 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1521,6 +1765,19 @@ impl Terminal {
             .to_ssh_params()
             .expect("StoredConnection should contain valid SSH params");
 
+        let target_password = match &ssh_params.auth_method {
+            SshAuthMethod::Password { password } => Some(password.clone()),
+            _ => None,
+        };
+        let jump_password =
+            ssh_params
+                .jump_server
+                .as_ref()
+                .and_then(|jump| match &jump.auth_method {
+                    SshAuthMethod::Password { password } => Some(password.clone()),
+                    _ => None,
+                });
+
         let auth = match ssh_params.auth_method.clone() {
             SshAuthMethod::Password { password } => SshAuth::Password(password),
             SshAuthMethod::PrivateKey {
@@ -1535,6 +1792,7 @@ impl Terminal {
             SshAuthMethod::AutoPublicKey => SshAuth::AutoPublicKey,
         };
 
+        // 构建初始化命令
         let init_commands = build_ssh_init_commands(
             working_dir,
             ssh_params.default_directory.as_deref(),
@@ -1542,7 +1800,7 @@ impl Terminal {
             sync_path_with_terminal,
         );
 
-        let ssh_config = SshConnectConfig {
+        let mut ssh_config = SshConnectConfig {
             host: ssh_params.host,
             port: ssh_params.port,
             username: ssh_params.username,
@@ -1590,16 +1848,20 @@ impl Terminal {
         };
 
         let pty_config = PtyConfig::default();
+        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
+        let ssh_mfa_responder =
+            TerminalMfaResponder::new(event_tx.clone(), jump_password, target_password);
+        ssh_config.keyboard_interactive_responder = Some(Arc::new(ssh_mfa_responder.clone()));
         let config = SshTerminalConfig {
             ssh_config,
             pty_config,
-            disable_shell_integration: false,
+            disable_shell_integration: ssh_params.disable_shell_integration.unwrap_or(false),
         };
+        let ssh_session_manager = Arc::new(SshSessionManager::new(config.ssh_config.clone()));
 
         let cols = config.pty_config.width as usize;
         let rows = config.pty_config.height as usize;
 
-        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
         let initial_working_dir = working_dir.map(str::to_string);
 
@@ -1609,7 +1871,6 @@ impl Terminal {
         }
         let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
         let connection_generation = 1;
-        let ssh_session_manager = Arc::new(SshSessionManager::new(config.ssh_config.clone()));
 
         Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
         Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
@@ -1645,11 +1906,15 @@ impl Terminal {
             connection_wait_started_at: Some(Instant::now()),
             cols,
             rows,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: Some(config.clone()),
             ssh_session_manager: Some(ssh_session_manager),
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -1702,11 +1967,15 @@ impl Terminal {
             connection_wait_started_at: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             ssh_process_state: Cell::new(SshProcessState::Unknown),
             ssh_prompt_detected: false,
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: Some(serial_params),
             event_tx: Some(event_tx),
             event_proxy: None,
@@ -2038,6 +2307,12 @@ impl Terminal {
                 // 后端任务与这里并发执行，prompt 事件可能先于连接成功回调到达。
                 // 成功分支不能重置 SSH 跟踪状态，否则会把已收到的 Idle/prompt 信号抹掉，
                 // 导致 top 等前台程序运行时无法正确拦截关闭。
+
+                // 记录 SSH 连接建立时间，用于超时检测
+                if self.connection_kind == TerminalConnectionKind::Ssh {
+                    self.ssh_connection_established_at = Some(Instant::now());
+                }
+
                 tracing::debug!(
                     target: "terminal.ssh",
                     ssh_process_state = ?self.ssh_process_state.get(),
@@ -2358,7 +2633,11 @@ impl Terminal {
     }
 
     /// 是否存在会在关闭时被中断的本地子进程。
-    pub fn has_running_processes(&self) -> bool {
+    pub fn has_running_processes(&self, check_enabled: bool) -> bool {
+        if !check_enabled {
+            return false;
+        }
+
         if self.child_exited.is_some() {
             return false;
         }
@@ -2391,13 +2670,32 @@ impl Terminal {
             let interactive_mode_active = has_ssh_interactive_program_mode(self.mode());
             let command_submitted_without_prompt_sync =
                 self.ssh_command_submitted_without_prompt_sync.get() && !self.ssh_prompt_detected;
-            let result = should_report_ssh_running_processes(
+
+            // 检查是否需要禁用检测（超时）
+            let should_disable = should_report_ssh_running_processes(
                 matches!(self.connection_state, ConnectionState::Connected),
                 ssh_process_state,
                 self.ssh_prompt_detected,
                 interactive_mode_active,
                 command_submitted_without_prompt_sync,
+                self.ssh_connection_established_at,
+                self.ssh_detection_disabled.get(),
             );
+
+            // 如果检测到超时，标记为已禁用
+            if !self.ssh_detection_disabled.get()
+                && self.ssh_connection_established_at.is_some()
+                && !self.ssh_prompt_detected
+                && self.ssh_connection_established_at.unwrap().elapsed().as_secs() > SSH_DETECTION_TIMEOUT_SECS
+            {
+                self.ssh_detection_disabled.set(true);
+                tracing::warn!(
+                    target: "terminal.ssh",
+                    "SSH shell integration 检测超时，已禁用进程检查"
+                );
+            }
+
+            let result = should_disable;
             if result {
                 tracing::debug!(
                     target: "terminal.ssh",
@@ -2516,21 +2814,33 @@ impl Terminal {
     /// 调整终端大小
     pub fn resize(&mut self, cols: usize, rows: usize, pixel_width: u16, pixel_height: u16) {
         if self.cols == cols && self.rows == rows {
+            // 单元格行列数未变,但仍记录最新像素尺寸,供 nudge_resize 复用
+            self.pixel_width = pixel_width;
+            self.pixel_height = pixel_height;
+            tracing::debug!(
+                target: "terminal_residue",
+                cols, rows, pixel_width, pixel_height,
+                "Terminal::resize noop (cells unchanged, pixels cached)"
+            );
             return;
         }
 
         tracing::info!(
-            "Terminal::resize: {}x{} -> {}x{}, pixel={}x{}",
+            target: "terminal_residue",
+            "Terminal::resize: {}x{} -> {}x{}, pixel={}x{}, backend={}",
             self.cols,
             self.rows,
             cols,
             rows,
             pixel_width,
-            pixel_height
+            pixel_height,
+            self.backend.is_some()
         );
 
         self.cols = cols;
         self.rows = rows;
+        self.pixel_width = pixel_width;
+        self.pixel_height = pixel_height;
 
         self.term.lock().resize(TermDimensions { cols, rows });
 
@@ -2542,6 +2852,32 @@ impl Terminal {
                 pixel_height,
             });
         }
+    }
+
+    /// 重新向 PTY 后端发送当前尺寸,不修改 alacritty grid。
+    ///
+    /// 用于在 alt screen 切换等场景下触发 SIGWINCH,
+    /// 让 TUI 应用(opencode/lazygit/vim 等)重新查询尺寸并刷新整屏画面,
+    /// 避免出现底部残留旧画面的问题。
+    pub fn nudge_resize(&self) {
+        let Some(ref backend) = self.backend else {
+            tracing::warn!(target: "terminal_residue", "nudge_resize skipped: no backend");
+            return;
+        };
+        tracing::info!(
+            target: "terminal_residue",
+            cols = self.cols,
+            rows = self.rows,
+            pixel_width = self.pixel_width,
+            pixel_height = self.pixel_height,
+            "Terminal::nudge_resize -> backend.resize"
+        );
+        backend.resize(TerminalSize {
+            rows: self.rows as u16,
+            cols: self.cols as u16,
+            pixel_width: self.pixel_width,
+            pixel_height: self.pixel_height,
+        });
     }
 
     /// 重新连接 SSH 或串口
@@ -3091,6 +3427,8 @@ mod tests {
             connection_state: ConnectionState::Connected,
             cols: 80,
             rows: 24,
+            pixel_width: 0,
+            pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
             serial_params: None,

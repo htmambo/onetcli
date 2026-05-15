@@ -283,6 +283,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
     let title = options.title.clone();
     let on_should_close = Arc::new(on_should_close);
     let kind = options.kind.clone();
+    let corner_radius = cx.theme().radius_lg;
 
     cx.spawn(async move |cx| {
         let on_should_close = Arc::clone(&on_should_close);
@@ -314,7 +315,15 @@ pub fn open_popup_window_with_should_close<F, E, H>(
             let view = create_view_fn(window, cx).into();
             let popup_view =
                 cx.new(|cx| PopupWindowView::new(view, Some(content_size), window, cx));
-            cx.new(|cx| Root::new(popup_view, window, cx))
+            cx.new(|cx| {
+                let root = Root::new(popup_view, window, cx);
+                #[cfg(target_os = "linux")]
+                {
+                    // popup 的可见底色由 PopupWindowView 承担，避免 Root 底色在圆角处透出。
+                    root = root.bg(gpui::transparent_black());
+                }
+                root
+            })
         })?;
 
         window.update(cx, |_, window, _| {

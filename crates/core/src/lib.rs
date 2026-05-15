@@ -47,4 +47,5 @@ pub fn init(cx: &mut App) {
     agent::init(cx);
     connection_notifier::init(cx);
     certificate_notifier::init(cx);
+    popup_window::init(cx);
 }

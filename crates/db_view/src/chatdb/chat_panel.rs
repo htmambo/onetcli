@@ -346,6 +346,9 @@ impl ChatPanel {
         self.chat_history.clear();
         self.sql_result_views.clear();
         self.sql_block_results.clear();
+        self.latest_ai_message_id = None;
+        self.render_limit = MESSAGE_RENDER_LIMIT;
+        self.session_affinity.reset();
         cx.notify();
     }
 

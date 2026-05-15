@@ -732,8 +732,7 @@ impl ConnectionPool {
         _db_manager: &DbManager,
     ) -> anyhow::Result<Arc<RwLock<Box<dyn DbConnection + Send + Sync>>>> {
         let plugin = self.db_manager.get_plugin(&config.database_type)?;
-        let mut connection = plugin.create_connection(config).await?;
-        connection.connect().await?;
+        let connection = plugin.create_connection(config).await?;
         Ok(Arc::new(RwLock::new(connection)))
     }
 }
@@ -1946,6 +1945,14 @@ impl GlobalDbState {
         connection_id: String,
         node: DbNode,
     ) -> anyhow::Result<Option<crate::types::ObjectView>> {
+        if node.node_type == DbNodeType::Connection && !node.children_loaded {
+            info!(
+                "[DB][Timing] load_object_view skipped connection_id={} node_id={} reason=connection_children_not_loaded",
+                connection_id, node.id
+            );
+            return Ok(None);
+        }
+
         let mut config = self
             .get_config(&connection_id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found: {}", connection_id))?

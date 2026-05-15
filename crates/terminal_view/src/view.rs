@@ -248,17 +248,51 @@ fn take_whole_scroll_lines(scroll_lines_accumulated: &mut f32) -> i32 {
     lines
 }
 
-fn alt_screen_scroll_arrow(lines: i32, app_cursor: bool) -> Option<&'static str> {
+fn sgr_mouse_wheel_report(lines: i32, col: usize, row: usize) -> Option<String> {
     if lines == 0 {
         return None;
     }
 
-    Some(match (lines > 0, app_cursor) {
-        (true, true) => "\x1bOA",   // Up, application mode
-        (true, false) => "\x1b[A",  // Up, normal mode
-        (false, true) => "\x1bOB",  // Down, application mode
-        (false, false) => "\x1b[B", // Down, normal mode
-    })
+    let button = if lines > 0 { 64 } else { 65 };
+    Some(format!("\x1b[<{};{};{}M", button, col + 1, row + 1))
+}
+
+/// 生成 SGR 鼠标按钮报告。
+///
+/// - `button`：xterm 按钮编码（0=左键、1=中键、2=右键，加上 shift/alt/ctrl/拖动等位）
+/// - `pressed`：true 用 `M` 表示按下，false 用 `m` 表示释放（SGR 协议规定）
+/// - `col` / `row`：0-based，输出转为 1-based
+///
+/// 抽出为独立纯函数，便于单元测试和后续扩展（拖动 32 位、wheel-with-modifiers 等）。
+fn sgr_mouse_button_report(button: u8, col: usize, row: usize, pressed: bool) -> String {
+    let suffix = if pressed { 'M' } else { 'm' };
+    format!("\x1b[<{};{};{}{}", button, col + 1, row + 1, suffix)
+}
+
+/// 将 GPUI 鼠标按钮映射为 xterm 按钮基础编码：左=0、中=1、右=2。
+/// 其它按钮（X1/X2 等）当前未在 SGR 报告中使用，返回 None。
+fn mouse_button_code(button: MouseButton) -> Option<u8> {
+    match button {
+        MouseButton::Left => Some(0),
+        MouseButton::Middle => Some(1),
+        MouseButton::Right => Some(2),
+        _ => None,
+    }
+}
+
+/// 将修饰键编码到 xterm 鼠标按钮的高位：shift=4、alt=8、control=16。
+fn encode_mouse_modifiers(modifiers: Modifiers) -> u8 {
+    let mut bits = 0u8;
+    if modifiers.shift {
+        bits |= 4;
+    }
+    if modifiers.alt {
+        bits |= 8;
+    }
+    if modifiers.control {
+        bits |= 16;
+    }
+    bits
 }
 
 fn should_scroll_to_bottom_on_user_input(
@@ -568,6 +602,12 @@ pub struct TerminalView {
     cell_width: Pixels,
 
     last_size: Option<(usize, usize)>,
+    /// 上一帧 alacritty 是否处于 alt screen 模式。
+    ///
+    /// 用于检测主屏与备用屏切换:进入 alt screen 时主动调用 nudge_resize
+    /// 重发当前尺寸给 PTY,触发 SIGWINCH,让 TUI 应用刷新整屏画面,
+    /// 避免出现底部残留上一次渲染内容的问题。
+    last_alt_screen: bool,
     scroll_lines_accumulated: f32,
 
     mouse_state: MouseState,
@@ -730,7 +770,10 @@ impl TerminalView {
     }
 
     fn has_blocking_terminal_activity(&self, cx: &App) -> bool {
-        self.terminal.read(cx).has_running_processes()
+        let settings = current_settings(cx);
+        self.terminal
+            .read(cx)
+            .has_running_processes(settings.check_running_processes_on_exit)
     }
 
     pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -1005,6 +1048,7 @@ impl TerminalView {
             // 初始化为 None，确保首次渲染时会触发 resize，
             // 将正确的终端尺寸发送给 PTY
             last_size: None,
+            last_alt_screen: false,
             scroll_lines_accumulated: 0.0,
             mouse_state: MouseState::default(),
             addon_manager: Self::create_addon_manager(),
@@ -3014,6 +3058,16 @@ impl TerminalView {
 
         let new_size = (cols, rows);
         if self.last_size != Some(new_size) {
+            tracing::info!(
+                target: "terminal_residue",
+                old = ?self.last_size,
+                new = ?new_size,
+                bounds_w = ?bounds.size.width,
+                bounds_h = ?bounds.size.height,
+                cell_width = ?self.cell_width,
+                line_height = ?self.line_height,
+                "resize_if_needed -> Terminal::resize"
+            );
             self.last_size = Some(new_size);
             self.terminal.update(cx, |terminal, _| {
                 terminal.resize(
@@ -3407,11 +3461,14 @@ impl TerminalView {
         }
 
         if mode.contains(TermMode::ALT_SCREEN) {
-            // ALT_SCREEN（vim、less 等）：累计到整行后再转为上下箭头，避免放大小幅滚轮输入
-            if let Some(arrow) = alt_screen_scroll_arrow(lines, mode.contains(TermMode::APP_CURSOR))
-            {
-                for _ in 0..lines.abs() {
-                    self.write_to_pty(arrow.as_bytes().to_vec(), cx);
+            if mode.contains(TermMode::SGR_MOUSE) && mode.intersects(TermMode::MOUSE_MODE) {
+                let point = self.pixel_to_point(event.position, self.terminal_bounds, cx);
+                if let Some(report) =
+                    sgr_mouse_wheel_report(lines, point.column.0, point.line.0 as usize)
+                {
+                    for _ in 0..lines.unsigned_abs() {
+                        self.write_to_pty(report.as_bytes().to_vec(), cx);
+                    }
                 }
             }
             return;
@@ -3476,6 +3533,41 @@ impl TerminalView {
         } else {
             Side::Right
         }
+    }
+
+    /// 当终端启用 SGR 鼠标 + 任意鼠标报告模式时，把按钮按下/释放事件以 SGR 形式
+    /// 回报给 PTY。返回 true 表示已经处理，调用方应跳过 selection/dismiss/paste 等本地行为。
+    ///
+    /// 特殊穿透:Shift+Left 永远走终端自身的文本选区,不向 TUI 转发 —— 这是 xterm/iTerm/
+    /// kitty/wezterm 等的通用约定,让用户在 vim/tmux 等捕获鼠标的应用里仍能复制文本。
+    /// 同理 mouse_up 时,如果当前正在终端选区(由 shift+drag 启动),也跳过 release 回报,
+    /// 避免在 release 阶段 shift 已松开就把 release 事件错发给 TUI、丢掉 selection 收尾。
+    fn try_report_sgr_mouse_button(
+        &mut self,
+        button: MouseButton,
+        position: Point<Pixels>,
+        modifiers: Modifiers,
+        pressed: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if button == MouseButton::Left
+            && (modifiers.shift || (!pressed && self.mouse_state.selecting))
+        {
+            return false;
+        }
+        let mode = self.terminal.read(cx).mode();
+        if !(mode.contains(TermMode::SGR_MOUSE) && mode.intersects(TermMode::MOUSE_MODE)) {
+            return false;
+        }
+        let Some(base) = mouse_button_code(button) else {
+            return false;
+        };
+        let point = self.pixel_to_point(position, self.terminal_bounds, cx);
+        let encoded = base | encode_mouse_modifiers(modifiers);
+        let report =
+            sgr_mouse_button_report(encoded, point.column.0, point.line.0 as usize, pressed);
+        self.write_to_pty(report.into_bytes(), cx);
+        true
     }
 
     fn handle_mouse_down(
@@ -3572,10 +3664,20 @@ impl TerminalView {
 
     fn handle_middle_mouse_down(
         &mut self,
-        _event: &MouseDownEvent,
+        event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // SGR 鼠标模式下中键按下走 TUI 报告而不是 middle-click paste
+        if self.try_report_sgr_mouse_button(
+            MouseButton::Middle,
+            event.position,
+            event.modifiers,
+            true,
+            cx,
+        ) {
+            return;
+        }
         if !self.middle_click_paste {
             return;
         }
@@ -3644,6 +3746,16 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // SGR 鼠标模式下：先回报释放，然后跳过 selection 收尾
+        if self.try_report_sgr_mouse_button(
+            event.button,
+            event.position,
+            event.modifiers,
+            false,
+            cx,
+        ) {
+            return;
+        }
         if event.button != MouseButton::Left {
             return;
         }
@@ -4106,6 +4218,28 @@ impl Render for TerminalView {
         let view = cx.entity().clone();
         let show_scrollbar = !terminal_mode.contains(TermMode::ALT_SCREEN) && history_size > 0;
 
+        // 检测主屏 ↔ alt screen 切换。
+        // 进入 alt screen 时(opencode/lazygit/vim 等 TUI 启动),主动重发当前尺寸到 PTY,
+        // 触发 SIGWINCH 让 TUI 重新查询尺寸并刷新整屏,避免底部残留旧画面。
+        // 仅在 last_size 已就绪时(说明 PTY 已收到过正确尺寸)才 nudge,
+        // 避免覆盖即将到来的首次 resize_if_needed。
+        let alt_screen = terminal_mode.contains(TermMode::ALT_SCREEN);
+        if alt_screen != self.last_alt_screen {
+            tracing::info!(
+                target: "terminal_residue",
+                from = self.last_alt_screen,
+                to = alt_screen,
+                last_size = ?self.last_size,
+                "alt_screen mode transition"
+            );
+            self.last_alt_screen = alt_screen;
+            if alt_screen && self.last_size.is_some() {
+                tracing::info!(target: "terminal_residue", "nudge_resize fired on enter alt_screen");
+                self.terminal
+                    .update(cx, |terminal, _| terminal.nudge_resize());
+            }
+        }
+
         div()
             .size_full()
             .flex()
@@ -4527,10 +4661,80 @@ mod tests {
     }
 
     #[test]
-    fn alt_screen_scroll_arrow_maps_negative_lines_to_down() {
-        assert_eq!(alt_screen_scroll_arrow(-1, false), Some("\x1b[B"));
-        assert_eq!(alt_screen_scroll_arrow(-1, true), Some("\x1bOB"));
-        assert_eq!(alt_screen_scroll_arrow(0, false), None);
+    fn sgr_mouse_wheel_report_maps_negative_lines_to_wheel_down() {
+        assert_eq!(
+            sgr_mouse_wheel_report(-1, 4, 2).as_deref(),
+            Some("\x1b[<65;5;3M")
+        );
+        assert_eq!(sgr_mouse_wheel_report(0, 4, 2), None);
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_uses_capital_m_on_press() {
+        // 左键按下，列 0、行 0 -> 转 1-based
+        let s = sgr_mouse_button_report(0, 0, 0, true);
+        assert_eq!(s, "\x1b[<0;1;1M");
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_uses_lowercase_m_on_release() {
+        let s = sgr_mouse_button_report(2, 9, 4, false);
+        // 右键 (button=2) 释放在 1-based col=10 row=5
+        assert_eq!(s, "\x1b[<2;10;5m");
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_supports_modifier_encoded_buttons() {
+        // 左键 + shift (4) + ctrl (16) -> button=20
+        let s = sgr_mouse_button_report(20, 0, 0, true);
+        assert_eq!(s, "\x1b[<20;1;1M");
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_supports_drag_button_codes() {
+        // 拖动事件：button + 32（xterm 拖动位）
+        // 左键拖动 = 32
+        let s = sgr_mouse_button_report(32, 7, 11, true);
+        assert_eq!(s, "\x1b[<32;8;12M");
+    }
+
+    #[test]
+    fn mouse_button_code_maps_three_main_buttons() {
+        assert_eq!(mouse_button_code(MouseButton::Left), Some(0));
+        assert_eq!(mouse_button_code(MouseButton::Middle), Some(1));
+        assert_eq!(mouse_button_code(MouseButton::Right), Some(2));
+    }
+
+    #[test]
+    fn encode_mouse_modifiers_packs_shift_alt_control() {
+        let none = Modifiers::default();
+        assert_eq!(encode_mouse_modifiers(none), 0);
+
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(shift), 4);
+
+        let alt = Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(alt), 8);
+
+        let ctrl = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(ctrl), 16);
+
+        let all = Modifiers {
+            shift: true,
+            alt: true,
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(all), 28);
     }
 
     #[test]
