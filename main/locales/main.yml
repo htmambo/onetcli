@@ -1129,6 +1129,14 @@ Settings:
         en: Reuse terminal session content when available; when disabled, only reopen the connection
         zh-CN: 可用时恢复终端中的会话内容；关闭后仅重新打开连接
         zh-HK: 可用時恢復終端中的工作階段內容；關閉後僅重新開啟連線
+      check_running_processes_on_exit:
+        en: Check running processes on exit
+        zh-CN: 退出时检测运行中的进程
+        zh-HK: 退出時檢測運行中的進程
+      check_running_processes_on_exit_desc:
+        en: Detect running processes when closing terminal tabs to prevent accidental data loss
+        zh-CN: 关闭终端标签页时检测是否有运行中的进程，防止意外丢失数据
+        zh-HK: 關閉終端標籤頁時檢測是否有運行中的進程，防止意外丟失數據
 
     # 数据库设置
     Database:

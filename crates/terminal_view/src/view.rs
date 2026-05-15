@@ -770,7 +770,10 @@ impl TerminalView {
     }
 
     fn has_blocking_terminal_activity(&self, cx: &App) -> bool {
-        self.terminal.read(cx).has_running_processes()
+        let settings = current_settings(cx);
+        self.terminal
+            .read(cx)
+            .has_running_processes(settings.check_running_processes_on_exit)
     }
 
     pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {

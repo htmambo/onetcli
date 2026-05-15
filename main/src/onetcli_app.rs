@@ -349,8 +349,10 @@ fn force_close_tabs_then_quit(
 
         let _ = cx.update(|cx| {
             if can_quit {
+                tracing::info!("所有标签页已关闭，准备退出应用");
                 cx.quit();
             } else {
+                tracing::warn!("部分标签页关闭失败，取消退出");
                 guard.borrow_mut().cancel_force_close();
             }
         });
@@ -473,6 +475,21 @@ fn request_main_window_close(window: &mut Window, cx: &mut App) -> bool {
         AppCloseDecision::Allow | AppCloseDecision::ForceClose => true,
         AppCloseDecision::Ignore => false,
         AppCloseDecision::Prompt => {
+            // 在打开对话框之前先保存状态，确保"仍然退出"时可以恢复
+            tracing::info!("准备显示退出确认对话框，先保存当前标签状态");
+            let state = with_recovery_snapshot_overrides(
+                cx,
+                None,
+                Some(WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS),
+                |cx| tab_container.read(cx).dump(cx),
+            );
+            if let Err(err) = save_tab_state(&state) {
+                tracing::error!("保存标签状态失败：{:?}", err);
+            } else {
+                tracing::info!("标签状态保存成功，共 {} 个标签", state.tabs.len());
+            }
+            AppSettings::save_global(cx);
+
             open_app_close_dialog(window, tab_container, running_states, guard, cx);
             false
         }
@@ -1043,14 +1060,21 @@ impl OnetCliApp {
         cx.on_app_quit({
             let tab_container = tab_container.clone();
             move |_, cx| {
-                let state = with_recovery_snapshot_overrides(
-                    cx,
-                    None,
-                    Some(WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS),
-                    |cx| tab_container.read(cx).dump(cx),
-                );
-                if let Err(err) = save_tab_state(&state) {
-                    tracing::error!("退出时保存标签状态失败：{:?}", err);
+                // 检查是否有标签页，如果没有说明已经在 force_close 中保存过了
+                let has_tabs = tab_container.read(cx).tabs().len() > 0;
+                if has_tabs {
+                    tracing::info!("应用退出：保存标签状态");
+                    let state = with_recovery_snapshot_overrides(
+                        cx,
+                        None,
+                        Some(WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS),
+                        |cx| tab_container.read(cx).dump(cx),
+                    );
+                    if let Err(err) = save_tab_state(&state) {
+                        tracing::error!("退出时保存标签状态失败：{:?}", err);
+                    }
+                } else {
+                    tracing::info!("应用退出：标签页已清空，跳过保存（状态已在强制退出时保存）");
                 }
                 AppSettings::save_global(cx);
                 let redis_state = cx

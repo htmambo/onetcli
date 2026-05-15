@@ -45,6 +45,12 @@ pub struct TerminalSettings {
     pub builtin_highlights_initialized: bool,
     #[serde(default)]
     pub custom_highlights: Vec<TerminalHighlightRule>,
+    #[serde(default = "default_check_running_processes")]
+    pub check_running_processes_on_exit: bool,
+}
+
+fn default_check_running_processes() -> bool {
+    true
 }
 
 impl Default for TerminalSettings {
@@ -61,6 +67,7 @@ impl Default for TerminalSettings {
             confirm_high_risk_command: true,
             builtin_highlights_initialized: true,
             custom_highlights: builtin_highlight_rules(),
+            check_running_processes_on_exit: true,
         }
     }
 }

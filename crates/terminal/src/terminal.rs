@@ -2633,7 +2633,11 @@ impl Terminal {
     }
 
     /// 是否存在会在关闭时被中断的本地子进程。
-    pub fn has_running_processes(&self) -> bool {
+    pub fn has_running_processes(&self, check_enabled: bool) -> bool {
+        if !check_enabled {
+            return false;
+        }
+
         if self.child_exited.is_some() {
             return false;
         }

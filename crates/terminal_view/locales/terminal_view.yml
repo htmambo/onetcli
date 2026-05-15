@@ -447,6 +447,10 @@ Settings:
     en: Confirm high-risk command paste
     zh-CN: 高危命令粘贴需确认
     zh-HK: 高危命令貼上需確認
+  check_running_processes_on_exit:
+    en: Check running processes on exit
+    zh-CN: 退出时检测运行中的进程
+    zh-HK: 退出時檢測運行中的進程
   auto_copy:
     en: Auto copy on select
     zh-CN: 选中自动复制

@@ -52,6 +52,7 @@ use terminal_view::{
     DEFAULT_LINE_HEIGHT_SCALE, DEFAULT_RECOVERY_SCROLLBACK_LINES, MAX_LINE_HEIGHT_SCALE,
     MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalSettings, TerminalTheme,
     set_recovery_scrollback_lines,
+    settings::{GlobalTerminalSettings, TerminalSettingsStore},
 };
 use tracing::{error, info};
 
@@ -502,6 +503,8 @@ pub struct AppSettings {
     pub terminal_confirm_multiline_paste: bool,
     #[serde(default = "default_true")]
     pub terminal_confirm_high_risk_command: bool,
+    #[serde(default = "default_true")]
+    pub terminal_check_running_processes_on_exit: bool,
     #[serde(default)]
     pub log_file_path: String,
     #[serde(default = "default_true")]
@@ -879,6 +882,7 @@ impl Default for AppSettings {
             terminal_recovery_scrollback_lines: default_terminal_recovery_scrollback_lines(),
             terminal_confirm_multiline_paste: default_true(),
             terminal_confirm_high_risk_command: default_true(),
+            terminal_check_running_processes_on_exit: default_true(),
             restore_connections_on_startup: default_true(),
             restore_session_content: default_true(),
             log_file_path: String::new(),
@@ -1348,6 +1352,16 @@ fn migrate_legacy_theme_state(settings: &mut AppSettings) {
 fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
     set_recovery_scrollback_lines(cx, settings.normalized_terminal_recovery_scrollback_lines());
 
+    // 更新 GlobalTerminalSettings
+    if let Some(global) = cx.try_global::<GlobalTerminalSettings>() {
+        let store = global.0.clone();
+        store.update(cx, |store: &mut TerminalSettingsStore, cx| {
+            let mut next = store.snapshot();
+            next.check_running_processes_on_exit = settings.terminal_check_running_processes_on_exit;
+            store.replace(next, cx);
+        });
+    }
+
     let Some(home) = cx.try_global::<GlobalHomePage>() else {
         return;
     };
@@ -1396,6 +1410,7 @@ fn legacy_terminal_settings(settings: &AppSettings) -> TerminalSettings {
         confirm_high_risk_command: settings.terminal_confirm_high_risk_command,
         builtin_highlights_initialized: false,
         custom_highlights: Vec::new(),
+        check_running_processes_on_exit: settings.terminal_check_running_processes_on_exit,
     }
 }
 
@@ -2673,6 +2688,27 @@ impl SettingsPanel {
                             .visible_when(|cx| {
                                 AppSettings::global(cx).restore_connections_on_startup
                             }),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.check_running_processes_on_exit"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx).terminal_check_running_processes_on_exit
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        let settings = AppSettings::global_mut(cx);
+                                        settings.terminal_check_running_processes_on_exit = val;
+                                        settings.save();
+                                        sync_terminal_settings_to_all(settings.clone(), cx);
+                                    },
+                                )
+                                .default_value(
+                                    default_settings.terminal_check_running_processes_on_exit,
+                                ),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.check_running_processes_on_exit_desc")
+                                    .to_string(),
+                            ),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
                         .title(t!("Settings.General.Database.group_title"))
