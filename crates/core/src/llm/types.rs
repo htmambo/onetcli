@@ -120,6 +120,9 @@ pub struct ProviderConfig {
     pub thinking_budget: Option<i32>,
     pub enabled: bool,
     pub is_default: bool,
+    pub cloud_id: Option<String>,
+    pub last_synced_at: Option<i64>,
+    pub sync_enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -140,6 +143,9 @@ impl Default for ProviderConfig {
             thinking_budget: None,
             enabled: true,
             is_default: false,
+            cloud_id: None,
+            last_synced_at: None,
+            sync_enabled: true,
             created_at: 0,
             updated_at: 0,
         }
@@ -150,5 +156,46 @@ impl ProviderConfig {
     /// 是否为内置 provider
     pub fn is_builtin(&self) -> bool {
         self.provider_type.is_builtin()
+    }
+}
+
+// ===== 云同步支持 =====
+
+use crate::cloud_sync::sync_type::SyncableItem;
+
+impl SyncableItem for ProviderConfig {
+    fn local_id(&self) -> Option<i64> {
+        Some(self.id)
+    }
+
+    fn set_local_id(&mut self, id: Option<i64>) {
+        if let Some(id) = id {
+            self.id = id;
+        }
+    }
+
+    fn item_name(&self) -> &str {
+        &self.name
+    }
+
+    fn cloud_id(&self) -> Option<&str> {
+        self.cloud_id.as_deref()
+    }
+
+    fn set_cloud_id(&mut self, cloud_id: Option<String>) {
+        self.cloud_id = cloud_id;
+    }
+
+    fn updated_at(&self) -> Option<i64> {
+        Some(self.updated_at)
+    }
+
+    fn last_synced_at(&self) -> Option<i64> {
+        self.last_synced_at
+    }
+
+    // 使用简单时间戳比较（与 Certificate 一致）
+    fn uses_sync_state(&self) -> bool {
+        false
     }
 }

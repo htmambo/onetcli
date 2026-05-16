@@ -431,6 +431,9 @@ impl ProviderForm {
             thinking_budget: None,
             enabled: true,
             is_default: false,
+            cloud_id: None,
+            last_synced_at: None,
+            sync_enabled: true,
             created_at: now,
             updated_at: now,
         };
@@ -550,6 +553,9 @@ impl ProviderForm {
             thinking_budget: None,
             enabled: true,
             is_default: self.is_default,
+            cloud_id: None,
+            last_synced_at: None,
+            sync_enabled: true,
             created_at: now,
             updated_at: now,
         })

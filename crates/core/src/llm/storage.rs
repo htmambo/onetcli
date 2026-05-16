@@ -24,6 +24,9 @@ struct ProviderConfigRow {
     thinking_budget: Option<i32>,
     enabled: i32,
     is_default: i32,
+    cloud_id: Option<String>,
+    last_synced_at: Option<i64>,
+    sync_enabled: i32,
     created_at: i64,
     updated_at: i64,
 }
@@ -44,6 +47,9 @@ impl FromSqliteRow for ProviderConfigRow {
             thinking_budget: row.get("thinking_budget")?,
             enabled: row.get("enabled")?,
             is_default: row.get("is_default")?,
+            cloud_id: row.get("cloud_id")?,
+            last_synced_at: row.get("last_synced_at")?,
+            sync_enabled: row.get("sync_enabled")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -82,6 +88,9 @@ impl TryFrom<ProviderConfigRow> for ProviderConfig {
             thinking_budget: row.thinking_budget,
             enabled: row.enabled != 0,
             is_default: row.is_default != 0,
+            cloud_id: row.cloud_id,
+            last_synced_at: row.last_synced_at,
+            sync_enabled: row.sync_enabled != 0,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -134,12 +143,104 @@ impl ProviderRepository {
             thinking_budget: None,
             enabled: true,
             is_default: !has_default,
+            cloud_id: None,
+            last_synced_at: None,
+            sync_enabled: true,
             created_at: now,
             updated_at: now,
         };
 
         let _ = self.insert(&mut config);
         Ok(config)
+    }
+
+    /// 从云端同步更新（insert_or_update 语义）
+    pub fn update_from_cloud(&self, item: &ProviderConfig) -> Result<()> {
+        // 默认提供商去重：如果当前项设为默认，先将其他项取消默认
+        if item.is_default {
+            self.conn.with_connection(|conn| {
+                conn.execute(
+                    "UPDATE llm_providers SET is_default = 0 WHERE id != ?1",
+                    params![item.id],
+                )?;
+                Ok(())
+            })?;
+        }
+
+        let id = item.id;
+        let name = item.name.clone();
+        let provider_type = item.provider_type.as_str().to_string();
+        let api_key = item.api_key.clone();
+        let api_base = item.api_base.clone();
+        let api_version = item.api_version.clone();
+        let model = item.model.clone();
+        let models = if item.models.is_empty() {
+            vec![item.model.clone()]
+        } else {
+            item.models.clone()
+        };
+        let models_json = serde_json::to_string(&models).unwrap_or_else(|_| "[]".to_string());
+        let max_tokens = item.max_tokens;
+        let temperature = item.temperature.map(|t| t as f64);
+        let thinking_budget = item.thinking_budget;
+        let enabled = if item.enabled { 1i32 } else { 0i32 };
+        let is_default = if item.is_default { 1i32 } else { 0i32 };
+        let cloud_id = item.cloud_id.clone();
+        let last_synced_at = item.last_synced_at;
+        let sync_enabled = if item.sync_enabled { 1i32 } else { 0i32 };
+        let created_at = item.created_at;
+        let updated_at = item.updated_at;
+
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE llm_providers SET
+                    name = ?1, provider_type = ?2, api_key = ?3, api_base = ?4,
+                    api_version = ?5, model = ?6, models = ?7, max_tokens = ?8,
+                    temperature = ?9, thinking_budget = ?10, enabled = ?11,
+                    is_default = ?12, updated_at = ?13, cloud_id = ?14,
+                    last_synced_at = ?15, sync_enabled = ?16, created_at = ?17
+                 WHERE id = ?18",
+                params![
+                    name, provider_type, api_key, api_base, api_version, model,
+                    models_json, max_tokens, temperature, thinking_budget,
+                    enabled, is_default, updated_at, cloud_id, last_synced_at,
+                    sync_enabled, created_at, id,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// 更新同步状态（上传成功后调用）
+    pub fn update_sync_status(
+        &self,
+        id: i64,
+        cloud_id: Option<String>,
+        last_synced_at: Option<i64>,
+    ) -> Result<()> {
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE llm_providers SET cloud_id = ?1, last_synced_at = ?2 WHERE id = ?3",
+                params![cloud_id, last_synced_at, id],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// 按 cloud_id 查询（用于下载时去重）
+    pub fn get_by_cloud_id(&self, cloud_id: &str) -> Result<Option<ProviderConfig>> {
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at FROM llm_providers WHERE cloud_id = ?1",
+            )?;
+            let mut rows = stmt.query(params![cloud_id])?;
+            if let Some(row) = rows.next()? {
+                let config_row = ProviderConfigRow::from_row(row)?;
+                Ok(Some(config_row.try_into()?))
+            } else {
+                Ok(None)
+            }
+        })
     }
 }
 
@@ -183,14 +284,17 @@ impl Repository for ProviderRepository {
         let thinking_budget = item.thinking_budget;
         let enabled = if item.enabled { 1i32 } else { 0i32 };
         let is_default = if item.is_default { 1i32 } else { 0i32 };
+        let cloud_id = item.cloud_id.clone();
+        let last_synced_at = item.last_synced_at;
+        let sync_enabled = if item.sync_enabled { 1i32 } else { 0i32 };
         let created_at = item.created_at;
         let updated_at = item.updated_at;
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO llm_providers (id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                params![id, name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, created_at, updated_at],
+                "INSERT INTO llm_providers (id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                params![id, name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at],
             )?;
             Ok(())
         })?;
@@ -217,12 +321,15 @@ impl Repository for ProviderRepository {
         let thinking_budget = item.thinking_budget;
         let enabled = if item.enabled { 1i32 } else { 0i32 };
         let is_default = if item.is_default { 1i32 } else { 0i32 };
+        let cloud_id = item.cloud_id.clone();
+        let last_synced_at = item.last_synced_at;
+        let sync_enabled = if item.sync_enabled { 1i32 } else { 0i32 };
         let updated_at = now();
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE llm_providers SET name = ?1, provider_type = ?2, api_key = ?3, api_base = ?4, api_version = ?5, model = ?6, models = ?7, max_tokens = ?8, temperature = ?9, thinking_budget = ?10, enabled = ?11, is_default = ?12, updated_at = ?13 WHERE id = ?14",
-                params![name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, updated_at, id],
+                "UPDATE llm_providers SET name = ?1, provider_type = ?2, api_key = ?3, api_base = ?4, api_version = ?5, model = ?6, models = ?7, max_tokens = ?8, temperature = ?9, thinking_budget = ?10, enabled = ?11, is_default = ?12, cloud_id = ?13, last_synced_at = ?14, sync_enabled = ?15, updated_at = ?16 WHERE id = ?17",
+                params![name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, updated_at, id],
             )?;
             Ok(())
         })
@@ -238,7 +345,7 @@ impl Repository for ProviderRepository {
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, created_at, updated_at FROM llm_providers WHERE id = ?1",
+                "SELECT id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at FROM llm_providers WHERE id = ?1",
             )?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
@@ -253,7 +360,7 @@ impl Repository for ProviderRepository {
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, created_at, updated_at FROM llm_providers ORDER BY created_at DESC",
+                "SELECT id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at FROM llm_providers ORDER BY created_at DESC",
             )?;
             let rows = stmt.query_map([], |row| ProviderConfigRow::from_row(row))?;
             let mut results = Vec::new();

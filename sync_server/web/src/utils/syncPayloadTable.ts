@@ -369,6 +369,32 @@ function parseCredential(data: Record<string, unknown>): PayloadField[] {
   });
 }
 
+function parseLlmProvider(data: Record<string, unknown>): PayloadField[] {
+  const fields: PayloadField[] = [];
+  const simple: Array<[string, string, Partial<{ sensitive: boolean; mono: boolean }>]> = [
+    ["名称", "name", {}],
+    ["类型", "provider_type", {}],
+    ["模型", "model", {}],
+    ["API Base", "api_base", { mono: true }],
+    ["API 版本", "api_version", {}],
+    ["最大 Token", "max_tokens", {}],
+    ["温度", "temperature", {}],
+    ["Thinking Budget", "thinking_budget", {}],
+    ["启用", "enabled", {}],
+    ["默认", "is_default", {}],
+  ];
+  for (const [label, key, opts] of simple) {
+    const f = field(label, data[key], opts);
+    if (f) fields.push(f);
+  }
+  if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+    fields.push({ label: "模型列表", value: JSON.stringify(data.models, null, 2), mono: true });
+  }
+  const apiKey = field("API 密钥", data.api_key, { sensitive: true, mono: true });
+  if (apiKey) fields.push(apiKey);
+  return fields;
+}
+
 function parseGeneric(data: Record<string, unknown>): PayloadField[] {
   return objectToFields(data, new Set());
 }
@@ -396,6 +422,8 @@ export function buildPayloadTable(
       return parseWorkspace(data);
     case "credential":
       return parseCredential(data);
+    case "llm_provider":
+      return parseLlmProvider(data);
     default:
       return parseGeneric(data);
   }

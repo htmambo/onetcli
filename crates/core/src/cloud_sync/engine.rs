@@ -12,6 +12,7 @@ use super::blob_vault::BlobVault;
 use super::certificate_sync::CertificateSyncType;
 use super::client::CloudApiClient;
 use super::connection_sync::ConnectionSyncHandler;
+use super::llm_provider_sync::LlmProviderSyncType;
 use super::generic_sync::generic_sync;
 use super::models::{ConflictResolution, ConflictType, SyncResult};
 use super::queue::OperationQueue;
@@ -91,6 +92,9 @@ impl SyncEngine {
                 }),
                 Box::new(TypedSyncBridge {
                     handler: CertificateSyncType,
+                }),
+                Box::new(TypedSyncBridge {
+                    handler: LlmProviderSyncType,
                 }),
                 Box::new(ConnectionSyncHandler),
             ],

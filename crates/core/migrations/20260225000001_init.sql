@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS llm_providers (
     models TEXT,
     is_default INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
+    cloud_id TEXT,
+    last_synced_at INTEGER,
+    sync_enabled INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

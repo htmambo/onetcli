@@ -3,12 +3,14 @@ const syncItemTypeAliases: Record<string, string> = {
   workspace: "workspace",
   certificate: "credential",
   credential: "credential",
+  llm_provider: "llm_provider",
 };
 
 const syncItemTypeLabels: Record<string, string> = {
   connection: "连接项",
   workspace: "工作区",
   credential: "凭证",
+  llm_provider: "LLM 提供商",
 };
 
 export function normalizeSyncItemType(dataType: string) {

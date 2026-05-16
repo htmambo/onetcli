@@ -408,6 +408,88 @@ impl CloudSyncService {
             owner_id: plain_data.owner_id,
         })
     }
+
+    /// 准备上传 LLM 提供商配置到 sync_data（整体 blob 加密）
+    pub(crate) fn prepare_llm_provider_sync_data_upload(
+        &self,
+        item: &crate::llm::types::ProviderConfig,
+    ) -> Result<CloudSyncData, SyncError> {
+        let plain_data = LlmProviderPlainData {
+            name: item.name.clone(),
+            provider_type: item.provider_type.as_str().to_string(),
+            api_key: item.api_key.clone(),
+            api_base: item.api_base.clone(),
+            api_version: item.api_version.clone(),
+            model: item.model.clone(),
+            models: item.models.clone(),
+            max_tokens: item.max_tokens,
+            temperature: item.temperature,
+            thinking_budget: item.thinking_budget,
+            enabled: item.enabled,
+            is_default: item.is_default,
+            owner_id: None,
+        };
+
+        let plaintext = serde_json::to_string(&plain_data)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+
+        let checksum = Self::calculate_blob_checksum(&plaintext);
+        let encrypted_data = self.encrypt_blob(&plaintext)?;
+        let key_version = self.key_version();
+
+        Ok(CloudSyncData {
+            id: item.cloud_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            owner_id: self.user_id.clone().unwrap_or_default(),
+            data_type: data_type::LLM_PROVIDER.to_string(),
+            name: item.name.clone(),
+            encrypted_data,
+            key_version,
+            checksum,
+            version: 1,
+            updated_at: current_timestamp(),
+            deleted_at: None,
+        })
+    }
+
+    /// 解密 sync_data 中的 LLM 提供商配置数据
+    pub(crate) fn decrypt_sync_data_llm_provider(
+        &self,
+        cloud_data: &CloudSyncData,
+    ) -> Result<crate::llm::types::ProviderConfig, SyncError> {
+        let plaintext = self.decrypt_blob(&cloud_data.encrypted_data)?;
+        let plain_data: LlmProviderPlainData = serde_json::from_str(&plaintext)
+            .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
+
+        let provider_type = crate::llm::types::ProviderType::from_str(&plain_data.provider_type)
+            .unwrap_or(crate::llm::types::ProviderType::OpenAI);
+
+        let models = if plain_data.models.is_empty() {
+            vec![plain_data.model.clone()]
+        } else {
+            plain_data.models
+        };
+
+        Ok(crate::llm::types::ProviderConfig {
+            id: 0, // 本地插入时重新分配
+            name: plain_data.name,
+            provider_type,
+            api_key: plain_data.api_key,
+            api_base: plain_data.api_base,
+            api_version: plain_data.api_version,
+            model: plain_data.model,
+            models,
+            max_tokens: plain_data.max_tokens,
+            temperature: plain_data.temperature,
+            thinking_budget: plain_data.thinking_budget,
+            enabled: plain_data.enabled,
+            is_default: plain_data.is_default,
+            cloud_id: Some(cloud_data.id.clone()),
+            last_synced_at: Some(cloud_data.updated_at / 1000),
+            sync_enabled: true,
+            created_at: cloud_data.updated_at / 1000,
+            updated_at: cloud_data.updated_at / 1000,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -231,6 +231,7 @@ pub mod data_type {
     pub const CONNECTION: &str = "connection";
     pub const WORKSPACE: &str = "workspace";
     pub const CERTIFICATE: &str = "certificate";
+    pub const LLM_PROVIDER: &str = "llm_provider";
 }
 
 #[cfg(test)]
@@ -323,6 +324,45 @@ pub struct CertificatePlainData {
     /// 备注
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
+    /// 创建者
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<String>,
+}
+
+/// LLM 提供商明文数据结构（加密前 / 解密后的 JSON blob）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmProviderPlainData {
+    /// 提供商名称
+    pub name: String,
+    /// 提供商类型
+    pub provider_type: String,
+    /// API 密钥
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// API 基础地址
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_base: Option<String>,
+    /// API 版本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_version: Option<String>,
+    /// 当前模型
+    pub model: String,
+    /// 可用模型列表
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+    /// 最大 Token 数
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<i32>,
+    /// 温度参数
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Thinking budget（Anthropic 专属）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<i32>,
+    /// 是否启用
+    pub enabled: bool,
+    /// 是否为默认提供商
+    pub is_default: bool,
     /// 创建者
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
