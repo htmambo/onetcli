@@ -67,7 +67,7 @@ fn build_database_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }
@@ -97,7 +97,7 @@ fn build_ssh_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }
@@ -125,7 +125,7 @@ fn build_redis_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }
@@ -153,7 +153,7 @@ fn build_mongo_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }
@@ -181,7 +181,7 @@ fn build_serial_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }

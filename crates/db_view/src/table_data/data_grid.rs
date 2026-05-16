@@ -1627,11 +1627,6 @@ impl DataGrid {
         });
     }
 
-    fn clear_changes_and_refresh(&self, cx: &mut App) {
-        self.clear_changes(cx);
-        self.handle_refresh(cx);
-    }
-
     pub fn revert_changes(&self, cx: &mut App) {
         self.table.update(cx, |state, cx| {
             state.delegate_mut().revert_all_changes();

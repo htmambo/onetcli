@@ -309,6 +309,13 @@ impl X11ClientStatePtr {
         }
     }
 
+    pub fn enable_ime(&self) {
+        let Some(client) = self.get_client() else {
+            return;
+        };
+        client.enable_ime();
+    }
+
     pub fn disable_ime(&self) {
         let Some(client) = self.get_client() else {
             return;
@@ -317,6 +324,9 @@ impl X11ClientStatePtr {
         state.composing = false;
         if let Some(mut ximc) = state.ximc.take() {
             if let Some(xim_handler) = state.xim_handler.as_ref() {
+                if xim_handler.connected && xim_handler.ic_id != 0 {
+                    ximc.unset_focus(xim_handler.im_id, xim_handler.ic_id).ok();
+                }
                 let ic_attributes = ximc
                     .build_ic_attributes()
                     .push(AttributeName::InputStyle, InputStyle::empty())
@@ -476,7 +486,33 @@ impl X11Client {
 
         let xcb_connection = Rc::new(xcb_connection);
 
-        let ximc = X11rbClient::init(Rc::clone(&xcb_connection), x_root_index, None).ok();
+        let ximc = match X11rbClient::init(Rc::clone(&xcb_connection), x_root_index, None) {
+            Ok(ximc) => {
+                log::info!("XIM initialized successfully");
+                Some(ximc)
+            }
+            Err(e) => {
+                log::warn!("XIM init with XMODIFIERS failed: {} (XMODIFIERS={:?})", e, std::env::var("XMODIFIERS").ok());
+                // Try common IM server names as fallback
+                let mut ximc = None;
+                for im_name in ["fcitx", "fcitx5", "ibus"] {
+                    match X11rbClient::init(Rc::clone(&xcb_connection), x_root_index, Some(im_name)) {
+                        Ok(client) => {
+                            log::info!("XIM initialized with fallback name: {}", im_name);
+                            ximc = Some(client);
+                            break;
+                        }
+                        Err(e) => {
+                            log::debug!("XIM init fallback '{}' failed: {}", im_name, e);
+                        }
+                    }
+                }
+                if ximc.is_none() {
+                    log::error!("XIM initialization failed completely. Input method will not be available.");
+                }
+                ximc
+            }
+        };
         let xim_handler = if ximc.is_some() {
             Some(XimHandler::new())
         } else {
@@ -677,12 +713,17 @@ impl X11Client {
                 }
 
                 let Some((mut ximc, mut xim_handler)) = state.take_xim() else {
+                    self.handle_event(event);
                     continue;
                 };
-                let xim_connected = xim_handler.connected;
+                let xim_connected_before = xim_handler.connected;
+                let xim_ic_id_before = xim_handler.ic_id;
                 drop(state);
 
                 let xim_filtered = ximc.filter_event(&event, &mut xim_handler);
+                let xim_just_connected = !xim_connected_before && xim_handler.connected;
+                let xim_handler_im_id = xim_handler.im_id;
+                let xim_handler_ic_id = xim_handler.ic_id;
                 let xim_callback_event = xim_handler.last_callback_event.take();
 
                 let mut state = self.0.borrow_mut();
@@ -693,12 +734,17 @@ impl X11Client {
                     self.handle_xim_callback_event(event);
                 }
 
+                if xim_just_connected {
+                    log::info!("XIM handshake completed (im_id={}, ic_id={}), enabling IME for focused window", xim_handler_im_id, xim_handler_ic_id);
+                    self.enable_ime();
+                }
+
                 match xim_filtered {
                     Ok(handled) => {
                         if handled {
                             continue;
                         }
-                        if xim_connected {
+                        if xim_connected_before || xim_just_connected {
                             self.xim_handle_event(event);
                         } else {
                             self.handle_event(event);
@@ -724,19 +770,38 @@ impl X11Client {
     pub fn enable_ime(&self) {
         let mut state = self.0.borrow_mut();
         if !state.has_xim() {
+            log::warn!("enable_ime called but XIM is not available");
             return;
         }
 
         let Some((mut ximc, mut xim_handler)) = state.take_xim() else {
             return;
         };
+        let keyboard_focused_window = state.keyboard_focused_window;
+        log::info!("enable_ime: connected={}, im_id={}, ic_id={}, xim_window={:?}, focused_window={:?}", xim_handler.connected, xim_handler.im_id, xim_handler.ic_id, xim_handler.window, keyboard_focused_window);
+        if !xim_handler.connected || xim_handler.im_id == 0 {
+            log::warn!("enable_ime skipped: XIM not ready yet (connected={}, im_id={})", xim_handler.connected, xim_handler.im_id);
+            state.restore_xim(ximc, xim_handler);
+            return;
+        }
+        // Use keyboard_focused_window if xim_handler.window hasn't been set yet
+        let target_window = if xim_handler.window != 0 {
+            xim_handler.window
+        } else if let Some(focused) = keyboard_focused_window {
+            xim_handler.window = focused;
+            focused
+        } else {
+            log::warn!("enable_ime skipped: no target window available");
+            state.restore_xim(ximc, xim_handler);
+            return;
+        };
         let mut ic_attributes = ximc
             .build_ic_attributes()
             .push(AttributeName::InputStyle, InputStyle::PREEDIT_CALLBACKS)
-            .push(AttributeName::ClientWindow, xim_handler.window)
-            .push(AttributeName::FocusWindow, xim_handler.window);
+            .push(AttributeName::ClientWindow, target_window)
+            .push(AttributeName::FocusWindow, target_window);
 
-        let window_id = state.keyboard_focused_window;
+        let window_id = keyboard_focused_window;
         drop(state);
         if let Some(window_id) = window_id {
             let Some(window) = self.get_window(window_id) else {
@@ -760,6 +825,7 @@ impl X11Client {
             }
         }
         ximc.create_ic(xim_handler.im_id, ic_attributes.build())
+            .map_err(|e| log::error!("Failed to create XIM input context: {}", e))
             .ok();
         let mut state = self.0.borrow_mut();
         state.restore_xim(ximc, xim_handler);
@@ -987,10 +1053,12 @@ impl X11Client {
                 }
                 drop(state);
                 self.enable_ime();
+                self.xim_set_focus();
             }
             Event::FocusOut(event) => {
                 let window = self.get_window(event.event)?;
                 window.set_active(false);
+                self.xim_unset_focus();
                 let mut state = self.0.borrow_mut();
                 // Set last scroll values to `None` so that a large delta isn't created if scrolling is done outside the window (the valuator is global)
                 reset_all_pointer_device_scroll_positions(&mut state.pointer_device_states);
@@ -1404,6 +1472,19 @@ impl X11Client {
                     event.detail.into(),
                 ));
                 let (mut ximc, mut xim_handler) = state.take_xim()?;
+                log::debug!("xim_handle_event: key={}, ic_id={}, im_id={}, connected={}", event.detail, xim_handler.ic_id, xim_handler.im_id, xim_handler.connected);
+                if xim_handler.ic_id == 0 {
+                    drop(state);
+                    let event = if event.response_type == x11rb::protocol::xproto::KEY_PRESS_EVENT {
+                        Event::KeyPress(event)
+                    } else {
+                        Event::KeyRelease(event)
+                    };
+                    self.handle_event(event);
+                    let mut state = self.0.borrow_mut();
+                    state.restore_xim(ximc, xim_handler);
+                    return Some(());
+                }
                 drop(state);
                 xim_handler.window = event.event;
                 ximc.forward_event(
@@ -1423,6 +1504,50 @@ impl X11Client {
             }
         }
         Some(())
+    }
+
+    fn xim_set_focus(&self) {
+        let mut state = self.0.borrow_mut();
+        if !state.has_xim() {
+            return;
+        }
+        let Some((mut ximc, xim_handler)) = state.take_xim() else {
+            return;
+        };
+        if xim_handler.connected && xim_handler.ic_id != 0 {
+            let im_id = xim_handler.im_id;
+            let ic_id = xim_handler.ic_id;
+            drop(state);
+            ximc.set_focus(im_id, ic_id)
+                .map_err(|e| log::error!("Failed to set XIM focus: {}", e))
+                .ok();
+            let mut state = self.0.borrow_mut();
+            state.restore_xim(ximc, xim_handler);
+        } else {
+            state.restore_xim(ximc, xim_handler);
+        }
+    }
+
+    fn xim_unset_focus(&self) {
+        let mut state = self.0.borrow_mut();
+        if !state.has_xim() {
+            return;
+        }
+        let Some((mut ximc, xim_handler)) = state.take_xim() else {
+            return;
+        };
+        if xim_handler.connected && xim_handler.ic_id != 0 {
+            let im_id = xim_handler.im_id;
+            let ic_id = xim_handler.ic_id;
+            drop(state);
+            ximc.unset_focus(im_id, ic_id)
+                .map_err(|e| log::error!("Failed to unset XIM focus: {}", e))
+                .ok();
+            let mut state = self.0.borrow_mut();
+            state.restore_xim(ximc, xim_handler);
+        } else {
+            state.restore_xim(ximc, xim_handler);
+        }
     }
 
     fn xim_handle_commit(&self, window: xproto::Window, text: String) -> Option<()> {

@@ -12,7 +12,6 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     list::{ListDelegate, ListItem, ListState},
-    tokens::Radius,
     tooltip::Tooltip,
     v_flex,
 };
