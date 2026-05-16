@@ -2013,6 +2013,11 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) {
         self.editing_connection_id = None;
+
+        if !self.ensure_master_key_ready_for_new_connection(window, cx) {
+            return;
+        }
+
         let parent = cx.entity();
         let parent_window = window.window_handle();
         open_popup_window(
@@ -2276,12 +2281,10 @@ impl HomePage {
     pub(crate) fn show_connection_form(
         &mut self,
         db_type: DatabaseType,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.editing_connection_id.is_none()
-            && !self.ensure_master_key_ready_for_new_connection(window, cx)
-        {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
 
@@ -2311,10 +2314,8 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_ssh_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none()
-            && !self.ensure_master_key_ready_for_new_connection(window, cx)
-        {
+    pub(crate) fn show_ssh_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
 
@@ -2345,10 +2346,8 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_redis_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none()
-            && !self.ensure_master_key_ready_for_new_connection(window, cx)
-        {
+    pub(crate) fn show_redis_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
 
@@ -2379,10 +2378,8 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_mongodb_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none()
-            && !self.ensure_master_key_ready_for_new_connection(window, cx)
-        {
+    pub(crate) fn show_mongodb_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
 
@@ -2413,10 +2410,8 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_serial_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none()
-            && !self.ensure_master_key_ready_for_new_connection(window, cx)
-        {
+    pub(crate) fn show_serial_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
 
@@ -2452,12 +2447,16 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if crypto::has_repo_password_set() {
+        if self.is_master_key_ready_for_new_connection() {
             return true;
         }
 
         self.show_encryption_key_dialog(window, cx);
         false
+    }
+
+    pub(crate) fn is_master_key_ready_for_new_connection(&self) -> bool {
+        crypto::has_master_key()
     }
 
     fn show_encryption_key_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -6008,12 +6007,6 @@ impl HomePage {
                 this.child(Self::render_manual_drop_indicator_for_edge(edge, cx))
             })
             .on_double_click(cx.listener(move |this, _, w, cx| {
-                // 如果主密钥未解锁且已设置过密码，拦截连接操作并弹出解锁对话框
-                if !crypto::has_master_key() && crypto::has_repo_password_set() {
-                    this.show_encryption_key_dialog(w, cx);
-                    return;
-                }
-
                 let strategy =
                     build_connection_open_strategy(clone_conn.clone(), workspace.clone());
                 strategy.open(this, w, cx);

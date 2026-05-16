@@ -122,6 +122,8 @@ pub enum TerminalSidebarEvent {
     AutocompleteChanged(bool),
     /// 中键粘贴开关
     MiddleClickPasteChanged(bool),
+    /// vim/TUI 滚轮转方向键开关
+    VimScrollToArrowKeysChanged(bool),
     /// 路径与终端同步开关
     SyncPathChanged(bool),
     /// 自定义高亮规则变更
@@ -181,6 +183,7 @@ impl TerminalSidebar {
                 settings.enable_autocomplete,
                 settings.middle_click_paste,
                 sync_path_enabled,
+                true,
                 window,
                 cx,
             )
@@ -272,6 +275,9 @@ impl TerminalSidebar {
                 }
                 settings_panel::SettingsPanelEvent::MiddleClickPasteChanged(enabled) => {
                     cx.emit(TerminalSidebarEvent::MiddleClickPasteChanged(*enabled));
+                }
+                settings_panel::SettingsPanelEvent::VimScrollToArrowKeysChanged(enabled) => {
+                    cx.emit(TerminalSidebarEvent::VimScrollToArrowKeysChanged(*enabled));
                 }
                 settings_panel::SettingsPanelEvent::SyncPathChanged(enabled) => {
                     this.sync_path_enabled = *enabled;
@@ -468,6 +474,12 @@ impl TerminalSidebar {
     pub fn set_middle_click_paste(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.settings_panel.update(cx, |panel, cx| {
             panel.set_middle_click_paste(enabled, cx);
+        });
+    }
+
+    pub fn set_vim_scroll_to_arrow_keys(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings_panel.update(cx, |panel, cx| {
+            panel.set_vim_scroll_to_arrow_keys(enabled, cx);
         });
     }
 

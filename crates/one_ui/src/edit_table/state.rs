@@ -7,10 +7,10 @@ use crate::edit_table::filter_panel::FilterPanel;
 use gpui::{
     AppContext, Axis, Bounds, ClickEvent, ClipboardItem, Context, Div, DragMoveEvent, ElementId,
     Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, IsZero,
-    KeyDownEvent, Keystroke, ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement,
-    Pixels, Point, Render, ScrollStrategy, ScrollWheelEvent, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, UniformListScrollHandle, Window,
-    canvas, div, prelude::FluentBuilder, px, uniform_list,
+    ListSizingBehavior, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render,
+    ScrollStrategy, ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement as _,
+    Styled, Subscription, Task, UniformListScrollHandle, Window, canvas, div,
+    prelude::FluentBuilder, px, uniform_list,
 };
 use gpui_component::list::{List, ListState};
 use gpui_component::scroll::ScrollbarHandle;
@@ -21,7 +21,9 @@ use gpui_component::{
     scroll::{ScrollableMask, Scrollbar},
     v_flex,
 };
-use rust_i18n::t;
+
+const SCROLLBAR_WIDTH: Pixels = px(16.);
+const COLUMN_SEPARATOR_WIDTH: Pixels = px(1.);
 
 gpui::actions!(
     edit_table_internal,
@@ -93,8 +95,7 @@ pub struct EditTableState<D: EditTableDelegate> {
     bounds: Bounds<Pixels>,
     fixed_head_cols_bounds: Bounds<Pixels>,
 
-    /// Column groups (pub(super) for use within one_ui crate, e.g., by DataGrid)
-    pub(super) col_groups: Vec<ColGroup>,
+    col_groups: Vec<ColGroup>,
 
     pub loop_selection: bool,
     pub col_selectable: bool,
@@ -224,22 +225,6 @@ where
     pub fn col_selectable(mut self, col_selectable: bool) -> Self {
         self.col_selectable = col_selectable;
         self
-    }
-
-    pub fn set_size(&mut self, size: Size) {
-        self.options.size = size;
-    }
-
-    /// 设置自定义行高（像素），覆盖 size 对应的默认值
-    pub fn set_row_height(&mut self, height: Pixels) {
-        self.options.row_height_override = Some(height);
-    }
-
-    /// 获取实际行高（优先使用 override）
-    fn effective_row_height(&self) -> Pixels {
-        self.options
-            .row_height_override
-            .unwrap_or_else(|| self.options.size.table_row_height())
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -401,7 +386,7 @@ where
 
     fn select_cell_for_navigation(&mut self, row_ix: usize, col_ix: usize, cx: &mut Context<Self>) {
         self.select_cell(row_ix, col_ix, cx);
-        self.queue_cell_scroll(row_ix, col_ix, ScrollStrategy::Nearest, cx);
+        self.queue_cell_scroll(row_ix, col_ix, ScrollStrategy::Center, cx);
         cx.notify();
     }
 
@@ -440,7 +425,7 @@ where
         }
 
         if self.options.scrollbar_visible.right && self.delegate.rows_count(cx) > 0 {
-            viewport_right -= Scrollbar::width();
+            viewport_right -= SCROLLBAR_WIDTH;
         }
 
         if viewport_right <= viewport_left {
@@ -1001,7 +986,7 @@ where
     }
 
     fn page_item_count(&self) -> usize {
-        let row_height = self.effective_row_height();
+        let row_height = self.options.size.table_row_height();
         let height = self.bounds.size.height;
         let count = (height / row_height).floor() as usize;
         count.saturating_sub(1).max(1)
@@ -1109,52 +1094,6 @@ where
         }
     }
 
-    fn should_start_edit_on_printable_key(keystroke: &Keystroke) -> bool {
-        if keystroke.modifiers.control
-            || keystroke.modifiers.platform
-            || keystroke.modifiers.function
-        {
-            return false;
-        }
-
-        let Some(key_char) = keystroke.key_char.as_ref() else {
-            return false;
-        };
-
-        !key_char.is_empty() && key_char.chars().all(|char| !char.is_control())
-    }
-
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_cell.is_some() || !self.delegate.cell_edit_enabled(cx) {
-            return;
-        }
-
-        let Some((row_ix, col_ix)) = self.current_cell_for_navigation() else {
-            return;
-        };
-
-        if self.delegate.row_number_enabled(cx) && col_ix == 0 {
-            return;
-        }
-
-        if !Self::should_start_edit_on_printable_key(&event.keystroke) {
-            return;
-        }
-
-        self.start_editing(row_ix, col_ix, window, cx);
-
-        if self.editing_cell != Some((row_ix, col_ix)) {
-            return;
-        }
-
-        let keystroke = event.keystroke.clone();
-        window.prevent_default();
-        cx.stop_propagation();
-        window.defer(cx, move |window, cx| {
-            let _ = window.dispatch_keystroke(keystroke.clone(), cx);
-        });
-    }
-
     pub fn start_editing(
         &mut self,
         row_ix: usize,
@@ -1207,17 +1146,15 @@ where
             self.editing_cell = None;
             self.editing_input = None;
             self._subscriptions.clear();
-            self.focus_handle.focus(window, cx);
             cx.notify();
         }
     }
 
-    pub fn cancel_cell_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn cancel_cell_edit(&mut self, cx: &mut Context<Self>) {
         if self.editing_cell.is_some() {
             self.editing_cell = None;
             self.editing_input = None;
             self._subscriptions.clear();
-            self.focus_handle.focus(window, cx);
             cx.notify();
         }
     }
@@ -1278,14 +1215,9 @@ where
         }
     }
 
-    pub(super) fn action_cancel(
-        &mut self,
-        _: &Cancel,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn action_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
         if self.editing_cell.is_some() {
-            self.cancel_cell_edit(window, cx);
+            self.cancel_cell_edit(cx);
             return;
         }
 
@@ -1959,6 +1891,19 @@ where
             && (self.selection.ranges.len() > 1
                 || self.selection.ranges.iter().any(|r| !r.is_single()));
 
+        // 计算选区边框（只在选区边界显示，且仅限单元格选择模式）
+        let (border_top, border_bottom, border_left, border_right) =
+            if is_in_selection && row_ix.is_some() {
+                let r = row_ix.unwrap();
+                let top = r == 0 || !self.selection.contains(r - 1, col_ix);
+                let bottom = !self.selection.contains(r + 1, col_ix);
+                let left = col_ix == 0 || !self.selection.contains(r, col_ix - 1);
+                let right = !self.selection.contains(r, col_ix + 1);
+                (top, bottom, left, right)
+            } else {
+                (false, false, false, false)
+            };
+
         // 旧的单选逻辑（向后兼容）
         let is_select_cell = match self.selected_cell {
             None => false,
@@ -1992,45 +1937,58 @@ where
         let is_editing = row_ix.is_some() && self.editing_cell == Some((row_ix.unwrap(), col_ix));
         let selection_border_color = cx.theme().table_active_border;
 
+        let is_single_select_active =
+            (is_active_cell || is_select_cell) && !is_editing && !is_multi_selection;
+        let show_column_separator = !is_editing && !border_right && !is_single_select_active;
+
         let mut cell = div()
             .id(cell_id)
             .w(col_width)
             .h_full()
+            .relative()
             .flex_shrink_0()
             .overflow_hidden()
             .whitespace_nowrap()
+            .when(show_column_separator, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .w(COLUMN_SEPARATOR_WIDTH)
+                        .bg(cx.theme().border),
+                )
+            })
             // 选区内的所有单元格使用背景色
             .when(is_in_selection && !is_editing, |this| {
                 this.bg(cx.theme().table_active)
             })
-            // 活动单元格边框（用绝对定位子元素，不占用 content 区域）
-            .when(
-                (is_active_cell || is_select_cell) && !is_editing && !is_multi_selection,
-                |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .top_0()
-                            .right_0()
-                            .bottom_0()
-                            .border_2()
-                            .border_color(selection_border_color),
-                    )
-                },
-            )
-            // 编辑状态边框（用绝对定位子元素，不占用 content 区域）
+            // 选区边框 - 上边界
+            .when(border_top, |this| {
+                this.border_t_2().border_color(selection_border_color)
+            })
+            // 选区边框 - 下边界
+            .when(border_bottom, |this| {
+                this.border_b_2().border_color(selection_border_color)
+            })
+            // 选区边框 - 左边界
+            .when(border_left, |this| {
+                this.border_l_2().border_color(selection_border_color)
+            })
+            // 选区边框 - 右边界
+            .when(border_right, |this| {
+                this.border_r_2().border_color(selection_border_color)
+            })
+            // 活动单元格额外添加完整边框（仅在单选时显示）
+            .when(is_single_select_active, |this| {
+                this.border_2().border_color(selection_border_color)
+            })
+            // 编辑状态的单元格
             .when(is_editing, |this| {
-                this.bg(cx.theme().background).child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .right_0()
-                        .bottom_0()
-                        .border_2()
-                        .border_color(cx.theme().ring),
-                )
+                this.bg(cx.theme().background)
+                    .border_2()
+                    .border_color(cx.theme().ring)
             })
             .when(is_modified && !is_editing && !is_in_selection, |this| {
                 this.bg(cx.theme().warning.opacity(0.15))
@@ -2050,11 +2008,23 @@ where
             ),
         };
 
+        // 边框补偿：编辑态始终有 border_2；显示态仅选中时有
+        let (has_t, has_b, has_l, has_r) = if is_editing {
+            (true, true, true, true)
+        } else {
+            (
+                border_top || is_single_select_active,
+                border_bottom || is_single_select_active,
+                border_left || is_single_select_active,
+                border_right || is_single_select_active,
+            )
+        };
+        let b = px(2.);
         cell = cell
-            .pt(target_pt)
-            .pb(target_pb)
-            .pl(target_pl)
-            .pr(target_pr);
+            .pt(if has_t { (target_pt - b).max(px(0.)) } else { target_pt })
+            .pb(if has_b { (target_pb - b).max(px(0.)) } else { target_pb })
+            .pl(if has_l { (target_pl - b).max(px(0.)) } else { target_pl })
+            .pr(if has_r { (target_pr - b).max(px(0.)) } else { target_pr });
 
         // 编辑模式：嵌入轻量编辑器（无自带样式，由容器控制布局）
         if is_editing {
@@ -2303,11 +2273,9 @@ where
                 })
                 .hover(|this| this.bg(cx.theme().secondary).opacity(7.))
                 .active(|this| this.bg(cx.theme().secondary_active).opacity(1.))
-                .on_click(cx.listener(move |table, _e: &ClickEvent, window, cx| {
-                    // 点击排序图标：循环切换排序方向
-                    cx.stop_propagation();
-                    table.perform_sort(col_ix, window, cx);
-                }))
+                .on_click(
+                    cx.listener(move |table, _, window, cx| table.perform_sort(col_ix, window, cx)),
+                )
                 .child(
                     Icon::new(icon)
                         .size_3()
@@ -2398,21 +2366,14 @@ where
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(
-                                t!(
-                                    "EditTable.filter_selected_count",
-                                    selected = selected_count,
-                                    total = total_count
-                                )
-                                .to_string(),
-                            ),
+                            .child(format!("Selected {} / {}", selected_count, total_count)),
                     )
                     .child(
                         h_flex()
                             .gap_1()
                             .child(
                                 Button::new("filter-select-all")
-                                    .label(t!("EditTable.filter_select_all").to_string())
+                                    .label("Select All")
                                     .ghost()
                                     .with_size(Size::XSmall)
                                     .on_click({
@@ -2428,7 +2389,7 @@ where
                             )
                             .child(
                                 Button::new("filter-deselect-all")
-                                    .label(t!("EditTable.filter_clear").to_string())
+                                    .label("Clear")
                                     .ghost()
                                     .with_size(Size::XSmall)
                                     .on_click({
@@ -2573,7 +2534,7 @@ where
         header
             .h_flex()
             .w_full()
-            .h(self.effective_row_height())
+            .h(self.options.size.table_row_height())
             .flex_shrink_0()
             .border_b_1()
             .border_color(cx.theme().border)
@@ -2661,7 +2622,7 @@ where
         let is_row_deleted = self.delegate.is_row_deleted(row_ix, cx);
         let is_row_added = self.delegate.is_row_added(row_ix, cx);
         let _view = cx.entity().clone();
-        let row_height = self.effective_row_height();
+        let row_height = self.options.size.table_row_height();
 
         if row_ix < rows_count {
             let is_last_row = row_ix + 1 == rows_count;
@@ -2753,14 +2714,31 @@ where
                     this.when(
                         is_selected && self.selection_state == SelectionState::Row,
                         |this| {
-                            this.bg(cx.theme().table_active)
-                                .border_2()
-                                .border_color(cx.theme().table_active_border)
+                            this.border_color(gpui::transparent_white()).child(
+                                div()
+                                    .top(if row_ix == 0 { px(0.) } else { px(-1.) })
+                                    .left(px(0.))
+                                    .right(px(0.))
+                                    .bottom(px(-1.))
+                                    .absolute()
+                                    .bg(cx.theme().table_active)
+                                    .border_2()
+                                    .border_color(cx.theme().table_active_border),
+                            )
                         },
                     )
                 })
                 .when(self.right_clicked_row == Some(row_ix), |this| {
-                    this.border_1().border_color(cx.theme().selection)
+                    this.border_color(gpui::transparent_white()).child(
+                        div()
+                            .top(if row_ix == 0 { px(0.) } else { px(-1.) })
+                            .left(px(0.))
+                            .right(px(0.))
+                            .bottom(px(-1.))
+                            .absolute()
+                            .border_1()
+                            .border_color(cx.theme().selection),
+                    )
                 })
                 .on_mouse_down(
                     MouseButton::Right,
@@ -2813,7 +2791,6 @@ where
         let is_row_number_col = self.delegate.row_number_enabled(cx) && col_ix == 0;
 
         if is_row_number_col {
-            let row_number_offset = self.delegate.row_number_offset(cx);
             return div()
                 .id(ElementId::Name(format!("row-number-{}", row_ix).into()))
                 .size_full()
@@ -2821,7 +2798,7 @@ where
                 .items_center()
                 .justify_end()
                 .text_color(cx.theme().muted_foreground)
-                .child((row_ix + row_number_offset).to_string())
+                .child((row_ix + 1).to_string())
                 .on_click(cx.listener(move |this, e, window, cx| {
                     this.on_row_left_click(e, row_ix, window, cx);
                 }))
@@ -2848,10 +2825,10 @@ where
             div()
                 .occlude()
                 .absolute()
-                .top(self.effective_row_height())
+                .top(self.options.size.table_row_height())
                 .right_0()
                 .bottom_0()
-                .w(Scrollbar::width())
+                .w(SCROLLBAR_WIDTH)
                 .child(Scrollbar::vertical(&self.vertical_scroll_handle)),
         )
     }
@@ -2867,7 +2844,7 @@ where
             .left(self.fixed_head_cols_bounds.size.width)
             .right_0()
             .bottom_0()
-            .h(Scrollbar::width())
+            .h(SCROLLBAR_WIDTH)
             .child(Scrollbar::horizontal(&self.horizontal_scroll_handle))
     }
 }
@@ -2896,7 +2873,7 @@ where
         let rows_count = self.delegate.rows_count(cx);
         let loading = self.delegate.loading(cx);
 
-        let row_height = self.effective_row_height();
+        let row_height = self.options.size.table_row_height();
         let total_height = self
             .vertical_scroll_handle
             .0
@@ -2941,7 +2918,6 @@ where
             .id("table-inner")
             .key_context("EditTable")
             .track_focus(&self.focus_handle)
-            .on_key_down(cx.listener(Self::on_key_down))
             .on_action(cx.listener(Self::action_copy))
             .on_action(cx.listener(Self::action_paste))
             .on_action(cx.listener(Self::action_select_all))
@@ -2982,7 +2958,7 @@ where
                             .flex_grow()
                             .size_full()
                             .when(self.options.scrollbar_visible.bottom, |this| {
-                                this.pb(Scrollbar::width())
+                                this.pb(SCROLLBAR_WIDTH)
                             })
                             .child(
                                 uniform_list(
@@ -3094,71 +3070,5 @@ where
                         ),
                 )
             })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::EditTableState;
-    use crate::edit_table::{Column, EditTableDelegate};
-    use gpui::{App, Context, IntoElement, Keystroke, Modifiers, Window, div};
-
-    struct TestDelegate;
-
-    impl EditTableDelegate for TestDelegate {
-        fn columns_count(&self, _: &App) -> usize {
-            0
-        }
-
-        fn rows_count(&self, _: &App) -> usize {
-            0
-        }
-
-        fn column(&self, _: usize, _: &App) -> Column {
-            unreachable!("测试不会访问列定义")
-        }
-
-        fn render_td(
-            &mut self,
-            _: usize,
-            _: usize,
-            _: &mut Window,
-            _: &mut Context<EditTableState<Self>>,
-        ) -> impl IntoElement {
-            div()
-        }
-    }
-
-    #[test]
-    fn printable_key_can_start_editing() {
-        let keystroke = Keystroke {
-            modifiers: Modifiers::none(),
-            key: "a".into(),
-            key_char: Some("a".into()),
-        };
-
-        assert!(EditTableState::<TestDelegate>::should_start_edit_on_printable_key(&keystroke));
-    }
-
-    #[test]
-    fn control_shortcut_cannot_start_editing() {
-        let keystroke = Keystroke {
-            modifiers: Modifiers::secondary_key(),
-            key: "c".into(),
-            key_char: None,
-        };
-
-        assert!(!EditTableState::<TestDelegate>::should_start_edit_on_printable_key(&keystroke));
-    }
-
-    #[test]
-    fn control_character_cannot_start_editing() {
-        let keystroke = Keystroke {
-            modifiers: Modifiers::none(),
-            key: "enter".into(),
-            key_char: Some("\n".into()),
-        };
-
-        assert!(!EditTableState::<TestDelegate>::should_start_edit_on_printable_key(&keystroke));
     }
 }

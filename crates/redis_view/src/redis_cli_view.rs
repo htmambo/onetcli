@@ -81,10 +81,6 @@ const COMMAND_HINTS: &[CommandHint] = &[
         usage: "DBSIZE",
     },
     CommandHint {
-        name: "SELECT",
-        usage: "SELECT <index>",
-    },
-    CommandHint {
         name: "KEYS",
         usage: "KEYS <pattern>",
     },
@@ -1153,14 +1149,14 @@ impl RedisCliView {
                     guard
                         .execute_command_in_db(db_index, &command)
                         .await
-                        .map_err(|e| anyhow::anyhow!("{}", e))
+                        .map_err(anyhow::Error::new)
                 }
             })
             .await;
 
             let result = match spawn_result {
                 Ok(value) => CliResult::Success(value),
-                Err(e) => CliResult::Error(e.to_string()),
+                Err(e) => CliResult::Error(format!("{e:#}")),
             };
 
             _ = this.update(cx, |view, cx| {
@@ -1787,7 +1783,7 @@ impl TabContent for RedisCliView {
                     global_state
                         .remove_connection(&connection_id)
                         .await
-                        .map_err(|e| anyhow::anyhow!("{}", e))
+                        .map_err(anyhow::Error::new)
                 })
                 .await;
             })
