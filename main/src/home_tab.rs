@@ -2281,7 +2281,7 @@ impl HomePage {
     pub(crate) fn show_connection_form(
         &mut self,
         db_type: DatabaseType,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
@@ -2314,7 +2314,7 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_ssh_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn show_ssh_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
@@ -2346,7 +2346,7 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_redis_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn show_redis_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
@@ -2378,7 +2378,7 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_mongodb_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn show_mongodb_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
@@ -2410,7 +2410,7 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_serial_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn show_serial_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }

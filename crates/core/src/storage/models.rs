@@ -1,45 +1,12 @@
 use crate::cloud_sync::sync_type::SyncableItem;
 use crate::crypto;
 use crate::storage::traits::Entity;
-use gpui::Global;
 use gpui_component::Size::Large;
 use gpui_component::{Icon, IconName, Sizable};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
 use std::fmt;
-
-/// 活跃连接状态 - 用于跟踪哪些连接当前已打开
-#[derive(Default)]
-pub struct ActiveConnections {
-    active_ids: HashSet<i64>,
-}
-
-impl Global for ActiveConnections {}
-
-impl ActiveConnections {
-    pub fn new() -> Self {
-        Self {
-            active_ids: HashSet::new(),
-        }
-    }
-
-    pub fn add(&mut self, conn_id: i64) {
-        self.active_ids.insert(conn_id);
-    }
-
-    pub fn remove(&mut self, conn_id: i64) {
-        self.active_ids.remove(&conn_id);
-    }
-
-    pub fn is_active(&self, conn_id: i64) -> bool {
-        self.active_ids.contains(&conn_id)
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.active_ids.len()
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionType {
@@ -91,15 +58,15 @@ impl ConnectionType {
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            ConnectionType::All => "All",
-            ConnectionType::Database => "Database",
-            ConnectionType::SshSftp => "SSH/SFTP",
-            ConnectionType::Redis => "Redis",
-            ConnectionType::MongoDB => "MongoDB",
-            ConnectionType::ChatDB => "ChatDB",
-            ConnectionType::Serial => "Serial",
+            ConnectionType::All => t!("ConnectionType.all").to_string(),
+            ConnectionType::Database => t!("ConnectionType.database").to_string(),
+            ConnectionType::SshSftp => t!("ConnectionType.ssh_sftp").to_string(),
+            ConnectionType::Redis => t!("ConnectionType.redis").to_string(),
+            ConnectionType::MongoDB => t!("ConnectionType.mongodb").to_string(),
+            ConnectionType::ChatDB => t!("ConnectionType.chatdb").to_string(),
+            ConnectionType::Serial => t!("ConnectionType.serial").to_string(),
         }
     }
 
@@ -205,6 +172,9 @@ pub struct SshParams {
     pub port: u16,
     pub username: String,
     pub auth_method: SshAuthMethod,
+    /// 关联证书引用（保存引用 + 当前凭据快照）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<CertificateReference>,
     /// 连接超时（秒）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connect_timeout: Option<u64>,
@@ -214,6 +184,9 @@ pub struct SshParams {
     /// 最大心跳失败次数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keepalive_max: Option<usize>,
+    /// 是否启用旧版 KEX 兼容模式
+    #[serde(default)]
+    pub enable_legacy_kex: bool,
     /// 默认工作目录
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_directory: Option<String>,
@@ -223,6 +196,12 @@ pub struct SshParams {
     /// 关闭 shell integration 注入(走裸 request_shell,牺牲 prompt hook / 命令记录)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disable_shell_integration: Option<bool>,
+    /// SFTP 本地目录（留空则使用用户主目录）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sftp_local_directory: Option<String>,
+    /// SFTP 远程目录（留空则使用服务器默认目录）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sftp_remote_directory: Option<String>,
     /// 跳板机配置
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jump_server: Option<JumpServerConfig>,
@@ -265,7 +244,7 @@ pub enum SshAuthMethod {
         password: String,
     },
     PrivateKey {
-        key_path: String,
+        ssh_private_key: String,
         passphrase: Option<String>,
     },
     Agent,
@@ -308,6 +287,9 @@ pub struct RedisParams {
     pub port: u16,
     pub password: Option<String>,
     pub username: Option<String>,
+    /// 关联证书引用（保存引用 + 当前凭据快照）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<CertificateReference>,
     pub db_index: u8,
     /// 连接模式
     #[serde(default)]
@@ -340,6 +322,9 @@ pub struct MongoDBParams {
     pub username: Option<String>,
     #[serde(default)]
     pub password: Option<String>,
+    /// 关联证书引用（保存引用 + 当前凭据快照）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<CertificateReference>,
     #[serde(default)]
     pub auth_source: Option<String>,
     #[serde(default)]
@@ -470,6 +455,12 @@ pub struct DbConnectionConfig {
     pub database: Option<String>,
     pub service_name: Option<String>,
     pub sid: Option<String>,
+    /// 数据库主认证证书引用（保存引用 + 当前凭据快照）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<CertificateReference>,
+    /// SSH 隧道认证证书引用（保存引用 + 当前凭据快照）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_tunnel_credential_ref: Option<CertificateReference>,
     #[serde(skip)]
     pub workspace_id: Option<i64>,
     #[serde(default)]
@@ -507,7 +498,217 @@ impl DbConnectionConfig {
             || self.database != other.database
             || self.service_name != other.service_name
             || self.sid != other.sid
+            || self.credential_ref != other.credential_ref
+            || self.ssh_tunnel_credential_ref != other.ssh_tunnel_credential_ref
             || self.extra_params != other.extra_params
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CertificateKind {
+    UsernamePassword,
+    SshPrivateKey,
+}
+
+impl CertificateKind {
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "SshPrivateKey" => Self::SshPrivateKey,
+            _ => Self::UsernamePassword,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::UsernamePassword => "账号密码",
+            Self::SshPrivateKey => "SSH 私钥",
+        }
+    }
+}
+
+impl fmt::Display for CertificateKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::UsernamePassword => "UsernamePassword",
+            Self::SshPrivateKey => "SshPrivateKey",
+        };
+        write!(f, "{}", value)
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CertificateReference {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud_id: Option<String>,
+}
+
+impl CertificateReference {
+    pub fn from_certificate(certificate: &Certificate) -> Self {
+        Self {
+            local_id: certificate.id,
+            cloud_id: certificate.cloud_id.clone(),
+        }
+    }
+
+    pub fn matches_certificate(&self, certificate: &Certificate) -> bool {
+        self.matches_ids(certificate.id, certificate.cloud_id.as_deref())
+    }
+
+    pub fn matches_ids(&self, local_id: Option<i64>, cloud_id: Option<&str>) -> bool {
+        if let Some(reference_cloud_id) = self.cloud_id.as_deref() {
+            return cloud_id == Some(reference_cloud_id);
+        }
+
+        matches!((self.local_id, local_id), (Some(reference_id), Some(local_id)) if reference_id == local_id)
+    }
+
+    pub fn sync_with_certificate(&mut self, certificate: &Certificate) -> bool {
+        let mut changed = false;
+
+        if self.local_id != certificate.id {
+            self.local_id = certificate.id;
+            changed = true;
+        }
+
+        if self.cloud_id != certificate.cloud_id {
+            self.cloud_id = certificate.cloud_id.clone();
+            changed = true;
+        }
+
+        changed
+    }
+}
+
+/// 统一管理的证书实体
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Certificate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    pub name: String,
+    pub kind: CertificateKind,
+    pub params: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remark: Option<String>,
+    #[serde(default = "default_sync_enabled")]
+    pub sync_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cloud_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<String>,
+}
+
+impl Certificate {
+    pub fn username(&self) -> Option<&str> {
+        self.params.get("username")?.as_str()
+    }
+    pub fn password(&self) -> Option<&str> {
+        self.params.get("password")?.as_str()
+    }
+    pub fn key_path(&self) -> Option<&str> {
+        self.params.get("ssh_private_key")?.as_str()
+    }
+    pub fn passphrase(&self) -> Option<&str> {
+        self.params.get("passphrase")?.as_str()
+    }
+    pub fn ssh_private_key(&self) -> Option<&str> {
+        self.params.get("ssh_private_key")?.as_str()
+    }
+
+    pub fn set_username(&mut self, value: &str) {
+        self.params.as_object_mut().unwrap().insert(
+            "username".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    pub fn set_password(&mut self, value: Option<String>) {
+        let obj = self.params.as_object_mut().unwrap();
+        match value {
+            Some(v) => obj.insert("password".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("password"),
+        };
+    }
+    pub fn set_key_path(&mut self, value: Option<String>) {
+        let obj = self.params.as_object_mut().unwrap();
+        match value {
+            Some(v) => obj.insert("ssh_private_key".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("ssh_private_key"),
+        };
+    }
+    pub fn set_passphrase(&mut self, value: Option<String>) {
+        let obj = self.params.as_object_mut().unwrap();
+        match value {
+            Some(v) => obj.insert("passphrase".to_string(), serde_json::Value::String(v)),
+            None => obj.remove("passphrase"),
+        };
+    }
+
+    pub fn display_subtitle(&self) -> String {
+        match self.kind {
+            CertificateKind::UsernamePassword => {
+                let username = self.username().unwrap_or("");
+                format!("{} / 账号密码", username)
+            }
+            CertificateKind::SshPrivateKey => {
+                let username = self.username().unwrap_or("");
+                let has_key = self.key_path().map(|k| !k.is_empty()).unwrap_or(false);
+                let key_info = if has_key { "[已存储私钥]" } else { "未设置私钥" };
+                format!("{} / {}", username, key_info)
+            }
+        }
+    }
+}
+
+impl Entity for Certificate {
+    fn id(&self) -> Option<i64> {
+        self.id
+    }
+
+    fn created_at(&self) -> i64 {
+        self.created_at
+            .expect("created_at 在从数据库读取后应该存在")
+    }
+
+    fn updated_at(&self) -> i64 {
+        self.updated_at
+            .expect("updated_at 在从数据库读取后应该存在")
+    }
+}
+
+impl SyncableItem for Certificate {
+    fn local_id(&self) -> Option<i64> {
+        self.id
+    }
+
+    fn set_local_id(&mut self, id: Option<i64>) {
+        self.id = id;
+    }
+
+    fn item_name(&self) -> &str {
+        &self.name
+    }
+
+    fn cloud_id(&self) -> Option<&str> {
+        self.cloud_id.as_deref()
+    }
+
+    fn set_cloud_id(&mut self, cloud_id: Option<String>) {
+        self.cloud_id = cloud_id;
+    }
+
+    fn updated_at(&self) -> Option<i64> {
+        self.updated_at
+    }
+
+    fn last_synced_at(&self) -> Option<i64> {
+        self.last_synced_at
     }
 }
 
@@ -517,6 +718,8 @@ pub struct Workspace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<i64>,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -528,6 +731,9 @@ pub struct Workspace {
     /// 云端 ID（用于同步）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloud_id: Option<String>,
+    /// 最后同步时间戳
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<i64>,
 }
 
 impl Entity for Workspace {
@@ -551,11 +757,13 @@ impl Workspace {
         Self {
             id: None,
             name,
+            sort_order: None,
             color: None,
             icon: None,
             created_at: None,
             updated_at: None,
             cloud_id: None,
+            last_synced_at: None,
         }
     }
 }
@@ -584,6 +792,14 @@ impl SyncableItem for Workspace {
     fn updated_at(&self) -> Option<i64> {
         self.updated_at
     }
+
+    fn last_synced_at(&self) -> Option<i64> {
+        self.last_synced_at
+    }
+
+    fn uses_sync_state(&self) -> bool {
+        true
+    }
 }
 
 /// Stored connection with ID
@@ -594,6 +810,8 @@ pub struct StoredConnection {
     pub name: String,
     pub connection_type: ConnectionType,
     pub params: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<i64>,
     /// 已选中的数据库ID列表（JSON数组），None表示全选
@@ -614,9 +832,6 @@ pub struct StoredConnection {
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
-    /// 团队归属 ID（None = 个人数据）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub team_id: Option<String>,
     /// 连接创建者 ID（用户 UUID，用于权限判断）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
@@ -667,16 +882,8 @@ impl SyncableItem for StoredConnection {
         self.updated_at
     }
 
-    fn is_sync_enabled(&self) -> bool {
-        self.sync_enabled
-    }
-
     fn last_synced_at(&self) -> Option<i64> {
         self.last_synced_at
-    }
-
-    fn team_id(&self) -> Option<&str> {
-        self.team_id.as_deref()
     }
 }
 
@@ -691,6 +898,7 @@ impl StoredConnection {
             name,
             connection_type: ConnectionType::Database,
             params: serde_json::to_string(&params).expect("DbConnectionConfig 序列化不应失败"),
+            sort_order: None,
             workspace_id,
             selected_databases: if let Some(database) = &params.database {
                 Some(format!("[\"{}\"]", database))
@@ -703,7 +911,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -714,6 +921,7 @@ impl StoredConnection {
             name,
             connection_type: ConnectionType::SshSftp,
             params: serde_json::to_string(&params).expect("SshParams 序列化不应失败"),
+            sort_order: None,
             workspace_id,
             selected_databases: None,
             remark: None,
@@ -722,7 +930,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -733,6 +940,7 @@ impl StoredConnection {
             name,
             connection_type: ConnectionType::Redis,
             params: serde_json::to_string(&params).expect("RedisParams 序列化不应失败"),
+            sort_order: None,
             workspace_id,
             selected_databases: None,
             remark: None,
@@ -741,7 +949,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -752,6 +959,7 @@ impl StoredConnection {
             name,
             connection_type: ConnectionType::MongoDB,
             params: serde_json::to_string(&params).expect("MongoDBParams 序列化不应失败"),
+            sort_order: None,
             workspace_id,
             selected_databases: None,
             remark: None,
@@ -760,7 +968,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -783,6 +990,7 @@ impl StoredConnection {
             name,
             connection_type: ConnectionType::Serial,
             params: serde_json::to_string(&params).expect("SerialParams 序列化不应失败"),
+            sort_order: None,
             workspace_id,
             selected_databases: None,
             remark: None,
@@ -791,7 +999,6 @@ impl StoredConnection {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         }
     }
@@ -844,6 +1051,433 @@ impl StoredConnection {
         cloned.params = cloned.decrypt_params();
         cloned
     }
+}
+
+pub fn apply_certificate_to_connection_snapshot(
+    connection: &mut StoredConnection,
+    certificate: &Certificate,
+) -> bool {
+    match connection.connection_type {
+        ConnectionType::Database => {
+            let Ok(mut config) = connection.to_db_connection() else {
+                return false;
+            };
+
+            let changed = apply_certificate_to_db_config(&mut config, certificate);
+            if changed {
+                if let Ok(params) = serde_json::to_string(&config) {
+                    connection.params = params;
+                }
+            }
+            changed
+        }
+        ConnectionType::SshSftp => {
+            let Ok(mut params) = connection.to_ssh_params() else {
+                return false;
+            };
+
+            let changed = apply_certificate_to_ssh_params(&mut params, certificate);
+            if changed {
+                if let Ok(serialized) = serde_json::to_string(&params) {
+                    connection.params = serialized;
+                }
+            }
+            changed
+        }
+        ConnectionType::Redis => {
+            let Ok(mut params) = connection.to_redis_params() else {
+                return false;
+            };
+
+            let changed = apply_certificate_to_redis_params(&mut params, certificate);
+            if changed {
+                if let Ok(serialized) = serde_json::to_string(&params) {
+                    connection.params = serialized;
+                }
+            }
+            changed
+        }
+        ConnectionType::MongoDB => {
+            let Ok(mut params) = connection.to_mongodb_params() else {
+                return false;
+            };
+
+            let changed = apply_certificate_to_mongodb_params(&mut params, certificate);
+            if changed {
+                if let Ok(serialized) = serde_json::to_string(&params) {
+                    connection.params = serialized;
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+pub fn detach_certificate_from_connection_snapshot(
+    connection: &mut StoredConnection,
+    local_id: Option<i64>,
+    cloud_id: Option<&str>,
+) -> bool {
+    match connection.connection_type {
+        ConnectionType::Database => {
+            let Ok(mut config) = connection.to_db_connection() else {
+                return false;
+            };
+
+            let changed = detach_certificate_from_db_config(&mut config, local_id, cloud_id);
+            if changed {
+                if let Ok(params) = serde_json::to_string(&config) {
+                    connection.params = params;
+                }
+            }
+            changed
+        }
+        ConnectionType::SshSftp => {
+            let Ok(mut params) = connection.to_ssh_params() else {
+                return false;
+            };
+
+            let changed = detach_certificate_from_ssh_params(&mut params, local_id, cloud_id);
+            if changed {
+                if let Ok(serialized) = serde_json::to_string(&params) {
+                    connection.params = serialized;
+                }
+            }
+            changed
+        }
+        ConnectionType::Redis => {
+            let Ok(mut params) = connection.to_redis_params() else {
+                return false;
+            };
+
+            let changed = detach_certificate_from_redis_params(&mut params, local_id, cloud_id);
+            if changed {
+                if let Ok(serialized) = serde_json::to_string(&params) {
+                    connection.params = serialized;
+                }
+            }
+            changed
+        }
+        ConnectionType::MongoDB => {
+            let Ok(mut params) = connection.to_mongodb_params() else {
+                return false;
+            };
+
+            let changed = detach_certificate_from_mongodb_params(&mut params, local_id, cloud_id);
+            if changed {
+                if let Ok(serialized) = serde_json::to_string(&params) {
+                    connection.params = serialized;
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn apply_certificate_to_db_config(
+    config: &mut DbConnectionConfig,
+    certificate: &Certificate,
+) -> bool {
+    let mut changed = false;
+
+    if let Some(reference) = config.credential_ref.as_mut() {
+        if reference.matches_certificate(certificate) {
+            changed |= reference.sync_with_certificate(certificate);
+            if certificate.kind == CertificateKind::UsernamePassword {
+                if let Some(username) = certificate.username() {
+                    if config.username != username {
+                        config.username = username.to_string();
+                        changed = true;
+                    }
+                }
+                if let Some(password) = certificate.password() {
+                    if config.password != password {
+                        config.password = password.to_string();
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(reference) = config.ssh_tunnel_credential_ref.as_mut() {
+        if reference.matches_certificate(certificate) {
+            changed |= reference.sync_with_certificate(certificate);
+
+            if let Some(username) = certificate.username() {
+                if config.extra_params.get("ssh_username") != Some(&username.to_string()) {
+                    config
+                        .extra_params
+                        .insert("ssh_username".to_string(), username.to_string());
+                    changed = true;
+                }
+            }
+
+            match certificate.kind {
+                CertificateKind::UsernamePassword => {
+                    if config.extra_params.get("ssh_auth_type").map(|v| v.as_str())
+                        != Some("password")
+                    {
+                        config
+                            .extra_params
+                            .insert("ssh_auth_type".to_string(), "password".to_string());
+                        changed = true;
+                    }
+                    let cert_pass = certificate.password().unwrap_or("");
+                    if config.extra_params.get("ssh_password") != Some(&cert_pass.to_string()) {
+                        config
+                            .extra_params
+                            .insert("ssh_password".to_string(), cert_pass.to_string());
+                        changed = true;
+                    }
+                    changed |= config.extra_params.remove("ssh_private_key").is_some();
+                    changed |= config
+                        .extra_params
+                        .remove("ssh_private_key_passphrase")
+                        .is_some();
+                }
+                CertificateKind::SshPrivateKey => {
+                    if config.extra_params.get("ssh_auth_type").map(|v| v.as_str())
+                        != Some("private_key")
+                    {
+                        config
+                            .extra_params
+                            .insert("ssh_auth_type".to_string(), "private_key".to_string());
+                        changed = true;
+                    }
+                    let key_content = certificate.ssh_private_key().unwrap_or("");
+                    if config.extra_params.get("ssh_private_key")
+                        != Some(&key_content.to_string())
+                    {
+                        config
+                            .extra_params
+                            .insert("ssh_private_key".to_string(), key_content.to_string());
+                        changed = true;
+                    }
+                    match certificate.passphrase() {
+                        Some(pass) if !pass.is_empty() => {
+                            if config.extra_params.get("ssh_private_key_passphrase")
+                                != Some(&pass.to_string())
+                            {
+                                config.extra_params.insert(
+                                    "ssh_private_key_passphrase".to_string(),
+                                    pass.to_string(),
+                                );
+                                changed = true;
+                            }
+                        }
+                        _ => {
+                            changed |= config
+                                .extra_params
+                                .remove("ssh_private_key_passphrase")
+                                .is_some();
+                        }
+                    }
+                    changed |= config.extra_params.remove("ssh_password").is_some();
+                }
+            }
+        }
+    }
+
+    changed
+}
+
+fn detach_certificate_from_db_config(
+    config: &mut DbConnectionConfig,
+    local_id: Option<i64>,
+    cloud_id: Option<&str>,
+) -> bool {
+    let mut changed = false;
+
+    if config
+        .credential_ref
+        .as_ref()
+        .is_some_and(|reference| reference.matches_ids(local_id, cloud_id))
+    {
+        config.credential_ref = None;
+        changed = true;
+    }
+
+    if config
+        .ssh_tunnel_credential_ref
+        .as_ref()
+        .is_some_and(|reference| reference.matches_ids(local_id, cloud_id))
+    {
+        config.ssh_tunnel_credential_ref = None;
+        changed = true;
+    }
+
+    changed
+}
+
+fn apply_certificate_to_ssh_params(params: &mut SshParams, certificate: &Certificate) -> bool {
+    let Some(reference) = params.credential_ref.as_mut() else {
+        return false;
+    };
+    if !reference.matches_certificate(certificate) {
+        return false;
+    }
+
+    let mut changed = reference.sync_with_certificate(certificate);
+
+    if let Some(username) = certificate.username() {
+        if params.username != username {
+            params.username = username.to_string();
+            changed = true;
+        }
+    }
+
+    match certificate.kind {
+        CertificateKind::UsernamePassword => {
+            let password = certificate.password().unwrap_or("");
+            if !matches!(params.auth_method, SshAuthMethod::Password { .. }) {
+                params.auth_method = SshAuthMethod::Password {
+                    password: password.to_string(),
+                };
+                changed = true;
+            } else if let SshAuthMethod::Password { password: existing } = &mut params.auth_method {
+                if *existing != password {
+                    *existing = password.to_string();
+                    changed = true;
+                }
+            }
+        }
+        CertificateKind::SshPrivateKey => {
+            let key_content = certificate.key_path().unwrap_or("");
+            let passphrase = certificate.passphrase().map(|s| s.to_string());
+            if !matches!(params.auth_method, SshAuthMethod::PrivateKey { .. }) {
+                params.auth_method = SshAuthMethod::PrivateKey {
+                    ssh_private_key: key_content.to_string(),
+                    passphrase,
+                };
+                changed = true;
+            } else if let SshAuthMethod::PrivateKey {
+                ssh_private_key: existing_key,
+                passphrase: existing_passphrase,
+            } = &mut params.auth_method
+            {
+                if *existing_key != key_content {
+                    *existing_key = key_content.to_string();
+                    changed = true;
+                }
+                if *existing_passphrase != passphrase {
+                    *existing_passphrase = passphrase;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    changed
+}
+
+fn detach_certificate_from_ssh_params(
+    params: &mut SshParams,
+    local_id: Option<i64>,
+    cloud_id: Option<&str>,
+) -> bool {
+    if params
+        .credential_ref
+        .as_ref()
+        .is_some_and(|reference| reference.matches_ids(local_id, cloud_id))
+    {
+        params.credential_ref = None;
+        return true;
+    }
+    false
+}
+
+fn apply_certificate_to_redis_params(params: &mut RedisParams, certificate: &Certificate) -> bool {
+    let Some(reference) = params.credential_ref.as_mut() else {
+        return false;
+    };
+    if !reference.matches_certificate(certificate) {
+        return false;
+    }
+
+    let mut changed = reference.sync_with_certificate(certificate);
+    if certificate.kind != CertificateKind::UsernamePassword {
+        return changed;
+    }
+
+    let username = certificate.username().map(|s| s.to_string());
+    if params.username != username {
+        params.username = username;
+        changed = true;
+    }
+
+    let password = certificate.password().map(|s| s.to_string());
+    if params.password != password {
+        params.password = password;
+        changed = true;
+    }
+
+    changed
+}
+
+fn detach_certificate_from_redis_params(
+    params: &mut RedisParams,
+    local_id: Option<i64>,
+    cloud_id: Option<&str>,
+) -> bool {
+    if params
+        .credential_ref
+        .as_ref()
+        .is_some_and(|reference| reference.matches_ids(local_id, cloud_id))
+    {
+        params.credential_ref = None;
+        return true;
+    }
+    false
+}
+
+fn apply_certificate_to_mongodb_params(
+    params: &mut MongoDBParams,
+    certificate: &Certificate,
+) -> bool {
+    let Some(reference) = params.credential_ref.as_mut() else {
+        return false;
+    };
+    if !reference.matches_certificate(certificate) {
+        return false;
+    }
+
+    let mut changed = reference.sync_with_certificate(certificate);
+    if certificate.kind != CertificateKind::UsernamePassword {
+        return changed;
+    }
+
+    let username = certificate.username().map(|s| s.to_string());
+    if params.username != username {
+        params.username = username;
+        changed = true;
+    }
+
+    let password = certificate.password().map(|s| s.to_string());
+    if params.password != password {
+        params.password = password;
+        changed = true;
+    }
+
+    changed
+}
+
+fn detach_certificate_from_mongodb_params(
+    params: &mut MongoDBParams,
+    local_id: Option<i64>,
+    cloud_id: Option<&str>,
+) -> bool {
+    if params
+        .credential_ref
+        .as_ref()
+        .is_some_and(|reference| reference.matches_ids(local_id, cloud_id))
+    {
+        params.credential_ref = None;
+        return true;
+    }
+    false
 }
 
 /// 递归加密 JSON 中所有名为 password 或 passphrase 的字符串字段
@@ -1065,12 +1699,42 @@ mod serial_tests {
     }
 
     #[test]
+    fn certificate_reference_prefers_cloud_id_when_present() {
+        let reference = CertificateReference {
+            local_id: Some(1),
+            cloud_id: Some("certificate-cloud-1".to_string()),
+        };
+
+        assert!(reference.matches_ids(Some(99), Some("certificate-cloud-1")));
+        assert!(!reference.matches_ids(Some(1), Some("certificate-cloud-2")));
+        assert!(!reference.matches_ids(Some(1), None));
+    }
+
+    #[test]
+    fn certificate_reference_falls_back_to_local_id_before_sync() {
+        let reference = CertificateReference {
+            local_id: Some(7),
+            cloud_id: None,
+        };
+
+        assert!(reference.matches_ids(Some(7), None));
+        assert!(!reference.matches_ids(Some(8), None));
+    }
+
+    #[test]
     fn ssh_auth_method_agent_serialize_deserialize() {
         let auth = SshAuthMethod::Agent;
         let json = serde_json::to_string(&auth).expect("Agent 认证方式应可序列化");
         let parsed: SshAuthMethod =
             serde_json::from_str(&json).expect("Agent 认证方式应可反序列化");
         assert!(matches!(parsed, SshAuthMethod::Agent));
+    }
+
+    #[test]
+    fn ssh_params_defaults_legacy_kex_to_false_when_missing() {
+        let json = r#"{"host":"127.0.0.1","port":22,"username":"root","auth_method":"Agent"}"#;
+        let parsed: SshParams = serde_json::from_str(json).expect("旧格式 SSH 参数应可反序列化");
+        assert!(!parsed.enable_legacy_kex);
     }
 
     #[test]

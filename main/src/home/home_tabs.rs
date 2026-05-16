@@ -212,6 +212,7 @@ impl HomePage {
                     autocomplete_enabled,
                     middle_click_paste,
                     sync_path,
+                    false,
                     window,
                     cx,
                 );
@@ -454,6 +455,7 @@ impl HomePage {
                         autocomplete_enabled,
                         middle_click_paste,
                         sync_path,
+                        false,
                         window,
                         cx,
                     );
