@@ -47,6 +47,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260502000001",
         include_str!("../../migrations/20260502000001_chat_session_connection.sql"),
     ),
+    (
+        "20260516000001",
+        include_str!("../../migrations/20260516000001_chat_session_schema.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {

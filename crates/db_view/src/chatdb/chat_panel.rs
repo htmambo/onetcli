@@ -530,41 +530,62 @@ impl ChatPanel {
                 Err(_) => return,
             };
 
+            let session = session_service.get_session(session_id).ok().flatten();
+
             if let Some(entity) = this.upgrade() {
                 let _ = cx.update(|cx| {
-                    entity.update(cx, |this, cx| {
-                        this.session_id = Some(session_id);
-                        this.messages = messages
-                            .iter()
-                            .map(|msg| {
-                                let role = match msg.role.as_str() {
-                                    "assistant" => ChatRole::Assistant,
-                                    _ => ChatRole::User,
-                                };
-                                ChatMessageUI::from_history(
-                                    msg.id.to_string(),
-                                    role,
-                                    msg.content.clone(),
-                                )
-                            })
-                            .collect();
-                        this.chat_history = messages
-                            .iter()
-                            .map(|msg| {
-                                let role = match msg.role.as_str() {
-                                    "assistant" => Role::Assistant,
-                                    "system" => Role::System,
-                                    _ => Role::User,
-                                };
-                                Message::text(role, msg.content.clone())
-                            })
-                            .collect();
-                        this.sql_result_views.clear();
-                        this.sql_block_results.clear();
-                        this.latest_ai_message_id = None;
-                        this.render_limit = MESSAGE_RENDER_LIMIT;
-                        cx.notify();
-                    });
+                    if let Some(window_id) = cx.active_window() {
+                        let _ = cx.update_window(window_id, |_, _window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.session_id = Some(session_id);
+                                this.messages = messages
+                                    .iter()
+                                    .map(|msg| {
+                                        let role = match msg.role.as_str() {
+                                            "assistant" => ChatRole::Assistant,
+                                            _ => ChatRole::User,
+                                        };
+                                        ChatMessageUI::from_history(
+                                            msg.id.to_string(),
+                                            role,
+                                            msg.content.clone(),
+                                        )
+                                    })
+                                    .collect();
+                                this.chat_history = messages
+                                    .iter()
+                                    .map(|msg| {
+                                        let role = match msg.role.as_str() {
+                                            "assistant" => Role::Assistant,
+                                            "system" => Role::System,
+                                            _ => Role::User,
+                                        };
+                                        Message::text(role, msg.content.clone())
+                                    })
+                                    .collect();
+                                this.sql_result_views.clear();
+                                this.sql_block_results.clear();
+                                this.latest_ai_message_id = None;
+                                this.render_limit = MESSAGE_RENDER_LIMIT;
+
+                                // 从历史会话恢复数据库连接
+                                if let Some(session) = session {
+                                    if let Some(conn_id) = session.connection_id {
+                                        this.ai_input.update(cx, |input, cx| {
+                                            input.restore_connection_state(
+                                                conn_id,
+                                                session.database_name,
+                                                session.schema_name,
+                                                cx,
+                                            );
+                                        });
+                                    }
+                                }
+
+                                cx.notify();
+                            });
+                        });
+                    }
                 });
             }
         })
@@ -730,7 +751,7 @@ impl ChatPanel {
 
         // 组装连接信息（用于入库 chat_sessions）
         let connection_info = ai_input.read(cx).get_connection_info().and_then(
-            |(conn_id, database, _schema)| {
+            |(conn_id, database, schema)| {
                 let db_state = cx.global::<GlobalDbState>().clone();
                 let db_type = db_state
                     .get_config(&conn_id)
@@ -739,6 +760,7 @@ impl ChatPanel {
                     connection_id: Some(conn_id),
                     database_name: database,
                     database_type: db_type,
+                    schema_name: schema,
                 })
             },
         );

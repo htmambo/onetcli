@@ -292,6 +292,19 @@ impl AIInput {
         ))
     }
 
+    /// 从历史会话恢复数据库连接状态
+    pub fn restore_connection_state(
+        &mut self,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.db_selector.update(cx, |selector, cx| {
+            selector.restore_connection_state(connection_id, database, schema, cx);
+        });
+    }
+
     /// 获取模型设置
     pub fn get_model_settings(&self) -> &ModelSettings {
         &self.model_settings

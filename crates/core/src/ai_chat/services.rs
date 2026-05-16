@@ -51,6 +51,7 @@ pub struct SessionConnectionInfo {
     pub connection_id: Option<String>,
     pub database_name: Option<String>,
     pub database_type: Option<String>,
+    pub schema_name: Option<String>,
 }
 
 // ============================================================================
@@ -86,6 +87,7 @@ impl SessionService {
             session.connection_id = cx.connection_id;
             session.database_name = cx.database_name;
             session.database_type = cx.database_type;
+            session.schema_name = cx.schema_name;
         }
         session_repo
             .insert(&mut session)

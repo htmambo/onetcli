@@ -109,6 +109,10 @@ pub struct DbConnectionSelector {
     loading_connections: bool,
     loading_databases: bool,
     loading_schemas: bool,
+    /// 从历史会话恢复时的目标数据库
+    restore_database: Option<String>,
+    /// 从历史会话恢复时的目标 schema
+    restore_schema: Option<String>,
 }
 
 #[derive(Clone)]
@@ -206,6 +210,8 @@ impl DbConnectionSelector {
             loading_connections: false,
             loading_databases: false,
             loading_schemas: false,
+            restore_database: None,
+            restore_schema: None,
         };
         instance.apply_selector_context(context, cx);
         instance
@@ -288,6 +294,25 @@ impl DbConnectionSelector {
         self.emit_selection(cx);
         self.close_popover(cx);
         cx.notify();
+    }
+
+    /// 从历史会话恢复连接选择状态
+    pub fn restore_connection_state(
+        &mut self,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_connections_loaded(cx);
+
+        let Some(connection) = self.connections.iter().find(|c| c.id == connection_id).cloned() else {
+            return;
+        };
+
+        self.restore_database = database;
+        self.restore_schema = schema;
+        self.handle_connection_selected(connection, cx);
     }
 
     fn ensure_connections_loaded(&mut self, cx: &mut Context<Self>) {
@@ -486,6 +511,16 @@ impl DbConnectionSelector {
                                 selector.databases.clear();
                             }
                         }
+
+                        // 优先处理历史会话恢复目标
+                        if let Some(target_db) = selector.restore_database.take() {
+                            if selector.databases.iter().any(|db| db == &target_db) {
+                                selector.handle_database_selected(target_db, cx);
+                                return;
+                            }
+                        }
+                        selector.restore_schema = None;
+
                         let has_database_selected = if selector.uses_schema_as_database {
                             selector.selected_schema.is_some()
                         } else {
@@ -574,6 +609,15 @@ impl DbConnectionSelector {
                             Ok(list) => selector.schemas = list,
                             Err(_) => selector.schemas.clear(),
                         }
+
+                        // 优先处理历史会话恢复目标
+                        if let Some(target_schema) = selector.restore_schema.take() {
+                            if selector.schemas.iter().any(|s| s == &target_schema) {
+                                selector.handle_schema_selected(target_schema, cx);
+                                return;
+                            }
+                        }
+
                         cx.notify();
                     });
                 });
