@@ -1425,8 +1425,11 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn enable_ime(&self) {
-        let state = self.borrow();
-        state.client.enable_ime();
+        let client = {
+            let state = self.borrow();
+            state.client.clone()
+        };
+        client.enable_ime();
     }
 
     fn gpu_specs(&self) -> Option<GpuSpecs> {
