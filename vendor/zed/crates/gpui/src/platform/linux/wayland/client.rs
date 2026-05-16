@@ -304,9 +304,16 @@ impl WaylandClientStatePtr {
         let client = self.get_client();
         let mut state = client.borrow_mut();
         let Some(mut text_input) = state.text_input.take() else {
+            // text_input 尚未初始化，记录警告
+            if state.globals.text_input_manager.is_none() {
+                log::warn!("IME: text_input_manager 不可用，Wayland compositor 可能不支持 zwp_text_input_v3 协议");
+            } else {
+                log::warn!("IME: text_input 尚未初始化，可能是 seat capabilities 事件尚未触发");
+            }
             return;
         };
 
+        log::debug!("IME: 启用输入法");
         text_input.enable();
         text_input.set_content_type(ContentHint::None, ContentPurpose::Normal);
         if let Some(window) = state.keyboard_focused_window.clone() {
