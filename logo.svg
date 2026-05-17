@@ -20,18 +20,21 @@
       </feMerge>
     </filter>
 
-    <!-- 边框渐变（从浅到深） -->
+    <!-- 边框渐变（高对比，避免缩小时和背景混在一起） -->
     <linearGradient id="borderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#555555;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#0a0a0a;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#e6e6e6;stop-opacity:0.95" />
+      <stop offset="55%" style="stop-color:#8d8d8d;stop-opacity:0.9" />
+      <stop offset="100%" style="stop-color:#3a3a3a;stop-opacity:0.95" />
     </linearGradient>
   </defs>
 
   <!-- 主体：圆角矩形（深灰色背景） -->
-  <rect x="8" y="8" width="1008" height="1008" rx="180" ry="180" fill="url(#bgGradient)" />
+  <rect x="12" y="12" width="994" height="994" rx="180" ry="180" fill="url(#bgGradient)" />
   
   <!-- 边框渐变效果 -->
-  <rect x="8" y="8" width="1008" height="1008" rx="180" ry="180" fill="none" stroke="url(#borderGradient)" stroke-width="8" />
+  <rect x="12" y="12" width="994" height="994" rx="180" ry="180" fill="none" stroke="url(#borderGradient)" stroke-width="24" />
+  <!-- 内层高光边框，保证小尺寸也能看见边框轮廓 -->
+  <rect x="24" y="24" width="970" height="970" rx="168" ry="168" fill="none" stroke="#f4f4f4" stroke-opacity="0.55" stroke-width="6" />
 
   <!-- 三个彩色圆形（macOS 风格的窗口控制按钮） -->
   
