@@ -1,29 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#13DDF4"/>
-      <stop offset="100%" stop-color="#2A2580"/>
+    <!-- 背景渐变（深灰色，带有边缘暗化效果） -->
+    <radialGradient id="bgGradient" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" style="stop-color:#3a3a3a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a1a1a;stop-opacity:1" />
+    </radialGradient>
+    
+    <!-- 圆形阴影效果 -->
+    <filter id="circleShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- 边框渐变（从浅到深） -->
+    <linearGradient id="borderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#555555;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0a0a0a;stop-opacity:1" />
     </linearGradient>
   </defs>
 
-  <!-- macOS 风格圆角背景，填满整个区域 -->
-  <rect width="512" height="512" rx="115" fill="url(#bgGrad)"/>
+  <!-- 主体：圆角矩形（深灰色背景） -->
+  <rect x="8" y="8" width="1008" height="1008" rx="180" ry="180" fill="url(#bgGradient)" />
+  
+  <!-- 边框渐变效果 -->
+  <rect x="8" y="8" width="1008" height="1008" rx="180" ry="180" fill="none" stroke="url(#borderGradient)" stroke-width="8" />
 
-  <!-- 闪电符号（6 顶点多边形，坐标基于 icns 像素数据精确映射） -->
-  <polygon points="199,116 157,232 217,270 77,406 117,294 56,245" fill="#061420"/>
+  <!-- 三个彩色圆形（macOS 风格的窗口控制按钮） -->
+  
+  <!-- 红色圆 -->
+  <circle cx="200" cy="180" r="50" fill="#FF5F56" filter="url(#circleShadow)" />
+  <circle cx="200" cy="180" r="45" fill="#FF6B63" />
+  
+  <!-- 黄色圆 -->
+  <circle cx="320" cy="180" r="50" fill="#FFBD2E" filter="url(#circleShadow)" />
+  <circle cx="320" cy="180" r="45" fill="#FFCA3A" />
+  
+  <!-- 绿色圆 -->
+  <circle cx="440" cy="180" r="50" fill="#27C93F" filter="url(#circleShadow)" />
+  <circle cx="440" cy="180" r="45" fill="#2EC43C" />
 
-  <!-- 数据库表格（右侧，与闪电并列，淡化处理） -->
-  <g opacity="0.4">
-    <g fill="none" stroke="#061420" stroke-width="11" stroke-linejoin="round">
-      <rect x="246" y="136" width="180" height="188" rx="12"/>
-      <line x1="246" y1="189" x2="426" y2="189"/>
-      <line x1="246" y1="243" x2="426" y2="243"/>
-      <line x1="336" y1="136" x2="336" y2="324"/>
-    </g>
-    <!-- 表头填充 -->
-    <rect x="252" y="142" width="168" height="42" rx="7" fill="#061420"/>
-  </g>
+  <!-- 文本：su root -->
+  <text x="180" y="450" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="160" font-weight="700" text-anchor="start" fill="white">su root</text>
+  
+  <!-- 文本：rm -rf / -->
+  <text x="180" y="600" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="160" font-weight="700" text-anchor="start" fill="white">rm -rf /</text>
 
-  <!-- 横向短横线（终端提示符横线） -->
-  <rect x="216" y="362" width="240" height="33" rx="16" fill="#061420"/>
+  <!-- 终端提示符：>_ -->
+  <text x="80" y="800" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="200" font-weight="700" text-anchor="start" fill="green">&gt;_</text>
 </svg>

@@ -1,108 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0D1117"/>
-      <stop offset="100%" stop-color="#161B22"/>
-    </linearGradient>
-    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#00FFE0"/>
-      <stop offset="100%" stop-color="#0099FF"/>
-    </linearGradient>
-    <linearGradient id="accentGrad2" x1="1" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#00FFE0"/>
-      <stop offset="100%" stop-color="#0099FF"/>
-    </linearGradient>
-    <radialGradient id="fillGrad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#00E5CC" stop-opacity="0.12"/>
-      <stop offset="100%" stop-color="#0099FF" stop-opacity="0.02"/>
+    <!-- 背景渐变（深灰色，带有边缘暗化效果） -->
+    <radialGradient id="bgGradient" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" style="stop-color:#3a3a3a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a1a1a;stop-opacity:1" />
     </radialGradient>
-    <radialGradient id="glowBg" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#00CCAA" stop-opacity="0.18"/>
-      <stop offset="100%" stop-color="#0099FF" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="bigGlow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="16" result="blur"/>
+    
+    <!-- 圆形阴影效果 -->
+    <filter id="circleShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
       <feMerge>
-        <feMergeNode in="blur"/>
+        <feMergeNode/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
-    <filter id="xGlow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="22" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="dotGlow" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="nodeGlow" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur stdDeviation="7" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
+
+    <!-- 边框渐变（从浅到深） -->
+    <linearGradient id="borderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#555555;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0a0a0a;stop-opacity:1" />
+    </linearGradient>
   </defs>
 
-  <!-- Background -->
-  <rect width="512" height="512" rx="96" fill="url(#bgGrad)"/>
+  <!-- 主体：圆角矩形（深灰色背景） -->
+  <rect x="8" y="8" width="1008" height="1008" rx="180" ry="180" fill="url(#bgGradient)" />
+  
+  <!-- 边框渐变效果 -->
+  <rect x="8" y="8" width="1008" height="1008" rx="180" ry="180" fill="none" stroke="url(#borderGradient)" stroke-width="8" />
 
-  <!-- Grid -->
-  <g opacity="0.045" stroke="#00E5CC" stroke-width="1">
-    <line x1="0" y1="128" x2="512" y2="128"/>
-    <line x1="0" y1="256" x2="512" y2="256"/>
-    <line x1="0" y1="384" x2="512" y2="384"/>
-    <line x1="128" y1="0" x2="128" y2="512"/>
-    <line x1="256" y1="0" x2="256" y2="512"/>
-    <line x1="384" y1="0" x2="384" y2="512"/>
-  </g>
+  <!-- 三个彩色圆形（macOS 风格的窗口控制按钮） -->
+  
+  <!-- 红色圆 -->
+  <circle cx="200" cy="180" r="50" fill="#FF5F56" filter="url(#circleShadow)" />
+  <circle cx="200" cy="180" r="45" fill="#FF6B63" />
+  
+  <!-- 黄色圆 -->
+  <circle cx="320" cy="180" r="50" fill="#FFBD2E" filter="url(#circleShadow)" />
+  <circle cx="320" cy="180" r="45" fill="#FFCA3A" />
+  
+  <!-- 绿色圆 -->
+  <circle cx="440" cy="180" r="50" fill="#27C93F" filter="url(#circleShadow)" />
+  <circle cx="440" cy="180" r="45" fill="#2EC43C" />
 
-  <!-- Ambient glow behind ring -->
-  <circle cx="256" cy="256" r="180" fill="url(#glowBg)"/>
+  <!-- 文本：su root -->
+  <text x="180" y="450" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="160" font-weight="700" text-anchor="start" fill="white">su root</text>
+  
+  <!-- 文本：rm -rf / -->
+  <text x="180" y="600" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="160" font-weight="700" text-anchor="start" fill="white">rm -rf /</text>
 
-  <!-- Outer decorative ring (faint) -->
-  <circle cx="256" cy="256" r="210" fill="none" stroke="url(#accentGrad)" stroke-width="1.5" opacity="0.12"/>
-
-  <!-- Connector arms -->
-  <!-- Left -->
-  <line x1="104" y1="256" x2="52" y2="256" stroke="url(#accentGrad)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
-  <circle cx="38" cy="256" r="13" fill="url(#accentGrad)" filter="url(#nodeGlow)"/>
-
-  <!-- Right -->
-  <line x1="408" y1="256" x2="460" y2="256" stroke="url(#accentGrad)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
-  <circle cx="474" cy="256" r="13" fill="url(#accentGrad)" filter="url(#nodeGlow)"/>
-
-  <!-- Top-left -->
-  <line x1="138" y1="138" x2="96" y2="96" stroke="url(#accentGrad2)" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
-  <circle cx="85" cy="85" r="11" fill="url(#accentGrad2)" filter="url(#nodeGlow)" opacity="0.85"/>
-
-  <!-- Top-right -->
-  <line x1="374" y1="138" x2="416" y2="96" stroke="url(#accentGrad)" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
-  <circle cx="427" cy="85" r="11" fill="url(#accentGrad)" filter="url(#nodeGlow)" opacity="0.85"/>
-
-  <!-- Bottom -->
-  <line x1="256" y1="408" x2="256" y2="460" stroke="url(#accentGrad)" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
-  <circle cx="256" cy="474" r="13" fill="url(#accentGrad)" filter="url(#nodeGlow)"/>
-
-  <!-- Circle fill -->
-  <circle cx="256" cy="256" r="152" fill="url(#fillGrad)"/>
-
-  <!-- Ghost ring for extra glow depth -->
-  <circle cx="256" cy="256" r="152" fill="none" stroke="url(#accentGrad)" stroke-width="28" opacity="0.12" filter="url(#xGlow)"/>
-
-  <!-- Main ring -->
-  <circle cx="256" cy="256" r="152" fill="none" stroke="url(#accentGrad)" stroke-width="20" filter="url(#bigGlow)"/>
-
-  <!-- Inner detail ring -->
-  <circle cx="256" cy="256" r="130" fill="none" stroke="url(#accentGrad)" stroke-width="2" opacity="0.2"/>
-
-  <!-- Center dot -->
-  <circle cx="256" cy="256" r="32" fill="url(#accentGrad)" filter="url(#dotGlow)"/>
-  <circle cx="245" cy="245" r="11" fill="white" opacity="0.45"/>
+  <!-- 终端提示符：>_ -->
+  <text x="80" y="800" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="200" font-weight="700" text-anchor="start" fill="green">&gt;_</text>
 </svg>

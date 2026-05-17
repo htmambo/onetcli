@@ -3,7 +3,6 @@ use gpui::{App, Context, Entity, ParentElement, SharedString, Styled, Task, Wind
 use gpui_component::{
     ActiveTheme, IndexPath, WindowExt, h_flex,
     list::{ListDelegate, ListItem, ListState},
-    tokens::Radius,
 };
 use one_core::storage::StoredConnection;
 
