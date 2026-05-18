@@ -11,7 +11,7 @@ fi
 
 mkdir -p "$(dirname "${OUTPUT_SVG}")"
 
-perl -0pe 's@\n  <!-- Background -->\n  <rect width="512" height="512" rx="96" fill="url\(#bgGrad\)"/>\n@@' \
+perl -0pe 's@\n\s*<!-- 主体：圆角矩形[^-]*-->\n\s*<rect[^>]*fill="url\(#bgGradient\)"[^/]*/>\n@@' \
     "${SOURCE_SVG}" > "${OUTPUT_SVG}"
 
 if cmp -s "${SOURCE_SVG}" "${OUTPUT_SVG}"; then
