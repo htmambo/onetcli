@@ -29,12 +29,13 @@
   </defs>
 
   <!-- 主体：圆角矩形（深灰色背景） -->
-  <rect x="12" y="12" width="994" height="994" rx="180" ry="180" fill="url(#bgGradient)" />
+  <rect x="54" y="54" width="920" height="920" rx="140" ry="140" fill="url(#bgGradient)" />
   
   <!-- 边框渐变效果 -->
-  <rect x="12" y="12" width="994" height="994" rx="180" ry="180" fill="none" stroke="url(#borderGradient)" stroke-width="24" />
+  <rect x="18" y="18" width="988" height="988" rx="180" ry="180" fill="none" stroke="url(#borderGradient)" stroke-width="36" />
+
   <!-- 内层高光边框，保证小尺寸也能看见边框轮廓 -->
-  <rect x="24" y="24" width="970" height="970" rx="168" ry="168" fill="none" stroke="#f4f4f4" stroke-opacity="0.55" stroke-width="6" />
+  <rect x="54" y="54" width="914" height="914" rx="140" ry="140" fill="none" stroke="#0f0f0f" stroke-opacity="1" stroke-width="36" />
 
   <!-- 三个彩色圆形（macOS 风格的窗口控制按钮） -->
   
@@ -51,11 +52,11 @@
   <circle cx="440" cy="180" r="45" fill="#2EC43C" />
 
   <!-- 文本：su root -->
-  <text x="180" y="450" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="160" font-weight="700" text-anchor="start" fill="white">su root</text>
+  <text x="170" y="450" font-family="'JetBrainsMono', 'Menlo', 'Ubuntu Mono', monospace" font-size="180" font-weight="700" text-anchor="start" fill="white">su root</text>
   
   <!-- 文本：rm -rf / -->
-  <text x="180" y="600" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="160" font-weight="700" text-anchor="start" fill="white">rm -rf /</text>
+  <text x="170" y="620" font-family="'JetBrainsMono', 'Menlo', 'Ubuntu Mono', monospace" font-size="180" font-weight="700" text-anchor="start" fill="white">rm -rf /</text>
 
   <!-- 终端提示符：>_ -->
-  <text x="80" y="800" font-family="'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="200" font-weight="700" text-anchor="start" fill="green">&gt;_</text>
+  <text x="70" y="800" font-family="'Hiragino Kaku Gothic StdN', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="200" font-weight="700" text-anchor="start" fill="green">&gt;_</text>
 </svg>
