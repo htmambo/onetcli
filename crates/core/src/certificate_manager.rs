@@ -604,13 +604,12 @@ impl CertificateForm {
 
         certificate.name = name;
         certificate.kind = kind;
-        // Update params by mutating the JSON
         if let Some(obj) = certificate.params.as_object_mut() {
             obj.insert("username".to_string(), serde_json::Value::String(username));
             match kind {
                 CertificateKind::UsernamePassword => {
-                    if let Some(ref p) = password {
-                        obj.insert("password".to_string(), serde_json::Value::String(p.clone()));
+                    if let Some(p) = password {
+                        obj.insert("password".to_string(), serde_json::Value::String(p));
                     } else {
                         obj.remove("password");
                     }
@@ -619,18 +618,18 @@ impl CertificateForm {
                 }
                 CertificateKind::SshPrivateKey => {
                     obj.remove("password");
-                    if let Some(ref kc) = key_content {
+                    if let Some(kc) = key_content {
                         obj.insert(
                             "ssh_private_key".to_string(),
-                            serde_json::Value::String(kc.clone()),
+                            serde_json::Value::String(kc),
                         );
                     } else {
                         obj.remove("ssh_private_key");
                     }
-                    if let Some(ref ph) = passphrase {
+                    if let Some(ph) = passphrase {
                         obj.insert(
                             "passphrase".to_string(),
-                            serde_json::Value::String(ph.clone()),
+                            serde_json::Value::String(ph),
                         );
                     } else {
                         obj.remove("passphrase");

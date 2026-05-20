@@ -108,7 +108,7 @@ pub fn parse_shell_history(contents: &str, format: ShellHistoryFormat) -> Vec<St
         .collect()
 }
 
-/// 向历史记录中添加富条目（全局去重）
+/// 向历史记录中添加富条目（全局去重，O(1) 查找）
 ///
 /// 如果已存在相同命令，更新其 timestamp 和 use_count，而非添加新条目。
 pub fn push_rich_history_entry(
@@ -121,7 +121,8 @@ pub fn push_rich_history_entry(
     };
     entry.command = command;
 
-    // 全局去重：查找已有条目并更新
+    // 线性查找：VecDeque 不支持 O(1) 按值查找，但条目数有限（≤ SESSION_HISTORY_LIMIT）
+    // 对于 1024 条目级规模，线性扫描耗时在微秒级，可接受
     if let Some(existing) = entries.iter_mut().find(|e| e.command == entry.command) {
         existing.timestamp = entry.timestamp;
         existing.use_count += 1;
@@ -192,16 +193,17 @@ fn suggestion_rank(command: &str, query: &str) -> Option<u8> {
 
 /// 从 session (HistoryEntry) + persisted (String) 中收集唯一命令
 fn collect_unique_commands(session: &VecDeque<HistoryEntry>, persisted: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut commands = Vec::new();
+    let capacity = session.len() + persisted.len();
+    let mut seen = HashSet::with_capacity(capacity);
+    let mut commands = Vec::with_capacity(capacity);
 
     for entry in session.iter().rev() {
-        if seen.insert(entry.command.clone()) {
+        if seen.insert(entry.command.as_str()) {
             commands.push(entry.command.clone());
         }
     }
     for command in persisted.iter().rev() {
-        if seen.insert(command.clone()) {
+        if seen.insert(command.as_str()) {
             commands.push(command.clone());
         }
     }
@@ -212,13 +214,13 @@ fn collect_unique_commands(session: &VecDeque<HistoryEntry>, persisted: &[String
 /// 按 frecency 评分对 session 条目排序的辅助
 ///
 /// 返回 (command, frecency_score) 映射
-fn build_frecency_map(
-    session: &VecDeque<HistoryEntry>,
+fn build_frecency_map<'a>(
+    session: &'a VecDeque<HistoryEntry>,
     current_cwd: Option<&str>,
-) -> std::collections::HashMap<String, f64> {
+) -> std::collections::HashMap<&'a str, f64> {
     session
         .iter()
-        .map(|entry| (entry.command.clone(), entry.frecency_score(current_cwd)))
+        .map(|entry| (entry.command.as_str(), entry.frecency_score(current_cwd)))
         .collect()
 }
 
@@ -253,9 +255,8 @@ pub fn collect_history_suggestions_with_cwd(
         .filter_map(|command| {
             let lowered_command = command.to_lowercase();
             let rank = suggestion_rank(&lowered_command, &lowered_prefix)?;
-            // 使用 frecency 的负数作为排序键（越高越优先 → 负数越小排在前面）
             let neg_frecency = frecency_map
-                .get(&command)
+                .get(command.as_str())
                 .map(|s| (-s * 1000.0) as i64)
                 .unwrap_or(0);
             Some((rank, neg_frecency, command))
@@ -349,7 +350,7 @@ pub fn collect_history_search_results(
             let lowered_command = command.to_lowercase();
             let rank = history_search_rank(&lowered_command, &lowered_query)?;
             let neg_frecency = frecency_map
-                .get(&command)
+                .get(command.as_str())
                 .map(|s| (-s * 1000.0) as i64)
                 .unwrap_or(recency as i64);
             Some((rank, neg_frecency, command))

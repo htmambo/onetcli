@@ -6,6 +6,9 @@
 
 ## 已完成任务 (Archive)
 
+### 2026-05
+- ✅ [全局性能优化](Archive/2026-05/PERFORMANCE_OPTIMIZATION_PLAN.md) - 完成于 2026-05-21
+
 ### 2026-04
 - ✅ [UI 主题系统重构](Archive/2026-04/THEME_SYSTEM_REFACTOR_PLAN.md) - 完成于 2026-04-21
 

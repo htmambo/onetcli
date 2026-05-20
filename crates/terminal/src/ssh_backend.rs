@@ -10,7 +10,7 @@ use ssh::{
     ChannelEvent, PtyConfig, ShellIntegrationSetup, SshChannel, SshClient, SshSessionManager,
 };
 
-use crate::osc::{OscEvent, extract_osc_events};
+use crate::osc::{OscBuffer, OscEvent, extract_osc_events};
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
 use crate::shell_integration::{
     embedded_shell_integration_script, normalized_shell_integration_script,
@@ -229,6 +229,7 @@ impl SshBackend {
             // 用来判断 shell 是否已经 ready（收到第一个 133;B 后才发 init_commands）
             let mut shell_ready = false;
             let mut init_sent = false;
+            let mut osc_buffer = OscBuffer::new();
 
             loop {
                 tokio::select! {
@@ -266,8 +267,8 @@ impl SshBackend {
                     event = channel.recv() => {
                         match event {
                             Some(ChannelEvent::Data(data)) | Some(ChannelEvent::ExtendedData { data, .. }) => {
-                                // 解析所有 OSC 事件
-                                for osc_event in extract_osc_events(&data) {
+                            // 使用带缓冲的解析器处理跨 chunk 的 OSC 序列
+                                for osc_event in osc_buffer.feed(&data) {
                                     tracing::debug!(
                                         target: "terminal.history_prompt.osc",
                                         event = ?osc_event,
@@ -564,38 +565,38 @@ impl SshBackend {
         setup: Option<&ShellIntegrationSetup>,
     ) -> anyhow::Result<()> {
         let Some(setup) = setup else {
-            // 降级路径：远端没有安装 integration，只请求基本 pty + shell。
             channel.request_pty(pty_config).await?;
             channel.request_shell().await?;
             return Ok(());
         };
 
-        channel.set_env("ONETCLI_SHELL_INTEGRATION", "1").await?;
-        channel
-            .set_env("ONETCLI_ORIG_ZDOTDIR", &setup.home_dir)
-            .await?;
+        // 不依赖 SSH set_env（大多数服务器不 AcceptEnv 自定义变量），
+        // 统一通过 exec 内联设置环境变量来确保 shell integration 生效。
+        channel.request_pty(pty_config).await?;
 
         match setup.login_shell.as_deref().map(shell_basename) {
             Some("zsh") => {
-                channel
-                    .set_env("ZDOTDIR", &format!("{}/zsh", setup.session_dir))
-                    .await?;
-                channel.request_pty(pty_config).await?;
-                channel.request_shell().await?;
+                let zdotdir = format!("{}/zsh", setup.session_dir);
+                let command = format!(
+                    "exec env ZDOTDIR={} ONETCLI_ORIG_ZDOTDIR={} ONETCLI_SHELL_INTEGRATION=1 zsh -l -i",
+                    shell_single_quote(&zdotdir),
+                    shell_single_quote(&setup.home_dir),
+                );
+                channel.exec(&command).await?;
             }
             Some("bash") => {
-                channel.request_pty(pty_config).await?;
                 let shell_path = setup.login_shell.as_deref().unwrap_or("bash");
                 let bash_rc = format!("{}/bash/.bashrc", setup.session_dir);
                 let command = format!(
-                    "exec {} --rcfile {} -i",
+                    "exec env ONETCLI_SHELL_INTEGRATION=1 {} --rcfile {} -i",
                     shell_single_quote(shell_path),
-                    shell_single_quote(&bash_rc)
+                    shell_single_quote(&bash_rc),
                 );
                 channel.exec(&command).await?;
             }
             _ => {
-                channel.request_pty(pty_config).await?;
+                // 未知 shell，尝试通过 set_env 设置（best effort）
+                let _ = channel.set_env("ONETCLI_SHELL_INTEGRATION", "1").await;
                 channel.request_shell().await?;
             }
         }

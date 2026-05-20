@@ -290,16 +290,28 @@ impl Repository for ProviderRepository {
         let created_at = item.created_at;
         let updated_at = item.updated_at;
 
-        self.conn.with_connection(|conn| {
-            conn.execute(
-                "INSERT INTO llm_providers (id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-                params![id, name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at],
-            )?;
-            Ok(())
-        })?;
+        let new_id = if id == 0 {
+            self.conn.with_connection(|conn| {
+                conn.execute(
+                    "INSERT INTO llm_providers (name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                    params![name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })?
+        } else {
+            self.conn.with_connection(|conn| {
+                conn.execute(
+                    "INSERT INTO llm_providers (id, name, provider_type, api_key, api_base, api_version, model, models, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                    params![id, name, provider_type, api_key, api_base, api_version, model, models_json, max_tokens, temperature, thinking_budget, enabled, is_default, cloud_id, last_synced_at, sync_enabled, created_at, updated_at],
+                )?;
+                Ok(id)
+            })?
+        };
 
-        Ok(0)
+        item.id = new_id;
+        Ok(new_id)
     }
 
     fn update(&self, item: &Self::Entity) -> Result<()> {

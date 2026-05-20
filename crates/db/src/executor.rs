@@ -49,6 +49,20 @@ impl Default for ExecOptions {
     }
 }
 
+impl ExecOptions {
+    /// 对查询结果集应用 max_rows 截断，避免 UI 层持有过多数据
+    pub fn truncate_results(&self, results: &mut Vec<SqlResult>) {
+        let Some(max_rows) = self.max_rows else { return };
+        for result in results.iter_mut() {
+            if let SqlResult::Query(ref mut query) = result {
+                if query.rows.len() > max_rows {
+                    query.rows.truncate(max_rows);
+                }
+            }
+        }
+    }
+}
+
 /// Result of a single SQL statement execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]

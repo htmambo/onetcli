@@ -738,6 +738,8 @@ impl ConnectionPool {
 }
 
 /// Global database state - stores DbManager and ConnectionManager
+///
+/// 所有字段均已 Arc 包装，`Clone` 仅增加引用计数，不会复制底层数据。
 #[derive(Clone)]
 pub struct GlobalDbState {
     pub db_manager: DbManager,
@@ -1058,7 +1060,7 @@ impl GlobalDbState {
 
             let plugin = clone_self.get_plugin(&config.database_type)?;
 
-            let result = {
+            let mut result = {
                 let mut guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
@@ -1074,8 +1076,10 @@ impl GlobalDbState {
                         .map_err(|e| anyhow::anyhow!("Failed to switch schema: {}", e))?;
                 }
 
-                conn.execute(plugin.as_ref(), &script, opts).await?
+                conn.execute(plugin.as_ref(), &script, opts.clone()).await?
             };
+
+            opts.truncate_results(&mut result);
 
             // Determine if session should stay open based on script content
             let upper_script = script.to_uppercase();
@@ -2356,6 +2360,7 @@ impl GlobalDbState {
             .create_session(config, &self.db_manager)
             .await?;
 
+        let opts = opts.unwrap_or_default();
         let result = {
             let mut guard = self
                 .connection_manager
@@ -2371,12 +2376,16 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("Failed to switch schema: {}", e))?;
             }
 
-            conn.execute(plugin.as_ref(), script, opts.unwrap_or_default())
-                .await
+            conn.execute(plugin.as_ref(), script, opts.clone()).await
         };
 
         self.connection_manager.close_session(&session_id).await?;
-        result.map_err(|e| anyhow::anyhow!("{}", e))
+        result
+            .map(|mut r| {
+                opts.truncate_results(&mut r);
+                r
+            })
+            .map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
 

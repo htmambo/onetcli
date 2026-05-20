@@ -3176,11 +3176,11 @@ mod tests {
     #[test]
     fn should_report_ssh_running_processes_requires_detected_prompt() {
         assert!(
-            should_report_ssh_running_processes(true, SshProcessState::Busy, true, false, false),
+            should_report_ssh_running_processes(true, SshProcessState::Busy, true, false, false, None, false),
             "已连接且检测到 prompt 时，Busy 应阻止关闭"
         );
         assert!(
-            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, false),
+            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, false, None, false),
             "未检测到 prompt 的 Busy 不能作为可靠的阻止关闭信号"
         );
     }
@@ -3188,11 +3188,11 @@ mod tests {
     #[test]
     fn should_report_ssh_running_processes_supports_submitted_command_fallback() {
         assert!(
-            should_report_ssh_running_processes(true, SshProcessState::Busy, false, true, true),
+            should_report_ssh_running_processes(true, SshProcessState::Busy, false, true, true, None, false),
             "未同步到 prompt 时，已提交命令应保守地阻止关闭"
         );
         assert!(
-            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, true),
+            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, true, None, false),
             "无交互程序模式时，已提交命令不应单独阻止关闭"
         );
     }
@@ -3204,6 +3204,8 @@ mod tests {
             SshProcessState::Idle,
             true,
             false,
+            false,
+            None,
             false
         ));
         assert!(!should_report_ssh_running_processes(
@@ -3211,6 +3213,8 @@ mod tests {
             SshProcessState::Unknown,
             true,
             false,
+            false,
+            None,
             false
         ));
         assert!(!should_report_ssh_running_processes(
@@ -3218,7 +3222,9 @@ mod tests {
             SshProcessState::Busy,
             true,
             true,
-            true
+            true,
+            None,
+            false
         ));
     }
 
@@ -3423,14 +3429,25 @@ mod tests {
             backend: None,
             title: "old title".to_string(),
             current_working_dir: Some("/tmp/project".to_string()),
+            local_shell_pid: None,
+            local_cwd_file: None,
+            #[cfg(target_os = "macos")]
+            local_process_tree_settled: Cell::new(false),
             child_exited: Some(255),
             connection_state: ConnectionState::Connected,
+            connection_status_message: None,
+            connection_wait_started_at: None,
             cols: 80,
             rows: 24,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: None,
             ssh_session_manager: None,
+            ssh_process_state: Cell::new(SshProcessState::Unknown),
+            ssh_prompt_detected: false,
+            ssh_command_submitted_without_prompt_sync: Cell::new(false),
+            ssh_connection_established_at: None,
+            ssh_detection_disabled: Cell::new(false),
             serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
@@ -3441,6 +3458,7 @@ mod tests {
             persisted_history: Vec::new(),
             connection_generation: 1,
             connection_kind: TerminalConnectionKind::Ssh,
+            local_pty_session_id: None,
         };
 
         let mut processor: Processor<StdSyncHandler> = Processor::new();

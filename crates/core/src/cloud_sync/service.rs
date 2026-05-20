@@ -73,9 +73,11 @@ pub struct CloudSyncService {
     logged_in: bool,
     /// 用户 ID
     user_id: Option<String>,
-    /// 同步操作队列（按类型分组）
+    /// 同步操作队列（按类型分组，上限 64 个队列）
     operation_queues: HashMap<String, OperationQueue>,
 }
+
+const MAX_OPERATION_QUEUES: usize = 64;
 
 impl CloudSyncService {
     /// 创建新的云同步服务
@@ -122,6 +124,12 @@ impl CloudSyncService {
         if queue.is_empty() {
             self.operation_queues.remove(key);
         } else {
+            if self.operation_queues.len() >= MAX_OPERATION_QUEUES && !self.operation_queues.contains_key(key) {
+                tracing::warn!("Operation queue limit ({MAX_OPERATION_QUEUES}) reached, dropping oldest");
+                if let Some(oldest_key) = self.operation_queues.keys().next().cloned() {
+                    self.operation_queues.remove(&oldest_key);
+                }
+            }
             self.operation_queues.insert(key.to_string(), queue);
         }
     }

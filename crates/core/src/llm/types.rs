@@ -169,9 +169,7 @@ impl SyncableItem for ProviderConfig {
     }
 
     fn set_local_id(&mut self, id: Option<i64>) {
-        if let Some(id) = id {
-            self.id = id;
-        }
+        self.id = id.unwrap_or(0);
     }
 
     fn item_name(&self) -> &str {

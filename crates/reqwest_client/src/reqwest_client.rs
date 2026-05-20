@@ -4,7 +4,7 @@ use std::{borrow::Cow, mem, pin::Pin, task::Poll, time::Duration};
 
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{AsyncRead, FutureExt as _, TryStreamExt as _};
+use futures::{AsyncRead, FutureExt as _};
 use gpui::http_client::{self, RedirectPolicy, Url, http};
 use regex::Regex;
 use reqwest::{
@@ -30,6 +30,8 @@ impl ReqwestClient {
         reqwest::Client::builder()
             .use_rustls_tls()
             .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(60))
+            .pool_idle_timeout(Duration::from_secs(90))
     }
 
     pub fn new() -> Self {
@@ -254,18 +256,23 @@ impl http_client::HttpClient for ReqwestClient {
                 .await?
                 .map_err(redact_error)?;
 
+            let status = response.status();
+            let version = response.version();
             let headers = mem::take(response.headers_mut());
+
+            // 在 Tokio runtime 上读取完整 body，避免返回的 stream 需要在 Tokio reactor 上 poll
+            let body_bytes = handle
+                .spawn(async move {
+                    response.bytes().await.map_err(|e| futures::io::Error::other(e))
+                })
+                .await??;
+
             let mut builder = http::Response::builder()
-                .status(response.status().as_u16())
-                .version(response.version());
+                .status(status.as_u16())
+                .version(version);
             *builder.headers_mut().unwrap() = headers;
 
-            let bytes = response
-                .bytes_stream()
-                .map_err(futures::io::Error::other)
-                .into_async_read();
-            let body = http_client::AsyncBody::from_reader(bytes);
-
+            let body = http_client::AsyncBody::from(body_bytes);
             builder.body(body).map_err(|e| anyhow!(e))
         }
         .boxed()

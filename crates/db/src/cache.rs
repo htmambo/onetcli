@@ -301,20 +301,20 @@ impl NodeCache {
 
     /// 递归使节点及其所有后代的缓存失效
     ///
-    /// 使用迭代而非递归，避免深层树导致栈溢出。
+    /// 优先从内存缓存获取子节点 ID，避免为发现子节点而读盘。
+    /// 不在内存中的节点直接删除文件，其子节点依赖 TTL 自然过期。
     pub async fn invalidate_node_recursive(&self, ctx: &CacheContext, node_id: &str) {
         use std::collections::VecDeque;
         let mut queue = VecDeque::new();
         queue.push_back(node_id.to_string());
 
         while let Some(current_id) = queue.pop_front() {
-            // 先获取节点以收集子节点 ID
-            if let Some(node) = self.get_node(ctx, &current_id).await {
+            // 仅从内存获取子节点（O(1)，无 I/O）
+            if let Some(node) = self.get_from_memory(ctx, &current_id) {
                 for child in &node.children {
                     queue.push_back(child.id.clone());
                 }
             }
-            // 再失效当前节点
             self.invalidate_node(ctx, &current_id).await;
         }
     }

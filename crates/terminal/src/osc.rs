@@ -69,6 +69,104 @@ pub fn extract_osc_events(data: &[u8]) -> Vec<OscEvent> {
     events
 }
 
+/// 带缓冲的 OSC 解析器，处理跨 chunk 分片的 OSC 序列
+pub struct OscBuffer {
+    buf: String,
+    /// 防止缓冲区无限增长
+    max_len: usize,
+}
+
+const OSC_BUFFER_MAX: usize = 4096;
+
+impl OscBuffer {
+    pub fn new() -> Self {
+        Self {
+            buf: String::new(),
+            max_len: OSC_BUFFER_MAX,
+        }
+    }
+
+    /// 向缓冲区追加新数据并提取所有完整的 OSC 事件
+    pub fn feed(&mut self, data: &[u8]) -> Vec<OscEvent> {
+        let text = String::from_utf8_lossy(data);
+        self.buf.push_str(&text);
+
+        // 缓冲区过大时丢弃前半部分（防止内存泄漏）
+        if self.buf.len() > self.max_len {
+            // 保留最后一个 ESC 之后的内容
+            if let Some(pos) = self.buf.rfind('\x1b') {
+                self.buf = self.buf[pos..].to_string();
+            } else {
+                self.buf.clear();
+            }
+        }
+
+        let mut events = Vec::new();
+        let chars: Vec<char> = self.buf.chars().collect();
+        let mut i = 0;
+        let mut last_consumed = 0;
+
+        while i < chars.len() {
+            if chars[i] == '\x1b' && i + 1 < chars.len() && chars[i + 1] == ']' {
+                let osc_start = i;
+                i += 2;
+                let payload_start = i;
+                let mut found_end = false;
+
+                while i < chars.len() {
+                    if chars[i] == '\x07' {
+                        let payload: String = chars[payload_start..i].iter().collect();
+                        if let Some(ev) = parse_osc_payload(&payload) {
+                            events.push(ev);
+                        }
+                        i += 1;
+                        last_consumed = i;
+                        found_end = true;
+                        break;
+                    }
+                    if chars[i] == '\x1b' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+                        let payload: String = chars[payload_start..i].iter().collect();
+                        if let Some(ev) = parse_osc_payload(&payload) {
+                            events.push(ev);
+                        }
+                        i += 2;
+                        last_consumed = i;
+                        found_end = true;
+                        break;
+                    }
+                    // 遇到新的 ESC ] 说明前一个 OSC 不完整，丢弃
+                    if chars[i] == '\x1b'
+                        && i + 1 < chars.len()
+                        && chars[i + 1] == ']'
+                        && i != osc_start
+                    {
+                        last_consumed = i;
+                        found_end = true;
+                        break;
+                    }
+                    i += 1;
+                }
+
+                if !found_end {
+                    // OSC 序列未结束，保留从 osc_start 开始的内容等待下一个 chunk
+                    break;
+                }
+            } else {
+                last_consumed = i + 1;
+                i += 1;
+            }
+        }
+
+        // 丢弃已消费的部分，保留未完成的 OSC 序列
+        if last_consumed > 0 {
+            let consumed_bytes: usize = chars[..last_consumed].iter().map(|c| c.len_utf8()).sum();
+            self.buf = self.buf[consumed_bytes..].to_string();
+        }
+
+        events
+    }
+}
+
 /// 解析 OSC payload 内容
 pub fn parse_osc_payload(payload: &str) -> Option<OscEvent> {
     // OSC 133 协议：shell 集成标记
@@ -220,5 +318,52 @@ mod tests {
     fn parse_unknown_osc_returns_none() {
         assert_eq!(parse_osc_payload("999;unknown"), None);
         assert_eq!(parse_osc_payload("133;X"), None);
+    }
+
+    #[test]
+    fn osc_buffer_handles_split_sequence() {
+        let mut buf = OscBuffer::new();
+
+        // 第一个 chunk：OSC 序列被截断
+        let chunk1 = b"\x1b]7;file://host";
+        let events = buf.feed(chunk1);
+        assert!(events.is_empty());
+
+        // 第二个 chunk：序列完成
+        let chunk2 = b"/home/user\x07";
+        let events = buf.feed(chunk2);
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            OscEvent::WorkingDirChanged("/home/user".to_string())
+        );
+    }
+
+    #[test]
+    fn osc_buffer_handles_complete_sequence_in_one_chunk() {
+        let mut buf = OscBuffer::new();
+        let data = b"\x1b]133;A\x07output\x1b]7;file://h/tmp\x07";
+        let events = buf.feed(data);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], OscEvent::PromptStart);
+        assert_eq!(events[1], OscEvent::WorkingDirChanged("/tmp".to_string()));
+    }
+
+    #[test]
+    fn osc_buffer_handles_three_way_split() {
+        let mut buf = OscBuffer::new();
+
+        let events = buf.feed(b"\x1b]1337;Current");
+        assert!(events.is_empty());
+
+        let events = buf.feed(b"Dir=/srv/");
+        assert!(events.is_empty());
+
+        let events = buf.feed(b"app\x07");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            OscEvent::WorkingDirChanged("/srv/app".to_string())
+        );
     }
 }
