@@ -1,17 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# macOS 应用图标生成脚本。
+# 源 SVG 来自项目根目录的 logo-macos.svg（专供 macOS 路径使用）。
+# Linux/Windows 路径继续使用 logo.svg，生成逻辑互不影响。
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-SOURCE_SVG="${1:-${PROJECT_DIR}/logo.svg}"
+SOURCE_SVG="${1:-${PROJECT_DIR}/logo-macos.svg}"
 OUTPUT_ICNS="${2:-${PROJECT_DIR}/resources/macos/OnetCli.icns}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onetcli-icon.XXXXXX")"
 ICONSET_DIR="${WORK_DIR}/OnetCli.iconset"
 MASTER_PNG="${WORK_DIR}/OnetCli-master.png"
-MACOS_SVG="${WORK_DIR}/logo-macos.svg"
-MACOS_ICON_SIZE=1024
-MACOS_ICON_MARGIN=96
-MACOS_ICON_SCALE="0.8"
 
 cleanup() {
     rm -rf "$WORK_DIR"
@@ -19,55 +19,15 @@ cleanup() {
 trap cleanup EXIT
 
 if [ ! -f "$SOURCE_SVG" ]; then
-    echo "Error: SVG source not found at ${SOURCE_SVG}"
+    echo "Error: SVG source not found at ${SOURCE_SVG}" >&2
     exit 1
 fi
 
 mkdir -p "$ICONSET_DIR"
 mkdir -p "$(dirname "$OUTPUT_ICNS")"
 
-python3 - "$SOURCE_SVG" "$MACOS_SVG" "$MACOS_ICON_SIZE" "$MACOS_ICON_MARGIN" "$MACOS_ICON_SCALE" << 'PYEOF'
-import sys
-import xml.etree.ElementTree as ET
-
-source_path = sys.argv[1]
-output_path = sys.argv[2]
-canvas_size = int(sys.argv[3])
-margin = int(sys.argv[4])
-scale = float(sys.argv[5])
-
-ET.register_namespace('', 'http://www.w3.org/2000/svg')
-tree = ET.parse(source_path)
-root = tree.getroot()
-
-namespace = root.tag.split('}', 1)[0].strip('{') if '}' in root.tag else ''
-root_tag = root.tag
-new_root = ET.Element(root_tag, dict(root.attrib))
-new_root.set('viewBox', f'0 0 {canvas_size} {canvas_size}')
-new_root.set('width', str(canvas_size))
-new_root.set('height', str(canvas_size))
-
-children = list(root)
-for child in children:
-    if child.tag == f'{{{namespace}}}defs':
-        new_root.append(child)
-
-content_group = ET.SubElement(
-    new_root,
-    f'{{{namespace}}}g' if namespace else 'g',
-    {'transform': f'translate({margin} {margin}) scale({scale})'},
-)
-
-for child in children:
-    if child.tag == f'{{{namespace}}}defs':
-        continue
-    content_group.append(child)
-
-ET.ElementTree(new_root).write(output_path, encoding='utf-8', xml_declaration=True)
-PYEOF
-
 echo "Rendering macOS icon from ${SOURCE_SVG}..."
-sips -s format png "$MACOS_SVG" --out "$MASTER_PNG" >/dev/null
+sips -s format png "$SOURCE_SVG" --out "$MASTER_PNG" >/dev/null
 
 render_icon() {
     local size="$1"
@@ -75,6 +35,7 @@ render_icon() {
     sips -z "$size" "$size" "$MASTER_PNG" --out "${ICONSET_DIR}/${name}" >/dev/null
 }
 
+# macOS .iconset 标准尺寸
 render_icon 16 icon_16x16.png
 render_icon 32 icon_16x16@2x.png
 render_icon 32 icon_32x32.png

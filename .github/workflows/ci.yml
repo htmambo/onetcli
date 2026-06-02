@@ -49,6 +49,14 @@ jobs:
         if: ${{ matrix.run_on == 'macos-latest' }}
         run: |
           cargo clippy --workspace --all-targets
+      - name: Focused checks (macOS)
+        if: ${{ matrix.run_on == 'macos-latest' }}
+        run: |
+          cargo check -p main
+          cargo check -p one-core
+          cargo check -p terminal_view
+          cargo test -p main
+          cargo test -p gpui-component
       - name: Test Linux
         if: ${{ matrix.run_on == 'ubuntu-latest' }}
         run: |

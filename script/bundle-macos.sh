@@ -71,8 +71,8 @@ sed "s/\${ONETCLI_VERSION}/${VERSION}/g" \
     "${PROJECT_DIR}/resources/macos/Info.plist" \
     > "$APP_DIR/Contents/Info.plist"
 
-# Generate icns from logo.svg if not already present.
-# Skips if OnetCli.icns already exists (stable output guaranteed).
+# 从 logo-macos.svg 重新生成 icns（脚本内部会清空旧 icns 后重新生成，
+# 增量更新由 generate-macos-icon.sh 内部的 PNG IEND 清理保证输出稳定）。
 bash "${PROJECT_DIR}/script/generate-macos-icon.sh"
 
 # Copy icon

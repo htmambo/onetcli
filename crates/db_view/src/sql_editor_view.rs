@@ -14,7 +14,7 @@ use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, WindowExt, h_flex, v_flex,
 };
 use one_core::storage::DatabaseType;
-use one_core::storage::manager::get_queries_dir;
+use one_core::storage::get_queries_dir;
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
 use one_ui::resize_handle::{ResizePanel, resize_handle};

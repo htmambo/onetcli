@@ -135,6 +135,24 @@ cargo clippy -- --deny warnings
 cargo fmt --check
 ```
 
+### Focused Verification
+
+在做入口、核心 crate 或同步服务相关改动时，优先运行最小主路径验证，再视影响面扩大：
+
+```bash
+# Rust main path
+cargo check -p main
+cargo check -p one-core
+cargo check -p terminal_view
+
+# Targeted regression tests
+cargo test -p main
+cargo test -p gpui-component
+
+# sync_server
+cd sync_server && npm run check
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 ## Tech Stack

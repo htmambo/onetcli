@@ -268,7 +268,7 @@ impl SqlitePlugin {
 }
 
 fn build_sqlite_ui_manifest() -> DatabaseUiManifest {
-    let default_db_path = one_core::storage::manager::get_config_dir()
+    let default_db_path = one_core::storage::get_config_dir()
         .map(|path| {
             path.join("onetcli_default.db")
                 .to_string_lossy()

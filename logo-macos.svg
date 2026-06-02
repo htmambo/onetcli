@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- 背景渐变（深灰色，带有边缘暗化效果） -->
+    <radialGradient id="bgGradient" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" style="stop-color:#3a3a3a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1a1a1a;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- 圆形阴影效果 -->
+    <filter id="circleShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- macOS 专用背景层：填满系统 squircle 容器。
+       圆角半径 232 略大于系统 22.4% (≈229px) squircle，
+       让背景渐变完整覆盖系统裁切区域，避免 stroke-only 装饰被切后露出透明画布。
+       原 logo.svg 中的外层 stroke 边框（rx=180）已删除（无装饰意义且导致白边）。 -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" ry="232" fill="url(#bgGradient)" />
+
+  <!-- 主体：圆角矩形（深灰色背景），构成"终端窗口"视觉 -->
+  <rect x="96" y="96" width="850" height="850" rx="120" ry="120" fill="url(#bgGradient)" />
+
+  <!-- 内层高光边框，保证小尺寸也能看见边框轮廓 -->
+  <rect x="72" y="72" width="880" height="880" rx="140" ry="140" fill="none" stroke="#000" stroke-opacity="1" stroke-width="48" />
+
+  <!-- 三个彩色圆形（macOS 风格的窗口控制按钮） -->
+
+  <!-- 红色圆 -->
+  <circle cx="200" cy="180" r="50" fill="#FF5F56" filter="url(#circleShadow)" />
+  <circle cx="200" cy="180" r="45" fill="#FF6B63" />
+
+  <!-- 黄色圆 -->
+  <circle cx="320" cy="180" r="50" fill="#FFBD2E" filter="url(#circleShadow)" />
+  <circle cx="320" cy="180" r="45" fill="#FFCA3A" />
+
+  <!-- 绿色圆 -->
+  <circle cx="440" cy="180" r="50" fill="#27C93F" filter="url(#circleShadow)" />
+  <circle cx="440" cy="180" r="45" fill="#2EC43C" />
+
+  <!-- 文本：su root -->
+  <text x="170" y="390" font-family="'JetBrainsMono', 'Menlo', 'Ubuntu Mono', monospace" font-size="180" font-weight="700" text-anchor="start" fill="white">su root</text>
+
+  <!-- 文本：rm -rf / -->
+  <text x="170" y="560" font-family="'JetBrainsMono', 'Menlo', 'Ubuntu Mono', monospace" font-size="180" font-weight="700" text-anchor="start" fill="white">rm -rf /</text>
+
+  <!-- 终端提示符：>_ -->
+  <text x="90" y="800" font-family="'Hiragino Kaku Gothic StdN', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace" font-size="200" font-weight="700" text-anchor="start" fill="green">&gt;_</text>
+</svg>

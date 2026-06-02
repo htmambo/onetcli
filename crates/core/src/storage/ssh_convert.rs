@@ -111,7 +111,9 @@ mod tests {
     #[test]
     fn ssh_auth_method_private_key_converts() {
         let method = SshAuthMethod::PrivateKey {
-            ssh_private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\ncontent\n-----END OPENSSH PRIVATE KEY-----".to_string(),
+            ssh_private_key:
+                "-----BEGIN OPENSSH PRIVATE KEY-----\ncontent\n-----END OPENSSH PRIVATE KEY-----"
+                    .to_string(),
             passphrase: Some("pass123".to_string()),
         };
         let auth = ssh_auth_from_method(method);

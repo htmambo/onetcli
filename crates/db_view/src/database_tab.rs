@@ -14,8 +14,8 @@ use gpui::{
     div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, Size, h_flex, tokens::Radius, v_flex,
-    WindowsSurfaceLayer, layered_level_surface_color, 
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowsSurfaceLayer, h_flex,
+    layered_level_surface_color, tokens::Radius, v_flex,
 };
 use one_core::ai_chat::{CodeBlockAction, LanguageMatcher};
 use one_core::connection_restore::{ConnectionRestoreKind, ConnectionRestorePayload};

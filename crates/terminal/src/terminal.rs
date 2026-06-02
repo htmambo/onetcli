@@ -14,7 +14,7 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::{Flags, LineLength};
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty::{self, Options as PtyOptions};
-use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+use alacritty_terminal::vte::ansi::{Color, Processor, StdSyncHandler};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -1030,6 +1030,18 @@ fn build_local_shell(shell: Option<String>, extra_args: Vec<String>) -> Option<t
     }
 }
 
+fn default_local_working_dir() -> Option<PathBuf> {
+    dirs::home_dir()
+}
+
+pub fn resolve_local_working_dir(working_dir: Option<String>) -> Option<PathBuf> {
+    match working_dir {
+        Some(dir) if dir.trim().is_empty() => default_local_working_dir(),
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => default_local_working_dir(),
+    }
+}
+
 /// 准备本地终端的 Shell Integration 环境
 ///
 /// 将 `shell_integration.sh` 写入进程级临时目录 `/tmp/onetcli-<pid>/`，
@@ -1475,6 +1487,7 @@ impl Terminal {
             cwd_file: _,
         } = config;
         let history_shell = shell.clone();
+        let working_directory = resolve_local_working_dir(working_dir.clone());
 
         if let Some(content) = recovery_content.and_then(sanitize_recovery_content) {
             replay_term_output(&term, content.as_bytes(), None);
@@ -1483,7 +1496,7 @@ impl Terminal {
 
         let pty_options = PtyOptions {
             shell: build_local_shell(shell, shell_args),
-            working_directory: working_dir.clone().map(Into::into),
+            working_directory,
             env: env.into_iter().collect(),
             drain_on_exit: true,
             #[cfg(target_os = "windows")]
@@ -1733,6 +1746,14 @@ impl Terminal {
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: Some(session_id),
         })
+    }
+
+    pub fn clear_screen(&mut self, cx: &mut Context<Self>) {
+        let mut term = self.term.lock();
+        term.grid_mut().reset::<Color>();
+        term.selection = None;
+        drop(term);
+        cx.emit(TerminalModelEvent::Wakeup);
     }
 
     /// 创建 SSH 终端
@@ -3119,6 +3140,7 @@ mod tests {
         shell_escape_arg, should_report_ssh_running_processes, SshProcessState, Terminal,
         ConnectionState, TerminalConnectionKind, TerminalMfaPrompt, TerminalMfaRequest,
         TerminalMfaResponder, keyboard_interactive_answers_for_terminal,
+        resolve_local_working_dir,
     };
     use crate::TerminalEvent;
     use crate::history::{
@@ -3149,6 +3171,27 @@ mod tests {
     fn build_cd_command_escapes_newline() {
         let cmd = build_cd_command("a\nb");
         assert_eq!(cmd, "cd -- 'a\nb'");
+    }
+
+    #[test]
+    fn resolve_local_working_dir_uses_home_when_unspecified() {
+        assert_eq!(dirs::home_dir(), resolve_local_working_dir(None));
+    }
+
+    #[test]
+    fn resolve_local_working_dir_keeps_explicit_directory() {
+        assert_eq!(
+            Some(std::path::PathBuf::from("/tmp/onetcli")),
+            resolve_local_working_dir(Some("/tmp/onetcli".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_local_working_dir_treats_blank_as_unspecified() {
+        assert_eq!(
+            dirs::home_dir(),
+            resolve_local_working_dir(Some("  ".to_string()))
+        );
     }
 
     #[test]

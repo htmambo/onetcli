@@ -430,7 +430,7 @@ impl DuckDbPlugin {
 }
 
 fn build_duckdb_ui_manifest() -> DatabaseUiManifest {
-    let default_db_path = one_core::storage::manager::get_config_dir()
+    let default_db_path = one_core::storage::get_config_dir()
         .map(|path| {
             path.join("onetcli_default.duckdb")
                 .to_string_lossy()

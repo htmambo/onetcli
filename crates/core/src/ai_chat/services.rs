@@ -206,7 +206,11 @@ impl SessionService {
         }
 
         // 创建新会话
-        self.create_session(default_name.to_string(), provider_id.to_string(), connection_info)
+        self.create_session(
+            default_name.to_string(),
+            provider_id.to_string(),
+            connection_info,
+        )
     }
 
     /// 获取存储管理器的引用
@@ -258,12 +262,12 @@ pub async fn generate_ai_session_title(
 
     match provider.chat(&request).await {
         Ok(title) => {
-            let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
-            if title.is_empty() {
-                None
-            } else {
-                Some(title)
-            }
+            let title = title
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
+            if title.is_empty() { None } else { Some(title) }
         }
         Err(e) => {
             tracing::warn!("AI 生成会话标题失败: {}", e);

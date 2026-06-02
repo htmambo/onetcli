@@ -13,18 +13,18 @@ use gpui::{
 use gpui_component::menu::DropdownMenu;
 use gpui_component::{
     ActiveTheme, Disableable, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, Size,
-    StyledExt, WindowExt, app_style,
+    StyledExt, WindowExt, WindowsSurfaceLayer, app_style,
     button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
+    layered_level_surface_color,
     list::{List, ListState},
     menu::PopupMenuItem,
     popover::Popover,
     tokens::Radius,
     tooltip::Tooltip,
     v_flex,
-    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{

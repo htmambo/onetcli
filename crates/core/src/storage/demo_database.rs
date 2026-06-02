@@ -4,7 +4,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use tracing::{error, info};
 
-use super::manager::get_config_dir;
+use super::get_config_dir;
 use super::models::{DatabaseType, DbConnectionConfig, StoredConnection};
 use super::repository::ConnectionRepository;
 use super::traits::Repository;

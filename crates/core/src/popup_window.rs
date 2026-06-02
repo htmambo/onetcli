@@ -330,7 +330,7 @@ pub fn open_popup_window_with_should_close<F, E, H>(
         let window = cx.open_window(window_opts, move |window, cx| {
             let on_should_close = Arc::clone(&on_should_close);
             window.on_window_should_close(cx, move |window, cx| on_should_close(window, cx));
-	    // 消除linux中可能出现的窗口直角
+            // 消除linux中可能出现的窗口直角
             window.set_blur_behind_corner_radius(corner_radius);
             let view = create_view_fn(window, cx).into();
             let popup_view =

@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -18,6 +19,7 @@ one-ui.workspace = true
 one-core.workspace = true
 rust-i18n.workspace = true
 dashmap.workspace = true
+futures.workspace = true
 redis_client.workspace = true
 
 [lints]

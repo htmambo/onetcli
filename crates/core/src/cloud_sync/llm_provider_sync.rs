@@ -30,34 +30,36 @@ impl SyncTypeHandler for LlmProviderSyncType {
         let repo = engine
             .storage
             .get::<ProviderRepository>()
-            .ok_or_else(|| {
-                SyncError::StorageError("ProviderRepository not found".to_string())
-            })?;
+            .ok_or_else(|| SyncError::StorageError("ProviderRepository not found".to_string()))?;
 
         repo.list()
             .map_err(|e| SyncError::StorageError(e.to_string()))
     }
 
-    fn insert_local(&self, engine: &SyncEngine, item: &mut ProviderConfig) -> Result<(), SyncError> {
+    fn insert_local(
+        &self,
+        engine: &SyncEngine,
+        item: &mut ProviderConfig,
+    ) -> Result<(), SyncError> {
         let repo = engine
             .storage
             .get::<ProviderRepository>()
-            .ok_or_else(|| {
-                SyncError::StorageError("ProviderRepository not found".to_string())
-            })?;
+            .ok_or_else(|| SyncError::StorageError("ProviderRepository not found".to_string()))?;
 
         repo.insert(item)
             .map_err(|e| SyncError::StorageError(e.to_string()))?;
         Ok(())
     }
 
-    fn update_local_item(&self, engine: &SyncEngine, item: &ProviderConfig) -> Result<(), SyncError> {
+    fn update_local_item(
+        &self,
+        engine: &SyncEngine,
+        item: &ProviderConfig,
+    ) -> Result<(), SyncError> {
         let repo = engine
             .storage
             .get::<ProviderRepository>()
-            .ok_or_else(|| {
-                SyncError::StorageError("ProviderRepository not found".to_string())
-            })?;
+            .ok_or_else(|| SyncError::StorageError("ProviderRepository not found".to_string()))?;
 
         repo.update_from_cloud(item)
             .map_err(|e| SyncError::StorageError(e.to_string()))
@@ -67,9 +69,7 @@ impl SyncTypeHandler for LlmProviderSyncType {
         let repo = engine
             .storage
             .get::<ProviderRepository>()
-            .ok_or_else(|| {
-                SyncError::StorageError("ProviderRepository not found".to_string())
-            })?;
+            .ok_or_else(|| SyncError::StorageError("ProviderRepository not found".to_string()))?;
 
         repo.delete(id)
             .map_err(|e| SyncError::StorageError(e.to_string()))
@@ -84,9 +84,7 @@ impl SyncTypeHandler for LlmProviderSyncType {
         let repo = engine
             .storage
             .get::<ProviderRepository>()
-            .ok_or_else(|| {
-                SyncError::StorageError("ProviderRepository not found".to_string())
-            })?;
+            .ok_or_else(|| SyncError::StorageError("ProviderRepository not found".to_string()))?;
 
         repo.update_sync_status(
             local_id,

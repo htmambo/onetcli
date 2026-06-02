@@ -16,7 +16,7 @@ use crate::streaming_parser::StreamingSqlParser;
 use crate::types::*;
 use anyhow::{Error, Result, anyhow, bail};
 use async_trait::async_trait;
-use one_core::storage::manager::get_queries_dir;
+use one_core::storage::get_queries_dir;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
 use rust_i18n::t;
 use sqlparser::ast;

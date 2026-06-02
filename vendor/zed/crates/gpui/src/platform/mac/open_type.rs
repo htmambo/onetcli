@@ -7,7 +7,7 @@ use core_foundation::{
         CFArray, CFArrayAppendArray, CFArrayAppendValue, CFArrayCreateMutable, CFArrayGetCount,
         CFArrayGetValueAtIndex, CFArrayRef, CFMutableArrayRef, kCFTypeArrayCallBacks,
     },
-    base::{CFRelease, TCFType, kCFAllocatorDefault},
+    base::{CFRetain, CFRelease, TCFType, kCFAllocatorDefault},
     dictionary::{
         CFDictionaryCreate, kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks,
     },
@@ -105,8 +105,21 @@ fn generate_fallback_array(fallbacks: &FontFallbacks, font_ref: CTFontRef) -> CF
             let name = CFString::from(user_fallback.as_str());
             let fallback_desc =
                 CTFontDescriptorCreateWithNameAndSize(name.as_concrete_TypeRef(), 0.0);
-            CFArrayAppendValue(fallback_array, fallback_desc as _);
-            CFRelease(fallback_desc as _);
+
+            // macOS Tahoe (26) 将部分家族名（如 "PingFang SC"）解析至
+            // /System/Library/PrivateFrameworks/FontServices.framework/Resources/Reserved/ 下的
+            // 轻量 UI-only 字体（PingFangUI.ttc），其字形 ID 与正式字体不同，
+            // 导致 GPUI 光栅化时产生乱码。此处过滤掉指向 Reserved 路径的描述符，
+            // 让后续 append_system_fallbacks 通过系统级联列表补回正确的正式字体。
+            let desc = CTFontDescriptor::wrap_under_create_rule(fallback_desc);
+            if let Some(path) = desc.font_path() {
+                let path_str = path.to_string_lossy();
+                if path_str.contains("FontServices.framework/Resources/Reserved") {
+                    continue;
+                }
+            }
+            CFRetain(desc.as_concrete_TypeRef() as _);
+            CFArrayAppendValue(fallback_array, desc.as_concrete_TypeRef() as _);
         }
         append_system_fallbacks(fallback_array, font_ref);
         fallback_array
@@ -118,9 +131,20 @@ fn append_system_fallbacks(fallback_array: CFMutableArrayRef, font_ref: CTFontRe
         let preferred_languages: CFArray<CFString> =
             CFArray::wrap_under_create_rule(CFLocaleCopyPreferredLanguages());
 
+        let mut merged_languages = vec![
+            CFString::new("zh-Hans"),
+            CFString::new("zh-Hant"),
+            CFString::new("ja"),
+            CFString::new("ko"),
+        ];
+        for lang in preferred_languages.iter() {
+            merged_languages.push(lang.clone());
+        }
+        let languages = CFArray::from_CFTypes(&merged_languages);
+
         let default_fallbacks = CTFontCopyDefaultCascadeListForLanguages(
             font_ref,
-            preferred_languages.as_concrete_TypeRef(),
+            languages.as_concrete_TypeRef(),
         );
         let default_fallbacks: CFArray<CTFontDescriptor> =
             CFArray::wrap_under_create_rule(default_fallbacks);
@@ -128,7 +152,7 @@ fn append_system_fallbacks(fallback_array: CFMutableArrayRef, font_ref: CTFontRe
         default_fallbacks
             .iter()
             .filter(|desc| desc.font_path().is_some())
-            .map(|desc| {
+            .for_each(|desc| {
                 CFArrayAppendValue(fallback_array, desc.as_concrete_TypeRef() as _);
             });
     }

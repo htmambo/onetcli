@@ -563,9 +563,11 @@ impl AiChatPanel {
 
     /// 确保会话存在，如果不存在则创建新会话
     fn ensure_session_id(&mut self, provider_id: &str, cx: &mut Context<Self>) -> Option<i64> {
-        let result = self
-            .engine
-            .ensure_session_id(provider_id, t!("AiChat.new_session_name").as_ref(), None);
+        let result = self.engine.ensure_session_id(
+            provider_id,
+            t!("AiChat.new_session_name").as_ref(),
+            None,
+        );
         if result.is_some() && self.engine.is_new_session {
             // 新创建的会话，需要刷新历史列表（ensure_session_id 已经设置了 is_new_session）
             self.load_history_sessions(cx);

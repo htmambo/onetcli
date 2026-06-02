@@ -659,7 +659,11 @@ impl Certificate {
             CertificateKind::SshPrivateKey => {
                 let username = self.username().unwrap_or("");
                 let has_key = self.key_path().map(|k| !k.is_empty()).unwrap_or(false);
-                let key_info = if has_key { "[已存储私钥]" } else { "未设置私钥" };
+                let key_info = if has_key {
+                    "[已存储私钥]"
+                } else {
+                    "未设置私钥"
+                };
                 format!("{} / {}", username, key_info)
             }
         }
@@ -1248,8 +1252,7 @@ fn apply_certificate_to_db_config(
                         changed = true;
                     }
                     let key_content = certificate.ssh_private_key().unwrap_or("");
-                    if config.extra_params.get("ssh_private_key")
-                        != Some(&key_content.to_string())
+                    if config.extra_params.get("ssh_private_key") != Some(&key_content.to_string())
                     {
                         config
                             .extra_params

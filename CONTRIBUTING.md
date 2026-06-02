@@ -38,6 +38,27 @@ For Windows, you can run the following command in PowerShell:
 .\script\install-window.ps1
 ```
 
+### Minimum verification path
+
+对于结构调整、启动链路、核心状态管理和同步服务改动，优先执行以下最小验证集：
+
+```bash
+cargo fmt --check
+cargo check -p main
+cargo check -p one-core
+cargo check -p terminal_view
+cargo test -p main
+cargo test -p gpui-component
+cd sync_server && npm run check
+```
+
+如果改动跨多个 crate、共享协议或持久化逻辑，再补充：
+
+```bash
+cargo check --workspace
+cargo test --all
+```
+
 ### Run story
 
 There are a lot of UI test cases in the `crates/story` folder, if you change the existing features you can run the tests to make sure they are working.

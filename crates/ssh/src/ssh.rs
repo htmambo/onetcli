@@ -584,10 +584,7 @@ where
         } => {
             // Write key content to a temp file since russh's decode_secret_key reads from a file path.
             let temp_dir = std::env::temp_dir();
-            let temp_key_path = temp_dir.join(format!(
-                "onetcli_ssh_key_{}",
-                uuid::Uuid::new_v4()
-            ));
+            let temp_key_path = temp_dir.join(format!("onetcli_ssh_key_{}", uuid::Uuid::new_v4()));
             std::fs::write(&temp_key_path, &key_content)?;
             let key_pair = match load_secret_key(&temp_key_path, passphrase.as_deref()) {
                 Ok(kp) => {

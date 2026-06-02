@@ -273,6 +273,10 @@ Home:
     en: Keep both versions
     zh-CN: 保留两个版本
     zh-HK: 保留兩個版本
+  sync_conflict_apply:
+    en: Apply
+    zh-CN: 应用
+    zh-HK: 套用
   ai_assistant:
     en: AI Assistant
     zh-CN: AI 助手

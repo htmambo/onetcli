@@ -124,8 +124,12 @@ impl CloudSyncService {
         if queue.is_empty() {
             self.operation_queues.remove(key);
         } else {
-            if self.operation_queues.len() >= MAX_OPERATION_QUEUES && !self.operation_queues.contains_key(key) {
-                tracing::warn!("Operation queue limit ({MAX_OPERATION_QUEUES}) reached, dropping oldest");
+            if self.operation_queues.len() >= MAX_OPERATION_QUEUES
+                && !self.operation_queues.contains_key(key)
+            {
+                tracing::warn!(
+                    "Operation queue limit ({MAX_OPERATION_QUEUES}) reached, dropping oldest"
+                );
                 if let Some(oldest_key) = self.operation_queues.keys().next().cloned() {
                     self.operation_queues.remove(&oldest_key);
                 }
@@ -446,7 +450,10 @@ impl CloudSyncService {
         let key_version = self.key_version();
 
         Ok(CloudSyncData {
-            id: item.cloud_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            id: item
+                .cloud_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             owner_id: self.user_id.clone().unwrap_or_default(),
             data_type: data_type::LLM_PROVIDER.to_string(),
             name: item.name.clone(),

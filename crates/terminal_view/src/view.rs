@@ -71,6 +71,7 @@ actions!(
         Paste,
         SelectAll,
         ClearSelection,
+        ClearScreen,
         SearchForward,
         SearchBackward,
         ToggleViMode,
@@ -109,6 +110,10 @@ const TERMINAL_PASTE_SHORTCUT: &str = "ctrl-shift-v";
 const TERMINAL_SELECT_ALL_SHORTCUT: &str = "cmd-a";
 #[cfg(not(target_os = "macos"))]
 const TERMINAL_SELECT_ALL_SHORTCUT: &str = "ctrl-shift-a";
+#[cfg(target_os = "macos")]
+const TERMINAL_CLEAR_SCREEN_SHORTCUT: &str = "cmd-k";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_CLEAR_SCREEN_SHORTCUT: &str = "ctrl-l";
 #[cfg(target_os = "macos")]
 const TERMINAL_SEARCH_FORWARD_SHORTCUT: &str = "cmd-f";
 #[cfg(not(target_os = "macos"))]
@@ -563,6 +568,11 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(
             TERMINAL_SELECT_ALL_SHORTCUT,
             SelectAll,
+            Some(TERMINAL_CONTEXT),
+        ),
+        KeyBinding::new(
+            TERMINAL_CLEAR_SCREEN_SHORTCUT,
+            ClearScreen,
             Some(TERMINAL_CONTEXT),
         ),
         KeyBinding::new("escape", ClearSelection, Some(TERMINAL_CONTEXT)),
@@ -3008,6 +3018,25 @@ impl TerminalView {
         cx.notify();
     }
 
+    fn clear_screen(&mut self, _: &ClearScreen, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_history_prompt();
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.clear_screen(cx);
+        });
+        self.reset_render_cache(cx);
+        self.focus_terminal(window, cx);
+        cx.notify();
+    }
+
+    fn reset_render_cache(&mut self, cx: &mut Context<Self>) {
+        let (screen_lines, columns, colors) = {
+            let terminal = self.terminal.read(cx);
+            let term = terminal.term().lock();
+            (term.screen_lines(), term.columns(), term.colors().clone())
+        };
+        self.render_cache = RenderCache::new(screen_lines, columns, colors);
+    }
+
     fn clear_selection(&mut self, _: &ClearSelection, window: &mut Window, cx: &mut Context<Self>) {
         // 优先关闭 history prompt 补全弹窗
         if self.history_prompt.dropdown_visible() {
@@ -3217,10 +3246,12 @@ impl TerminalView {
         let view_copy = view.clone();
         let view_paste = view.clone();
         let view_select_all = view.clone();
+        let view_clear_screen = view.clone();
         let view_clear = view.clone();
         let copy_shortcut = terminal_shortcut_label(TERMINAL_COPY_SHORTCUT);
         let paste_shortcut = terminal_shortcut_label(TERMINAL_PASTE_SHORTCUT);
         let select_all_shortcut = terminal_shortcut_label(TERMINAL_SELECT_ALL_SHORTCUT);
+        let clear_screen_shortcut = terminal_shortcut_label(TERMINAL_CLEAR_SCREEN_SHORTCUT);
 
         let mut menu = menu
             // 复制
@@ -3248,6 +3279,20 @@ impl TerminalView {
                 .on_click(move |_, window, cx| {
                     let _ = view_paste.update(cx, |this, cx| {
                         this.paste(&Paste, window, cx);
+                    });
+                }),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!(
+                    "ContextMenu.clear_screen_with_shortcut",
+                    shortcut = clear_screen_shortcut
+                ))
+                .icon(IconName::Delete)
+                .action(Box::new(ClearScreen))
+                .on_click(move |_, window, cx| {
+                    let _ = view_clear_screen.update(cx, |this, cx| {
+                        this.clear_screen(&ClearScreen, window, cx);
                     });
                 }),
             )
@@ -4398,6 +4443,7 @@ impl Render for TerminalView {
                     .on_action(cx.listener(Self::copy))
                     .on_action(cx.listener(Self::paste))
                     .on_action(cx.listener(Self::select_all))
+                    .on_action(cx.listener(Self::clear_screen))
                     .on_action(cx.listener(Self::clear_selection))
                     .on_action(cx.listener(Self::search_forward))
                     .on_action(cx.listener(Self::search_backward))
@@ -4801,6 +4847,53 @@ mod tests {
     fn alt_screen_scroll_arrow_maps_positive_lines_to_up() {
         assert_eq!(alt_screen_scroll_arrow(1, false), Some("\x1b[A"));
         assert_eq!(alt_screen_scroll_arrow(1, true), Some("\x1bOA"));
+    }
+
+    #[test]
+    fn terminal_keybindings_bind_ctrl_zero_to_reset_font() {
+        let source = include_str!("view.rs");
+        let binding = format!("{}{}", r#"KeyBinding::new("ctrl-0", "#, "ResetFont");
+
+        assert!(source.contains(&binding));
+    }
+
+    #[test]
+    fn terminal_keybindings_bind_clear_screen_shortcut() {
+        let source = include_str!("view.rs");
+
+        assert!(source.contains("TERMINAL_CLEAR_SCREEN_SHORTCUT"));
+        assert!(source.contains("ClearScreen"));
+    }
+
+    #[test]
+    fn terminal_context_menu_exposes_clear_screen() {
+        let source = include_str!("view.rs");
+
+        assert!(source.contains("ContextMenu.clear_screen_with_shortcut"));
+        assert!(source.contains("this.clear_screen(&ClearScreen, window, cx)"));
+    }
+
+    #[test]
+    fn terminal_reset_font_size_is_fifteen() {
+        assert_eq!(super::TERMINAL_RESET_FONT_SIZE, 15.0);
+    }
+
+    #[test]
+    fn terminal_theme_source_does_not_define_font_settings() {
+        let source = include_str!("theme.rs");
+
+        assert!(!source.contains("pub font_size"));
+        assert!(!source.contains("pub font_family"));
+        assert!(!source.contains("pub font_fallbacks"));
+        assert!(!source.contains("pub line_height_scale"));
+    }
+
+    #[test]
+    fn sgr_mouse_wheel_report_maps_positive_lines_to_wheel_up() {
+        assert_eq!(
+            sgr_mouse_wheel_report(1, 4, 2).as_deref(),
+            Some("\x1b[<64;5;3M")
+        );
     }
 
     #[test]

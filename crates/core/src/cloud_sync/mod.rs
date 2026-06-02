@@ -21,12 +21,12 @@ pub mod blob_vault;
 mod blob_vault_driver;
 mod certificate_sync;
 pub mod client;
-mod llm_provider_sync;
 #[cfg(test)]
 mod conflict;
 mod connection_sync;
 pub mod engine;
 mod generic_sync;
+mod llm_provider_sync;
 mod models;
 pub mod oauth;
 pub(crate) mod queue;

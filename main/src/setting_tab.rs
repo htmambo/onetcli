@@ -10,19 +10,20 @@ use gpui::{
     AnyElement, App, AppContext, AsyncApp, Axis, Bounds, ClickEvent, Context, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
     Pixels, Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance,
-    WindowBounds, div, point, px, size, WindowBackgroundAppearance,
+    WindowBackgroundAppearance, WindowBounds, div, point, px, size,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, Theme, ThemeMode,
-    ThemeRegistry, TitleBar, WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, IndexPath, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
+    Sizable, Size, Theme, ThemeMode, ThemeRegistry, TitleBar, WindowExt, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
     group_box::GroupBoxVariant,
     h_flex,
     input::{Input, InputState},
     kbd::Kbd,
+    layered_level_surface_color,
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     setting::{
@@ -32,7 +33,6 @@ use gpui_component::{
     switch::Switch,
     tokens::Radius,
     v_flex,
-    MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::ai_chat::GlobalChatSettings;
 use one_core::certificate_manager::CertificateManagerView;
@@ -42,7 +42,7 @@ use one_core::cloud_sync::{
 use one_core::gpui_tokio::Tokio;
 use one_core::llm::manager::GlobalProviderState;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
-use one_core::storage::manager::get_config_dir;
+use one_core::storage::get_config_dir;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
 use reqwest_client::ReqwestClient;
@@ -1357,7 +1357,8 @@ fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
         let store = global.0.clone();
         store.update(cx, |store: &mut TerminalSettingsStore, cx| {
             let mut next = store.snapshot();
-            next.check_running_processes_on_exit = settings.terminal_check_running_processes_on_exit;
+            next.check_running_processes_on_exit =
+                settings.terminal_check_running_processes_on_exit;
             store.replace(next, cx);
         });
     }

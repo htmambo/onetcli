@@ -32,7 +32,9 @@ impl FromSqliteRow for ChatSession {
             database_name: row.get("database_name").ok(),
             database_type: row.get("database_type").ok(),
             schema_name: row.get("schema_name").ok(),
-            title_source: row.get("title_source").unwrap_or_else(|_| "extracted".to_string()),
+            title_source: row
+                .get("title_source")
+                .unwrap_or_else(|_| "extracted".to_string()),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })

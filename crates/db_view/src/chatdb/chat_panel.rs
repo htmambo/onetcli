@@ -63,7 +63,10 @@ use one_core::ai_chat::components::{
     ModelSettings, ProviderItem, SessionData, SessionListConfig, SessionListDelegate,
     SessionListHost,
 };
-use one_core::ai_chat::services::{SessionConnectionInfo, SessionError, SessionService, extract_session_name, generate_ai_session_title};
+use one_core::ai_chat::services::{
+    SessionConnectionInfo, SessionError, SessionService, extract_session_name,
+    generate_ai_session_title,
+};
 use one_core::llm::chat_history::SessionRepository;
 
 // ============================================================================
@@ -738,7 +741,9 @@ impl ChatPanel {
         let session_id = self.session_id;
         let provider_id_str_clone = provider_id_str.clone();
         let message_content = content.clone();
-        let ai_title_enabled = cx.global::<one_core::ai_chat::GlobalChatSettings>().ai_auto_generate_session_title;
+        let ai_title_enabled = cx
+            .global::<one_core::ai_chat::GlobalChatSettings>()
+            .ai_auto_generate_session_title;
 
         // 创建取消令牌
         let cancel_token = CancellationToken::new();
@@ -750,20 +755,22 @@ impl ChatPanel {
         let mut affinity = self.session_affinity.clone();
 
         // 组装连接信息（用于入库 chat_sessions）
-        let connection_info = ai_input.read(cx).get_connection_info().and_then(
-            |(conn_id, database, schema)| {
-                let db_state = cx.global::<GlobalDbState>().clone();
-                let db_type = db_state
-                    .get_config(&conn_id)
-                    .map(|c| c.database_type.as_str().to_string());
-                Some(SessionConnectionInfo {
-                    connection_id: Some(conn_id),
-                    database_name: database,
-                    database_type: db_type,
-                    schema_name: schema,
-                })
-            },
-        );
+        let connection_info =
+            ai_input
+                .read(cx)
+                .get_connection_info()
+                .and_then(|(conn_id, database, schema)| {
+                    let db_state = cx.global::<GlobalDbState>().clone();
+                    let db_type = db_state
+                        .get_config(&conn_id)
+                        .map(|c| c.database_type.as_str().to_string());
+                    Some(SessionConnectionInfo {
+                        connection_id: Some(conn_id),
+                        database_name: database,
+                        database_type: db_type,
+                        schema_name: schema,
+                    })
+                });
 
         // 注入数据库元数据 capability（如果有数据库连接）
         let db_metadata =
@@ -876,7 +883,8 @@ impl ChatPanel {
                         {
                             session.name = title;
                             session.title_source = "ai_generated".to_string();
-                            let _ = session_service.storage_manager()
+                            let _ = session_service
+                                .storage_manager()
                                 .get::<SessionRepository>()
                                 .map(|repo| repo.update(&session));
 
@@ -2195,12 +2203,7 @@ impl ChatPanel {
             .w_full()
             .px_2()
             .py_2()
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .child(self.ai_input.clone()),
-            )
+            .child(v_flex().w_full().min_w_0().child(self.ai_input.clone()))
     }
 }
 
