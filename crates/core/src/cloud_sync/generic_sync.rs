@@ -92,8 +92,9 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
     );
 
     // ========== 6. 计算同步计划 ==========
+    let pending_cloud_ids = get_pending_cloud_ids(engine, handler);
     let plan = calculate_sync_plan(
-        engine,
+        &pending_cloud_ids,
         handler,
         &local_items,
         &active_cloud_data,
@@ -530,8 +531,11 @@ fn process_soft_deletions<H: SyncTypeHandler>(
 }
 
 /// 计算同步计划（通用版，按 updated_at 比较，无冲突检测）
+///
+/// 入参 `pending_cloud_ids` 是本地已登记的待删除云端 ID 集合；该函数与
+/// `SyncEngine` 解耦，便于单测覆盖「云端有同名但本地禁用按名称回链」等分支。
 fn calculate_sync_plan<H: SyncTypeHandler>(
-    engine: &SyncEngine,
+    pending_cloud_ids: &HashSet<String>,
     handler: &H,
     local_items: &[H::Item],
     cloud_data_list: &[CloudSyncData],
@@ -542,24 +546,37 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
     let cloud_map: HashMap<&str, &CloudSyncData> =
         cloud_data_list.iter().map(|d| (d.id.as_str(), d)).collect();
 
-    let local_cloud_ids: HashSet<String> = local_items
+    // 仅启用同步的本地项参与双向同步；未启用的项保留在本地，
+    // 不会被上传，也不会被云端同名项匹配覆盖。
+    let sync_enabled_locals: Vec<&H::Item> = local_items
+        .iter()
+        .filter(|item| item.sync_enabled())
+        .collect();
+
+    let local_cloud_ids: HashSet<String> = sync_enabled_locals
         .iter()
         .filter_map(|item| item.cloud_id().map(|s| s.to_string()))
         .collect();
 
-    let local_unlinked_by_name: HashMap<&str, &H::Item> = local_items
+    // 按名称回链候选：仅保留 handler 显式允许（默认全部允许）的本地项，
+    // 用于在云端已有同名条目时建立 cloud_id 关联。
+    let local_unlinked_by_name: HashMap<&str, &H::Item> = sync_enabled_locals
         .iter()
         .filter(|item| item.cloud_id().is_none())
-        .map(|item| (item.item_name(), item))
+        .filter(|item| handler.should_link_unlinked_local_by_name(item))
+        .map(|item| (item.item_name(), *item))
         .collect();
 
-    let local_all_by_name: HashMap<&str, &H::Item> = local_items
+    // 兜底映射：仅用于"本地已有同 cloud_id 但当前未关联"场景；
+    // 也只覆盖允许按名称链接的本地项，避免被云端旧值覆盖。
+    let local_all_by_name: HashMap<&str, &H::Item> = sync_enabled_locals
         .iter()
-        .map(|item| (item.item_name(), item))
+        .filter(|item| handler.should_link_unlinked_local_by_name(item))
+        .map(|item| (item.item_name(), *item))
         .collect();
 
     // 处理本地数据
-    for local_item in local_items {
+    for local_item in sync_enabled_locals.iter().copied() {
         match local_item.cloud_id() {
             Some(cloud_id) => {
                 if let Some(cloud_data) = cloud_map.get(cloud_id) {
@@ -605,13 +622,29 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
                     .any(|name| name == local_item.item_name());
                 if !has_cloud_match {
                     plan.to_upload.push(local_item.clone());
+                } else if handler.should_link_unlinked_local_by_name(local_item) {
+                    // 允许按名称回链：云端有同名条目，留给云端处理循环做关联。
+                    tracing::debug!(
+                        "[同步计划] {} '{}' 与云端已有同名项匹配，等待回链",
+                        handler.display_name(),
+                        local_item.item_name()
+                    );
+                } else {
+                    // 不允许按名称回链：云端已有同名但本地是新建，优先保留本地数据，
+                    // 不应被云端旧值通过 `update_from_cloud` 覆盖；将本地项推入上传队列，
+                    // 由云端去重策略（多端冲突由用户在 UI 中处理）兜底。
+                    tracing::info!(
+                        "[同步计划] {} '{}' 不与云端同名项合并，标记为新建上传",
+                        handler.display_name(),
+                        local_item.item_name()
+                    );
+                    plan.to_upload.push(local_item.clone());
                 }
             }
         }
     }
 
     // 处理云端新增数据
-    let pending_cloud_ids = get_pending_cloud_ids(engine, handler);
     for cloud_data in cloud_data_list {
         if !local_cloud_ids.contains(&cloud_data.id) {
             if pending_cloud_ids.contains(&cloud_data.id) {
@@ -815,9 +848,137 @@ async fn download_and_update_item<H: SyncTypeHandler>(
 #[cfg(test)]
 mod tests {
     use super::{
-        LinkedSyncAction, decide_linked_sync_action, should_keep_local_item_on_cloud_delete,
+        LinkedSyncAction, calculate_sync_plan, decide_linked_sync_action,
+        should_keep_local_item_on_cloud_delete,
     };
+    use crate::cloud_sync::models::CloudSyncData;
+    use crate::cloud_sync::sync_type::SyncTypeHandler;
+    use crate::llm::types::{ProviderConfig, ProviderType};
     use crate::storage::Workspace;
+    use std::collections::{HashMap, HashSet};
+    use super::super::llm_provider_sync::LlmProviderSyncType;
+
+    /// 回归用例：用户自建 LLM 提供商（OpenAI）本地新增，云端已有同名记录。
+    ///
+    /// 期望（依据 `should_link_unlinked_local_by_name = false` 策略）：
+    /// - 本项进入 `to_upload`（保留本地，被云端去重策略兜底）。
+    /// - `to_update_local` 为空（核心：本地新建**不**会被云端旧值通过
+    ///   `update_from_cloud` 静默覆盖，这正是该 bug 修复的关键断言）。
+    /// - `to_download` 可能非空（云端同名条目仍会被下载到本地，标记为
+    ///   已知 trade-off：可能产生重复云端记录，由云端去重或用户在 UI 中
+    ///   处理）。
+    #[test]
+    fn calculate_sync_plan_preserves_user_provider_when_cloud_has_same_name() {
+        let handler = LlmProviderSyncType;
+
+        let mut local = ProviderConfig::default();
+        local.id = 1;
+        local.name = "user-openai".to_string();
+        local.provider_type = ProviderType::OpenAI;
+        local.cloud_id = None;
+        local.updated_at = 1_700_000_000;
+        let local_items = vec![local.clone()];
+
+        let cloud = CloudSyncData {
+            id: "cloud-uuid-1".to_string(),
+            owner_id: "owner".to_string(),
+            data_type: "llm_provider".to_string(),
+            name: "user-openai".to_string(),
+            encrypted_data: String::new(),
+            key_version: 1,
+            checksum: String::new(),
+            version: 1,
+            updated_at: 1_699_000_000_000,
+            deleted_at: None,
+        };
+        let cloud_data_list = vec![cloud.clone()];
+
+        let mut cloud_name_map = HashMap::new();
+        cloud_name_map.insert(cloud.id.clone(), cloud.name.clone());
+
+        let pending_cloud_ids = HashSet::new();
+
+        let plan = calculate_sync_plan(
+            &pending_cloud_ids,
+            &handler,
+            &local_items,
+            &cloud_data_list,
+            &cloud_name_map,
+        )
+        .expect("计算同步计划应当成功");
+
+        // 核心断言：本地用户项必须被推入上传队列
+        assert_eq!(plan.to_upload.len(), 1, "本地项应当被推入上传队列");
+        assert_eq!(plan.to_upload[0].id, local.id, "上传目标必须是本地用户项");
+
+        // 核心断言：本地新建不得被云端旧值通过 update_from_cloud 覆盖
+        // （这是 bug 修复的关键：`to_update_local` 必须为空）
+        assert!(
+            plan.to_update_local.is_empty(),
+            "云端同名项不得通过 update_from_cloud 覆盖本地新建"
+        );
+
+        // 本地无 cloud_id，不应走 to_update_cloud 分支
+        assert!(
+            plan.to_update_cloud.is_empty(),
+            "本地无 cloud_id，不应走 to_update_cloud 分支"
+        );
+        // 已知 trade-off：to_download 可能非空，云端同名项被下载后由
+        // 云端去重/用户 UI 处理
+    }
+
+    /// 回归用例：内置 OnetCli 提供商本地新增，云端已有同名记录。
+    ///
+    /// 期望：本地项**不**进入 `to_upload`（允许按名称回链），云端条目也
+    /// **不**进入 `to_download`（将被云端处理循环关联）。
+    #[test]
+    fn calculate_sync_plan_keeps_builtin_provider_unlinked_for_name_backfill() {
+        let handler = LlmProviderSyncType;
+
+        let mut local = ProviderConfig::default();
+        local.id = 2;
+        local.name = "OnetCli AI".to_string();
+        local.provider_type = ProviderType::OnetCli;
+        local.cloud_id = None;
+        let local_items = vec![local.clone()];
+
+        let cloud = CloudSyncData {
+            id: "cloud-uuid-2".to_string(),
+            owner_id: "owner".to_string(),
+            data_type: "llm_provider".to_string(),
+            name: "OnetCli AI".to_string(),
+            encrypted_data: String::new(),
+            key_version: 1,
+            checksum: String::new(),
+            version: 1,
+            updated_at: 1_699_000_000_000,
+            deleted_at: None,
+        };
+        let cloud_data_list = vec![cloud.clone()];
+
+        let mut cloud_name_map = HashMap::new();
+        cloud_name_map.insert(cloud.id.clone(), cloud.name.clone());
+
+        let pending_cloud_ids = HashSet::new();
+
+        let plan = calculate_sync_plan(
+            &pending_cloud_ids,
+            &handler,
+            &local_items,
+            &cloud_data_list,
+            &cloud_name_map,
+        )
+        .expect("计算同步计划应当成功");
+
+        assert!(
+            plan.to_upload.is_empty(),
+            "内置项应允许按名称回链，不应被推入上传队列"
+        );
+        assert!(
+            plan.to_download.is_empty(),
+            "云端同名项应留给回链处理，不应被下载"
+        );
+    }
 
     #[test]
     fn non_sync_state_items_keep_original_timestamp_comparison() {

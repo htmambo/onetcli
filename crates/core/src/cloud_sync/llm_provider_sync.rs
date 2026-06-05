@@ -120,4 +120,51 @@ impl SyncTypeHandler for LlmProviderSyncType {
     fn pending_deletion_entity_type(&self) -> &'static str {
         "llm_provider"
     }
+
+    /// LLM Provider 的按名称回链策略：
+    /// - 内置（`OnetCli`）项允许按名称回链，便于跨设备共享同一份全局配置；
+    /// - 用户自建项**不**回链，避免本地新增的 API Key/模型等被云端旧值
+    ///   通过 `update_from_cloud` 静默覆盖（"新增的也会消失"）。
+    fn should_link_unlinked_local_by_name(&self, item: &ProviderConfig) -> bool {
+        item.provider_type.is_builtin()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LlmProviderSyncType;
+    use crate::cloud_sync::sync_type::SyncTypeHandler;
+    use crate::llm::types::{ProviderConfig, ProviderType};
+
+    fn provider(provider_type: ProviderType, name: &str) -> ProviderConfig {
+        ProviderConfig {
+            id: 0,
+            name: name.to_string(),
+            provider_type,
+            ..Default::default()
+        }
+    }
+
+    /// 回归用例：内置 OnetCli 提供商允许按名称回链（跨设备共享同一份配置）。
+    #[test]
+    fn builtin_provider_should_link_by_name() {
+        let handler = LlmProviderSyncType;
+        let item = provider(ProviderType::OnetCli, "OnetCli AI");
+        assert!(handler.should_link_unlinked_local_by_name(&item));
+    }
+
+    /// 回归用例：用户自建提供商不允许按名称回链，避免云端旧值覆盖本地新增。
+    /// 覆盖 OpenAI / Anthropic / OpenAICompatible / AzureOpenAI 等所有 user_configurable 类型。
+    #[test]
+    fn user_providers_should_not_link_by_name() {
+        let handler = LlmProviderSyncType;
+        for pt in ProviderType::user_configurable() {
+            let item = provider(pt, "user-provider");
+            assert!(
+                !handler.should_link_unlinked_local_by_name(&item),
+                "{:?} 应当禁用按名称回链以保护本地新增数据",
+                pt
+            );
+        }
+    }
 }

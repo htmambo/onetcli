@@ -36,6 +36,13 @@ pub(crate) trait SyncableItem: Clone + Send + Sync + 'static {
     fn uses_sync_state(&self) -> bool {
         false
     }
+
+    /// 本地项是否启用了云同步（默认 `true`）。
+    /// 关闭同步的项不应进入 `to_upload` / `to_update_local` 等本地驱动的同步动作，
+    /// 也不应在云端匹配阶段被作为回链候选。
+    fn sync_enabled(&self) -> bool {
+        true
+    }
 }
 
 /// 同步计划（通用版）
@@ -178,5 +185,14 @@ pub(crate) trait SyncTypeHandler: Send + Sync + 'static {
         } else {
             Ok(PendingDeletionDecision::DeleteCloud)
         }
+    }
+
+    /// 本地 `cloud_id` 为空的项是否允许按"名称"回链到云端同名项。
+    ///
+    /// 默认 `true` 保持向后兼容。**LLM Provider** 等允许用户自由新增的
+    /// 类型应针对非内置项返回 `false`，避免本地新增的配置被云端旧值
+    /// 通过 `update_from_cloud` 静默覆盖。
+    fn should_link_unlinked_local_by_name(&self, _item: &Self::Item) -> bool {
+        true
     }
 }

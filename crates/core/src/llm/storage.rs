@@ -266,6 +266,18 @@ impl Repository for ProviderRepository {
     }
 
     fn insert(&self, item: &mut Self::Entity) -> Result<i64> {
+        // 默认提供商去重（兜底）：如果新插入项设为默认，先将所有现有默认项取消。
+        // 此路径覆盖「云端下载新增」场景（`to_download` → `insert_local`）：
+        // - 同步前本地有默认 A，云端下载新增默认 B，不去重会产生两个默认。
+        // - 插入场景下 `item.id` 可能为 0（即将自增），无法用 `id != ?1` 排除，
+        //   故直接清空所有默认即可，新插入的行随后会被显式置为 1。
+        if item.is_default {
+            self.conn.with_connection(|conn| {
+                conn.execute("UPDATE llm_providers SET is_default = 0", params![])?;
+                Ok(())
+            })?;
+        }
+
         let id = item.id;
         let name = item.name.clone();
         let provider_type = item.provider_type.as_str().to_string();
@@ -315,6 +327,19 @@ impl Repository for ProviderRepository {
     }
 
     fn update(&self, item: &Self::Entity) -> Result<()> {
+        // 默认提供商去重（兜底）：如果当前项设为默认，先将其他项取消默认。
+        // 与 `update_from_cloud` 保持一致，确保"同一时刻仅一个默认"的不变量
+        // 在任何调用路径（UI 切换、批量写入、修复脚本）下都被强制约束。
+        if item.is_default {
+            self.conn.with_connection(|conn| {
+                conn.execute(
+                    "UPDATE llm_providers SET is_default = 0 WHERE id != ?1",
+                    params![item.id],
+                )?;
+                Ok(())
+            })?;
+        }
+
         let id = item.id;
         let name = item.name.clone();
         let provider_type = item.provider_type.as_str().to_string();

@@ -196,4 +196,29 @@ impl SyncableItem for ProviderConfig {
     fn uses_sync_state(&self) -> bool {
         false
     }
+
+    /// 关闭同步的提供商不应被上传或被云端匹配覆盖。
+    fn sync_enabled(&self) -> bool {
+        self.sync_enabled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProviderConfig;
+    use crate::cloud_sync::sync_type::SyncableItem;
+
+    /// 回归用例：`sync_enabled = false` 的提供商在同步计算时应被排除。
+    /// 否则关闭同步的本地条目会被云端同名项覆盖。
+    #[test]
+    fn sync_disabled_provider_excluded_from_sync() {
+        let mut item = ProviderConfig::default();
+        assert!(item.sync_enabled, "默认应启用同步");
+
+        item.sync_enabled = false;
+        assert!(
+            !item.sync_enabled(),
+            "关闭同步的提供商应当不参与同步"
+        );
+    }
 }
