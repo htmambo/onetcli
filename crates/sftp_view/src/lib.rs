@@ -3866,7 +3866,7 @@ impl SftpView {
 }
 
 #[cfg(test)]
-mod tests {
+mod listing_tests {
     use super::{initial_remote_path, resolved_remote_path};
 
     #[test]

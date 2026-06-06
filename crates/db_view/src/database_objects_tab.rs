@@ -1190,7 +1190,7 @@ impl TabContent for DatabaseObjectsPanel {
 }
 
 #[cfg(test)]
-mod tests {
+mod tab_title_tests {
     use super::*;
 
     fn database_node() -> DbNode {

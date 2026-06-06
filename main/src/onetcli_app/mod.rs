@@ -993,10 +993,8 @@ impl Render for OnetCliApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AppCloseDecision, AppCloseGuard, ConnectionStats, build_status_bar_title,
-        build_window_title,
-    };
+    use super::close_guard::{AppCloseDecision, AppCloseGuard};
+    use super::{ConnectionStats, build_status_bar_title, build_window_title};
 
     #[test]
     fn 活动标签存在时拼接应用名和标签名() {
