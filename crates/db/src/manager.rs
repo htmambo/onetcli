@@ -2523,6 +2523,8 @@ mod tests {
             database: Some("postgres".to_string()),
             service_name: None,
             sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
             workspace_id: None,
             extra_params: Default::default(),
         }

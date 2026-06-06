@@ -49,9 +49,11 @@ async fn external_connection_uses_mock_local_socket_driver() {
         port: 0,
         username: String::new(),
         password: String::new(),
+        credential_ref: None,
         database: Some("mockdb".into()),
         service_name: None,
         sid: None,
+        ssh_tunnel_credential_ref: None,
         workspace_id: None,
         extra_params: HashMap::new(),
     };

@@ -54,9 +54,11 @@ fn make_config(id: &str, db_path: &std::path::Path) -> DbConnectionConfig {
         port: 0,
         username: String::new(),
         password: String::new(),
+        credential_ref: None,
         database: Some("main".into()),
         service_name: None,
         sid: None,
+        ssh_tunnel_credential_ref: None,
         workspace_id: None,
         extra_params: HashMap::new(),
     }

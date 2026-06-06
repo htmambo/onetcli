@@ -55,9 +55,11 @@ fn make_config() -> DbConnectionConfig {
         port: 0,
         username: String::new(),
         password: String::new(),
+        credential_ref: None,
         database: Some("mockdb".into()),
         service_name: None,
         sid: None,
+        ssh_tunnel_credential_ref: None,
         workspace_id: None,
         extra_params: HashMap::new(),
     }

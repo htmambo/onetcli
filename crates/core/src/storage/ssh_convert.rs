@@ -205,6 +205,7 @@ mod tests {
             enable_legacy_kex: false,
             default_directory: None,
             init_script: None,
+            disable_shell_integration: None,
             sftp_local_directory: None,
             sftp_remote_directory: None,
             jump_server: Some(JumpServerConfig {
@@ -249,6 +250,7 @@ mod tests {
             enable_legacy_kex: false,
             default_directory: None,
             init_script: None,
+            disable_shell_integration: None,
             sftp_local_directory: None,
             sftp_remote_directory: None,
             jump_server: None,
