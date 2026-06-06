@@ -37,3 +37,6 @@ regex.workspace = true
 tiny_http.workspace = true
 urlencoding.workspace = true
 ssh.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

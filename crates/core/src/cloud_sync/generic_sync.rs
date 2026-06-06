@@ -553,7 +553,7 @@ fn calculate_sync_plan<H: SyncTypeHandler>(
         .filter(|item| item.sync_enabled())
         .collect();
 
-    let local_cloud_ids: HashSet<String> = sync_enabled_locals
+    let local_cloud_ids: HashSet<String> = local_items
         .iter()
         .filter_map(|item| item.cloud_id().map(|s| s.to_string()))
         .collect();
@@ -847,16 +847,15 @@ async fn download_and_update_item<H: SyncTypeHandler>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::llm_provider_sync::LlmProviderSyncType;
     use super::{
         LinkedSyncAction, calculate_sync_plan, decide_linked_sync_action,
         should_keep_local_item_on_cloud_delete,
     };
     use crate::cloud_sync::models::CloudSyncData;
-    use crate::cloud_sync::sync_type::SyncTypeHandler;
     use crate::llm::types::{ProviderConfig, ProviderType};
     use crate::storage::Workspace;
     use std::collections::{HashMap, HashSet};
-    use super::super::llm_provider_sync::LlmProviderSyncType;
 
     /// 回归用例：用户自建 LLM 提供商（OpenAI）本地新增，云端已有同名记录。
     ///
@@ -977,6 +976,67 @@ mod tests {
         assert!(
             plan.to_download.is_empty(),
             "云端同名项应留给回链处理，不应被下载"
+        );
+    }
+
+    /// 回归用例：本地已有 cloud_id 但关闭同步的 provider 不参与上传/更新，
+    /// 同时也不能让同一个云端条目被误判为新增并重复下载。
+    #[test]
+    fn calculate_sync_plan_skips_download_for_sync_disabled_linked_provider() {
+        let handler = LlmProviderSyncType;
+
+        let mut local = ProviderConfig::default();
+        local.id = 3;
+        local.name = "disabled-openai".to_string();
+        local.provider_type = ProviderType::OpenAI;
+        local.cloud_id = Some("cloud-uuid-disabled".to_string());
+        local.sync_enabled = false;
+        local.updated_at = 1_700_000_000;
+        let local_items = vec![local];
+
+        let cloud = CloudSyncData {
+            id: "cloud-uuid-disabled".to_string(),
+            owner_id: "owner".to_string(),
+            data_type: "llm_provider".to_string(),
+            name: "disabled-openai".to_string(),
+            encrypted_data: String::new(),
+            key_version: 1,
+            checksum: String::new(),
+            version: 1,
+            updated_at: 1_701_000_000_000,
+            deleted_at: None,
+        };
+        let cloud_data_list = vec![cloud.clone()];
+
+        let mut cloud_name_map = HashMap::new();
+        cloud_name_map.insert(cloud.id.clone(), cloud.name.clone());
+
+        let pending_cloud_ids = HashSet::new();
+
+        let plan = calculate_sync_plan(
+            &pending_cloud_ids,
+            &handler,
+            &local_items,
+            &cloud_data_list,
+            &cloud_name_map,
+        )
+        .expect("计算同步计划应当成功");
+
+        assert!(
+            plan.to_upload.is_empty(),
+            "关闭同步的本地 provider 不应上传"
+        );
+        assert!(
+            plan.to_update_cloud.is_empty(),
+            "关闭同步的本地 provider 不应更新云端"
+        );
+        assert!(
+            plan.to_update_local.is_empty(),
+            "关闭同步的本地 provider 不应被云端覆盖"
+        );
+        assert!(
+            plan.to_download.is_empty(),
+            "已存在于本地但关闭同步的 cloud_id 不应被重复下载"
         );
     }
 

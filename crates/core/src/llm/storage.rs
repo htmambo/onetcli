@@ -1,6 +1,6 @@
 use anyhow::Result;
 use gpui::{App, SharedString};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::llm::chat_history::{MessageRepository, SessionRepository};
 use crate::storage::connection::SqliteConnection;
@@ -107,6 +107,38 @@ impl ProviderRepository {
         Self { conn }
     }
 
+    pub fn delete_with_pending_cloud_deletion(&self, id: i64) -> Result<Option<String>> {
+        let ts = now();
+        self.conn.with_connection_mut(|conn| {
+            let tx = conn.transaction()?;
+            let cloud_id = tx
+                .query_row(
+                    "SELECT cloud_id FROM llm_providers WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
+
+            if let Some(cloud_id) = cloud_id.as_deref() {
+                tx.execute(
+                    "INSERT OR IGNORE INTO pending_cloud_deletions (cloud_id, entity_type, base_last_synced_at, metadata, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        cloud_id,
+                        "llm_provider",
+                        Option::<i64>::None,
+                        Option::<String>::None,
+                        ts
+                    ],
+                )?;
+            }
+
+            tx.execute("DELETE FROM llm_providers WHERE id = ?1", params![id])?;
+            tx.commit()?;
+            Ok(cloud_id)
+        })
+    }
+
     pub fn ensure_onetcli_provider(&self) -> Result<ProviderConfig> {
         // 先查找已有的 OnetCli 类型 provider
         if let Ok(list) = self.list() {
@@ -201,10 +233,24 @@ impl ProviderRepository {
                     last_synced_at = ?15, sync_enabled = ?16, created_at = ?17
                  WHERE id = ?18",
                 params![
-                    name, provider_type, api_key, api_base, api_version, model,
-                    models_json, max_tokens, temperature, thinking_budget,
-                    enabled, is_default, updated_at, cloud_id, last_synced_at,
-                    sync_enabled, created_at, id,
+                    name,
+                    provider_type,
+                    api_key,
+                    api_base,
+                    api_version,
+                    model,
+                    models_json,
+                    max_tokens,
+                    temperature,
+                    thinking_budget,
+                    enabled,
+                    is_default,
+                    updated_at,
+                    cloud_id,
+                    last_synced_at,
+                    sync_enabled,
+                    created_at,
+                    id,
                 ],
             )?;
             Ok(())
@@ -425,6 +471,75 @@ impl Repository for ProviderRepository {
             )?;
             Ok(exists == 1)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProviderRepository;
+    use crate::llm::types::{ProviderConfig, ProviderType};
+    use crate::storage::connection::SqliteConnection;
+    use crate::storage::migration::run_migrations;
+    use crate::storage::repository::PendingCloudDeletionRepository;
+    use crate::storage::traits::Repository;
+
+    fn create_test_repositories() -> (
+        tempfile::TempDir,
+        ProviderRepository,
+        PendingCloudDeletionRepository,
+    ) {
+        let temp_dir = tempfile::tempdir().expect("应创建临时目录");
+        let db_path = temp_dir.path().join("llm-provider-delete.db");
+        let conn = SqliteConnection::open(&db_path).expect("应打开测试数据库");
+        conn.with_connection(|db| {
+            run_migrations(db)?;
+            Ok(())
+        })
+        .expect("应完成数据库迁移");
+
+        (
+            temp_dir,
+            ProviderRepository::new(conn.clone()),
+            PendingCloudDeletionRepository::new(conn),
+        )
+    }
+
+    fn synced_provider() -> ProviderConfig {
+        ProviderConfig {
+            id: 0,
+            name: "Synced OpenAI".to_string(),
+            provider_type: ProviderType::OpenAI,
+            model: "gpt-4o".to_string(),
+            cloud_id: Some("cloud-provider-1".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn delete_with_pending_cloud_deletion_registers_llm_provider_before_delete() {
+        let (_temp_dir, provider_repo, pending_repo) = create_test_repositories();
+        let mut provider = synced_provider();
+        provider_repo
+            .insert(&mut provider)
+            .expect("应插入 provider");
+        let provider_id = provider.id;
+
+        let deleted_cloud_id = provider_repo
+            .delete_with_pending_cloud_deletion(provider_id)
+            .expect("应事务删除 provider");
+
+        assert_eq!(deleted_cloud_id.as_deref(), Some("cloud-provider-1"));
+        assert!(
+            !provider_repo.exists(provider_id).expect("应查询 provider"),
+            "provider 应已被删除"
+        );
+
+        let pending = pending_repo
+            .list_by_entity_type("llm_provider")
+            .expect("应查询待删除记录");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].cloud_id, "cloud-provider-1");
+        assert_eq!(pending[0].entity_type, "llm_provider");
     }
 }
 

@@ -11,9 +11,7 @@ use gpui_component::{
 };
 use one_core::llm::{storage::ProviderRepository, types::ProviderConfig};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window, request_popup_window_close};
-use one_core::storage::{
-    GlobalStorageState, PendingCloudDeletionRepository, StorageManager, traits::Repository,
-};
+use one_core::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use rust_i18n::t;
 
 use super::provider_form_dialog::ProviderForm;
@@ -104,39 +102,13 @@ impl LlmProvidersView {
             .get::<ProviderRepository>()
             .expect("ProviderRepository not found");
 
-        // 同步引擎需要先知道"该 cloud_id 待删除"才能在云端执行删除；
-        // 缺失这一步会导致本地已删的提供商在下一次同步时被云端旧值
-        // 重新下载落地（"已经删除的会被再次恢复"）。
-        let cloud_id_to_purge = repo
-            .get(provider_id)
-            .ok()
-            .flatten()
-            .and_then(|p| p.cloud_id);
-
-        match repo.delete(provider_id) {
-            Ok(_) => {
+        match repo.delete_with_pending_cloud_deletion(provider_id) {
+            Ok(cloud_id_to_purge) => {
                 if let Some(cloud_id) = cloud_id_to_purge.as_deref() {
-                    if let Some(pending_repo) =
-                        self.storage_manager.get::<PendingCloudDeletionRepository>()
-                    {
-                        if let Err(error) = pending_repo.add(cloud_id, "llm_provider") {
-                            tracing::error!(
-                                "[LLM Provider] 记录待删除同步失败: {} - {}",
-                                cloud_id,
-                                error
-                            );
-                        } else {
-                            tracing::info!(
-                                "[LLM Provider] 已登记待删除，等待同步引擎处理: {}",
-                                cloud_id
-                            );
-                        }
-                    } else {
-                        tracing::error!(
-                            "[LLM Provider] PendingCloudDeletionRepository 不存在，无法登记待删除: {}",
-                            cloud_id
-                        );
-                    }
+                    tracing::info!(
+                        "[LLM Provider] 已登记待删除，等待同步引擎处理: {}",
+                        cloud_id
+                    );
                 }
                 self.load_providers(cx);
             }
