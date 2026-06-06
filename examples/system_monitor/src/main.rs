@@ -564,7 +564,7 @@ impl Render for SystemMonitor {
                             .segmented()
                             .px_0()
                             .py(px(2.))
-                            .bg(cx.theme().title_bar)
+                            .bg(cx.theme().semantic().title_bar())
                             .selected_index(active_tab_index)
                             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                                 this.set_active_tab(*ix, window, cx);

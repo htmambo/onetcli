@@ -3184,10 +3184,11 @@ impl Render for TabContainer {
 mod tests {
     use super::{
         TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
-        default_inactive_tab_color, is_regular_tab_active, resolve_inactive_tab_color,
-        resolve_tab_bar_color, should_render_inline_drag_spacer, should_render_windows_drag_spacer,
+        default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
+        layered_level_surface_color, resolve_inactive_tab_color, resolve_tab_bar_color,
+        should_render_inline_drag_spacer, should_render_windows_drag_spacer,
         should_suppress_duplicate_status_summary, tab_chrome_width, tab_title_measure_font_size,
-        tab_title_text_scale, uses_manual_window_move, inactive_tab_background_alpha,
+        tab_title_text_scale, uses_manual_window_move, WindowsSurfaceLayer,
     };
     use gpui::{hsla, px};
 
@@ -3319,14 +3320,24 @@ mod tests {
     }
 
     #[test]
-    fn 默认tab_bar直接使用主题tab_bar颜色() {
+    fn 默认tab_bar使用分层后的主题tab_bar颜色() {
         let theme_tab_bar = hsla(0.63, 0.18, 0.12, 0.91);
+        let expected = layered_level_surface_color(
+            theme_tab_bar,
+            false,
+            1.0,
+            2,
+            WindowsSurfaceLayer::ContentBase,
+        );
 
-        assert_eq!(resolve_tab_bar_color(None, theme_tab_bar), theme_tab_bar);
+        assert_eq!(
+            resolve_tab_bar_color(None, theme_tab_bar, false, 1.0),
+            expected
+        );
     }
 
     #[test]
-    fn 默认inactive_tab直接使用主题tab颜色() {
+    fn 默认inactive_tab使用分层后的主题tab颜色() {
         let theme_tab = hsla(0.63, 0.18, 0.18, 0.94);
         let resolved = resolve_inactive_tab_color(
             None,
@@ -3335,9 +3346,20 @@ mod tests {
             hsla(0.63, 0.18, 0.12, 0.91),
             0.84,
             true,
+            false,
+            1.0,
         );
 
-        assert_eq!(resolved, theme_tab);
+        assert_eq!(
+            resolved,
+            layered_level_surface_color(
+                theme_tab,
+                false,
+                1.0,
+                2,
+                WindowsSurfaceLayer::ContentBase
+            )
+        );
     }
 
     #[test]
@@ -3351,6 +3373,8 @@ mod tests {
             custom_tab_bar,
             0.84,
             true,
+            false,
+            1.0,
         );
 
         assert_eq!(resolved, expected);
