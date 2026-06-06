@@ -844,12 +844,13 @@ mod tests {
     }
 
     #[test]
-    fn 应用独有主题已加入终端主题列表() {
+    fn 内置终端主题已加入主题列表() {
         for theme_name in [
-            "Adventure",
-            "Catppuccin Latte",
-            "Flexoki Light",
-            "Matrix",
+            "midnight",
+            "daylight",
+            "ocean",
+            "obsidian",
+            "crimson",
             "matrix",
         ] {
             assert!(

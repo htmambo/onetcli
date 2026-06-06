@@ -256,6 +256,7 @@ mod tests {
             vim_scroll_to_arrow_keys: false,
             builtin_highlights_initialized: true,
             custom_highlights: Vec::new(),
+            check_running_processes_on_exit: true,
         };
 
         save_settings_to_path(&path, &settings).expect("应写入 terminal settings");

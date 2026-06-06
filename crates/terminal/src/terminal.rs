@@ -3151,6 +3151,7 @@ mod tests {
     use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::vte::ansi::{NamedColor, Processor, Rgb, StdSyncHandler};
     use anyhow::anyhow;
+    use std::cell::Cell;
     use std::collections::VecDeque;
     use std::fs;
     use tokio::sync::mpsc::unbounded_channel;

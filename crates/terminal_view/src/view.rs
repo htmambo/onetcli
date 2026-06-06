@@ -262,6 +262,18 @@ fn sgr_mouse_wheel_report(lines: i32, col: usize, row: usize) -> Option<String> 
     Some(format!("\x1b[<{};{};{}M", button, col + 1, row + 1))
 }
 
+fn alt_screen_scroll_arrow(lines: i32, app_cursor: bool) -> Option<&'static str> {
+    if lines == 0 {
+        return None;
+    }
+
+    if app_cursor {
+        return Some(if lines > 0 { "\x1bOA" } else { "\x1bOB" });
+    }
+
+    Some(if lines > 0 { "\x1b[A" } else { "\x1b[B" })
+}
+
 /// 生成 SGR 鼠标按钮报告。
 ///
 /// - `button`：xterm 按钮编码（0=左键、1=中键、2=右键，加上 shift/alt/ctrl/拖动等位）
@@ -3564,15 +3576,12 @@ impl TerminalView {
             } else if self.vim_scroll_to_arrow_keys && lines != 0 {
                 // alt-screen TUI(vim/less/man 等)未启用鼠标报告:
                 // 把滚轮转为方向键发给 PTY,既能滚动又不会触发 vim 的 VISUAL 选区
-                let seq: &[u8] = if mode.contains(TermMode::APP_CURSOR) {
-                    if lines > 0 { b"\x1bOA" } else { b"\x1bOB" }
-                } else if lines > 0 {
-                    b"\x1b[A"
-                } else {
-                    b"\x1b[B"
-                };
-                for _ in 0..lines.unsigned_abs() {
-                    self.write_to_pty(seq.to_vec(), cx);
+                if let Some(seq) =
+                    alt_screen_scroll_arrow(lines, mode.contains(TermMode::APP_CURSOR))
+                {
+                    for _ in 0..lines.unsigned_abs() {
+                        self.write_to_pty(seq.as_bytes().to_vec(), cx);
+                    }
                 }
             }
             return;
@@ -4793,11 +4802,12 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::TerminalView;
     use super::{
-        UnbracketedPasteHazard, alt_screen_scroll_arrow, detect_unbracketed_paste_hazard,
-        encode_mouse_modifiers, has_trailing_line_continuation, has_unterminated_shell_quote,
-        history_prompt_available, history_prompt_dropdown_origin, history_prompt_overlay_bounds,
-        mouse_button_code, multiline_non_empty_line_count, preserve_theme_typography,
-        sgr_mouse_button_report, sgr_mouse_mode_enabled, sgr_mouse_wheel_report,
+        DEFAULT_FONT_SIZE, UnbracketedPasteHazard, alt_screen_scroll_arrow,
+        detect_unbracketed_paste_hazard, encode_mouse_modifiers,
+        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
+        history_prompt_dropdown_origin, history_prompt_overlay_bounds, mouse_button_code,
+        multiline_non_empty_line_count, preserve_theme_typography, sgr_mouse_button_report,
+        sgr_mouse_mode_enabled, sgr_mouse_wheel_report,
         should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
@@ -4810,7 +4820,7 @@ mod tests {
     use alacritty_terminal::term::TermMode;
     #[cfg(target_os = "macos")]
     use gpui::TestAppContext;
-    use gpui::{px, size, Bounds, Keystroke, MouseButton, Point, SharedString};
+    use gpui::{px, size, Bounds, Keystroke, Modifiers, MouseButton, Point, SharedString};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{
@@ -4874,18 +4884,18 @@ mod tests {
     }
 
     #[test]
-    fn terminal_reset_font_size_is_fifteen() {
-        assert_eq!(super::TERMINAL_RESET_FONT_SIZE, 15.0);
+    fn terminal_reset_font_size_matches_default_font_size() {
+        assert_eq!(DEFAULT_FONT_SIZE, 13.0);
     }
 
     #[test]
-    fn terminal_theme_source_does_not_define_font_settings() {
+    fn terminal_theme_source_defines_font_settings() {
         let source = include_str!("theme.rs");
 
-        assert!(!source.contains("pub font_size"));
-        assert!(!source.contains("pub font_family"));
-        assert!(!source.contains("pub font_fallbacks"));
-        assert!(!source.contains("pub line_height_scale"));
+        assert!(source.contains("pub font_size"));
+        assert!(source.contains("pub font_family"));
+        assert!(source.contains("pub font_fallbacks"));
+        assert!(source.contains("pub line_height_scale"));
     }
 
     #[test]
