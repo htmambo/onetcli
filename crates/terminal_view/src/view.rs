@@ -3655,7 +3655,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> bool {
         if button == MouseButton::Left
-            && (modifiers.shift || (!pressed && self.mouse_state.selecting))
+            && (modifiers.shift || modifiers.platform || (!pressed && self.mouse_state.selecting))
         {
             return false;
         }
