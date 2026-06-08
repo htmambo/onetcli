@@ -96,6 +96,16 @@ fi
 # Write PkgInfo
 echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
+# 末尾（仅 macOS）：ad-hoc 签名避免 macOS 15+/26 Local Network Privacy 拦截局域网
+# 详见 AGENTS.md:337 已验证经验：未签名的 .app 在 Finder 启动时对局域网返回 EHOSTUNREACH
+if [ "$(uname)" = "Darwin" ] && [ -d "$APP_DIR" ]; then
+  if codesign --force --deep --sign - "$APP_DIR"; then
+    echo "已对 ${APP_DIR} 执行 ad-hoc codesign（macOS 15+/26 局域网权限可用）"
+  else
+    echo "⚠️ codesign 失败；${APP_DIR} 在 macOS 15+/26 上可能无法触发本地网络权限授权"
+  fi
+fi
+
 echo "打包完成：${APP_DIR}"
 echo "目录内容："
 ls -la "$APP_DIR/Contents/"
