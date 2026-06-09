@@ -279,6 +279,10 @@ pub struct HomePage {
     connection_restore_prompt_opened: bool,
     /// 首页内容滚动位置
     scroll_handle: ScrollHandle,
+    /// 启动恢复主密钥失败后，在首帧延迟弹出解锁对话框。
+    master_key_unlock_prompt_pending: bool,
+    /// 防止主密钥对话框被启动提示和用户点击重复打开。
+    master_key_dialog_open: bool,
 }
 
 impl HomePage {
@@ -353,6 +357,8 @@ impl HomePage {
             connections_loaded: false,
             connection_restore_prompt_opened: false,
             scroll_handle: ScrollHandle::new(),
+            master_key_unlock_prompt_pending: false,
+            master_key_dialog_open: false,
         };
 
         // 异步加载工作区
@@ -365,6 +371,7 @@ impl HomePage {
         } else if crypto::has_repo_password_set() {
             // 有验证文件但恢复失败，提示用户需要重新输入密钥
             tracing::warn!("密钥恢复失败，需要用户重新输入主密钥");
+            page.master_key_unlock_prompt_pending = true;
         } else {
             tracing::info!("首次使用，需要设置主密钥");
         }
@@ -471,6 +478,13 @@ impl HomePage {
     }
 
     fn load_connections(&mut self, cx: &mut Context<Self>) {
+        if self.saved_connections_locked() {
+            tracing::warn!("主密钥未解锁，暂缓加载本地连接，避免将加密密码解密为空");
+            self.connections.clear();
+            cx.notify();
+            return;
+        }
+
         let storage = cx.global::<GlobalStorageState>().storage.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let result = (|| {
@@ -1970,6 +1984,10 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.ensure_master_key_ready_for_saved_connections(window, cx) {
+            return;
+        }
+
         let parent = cx.entity();
         let connections = self.connections.clone();
         let list = cx.new(|cx| {
@@ -2036,6 +2054,10 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.ensure_master_key_ready_for_saved_connections(window, cx) {
+            return;
+        }
+
         let workspace = connection
             .workspace_id
             .and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
@@ -2459,7 +2481,29 @@ impl HomePage {
         crypto::has_master_key()
     }
 
+    fn ensure_master_key_ready_for_saved_connections(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.saved_connections_locked() {
+            return true;
+        }
+
+        self.show_encryption_key_dialog(window, cx);
+        false
+    }
+
+    fn saved_connections_locked(&self) -> bool {
+        crypto::has_repo_password_set() && !crypto::has_master_key()
+    }
+
     fn show_encryption_key_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.master_key_dialog_open {
+            return;
+        }
+        self.master_key_dialog_open = true;
+
         let view = cx.entity();
         let has_password_set = crypto::has_repo_password_set();
         let has_key_in_memory = crypto::has_master_key();
@@ -2582,16 +2626,17 @@ impl HomePage {
                 .on_close({
                     let view_for_sync = view.clone();
                     move |_window, _result, cx| {
-                        if crypto::has_master_key() {
-                            view_for_sync.update(cx, |this, cx| {
+                        view_for_sync.update(cx, |this, cx| {
+                            this.master_key_dialog_open = false;
+                            if crypto::has_master_key() {
                                 // 密钥已就绪后刷新连接列表，修复启动时序导致的空密码回显
                                 this.load_connections(cx);
                                 if this.current_user.is_some() {
                                     tracing::info!("密钥设置/解锁成功，自动触发云同步");
                                     this.trigger_sync(cx);
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 })
                 .child(
@@ -5828,8 +5873,6 @@ impl HomePage {
         let delete_conn_name = conn.name.clone();
         let is_selected = selected_id == conn.id;
         let subtitle = self.connection_subtitle(&conn);
-        let workspace =
-            workspace_id.and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
 
         let is_active = conn
             .id
@@ -6007,9 +6050,7 @@ impl HomePage {
                 this.child(Self::render_manual_drop_indicator_for_edge(edge, cx))
             })
             .on_double_click(cx.listener(move |this, _, w, cx| {
-                let strategy =
-                    build_connection_open_strategy(clone_conn.clone(), workspace.clone());
-                strategy.open(this, w, cx);
+                this.open_connection_from_quick(&clone_conn, w, cx);
                 cx.notify()
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -7377,6 +7418,16 @@ impl Render for HomePage {
             window.defer(cx, move |window, cx| {
                 view.update(cx, |this, cx| {
                     this.show_login_dialog(window, cx);
+                });
+            });
+        }
+
+        if self.master_key_unlock_prompt_pending && self.saved_connections_locked() {
+            self.master_key_unlock_prompt_pending = false;
+            let view = cx.entity();
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |this, cx| {
+                    this.show_encryption_key_dialog(window, cx);
                 });
             });
         }

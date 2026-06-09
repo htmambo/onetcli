@@ -1190,7 +1190,7 @@ impl TabContent for DatabaseObjectsPanel {
 }
 
 #[cfg(test)]
-mod tab_title_tests {
+mod object_row_tests {
     use super::*;
 
     fn database_node() -> DbNode {
@@ -1299,7 +1299,7 @@ impl Clone for DatabaseObjectsPanel {
 }
 
 #[cfg(test)]
-mod tests {
+mod tab_title_tests {
     use super::DatabaseObjects;
     use db::DbNodeType;
     use gpui_component::Size;

@@ -3136,11 +3136,11 @@ mod tests {
     use super::{
         apply_term_escape_sequence, build_cd_command, build_ssh_base_init_commands,
         build_ssh_init_commands, compose_ssh_init_commands, format_connection_error,
-        is_osc_palette_line, resolve_default_windows_shell_from_env, sanitize_recovery_content,
-        shell_escape_arg, should_report_ssh_running_processes, SshProcessState, Terminal,
-        ConnectionState, TerminalConnectionKind, TerminalMfaPrompt, TerminalMfaRequest,
-        TerminalMfaResponder, keyboard_interactive_answers_for_terminal,
-        resolve_local_working_dir,
+        is_osc_palette_line,
+        keyboard_interactive_answers_for_terminal, resolve_default_windows_shell_from_env,
+        resolve_local_working_dir, sanitize_recovery_content, shell_escape_arg,
+        should_report_ssh_running_processes, ConnectionState, SshProcessState, Terminal,
+        TerminalConnectionKind, TerminalMfaPrompt, TerminalMfaRequest, TerminalMfaResponder,
     };
     use crate::TerminalEvent;
     use crate::history::{
