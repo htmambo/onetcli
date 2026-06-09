@@ -167,4 +167,74 @@ mod tests {
             );
         }
     }
+
+    // ============================================================================
+    // T5：should_link_unlinked_local_by_name 覆盖（fail-fast 断言）
+    // ============================================================================
+
+    /// `user_configurable` 列表不应包含任何 builtin 成员；
+    /// 同时固定列表长度为 11（防止 enum 增删未更新此处测试而出现策略漂移）。
+    /// 失败信息引导维护者同步更新 `ProviderType::is_builtin` 与本测试。
+    #[test]
+    fn user_configurable_provider_enum_has_no_builtin_member() {
+        let user_configurable = ProviderType::user_configurable();
+        assert_eq!(
+            user_configurable.len(),
+            11,
+            "user_configurable 数量应为 11；若 ProviderType 新增/删除成员，\
+             请同步更新 ProviderType::is_builtin 与本测试的硬编码数量"
+        );
+        assert!(
+            user_configurable
+                .iter()
+                .all(|pt| !pt.is_builtin()),
+            "user_configurable 中不得包含 builtin 成员"
+        );
+    }
+
+    /// 内置项的回链策略**不依赖**名称字段，仅与 provider_type 绑定。
+    /// 验证即便用户重命名 OnetCli 内置项，仍允许按名称回链（跨设备共享全局配置）。
+    #[test]
+    fn builtin_provider_with_custom_name_still_links() {
+        let handler = LlmProviderSyncType;
+        let item = provider(ProviderType::OnetCli, "用户重命名后的 OnetCli");
+        assert!(
+            handler.should_link_unlinked_local_by_name(&item),
+            "OnetCli 内置项无论名称如何都应允许按名称回链"
+        );
+    }
+
+    /// 全员分类一致性：每个 ProviderType 的回链策略应严格等价于 `is_builtin`。
+    /// 本测试是 Contract 的"黄金断言"：任何新增/删除 enum 变体、任何对 is_builtin 或
+    /// should_link_unlinked_local_by_name 的改动，若让二者不再完全一致，本测试必红。
+    /// 同样固定 all() 数量为 12，便于 grep 定位漂移。
+    #[test]
+    fn every_provider_type_classified_consistently() {
+        let all = ProviderType::all();
+        assert_eq!(
+            all.len(),
+            12,
+            "ProviderType::all() 数量应为 12；若新增/删除 enum 变体，\
+             请同步更新 is_builtin、user_configurable 与本测试"
+        );
+
+        let builtin_members: Vec<ProviderType> =
+            all.iter().copied().filter(ProviderType::is_builtin).collect();
+        assert_eq!(
+            builtin_members,
+            vec![ProviderType::OnetCli],
+            "唯一 builtin 成员应为 OnetCli"
+        );
+
+        let handler = LlmProviderSyncType;
+        for pt in all {
+            let item = provider(pt, "any-name");
+            assert_eq!(
+                handler.should_link_unlinked_local_by_name(&item),
+                pt.is_builtin(),
+                "{:?} 的 should_link 策略与 is_builtin 不一致",
+                pt
+            );
+        }
+    }
 }

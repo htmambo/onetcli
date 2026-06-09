@@ -2,11 +2,13 @@
 
 ## 活跃任务 (Active)
 
-暂无
+- 🔄 [P1 拆分 setting_tab.rs (4455 行)](Active/SETTING_TAB_SPLIT_PLAN.md) - 开始于 2026-06-08 (fullauto: setting-tab-split)
 
 ## 已完成任务 (Archive)
 
 ### 2026-06
+- ✅ [P2 经验沉淀硬化：RoundedPopup 助手 + bundle-macos codesign](Archive/2026-06/POPUP_CODESIGN_HARDENING_PLAN.md) - 完成于 2026-06-08 (fullauto: popup-codesign)
+- ✅ [LLM 提供商云同步问题域归并与回归测试强化](Archive/2026-06/LLM_PROVIDER_SYNC_HARDENING_PLAN.md) - 完成于 2026-06-08
 - ✅ [macOS 应用图标内边距优化与白边修复](Archive/2026-06/MACOS_APP_ICON_PADDING_PLAN.md) - 完成于 2026-06-02
 
 ### 2026-05

@@ -14,6 +14,27 @@ actions!(popup_window, [CancelPopup]);
 
 const CONTEXT: &str = "PopupWindow";
 
+/// Popup 圆角半径的单一真相源（像素）。
+///
+/// `PopupWindowView::render` 渲染仍走主题 `cx.theme().radius_lg`，保留用户/主题适配；
+/// 本常量作为"测试守护 + 文档化"基线：保证 pop 弹窗圆角与 gpui-component
+/// 内置主题 `radius_lg`（`px(8.0)`）一致；若改主题默认值需同步此处。
+///
+/// 详见 `AGENTS.md:329` 已验证经验：Wayland 下 popup_window 圆角背景外溢时，
+/// 应让内容层自绘圆角，壳层只负责边框/阴影。
+pub const ROUNDED_POPUP_RADIUS_PX: f32 = 8.0;
+
+/// 编译期断言：保证 `ROUNDED_POPUP_RADIUS_PX` 始终与主题 `radius_lg` 一致。
+const _: () = assert!(
+    ROUNDED_POPUP_RADIUS_PX == 8.0,
+    "ROUNDED_POPUP_RADIUS_PX 必须与 gpui-component radius_lg 保持一致"
+);
+
+/// 将 popup 圆角常量转成 GPUI `Pixels`，供需要直接传入 `.rounded(...)` 的位置使用。
+pub fn popup_radius_gpui() -> gpui::Pixels {
+    gpui::px(ROUNDED_POPUP_RADIUS_PX)
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", CancelPopup, Some(CONTEXT))]);
 }
@@ -364,6 +385,19 @@ mod tests {
     #[test]
     fn popup_window_defaults_to_dialog_kind() {
         assert_eq!(PopupWindowOptions::default().kind, WindowKind::Dialog);
+    }
+
+    /// 回归守护：`ROUNDED_POPUP_RADIUS_PX` 与 gpui-component `radius_lg`（`px(8.)`）
+    /// 保持一致；任何修改必须同步 GPui 主题默认值与 `AGENTS.md:329` 经验。
+    #[test]
+    fn popup_window_radius_constant_matches_theme_default() {
+        assert_eq!(ROUNDED_POPUP_RADIUS_PX, 8.0);
+    }
+
+    /// 回归守护：`popup_radius_gpui()` 产出与常量等价的 Pixels 值。
+    #[test]
+    fn popup_radius_gpui_returns_constant_in_pixels() {
+        assert_eq!(popup_radius_gpui(), gpui::px(ROUNDED_POPUP_RADIUS_PX));
     }
 
     #[test]

@@ -541,6 +541,115 @@ mod tests {
         assert_eq!(pending[0].cloud_id, "cloud-provider-1");
         assert_eq!(pending[0].entity_type, "llm_provider");
     }
+
+    // ============================================================================
+    // T9：恰好一个默认 provider 不变式（采纳 Codex Phase 1 风险 #5）
+    // ============================================================================
+
+    fn make_provider(name: &str, is_default: bool) -> ProviderConfig {
+        ProviderConfig {
+            id: 0,
+            name: name.to_string(),
+            provider_type: ProviderType::OpenAI,
+            model: "gpt-4o".to_string(),
+            is_default,
+            ..Default::default()
+        }
+    }
+
+    fn count_default_providers(repo: &ProviderRepository) -> usize {
+        repo.list()
+            .expect("应查询 provider 列表")
+            .iter()
+            .filter(|p| p.is_default)
+            .count()
+    }
+
+    /// 插入第一个默认 provider → 表中"恰好一个默认"成立。
+    /// 守护：`ProviderRepository::insert` 的 is_default 去重逻辑（821098c2 修复点）。
+    #[test]
+    fn insert_first_default_provider_yields_exactly_one_default() {
+        let (_temp_dir, repo, _pending) = create_test_repositories();
+        let mut p = make_provider("first-default", true);
+        repo.insert(&mut p).expect("应插入默认 provider");
+
+        assert_eq!(count_default_providers(&repo), 1, "应恰好 1 个默认");
+        assert!(p.is_default, "返回的 provider 应保持 is_default=true");
+    }
+
+    /// 连续插入两个 `is_default=true` 的 provider → 第二次插入后，**第一个**被清为
+    /// `is_default=false`，**仅最新**那个保持默认。这正是 821098c2 修复"同步后多默认"
+    /// 的核心 contract。
+    #[test]
+    fn inserting_second_default_demotes_previous_to_non_default() {
+        let (_temp_dir, repo, _pending) = create_test_repositories();
+
+        let mut first = make_provider("first-default", true);
+        repo.insert(&mut first).expect("应插入第一个默认");
+        let first_id = first.id;
+
+        let mut second = make_provider("second-default", true);
+        repo.insert(&mut second).expect("应插入第二个默认");
+        let second_id = second.id;
+
+        assert_ne!(first_id, second_id);
+        assert_eq!(
+            count_default_providers(&repo),
+            1,
+            "插入第二个默认后应仍仅有 1 个默认"
+        );
+
+        let all = repo.list().expect("应查询");
+        let first_after = all.iter().find(|p| p.id == first_id).expect("应存在");
+        let second_after = all.iter().find(|p| p.id == second_id).expect("应存在");
+        assert!(
+            !first_after.is_default,
+            "第一个默认应被降级为非默认"
+        );
+        assert!(
+            second_after.is_default,
+            "最新插入的应保持默认"
+        );
+    }
+
+    /// `update_from_cloud` 同样应执行 is_default 去重（防御性兜底，与 insert 行为对齐）。
+    /// 守护：与 `ProviderRepository::update` 行为对齐（821098c2 已加同样兜底）。
+    /// 模拟"从云端下载一个 is_default=true 的 provider"场景。
+    #[test]
+    fn update_from_cloud_with_is_default_demotes_existing_default() {
+        let (_temp_dir, repo, _pending) = create_test_repositories();
+
+        let mut local_default = make_provider("local-default", true);
+        repo.insert(&mut local_default).expect("应插入本地默认");
+        let local_default_id = local_default.id;
+
+        // 模拟云端下载：构造一个来自云端的 is_default=true provider
+        let mut cloud_provider = make_provider("cloud-default", true);
+        cloud_provider.cloud_id = Some("cloud-uuid".to_string());
+        repo.insert(&mut cloud_provider).expect("应插入云端 provider");
+
+        // 用 update_from_cloud 走"下载 + 更新本地"路径
+        let mut cloud_provider_for_update = cloud_provider.clone();
+        cloud_provider_for_update.is_default = true;
+        repo.update_from_cloud(&cloud_provider_for_update)
+            .expect("应执行 update_from_cloud");
+
+        assert_eq!(
+            count_default_providers(&repo),
+            1,
+            "update_from_cloud 后仍应仅有 1 个默认"
+        );
+        let local_after = repo
+            .list()
+            .expect("应查询")
+            .into_iter()
+            .find(|p| p.id == local_default_id)
+            .expect("应存在");
+        assert!(
+            !local_after.is_default,
+            "update_from_cloud 后原有本地默认应被降级"
+        );
+    }
 }
 
 pub fn init(cx: &mut App) {

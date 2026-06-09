@@ -2,6 +2,7 @@ rust_i18n::i18n!("../ui/locales", fallback = "en");
 
 pub mod edit_table;
 pub mod large_text_editor;
+pub mod popup_helpers;
 pub mod resize_handle;
 mod time;
 
