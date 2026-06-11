@@ -25,6 +25,7 @@ use one_core::storage::{DatabaseType, DbConnectionConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -208,6 +209,20 @@ impl Clone for DbManager {
     }
 }
 
+/// Lifecycle state for a connection session in the pool.
+///
+/// - `Active`: session is either idle in the pool or in use; new `get_session_connection` allowed.
+/// - `Closing`: release/close/remove in progress; the inner mutex is reserved for the
+///   verifier/closer. `get_session_connection` rejects this state.
+/// - `Closed`: terminal — the connection has been disconnected and the session is
+///   waiting to be dropped (the Arc may still be referenced by external holders).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionState {
+    Active,
+    Closing,
+    Closed,
+}
+
 /// Connection session - represents a single database connection
 struct ConnectionSession {
     connection: Box<dyn DbConnection + Send + Sync>,
@@ -215,6 +230,7 @@ struct ConnectionSession {
     created_at: Instant,
     session_id: String,
     in_use: bool,
+    state: SessionState,
 }
 
 impl ConnectionSession {
@@ -226,6 +242,7 @@ impl ConnectionSession {
             created_at: now,
             session_id,
             in_use: false,
+            state: SessionState::Active,
         }
     }
 
@@ -244,14 +261,14 @@ impl ConnectionSession {
     }
 
     fn is_expired(&self, timeout: Duration) -> bool {
-        if self.in_use {
+        if self.in_use || self.state != SessionState::Active {
             return false;
         }
         self.last_active.elapsed() > timeout
     }
 
     fn is_lifetime_expired(&self, max_lifetime: Duration) -> bool {
-        self.created_at.elapsed() > max_lifetime
+        self.state == SessionState::Active && self.created_at.elapsed() > max_lifetime
     }
 
     /// Check if current database matches config database
@@ -279,18 +296,27 @@ impl ConnectionSession {
     }
 
     async fn close(&mut self) {
+        if self.state == SessionState::Closed {
+            return;
+        }
         if let Err(e) = self.connection.disconnect().await {
             error!("Failed to disconnect session {}: {}", self.session_id, e);
         } else {
             info!("Closed session: {}", self.session_id);
         }
+        self.state = SessionState::Closed;
     }
 }
 
 /// Connection manager - manages database connections for a client application
 pub struct ConnectionManager {
     /// config_id -> list of sessions for that config
-    sessions: Arc<RwLock<HashMap<String, Vec<ConnectionSession>>>>,
+    ///
+    /// Each session is wrapped in an `Arc<AsyncMutex<…>>` so that DB operations
+    /// can hold the per-session lock across `.await` without blocking other
+    /// sessions or pool mutations. The outer `RwLock` only protects the map
+    /// structure and never spans an `.await`.
+    sessions: Arc<RwLock<HashMap<String, Vec<Arc<AsyncMutex<ConnectionSession>>>>>>,
     /// Connection idle timeout (default: 5 minutes)
     idle_timeout: Duration,
     /// Maximum connection lifetime (default: 30 minutes)
@@ -340,7 +366,7 @@ impl ConnectionManager {
 
         let session_id = self.generate_session_id(&config_id).await;
 
-        // Create new connection
+        // Create new connection (slow path: outside any global lock)
         let plugin = db_manager.get_plugin(&config.database_type)?;
         let connection = plugin.create_connection(config.clone()).await?;
         info!(
@@ -348,43 +374,62 @@ impl ConnectionManager {
             session_id, config.database
         );
 
-        // Store session
+        // Store session under a brief global write lock
         let mut session = ConnectionSession::new(connection, session_id.clone());
         session.mark_in_use();
+        let new_arc = Arc::new(AsyncMutex::new(session));
 
         let mut sessions = self.sessions.write().await;
         sessions
             .entry(config_id)
             .or_insert_with(Vec::new)
-            .push(session);
+            .push(new_arc);
 
         Ok(session_id)
     }
 
-    /// Get mutable access to a session's connection
-    /// Returns the connection wrapped in the write guard to maintain lock
+    /// Get mutable access to a session's connection.
+    ///
+    /// Clones the session `Arc` under a read lock, drops the lock, then locks
+    /// the per-session mutex. Rejects if the session is not `Active`.
     pub async fn get_session_connection(
         &self,
         session_id: &str,
-    ) -> Result<SessionConnectionGuard<'_>, DbError> {
-        let sessions = self.sessions.write().await;
-
-        // Check if session exists
-        let exists = sessions
-            .values()
-            .any(|list| list.iter().any(|s| s.session_id == session_id));
-
-        if !exists {
+    ) -> Result<SessionConnectionGuard, DbError> {
+        // Phase 1: locate and clone the Arc under a read lock.
+        // We use a non-blocking try_lock to peek at session_id/state without
+        // holding the inner mutex across the global lock scope. The lock guard
+        // is dropped before the Arc is cloned so the returned Arc is not
+        // associated with a held lock.
+        let arc = {
+            let sessions = self.sessions.read().await;
+            let mut found: Option<Arc<AsyncMutex<ConnectionSession>>> = None;
+            'outer: for list in sessions.values() {
+                for arc in list.iter() {
+                    if let Ok(guard) = arc.try_lock() {
+                        let matches =
+                            guard.session_id == session_id && guard.state == SessionState::Active;
+                        drop(guard);
+                        if matches {
+                            found = Some(Arc::clone(arc));
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            found.ok_or_else(|| {
+                DbError::Internal(format!("session not found: {}", session_id))
+            })?
+        };
+        // Phase 2: acquire the inner mutex and confirm state under the lock.
+        let guard = arc.lock_owned().await;
+        if guard.state != SessionState::Active {
             return Err(DbError::Internal(format!(
-                "session not found: {}",
+                "session not active: {}",
                 session_id
             )));
         }
-
-        Ok(SessionConnectionGuard {
-            sessions,
-            session_id: session_id.to_string(),
-        })
+        Ok(SessionConnectionGuard { inner: guard })
     }
 
     fn db_equals(db1: &DbConnectionConfig, db2: &DbConnectionConfig) -> bool {
@@ -397,94 +442,144 @@ impl ConnectionManager {
         }
     }
 
-    /// Try to acquire an existing idle session with matching database
+    /// Try to acquire an existing idle session with matching database.
+    ///
+    /// Uses a non-async claim under the global write lock (`try_lock` on each
+    /// session's inner mutex). The slow ping runs only after the global lock
+    /// has been released. On ping failure, the session is re-removed and
+    /// closed outside any lock.
     async fn try_acquire_session(
         &self,
         config: &DbConnectionConfig,
     ) -> Result<Option<String>, DbError> {
-        let mut sessions = self.sessions.write().await;
+        // Phase 1: claim a matching idle session under the global write lock.
+        let (claimed_arc, claimed_session_id) = {
+            let sessions = self.sessions.write().await;
+            let mut found: Option<(Arc<AsyncMutex<ConnectionSession>>, String)> = None;
 
-        let remove_config_entry = {
-            let Some(session_list) = sessions.get_mut(&config.id) else {
-                return Ok(None);
-            };
-
-            let mut index = 0;
-            while index < session_list.len() {
-                let session = &session_list[index];
-                let matches_config =
-                    !session.in_use && Self::db_equals(session.connection.config(), config);
-
-                if !matches_config {
-                    index += 1;
-                    continue;
+            if let Some(session_list) = sessions.get(&config.id) {
+                for arc in session_list.iter() {
+                    // Non-blocking inspection: only proceed if we can grab the
+                    // inner lock without awaiting.
+                    let Ok(guard) = arc.try_lock() else {
+                        continue;
+                    };
+                    let matches = guard.state == SessionState::Active
+                        && !guard.in_use
+                        && Self::db_equals(guard.connection.config(), config);
+                    if matches {
+                        found = Some((Arc::clone(arc), guard.session_id.clone()));
+                    }
+                    drop(guard);
+                    if found.is_some() {
+                        break;
+                    }
                 }
+            }
+            // found already holds clones; global lock is dropped at end of block
+            match found {
+                Some(pair) => pair,
+                None => return Ok(None),
+            }
+        };
+        // Global write lock dropped here.
 
-                if let Err(error) = session.connection.ping().await {
-                    let mut session = session_list.remove(index);
+        // Phase 2: ping outside any global lock. If it fails, remove and close.
+        let ping_ok = {
+            let mut guard = claimed_arc.lock().await;
+            if guard.state != SessionState::Active {
+                // Someone else closed/released it concurrently.
+                drop(guard);
+                return Ok(None);
+            }
+            match guard.connection.ping().await {
+                Ok(()) => {
+                    guard.mark_in_use();
+                    true
+                }
+                Err(error) => {
                     warn!(
                         "Discarding stale session {} before reuse: {}",
-                        session.session_id, error
+                        guard.session_id, error
                     );
-                    session.close().await;
-                    continue;
+                    guard.state = SessionState::Closing;
+                    false
                 }
-
-                let session = &mut session_list[index];
-                session.mark_in_use();
-
-                debug!(
-                    "Reusing session: {} (database: {:?})",
-                    session.session_id, config.database
-                );
-                return Ok(Some(session.session_id.clone()));
             }
-
-            session_list.is_empty()
         };
 
-        if remove_config_entry {
-            sessions.remove(&config.id);
+        if ping_ok {
+            debug!(
+                "Reusing session: {} (database: {:?})",
+                claimed_session_id, config.database
+            );
+            return Ok(Some(claimed_session_id));
         }
 
+        // Ping failed: remove the now-closing session from the pool and close it.
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(list) = sessions.get_mut(&config.id) {
+                list.retain(|s| {
+                    s.try_lock()
+                        .map(|g| g.session_id != claimed_session_id)
+                        .unwrap_or(true)
+                });
+            }
+        }
+        {
+            let mut guard = claimed_arc.lock().await;
+            guard.close().await;
+        }
         Ok(None)
     }
 }
 
-/// Guard that holds the write lock and provides access to a session's connection
-pub struct SessionConnectionGuard<'a> {
-    sessions: tokio::sync::RwLockWriteGuard<'a, HashMap<String, Vec<ConnectionSession>>>,
-    session_id: String,
+/// Guard that holds the per-session mutex and provides access to its connection.
+///
+/// Obtained from `ConnectionManager::get_session_connection`. The guard owns
+/// the inner `MutexGuard`, so dropping it releases the per-session lock. The
+/// global pool lock is never held by this guard.
+pub struct SessionConnectionGuard {
+    inner: tokio::sync::OwnedMutexGuard<ConnectionSession>,
 }
 
-impl<'a> SessionConnectionGuard<'a> {
-    /// Get mutable reference to the connection and update last active time
+impl SessionConnectionGuard {
+    /// Get mutable reference to the connection and update last active time.
+    ///
+    /// Returns `None` if the underlying session has been concurrently marked
+    /// `Closed`. Callers should treat this as a session-loss error and let
+    /// the outer release/close path clean up.
     pub fn connection(&mut self) -> Option<&mut (dyn DbConnection + Send + Sync)> {
-        for session_list in self.sessions.values_mut() {
-            if let Some(session) = session_list
-                .iter_mut()
-                .find(|s| s.session_id == self.session_id)
-            {
-                session.mark_in_use();
-                return Some(&mut *session.connection);
-            }
+        if self.inner.state == SessionState::Closed {
+            return None;
         }
-        None
+        self.inner.mark_in_use();
+        Some(&mut *self.inner.connection)
     }
 }
 
 impl ConnectionManager {
     /// Get session config
     pub async fn get_session_config(&self, session_id: &str) -> Option<DbConnectionConfig> {
-        let sessions = self.sessions.read().await;
-
-        for session_list in sessions.values() {
-            if let Some(session) = session_list.iter().find(|s| s.session_id == session_id) {
-                return Some(session.connection.config().clone());
-            }
-        }
-
-        None
+        // Phase 1: find Arc under read lock.
+        let arc = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .values()
+                .find_map(|list| {
+                    list.iter()
+                        .find(|s| {
+                            s.try_lock()
+                                .map(|g| g.session_id == session_id)
+                                .unwrap_or(false)
+                        })
+                        .cloned()
+                })
+        }?;
+        // Phase 2: read config under inner lock.
+        let guard = arc.lock().await;
+        Some(guard.connection.config().clone())
     }
 
     pub async fn release_session(&self, session_id: &str) -> Result<(), DbError> {
@@ -500,149 +595,273 @@ impl ConnectionManager {
         session_id: &str,
         close_idle_file_connection: bool,
     ) -> Result<(), DbError> {
-        let mut sessions = self.sessions.write().await;
+        // Phase 1: locate the Arc and mark the session as Closing under the
+        // global write lock. Closing blocks new get_session_connection callers
+        // and prevents try_acquire_session from claiming a stale connection
+        // before verify_and_sync_database has run.
+        let (arc, config_id, should_close) = {
+            let mut sessions = self.sessions.write().await;
+            let mut found: Option<(
+                Arc<AsyncMutex<ConnectionSession>>,
+                String,
+                bool,
+            )> = None;
 
-        let mut removed_session: Option<ConnectionSession> = None;
-        let mut empty_config_id: Option<String> = None;
-
-        for (config_id, session_list) in sessions.iter_mut() {
-            if let Some(pos) = session_list.iter().position(|s| s.session_id == session_id) {
-                let session = &mut session_list[pos];
-                match session.verify_and_sync_database().await {
-                    Ok(_) => {
-                        if close_idle_file_connection && session.connection.close_on_release() {
-                            removed_session = Some(session_list.remove(pos));
-                            if session_list.is_empty() {
-                                empty_config_id = Some(config_id.clone());
-                            }
-                            break;
-                        }
-                        session.release();
-                        debug!("Session {} released", session_id);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        // Check failed, mark for closing
-                        warn!(
-                            "Session {} database check failed: {}, closing connection",
-                            session_id, e
-                        );
-                        removed_session = Some(session_list.remove(pos));
-                        if session_list.is_empty() {
-                            empty_config_id = Some(config_id.clone());
-                        }
-                        break;
-                    }
+            for (config_id, list) in sessions.iter_mut() {
+                let Some(pos) = list.iter().position(|s| {
+                    s.try_lock()
+                        .map(|g| g.session_id == session_id)
+                        .unwrap_or(false)
+                }) else {
+                    continue;
+                };
+                let arc = Arc::clone(&list[pos]);
+                // A second try_lock on the same Arc from the same task is
+                // guaranteed to succeed (no reentrancy on tokio Mutex and we
+                // already dropped the first peek guard). If it fails the
+                // session is being concurrently released/closed — treat as
+                // idempotent and let the closer win.
+                let mut guard = match arc.try_lock() {
+                    Ok(g) => g,
+                    Err(_) => return Ok(()),
+                };
+                if guard.state != SessionState::Active {
+                    // Already closing/closed: idempotent release.
+                    drop(guard);
+                    return Ok(());
+                }
+                guard.state = SessionState::Closing;
+                let needs_close = guard.connection.close_on_release()
+                    && close_idle_file_connection;
+                drop(guard);
+                found = Some((arc, config_id.clone(), needs_close));
+                break;
+            }
+            match found {
+                Some(pair) => pair,
+                None => {
+                    return Err(DbError::Internal(format!(
+                        "session not found: {}",
+                        session_id
+                    )));
                 }
             }
-        }
+        };
+        // Global write lock dropped here.
 
-        if let Some(config_id) = empty_config_id {
-            sessions.remove(&config_id);
-        }
+        // Phase 2: run verify_and_sync_database outside any global lock.
+        let verify_result = {
+            let mut guard = arc.lock().await;
+            guard.verify_and_sync_database().await
+        };
 
-        if let Some(mut session) = removed_session {
-            session.release();
-            session.close().await;
+        // Phase 3: decide close vs reuse, update the map.
+        if let Err(e) = verify_result {
+            warn!(
+                "Session {} database check failed: {}, closing connection",
+                session_id, e
+            );
+            // Remove the now-closing session from the map (if still present)
+            // and disconnect it. Other sessions in the same config stay.
+            {
+                let mut sessions = self.sessions.write().await;
+                if let Some(list) = sessions.get_mut(&config_id) {
+                    list.retain(|s| {
+                        s.try_lock()
+                            .map(|g| g.session_id != session_id)
+                            .unwrap_or(true)
+                    });
+                }
+            }
+            let mut guard = arc.lock().await;
+            guard.close().await;
             return Ok(());
         }
 
-        Err(DbError::Internal(format!(
-            "session not found: {}",
-            session_id
-        )))
+        if should_close {
+            // Remove from the map and close the connection.
+            {
+                let mut sessions = self.sessions.write().await;
+                if let Some(list) = sessions.get_mut(&config_id) {
+                    list.retain(|s| {
+                        s.try_lock()
+                            .map(|g| g.session_id != session_id)
+                            .unwrap_or(true)
+                    });
+                }
+            }
+            let mut guard = arc.lock().await;
+            guard.close().await;
+            return Ok(());
+        }
+
+        // Reuse: re-activate and mark idle. If the session was already
+        // removed (e.g. by concurrent cleanup), close it instead.
+        {
+            let sessions = self.sessions.read().await;
+            let still_present = sessions
+                .get(&config_id)
+                .map(|list| {
+                    list.iter().any(|s| {
+                        s.try_lock()
+                            .map(|g| g.session_id == session_id)
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false);
+            if !still_present {
+                drop(sessions);
+                let mut guard = arc.lock().await;
+                guard.close().await;
+                return Ok(());
+            }
+        }
+        let mut guard = arc.lock().await;
+        guard.state = SessionState::Active;
+        guard.release();
+        debug!("Session {} released", session_id);
+        Ok(())
     }
 
     /// Close a specific session
     pub async fn close_session(&self, session_id: &str) -> Result<(), DbError> {
-        let mut sessions = self.sessions.write().await;
-
-        let mut found_config_id: Option<String> = None;
-        let mut removed_session: Option<ConnectionSession> = None;
-
-        for (config_id, session_list) in sessions.iter_mut() {
-            if let Some(pos) = session_list.iter().position(|s| s.session_id == session_id) {
-                removed_session = Some(session_list.remove(pos));
-                if session_list.is_empty() {
-                    found_config_id = Some(config_id.clone());
+        // Phase 1: locate the Arc and mark Closing under the global write lock.
+        let (arc, config_id) = {
+            let mut sessions = self.sessions.write().await;
+            let mut found: Option<(Arc<AsyncMutex<ConnectionSession>>, String)> = None;
+            for (config_id, list) in sessions.iter_mut() {
+                let Some(pos) = list.iter().position(|s| {
+                    s.try_lock()
+                        .map(|g| g.session_id == session_id)
+                        .unwrap_or(false)
+                }) else {
+                    continue;
+                };
+                let arc = Arc::clone(&list[pos]);
+                if let Ok(mut guard) = arc.try_lock() {
+                    if guard.state == SessionState::Closed {
+                        drop(guard);
+                        return Ok(());
+                    }
+                    guard.state = SessionState::Closing;
                 }
+                // Whether or not try_lock succeeded, the session must be
+                // removed from the map so no new caller can claim it.
+                list.remove(pos);
+                found = Some((arc, config_id.clone()));
                 break;
             }
-        }
+            match found {
+                Some(pair) => pair,
+                None => {
+                    return Err(DbError::Internal(format!(
+                        "session not found: {}",
+                        session_id
+                    )));
+                }
+            }
+        };
 
-        // Remove empty config entry after iteration
-        if let Some(config_id) = found_config_id {
-            sessions.remove(&config_id);
+        // Phase 2: drop the global lock, then close outside.
+        let mut guard = arc.lock().await;
+        guard.close().await;
+        // Cleanup empty config entry.
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(list) = sessions.get(&config_id) {
+                if list.is_empty() {
+                    sessions.remove(&config_id);
+                }
+            }
         }
-
-        // Close session after releasing iteration
-        if let Some(mut session) = removed_session {
-            session.release();
-            session.close().await;
-            return Ok(());
-        }
-
-        Err(DbError::Internal(format!(
-            "session not found: {}",
-            session_id
-        )))
+        Ok(())
     }
 
     /// Remove all sessions for a connection config
     pub async fn remove_all_sessions(&self, config_id: &str) {
-        let mut sessions = self.sessions.write().await;
-
-        if let Some(mut session_list) = sessions.remove(config_id) {
-            info!(
-                "Closing {} sessions for config: {}",
-                session_list.len(),
-                config_id
-            );
-
-            for session in session_list.iter_mut() {
-                session.close().await;
+        // Phase 1: take the whole Vec of Arcs out of the map.
+        let arcs: Vec<Arc<AsyncMutex<ConnectionSession>>> = {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(config_id).unwrap_or_default()
+        };
+        if arcs.is_empty() {
+            return;
+        }
+        info!(
+            "Closing {} sessions for config: {}",
+            arcs.len(),
+            config_id
+        );
+        // Phase 2: mark each as Closing, then close outside the global lock.
+        for arc in &arcs {
+            if let Ok(mut g) = arc.try_lock() {
+                if g.state == SessionState::Active {
+                    g.state = SessionState::Closing;
+                }
             }
+        }
+        for arc in arcs {
+            let mut guard = arc.lock().await;
+            guard.close().await;
         }
     }
 
     /// Clean up expired sessions
     async fn cleanup_expired_sessions(&self) {
-        let mut sessions = self.sessions.write().await;
         let idle_timeout = self.idle_timeout;
         let max_lifetime = self.max_lifetime;
 
-        for (config_id, session_list) in sessions.iter_mut() {
-            let mut i = 0;
-            while i < session_list.len() {
-                let should_remove = session_list[i].is_expired(idle_timeout)
-                    || session_list[i].is_lifetime_expired(max_lifetime);
-
-                if should_remove {
-                    let mut session = session_list.remove(i);
-                    warn!(
-                        "Closing expired session {} for config {} (in_use: {}, idle: {}s, lifetime: {}s)",
-                        session.session_id,
-                        config_id,
-                        session.in_use,
-                        session.last_active.elapsed().as_secs(),
-                        session.created_at.elapsed().as_secs()
-                    );
-                    session.close().await;
-                } else {
-                    i += 1;
+        // Phase 1: collect expired Arcs and remove them from the map.
+        let to_close: Vec<(String, Arc<AsyncMutex<ConnectionSession>>)> = {
+            let mut sessions = self.sessions.write().await;
+            let mut collected: Vec<(String, Arc<AsyncMutex<ConnectionSession>>)> = Vec::new();
+            for (config_id, list) in sessions.iter_mut() {
+                let mut i = 0;
+                while i < list.len() {
+                    let expired = {
+                        if let Ok(guard) = list[i].try_lock() {
+                            guard.is_expired(idle_timeout) || guard.is_lifetime_expired(max_lifetime)
+                        } else {
+                            false
+                        }
+                    };
+                    if expired {
+                        let arc = list.remove(i);
+                        if let Ok(mut g) = arc.try_lock() {
+                            g.state = SessionState::Closing;
+                        }
+                        collected.push((config_id.clone(), arc));
+                    } else {
+                        i += 1;
+                    }
                 }
             }
+            sessions.retain(|_, list| !list.is_empty());
+            collected
+        };
+
+        // Phase 2: close each outside the global lock.
+        for (config_id, arc) in to_close {
+            let mut guard = arc.lock().await;
+            warn!(
+                "Closing expired session {} for config {} (in_use: {}, idle: {}s, lifetime: {}s)",
+                guard.session_id,
+                config_id,
+                guard.in_use,
+                guard.last_active.elapsed().as_secs(),
+                guard.created_at.elapsed().as_secs()
+            );
+            guard.close().await;
         }
 
-        // Remove empty config entries
-        sessions.retain(|_, list| !list.is_empty());
-
         // 记录当前剩余会话数，便于监控资源占用
+        let sessions = self.sessions.read().await;
         let total: usize = sessions.values().map(|l| l.len()).sum();
         let in_use: usize = sessions
             .values()
             .flat_map(|l| l.iter())
-            .filter(|s| s.in_use)
+            .filter_map(|s| s.try_lock().ok())
+            .filter(|g| g.in_use)
             .count();
         tracing::debug!(
             "连接池清理完成：剩余会话 {}（其中使用中 {}）",
@@ -658,8 +877,14 @@ impl ConnectionManager {
         let mut in_use_count = 0;
 
         for session_list in sessions.values() {
-            total += session_list.len();
-            in_use_count += session_list.iter().filter(|s| s.in_use).count();
+            for arc in session_list.iter() {
+                total += 1;
+                if let Ok(guard) = arc.try_lock() {
+                    if guard.in_use {
+                        in_use_count += 1;
+                    }
+                }
+            }
         }
 
         ConnectionStats {
@@ -672,21 +897,30 @@ impl ConnectionManager {
     /// List all sessions for a config
     pub async fn list_sessions(&self, config_id: &str) -> Vec<SessionInfo> {
         let sessions = self.sessions.read().await;
-
-        sessions
-            .get(config_id)
-            .map(|list| {
-                list.iter()
-                    .map(|s| SessionInfo {
-                        session_id: s.session_id.clone(),
-                        database: s.connection.config().database.clone(),
-                        in_use: s.in_use,
-                        idle_time: s.last_active.elapsed(),
-                        lifetime: s.created_at.elapsed(),
-                    })
-                    .collect()
+        let Some(list) = sessions.get(config_id) else {
+            return Vec::new();
+        };
+        list.iter()
+            .map(|s| {
+                if let Ok(g) = s.try_lock() {
+                    SessionInfo {
+                        session_id: g.session_id.clone(),
+                        database: g.connection.config().database.clone(),
+                        in_use: g.in_use,
+                        idle_time: g.last_active.elapsed(),
+                        lifetime: g.created_at.elapsed(),
+                    }
+                } else {
+                    SessionInfo {
+                        session_id: String::new(),
+                        database: None,
+                        in_use: true,
+                        idle_time: Duration::ZERO,
+                        lifetime: Duration::ZERO,
+                    }
+                }
             })
-            .unwrap_or_default()
+            .collect()
     }
 }
 
@@ -2589,7 +2823,7 @@ mod tests {
             .await
             .entry(config.id.clone())
             .or_default()
-            .push(session);
+            .push(Arc::new(AsyncMutex::new(session)));
 
         let acquired = manager.try_acquire_session(&config).await.unwrap();
         let remaining = manager.list_sessions(&config.id).await;
@@ -2621,7 +2855,7 @@ mod tests {
             .await
             .entry(config.id.clone())
             .or_default()
-            .push(session);
+            .push(Arc::new(AsyncMutex::new(session)));
 
         manager
             .release_session("duckdb-conn:session:1")
@@ -2655,7 +2889,7 @@ mod tests {
             .await
             .entry(config.id.clone())
             .or_default()
-            .push(session);
+            .push(Arc::new(AsyncMutex::new(session)));
 
         manager
             .release_session_for_reuse("duckdb-transaction:session:1")
