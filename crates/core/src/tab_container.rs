@@ -90,6 +90,9 @@ pub struct TabItemState {
     pub from: SharedString,
     /// Tab key
     pub key: SharedString,
+    /// Tab-level structured metadata for cross-view navigation.
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
     /// Tab-specific data (customized by each content type)
     #[serde(default)]
     pub data: serde_json::Value,
@@ -356,6 +359,7 @@ impl PartialEq for dyn TabContentView {
 pub struct TabItem {
     id: SharedString,
     from: SharedString,
+    metadata: HashMap<String, String>,
     content: Arc<dyn TabContentView>,
 }
 
@@ -368,8 +372,14 @@ impl TabItem {
         Self {
             id: SharedString::from(id.into()),
             from: SharedString::from(from.into()),
+            metadata: HashMap::new(),
             content: Arc::new(content),
         }
+    }
+
+    pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     pub fn id(&self) -> SharedString {
@@ -382,6 +392,10 @@ impl TabItem {
 
     pub fn content(&self) -> &Arc<dyn TabContentView> {
         &self.content
+    }
+
+    pub fn metadata(&self) -> &HashMap<String, String> {
+        &self.metadata
     }
 }
 
@@ -2091,6 +2105,7 @@ impl TabContainer {
                 id: tab.id(),
                 from: tab.from(),
                 key: SharedString::from(tab.content().content_key(cx)),
+                metadata: tab.metadata().clone(),
                 data: tab.content().dump(cx),
             })
             .collect();
@@ -2153,6 +2168,7 @@ impl TabContainer {
                 self.tabs.push(TabItem {
                     id: tab_state.id.clone(),
                     from: tab_state.from.clone(),
+                    metadata: tab_state.metadata.clone(),
                     content,
                 });
             }

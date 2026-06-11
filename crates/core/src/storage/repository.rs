@@ -12,6 +12,7 @@ use crate::storage::models::{
 };
 use crate::storage::quick_command::QuickCommandRepository;
 use crate::storage::row_mapping::FromSqliteRow;
+use crate::storage::sftp_favorite_path::SftpFavoritePathRepository;
 use crate::storage::traits::Repository;
 use crate::storage::{ConnectionType, StoredConnection, Workspace};
 
@@ -1383,6 +1384,7 @@ pub fn init(cx: &mut App) {
     let conn_repo = ConnectionRepository::new(conn.clone());
     let workspace_repo = WorkspaceRepository::new(conn.clone());
     let quick_cmd_repo = QuickCommandRepository::new(conn.clone());
+    let sftp_favorite_path_repo = SftpFavoritePathRepository::new(conn.clone());
     let pending_deletion_repo = PendingCloudDeletionRepository::new(conn.clone());
     let kv_repo = KeyValueRepository::new(conn.clone());
 
@@ -1390,6 +1392,7 @@ pub fn init(cx: &mut App) {
     storage.register(workspace_repo);
     storage.register(conn_repo);
     storage.register(quick_cmd_repo);
+    storage.register(sftp_favorite_path_repo);
     storage.register(pending_deletion_repo);
     storage.register(kv_repo);
 }

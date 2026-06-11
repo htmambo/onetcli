@@ -1,6 +1,6 @@
 [package]
 name = "main"
-version = "0.4.7"
+version = "0.4.8"
 publish.workspace = true
 edition.workspace = true
 
@@ -31,6 +31,7 @@ terminal_view = { workspace = true }
 sftp_view = { workspace = true }
 redis_view = { workspace = true }
 mongodb_view = { workspace = true }
+remote_file_editor = { workspace = true, features = ["ui"] }
 one-core.workspace = true
 one-ui.workspace = true
 reqwest_client.workspace = true
