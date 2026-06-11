@@ -372,19 +372,25 @@ impl SyncEngine {
 
     /// 解密云端数据建立 cloud_id → name 映射
     fn build_cloud_name_map(&self, cloud_data_list: &[CloudSyncData]) -> HashMap<String, String> {
-        let mut map = HashMap::new();
+        let mut map = HashMap::with_capacity(cloud_data_list.len());
+        // 首次遇到需要解密的条目时再获取读锁，保留已解析名称的无锁路径。
+        let mut service = None;
         for data in cloud_data_list {
             if data.has_resolved_name() {
                 map.insert(data.id.clone(), data.name.clone());
                 continue;
             }
 
-            let service = match self.crypto_service.read() {
-                Ok(s) => s,
-                Err(_) => return map,
-            };
-            if let Ok(conn) = service.decrypt_sync_data_connection(data) {
-                map.insert(data.id.clone(), conn.name);
+            if service.is_none() {
+                match self.crypto_service.read() {
+                    Ok(s) => service = Some(s),
+                    Err(_) => return map,
+                }
+            }
+            if let Some(s) = service.as_ref() {
+                if let Ok(conn) = s.decrypt_sync_data_connection(data) {
+                    map.insert(data.id.clone(), conn.name);
+                }
             }
         }
         map
@@ -524,6 +530,10 @@ impl SyncEngine {
             .filter_map(|c| c.cloud_id.clone())
             .collect();
 
+        // 预计算云端名称集合，将按名匹配从 O(n×m) 降为 O(n+m)
+        let cloud_names_set: HashSet<&str> =
+            cloud_name_map.values().map(|s| s.as_str()).collect();
+
         let local_unlinked_by_name: HashMap<&str, &StoredConnection> = local_connections
             .iter()
             .filter(|c| c.cloud_id.is_none() && c.sync_enabled)
@@ -586,9 +596,7 @@ impl SyncEngine {
                     }
                 }
                 None => {
-                    let has_cloud_match =
-                        cloud_name_map.values().any(|name| name == &local_conn.name);
-                    if !has_cloud_match {
+                    if !cloud_names_set.contains(local_conn.name.as_str()) {
                         plan.to_upload.push(local_conn.clone());
                     }
                 }

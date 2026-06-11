@@ -249,18 +249,26 @@ impl SyncServerClient {
     }
 
     fn notify_session_expired(&self) {
-        if let Ok(cb) = self.on_session_expired.read() {
-            if let Some(callback) = cb.as_ref() {
-                callback();
-            }
+        // 在读锁内 clone 出回调并立即释放锁，再调用回调。回调可能执行阻塞 I/O
+        // （如写鉴权文件到磁盘），不应在持有回调槽位锁的情况下运行。
+        let callback: Option<SessionExpiredCallback> = self
+            .on_session_expired
+            .read()
+            .ok()
+            .and_then(|cb| cb.as_ref().cloned());
+        if let Some(callback) = callback {
+            callback();
         }
     }
 
     fn notify_token_refreshed(&self, auth: &AuthResponse) {
-        if let Ok(cb) = self.on_token_refreshed.read() {
-            if let Some(callback) = cb.as_ref() {
-                callback(auth.clone());
-            }
+        let callback: Option<TokenRefreshedCallback> = self
+            .on_token_refreshed
+            .read()
+            .ok()
+            .and_then(|cb| cb.as_ref().cloned());
+        if let Some(callback) = callback {
+            callback(auth.clone());
         }
     }
 
