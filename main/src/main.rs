@@ -18,11 +18,13 @@ mod sync_server_theme;
 mod update;
 
 use crate::onetcli_app::OnetCliApp;
+use crate::setting_tab::HotkeyMigration;
 use db::GlobalDbState;
 use gpui::*;
-
-use gpui_component::Root;
+use gpui_component::notification::Notification;
+use gpui_component::{Root, WindowExt};
 use gpui_component_assets::Assets;
+use rust_i18n::t;
 
 fn main() {
     if update::handle_update_command() {
@@ -40,7 +42,7 @@ fn main() {
     app.run(move |cx| {
         onetcli_app::init(cx);
 
-        setting_tab::init_settings(cx);
+        let hotkey_migration = setting_tab::init_settings(cx);
         bootstrap::theme::init_theme_runtime(cx);
         bootstrap::window::init_global_runtime_state(cx);
         let options = bootstrap::window::main_window_options(cx);
@@ -55,11 +57,33 @@ fn main() {
                 app_init::init_window_systems(window, cx);
                 update::schedule_update_check(window, cx);
                 let view = cx.new(|cx| OnetCliApp::new(window, cx));
-                cx.new(|cx| Root::new(view, window, cx))
+                let root = cx.new(|cx| Root::new(view, window, cx));
+                maybe_show_hotkey_migration_toast(&hotkey_migration, window, cx);
+                root
             })?;
 
             Ok::<_, anyhow::Error>(())
         })
         .detach();
     });
+}
+
+fn maybe_show_hotkey_migration_toast(
+    migration: &HotkeyMigration,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !migration.any_changed() {
+        return;
+    }
+    let new_key = if cfg!(target_os = "macos") {
+        setting_tab::DEFAULT_SYSTEM_HOTKEY_MACOS
+    } else {
+        setting_tab::DEFAULT_SYSTEM_HOTKEY_OTHER
+    };
+    let message = t!(
+        "Settings.Migrations.ctrl_space_toast",
+        new_key = new_key
+    );
+    window.push_notification(Notification::info(message).autohide(true), cx);
 }

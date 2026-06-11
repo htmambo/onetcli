@@ -1300,9 +1300,10 @@ impl AppSettings {
     }
 }
 
-pub fn init_settings(cx: &mut App) {
+pub fn init_settings(cx: &mut App) -> HotkeyMigration {
     let mut settings = AppSettings::load();
     migrate_legacy_theme_state(&mut settings);
+    let hotkey_migration = migrate_legacy_system_hotkey(&mut settings);
     let initial_sync_server_url = settings.sync_server_url.clone();
     terminal_view::init_settings(cx, Some(legacy_terminal_settings(&settings)));
     // 初始化自动保存配置全局状态
@@ -1317,7 +1318,41 @@ pub fn init_settings(cx: &mut App) {
     // apply() 内部可能会写回规范化后的主题设置，因此必须先注册全局状态。
     cx.set_global(settings);
     AppSettings::global(cx).clone().apply(cx);
+    if hotkey_migration.any_changed() {
+        AppSettings::save_global(cx);
+    }
     let _ = get_auth_service(cx).update_sync_server_url(&initial_sync_server_url);
+    hotkey_migration
+}
+
+/// 旧版系统级激活热键 `ctrl-space` 与系统输入法切换冲突，启动时按平台迁移为新默认值。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HotkeyMigration {
+    pub macos_changed: bool,
+    pub other_changed: bool,
+}
+
+impl HotkeyMigration {
+    pub fn any_changed(self) -> bool {
+        self.macos_changed || self.other_changed
+    }
+}
+
+fn migrate_legacy_system_hotkey(settings: &mut AppSettings) -> HotkeyMigration {
+    let mut migration = HotkeyMigration::default();
+    if is_legacy_ctrl_space(&settings.system_hotkey_macos) {
+        settings.system_hotkey_macos = DEFAULT_SYSTEM_HOTKEY_MACOS.to_string();
+        migration.macos_changed = true;
+    }
+    if is_legacy_ctrl_space(&settings.system_hotkey_other) {
+        settings.system_hotkey_other = DEFAULT_SYSTEM_HOTKEY_OTHER.to_string();
+        migration.other_changed = true;
+    }
+    migration
+}
+
+fn is_legacy_ctrl_space(spec: &str) -> bool {
+    spec.trim().eq_ignore_ascii_case("ctrl-space")
 }
 
 fn migrate_legacy_theme_state(settings: &mut AppSettings) {
@@ -3338,7 +3373,7 @@ impl TabContent for SettingsPanel {
 
     fn on_activate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if !cx.has_global::<AppSettings>() {
-            init_settings(cx);
+            let _ = init_settings(cx);
         }
         self.apply_requested_page(cx);
     }
@@ -3347,7 +3382,7 @@ impl TabContent for SettingsPanel {
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !cx.has_global::<AppSettings>() {
-            init_settings(cx);
+            let _ = init_settings(cx);
         }
 
         let sidebar_bg = cx.theme().sidebar;
@@ -4452,4 +4487,66 @@ fn render_about_section(cx: &App) -> gpui::AnyElement {
                 ),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod hotkey_migration_tests {
+    use super::{is_legacy_ctrl_space, migrate_legacy_system_hotkey};
+    use crate::setting_tab::{AppSettings, DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
+
+    #[test]
+    fn detects_legacy_ctrl_space_case_insensitive() {
+        assert!(is_legacy_ctrl_space("ctrl-space"));
+        assert!(is_legacy_ctrl_space("CTRL-SPACE"));
+        assert!(is_legacy_ctrl_space("  Ctrl-Space  "));
+    }
+
+    #[test]
+    fn ignores_non_legacy_values() {
+        assert!(!is_legacy_ctrl_space("ctrl-alt-m"));
+        assert!(!is_legacy_ctrl_space("cmd-alt-m"));
+        assert!(!is_legacy_ctrl_space("ctrl-shift-space"));
+        assert!(!is_legacy_ctrl_space(""));
+    }
+
+    #[test]
+    fn migration_rewrites_both_fields_when_legacy() {
+        let mut settings = AppSettings::default();
+        settings.system_hotkey_macos = "ctrl-space".to_string();
+        settings.system_hotkey_other = "ctrl-space".to_string();
+
+        let migration = migrate_legacy_system_hotkey(&mut settings);
+
+        assert!(migration.macos_changed);
+        assert!(migration.other_changed);
+        assert_eq!(settings.system_hotkey_macos, DEFAULT_SYSTEM_HOTKEY_MACOS);
+        assert_eq!(settings.system_hotkey_other, DEFAULT_SYSTEM_HOTKEY_OTHER);
+    }
+
+    #[test]
+    fn migration_skips_user_customized_values() {
+        let mut settings = AppSettings::default();
+        settings.system_hotkey_macos = "cmd-shift-k".to_string();
+        settings.system_hotkey_other = "alt-shift-t".to_string();
+
+        let migration = migrate_legacy_system_hotkey(&mut settings);
+
+        assert!(!migration.any_changed());
+        assert_eq!(settings.system_hotkey_macos, "cmd-shift-k");
+        assert_eq!(settings.system_hotkey_other, "alt-shift-t");
+    }
+
+    #[test]
+    fn migration_marks_only_legacy_field_changed() {
+        let mut settings = AppSettings::default();
+        settings.system_hotkey_macos = "cmd-alt-m".to_string();
+        settings.system_hotkey_other = "ctrl-space".to_string();
+
+        let migration = migrate_legacy_system_hotkey(&mut settings);
+
+        assert!(!migration.macos_changed);
+        assert!(migration.other_changed);
+        assert_eq!(settings.system_hotkey_macos, "cmd-alt-m");
+        assert_eq!(settings.system_hotkey_other, DEFAULT_SYSTEM_HOTKEY_OTHER);
+    }
 }

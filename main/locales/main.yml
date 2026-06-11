@@ -1469,6 +1469,13 @@ Settings:
       zh-CN: 切换 Vi 模式
       zh-HK: 切換 Vi 模式
 
+  # 配置迁移提示
+  Migrations:
+    ctrl_space_toast:
+      en: 'To avoid conflict with the system input method, the "Activate Window" shortcut has been migrated from Ctrl+Space to {new_key}.'
+      zh-CN: '为避免与系统输入法切换冲突，"激活窗口"快捷键已从 Ctrl+Space 更改为 {new_key}。'
+      zh-HK: '為避免與系統輸入法切換衝突，"啟用視窗"快捷鍵已從 Ctrl+Space 更改為 {new_key}。'
+
   # 关于页面
   About:
     title:
