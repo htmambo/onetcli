@@ -3883,7 +3883,7 @@ fn show_global_proxy_settings_window(window: &mut Window, cx: &mut App) {
 fn apply_global_http_client(http_client: Arc<ReqwestClient>, cx: &mut App) {
     let auth_service = get_auth_service(cx);
     let http_for_auth: Arc<dyn gpui::http_client::HttpClient> = http_client.clone();
-    auth_service.replace_http_client(http_for_auth);
+    auth_service.replace_http_client(http_for_auth, AppSettings::global(cx));
 
     if let Some(provider_state) = cx.try_global::<GlobalProviderState>() {
         provider_state.set_cloud_client(auth_service.cloud_client());

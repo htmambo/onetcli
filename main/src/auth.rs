@@ -34,9 +34,9 @@ pub struct GlobalAuthService(pub Arc<AuthService>);
 impl gpui::Global for GlobalAuthService {}
 
 /// 初始化全局认证服务
-pub fn init(cx: &mut App) {
+pub fn init(cx: &mut App, settings: &AppSettings) {
     let http = cx.http_client();
-    let service = Arc::new(AuthService::new_with_http(http, cx));
+    let service = Arc::new(AuthService::new_with_http(http, settings, cx));
     cx.set_global(GlobalAuthService(service));
 }
 
@@ -105,8 +105,7 @@ impl AuthService {
     }
 
     /// 使用配置和 HttpClient 创建认证服务
-    fn new_with_http(http: Arc<dyn HttpClient>, _cx: &App) -> Self {
-        let settings = AppSettings::load();
+    fn new_with_http(http: Arc<dyn HttpClient>, settings: &AppSettings, _cx: &App) -> Self {
         let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
         if SyncServerClient::is_valid_base_url(&sync_server_base_url) {
             info!("认证服务使用 sync_server 后端: {}", sync_server_base_url);
@@ -126,8 +125,7 @@ impl AuthService {
         }
     }
 
-    pub fn replace_http_client(&self, http: Arc<dyn HttpClient>) {
-        let settings = AppSettings::load();
+    pub fn replace_http_client(&self, http: Arc<dyn HttpClient>, settings: &AppSettings) {
         let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
         let next_client = Arc::new(SyncServerClient::new(
             SyncServerClientConfig {

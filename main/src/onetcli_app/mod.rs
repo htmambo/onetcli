@@ -181,7 +181,7 @@ pub fn init(cx: &mut App) -> AppSettings {
     one_ui::init(cx);
     db_view::sql_editor_view::init(cx);
     db_view::chatdb::agents::init(cx);
-    crate::auth::init(cx);
+    crate::auth::init(cx, &settings);
     {
         let auth_service = crate::auth::get_auth_service(cx);
         let global_provider_state = cx.global::<GlobalProviderState>().clone();
