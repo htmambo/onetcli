@@ -467,17 +467,19 @@ fn build_name_map<H: SyncTypeHandler>(
     handler: &H,
     cloud_data_list: &[CloudSyncData],
 ) -> HashMap<String, String> {
-    let mut map = HashMap::new();
+    // Pre-allocate: at most one entry per cloud data.
+    let mut map = HashMap::with_capacity(cloud_data_list.len());
+    // Acquire the read guard once for the whole batch. `decrypt_name` only
+    // reads from the crypto service, so a single read lock suffices.
+    let service = match engine.crypto_service.read() {
+        Ok(s) => s,
+        Err(_) => return map,
+    };
     for data in cloud_data_list {
         if data.has_resolved_name() {
             map.insert(data.id.clone(), data.name.clone());
             continue;
         }
-
-        let service = match engine.crypto_service.read() {
-            Ok(s) => s,
-            Err(_) => return map,
-        };
 
         if let Some(name) = handler.decrypt_name(&service, data) {
             map.insert(data.id.clone(), name);

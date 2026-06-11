@@ -149,23 +149,21 @@ impl SyncEngine {
     /// 对证书数组中的 params 字段加密
     fn encrypt_certificate_params(&self, certs: &serde_json::Value) -> serde_json::Value {
         if let Some(arr) = certs.as_array() {
+            // Acquire the read guard once for the whole batch.
+            let crypto = self.crypto_service.read().ok();
+            let key = crypto.as_ref().and_then(|c| c.select_encrypt_key().ok());
             let encrypted: Vec<serde_json::Value> = arr
                 .iter()
                 .map(|cert| {
                     let mut cert = cert.clone();
-                    if let Some(params) = cert.get("params") {
+                    if let (Some(key), Some(params)) = (key, cert.get("params")) {
                         if let Ok(json) = serde_json::to_string(params) {
-                            let crypto = self.crypto_service.read().ok();
-                            if let Some(ref crypto) = crypto {
-                                if let Ok(key) = crypto.select_encrypt_key() {
-                                    let encrypted = crate::crypto::encrypt_with_key(&json, key);
-                                    if let Some(obj) = cert.as_object_mut() {
-                                        obj.insert(
-                                            "params".to_string(),
-                                            serde_json::Value::String(encrypted),
-                                        );
-                                    }
-                                }
+                            let encrypted = crate::crypto::encrypt_with_key(&json, key);
+                            if let Some(obj) = cert.as_object_mut() {
+                                obj.insert(
+                                    "params".to_string(),
+                                    serde_json::Value::String(encrypted),
+                                );
                             }
                         }
                     }
@@ -181,23 +179,20 @@ impl SyncEngine {
     /// 对连接数组中的 params 字段加密
     fn encrypt_connection_params(&self, conns: &serde_json::Value) -> serde_json::Value {
         if let Some(arr) = conns.as_array() {
+            let crypto = self.crypto_service.read().ok();
+            let key = crypto.as_ref().and_then(|c| c.select_encrypt_key().ok());
             let encrypted: Vec<serde_json::Value> = arr
                 .iter()
                 .map(|conn| {
                     let mut conn = conn.clone();
-                    if let Some(params) = conn.get("params") {
+                    if let (Some(key), Some(params)) = (key, conn.get("params")) {
                         if let Ok(json) = serde_json::to_string(params) {
-                            let crypto = self.crypto_service.read().ok();
-                            if let Some(ref crypto) = crypto {
-                                if let Ok(key) = crypto.select_encrypt_key() {
-                                    let encrypted = crate::crypto::encrypt_with_key(&json, key);
-                                    if let Some(obj) = conn.as_object_mut() {
-                                        obj.insert(
-                                            "params".to_string(),
-                                            serde_json::Value::String(encrypted),
-                                        );
-                                    }
-                                }
+                            let encrypted = crate::crypto::encrypt_with_key(&json, key);
+                            if let Some(obj) = conn.as_object_mut() {
+                                obj.insert(
+                                    "params".to_string(),
+                                    serde_json::Value::String(encrypted),
+                                );
                             }
                         }
                     }
@@ -213,23 +208,19 @@ impl SyncEngine {
     /// 对连接数组中的 params 字段解密
     fn decrypt_connection_params(&self, conns: &serde_json::Value) -> serde_json::Value {
         if let Some(arr) = conns.as_array() {
+            let crypto = self.crypto_service.read().ok();
+            let key = crypto.as_ref().and_then(|c| c.select_decrypt_key().ok());
             let decrypted: Vec<serde_json::Value> = arr
                 .iter()
                 .map(|conn| {
                     let mut conn = conn.clone();
-                    if let Some(params_str) = conn.get("params").and_then(|v| v.as_str()) {
-                        let crypto = self.crypto_service.read().ok();
-                        if let Some(ref crypto) = crypto {
-                            if let Ok(key) = crypto.select_decrypt_key() {
-                                if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key)
-                                {
-                                    if let Ok(params) =
-                                        serde_json::from_str::<serde_json::Value>(&json)
-                                    {
-                                        if let Some(obj) = conn.as_object_mut() {
-                                            obj.insert("params".to_string(), params);
-                                        }
-                                    }
+                    if let (Some(key), Some(params_str)) =
+                        (key.as_ref(), conn.get("params").and_then(|v| v.as_str()))
+                    {
+                        if let Ok(json) = crate::crypto::decrypt_with_key(params_str, key) {
+                            if let Ok(params) = serde_json::from_str::<serde_json::Value>(&json) {
+                                if let Some(obj) = conn.as_object_mut() {
+                                    obj.insert("params".to_string(), params);
                                 }
                             }
                         }
@@ -246,23 +237,19 @@ impl SyncEngine {
     /// 对证书数组中的 params 字段解密
     fn decrypt_certificate_params(&self, certs: &serde_json::Value) -> serde_json::Value {
         if let Some(arr) = certs.as_array() {
+            let crypto = self.crypto_service.read().ok();
+            let key = crypto.as_ref().and_then(|c| c.select_decrypt_key().ok());
             let decrypted: Vec<serde_json::Value> = arr
                 .iter()
                 .map(|cert| {
                     let mut cert = cert.clone();
-                    if let Some(params_str) = cert.get("params").and_then(|v| v.as_str()) {
-                        let crypto = self.crypto_service.read().ok();
-                        if let Some(ref crypto) = crypto {
-                            if let Ok(key) = crypto.select_decrypt_key() {
-                                if let Ok(json) = crate::crypto::decrypt_with_key(params_str, &key)
-                                {
-                                    if let Ok(params) =
-                                        serde_json::from_str::<serde_json::Value>(&json)
-                                    {
-                                        if let Some(obj) = cert.as_object_mut() {
-                                            obj.insert("params".to_string(), params);
-                                        }
-                                    }
+                    if let (Some(key), Some(params_str)) =
+                        (key.as_ref(), cert.get("params").and_then(|v| v.as_str()))
+                    {
+                        if let Ok(json) = crate::crypto::decrypt_with_key(params_str, key) {
+                            if let Ok(params) = serde_json::from_str::<serde_json::Value>(&json) {
+                                if let Some(obj) = cert.as_object_mut() {
+                                    obj.insert("params".to_string(), params);
                                 }
                             }
                         }
