@@ -3,6 +3,7 @@ use one_core::storage::DatabaseType;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Cursor, Read};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// 统一的 SQL 读取器，支持字符串和文件两种来源
 enum SqlReader {
@@ -50,7 +51,7 @@ pub struct StreamingSqlParser {
     prev_was_string_char: bool,
     in_line_comment: bool,
     in_block_comment: bool,
-    dollar_quote: Option<String>,
+    dollar_quote: Option<Arc<str>>,
 
     paren_depth: i32,
     begin_depth: i32,
@@ -130,7 +131,7 @@ impl StreamingSqlParser {
             return Ok(None);
         }
 
-        let mut line_buf = String::new();
+        let mut line_buf = String::with_capacity(256);
 
         loop {
             // First process any pending characters from previous line
@@ -201,12 +202,12 @@ impl StreamingSqlParser {
             return None;
         }
 
-        if let Some(ref tag) = self.dollar_quote.clone() {
+        if let Some(ref tag) = self.dollar_quote {
             self.buffer.push(ch);
             if ch == '$' {
                 let end_pos = self.buffer.len();
                 let start_pos = end_pos.saturating_sub(tag.len());
-                if self.buffer[start_pos..].ends_with(tag.as_str()) {
+                if self.buffer[start_pos..].ends_with(tag.as_ref()) {
                     self.dollar_quote = None;
                 }
             }
@@ -473,7 +474,7 @@ impl StreamingSqlParser {
         line.chars().count() >= MIN_SEPARATOR_LEN && chars.all(|ch| ch == first)
     }
 
-    fn try_extract_dollar_quote(&self) -> Option<String> {
+    fn try_extract_dollar_quote(&self) -> Option<Arc<str>> {
         let last_dollar_pos = self.buffer.rfind('$')?;
         if last_dollar_pos == 0 {
             return None;
@@ -485,7 +486,7 @@ impl StreamingSqlParser {
         let tag = &self.buffer[prev_dollar_pos..=last_dollar_pos];
         let inner = &tag[1..tag.len() - 1];
         if inner.is_empty() || inner.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            Some(tag.to_string())
+            Some(Arc::from(tag))
         } else {
             None
         }
