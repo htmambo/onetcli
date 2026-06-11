@@ -1647,10 +1647,11 @@ where
             0
         };
         let ((min_row, min_col), (max_row, max_col)) = range.normalized();
+        let column_count = max_col - min_col + 1;
 
         let mut data: Vec<Vec<String>> = Vec::new();
         for row in min_row..=max_row {
-            let mut row_data: Vec<String> = Vec::new();
+            let mut row_data: Vec<String> = Vec::with_capacity(column_count);
             for col in min_col..=max_col {
                 let delegate_col = col.saturating_sub(row_number_offset);
                 let value = self.delegate.get_cell_value(row, delegate_col, cx);
@@ -1699,11 +1700,12 @@ where
             0
         };
         let ((min_row, min_col), (max_row, max_col)) = range.normalized();
+        let column_count = max_col - min_col + 1;
 
         // 收集选中单元格的值
         let mut data: Vec<Vec<String>> = Vec::new();
         for row in min_row..=max_row {
-            let mut row_data: Vec<String> = Vec::new();
+            let mut row_data: Vec<String> = Vec::with_capacity(column_count);
             for col in min_col..=max_col {
                 // 转换为 delegate 的列索引（去除行号列偏移）
                 let delegate_col = col.saturating_sub(row_number_offset);
