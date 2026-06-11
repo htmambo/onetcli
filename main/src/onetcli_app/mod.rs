@@ -171,7 +171,7 @@ fn collect_running_states(tab_container: &Entity<TabContainer>, cx: &App) -> Vec
         .collect()
 }
 
-pub fn init(cx: &mut App) {
+pub fn init(cx: &mut App) -> AppSettings {
     let settings = AppSettings::load();
     init_tracing(&settings);
     let http_client = build_app_http_client(&settings.global_proxy).expect("HTTP 客户端初始化失败");
@@ -318,6 +318,7 @@ pub fn init(cx: &mut App) {
     }
 
     cx.activate(true);
+    settings
 }
 
 pub struct OnetCliApp {

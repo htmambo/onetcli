@@ -40,9 +40,9 @@ fn main() {
         .with_quit_mode(QuitMode::LastWindowClosed);
 
     app.run(move |cx| {
-        onetcli_app::init(cx);
+        let settings = onetcli_app::init(cx);
 
-        let hotkey_migration = setting_tab::init_settings(cx);
+        let hotkey_migration = setting_tab::init_settings_with(cx, Some(settings));
         bootstrap::theme::init_theme_runtime(cx);
         bootstrap::window::init_global_runtime_state(cx);
         let options = bootstrap::window::main_window_options(cx);

@@ -1301,7 +1301,13 @@ impl AppSettings {
 }
 
 pub fn init_settings(cx: &mut App) -> HotkeyMigration {
-    let mut settings = AppSettings::load();
+    init_settings_with(cx, None)
+}
+
+/// 等价 `init_settings`；允许调用方复用已加载的 `AppSettings` 以避免重复文件 I/O + JSON 解析。
+/// 当 `preloaded` 为 `None` 时行为与 `init_settings` 完全一致。
+pub fn init_settings_with(cx: &mut App, preloaded: Option<AppSettings>) -> HotkeyMigration {
+    let mut settings = preloaded.unwrap_or_else(AppSettings::load);
     migrate_legacy_theme_state(&mut settings);
     let hotkey_migration = migrate_legacy_system_hotkey(&mut settings);
     let initial_sync_server_url = settings.sync_server_url.clone();
