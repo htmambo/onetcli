@@ -159,7 +159,9 @@ impl StreamingSqlParser {
             }
 
             if !line_buf.is_empty() {
-                let chars = line_buf.chars().collect::<Vec<char>>();
+                // 预分配：字节数 >= 字符数，足够容纳全部 chars
+                let mut chars: Vec<char> = Vec::with_capacity(line_buf.len());
+                chars.extend(line_buf.chars());
                 let mut i = 0;
                 while i < chars.len() {
                     if let Some(stmt) = self.process_char(chars[i]) {
@@ -319,25 +321,15 @@ impl StreamingSqlParser {
         if self.db_type == DatabaseType::MySQL && ch == '\n' {
             if let Some(new_delim) = self.try_parse_delimiter() {
                 self.delimiter = new_delim;
-                let lines: Vec<&str> = self.buffer.lines().collect();
-                if lines.len() > 1 {
-                    self.buffer = lines[..lines.len() - 1].join("\n");
-                    self.last_checked_len = 0;
-                } else {
-                    self.buffer.clear();
-                    self.last_checked_len = 0;
-                }
+                self.drop_last_line_from_buffer();
                 return None;
             }
         }
 
         if self.db_type == DatabaseType::MSSQL && ch == '\n' {
-            let lines: Vec<&str> = self.buffer.lines().collect();
-            if let Some(last_line) = lines.last() {
-                if last_line.trim().to_uppercase() == "GO" {
-                    let stmt_lines: Vec<&str> = lines[..lines.len() - 1].to_vec();
-                    let stmt = stmt_lines.join("\n").trim().to_string();
-                    self.buffer.clear();
+            if let Some(last_line) = self.buffer.lines().next_back() {
+                if last_line.trim().eq_ignore_ascii_case("GO") {
+                    let stmt = self.take_buffer_without_last_line();
                     self.last_checked_len = 0;
                     if !stmt.is_empty() {
                         return Some(stmt);
@@ -493,17 +485,46 @@ impl StreamingSqlParser {
     }
 
     fn try_parse_delimiter(&self) -> Option<String> {
-        let lines: Vec<&str> = self.buffer.lines().collect();
-        if let Some(last_line) = lines.last() {
-            let trimmed = last_line.trim();
-            if trimmed.to_uppercase().starts_with("DELIMITER") {
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    return Some(parts[1].to_string());
+        if let Some(last_line) = self.buffer.lines().next_back() {
+            let trimmed = last_line.trim_start();
+            // 大小写不敏感前缀匹配：仅检查前 9 字节
+            if trimmed.len() > 9
+                && trimmed.as_bytes()[..9].eq_ignore_ascii_case(b"DELIMITER")
+            {
+                // 取 DELIMITER 后第一个非空白 token（等价于 split_whitespace().nth(1)）
+                let after = trimmed[9..].trim_start();
+                if !after.is_empty() {
+                    return Some(after.to_string());
                 }
             }
         }
         None
+    }
+
+    /// 从 buffer 移除最后一行（用于 MySQL DELIMITER 处理）。
+    /// 正确处理尾部换行：先 trim_end 找到最后逻辑行起点，再 truncate。
+    fn drop_last_line_from_buffer(&mut self) {
+        let trimmed_end = self.buffer.trim_end_matches(|c| c == '\n' || c == '\r').len();
+        if let Some(last_nl) = self.buffer[..trimmed_end].rfind('\n') {
+            self.buffer.truncate(last_nl);
+        } else {
+            self.buffer.clear();
+        }
+        self.last_checked_len = 0;
+    }
+
+    /// 取 buffer 中除最后一行之外的所有内容，并清空 buffer。用于 MSSQL GO 处理。
+    /// 返回值 = 移除最后一行（包括其换行）后的剩余内容（已 trim）。
+    fn take_buffer_without_last_line(&mut self) -> String {
+        let trimmed_end = self.buffer.trim_end_matches(|c| c == '\n' || c == '\r').len();
+        let stmt = if let Some(last_nl) = self.buffer[..trimmed_end].rfind('\n') {
+            self.buffer[..last_nl].trim().to_string()
+        } else {
+            // 最后一行是 buffer 唯一内容
+            self.buffer.trim().to_string()
+        };
+        self.buffer.clear();
+        stmt
     }
 
     /// 检查字符串是否为纯注释（只包含注释和空白字符）
