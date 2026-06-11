@@ -108,6 +108,7 @@ pub struct LargeTextCellTarget {
 pub enum DataGridEvent {
     LargeTextSelectionChanged,
     ToggleLargeTextEditorRequested,
+    OpenTableDesignerRequested,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

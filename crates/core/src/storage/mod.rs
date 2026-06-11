@@ -7,6 +7,7 @@ pub mod quick_command;
 pub mod repository;
 pub mod row_mapping;
 pub mod runtime_paths;
+pub mod sftp_favorite_path;
 pub mod ssh_convert;
 pub mod traits;
 
@@ -16,6 +17,7 @@ pub use models::*;
 pub use quick_command::*;
 pub use repository::*;
 pub use runtime_paths::*;
+pub use sftp_favorite_path::*;
 
 // 从 connection_state 重新导出，确保全局状态类型唯一
 pub use crate::connection_state::ActiveConnections;
