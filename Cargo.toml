@@ -191,7 +191,8 @@ type_complexity = "allow"
 [profile.dev]
 #codegen-units = 16
 #debug = "limited"
-#split-debuginfo = "unpacked"
+# split-debuginfo = "unpacked" 减小 target/ 体积 ~30%，保留完整调试能力
+split-debuginfo = "unpacked"
 
 
 
@@ -237,3 +238,6 @@ lsp-types = { opt-level = 3 }
 reqwest_client = { opt-level = 3 }
 markdown = { opt-level = 3 }
 xml5ever = { opt-level = 3 }
+# P0-C 优化：dev 模式下也启用较高优化级别
+alacritty_terminal = { opt-level = 3 }
+mongodb = { opt-level = 3 }
