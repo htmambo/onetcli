@@ -300,12 +300,14 @@ impl RedisConnectionImpl {
             return Ok(conn.clone());
         }
 
-        let mut guard = self.db_connections.write().await;
-        if let Some(conn) = guard.get(&db) {
-            return Ok(conn.clone());
-        }
-
+        // 不持写锁建连：建连涉及网络 I/O，持锁会串行化该连接对所有 db 的缓存访问。
         let (_, conn) = Self::open_connection_for_db(&self.config, db).await?;
+
+        let mut guard = self.db_connections.write().await;
+        // 二次检查：建连期间可能已有其他任务写入同一 db 的连接，复用之、丢弃本次。
+        if let Some(existing) = guard.get(&db) {
+            return Ok(existing.clone());
+        }
         guard.insert(db, conn.clone());
         Ok(conn)
     }

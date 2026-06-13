@@ -110,13 +110,15 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
     );
 
     // ========== 7. 构建操作队列 ==========
-    let local_item_map: HashMap<i64, H::Item> = local_items
+    // 借用而非 clone：local_items / active_cloud_data 为本函数所有的局部 Vec，
+    // 生命周期覆盖整个执行循环，且不借用 engine，避免大数据量同步时全量深拷贝。
+    let local_item_map: HashMap<i64, &H::Item> = local_items
         .iter()
-        .filter_map(|item| item.local_id().map(|id| (id, item.clone())))
+        .filter_map(|item| item.local_id().map(|id| (id, item)))
         .collect();
-    let cloud_data_map: HashMap<String, CloudSyncData> = active_cloud_data
+    let cloud_data_map: HashMap<&str, &CloudSyncData> = active_cloud_data
         .iter()
-        .map(|d| (d.id.clone(), d.clone()))
+        .map(|d| (d.id.as_str(), d))
         .collect();
 
     let mut operations = Vec::new();
@@ -177,7 +179,7 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
         let operation = queued_operation.operation.clone();
         match operation {
             SyncOperation::Upload { local_id } => {
-                let Some(local_item) = local_item_map.get(&local_id) else {
+                let Some(local_item) = local_item_map.get(&local_id).copied() else {
                     result.errors.push(format!(
                         "上传{}失败 {}: 本地数据不存在",
                         type_name, local_id
@@ -207,14 +209,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 }
             }
             SyncOperation::UpdateCloud { local_id, cloud_id } => {
-                let Some(local_item) = local_item_map.get(&local_id) else {
+                let Some(local_item) = local_item_map.get(&local_id).copied() else {
                     result.errors.push(format!(
                         "更新云端{}失败 {}: 本地数据不存在",
                         type_name, local_id
                     ));
                     continue;
                 };
-                let Some(cloud_data) = cloud_data_map.get(&cloud_id) else {
+                let Some(cloud_data) = cloud_data_map.get(cloud_id.as_str()).copied() else {
                     result.errors.push(format!(
                         "更新云端{}失败 {}: 云端数据不存在",
                         type_name, cloud_id
@@ -256,14 +258,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 }
             }
             SyncOperation::UpdateLocal { local_id, cloud_id } => {
-                let Some(local_item) = local_item_map.get(&local_id) else {
+                let Some(local_item) = local_item_map.get(&local_id).copied() else {
                     result.errors.push(format!(
                         "更新本地{}失败 {}: 本地数据不存在",
                         type_name, local_id
                     ));
                     continue;
                 };
-                let Some(cloud_data) = cloud_data_map.get(&cloud_id) else {
+                let Some(cloud_data) = cloud_data_map.get(cloud_id.as_str()).copied() else {
                     result.errors.push(format!(
                         "更新本地{}失败 {}: 云端数据不存在",
                         type_name, cloud_id
@@ -288,7 +290,7 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 }
             }
             SyncOperation::Download(cloud_id) => {
-                let Some(cloud_data) = cloud_data_map.get(&cloud_id) else {
+                let Some(cloud_data) = cloud_data_map.get(cloud_id.as_str()).copied() else {
                     result.errors.push(format!(
                         "下载{}失败 {}: 云端数据不存在",
                         type_name, cloud_id

@@ -61,13 +61,22 @@ impl SessionRegistry {
     }
 
     async fn list_detached(&self) -> Vec<(LocalPtySessionId, Instant)> {
+        // 先快照 handle（Arc clone，廉价），尽快释放 registry 读锁，
+        // 避免持锁期间 await 各 handle 子锁阻塞 insert/remove。
+        let handles: Vec<(LocalPtySessionId, SessionHandle)> = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .iter()
+                .map(|(id, handle)| (id.clone(), handle.clone()))
+                .collect()
+        };
+
         let mut result = Vec::new();
-        let sessions = self.sessions.read().await;
-        for (id, handle) in sessions.iter() {
+        for (id, handle) in handles {
             let attached = *handle.attached.read().await;
             if !attached {
                 if let Some(detached_at) = *handle.last_detached_at.read().await {
-                    result.push((id.clone(), detached_at));
+                    result.push((id, detached_at));
                 }
             }
         }
