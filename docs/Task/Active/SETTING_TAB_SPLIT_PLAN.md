@@ -1,9 +1,22 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: ⚠️ 已中停 (中停时间: 2026-06-08)
-> 对应 fullauto 状态：.omc/fullauto/setting-tab-split/state.json (phase=failed)
+**状态**: 🔄 进行中 (轮 1 已完成于 2026-06-15)
 
-## 中停说明
+## 进度追踪
+
+| 轮次 | 子模块 | 状态 |
+|---|---|---|
+| 轮 1 | `hotkey.rs` | ✅ 已完成 (2026-06-15) |
+| 轮 2 | `global_user.rs` | ⏳ 待执行 |
+| 轮 3 | `cloud.rs` | ⏳ 待执行 |
+| 轮 4 | `saved_window.rs` | ⏳ 待执行 |
+| 轮 5 | `proxy.rs` | ⏳ 待执行 |
+| 轮 6 | `types.rs` | ⏳ 待执行 |
+| 轮 7 | `theme_utils.rs` | ⏳ 待执行 |
+| 轮 8 | `app_settings.rs` | ⏳ 待执行 |
+| 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
+
+## 中停说明（已恢复）
 
 按 `AGENTS.md` 流程升级规则，本任务影响面（31 处 `#[serde(default = "...")]` 路径修改
 + 8 个新文件 + 14 个 import 验证 + 跨模块 cx.listener 闭包）超出 initial 判断。
@@ -118,4 +131,32 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 
 ## 阶段输出
 
-<!-- 各阶段完成后追加 -->
+### 轮 1：`hotkey.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r1-hotkey`
+
+**改动**：
+- 新增 `main/src/setting_tab/hotkey.rs`（17 行）
+- 从 `setting_tab.rs` 移出：
+  - `DEFAULT_SYSTEM_HOTKEY_MACOS` / `_OTHER` 两个常量
+  - `default_system_hotkey_macos()` / `_other()` 两个 serde default 函数
+- `setting_tab.rs` 内：
+  - 新增 `mod hotkey;` + `pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};`
+  - 4 处 `#[serde(default = "...")]` 与 `impl Default for AppSettings` 调用改为 `hotkey::` 前缀
+- `setting_tab.rs` 行数：4558 → 4551（−7 行）
+
+**可见性策略**：
+- 常量 `pub(crate)`：经父模块 `pub(crate) use` re-export，外部 `crate::setting_tab::DEFAULT_SYSTEM_HOTKEY_*` 路径不变
+- 默认函数 `pub(super)`：仅供父模块 `setting_tab` 内的 serde derive 与 `Default` impl 使用
+
+**验证**：
+- ✅ `cargo check -p main` 0 error
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ 8/8 hotkey 相关测试通过（`hotkey_migration_tests` + `app_init::tests`）
+- ✅ `git grep "use crate::setting_tab"` 外部引用 14 处全部不变
+- ✅ Codex 审核：APPROVED（无 finding）
+
+**经验**：
+- Rust 2024 中 `setting_tab.rs`（父模块文件）与 `setting_tab/<child>.rs` 子模块文件可共存
+- `#[serde(default = "hotkey::default_xxx")]` 路径字符串在 derive 展开点解析，相对父模块路径 OK
+- `pub(crate) use private_mod::Symbol` 可让外部以 `crate::parent::Symbol` 访问私有子模块项

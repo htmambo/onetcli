@@ -63,6 +63,10 @@ use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::
 use crate::sync_server_theme;
 use crate::update;
 
+mod hotkey;
+
+pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
+
 // ============================================================================
 // 全局用户状态
 // ============================================================================
@@ -556,17 +560,14 @@ pub struct AppSettings {
     /// 是否使用 AI 自动生成会话标题
     #[serde(default)]
     pub ai_auto_generate_session_title: bool,
-    #[serde(default = "default_system_hotkey_macos")]
+    #[serde(default = "hotkey::default_system_hotkey_macos")]
     pub system_hotkey_macos: String,
-    #[serde(default = "default_system_hotkey_other")]
+    #[serde(default = "hotkey::default_system_hotkey_other")]
     pub system_hotkey_other: String,
     /// SSH 自动接受新密钥（密钥变更时自动替换）
     #[serde(default)]
     pub ssh_auto_accept_new_keys: bool,
 }
-
-pub(crate) const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
-pub(crate) const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-alt-m";
 
 fn default_font_family() -> String {
     "Arial".to_string()
@@ -790,14 +791,6 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     )
 }
 
-fn default_system_hotkey_macos() -> String {
-    DEFAULT_SYSTEM_HOTKEY_MACOS.to_string()
-}
-
-fn default_system_hotkey_other() -> String {
-    DEFAULT_SYSTEM_HOTKEY_OTHER.to_string()
-}
-
 fn default_sync_backend_type() -> String {
     "sync_server".to_string()
 }
@@ -904,8 +897,8 @@ impl Default for AppSettings {
             sql_auto_save_interval: default_auto_save_interval(),
             db_undo_stack_size: default_db_undo_stack_size(),
             ai_auto_generate_session_title: false,
-            system_hotkey_macos: default_system_hotkey_macos(),
-            system_hotkey_other: default_system_hotkey_other(),
+            system_hotkey_macos: hotkey::default_system_hotkey_macos(),
+            system_hotkey_other: hotkey::default_system_hotkey_other(),
             ssh_auto_accept_new_keys: false,
         }
     }

@@ -2,7 +2,7 @@
 
 ## 活跃任务 (Active)
 
-- 🔄 [P1 拆分 setting_tab.rs (4455 行)](Active/SETTING_TAB_SPLIT_PLAN.md) - 开始于 2026-06-08 (fullauto: setting-tab-split)
+- 🔄 [P1 拆分 setting_tab.rs (4455 行)](Active/SETTING_TAB_SPLIT_PLAN.md) - 轮 1/9 完成于 2026-06-15
 
 ## 已完成任务 (Archive)
 
