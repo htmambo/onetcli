@@ -6,7 +6,7 @@ use db_view::set_db_view_settings;
 use gpui::http_client::{AsyncBody, Method, Request};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Axis, ClickEvent, Context, Entity, EventEmitter,
+    AnyElement, App, AppContext, AsyncApp, Axis, Context, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, ParentElement,
     Render, SharedString, StyleRefinement, Styled, WeakEntity, Window, WindowAppearance, div, px,
 };
@@ -16,7 +16,6 @@ use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY,
     Sizable, Size, Theme, ThemeRegistry, TitleBar, WindowExt, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
-    clipboard::Clipboard,
     group_box::GroupBoxVariant,
     h_flex,
     input::{Input, InputState},
@@ -53,6 +52,7 @@ use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::
 use crate::sync_server_theme;
 use crate::update;
 
+mod about;
 mod app_settings;
 mod cloud;
 mod global_user;
@@ -63,6 +63,7 @@ mod saved_window;
 mod theme_utils;
 mod types;
 
+use about::render_about_section;
 pub(crate) use app_settings::AppSettings;
 pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};
 pub(crate) use global_user::GlobalCurrentUser;
@@ -3182,114 +3183,6 @@ fn render_shortcuts_section(cx: &App) -> gpui::AnyElement {
 }
 
 /// GitHub 开源地址
-const GITHUB_URL: &str = "https://github.com/htmambo/onetcli";
-
-/// 渲染关于页面
-fn render_about_section(cx: &App) -> gpui::AnyElement {
-    let version = env!("CARGO_PKG_VERSION");
-    let muted = cx.theme().muted_foreground;
-
-    let disclaimer_items: Vec<String> = (1..=5)
-        .map(|i| {
-            let key = format!("Settings.About.disclaimer_item_{}", i);
-            let text = t!(&key).to_string();
-            format!("{}. {}", i, text)
-        })
-        .collect();
-
-    let data_safety_items: Vec<String> = (1..=3)
-        .map(|i| {
-            let key = format!("Settings.About.data_safety_item_{}", i);
-            let text = t!(&key).to_string();
-            format!("• {}", text)
-        })
-        .collect();
-
-    v_flex()
-        .gap_4()
-        .p_4()
-        // 版本信息
-        .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(div().text_sm().child(format!(
-                    "{}: {}",
-                    t!("Settings.About.version"),
-                    version
-                ))),
-        )
-        // GitHub 开源地址
-        .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .child(format!("{}: ", t!("Settings.About.opensource_label"))),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().link)
-                        .child(GITHUB_URL),
-                )
-                .child(Clipboard::new("about-copy-github-url").value(GITHUB_URL))
-                .child(
-                    Button::new("about-open-github")
-                        .icon(IconName::ExternalLink)
-                        .xsmall()
-                        .ghost()
-                        .on_click(|_: &ClickEvent, _, cx| {
-                            cx.open_url(GITHUB_URL);
-                        }),
-                ),
-        )
-        // 免责声明
-        .child(
-            v_flex()
-                .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(t!("Settings.About.disclaimer_title").to_string()),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(t!("Settings.About.disclaimer_status").to_string()),
-                )
-                .child(
-                    v_flex().gap_1().pl_2().children(
-                        disclaimer_items
-                            .into_iter()
-                            .map(|item| div().text_sm().text_color(muted).child(item)),
-                    ),
-                ),
-        )
-        // 数据与安全提示
-        .child(
-            v_flex()
-                .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(t!("Settings.About.data_safety_title").to_string()),
-                )
-                .child(
-                    v_flex().gap_1().pl_2().children(
-                        data_safety_items
-                            .into_iter()
-                            .map(|item| div().text_sm().text_color(muted).child(item)),
-                    ),
-                ),
-        )
-        .into_any_element()
-}
 
 #[cfg(test)]
 mod hotkey_migration_tests {

@@ -16,7 +16,12 @@
 | 轮 8a | `app_settings.rs` (struct + Default + Global) | ✅ 已完成 (2026-06-15) |
 | 轮 8b | `app_settings.rs` (impl 方法) | ✅ 已完成 (2026-06-15) |
 | 轮 8c | `migrations.rs` (迁移/同步辅助) | ✅ 已完成 (2026-06-15) |
-| 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
+| 轮 9 | `SettingsPanel` Render | 🔄 进行中（细分为 9a-9e） |
+| 轮 9a | `about.rs` | ✅ 已完成 (2026-06-15) |
+| 轮 9b | `shortcuts.rs` | ⏳ 待执行 |
+| 轮 9c | `auth_form.rs` | ⏳ 待执行 |
+| 轮 9d | `proxy_view.rs` | ⏳ 待执行 |
+| 轮 9e | `panel.rs` (SettingsPanel) | ⏳ 待执行 |
 
 ## 中停说明（已恢复）
 
@@ -520,3 +525,39 @@ use super::{hotkey, sync_follow_app_terminal_themes, theme_utils};
 - **测试 mod 跨 sibling 模块路径**：父模块声明 `mod migrations;` 后，测试 mod（嵌套在父中）需用 `super::migrations::xxx`，而**主代码**用裸 `migrations::xxx`。Python 批量改写需区分作用域
 - **dead use 行清理策略**：测试代码若改用全路径调用（`super::migrations::editable_sync_server_url(...)`），相应的 `use` 行就成为 dead code — 移除 use 比保留更清晰
 - **Sibling-to-sibling `pub(super)` 访问规则**：两个 sibling 子模块通过共同父模块可见性互访 — Rust 模块系统允许，pre-test 用 standalone rustc 验证可省去后续意外
+
+### 轮 9a：`about.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r9-panel-render`
+
+**决策**：原轮 9 单轮搬 1900 行风险过高，经 Codex 评估细分为 9a-9e（按叶子→根顺序）：
+- **9a**：`about.rs`（最简，本轮）
+- 9b：`shortcuts.rs`
+- 9c：`auth_form.rs`
+- 9d：`proxy_view.rs`
+- 9e：`panel.rs`（SettingsPanel 主体，最后做）
+
+**改动**：
+- 新增 `main/src/setting_tab/about.rs`（116 行）
+- 从 `setting_tab.rs` 移出（共 ~108 行）：
+  - `const GITHUB_URL: &str`
+  - `pub(super) fn render_about_section(cx: &App) -> gpui::AnyElement`
+- `setting_tab.rs` 内：
+  - 新增 `mod about;` + `use about::render_about_section;`（叶子模块，无外部消费者，不需 `pub(crate) use`）
+  - 移除父文件已无引用的 `gpui::ClickEvent`、`gpui_component::clipboard::Clipboard` import
+- `setting_tab.rs` 行数：3347 → 3243（−104 行）
+
+**可见性策略**：
+- `render_about_section` `pub(super)`，仅 `SettingsPanel::render` 调用
+- `GITHUB_URL` 子模块内 `const`，无外部访问
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（baseline 一致），0 setting_tab lib warning
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt about.rs` 通过
+
+**经验**：
+- **叶子 UI 模块抽取低风险**：单一渲染函数 + 私有常量 + 单一调用点 — 是最佳的轮 9 启动模块
+- **`use ... 子模块::符号`**（私有 use）vs `pub(crate) use ...`（re-export）：本轮 `render_about_section` 不被外部消费，只需私有 use；与之前所有 pub 类型迁移不同
+- **`gpui::IntoElement` trait import 易遗漏**：`.into_any_element()` 调用需要该 trait 在作用域，单 trait import 漏掉是常见错误，cargo check 立即捕获
