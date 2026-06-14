@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 3 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 4 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -9,7 +9,7 @@
 | 轮 1 | `hotkey.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 2 | `global_user.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 3 | `cloud.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 4 | `saved_window.rs` | ⏳ 待执行 |
+| 轮 4 | `saved_window.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 5 | `proxy.rs` | ⏳ 待执行 |
 | 轮 6 | `types.rs` | ⏳ 待执行 |
 | 轮 7 | `theme_utils.rs` | ⏳ 待执行 |
@@ -228,3 +228,42 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - 抽取整组同源 struct（云同步族）比单个迁更高效 — 共享 `OAuthTokens` 依赖、derive 不变、字段/可见性不变，行为零变化
 - 移除父文件未使用的 `use` 项（如 `OAuthTokens`）前，必须 `grep -nw` 全文确认
 - 子模块自行 `use one_core::...::OAuthTokens`，与父模块解耦更清晰
+
+### 轮 4：`saved_window.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r4-saved-window`
+
+**改动**：
+- 新增 `main/src/setting_tab/saved_window.rs`（141 行）
+- 从 `setting_tab.rs` 移出（共 ~130 行）：
+  - `pub enum SavedWindowDisplayState`（Windowed/Maximized/Fullscreen + serde rename_all）
+  - `pub struct SavedWindowBounds` + 7 个方法的 `impl` 块
+  - 2 个自由函数：`centered_bounds_in_visible_area`（私有）、`centered_window_bounds_within_visible_area`（升 `pub(super)`）
+- `setting_tab.rs` 内：
+  - 新增 `mod saved_window;`
+  - `pub(crate) use saved_window::SavedWindowBounds;`（保持外部 `onetcli_app/mod.rs` 3 处引用不变）
+  - `#[allow(unused_imports)] pub(crate) use saved_window::SavedWindowDisplayState;`（lib check 视角下未直接使用，但测试模块需要 — 加 `#[allow]` 抑制 warning 又保留 re-export 路径）
+  - `use saved_window::centered_window_bounds_within_visible_area;`（父模块 `AppSettings::restored_main_window_bounds` 调用）
+  - 移除父文件已无引用的 `gpui::{Bounds, point, size}` import 项
+- `setting_tab.rs` 行数：4455 → 4328（−127 行）
+
+**可见性策略（关键）**：
+- `from_window_bounds`、`to_restored_window_bounds` → `pub(super)`（父模块 `AppSettings::snapshot/restored_main_window_bounds` 调用）
+- `to_window_bounds`、`fit_in_visible_bounds` → `pub(super)`（父模块测试 `mod tests` 调用）
+- 内部私有：`from_bounds`、`is_valid`、`build_window_bounds`、`centered_bounds_in_visible_area`
+- struct 字段全部 `pub`（测试以结构体字面量构造）
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，0 setting_tab 相关 warning
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `git grep "use crate::setting_tab"` 外部 14 处不变
+- ✅ `rustfmt` saved_window.rs 通过
+- ✅ Codex 审核：APPROVED（仅一项 fmt 微调，已修复）
+
+**经验**：
+- **可见性边界必须穷举**：迁移前必须 grep 所有方法调用点（父模块 + 父模块测试 + 兄弟子模块），分类提升为 `pub(super)`，否则 lib check 通过但 `--tests` 失败
+- **测试模块独有的 re-export 警告**：用 `#[allow(unused_imports)]` 只标该行，比改全局允许更精准
+- **`use` 项清理**：抽走代码后，父文件顶层 `gpui::{...}` 必须 grep 验证哪些类型已无引用
+- **rustfmt 单文件应用**：`rustfmt --edition 2024 <file>` 比 `cargo fmt -p main` 范围更可控，避免触碰不相关文件
+- Codex 配合 grep 验证才是可靠的可见性映射方式 — Codex 提示了我自己没意识到的"测试也调用了私有方法"风险
