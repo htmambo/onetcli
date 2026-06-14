@@ -1,13 +1,13 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 1 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 2 已完成于 2026-06-15)
 
 ## 进度追踪
 
 | 轮次 | 子模块 | 状态 |
 |---|---|---|
 | 轮 1 | `hotkey.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 2 | `global_user.rs` | ⏳ 待执行 |
+| 轮 2 | `global_user.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 3 | `cloud.rs` | ⏳ 待执行 |
 | 轮 4 | `saved_window.rs` | ⏳ 待执行 |
 | 轮 5 | `proxy.rs` | ⏳ 待执行 |
@@ -160,3 +160,38 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - Rust 2024 中 `setting_tab.rs`（父模块文件）与 `setting_tab/<child>.rs` 子模块文件可共存
 - `#[serde(default = "hotkey::default_xxx")]` 路径字符串在 derive 展开点解析，相对父模块路径 OK
 - `pub(crate) use private_mod::Symbol` 可让外部以 `crate::parent::Symbol` 访问私有子模块项
+
+### 轮 2：`global_user.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r2-global-user`
+
+**改动**：
+- 新增 `main/src/setting_tab/global_user.rs`（61 行）
+- 从 `setting_tab.rs` 移出：
+  - `pub struct GlobalCurrentUser` + `impl Default` / `impl gpui::Global` / `impl GlobalCurrentUser { get_user, set_user }`
+  - `struct PendingSettingsPanelPage` + `impl gpui::Global` / `impl PendingSettingsPanelPage { take }`
+- `setting_tab.rs` 内：
+  - 新增 `mod global_user;`
+  - `pub(crate) use global_user::GlobalCurrentUser;`（保持外部 `home_tab.rs` 等的 `crate::setting_tab::GlobalCurrentUser` 路径不变）
+  - `use global_user::PendingSettingsPanelPage;`（私有，仅本文件 9 处引用）
+  - 移除 `std::sync::RwLock` 和 `one_core::cloud_sync::GlobalCloudUser` 的 `use`（父文件已无引用）
+- `setting_tab.rs` 行数：4551 → 4506（−45 行）
+
+**可见性策略**：
+- `GlobalCurrentUser`：子模块 `pub struct` + 父模块 `pub(crate) use` re-export → 外部 `home_tab.rs:61` 5 处引用零改动
+- `PendingSettingsPanelPage`：子模块 `pub(super) struct` + 父模块普通 `use` → 仅 setting_tab.rs 可见，等价于原私有 struct
+- `super::SettingsPanelPage` 反向引用：临时模式，等轮 6 把 `SettingsPanelPage` 移到 `types.rs` 后改路径
+
+**验证**：
+- ✅ `cargo check -p main` 0 error
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main --no-run` 测试二进制构建成功（35.6s）
+- ✅ `cargo test -p main` 84 passed / 1 failed
+  - 失败项 `setting_tab::tests::global_proxy_settings_validate_required_fields` **与本轮无关**（baseline `git stash` 验证同样失败，属 i18n 文案断言缺陷）
+- ✅ `git grep "use crate::setting_tab"` 外部 14 处引用不变
+- ✅ Codex 审核：APPROVED（无 finding）
+
+**经验**：
+- 子模块需要父模块类型时，`use super::ParentType;` 是常规模式，Rust 模块内 item 顺序不影响（父文件后置声明仍可被前置子模块 `use`）
+- 抽取后必须用 `grep` 复查父文件是否还引用了原 `use` 的符号 — 本轮就因 `UserInfo` 仍在 `render_logged_in_user_sync` 用而**保留** import，仅删 `GlobalCloudUser` 和 `RwLock`
+- 子模块标记 `pub(super) fn/struct` 比 `pub(crate)` 更收敛，最大化封装

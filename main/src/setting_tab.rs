@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use std::process::Command;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
 use gpui::http_client::{AsyncBody, Method, Request, Url};
@@ -37,7 +37,7 @@ use gpui_component::{
 use one_core::ai_chat::GlobalChatSettings;
 use one_core::certificate_manager::CertificateManagerView;
 use one_core::cloud_sync::{
-    GlobalCloudUser, UserInfo, oauth::OAuthTokens, sync_server::SyncServerClient,
+    UserInfo, oauth::OAuthTokens, sync_server::SyncServerClient,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::llm::manager::GlobalProviderState;
@@ -63,43 +63,16 @@ use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::
 use crate::sync_server_theme;
 use crate::update;
 
+mod global_user;
 mod hotkey;
 
+pub(crate) use global_user::GlobalCurrentUser;
+use global_user::PendingSettingsPanelPage;
 pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
 
 // ============================================================================
-// 全局用户状态
+// 设置面板页面
 // ============================================================================
-
-/// 全局当前用户状态
-///
-/// 用于在设置面板中显示用户信息和执行登出操作。
-#[derive(Clone, Default)]
-pub struct GlobalCurrentUser {
-    user: Arc<RwLock<Option<UserInfo>>>,
-}
-
-impl gpui::Global for GlobalCurrentUser {}
-
-impl GlobalCurrentUser {
-    /// 获取当前用户
-    pub fn get_user(cx: &App) -> Option<UserInfo> {
-        if let Some(state) = cx.try_global::<GlobalCurrentUser>() {
-            state.user.read().ok().and_then(|u| u.clone())
-        } else {
-            None
-        }
-    }
-
-    /// 设置当前用户
-    pub fn set_user(user: Option<UserInfo>, cx: &mut App) {
-        // 重新创建 GlobalCurrentUser 以触发 observe_global 回调，使 SettingsPanel 能刷新 UI
-        cx.set_global(Self {
-            user: Arc::new(RwLock::new(user.clone())),
-        });
-        GlobalCloudUser::set_user(user, cx);
-    }
-}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SettingsPanelPage {
@@ -111,24 +84,6 @@ impl SettingsPanelPage {
     fn select_index(self) -> SelectIndex {
         let _ = self;
         SelectIndex::default()
-    }
-}
-
-#[derive(Clone, Default)]
-struct PendingSettingsPanelPage {
-    page: Arc<RwLock<Option<SettingsPanelPage>>>,
-}
-
-impl gpui::Global for PendingSettingsPanelPage {}
-
-impl PendingSettingsPanelPage {
-    fn take(cx: &mut App) -> Option<SettingsPanelPage> {
-        if let Some(state) = cx.try_global::<PendingSettingsPanelPage>() {
-            if let Ok(mut guard) = state.page.write() {
-                return guard.take();
-            }
-        }
-        None
     }
 }
 
