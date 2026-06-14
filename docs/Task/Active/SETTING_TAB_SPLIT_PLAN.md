@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 7 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 8a 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -13,7 +13,9 @@
 | 轮 5 | `proxy.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 6 | `types.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 7 | `theme_utils.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 8 | `app_settings.rs` | ⏳ 待执行 |
+| 轮 8a | `app_settings.rs` (struct + Default + Global) | ✅ 已完成 (2026-06-15) |
+| 轮 8b | `app_settings.rs` (impl 方法) | ⏳ 待执行 |
+| 轮 8c | 迁移辅助函数（HotkeyMigration 等） | ⏳ 待执行 |
 | 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
 
 ## 中停说明（已恢复）
@@ -380,3 +382,48 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - **`#[serde(default = "module::function")]` 跨模块路径**：serde derive 在父模块展开，相对路径自动相对父模块解析 — `pub(super)` 子模块函数可被 serde 字符串路径调用
 - **行为零变化保证**：本轮 60 处替换涉及 28 个 serde 路径 + 32 个调用点，但函数实现 byte-for-byte 完全相同，纯位置迁移
 - **fmt 收尾纪律**：`cargo fmt -p main --check` 输出列出**所有**未格式化点，需区分本轮引入与 baseline；只修本轮引入项以避免 PR 范围爆炸
+
+### 轮 8a：`app_settings.rs` 数据形状（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r8a-app-settings-struct`
+
+**决策**：原 "轮 8" 单轮搬移 600+ 行风险过高，经 Codex 评估细分为 8a/8b/8c：
+- **8a**：`struct AppSettings` + `impl Default` + `impl gpui::Global`（数据形状层，本轮）
+- **8b**：`impl AppSettings { ... }` 行为方法层（~380 行）
+- **8c**：迁移辅助函数（`HotkeyMigration`、`migrate_legacy_*`、`legacy_terminal_settings` 等）
+
+**改动**：
+- 新增 `main/src/setting_tab/app_settings.rs`（195 行）
+- 从 `setting_tab.rs` 移出（共 ~250 行）：
+  - `pub struct AppSettings`（~50 字段 + 28 个 `#[serde(default = "theme_utils::*")]` + 2 个 `#[serde(default = "hotkey::*")]`）
+  - `impl Default for AppSettings`（~60 行字面量）
+  - `impl gpui::Global for AppSettings {}`
+- `setting_tab.rs` 内：
+  - 新增 `mod app_settings;`
+  - `pub(crate) use app_settings::AppSettings;`（保持外部 14 处引用不变）
+  - 移除父文件已无引用的 `serde::{Deserialize, Serialize}` import
+- 子模块 `app_settings.rs` 内 import：
+  - 数据类型：`use super::{cloud::{...}, proxy::GlobalProxySettings, saved_window::SavedWindowBounds, types::{...}};`
+  - 模块级：`use super::{hotkey, theme_utils};`（**关键**：模块级 use 让 serde 路径字符串 `"theme_utils::default_X"` 在子模块上下文中按原样解析，无需改写 28 处 serde 字符串）
+- `setting_tab.rs` 行数：4051 → 3876（−175 行）
+
+**可见性策略**：
+- `pub struct AppSettings`（字段全 `pub`），外部以 `crate::setting_tab::AppSettings` 通过 re-export 访问
+- `impl gpui::Global` 跨模块声明完全合法（无可见性问题）
+
+**关键发现：serde 路径字符串的稳定性**：
+- `#[serde(default = "theme_utils::default_X")]` 字符串路径在 derive 展开点解析（= `app_settings.rs`）
+- 子模块加 `use super::theme_utils;` 后，`theme_utils::X` 在子模块上下文与父模块完全等价
+- 因此 **28 处 serde 路径字符串 0 改动**！避免了大规模重写
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（与 baseline 一致），0 setting_tab lib warning
+- ✅ `cargo check -p main --tests` 0 error（4 处测试 unused import 暴露为预存死代码，留下个独立 cleanup 处理）
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt app_settings.rs` 通过
+- ✅ Codex 审核：APPROVED（无 finding）
+
+**经验**：
+- **大型迁移必须细分**：单轮 600+ 行风险极大，三分子轮（数据/方法/辅助）每轮可独立 `cargo check` 验证
+- **`use super::{module_name};` 模式** > 单项 use：搬移 struct 时，让子模块以**模块名**导入 sibling，serde derive 字符串可不动 — 极大降低跨轮联动改动量
+- **本轮副作用：暴露测试块 dead import**。`AppSettings` 搬走后，原本通过同文件 derive "间接证明已用"的几个测试 import（`Serialize/Deserialize` 等）变成 unused — 标记为 baseline-grade dead code，留单独清理
