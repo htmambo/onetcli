@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 5 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 6 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -11,7 +11,7 @@
 | 轮 3 | `cloud.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 4 | `saved_window.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 5 | `proxy.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 6 | `types.rs` | ⏳ 待执行 |
+| 轮 6 | `types.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 7 | `theme_utils.rs` | ⏳ 待执行 |
 | 轮 8 | `app_settings.rs` | ⏳ 待执行 |
 | 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
@@ -302,3 +302,40 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - **`#[serde(default = "fn_name")]` 路径鲁棒性**：当 struct + 默认值函数**一起搬走**时，相对路径自动保留 — 无需改 attribute 字符串
 - **同质化迁移**：序列化模型 + 默认值 + 校验 + 序列化辅助是"一族"，应一起迁；将 UI Render 留在父文件内分离关注点
 - 跨 crate 同名类型混淆排除：`crates/ssh::ProxyType`、`crates/core::storage::ProxyType` 与本 crate 完全独立，grep `crate::setting_tab::ProxyType` 是过滤外部消费者的最准方法
+
+### 轮 6：`types.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r6-types`
+
+**改动**：
+- 新增 `main/src/setting_tab/types.rs`（109 行）
+- 从 `setting_tab.rs` 移出（共 ~100 行）：
+  - `pub enum SettingsPanelPage` + `select_index` 方法
+  - `pub enum DatabaseOpenMode` + `as_str` / `from_str`
+  - `pub enum LargeTextCellEditorOpenMode` + `as_str` / `from_str` + `From<LargeTextCellEditorOpenMode> for LargeTextEditorOpenMode`
+  - `pub enum ConnectionListSortField` / `ConnectionListSortOrder` / `ConnectionListViewMode`
+- `setting_tab.rs` 内：
+  - 新增 `mod types;`
+  - `pub(crate) use types::{ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode, DatabaseOpenMode, LargeTextCellEditorOpenMode, SettingsPanelPage};`
+  - 移除父文件已无引用的 `LargeTextEditorOpenMode`（db_view 中）与 `SelectIndex`（gpui_component::setting 中）import 项
+- `setting_tab.rs` 行数：4232 → 4135（−97 行）
+
+**可见性策略**：
+- 全部 enum `pub`，外部以 `crate::setting_tab::*` 访问（父 re-export）
+- `SettingsPanelPage::select_index` 由原 `fn`（私有）显式标记为 `pub(super) fn`，因父模块 `SettingsPanel::render` 仍调用它
+
+**Sibling 模块兼容**：
+- `global_user.rs` 中的 `use super::SettingsPanelPage;` 依靠父模块的 `pub(crate) use types::SettingsPanelPage` re-export 保持解析正确，无需改动
+- 等价的 `use super::types::SettingsPanelPage;` 是另一选择，但保留 `super::` 形式让 sibling 与父模块表面解耦更可控
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（与 baseline 一致），0 setting_tab 相关 warning
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt types.rs` 通过
+- ✅ Codex 审核：APPROVED（无 finding）
+
+**经验**：
+- **子模块 import 必须精确到子路径**：`gpui_component::SelectIndex` 不存在 — 实际在 `gpui_component::setting::SelectIndex`。直接复制父文件 import 而不验证子路径是常见陷阱，靠 `cargo check` 立即捕获
+- **`super::Symbol` 路径稳定性**：当子模块通过 `super::X` 引用父类型，而父类型再次被搬到 sibling 模块后，只要父模块以 `pub(crate) use` re-export，`super::X` 仍可解析 — 大幅降低跨轮联动改动量
+- **批量同质迁移**：6 个枚举 + 4 个 impl 一次迁完比逐个更省事，因 enums 之间无依赖、derive 模式相同

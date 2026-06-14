@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
+use db_view::{DbViewSettings, set_db_view_settings};
 use gpui::http_client::{AsyncBody, Method, Request};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -27,7 +27,7 @@ use gpui_component::{
     scroll::ScrollableElement,
     select::{Select, SelectItem, SelectState},
     setting::{
-        NumberFieldOptions, RenderOptions, SelectIndex, SettingField, SettingGroup, SettingItem,
+        NumberFieldOptions, RenderOptions, SettingField, SettingGroup, SettingItem,
         SettingPage, Settings,
     },
     switch::Switch,
@@ -66,6 +66,7 @@ mod global_user;
 mod hotkey;
 mod proxy;
 mod saved_window;
+mod types;
 
 pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};
 pub(crate) use global_user::GlobalCurrentUser;
@@ -78,112 +79,14 @@ pub(crate) use saved_window::SavedWindowBounds;
 #[allow(unused_imports)]
 pub(crate) use saved_window::SavedWindowDisplayState;
 use saved_window::centered_window_bounds_within_visible_area;
+pub(crate) use types::{
+    ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode, DatabaseOpenMode,
+    LargeTextCellEditorOpenMode, SettingsPanelPage,
+};
 
 // ============================================================================
 // 设置面板页面
 // ============================================================================
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SettingsPanelPage {
-    #[default]
-    General,
-}
-
-impl SettingsPanelPage {
-    fn select_index(self) -> SelectIndex {
-        let _ = self;
-        SelectIndex::default()
-    }
-}
-
-// ============================================================================
-// 数据库配置
-// ============================================================================
-
-/// 数据库打开方式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum DatabaseOpenMode {
-    /// 单库模式：每个数据库单独打开一个标签页
-    #[default]
-    Single,
-    /// 工作区模式：按工作区分组打开，同一工作区的数据库在同一标签页
-    Workspace,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LargeTextCellEditorOpenMode {
-    #[default]
-    SidebarPreview,
-    Dialog,
-}
-
-impl LargeTextCellEditorOpenMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            LargeTextCellEditorOpenMode::SidebarPreview => "sidebar_preview",
-            LargeTextCellEditorOpenMode::Dialog => "dialog",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "dialog" => LargeTextCellEditorOpenMode::Dialog,
-            _ => LargeTextCellEditorOpenMode::SidebarPreview,
-        }
-    }
-}
-
-impl From<LargeTextCellEditorOpenMode> for LargeTextEditorOpenMode {
-    fn from(value: LargeTextCellEditorOpenMode) -> Self {
-        match value {
-            LargeTextCellEditorOpenMode::SidebarPreview => LargeTextEditorOpenMode::SidebarPreview,
-            LargeTextCellEditorOpenMode::Dialog => LargeTextEditorOpenMode::Dialog,
-        }
-    }
-}
-
-impl DatabaseOpenMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DatabaseOpenMode::Single => "single",
-            DatabaseOpenMode::Workspace => "workspace",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "workspace" => DatabaseOpenMode::Workspace,
-            _ => DatabaseOpenMode::Single,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionListSortField {
-    Name,
-    CreatedAt,
-    Manual,
-    #[default]
-    UpdatedAt,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionListSortOrder {
-    Ascending,
-    #[default]
-    Descending,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionListViewMode {
-    #[default]
-    Card,
-    List,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
