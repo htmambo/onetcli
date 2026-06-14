@@ -18,7 +18,7 @@
 | 轮 8c | `migrations.rs` (迁移/同步辅助) | ✅ 已完成 (2026-06-15) |
 | 轮 9 | `SettingsPanel` Render | 🔄 进行中（细分为 9a-9e） |
 | 轮 9a | `about.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 9b | `shortcuts.rs` | ⏳ 待执行 |
+| 轮 9b | `shortcuts.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9c | `auth_form.rs` | ⏳ 待执行 |
 | 轮 9d | `proxy_view.rs` | ⏳ 待执行 |
 | 轮 9e | `panel.rs` (SettingsPanel) | ⏳ 待执行 |
@@ -561,3 +561,25 @@ use super::{hotkey, sync_follow_app_terminal_themes, theme_utils};
 - **叶子 UI 模块抽取低风险**：单一渲染函数 + 私有常量 + 单一调用点 — 是最佳的轮 9 启动模块
 - **`use ... 子模块::符号`**（私有 use）vs `pub(crate) use ...`（re-export）：本轮 `render_about_section` 不被外部消费，只需私有 use；与之前所有 pub 类型迁移不同
 - **`gpui::IntoElement` trait import 易遗漏**：`.into_any_element()` 调用需要该 trait 在作用域，单 trait import 漏掉是常见错误，cargo check 立即捕获
+
+### 轮 9b：`shortcuts.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r9-panel-render`（同 9a 共享分支）
+
+**改动**：
+- 新增 `main/src/setting_tab/shortcuts.rs`（207 行）
+- 从 `setting_tab.rs` 移出（共 ~191 行）：
+  - `struct ShortcutEntry` / `struct ShortcutGroup`（私有）
+  - 3 个 `const ShortcutEntry[]`：`WINDOW_SHORTCUTS` / `TAB_SHORTCUTS` / `TERMINAL_SHORTCUTS`
+  - `const SHORTCUT_GROUPS: &[ShortcutGroup]`
+  - 3 个 fn：`shortcut_spec_for_entry` / `render_shortcut_value` / `render_shortcuts_section`
+- `setting_tab.rs` 内：
+  - `mod shortcuts;` + `use shortcuts::render_shortcuts_section;`
+  - 子模块用 `use super::app_settings::AppSettings;` + `use super::hotkey::{DEFAULT_SYSTEM_HOTKEY_*};` 反向引用 sibling
+  - 清理父文件已无引用 import：`gpui::Keystroke`、`gpui_component::kbd::Kbd`
+- `setting_tab.rs` 行数：3243 → 3050（−193 行）
+
+**经验**：
+- 包含**常量数组 + 私有 struct + 多个辅助 fn 的紧凑功能模块**是理想抽取单元 — 高内聚低耦合
+- 仅 `render_shortcuts_section` 标 `pub(super)`，其他 fn/struct/const 全为私有
+- 静态数组中引用 `super::hotkey::DEFAULT_SYSTEM_HOTKEY_*` 直接 `use` 后照常使用 — Rust 允许 const 表达式间接引用 sibling 模块的 const
