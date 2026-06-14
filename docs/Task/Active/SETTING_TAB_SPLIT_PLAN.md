@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 6 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 7 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -12,7 +12,7 @@
 | 轮 4 | `saved_window.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 5 | `proxy.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 6 | `types.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 7 | `theme_utils.rs` | ⏳ 待执行 |
+| 轮 7 | `theme_utils.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 8 | `app_settings.rs` | ⏳ 待执行 |
 | 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
 
@@ -339,3 +339,44 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - **子模块 import 必须精确到子路径**：`gpui_component::SelectIndex` 不存在 — 实际在 `gpui_component::setting::SelectIndex`。直接复制父文件 import 而不验证子路径是常见陷阱，靠 `cargo check` 立即捕获
 - **`super::Symbol` 路径稳定性**：当子模块通过 `super::X` 引用父类型，而父类型再次被搬到 sibling 模块后，只要父模块以 `pub(crate) use` re-export，`super::X` 仍可解析 — 大幅降低跨轮联动改动量
 - **批量同质迁移**：6 个枚举 + 4 个 impl 一次迁完比逐个更省事，因 enums 之间无依赖、derive 模式相同
+
+### 轮 7：`theme_utils.rs`（2026-06-15 完成，高风险轮）
+
+**分支**：`refactor/setting-tab-split-r7-theme-utils`
+
+**改动**：
+- 新增 `main/src/setting_tab/theme_utils.rs`（98 行）
+- 从 `setting_tab.rs` 移出 22 个纯函数：
+  - 17 个 `default_*` 默认值函数（含使用频次最高的 `default_true`）
+  - 3 个 `clamp_*` 数值归一化函数
+- 父模块**保留**`themed_setting_field/group/page`、`settings_group_*_style` 等 UI 主题化辅助函数 — 它们依赖 `cx.theme()` 与 47 处 render 调用强耦合，留待轮 9
+- `setting_tab.rs` 内大规模重写：
+  - 28 处 `#[serde(default = "default_X")]` → `#[serde(default = "theme_utils::default_X")]`（hotkey 已加前缀的 2 处保持不变）
+  - 32 处 `impl Default for AppSettings` 字面量 + `migrate_legacy_theme_state` + clamp 调用 → `theme_utils::` 前缀
+  - 测试 `mod tests` 中 `use super::{..., clamp_ui_surface_opacity, ...};` 拆为 `use super::theme_utils::clamp_ui_surface_opacity;`
+  - 移除父文件已无引用的 `terminal_view::{DEFAULT_LINE_HEIGHT_SCALE, DEFAULT_RECOVERY_SCROLLBACK_LINES}` import
+  - 保留父文件仍用的 `gpui_component::{MIN_GLASS_OPACITY, MAX_GLASS_OPACITY}` 和 `terminal_view::{MIN/MAX_LINE_HEIGHT_SCALE, MAX_RECOVERY_SCROLLBACK_LINES}`（render UI slider + setter 内 clamp）
+- `setting_tab.rs` 行数：4135 → 4051（−84 行）
+
+**实施手法（关键创新）**：
+> **Python 批量重写脚本** — 60 处替换若靠 Edit 单条做，极容易遗漏。改用 Python `str.replace` 替换 serde 属性、`re.subn` + 负向先行断言 `(?<![:.\w])(?<!fn )name(` 替换裸调用，一次完成 28 + 32 处共 60 个替换点。后置 grep 验证：`grep '#\[serde\(default = "default_'` 返回 0 即全部清零。
+
+**可见性策略**：
+- 全部函数 `pub(super)`，仅父模块 serde derive 与 Default impl 调用
+- 父模块测试 `mod tests` 通过 `super::theme_utils::clamp_ui_surface_opacity` 显式跨模块访问
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（与 baseline 一致），0 setting_tab 相关 warning
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt theme_utils.rs` 通过
+- ✅ `cargo fmt -p main` 本轮引入的 2 处 fmt 差异已修复（剩余 3 处为 baseline）
+- ✅ Codex 审核：APPROVED（修复 fmt 后无 finding）
+- ✅ `grep '#\[serde\(default = "default_' setting_tab.rs` 返回 0（所有 serde 路径已更新）
+
+**经验**：
+- **大规模 grep + 批量改写需要脚本辅助**：60 处替换若用 Edit 单条做，单条遗漏即破坏 build。Python 脚本 + 后置 grep 验证是更可靠的工作流
+- **正则负向先行断言精准过滤**：`(?<![:.\w])(?<!fn )name(` 同时排除 `hotkey::default_xxx` / `theme_utils::default_xxx`（已加前缀）和 `fn default_xxx` 定义
+- **`#[serde(default = "module::function")]` 跨模块路径**：serde derive 在父模块展开，相对路径自动相对父模块解析 — `pub(super)` 子模块函数可被 serde 字符串路径调用
+- **行为零变化保证**：本轮 60 处替换涉及 28 个 serde 路径 + 32 个调用点，但函数实现 byte-for-byte 完全相同，纯位置迁移
+- **fmt 收尾纪律**：`cargo fmt -p main --check` 输出列出**所有**未格式化点，需区分本轮引入与 baseline；只修本轮引入项以避免 PR 范围爆炸

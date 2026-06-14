@@ -47,8 +47,8 @@ use reqwest_client::ReqwestClient;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use terminal_view::{
-    DEFAULT_LINE_HEIGHT_SCALE, DEFAULT_RECOVERY_SCROLLBACK_LINES, MAX_LINE_HEIGHT_SCALE,
-    MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalSettings, TerminalTheme,
+    MAX_LINE_HEIGHT_SCALE, MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalSettings,
+    TerminalTheme,
     set_recovery_scrollback_lines,
     settings::{GlobalTerminalSettings, TerminalSettingsStore},
 };
@@ -66,6 +66,7 @@ mod global_user;
 mod hotkey;
 mod proxy;
 mod saved_window;
+mod theme_utils;
 mod types;
 
 pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};
@@ -96,66 +97,66 @@ pub struct AppSettings {
     pub theme_mode: String,
     #[serde(default)]
     pub auto_switch_theme: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub enable_glass_effect: bool,
-    #[serde(default = "default_ui_surface_opacity")]
+    #[serde(default = "theme_utils::default_ui_surface_opacity")]
     pub ui_surface_opacity: f64,
-    #[serde(default = "default_backdrop_opacity")]
+    #[serde(default = "theme_utils::default_backdrop_opacity")]
     pub backdrop_opacity: f64,
-    #[serde(default = "default_font_family")]
+    #[serde(default = "theme_utils::default_font_family")]
     pub font_family: String,
-    #[serde(default = "default_font_size")]
+    #[serde(default = "theme_utils::default_font_size")]
     pub font_size: f64,
-    #[serde(default = "default_terminal_font_size")]
+    #[serde(default = "theme_utils::default_terminal_font_size")]
     pub terminal_font_size: f64,
-    #[serde(default = "default_terminal_font_family")]
+    #[serde(default = "theme_utils::default_terminal_font_family")]
     pub terminal_font_family: String,
     #[serde(default)]
     pub terminal_font_ligatures: bool,
-    #[serde(default = "default_terminal_line_height_scale")]
+    #[serde(default = "theme_utils::default_terminal_line_height_scale")]
     pub terminal_line_height_scale: f64,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub terminal_auto_copy: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub terminal_enable_autocomplete: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub terminal_middle_click_paste: bool,
     #[serde(default)]
     pub terminal_sync_path_with_terminal: bool,
-    #[serde(default = "default_theme_name")]
+    #[serde(default = "theme_utils::default_theme_name")]
     pub theme_name: String,
-    #[serde(default = "default_scrollbar_show")]
+    #[serde(default = "theme_utils::default_scrollbar_show")]
     pub scrollbar_show: String,
-    #[serde(default = "default_mono_font_family")]
+    #[serde(default = "theme_utils::default_mono_font_family")]
     pub mono_font_family: String,
-    #[serde(default = "default_radius")]
+    #[serde(default = "theme_utils::default_radius")]
     pub radius: f64,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub shadow: bool,
-    #[serde(default = "default_terminal_theme")]
+    #[serde(default = "theme_utils::default_terminal_theme")]
     pub terminal_theme: String,
     #[serde(default)]
     pub terminal_cursor_blink: bool,
-    #[serde(default = "default_terminal_recovery_scrollback_lines")]
+    #[serde(default = "theme_utils::default_terminal_recovery_scrollback_lines")]
     pub terminal_recovery_scrollback_lines: f64,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub terminal_confirm_multiline_paste: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub terminal_confirm_high_risk_command: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub terminal_check_running_processes_on_exit: bool,
     #[serde(default)]
     pub log_file_path: String,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub restore_connections_on_startup: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub restore_session_content: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub auto_update: bool,
     #[serde(default)]
     pub sync_server_url: String,
     /// 同步后端类型："sync_server" | "webdav"
-    #[serde(default = "default_sync_backend_type")]
+    #[serde(default = "theme_utils::default_sync_backend_type")]
     pub sync_backend_type: String,
     /// WebDAV 配置
     #[serde(default)]
@@ -184,13 +185,13 @@ pub struct AppSettings {
     #[serde(default)]
     pub main_window_bounds: Option<SavedWindowBounds>,
     /// 是否启用SQL查询的自动保存功能
-    #[serde(default = "default_true")]
+    #[serde(default = "theme_utils::default_true")]
     pub enable_sql_auto_save: bool,
     /// SQL查询自动保存的间隔（秒），默认5秒
-    #[serde(default = "default_auto_save_interval")]
+    #[serde(default = "theme_utils::default_auto_save_interval")]
     pub sql_auto_save_interval: f64,
     /// 数据库编辑器撤销栈容量，0表示禁用逐步撤销
-    #[serde(default = "default_db_undo_stack_size")]
+    #[serde(default = "theme_utils::default_db_undo_stack_size")]
     pub db_undo_stack_size: usize,
     /// 是否使用 AI 自动生成会话标题
     #[serde(default)]
@@ -202,34 +203,6 @@ pub struct AppSettings {
     /// SSH 自动接受新密钥（密钥变更时自动替换）
     #[serde(default)]
     pub ssh_auto_accept_new_keys: bool,
-}
-
-fn default_font_family() -> String {
-    "Arial".to_string()
-}
-
-fn default_font_size() -> f64 {
-    14.0
-}
-
-fn clamp_ui_font_size(size: f64) -> f32 {
-    size.clamp(12.0, 32.0) as f32
-}
-
-fn default_ui_surface_opacity() -> f64 {
-    1.0
-}
-
-fn clamp_ui_surface_opacity(opacity: f64) -> f64 {
-    opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
-}
-
-fn default_backdrop_opacity() -> f64 {
-    1.0
-}
-
-fn clamp_backdrop_opacity(opacity: f64) -> f64 {
-    opacity.clamp(MIN_GLASS_OPACITY as f64, MAX_GLASS_OPACITY as f64)
 }
 
 #[cfg(target_os = "linux")]
@@ -321,60 +294,6 @@ pub(crate) fn resolve_linux_window_appearance_override() -> Option<WindowAppeara
     resolve_deepin_window_appearance()
 }
 
-fn default_terminal_font_size() -> f64 {
-    15.0
-}
-
-fn default_terminal_font_family() -> String {
-    terminal_view::theme::default_monospace_font().to_string()
-}
-
-fn default_terminal_line_height_scale() -> f64 {
-    DEFAULT_LINE_HEIGHT_SCALE as f64
-}
-
-fn default_theme_name() -> String {
-    "Default Light".to_string()
-}
-
-fn default_scrollbar_show() -> String {
-    "hover".to_string()
-}
-
-fn default_mono_font_family() -> String {
-    if cfg!(target_os = "macos") {
-        "Menlo".to_string()
-    } else if cfg!(target_os = "windows") {
-        "Consolas".to_string()
-    } else {
-        "DejaVu Sans Mono".to_string()
-    }
-}
-
-fn default_radius() -> f64 {
-    6.0
-}
-
-fn default_terminal_theme() -> String {
-    "ocean".to_string()
-}
-
-fn default_terminal_recovery_scrollback_lines() -> f64 {
-    DEFAULT_RECOVERY_SCROLLBACK_LINES as f64
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_auto_save_interval() -> f64 {
-    5.0
-}
-
-fn default_db_undo_stack_size() -> usize {
-    50
-}
-
 fn themed_setting_field<T>(field: SettingField<T>) -> SettingField<T> {
     field
         .bg(sync_server_theme::surface_alt())
@@ -426,46 +345,43 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     )
 }
 
-fn default_sync_backend_type() -> String {
-    "sync_server".to_string()
-}
-
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             locale: "zh-CN".to_string(),
             theme_mode: "auto".to_string(),
             auto_switch_theme: false,
-            enable_glass_effect: default_true(),
-            ui_surface_opacity: default_ui_surface_opacity(),
-            backdrop_opacity: default_backdrop_opacity(),
-            font_family: default_font_family(),
-            font_size: default_font_size(),
-            terminal_font_size: default_terminal_font_size(),
-            terminal_font_family: default_terminal_font_family(),
+            enable_glass_effect: theme_utils::default_true(),
+            ui_surface_opacity: theme_utils::default_ui_surface_opacity(),
+            backdrop_opacity: theme_utils::default_backdrop_opacity(),
+            font_family: theme_utils::default_font_family(),
+            font_size: theme_utils::default_font_size(),
+            terminal_font_size: theme_utils::default_terminal_font_size(),
+            terminal_font_family: theme_utils::default_terminal_font_family(),
             terminal_font_ligatures: false,
-            terminal_line_height_scale: default_terminal_line_height_scale(),
-            terminal_auto_copy: default_true(),
-            terminal_enable_autocomplete: default_true(),
-            terminal_middle_click_paste: default_true(),
+            terminal_line_height_scale: theme_utils::default_terminal_line_height_scale(),
+            terminal_auto_copy: theme_utils::default_true(),
+            terminal_enable_autocomplete: theme_utils::default_true(),
+            terminal_middle_click_paste: theme_utils::default_true(),
             terminal_sync_path_with_terminal: false,
-            theme_name: default_theme_name(),
-            scrollbar_show: default_scrollbar_show(),
-            mono_font_family: default_mono_font_family(),
-            radius: default_radius(),
+            theme_name: theme_utils::default_theme_name(),
+            scrollbar_show: theme_utils::default_scrollbar_show(),
+            mono_font_family: theme_utils::default_mono_font_family(),
+            radius: theme_utils::default_radius(),
             shadow: true,
-            terminal_theme: default_terminal_theme(),
+            terminal_theme: theme_utils::default_terminal_theme(),
             terminal_cursor_blink: false,
-            terminal_recovery_scrollback_lines: default_terminal_recovery_scrollback_lines(),
-            terminal_confirm_multiline_paste: default_true(),
-            terminal_confirm_high_risk_command: default_true(),
-            terminal_check_running_processes_on_exit: default_true(),
-            restore_connections_on_startup: default_true(),
-            restore_session_content: default_true(),
+            terminal_recovery_scrollback_lines:
+                theme_utils::default_terminal_recovery_scrollback_lines(),
+            terminal_confirm_multiline_paste: theme_utils::default_true(),
+            terminal_confirm_high_risk_command: theme_utils::default_true(),
+            terminal_check_running_processes_on_exit: theme_utils::default_true(),
+            restore_connections_on_startup: theme_utils::default_true(),
+            restore_session_content: theme_utils::default_true(),
             log_file_path: String::new(),
             auto_update: true,
             sync_server_url: String::new(),
-            sync_backend_type: default_sync_backend_type(),
+            sync_backend_type: theme_utils::default_sync_backend_type(),
             webdav_config: None,
             gist_config: None,
             google_drive_config: None,
@@ -478,8 +394,8 @@ impl Default for AppSettings {
             connection_list_view_mode: ConnectionListViewMode::default(),
             main_window_bounds: None,
             enable_sql_auto_save: true,
-            sql_auto_save_interval: default_auto_save_interval(),
-            db_undo_stack_size: default_db_undo_stack_size(),
+            sql_auto_save_interval: theme_utils::default_auto_save_interval(),
+            db_undo_stack_size: theme_utils::default_db_undo_stack_size(),
             ai_auto_generate_session_title: false,
             system_hotkey_macos: hotkey::default_system_hotkey_macos(),
             system_hotkey_other: hotkey::default_system_hotkey_other(),
@@ -683,7 +599,7 @@ impl AppSettings {
         {
             let theme = Theme::global_mut(cx);
             theme.font_family = font_family.into();
-            theme.font_size = px(clamp_ui_font_size(font_size));
+            theme.font_size = px(theme_utils::clamp_ui_font_size(font_size));
         }
         cx.refresh_windows();
     }
@@ -940,8 +856,8 @@ fn is_legacy_ctrl_space(spec: &str) -> bool {
 
 fn migrate_legacy_theme_state(settings: &mut AppSettings) {
     const LEGACY_STATE_FILE: &str = "target/state.json";
-    if settings.theme_name != default_theme_name()
-        && settings.scrollbar_show != default_scrollbar_show()
+    if settings.theme_name != theme_utils::default_theme_name()
+        && settings.scrollbar_show != theme_utils::default_scrollbar_show()
     {
         return;
     }
@@ -954,12 +870,12 @@ fn migrate_legacy_theme_state(settings: &mut AppSettings) {
         scrollbar_show: Option<String>,
     }
     if let Ok(legacy) = serde_json::from_str::<LegacyState>(&content) {
-        if settings.theme_name == default_theme_name() {
+        if settings.theme_name == theme_utils::default_theme_name() {
             if let Some(theme) = legacy.theme.filter(|t| !t.is_empty()) {
                 settings.theme_name = theme;
             }
         }
-        if settings.scrollbar_show == default_scrollbar_show() {
+        if settings.scrollbar_show == theme_utils::default_scrollbar_show() {
             if let Some(sb) = legacy.scrollbar_show.filter(|t| !t.is_empty()) {
                 settings.scrollbar_show = sb;
             }
@@ -1246,7 +1162,7 @@ impl SettingsPanel {
                                     |val: f64, cx: &mut App| {
                                         let settings_snapshot = {
                                             let settings = AppSettings::global_mut(cx);
-                                            settings.ui_surface_opacity = clamp_ui_surface_opacity(val);
+                                            settings.ui_surface_opacity = theme_utils::clamp_ui_surface_opacity(val);
                                             settings.save();
                                             settings.clone()
                                         };
@@ -1270,7 +1186,7 @@ impl SettingsPanel {
                                     |val: f64, cx: &mut App| {
                                         let settings_snapshot = {
                                             let settings = AppSettings::global_mut(cx);
-                                            settings.backdrop_opacity = clamp_backdrop_opacity(val);
+                                            settings.backdrop_opacity = theme_utils::clamp_backdrop_opacity(val);
                                             settings.save();
                                             settings.clone()
                                         };
@@ -2653,10 +2569,11 @@ impl SettingsPanel {
 mod tests {
     #[cfg(target_os = "linux")]
     use super::parse_deepin_theme_appearance;
+    use super::theme_utils::clamp_ui_surface_opacity;
     use super::{
         AppSettings, GlobalProxySettings, ProxyType, SavedWindowBounds, SavedWindowDisplayState,
-        centered_window_bounds_within_visible_area, clamp_ui_surface_opacity,
-        editable_sync_server_url, normalize_sync_server_url,
+        centered_window_bounds_within_visible_area, editable_sync_server_url,
+        normalize_sync_server_url,
     };
     use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
