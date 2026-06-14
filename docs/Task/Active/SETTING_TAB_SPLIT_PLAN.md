@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 8a 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 8b 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -14,7 +14,7 @@
 | 轮 6 | `types.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 7 | `theme_utils.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 8a | `app_settings.rs` (struct + Default + Global) | ✅ 已完成 (2026-06-15) |
-| 轮 8b | `app_settings.rs` (impl 方法) | ⏳ 待执行 |
+| 轮 8b | `app_settings.rs` (impl 方法) | ✅ 已完成 (2026-06-15) |
 | 轮 8c | 迁移辅助函数（HotkeyMigration 等） | ⏳ 待执行 |
 | 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
 
@@ -427,3 +427,44 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - **大型迁移必须细分**：单轮 600+ 行风险极大，三分子轮（数据/方法/辅助）每轮可独立 `cargo check` 验证
 - **`use super::{module_name};` 模式** > 单项 use：搬移 struct 时，让子模块以**模块名**导入 sibling，serde derive 字符串可不动 — 极大降低跨轮联动改动量
 - **本轮副作用：暴露测试块 dead import**。`AppSettings` 搬走后，原本通过同文件 derive "间接证明已用"的几个测试 import（`Serialize/Deserialize` 等）变成 unused — 标记为 baseline-grade dead code，留单独清理
+
+### 轮 8b：`app_settings.rs` 行为方法层（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r8b-app-settings-impl`
+
+**改动**：
+- 将 `impl AppSettings { ... }` 整块（386 行，25 个方法）追加到 `main/src/setting_tab/app_settings.rs`
+- 子模块 `app_settings.rs` 行数：195 → 597
+- `setting_tab.rs` 行数：3876 → 3483（−393 行）
+- 父文件清理已无引用 import：
+  - `std::path::PathBuf` / `DbViewSettings` / `Pixels` / `WindowBackgroundAppearance` / `WindowBounds` / `ThemeMode` / `get_config_dir` / `tracing::{error, info}` / 重复的 `saved_window::SavedWindowBounds` / `saved_window::centered_window_bounds_within_visible_area`
+- 父文件保留：`set_recovery_scrollback_lines`（`sync_terminal_settings_to_all` 仍调用，轮 8c 处理）
+- 测试 import 调整：`centered_window_bounds_within_visible_area` 从父级 multi-line `use super::{...}` 拆出，改为显式 `use super::saved_window::centered_window_bounds_within_visible_area;`
+
+**可见性策略（关键）**：
+- 5 个方法从私有 `fn` 升 `pub(super) fn`：
+  - `theme_preference_value` / `set_theme_preference` / `apply_ui_font_preferences`（父 UI render 调用）
+  - `effective_theme_mode`（父测试调用）
+  - `normalized_terminal_recovery_scrollback_lines`（父 `sync_terminal_settings_to_all` 调用）
+- 其余私有方法保持 `fn`（`config_path` / `write_to_disk` / `manual_theme_mode` / `find_matching_theme_name` / `apply_misc_appearance_preferences` / `apply_window_background_preferences`）
+- **父模块 `sync_follow_app_terminal_themes` 与 `resolve_linux_window_appearance_override` 保持原可见性**（私有 `fn` 与 `pub(crate) fn`） — Codex 指出子模块本身就能调父模块私有项，无需提升
+
+**子模块向父模块反向引用**：
+```rust
+#[cfg(target_os = "linux")]
+use super::resolve_linux_window_appearance_override;
+use super::{hotkey, sync_follow_app_terminal_themes, theme_utils};
+```
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（与 baseline 一致），0 setting_tab lib warning
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt app_settings.rs` 通过
+- ✅ Codex 审核：APPROVED（仅 baseline fmt 问题 2 处，与本轮无关）
+
+**经验**：
+- **子模块可访问父模块私有项**：Rust 模块系统允许子模块直接调用父模块的 `fn`，无需 `pub(super)` 提升 — 这是常见的可见性误区，应严格按"父调子需放 `pub(super)`，子调父无需任何调整"使用
+- **父模块 import 清理时机**：搬走大块代码后，**必须**对每个保留的 import 跑 grep 确认是否还有引用（如本轮 `set_recovery_scrollback_lines` 误删后重新引入，cargo check 立即捕获）
+- **测试 import 跨模块调整**：当父模块不再 re-export 私有 sibling 时，测试需直接走 `use super::sibling_mod::item`
+- **大块搬移的恢复机制**：先用 Python 删除 387 行 → cargo check 列出新 import 失效 → 单次 `Edit` 批量清理 import（含 5 个 group），避免逐项处理
