@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use db_view::{DbViewSettings, LargeTextEditorOpenMode, set_db_view_settings};
-use gpui::http_client::{AsyncBody, Method, Request, Url};
+use gpui::http_client::{AsyncBody, Method, Request};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Axis, ClickEvent, Context, Entity, EventEmitter,
@@ -64,12 +64,14 @@ use crate::update;
 mod cloud;
 mod global_user;
 mod hotkey;
+mod proxy;
 mod saved_window;
 
 pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};
 pub(crate) use global_user::GlobalCurrentUser;
 use global_user::PendingSettingsPanelPage;
 pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
+pub(crate) use proxy::{GlobalProxySettings, ProxyType};
 pub(crate) use saved_window::SavedWindowBounds;
 // `SavedWindowDisplayState` 仅供同模块测试用，加 `#[allow]` 规避非测试构建下的
 // `unused_imports` 告警。
@@ -181,108 +183,6 @@ pub enum ConnectionListViewMode {
     #[default]
     Card,
     List,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProxyType {
-    Http,
-    Https,
-    #[default]
-    Socks5,
-}
-
-impl ProxyType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ProxyType::Http => "http",
-            ProxyType::Https => "https",
-            ProxyType::Socks5 => "socks5",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GlobalProxySettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub proxy_type: ProxyType,
-    #[serde(default)]
-    pub host: String,
-    #[serde(default = "default_proxy_port")]
-    pub port: u16,
-    #[serde(default)]
-    pub username: String,
-    #[serde(default)]
-    pub password: String,
-}
-
-fn default_proxy_port() -> u16 {
-    1080
-}
-
-impl Default for GlobalProxySettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            proxy_type: ProxyType::default(),
-            host: String::new(),
-            port: default_proxy_port(),
-            username: String::new(),
-            password: String::new(),
-        }
-    }
-}
-
-impl GlobalProxySettings {
-    pub fn validate(&self) -> Result<(), String> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        if self.host.trim().is_empty() {
-            return Err(t!("Settings.proxy.validation_host_empty").to_string());
-        }
-
-        if self.port == 0 {
-            return Err(t!("Settings.proxy.validation_port_empty").to_string());
-        }
-
-        if self.username.trim().is_empty() && !self.password.is_empty() {
-            return Err(t!("Settings.proxy.validation_password_requires_username").to_string());
-        }
-
-        Ok(())
-    }
-
-    pub fn to_proxy_url(&self) -> Result<Option<Url>, String> {
-        if !self.enabled {
-            return Ok(None);
-        }
-
-        self.validate()?;
-
-        let base = format!(
-            "{}://{}:{}",
-            self.proxy_type.as_str(),
-            self.host.trim(),
-            self.port
-        );
-        let mut url = Url::parse(&base)
-            .map_err(|err| t!("Settings.proxy.validation_url_format", error = err))?;
-
-        if !self.username.trim().is_empty() {
-            url.set_username(self.username.trim())
-                .map_err(|_| t!("Settings.proxy.validation_username_format"))?;
-        }
-
-        if !self.password.is_empty() {
-            url.set_password(Some(&self.password))
-                .map_err(|_| t!("Settings.proxy.validation_password_format"))?;
-        }
-
-        Ok(Some(url))
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

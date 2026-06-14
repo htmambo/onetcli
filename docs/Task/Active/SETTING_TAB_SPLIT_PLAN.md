@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 4 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 5 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -10,7 +10,7 @@
 | 轮 2 | `global_user.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 3 | `cloud.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 4 | `saved_window.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 5 | `proxy.rs` | ⏳ 待执行 |
+| 轮 5 | `proxy.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 6 | `types.rs` | ⏳ 待执行 |
 | 轮 7 | `theme_utils.rs` | ⏳ 待执行 |
 | 轮 8 | `app_settings.rs` | ⏳ 待执行 |
@@ -267,3 +267,38 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - **`use` 项清理**：抽走代码后，父文件顶层 `gpui::{...}` 必须 grep 验证哪些类型已无引用
 - **rustfmt 单文件应用**：`rustfmt --edition 2024 <file>` 比 `cargo fmt -p main` 范围更可控，避免触碰不相关文件
 - Codex 配合 grep 验证才是可靠的可见性映射方式 — Codex 提示了我自己没意识到的"测试也调用了私有方法"风险
+
+### 轮 5：`proxy.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r5-proxy`
+
+**改动**：
+- 新增 `main/src/setting_tab/proxy.rs`（111 行）
+- 从 `setting_tab.rs` 移出（共 ~100 行）：
+  - `pub enum ProxyType`（Http/Https/Socks5）+ `impl ProxyType::as_str()`
+  - `pub struct GlobalProxySettings`（6 字段，含 `#[serde(default)]` 与 `#[serde(default = "default_proxy_port")]`）
+  - 自定义 `impl Default for GlobalProxySettings`
+  - `impl GlobalProxySettings { validate, to_proxy_url }`
+  - 私有 `fn default_proxy_port() -> u16`
+- `setting_tab.rs` 内：
+  - 新增 `mod proxy;`
+  - `pub(crate) use proxy::{GlobalProxySettings, ProxyType};`
+  - 移除父文件已无引用的 `gpui::http_client::Url` import 项
+- `setting_tab.rs` 行数：4328 → 4232（−96 行）
+
+**可见性策略**：
+- 两个类型 `pub`、字段 `pub`，方法已是 `pub`（无需提升）
+- `default_proxy_port` 保持私有 — 仅在 `proxy.rs` 内被 `#[serde(default = "...")]` 和 `Default` impl 引用
+- UI 视图 `GlobalProxySettingsView`（Render 实现）暂留 `setting_tab.rs`，因依赖大量父模块 UI import
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（与 baseline 完全一致）
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt proxy.rs` 通过
+- ✅ Codex 审核：APPROVED（无 finding）
+
+**经验**：
+- **`#[serde(default = "fn_name")]` 路径鲁棒性**：当 struct + 默认值函数**一起搬走**时，相对路径自动保留 — 无需改 attribute 字符串
+- **同质化迁移**：序列化模型 + 默认值 + 校验 + 序列化辅助是"一族"，应一起迁；将 UI Render 留在父文件内分离关注点
+- 跨 crate 同名类型混淆排除：`crates/ssh::ProxyType`、`crates/core::storage::ProxyType` 与本 crate 完全独立，grep `crate::setting_tab::ProxyType` 是过滤外部消费者的最准方法
