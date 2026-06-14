@@ -20,7 +20,7 @@
 | 轮 9a | `about.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9b | `shortcuts.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9c | `auth_form.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 9d | `proxy_view.rs` | ⏳ 待执行 |
+| 轮 9d | `proxy_view.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9e | `panel.rs` (SettingsPanel) | ⏳ 待执行 |
 
 ## 中停说明（已恢复）
