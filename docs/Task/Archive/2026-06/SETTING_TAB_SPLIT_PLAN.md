@@ -1,6 +1,37 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 8c 已完成于 2026-06-15，剩轮 9 SettingsPanel Render)
+**状态**: ✅ 已完成（轮 1-9d，2026-06-15 收官，14 子轮）
+**最终成果**：父文件 4558 → 2309 行（**−49.3%**），新增 13 个子模块共 **2466 行**
+
+## 收官说明
+
+本任务原规划 9 轮，实际执行细分为 14 个子轮（轮 8 拆为 8a/8b/8c，轮 9 拆为 9a/9b/9c/9d）。
+轮 9e（SettingsPanel 主 render 进一步细分）经评估后**搁置** — 剩余 2309 行的大部分是
+单一 `SettingsPanel::render` 主体，强行切分会破坏渲染局部性与可读性，收益递减。
+
+后续若需进一步切分 `SettingsPanel`，可针对各 section（general/sync/terminal 等）单独
+立项。当前架构已大幅改善可维护性、构建并行度与代码导航效率。
+
+## 最终架构
+
+```
+main/src/setting_tab/                # 13 个子模块，2466 行
+├── about.rs            (118)  关于页面渲染
+├── app_settings.rs     (598)  AppSettings 数据形状 + 行为方法
+├── auth_form.rs        (295)  同步账号登录/注册表单
+├── cloud.rs            (59)   云同步后端配置（WebDav/Gist/GoogleDrive/OneDrive）
+├── global_user.rs      (61)   GlobalCurrentUser + PendingSettingsPanelPage
+├── hotkey.rs           (17)   系统全局热键默认值
+├── migrations.rs       (154)  迁移与同步辅助（HotkeyMigration 等）
+├── proxy.rs            (111)  全局代理配置模型
+├── proxy_view.rs       (500)  全局代理设置 popup 视图
+├── saved_window.rs     (144)  主窗口尺寸/位置持久化
+├── shortcuts.rs        (202)  快捷键说明区块
+├── theme_utils.rs      (98)   默认值与数值归一化函数
+└── types.rs            (109)  设置相关纯枚举
+
+main/src/setting_tab.rs (2309)      父模块 facade + SettingsPanel render
+```
 
 ## 进度追踪
 
@@ -16,12 +47,11 @@
 | 轮 8a | `app_settings.rs` (struct + Default + Global) | ✅ 已完成 (2026-06-15) |
 | 轮 8b | `app_settings.rs` (impl 方法) | ✅ 已完成 (2026-06-15) |
 | 轮 8c | `migrations.rs` (迁移/同步辅助) | ✅ 已完成 (2026-06-15) |
-| 轮 9 | `SettingsPanel` Render | 🔄 进行中（细分为 9a-9e） |
 | 轮 9a | `about.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9b | `shortcuts.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9c | `auth_form.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 9d | `proxy_view.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 9e | `panel.rs` (SettingsPanel) | ⏳ 待执行 |
+| 轮 9e | `panel.rs` (SettingsPanel) | ⏸️ 已搁置（剩余 SettingsPanel 单体 render 不宜进一步切分） |
 
 ## 中停说明（已恢复）
 
