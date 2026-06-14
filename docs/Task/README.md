@@ -2,11 +2,12 @@
 
 ## 活跃任务 (Active)
 
-- 🔄 [P1 拆分 setting_tab.rs (4455 行)](Active/SETTING_TAB_SPLIT_PLAN.md) - 轮 9d 完成于 2026-06-15（14/15 子轮完成）
+（暂无）
 
 ## 已完成任务 (Archive)
 
 ### 2026-06
+- ✅ [P1 拆分 setting_tab.rs (4455 行 → 2309 行，−49.3%)](Archive/2026-06/SETTING_TAB_SPLIT_PLAN.md) - 完成于 2026-06-15（14 子轮，新增 13 个子模块 2466 行）
 - ✅ [旧版激活热键 ctrl+space 自动迁移与 toast 提示](Archive/2026-06/HOTKEY_LEGACY_MIGRATION_PLAN.md) - 完成于 2026-06-10
 - ✅ [P2 经验沉淀硬化：RoundedPopup 助手 + bundle-macos codesign](Archive/2026-06/POPUP_CODESIGN_HARDENING_PLAN.md) - 完成于 2026-06-08 (fullauto: popup-codesign)
 - ✅ [LLM 提供商云同步问题域归并与回归测试强化](Archive/2026-06/LLM_PROVIDER_SYNC_HARDENING_PLAN.md) - 完成于 2026-06-08
