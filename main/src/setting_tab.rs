@@ -34,7 +34,7 @@ use gpui_component::{
 };
 use one_core::ai_chat::GlobalChatSettings;
 use one_core::certificate_manager::CertificateManagerView;
-use one_core::cloud_sync::{UserInfo, sync_server::SyncServerClient};
+use one_core::cloud_sync::UserInfo;
 use one_core::gpui_tokio::Tokio;
 use one_core::llm::manager::GlobalProviderState;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
@@ -43,9 +43,7 @@ use one_core::utils::auto_save_config::AutoSaveConfig;
 use reqwest_client::ReqwestClient;
 use rust_i18n::t;
 use terminal_view::{
-    MAX_LINE_HEIGHT_SCALE, MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalSettings,
-    TerminalTheme, set_recovery_scrollback_lines,
-    settings::{GlobalTerminalSettings, TerminalSettingsStore},
+    MAX_LINE_HEIGHT_SCALE, MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
 };
 
 use crate::app_init::is_valid_system_hotkey;
@@ -59,6 +57,7 @@ mod app_settings;
 mod cloud;
 mod global_user;
 mod hotkey;
+mod migrations;
 mod proxy;
 mod saved_window;
 mod theme_utils;
@@ -69,6 +68,7 @@ pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebD
 pub(crate) use global_user::GlobalCurrentUser;
 use global_user::PendingSettingsPanelPage;
 pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
+pub(crate) use migrations::HotkeyMigration;
 pub(crate) use proxy::{GlobalProxySettings, ProxyType};
 pub(crate) use saved_window::SavedWindowBounds;
 // `SavedWindowDisplayState` 仅供同模块测试用，加 `#[allow]` 规避非测试构建下的
@@ -232,10 +232,10 @@ pub fn init_settings(cx: &mut App) -> HotkeyMigration {
 /// 当 `preloaded` 为 `None` 时行为与 `init_settings` 完全一致。
 pub fn init_settings_with(cx: &mut App, preloaded: Option<AppSettings>) -> HotkeyMigration {
     let mut settings = preloaded.unwrap_or_else(AppSettings::load);
-    migrate_legacy_theme_state(&mut settings);
-    let hotkey_migration = migrate_legacy_system_hotkey(&mut settings);
+    migrations::migrate_legacy_theme_state(&mut settings);
+    let hotkey_migration = migrations::migrate_legacy_system_hotkey(&mut settings);
     let initial_sync_server_url = settings.sync_server_url.clone();
-    terminal_view::init_settings(cx, Some(legacy_terminal_settings(&settings)));
+    terminal_view::init_settings(cx, Some(migrations::legacy_terminal_settings(&settings)));
     // 初始化自动保存配置全局状态
     cx.set_global(AutoSaveConfig::new(
         settings.enable_sql_auto_save,
@@ -255,132 +255,6 @@ pub fn init_settings_with(cx: &mut App, preloaded: Option<AppSettings>) -> Hotke
     hotkey_migration
 }
 
-/// 旧版系统级激活热键 `ctrl-space` 与系统输入法切换冲突，启动时按平台迁移为新默认值。
-#[derive(Debug, Clone, Copy, Default)]
-pub struct HotkeyMigration {
-    pub macos_changed: bool,
-    pub other_changed: bool,
-}
-
-impl HotkeyMigration {
-    pub fn any_changed(self) -> bool {
-        self.macos_changed || self.other_changed
-    }
-}
-
-fn migrate_legacy_system_hotkey(settings: &mut AppSettings) -> HotkeyMigration {
-    let mut migration = HotkeyMigration::default();
-    if is_legacy_ctrl_space(&settings.system_hotkey_macos) {
-        settings.system_hotkey_macos = DEFAULT_SYSTEM_HOTKEY_MACOS.to_string();
-        migration.macos_changed = true;
-    }
-    if is_legacy_ctrl_space(&settings.system_hotkey_other) {
-        settings.system_hotkey_other = DEFAULT_SYSTEM_HOTKEY_OTHER.to_string();
-        migration.other_changed = true;
-    }
-    migration
-}
-
-fn is_legacy_ctrl_space(spec: &str) -> bool {
-    spec.trim().eq_ignore_ascii_case("ctrl-space")
-}
-
-fn migrate_legacy_theme_state(settings: &mut AppSettings) {
-    const LEGACY_STATE_FILE: &str = "target/state.json";
-    if settings.theme_name != theme_utils::default_theme_name()
-        && settings.scrollbar_show != theme_utils::default_scrollbar_show()
-    {
-        return;
-    }
-    let Ok(content) = std::fs::read_to_string(LEGACY_STATE_FILE) else {
-        return;
-    };
-    #[derive(Debug, Clone, serde::Deserialize)]
-    struct LegacyState {
-        theme: Option<String>,
-        scrollbar_show: Option<String>,
-    }
-    if let Ok(legacy) = serde_json::from_str::<LegacyState>(&content) {
-        if settings.theme_name == theme_utils::default_theme_name() {
-            if let Some(theme) = legacy.theme.filter(|t| !t.is_empty()) {
-                settings.theme_name = theme;
-            }
-        }
-        if settings.scrollbar_show == theme_utils::default_scrollbar_show() {
-            if let Some(sb) = legacy.scrollbar_show.filter(|t| !t.is_empty()) {
-                settings.scrollbar_show = sb;
-            }
-        }
-    }
-}
-
-fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App) {
-    set_recovery_scrollback_lines(cx, settings.normalized_terminal_recovery_scrollback_lines());
-
-    // 更新 GlobalTerminalSettings
-    if let Some(global) = cx.try_global::<GlobalTerminalSettings>() {
-        let store = global.0.clone();
-        store.update(cx, |store: &mut TerminalSettingsStore, cx| {
-            let mut next = store.snapshot();
-            next.check_running_processes_on_exit =
-                settings.terminal_check_running_processes_on_exit;
-            store.replace(next, cx);
-        });
-    }
-
-    let Some(home) = cx.try_global::<GlobalHomePage>() else {
-        return;
-    };
-    let Some(window_id) = cx.active_window() else {
-        return;
-    };
-    let home_page = home.home_page.clone();
-    let _ = cx.update_window(window_id, move |_, window, cx| {
-        home_page.update(cx, |hp, cx| {
-            hp.apply_terminal_settings_to_all(&settings, window, cx);
-        });
-    });
-}
-
-fn sync_follow_app_terminal_themes(cx: &mut App) {
-    let settings = AppSettings::global(cx).clone();
-    cx.defer(move |cx| {
-        let Some(home) = cx.try_global::<GlobalHomePage>() else {
-            return;
-        };
-        let Some(window_id) = cx.active_window() else {
-            return;
-        };
-
-        // 避免在 HomePage 自己的 update 调用栈里再次触发 home_page.update，
-        // 否则启动阶段会命中 gpui 的重入保护并直接 panic。
-        let home_page = home.home_page.clone();
-        let _ = cx.update_window(window_id, move |_, window, cx| {
-            home_page.update(cx, |hp, cx| {
-                hp.apply_app_settings(&settings, window, cx);
-            });
-        });
-    });
-}
-
-fn legacy_terminal_settings(settings: &AppSettings) -> TerminalSettings {
-    TerminalSettings {
-        font_size: settings.terminal_font_size as f32,
-        auto_copy: settings.terminal_auto_copy,
-        enable_autocomplete: settings.terminal_enable_autocomplete,
-        middle_click_paste: settings.terminal_middle_click_paste,
-        sync_path_with_terminal: settings.terminal_sync_path_with_terminal,
-        theme: settings.terminal_theme.clone(),
-        cursor_blink: settings.terminal_cursor_blink,
-        confirm_multiline_paste: settings.terminal_confirm_multiline_paste,
-        confirm_high_risk_command: settings.terminal_confirm_high_risk_command,
-        vim_scroll_to_arrow_keys: true,
-        builtin_highlights_initialized: false,
-        custom_highlights: Vec::new(),
-        check_running_processes_on_exit: settings.terminal_check_running_processes_on_exit,
-    }
-}
-
 pub(crate) fn build_app_http_client(
     proxy: &GlobalProxySettings,
 ) -> Result<Arc<ReqwestClient>, String> {
@@ -390,17 +264,9 @@ pub(crate) fn build_app_http_client(
         .map_err(|err| format!("HTTP 客户端初始化失败: {}", err))
 }
 
-fn editable_sync_server_url(value: &str) -> String {
-    value.trim().to_string()
-}
-
-fn normalize_sync_server_url(value: &str) -> String {
-    SyncServerClient::normalize_base_url(value)
-}
-
 fn apply_sync_server_url_setting(value: SharedString, cx: &mut App) {
-    let editable = editable_sync_server_url(value.as_ref());
-    let normalized = normalize_sync_server_url(&editable);
+    let editable = migrations::editable_sync_server_url(value.as_ref());
+    let normalized = migrations::normalize_sync_server_url(&editable);
     let settings_changed = {
         let settings = AppSettings::global_mut(cx);
         if settings.sync_server_url == editable {
@@ -1479,7 +1345,7 @@ impl SettingsPanel {
                                             settings.save();
                                             settings.clone()
                                         };
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 ))
                                 .default_value(
@@ -1500,7 +1366,7 @@ impl SettingsPanel {
                                         settings.terminal_font_ligatures = val;
                                         settings.save();
                                         let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 )
                                 .default_value(default_settings.terminal_font_ligatures),
@@ -1522,7 +1388,7 @@ impl SettingsPanel {
                                         settings.terminal_font_size = val;
                                         settings.save();
                                         let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 ))
                                 .default_value(default_settings.terminal_font_size),
@@ -1544,7 +1410,7 @@ impl SettingsPanel {
                                         settings.terminal_line_height_scale = val;
                                         settings.save();
                                         let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 ))
                                 .default_value(default_settings.terminal_line_height_scale),
@@ -1561,7 +1427,7 @@ impl SettingsPanel {
                                         settings.terminal_auto_copy = val;
                                         settings.save();
                                         let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 )
                                 .default_value(default_settings.terminal_auto_copy),
@@ -1578,7 +1444,7 @@ impl SettingsPanel {
                                         settings.terminal_middle_click_paste = val;
                                         settings.save();
                                         let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 )
                                 .default_value(default_settings.terminal_middle_click_paste),
@@ -1602,7 +1468,7 @@ impl SettingsPanel {
                                         settings.terminal_recovery_scrollback_lines = val;
                                         settings.save();
                                         let settings_snapshot = settings.clone();
-                                        sync_terminal_settings_to_all(settings_snapshot, cx);
+                                        migrations::sync_terminal_settings_to_all(settings_snapshot, cx);
                                     },
                                 ))
                                 .default_value(default_settings.terminal_recovery_scrollback_lines),
@@ -1665,7 +1531,7 @@ impl SettingsPanel {
                                         let settings = AppSettings::global_mut(cx);
                                         settings.terminal_check_running_processes_on_exit = val;
                                         settings.save();
-                                        sync_terminal_settings_to_all(settings.clone(), cx);
+                                        migrations::sync_terminal_settings_to_all(settings.clone(), cx);
                                     },
                                 )
                                 .default_value(
@@ -2004,7 +1870,6 @@ mod tests {
     use super::theme_utils::clamp_ui_surface_opacity;
     use super::{
         AppSettings, GlobalProxySettings, ProxyType, SavedWindowBounds, SavedWindowDisplayState,
-        editable_sync_server_url, normalize_sync_server_url,
     };
     use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
@@ -2074,8 +1939,14 @@ mod tests {
     fn 同步地址输入保留末尾斜杠但规范化结果移除末尾斜杠() {
         let value = " https://example.com/api/ ";
 
-        assert_eq!(editable_sync_server_url(value), "https://example.com/api/");
-        assert_eq!(normalize_sync_server_url(value), "https://example.com/api");
+        assert_eq!(
+            super::migrations::editable_sync_server_url(value),
+            "https://example.com/api/"
+        );
+        assert_eq!(
+            super::migrations::normalize_sync_server_url(value),
+            "https://example.com/api"
+        );
     }
 
     #[test]
@@ -2265,7 +2136,7 @@ mod tests {
     #[test]
     fn legacy_terminal_settings_maps_terminal_fields() {
         let settings = AppSettings::default();
-        let legacy = super::legacy_terminal_settings(&settings);
+        let legacy = super::migrations::legacy_terminal_settings(&settings);
 
         assert_eq!(legacy.font_size, settings.terminal_font_size as f32);
         assert_eq!(legacy.auto_copy, settings.terminal_auto_copy);
@@ -3422,22 +3293,21 @@ fn render_about_section(cx: &App) -> gpui::AnyElement {
 
 #[cfg(test)]
 mod hotkey_migration_tests {
-    use super::{is_legacy_ctrl_space, migrate_legacy_system_hotkey};
     use crate::setting_tab::{AppSettings, DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
 
     #[test]
     fn detects_legacy_ctrl_space_case_insensitive() {
-        assert!(is_legacy_ctrl_space("ctrl-space"));
-        assert!(is_legacy_ctrl_space("CTRL-SPACE"));
-        assert!(is_legacy_ctrl_space("  Ctrl-Space  "));
+        assert!(super::migrations::is_legacy_ctrl_space("ctrl-space"));
+        assert!(super::migrations::is_legacy_ctrl_space("CTRL-SPACE"));
+        assert!(super::migrations::is_legacy_ctrl_space("  Ctrl-Space  "));
     }
 
     #[test]
     fn ignores_non_legacy_values() {
-        assert!(!is_legacy_ctrl_space("ctrl-alt-m"));
-        assert!(!is_legacy_ctrl_space("cmd-alt-m"));
-        assert!(!is_legacy_ctrl_space("ctrl-shift-space"));
-        assert!(!is_legacy_ctrl_space(""));
+        assert!(!super::migrations::is_legacy_ctrl_space("ctrl-alt-m"));
+        assert!(!super::migrations::is_legacy_ctrl_space("cmd-alt-m"));
+        assert!(!super::migrations::is_legacy_ctrl_space("ctrl-shift-space"));
+        assert!(!super::migrations::is_legacy_ctrl_space(""));
     }
 
     #[test]
@@ -3446,7 +3316,7 @@ mod hotkey_migration_tests {
         settings.system_hotkey_macos = "ctrl-space".to_string();
         settings.system_hotkey_other = "ctrl-space".to_string();
 
-        let migration = migrate_legacy_system_hotkey(&mut settings);
+        let migration = super::migrations::migrate_legacy_system_hotkey(&mut settings);
 
         assert!(migration.macos_changed);
         assert!(migration.other_changed);
@@ -3460,7 +3330,7 @@ mod hotkey_migration_tests {
         settings.system_hotkey_macos = "cmd-shift-k".to_string();
         settings.system_hotkey_other = "alt-shift-t".to_string();
 
-        let migration = migrate_legacy_system_hotkey(&mut settings);
+        let migration = super::migrations::migrate_legacy_system_hotkey(&mut settings);
 
         assert!(!migration.any_changed());
         assert_eq!(settings.system_hotkey_macos, "cmd-shift-k");
@@ -3473,7 +3343,7 @@ mod hotkey_migration_tests {
         settings.system_hotkey_macos = "cmd-alt-m".to_string();
         settings.system_hotkey_other = "ctrl-space".to_string();
 
-        let migration = migrate_legacy_system_hotkey(&mut settings);
+        let migration = super::migrations::migrate_legacy_system_hotkey(&mut settings);
 
         assert!(!migration.macos_changed);
         assert!(migration.other_changed);

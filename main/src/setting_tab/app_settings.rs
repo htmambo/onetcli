@@ -22,6 +22,7 @@ use terminal_view::{MAX_RECOVERY_SCROLLBACK_LINES, set_recovery_scrollback_lines
 use tracing::{error, info};
 
 use super::cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};
+use super::migrations::sync_follow_app_terminal_themes;
 use super::proxy::GlobalProxySettings;
 #[cfg(target_os = "linux")]
 use super::resolve_linux_window_appearance_override;
@@ -30,7 +31,7 @@ use super::types::{
     ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode, DatabaseOpenMode,
     LargeTextCellEditorOpenMode,
 };
-use super::{hotkey, sync_follow_app_terminal_themes, theme_utils};
+use super::{hotkey, theme_utils};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {

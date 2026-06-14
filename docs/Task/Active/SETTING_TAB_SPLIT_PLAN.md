@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 8b 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 8c 已完成于 2026-06-15，剩轮 9 SettingsPanel Render)
 
 ## 进度追踪
 
@@ -15,7 +15,7 @@
 | 轮 7 | `theme_utils.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 8a | `app_settings.rs` (struct + Default + Global) | ✅ 已完成 (2026-06-15) |
 | 轮 8b | `app_settings.rs` (impl 方法) | ✅ 已完成 (2026-06-15) |
-| 轮 8c | 迁移辅助函数（HotkeyMigration 等） | ⏳ 待执行 |
+| 轮 8c | `migrations.rs` (迁移/同步辅助) | ✅ 已完成 (2026-06-15) |
 | 轮 9 | `SettingsPanel` Render | ⏳ 待执行 |
 
 ## 中停说明（已恢复）
@@ -468,3 +468,55 @@ use super::{hotkey, sync_follow_app_terminal_themes, theme_utils};
 - **父模块 import 清理时机**：搬走大块代码后，**必须**对每个保留的 import 跑 grep 确认是否还有引用（如本轮 `set_recovery_scrollback_lines` 误删后重新引入，cargo check 立即捕获）
 - **测试 import 跨模块调整**：当父模块不再 re-export 私有 sibling 时，测试需直接走 `use super::sibling_mod::item`
 - **大块搬移的恢复机制**：先用 Python 删除 387 行 → cargo check 列出新 import 失效 → 单次 `Edit` 批量清理 import（含 5 个 group），避免逐项处理
+
+### 轮 8c：`migrations.rs` 迁移/同步辅助（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r8c-migration-helpers`
+
+**改动**：
+- 新增 `main/src/setting_tab/migrations.rs`（154 行）
+- 从 `setting_tab.rs` 移出（共 ~140 行）：
+  - `pub struct HotkeyMigration` + `impl::any_changed`
+  - `migrate_legacy_system_hotkey` / `is_legacy_ctrl_space`（热键迁移）
+  - `migrate_legacy_theme_state` + 内部 `LegacyState` deserialize struct（主题状态迁移）
+  - `sync_terminal_settings_to_all` / `sync_follow_app_terminal_themes`（GPUI 终端设置同步）
+  - `legacy_terminal_settings`（数据转换）
+  - `editable_sync_server_url` / `normalize_sync_server_url`（同步 URL 归一化）
+- `setting_tab.rs` 内：
+  - 新增 `mod migrations;` + `pub(crate) use migrations::HotkeyMigration;`（保持外部 `main.rs` 引用不变）
+  - 主代码 25 处裸调用加 `migrations::` 前缀（Python 批量改写 + 负向先行断言过滤）
+  - 测试 mod 内 12 处需 `super::migrations::xxx`（测试 mod 无法看见父模块的 sibling）
+  - 清理已无引用 import：`SyncServerClient`、`TerminalSettings`、`set_recovery_scrollback_lines`、`GlobalTerminalSettings`、`TerminalSettingsStore`
+- `app_settings.rs` 内：
+  - `use super::{hotkey, sync_follow_app_terminal_themes, theme_utils};` → 拆为 `use super::migrations::sync_follow_app_terminal_themes;` + `use super::{hotkey, theme_utils};`
+- `setting_tab.rs` 行数：3483 → 3347（−136 行）
+
+**关键 bug 与恢复**：
+- 第一次 Python 删除使用 `start_marker..end_marker` 范围删除，因 `build_app_http_client` (line 384) **位于** `editable_sync_server_url` (393) 之前但在我的删除范围内，被误删
+- `cargo check` 立即捕获 `unresolved import crate::setting_tab::build_app_http_client`（来自 `onetcli_app/mod.rs`）
+- 立即用 Edit 在 `apply_sync_server_url_setting` 之前重新插入 `build_app_http_client` 函数
+- **教训**：范围删除若包含中间需保留的导出函数，cargo check 是有效兜底；未来应优先用锚点验证的 anchor 模式删除
+
+**可见性策略**：
+- `HotkeyMigration` `pub`（外部 `main.rs` 用）→ 父模块 `pub(crate) use` re-export
+- 8 个 helper `pub(super) fn`（父模块 init/render 与父测试调用）
+- 内部 `LegacyState` struct 定义在 `migrate_legacy_theme_state` 函数体内，无跨模块边界
+
+**sibling-to-sibling 访问验证**：
+- `migrations::sync_terminal_settings_to_all` 调用 `settings.normalized_terminal_recovery_scrollback_lines()` — 该方法在 sibling `app_settings.rs` 中为 `pub(super)`
+- 用 standalone rustc 测试预先验证：sibling 可访问另一 sibling 的 `pub(super) fn` — 因为它们对共同父模块（`setting_tab`）都可见，所以彼此可见
+- Codex 二次确认：GO
+
+**验证**：
+- ✅ `cargo check -p main` 0 error，9 warnings（baseline 一致），0 setting_tab lib warning
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline i18n 缺陷）
+- ✅ `rustfmt migrations.rs` 通过
+- ✅ `cargo fmt` 本轮 fmt diff 已修复（剩 3 处为 baseline）
+- ✅ Codex 审核：APPROVED（仅 baseline fmt 问题）
+
+**经验**：
+- **范围删除的固有风险**：连续行删除若包含中间需保留的导出符号会破坏外部 import；cargo check 是有效兜底，但更稳妥是 anchor 精确删除（删 `fn xxx` 块时只锚定该 fn 起止）
+- **测试 mod 跨 sibling 模块路径**：父模块声明 `mod migrations;` 后，测试 mod（嵌套在父中）需用 `super::migrations::xxx`，而**主代码**用裸 `migrations::xxx`。Python 批量改写需区分作用域
+- **dead use 行清理策略**：测试代码若改用全路径调用（`super::migrations::editable_sync_server_url(...)`），相应的 `use` 行就成为 dead code — 移除 use 比保留更清晰
+- **Sibling-to-sibling `pub(super)` 访问规则**：两个 sibling 子模块通过共同父模块可见性互访 — Rust 模块系统允许，pre-test 用 standalone rustc 验证可省去后续意外
