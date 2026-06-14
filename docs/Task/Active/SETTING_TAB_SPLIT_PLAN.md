@@ -1,6 +1,6 @@
 # P1 拆分 main/src/setting_tab.rs 任务计划
 
-**状态**: 🔄 进行中 (轮 2 已完成于 2026-06-15)
+**状态**: 🔄 进行中 (轮 3 已完成于 2026-06-15)
 
 ## 进度追踪
 
@@ -8,7 +8,7 @@
 |---|---|---|
 | 轮 1 | `hotkey.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 2 | `global_user.rs` | ✅ 已完成 (2026-06-15) |
-| 轮 3 | `cloud.rs` | ⏳ 待执行 |
+| 轮 3 | `cloud.rs` | ✅ 已完成 (2026-06-15) |
 | 轮 4 | `saved_window.rs` | ⏳ 待执行 |
 | 轮 5 | `proxy.rs` | ⏳ 待执行 |
 | 轮 6 | `types.rs` | ⏳ 待执行 |
@@ -195,3 +195,36 @@ S1 (调研) → S2 (设计) → S3 (types) → S4 (app_settings) → S5 (cloud) 
 - 子模块需要父模块类型时，`use super::ParentType;` 是常规模式，Rust 模块内 item 顺序不影响（父文件后置声明仍可被前置子模块 `use`）
 - 抽取后必须用 `grep` 复查父文件是否还引用了原 `use` 的符号 — 本轮就因 `UserInfo` 仍在 `render_logged_in_user_sync` 用而**保留** import，仅删 `GlobalCloudUser` 和 `RwLock`
 - 子模块标记 `pub(super) fn/struct` 比 `pub(crate)` 更收敛，最大化封装
+
+### 轮 3：`cloud.rs`（2026-06-15 完成）
+
+**分支**：`refactor/setting-tab-split-r3-cloud`
+
+**改动**：
+- 新增 `main/src/setting_tab/cloud.rs`（59 行）
+- 从 `setting_tab.rs` 移出 4 个云同步配置 struct（共 50 行）：
+  - `WebDavSettings` + 自定义 `impl Default`（vault_path 缺省为 `"ONetCli-vault"`）
+  - `GistSettings`（derive Default）
+  - `GoogleDriveSettings`（derive Default）
+  - `OneDriveSettings`（derive Default）
+- `setting_tab.rs` 内：
+  - 新增 `mod cloud;`
+  - `pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};`（保持外部 `oauth_dialog.rs` 等 `crate::setting_tab::*Settings` 路径不变）
+  - 移除 `one_core::cloud_sync::oauth::OAuthTokens` 的 `use`（父文件已无引用）
+- `setting_tab.rs` 行数：4506 → 4455（−51 行）
+
+**可见性策略**：
+- 4 个 struct 全部 `pub`，外部以 `crate::setting_tab::XxxSettings` 访问（依靠父模块 `pub(crate) use` re-export）
+- 父模块同时保有 `AppSettings.{webdav,gist,google_drive,onedrive}_config` 字段类型、13 处渲染代码内的 `XxxSettings::default()` 调用
+
+**验证**：
+- ✅ `cargo check -p main` 0 error
+- ✅ `cargo check -p main --tests` 0 error
+- ✅ `cargo test -p main` 84 通过 / 1 失败（baseline 已知 i18n 缺陷，与本轮无关）
+- ✅ `git grep "use crate::setting_tab"` 外部 14 处不变
+- ✅ Codex 审核：APPROVED（无 finding）
+
+**经验**：
+- 抽取整组同源 struct（云同步族）比单个迁更高效 — 共享 `OAuthTokens` 依赖、derive 不变、字段/可见性不变，行为零变化
+- 移除父文件未使用的 `use` 项（如 `OAuthTokens`）前，必须 `grep -nw` 全文确认
+- 子模块自行 `use one_core::...::OAuthTokens`，与父模块解耦更清晰

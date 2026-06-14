@@ -36,9 +36,7 @@ use gpui_component::{
 };
 use one_core::ai_chat::GlobalChatSettings;
 use one_core::certificate_manager::CertificateManagerView;
-use one_core::cloud_sync::{
-    UserInfo, oauth::OAuthTokens, sync_server::SyncServerClient,
-};
+use one_core::cloud_sync::{UserInfo, sync_server::SyncServerClient};
 use one_core::gpui_tokio::Tokio;
 use one_core::llm::manager::GlobalProviderState;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
@@ -63,9 +61,11 @@ use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::
 use crate::sync_server_theme;
 use crate::update;
 
+mod cloud;
 mod global_user;
 mod hotkey;
 
+pub(crate) use cloud::{GistSettings, GoogleDriveSettings, OneDriveSettings, WebDavSettings};
 pub(crate) use global_user::GlobalCurrentUser;
 use global_user::PendingSettingsPanelPage;
 pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
@@ -748,57 +748,6 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
 
 fn default_sync_backend_type() -> String {
     "sync_server".to_string()
-}
-
-/// WebDAV 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebDavSettings {
-    pub endpoint: String,
-    /// "basic" | "bearer"
-    pub auth_type: String,
-    pub username: String,
-    pub password: String,
-    pub bearer_token: String,
-    pub vault_path: String,
-}
-
-impl Default for WebDavSettings {
-    fn default() -> Self {
-        Self {
-            endpoint: String::new(),
-            auth_type: "basic".to_string(),
-            username: String::new(),
-            password: String::new(),
-            bearer_token: String::new(),
-            vault_path: "ONetCli-vault".to_string(),
-        }
-    }
-}
-
-/// GitHub Gist 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GistSettings {
-    pub client_id: String,
-    pub gist_id: Option<String>,
-    pub tokens: Option<OAuthTokens>,
-}
-
-/// Google Drive 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GoogleDriveSettings {
-    pub client_id: String,
-    pub client_secret: String,
-    pub folder_id: Option<String>,
-    pub tokens: Option<OAuthTokens>,
-}
-
-/// OneDrive 同步配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct OneDriveSettings {
-    pub client_id: String,
-    pub client_secret: String,
-    pub root_id: Option<String>,
-    pub tokens: Option<OAuthTokens>,
 }
 
 impl Default for AppSettings {
