@@ -2725,7 +2725,6 @@ impl TabContainer {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.set_active_index(idx, window, cx);
                             }))
-                            .cursor_grab()
                             .drag_threshold(TAB_REORDER_DRAG_THRESHOLD)
                             .on_drag(DragTab::new(idx, title.clone()), |drag, _, _, cx| {
                                 cx.stop_propagation();

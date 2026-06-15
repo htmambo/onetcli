@@ -4454,7 +4454,14 @@ impl Render for TerminalView {
                 let terminal_bounds = self.terminal_bounds;
                 let entity = cx.entity().downgrade();
                 let focus_handle = self.focus_handle.clone();
+                // 链接/路径悬停时切换手型光标
+                let hover_cursor = if self.addon_manager.current_hover_id().is_some() {
+                    gpui::CursorStyle::PointingHand
+                } else {
+                    gpui::CursorStyle::Arrow
+                };
                 let terminal_core = div()
+                    .cursor(hover_cursor)
                     .track_focus(&focus_handle)
                     .key_context(TERMINAL_CONTEXT)
                     .on_action(cx.listener(Self::send_tab))

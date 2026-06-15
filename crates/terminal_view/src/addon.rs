@@ -213,6 +213,9 @@ pub trait TerminalAddon: Send + Sync {
 pub struct AddonManager {
     addons: HashMap<&'static str, Box<dyn TerminalAddon>>,
     load_order: Vec<&'static str>,
+    /// 当前处于 exclusive hover 状态的 addon id
+    /// 用于 view 层决定鼠标光标样式（链接/路径 → PointingHand）
+    current_hover_id: Option<&'static str>,
 }
 
 impl Default for AddonManager {
@@ -226,6 +229,7 @@ impl AddonManager {
         Self {
             addons: HashMap::new(),
             load_order: Vec::new(),
+            current_hover_id: None,
         }
     }
 
@@ -342,6 +346,34 @@ impl AddonManager {
             }
         }
 
+        // 维护聚合 hover 状态:供 view 层决定鼠标光标样式
+        if self.current_hover_id != exclusive_id {
+            self.current_hover_id = exclusive_id;
+            changed = true;
+        }
+
+        changed
+    }
+
+    /// 当前处于 hover 状态的 addon id（exclusive 互斥后唯一）
+    /// view 层据此决定 `.cursor(CursorStyle::PointingHand)`
+    pub fn current_hover_id(&self) -> Option<&'static str> {
+        self.current_hover_id
+    }
+
+    /// 清除所有 addon 的 hover 状态,并重置聚合字段
+    /// 返回是否发生状态变化(view 层据此决定是否触发重绘)
+    pub fn clear_hover(&mut self) -> bool {
+        let mut changed = false;
+        for id in &self.load_order {
+            if let Some(addon) = self.addons.get_mut(id) {
+                changed |= addon.clear_hover();
+            }
+        }
+        if self.current_hover_id.is_some() {
+            self.current_hover_id = None;
+            changed = true;
+        }
         changed
     }
 
@@ -1245,8 +1277,8 @@ fn file_path_to_url(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AddonManager, WebLinksAddon, compile_custom_highlight_rules, is_open_link_modifier_pressed,
-        open_link_action_hint, register_default_addons,
+        AddonManager, TerminalAddonMouseContext, WebLinksAddon, compile_custom_highlight_rules,
+        is_open_link_modifier_pressed, open_link_action_hint, register_default_addons,
     };
     use crate::addon::TerminalAddon;
     use crate::settings::TerminalHighlightRule;
@@ -1384,5 +1416,88 @@ mod tests {
 
         assert!(manager.is_loaded("custom_highlights"));
         assert!(!manager.is_loaded("ip_highlight"));
+    }
+
+    /// 辅助:构造一个指定列上的 mouse move 上下文(供 hover 测试复用)
+    fn url_hover_context<'a>(
+        line: &'a str,
+        col: usize,
+        m: Modifiers,
+        open_url: &'a mut dyn FnMut(&str),
+    ) -> TerminalAddonMouseContext<'a> {
+        TerminalAddonMouseContext::new(
+            0,
+            col,
+            line,
+            m,
+            gpui::Point::default(),
+            true,
+            None,
+            open_url,
+        )
+    }
+
+    #[test]
+    fn addon_manager_hover_aggregates_from_exclusive_addon() {
+        let mut manager = AddonManager::new();
+        manager.load(Box::new(WebLinksAddon::new()));
+
+        let line = "see https://example.com/foo here";
+        let col = line.find("https://").unwrap();
+        let mut opened: Vec<String> = Vec::new();
+        let mut push = |url: &str| opened.push(url.to_string());
+        let m = Modifiers::default();
+        let mut ctx = url_hover_context(line, col, m, &mut push);
+
+        let changed = manager.dispatch_mouse_move(&mut ctx);
+        assert!(changed);
+        assert_eq!(manager.current_hover_id(), Some("weblinks"));
+    }
+
+    #[test]
+    fn addon_manager_hover_clears_after_mouse_leaves_link() {
+        let mut manager = AddonManager::new();
+        manager.load(Box::new(WebLinksAddon::new()));
+
+        let line = "see https://example.com/foo here";
+        let url_col = line.find("https://").unwrap();
+        let mut opened: Vec<String> = Vec::new();
+        let mut push = |url: &str| opened.push(url.to_string());
+        let m = Modifiers::default();
+
+        // 1) 悬停到 URL
+        let mut ctx = url_hover_context(line, url_col, m, &mut push);
+        manager.dispatch_mouse_move(&mut ctx);
+        assert_eq!(manager.current_hover_id(), Some("weblinks"));
+
+        // 2) 移开光标到普通文本
+        let mut ctx = url_hover_context(line, 0, m, &mut push);
+        let changed = manager.dispatch_mouse_move(&mut ctx);
+        assert!(changed, "hover 状态变化应触发 changed=true");
+        assert_eq!(manager.current_hover_id(), None);
+    }
+
+    #[test]
+    fn addon_manager_clear_hover_resets_state() {
+        let mut manager = AddonManager::new();
+        manager.load(Box::new(WebLinksAddon::new()));
+
+        let line = "see https://example.com/foo here";
+        let col = line.find("https://").unwrap();
+        let mut opened: Vec<String> = Vec::new();
+        let mut push = |url: &str| opened.push(url.to_string());
+        let m = Modifiers::default();
+        let mut ctx = url_hover_context(line, col, m, &mut push);
+
+        manager.dispatch_mouse_move(&mut ctx);
+        assert_eq!(manager.current_hover_id(), Some("weblinks"));
+
+        let changed = manager.clear_hover();
+        assert!(changed);
+        assert_eq!(manager.current_hover_id(), None);
+
+        // 再次调用应无变化
+        let changed_again = manager.clear_hover();
+        assert!(!changed_again);
     }
 }

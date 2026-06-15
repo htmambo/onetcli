@@ -9,9 +9,9 @@ fn tab_surface_color(cx: &App, color: Hsla) -> Hsla {
 }
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, ClickEvent, Div, Edges, Hsla, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, px, relative,
+    AnyElement, App, ClickEvent, CursorStyle, Div, Edges, Hsla, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
+    Styled, Window, div, px, relative,
 };
 
 /// Tab variants.
@@ -693,6 +693,7 @@ impl RenderOnce for Tab {
                 this.when_some(self.on_click.clone(), |this, on_click| {
                     this.on_click(move |event, window, cx| on_click(event, window, cx))
                 })
+                .cursor(CursorStyle::PointingHand)
             })
     }
 }
