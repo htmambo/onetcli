@@ -3668,6 +3668,16 @@ impl TerminalView {
         {
             return false;
         }
+        // 非 macOS + 非 SGR 鼠标模式: Ctrl+Left 保留给 addon 打开链接,不发给 PTY
+        // SGR 模式下让 PTY 收 Ctrl+click（TUI 应用 vim/htop 等自身需要该修饰键）
+        if button == MouseButton::Left
+            && pressed
+            && modifiers.control
+            && !cfg!(target_os = "macos")
+            && !sgr_mouse_mode_enabled(self.terminal.read(cx).mode())
+        {
+            return false;
+        }
         let mode = self.terminal.read(cx).mode();
         if !sgr_mouse_mode_enabled(mode) {
             return false;

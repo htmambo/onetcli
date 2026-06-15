@@ -533,21 +533,23 @@ impl TerminalAddon for WebLinksAddon {
     }
 
     fn on_mouse_down(&mut self, context: &mut TerminalAddonMouseContext) -> bool {
-        if !context.modifiers.platform {
+        if !is_open_link_modifier_pressed(context.modifiers) {
             return false;
         }
 
-        let matched = self.detect_url_at(context.line_text, context.column, context.screen_line);
-        if !matched {
+        if !self.detect_url_at(context.line_text, context.column, context.screen_line) {
             return false;
         }
 
-        if let Some(link) = self.hovered_link.as_ref() {
-            context.open_url(&link.url);
-            return true;
-        }
-
-        false
+        // detect_url_at 匹配成功时一定写入了 hovered_link
+        let url = self
+            .hovered_link
+            .as_ref()
+            .expect("detect_url_at 已保证 hovered_link 已写入")
+            .url
+            .clone();
+        context.open_url(&url);
+        true
     }
 
     fn clear_hover(&mut self) -> bool {
@@ -560,7 +562,7 @@ impl TerminalAddon for WebLinksAddon {
 
     fn tooltip(&self) -> Option<TerminalAddonTooltip> {
         self.hovered_link.as_ref().map(|link| TerminalAddonTooltip {
-            action_hint: "⌘ + Click",
+            action_hint: open_link_action_hint(),
             action_text: "to open the link",
             display_text: link.url.clone(),
             display_color: rgb(0x66ccff).into(),
@@ -1056,7 +1058,7 @@ impl TerminalAddon for FilePathAddon {
     }
 
     fn on_mouse_down(&mut self, context: &mut TerminalAddonMouseContext) -> bool {
-        if !context.is_local || !context.modifiers.platform {
+        if !context.is_local || !is_open_link_modifier_pressed(context.modifiers) {
             return false;
         }
 
@@ -1123,6 +1125,26 @@ impl TerminalAddon for FilePathAddon {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+/// 打开链接/路径的修饰键。
+/// - macOS: ⌘ Command（gpui Modifiers::platform）
+/// - 非 macOS: Ctrl（Linux/Windows 桌面约定，Win 键常被 WM 拦截不可靠）
+fn is_open_link_modifier_pressed(modifiers: Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.platform
+    } else {
+        modifiers.control
+    }
+}
+
+/// 打开链接/路径的修饰键提示文案（按平台切换）。
+fn open_link_action_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "⌘ + Click"
+    } else {
+        "Ctrl + Click"
     }
 }
 
@@ -1222,8 +1244,105 @@ fn file_path_to_url(path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AddonManager, compile_custom_highlight_rules, register_default_addons};
+    use super::{
+        AddonManager, WebLinksAddon, compile_custom_highlight_rules, is_open_link_modifier_pressed,
+        open_link_action_hint, register_default_addons,
+    };
+    use crate::addon::TerminalAddon;
     use crate::settings::TerminalHighlightRule;
+    use gpui::Modifiers;
+
+    fn modifiers(control: bool, platform: bool) -> Modifiers {
+        Modifiers {
+            control,
+            platform,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn open_link_modifier_matches_platform_convention() {
+        // macOS: ⌘ = platform
+        // 非 macOS: Ctrl = control
+        if cfg!(target_os = "macos") {
+            assert!(is_open_link_modifier_pressed(modifiers(false, true)));
+            assert!(!is_open_link_modifier_pressed(modifiers(true, false)));
+        } else {
+            assert!(is_open_link_modifier_pressed(modifiers(true, false)));
+            assert!(!is_open_link_modifier_pressed(modifiers(false, true)));
+        }
+        // 两者都没按 → 不通过
+        assert!(!is_open_link_modifier_pressed(modifiers(false, false)));
+    }
+
+    #[test]
+    fn open_link_hint_matches_target_os() {
+        let hint = open_link_action_hint();
+        if cfg!(target_os = "macos") {
+            assert!(hint.contains("⌘"));
+        } else {
+            assert!(hint.contains("Ctrl"));
+        }
+    }
+
+    #[test]
+    fn weblinks_mouse_down_opens_url_on_correct_modifier() {
+        let mut addon = WebLinksAddon::new();
+        let line = "see https://example.com/foo here";
+        let col = line.find("https://").unwrap();
+
+        let m = if cfg!(target_os = "macos") {
+            modifiers(false, true)
+        } else {
+            modifiers(true, false)
+        };
+
+        let mut opened: Vec<String> = Vec::new();
+        let mut push = |url: &str| opened.push(url.to_string());
+        let mut ctx = crate::addon::TerminalAddonMouseContext::new(
+            0,
+            col,
+            line,
+            m,
+            gpui::Point::default(),
+            true,
+            None,
+            &mut push,
+        );
+
+        assert!(addon.on_mouse_down(&mut ctx));
+        assert_eq!(opened, vec!["https://example.com/foo".to_string()]);
+    }
+
+    #[test]
+    fn weblinks_mouse_down_ignores_wrong_modifier() {
+        let mut addon = WebLinksAddon::new();
+        let line = "see https://example.com/foo here";
+        let col = line.find("https://").unwrap();
+
+        // 错误修饰键:macOS 上按 Ctrl,非 macOS 上按 platform
+        let m = if cfg!(target_os = "macos") {
+            modifiers(true, false)
+        } else {
+            modifiers(false, true)
+        };
+
+        let mut opened: Vec<String> = Vec::new();
+        let mut push = |url: &str| opened.push(url.to_string());
+        let mut ctx = crate::addon::TerminalAddonMouseContext::new(
+            0,
+            col,
+            line,
+            m,
+            gpui::Point::default(),
+            true,
+            None,
+            &mut push,
+        );
+
+        assert!(!addon.on_mouse_down(&mut ctx));
+        assert!(opened.is_empty());
+    }
 
     #[test]
     fn custom_highlight_rule_requires_pattern_and_color() {
