@@ -1,8 +1,9 @@
 # SSH GEX 最小组尺寸兼容修复
 
-**状态**: ⏳ Pending
+**状态**: ✅ Completed（完成于 2026-07-01）
 **创建时间**: 2026-07-01
 **影响范围**: `crates/ssh`（含 `crates/sftp` 透传）
+**关联提交**: `dca6b674` — `fix(ssh): GEX 默认 min_group_size 下调到 2048 修复旧服务端 KEX 失败`
 
 ## 背景
 

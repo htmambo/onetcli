@@ -6,6 +6,9 @@
 
 ## 已完成任务 (Archive)
 
+### 2026-07
+- ✅ [SSH GEX 最小组尺寸兼容修复](Archive/2026-07/SSH_GEX_MIN_GROUP_SIZE_PLAN.md) - 完成于 2026-07-01（`dca6b674`；RusshClient::connect 统一走 build_client_config；russh 0.60.3 默认 3072 → 2048，修复 4 次 "DH prime size (2048 bits) not within requested range" 后 KexInit 失败）
+
 ### 2026-06
 - ✅ [终端/SSH ⌘+Click / Win+Click 打开链接失效修复（按平台切换修饰键）](Archive/2026-06/TERMINAL_OPEN_LINK_MODIFIER_PLAN.md) - 完成于 2026-06-15（macOS 仍用 ⌘；Linux/Windows 改为 Ctrl + click；Manjaro 实测通过）
 - ✅ [P1 拆分 setting_tab.rs (4455 行 → 2309 行，−49.3%)](Archive/2026-06/SETTING_TAB_SPLIT_PLAN.md) - 完成于 2026-06-15（14 子轮，新增 13 个子模块 2466 行）
