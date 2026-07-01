@@ -228,11 +228,11 @@ fn build_preferred_algorithms(enable_legacy_kex: bool) -> Preferred {
 }
 
 pub fn build_client_config(config: &SshConnectConfig) -> client::Config {
-    let gex = if config.enable_legacy_kex {
-        client::GexParams::new(2048, 4096, 8192).expect("旧版 SSH 兼容模式的 GEX 参数必须有效")
-    } else {
-        Default::default()
-    };
+    // 总是把 GEX 最小组尺寸下调到 2048，与 RFC 4253 / OpenSSH 客户端默认一致；
+    // 否则 russh 默认的 3072 会导致仅下发 2048-bit 素数的老服务端 KEX 失败。
+    // 旧版本此处仅在 enable_legacy_kex=true 时下调，导致默认路径下 2048-bit 服务端
+    // 触发 `DH prime size (2048 bits) not within requested range` 警告后连接失败。
+    let gex = client::GexParams::new(2048, 4096, 8192).expect("GEX 参数必须有效");
 
     client::Config {
         inactivity_timeout: config.timeout.or(Some(defaults::INACTIVITY_TIMEOUT)),
@@ -1496,14 +1496,10 @@ impl SshClient for RusshClient {
     type Channel = RusshChannel;
 
     async fn connect(config: SshConnectConfig) -> Result<Self> {
-        let russh_config = Arc::new(client::Config {
-            inactivity_timeout: config.timeout.or(Some(defaults::INACTIVITY_TIMEOUT)),
-            keepalive_interval: config
-                .keepalive_interval
-                .or(Some(defaults::KEEPALIVE_INTERVAL)),
-            keepalive_max: config.keepalive_max.unwrap_or(defaults::KEEPALIVE_MAX),
-            ..<_>::default()
-        });
+        // 统一走 build_client_config，让默认路径也应用 GEX 范围（2048/4096/8192）
+        // 和 enable_legacy_kex 决定的 preferred kex/cipher 列表，
+        // 避免裸 Config::default() 在 2048-bit GEX 服务端上 KEX 失败。
+        let russh_config = Arc::new(build_client_config(&config));
 
         // 情况1: 使用跳板机连接
         if let Some(ref jump) = config.jump_server {
