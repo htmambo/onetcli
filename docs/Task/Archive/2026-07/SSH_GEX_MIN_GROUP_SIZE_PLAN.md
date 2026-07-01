@@ -88,7 +88,7 @@ let russh_config = Arc::new(client::Config {
 
 1. `cargo build -p ssh -p sftp` 通过。
 2. `cargo test -p ssh` 现有测试通过。
-3. 对支持 2048-bit GEX 的远端（旧 OpenSSH / 多数 Linux 服务器）不再出现 `DH prime size (2048 bits) not within requested range` 警告，连接成功。
+3. 对支持 2048-bit GEX 的远端（旧 OpenSSH / 多数 Linux 服务器）不再出现 `DH prime size (2048 bits) not within requested range` 警告，连接成功。✅ **2026-07-01 用户现场回归通过**（4 台老服务端已可正常认证连接）
 4. `enable_legacy_kex=true` 行为不变（legacy kex/cipher 仍追加到 preferred）。
 5. `enable_legacy_kex=false` 行为：preferred 列表与 russh 0.60.3 默认一致，但 gex 接受 2048。
 
