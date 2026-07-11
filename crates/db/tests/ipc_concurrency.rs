@@ -66,7 +66,7 @@ fn make_config() -> DbConnectionConfig {
 }
 
 fn unique_socket(tag: &str) -> String {
-    format!("onetcli-conc-{tag}-{}.sock", uuid::Uuid::new_v4())
+    format!("omnihub-conc-{tag}-{}.sock", uuid::Uuid::new_v4())
 }
 
 fn make_query_response(id: u64, sql: &str) -> IpcResponse {

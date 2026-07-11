@@ -25,38 +25,46 @@ impl UpdateConfig {
 
     /// 获取更新接口地址
     fn get_update_url() -> String {
-        if let Ok(url) = std::env::var("ONETCLI_UPDATE_URL") {
-            if !url.trim().is_empty() {
-                return url;
-            }
+        if let Some(url) = env_or_option("OMNIHUB_UPDATE_URL")
+            .or_else(|| env_or_option("ONETCLI_UPDATE_URL"))
+        {
+            return url;
         }
-
-        option_env!("ONETCLI_UPDATE_URL")
-            .unwrap_or_default()
-            .to_string()
+        String::new()
     }
 
     /// 获取下载页地址
     fn get_download_url() -> Option<String> {
-        if let Ok(url) = std::env::var("ONETCLI_UPDATE_DOWNLOAD_URL") {
-            if !url.trim().is_empty() {
-                return Some(url);
-            }
-        }
-
-        option_env!("ONETCLI_UPDATE_DOWNLOAD_URL").and_then(|value| {
-            if value.trim().is_empty() {
-                None
-            } else {
-                Some(value.to_string())
-            }
-        })
+        env_or_option("OMNIHUB_UPDATE_DOWNLOAD_URL")
+            .or_else(|| env_or_option("ONETCLI_UPDATE_DOWNLOAD_URL"))
     }
 
     /// 检查配置是否有效
     pub fn is_valid(&self) -> bool {
         !self.update_url.trim().is_empty()
     }
+}
+
+fn env_or_option(key: &str) -> Option<String> {
+    if let Ok(url) = std::env::var(key) {
+        if !url.trim().is_empty() {
+            return Some(url);
+        }
+    }
+    match key {
+        "OMNIHUB_UPDATE_URL" => option_env!("OMNIHUB_UPDATE_URL").map(str::to_string),
+        "OMNIHUB_UPDATE_DOWNLOAD_URL" => option_env!("OMNIHUB_UPDATE_DOWNLOAD_URL").map(str::to_string),
+        "ONETCLI_UPDATE_URL" => option_env!("ONETCLI_UPDATE_URL").map(str::to_string),
+        "ONETCLI_UPDATE_DOWNLOAD_URL" => option_env!("ONETCLI_UPDATE_DOWNLOAD_URL").map(str::to_string),
+        _ => None,
+    }
+    .and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
 }
 
 impl Default for UpdateConfig {

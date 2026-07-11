@@ -18,7 +18,7 @@ use tokio::sync::oneshot;
 
 #[tokio::test]
 async fn external_connection_uses_mock_local_socket_driver() {
-    let socket_name = format!("onetcli-ipc-test-{}.sock", uuid::Uuid::new_v4());
+    let socket_name = format!("omnihub-ipc-test-{}.sock", uuid::Uuid::new_v4());
     let (ready_tx, ready_rx) = oneshot::channel();
     let server_name = socket_name.clone();
     let server = tokio::spawn(async move { run_mock_driver(&server_name, ready_tx).await });
@@ -74,7 +74,7 @@ async fn external_connection_uses_mock_local_socket_driver() {
 
     let metadata = json!({"method":"metadata.list_databases","params":{}}).to_string();
     let result = connection
-        .query(&format!("/*onetcli-ipc-metadata*/ {metadata}"))
+        .query(&format!("/*omnihub-ipc-metadata*/ {metadata}"))
         .await
         .unwrap();
     match result {

@@ -93,7 +93,7 @@ where
 
 pub(crate) fn build_download_path(version: &str, download_url: &str) -> Result<PathBuf, String> {
     let file_name = download_file_name(version, download_url);
-    let dir = std::env::temp_dir().join("onetcli-update");
+    let dir = std::env::temp_dir().join("omnihub-update");
     Ok(dir.join(file_name))
 }
 
@@ -104,7 +104,7 @@ fn download_file_name(version: &str, download_url: &str) -> String {
         .map(|name| archive_extension(&name))
         .unwrap_or_default();
 
-    let base_name = format!("onetcli-update-{}", version.replace('/', "-"));
+    let base_name = format!("omnihub-update-{}", version.replace('/', "-"));
     if extension.is_empty() {
         base_name
     } else {
@@ -179,19 +179,19 @@ mod tests {
     fn download_file_name_preserves_tar_gz_suffix() {
         let file_name = download_file_name(
             "0.3.2",
-            "https://example.com/onetcli-x86_64-apple-darwin.tar.gz",
+            "https://example.com/omnihub-x86_64-apple-darwin.tar.gz",
         );
 
-        assert_eq!(file_name, "onetcli-update-0.3.2.tar.gz");
+        assert_eq!(file_name, "omnihub-update-0.3.2.tar.gz");
     }
 
     #[test]
     fn download_file_name_preserves_zip_suffix() {
         let file_name = download_file_name(
             "0.3.2",
-            "https://example.com/onetcli-x86_64-pc-windows-msvc.zip",
+            "https://example.com/omnihub-x86_64-pc-windows-msvc.zip",
         );
 
-        assert_eq!(file_name, "onetcli-update-0.3.2.zip");
+        assert_eq!(file_name, "omnihub-update-0.3.2.zip");
     }
 }

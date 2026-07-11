@@ -50,7 +50,7 @@ pub fn configured_log_file_path(value: &str) -> anyhow::Result<PathBuf> {
 }
 
 pub fn default_log_file_path() -> anyhow::Result<PathBuf> {
-    Ok(get_config_dir()?.join("logs").join("onetcli.log"))
+    Ok(get_config_dir()?.join("logs").join("omnihub.log"))
 }
 
 pub fn log_file_appender(path: &Path) -> std::io::Result<std::fs::File> {
@@ -83,14 +83,14 @@ mod tests {
 
     #[test]
     fn configured_log_file_path_trims_value() {
-        let path = configured_log_file_path("  /tmp/onetcli.log  ").expect("应返回日志路径");
-        assert_eq!(path, std::path::PathBuf::from("/tmp/onetcli.log"));
+        let path = configured_log_file_path("  /tmp/omnihub.log  ").expect("应返回日志路径");
+        assert_eq!(path, std::path::PathBuf::from("/tmp/omnihub.log"));
     }
 
     #[test]
     fn log_file_appender_creates_parent_directories_and_appends() {
         let path = std::env::temp_dir()
-            .join(format!("onetcli-log-test-{}", std::process::id()))
+            .join(format!("omnihub-log-test-{}", std::process::id()))
             .join("nested")
             .join("app.log");
 
@@ -116,7 +116,7 @@ mod tests {
 
         let path = std::env::temp_dir()
             .join(format!(
-                "onetcli-log-permission-test-{}",
+                "omnihub-log-permission-test-{}",
                 std::process::id()
             ))
             .join("app.log");

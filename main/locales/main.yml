@@ -905,12 +905,12 @@ Settings:
         zh-HK: 同步後端
       backend_type_desc:
         en: Choose the sync backend type. The default is "Custom Sync Server", which allows you to use your own sync server implementation based on the `sync_server` protocol.
-        zh-CN: 选择同步后端类型，默认是“自建 ONetCli 同步服务器”则允许你使用自己搭建的基于 `sync_server` 协议的同步服务器。
-        zh-HK: 選擇同步後端類型，默認是“自建 ONetCli 同步服務器”則允許你使用自己搭建的基於 `sync_server` 協議的同步服務器。
+        zh-CN: 选择同步后端类型，默认是“自建 OmniHub 同步服务器”则允许你使用自己搭建的基于 `sync_server` 协议的同步服务器。
+        zh-HK: 選擇同步後端類型，默認是“自建 OmniHub 同步服務器”則允許你使用自己搭建的基於 `sync_server` 協議的同步服務器。
       self_hosted_backend:
         en: Custom Sync Server
-        zh-CN: 自建 ONetCli 同步服务器
-        zh-HK: 自建 ONetCli 同步服務器
+        zh-CN: 自建 OmniHub 同步服务器
+        zh-HK: 自建 OmniHub 同步服務器
       webdav_backend:
         en: WebDAV
         zh-CN: WebDAV

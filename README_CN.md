@@ -1,9 +1,9 @@
 <div align="center">
   <p>
-    <img src="logo.svg" alt="OnetCli" width="120" />
+    <img src="logo.svg" alt="OmniHub" width="120" />
   </p>
 
-  <h1>OnetCli</h1>
+  <h1>OmniHub</h1>
 
   <p><strong>数据库、SSH、SFTP、终端、监控与 AI 一体化的原生桌面工作台。</strong></p>
 
@@ -43,17 +43,17 @@
   </p>
 
   <p>
-    <img src="app.png" alt="OnetCli 概览" width="820" />
+    <img src="app.png" alt="OmniHub 概览" width="820" />
   </p>
 </div>
 
-## 为什么选择 OnetCli？
+## 为什么选择 OmniHub？
 
 <table>
   <tr>
     <td width="50%">
       <h3>原生桌面体验，而不是浏览器外壳</h3>
-      <p>OnetCli 使用 Rust 和 GPUI 构建，提供原生桌面体验与 GPU 加速渲染。</p>
+      <p>OmniHub 使用 Rust 和 GPUI 构建，提供原生桌面体验与 GPU 加速渲染。</p>
     </td>
     <td width="50%">
       <h3>日常运维集中到一个工作区</h3>
@@ -92,7 +92,7 @@
 
 ### 远程文件编辑
 
-可直接在 OnetCli 内编辑远程文件，支持语法高亮和自动补全。无需额外打开其他编辑器，也无需在终端和文件工具之间来回切换。
+可直接在 OmniHub 内编辑远程文件，支持语法高亮和自动补全。无需额外打开其他编辑器，也无需在终端和文件工具之间来回切换。
 
 ### 监控与图表
 
@@ -147,7 +147,7 @@
 如果 macOS 安装 DMG 后提示无法打开（"Apple 无法检查其是否包含恶意软件"），请执行：
 
 ```bash
-sudo xattr -rd com.apple.quarantine /Applications/OnetCli.app
+sudo xattr -rd com.apple.quarantine /Applications/OmniHub.app
 ```
 
 ### Oracle 支持
@@ -156,7 +156,7 @@ Oracle 连接需要安装 [Oracle Instant Client](https://www.oracle.com/databas
 
 ## 快速开始
 
-1. 打开 OnetCli，创建第一个数据库连接。
+1. 打开 OmniHub，创建第一个数据库连接。
 2. 添加 SSH 主机并打开远程终端。
 3. 打开 SFTP 文件管理，浏览远程目录或传输文件。
 4. 尝试 Redis Key 浏览或 MongoDB 文档浏览。
@@ -227,7 +227,7 @@ cargo fmt --check
 <details>
 <summary><strong>支持哪些数据库？</strong></summary>
 
-OnetCli 内置支持 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 和 ClickHouse，同时包含专用 Redis 与 MongoDB 视图。
+OmniHub 内置支持 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 和 ClickHouse，同时包含专用 Redis 与 MongoDB 视图。
 </details>
 
 <details>
@@ -237,15 +237,15 @@ OnetCli 内置支持 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 
 </details>
 
 <details>
-<summary><strong>在哪里下载 OnetCli？</strong></summary>
+<summary><strong>在哪里下载 OmniHub？</strong></summary>
 
 请使用 GitHub [Releases](https://github.com/feigeCode/onetcli/releases/latest) 页面。当前发布流程会生成 macOS、Linux、Windows 平台产物，并附带校验文件。
 </details>
 
 <details>
-<summary><strong>OnetCli 是免费的吗？</strong></summary>
+<summary><strong>OmniHub 是免费的吗？</strong></summary>
 
-所有功能不依赖赞助解锁。源码基于 Apache License 2.0 开源，分发和产品化使用还需要遵守 OnetCli 补充协议。
+所有功能不依赖赞助解锁。源码基于 Apache License 2.0 开源，分发和产品化使用还需要遵守 OmniHub 补充协议。
 </details>
 
 <details>
@@ -256,7 +256,7 @@ OnetCli 内置支持 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 
 
 ## 支持
 
-OnetCli 由个人长期维护。如果它节省了你的时间，可以通过捐赠、Star、提交 Bug 或贡献聚焦的小型 PR 支持项目。
+OmniHub 由个人长期维护。如果它节省了你的时间，可以通过捐赠、Star、提交 Bug 或贡献聚焦的小型 PR 支持项目。
 
 ### 捐赠
 
@@ -277,7 +277,7 @@ ER 图渲染基于 [ferrum-flow](https://github.com/tu6ge/ferrum-flow.git)。
 
 本项目基于 [Apache License 2.0](LICENSE-APACHE) 开源。
 
-OnetCli 应用的分发与使用须同时遵守 [OnetCli 补充协议](ONETCLI_LICENSE)，该补充协议在 Apache 2.0 基础上增加以下限制：
+OmniHub 应用的分发与使用须同时遵守 [OmniHub 补充协议](OMNIHUB_LICENSE)，该补充协议在 Apache 2.0 基础上增加以下限制：
 
 - 禁止二次分发、转售或将本软件作为独立产品再分发
 - 禁止基于本软件代码创建竞争性产品或服务
@@ -287,7 +287,7 @@ OnetCli 应用的分发与使用须同时遵守 [OnetCli 补充协议](ONETCLI_L
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=feigeCode%2Fonetcli&type=date&logscale=&legend=top-left">
+<a href="https://www.star-history.com/?repos=feigeCode%2Fomnihub&type=date&logscale=&legend=top-left">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=feigeCode/onetcli&type=date&theme=dark&logscale&legend=top-left" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=feigeCode/onetcli&type=date&logscale&legend=top-left" />

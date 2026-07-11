@@ -8,10 +8,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_SVG="${1:-${PROJECT_DIR}/logo-macos.svg}"
-OUTPUT_ICNS="${2:-${PROJECT_DIR}/resources/macos/OnetCli.icns}"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onetcli-icon.XXXXXX")"
-ICONSET_DIR="${WORK_DIR}/OnetCli.iconset"
-MASTER_PNG="${WORK_DIR}/OnetCli-master.png"
+OUTPUT_ICNS="${2:-${PROJECT_DIR}/resources/macos/OmniHub.icns}"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/omnihub-icon.XXXXXX")"
+ICONSET_DIR="${WORK_DIR}/OmniHub.iconset"
+MASTER_PNG="${WORK_DIR}/OmniHub-master.png"
 
 cleanup() {
     rm -rf "$WORK_DIR"

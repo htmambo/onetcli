@@ -65,8 +65,8 @@ pub enum LocalPtyHostEvent {
 /// 返回本地 PTY host 进程监听的 IPC endpoint 路径/名称。
 ///
 /// 路径规则：
-/// - Unix:  `$XDG_RUNTIME_DIR/onetcli/local-pty.sock` 或 `/tmp/onetcli-<uid>/local-pty.sock`
-/// - Windows: `\\.\pipe\onetcli-local-pty-<pid>`（使用当前进程 PID 避免多实例冲突）
+/// - Unix:  `$XDG_RUNTIME_DIR/omnihub/local-pty.sock` 或 `/tmp/omnihub-<uid>/local-pty.sock`
+/// - Windows: `\\.\pipe\omnihub-local-pty-<pid>`（使用当前进程 PID 避免多实例冲突）
 pub fn local_pty_endpoint() -> PathBuf {
     #[cfg(unix)]
     {
@@ -77,7 +77,7 @@ pub fn local_pty_endpoint() -> PathBuf {
     #[cfg(not(unix))]
     {
         let pid = std::process::id();
-        PathBuf::from(format!(r"\\.\pipe\onetcli-local-pty-{pid}"))
+        PathBuf::from(format!(r"\\.\pipe\omnihub-local-pty-{pid}"))
     }
 }
 
@@ -92,10 +92,10 @@ fn runtime_dir() -> PathBuf {
     #[cfg(unix)]
     {
         if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-            PathBuf::from(dir).join("onetcli")
+            PathBuf::from(dir).join("omnihub")
         } else {
             let uid = unsafe { libc::getuid() };
-            PathBuf::from(format!("/tmp/onetcli-{uid}"))
+            PathBuf::from(format!("/tmp/omnihub-{uid}"))
         }
     }
     #[cfg(not(unix))]
@@ -104,7 +104,7 @@ fn runtime_dir() -> PathBuf {
             .or_else(|| std::env::var_os("TEMP"))
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
-        dir.join("onetcli")
+        dir.join("omnihub")
     }
 }
 

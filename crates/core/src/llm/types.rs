@@ -13,7 +13,7 @@ pub enum ProviderType {
     Google,
     AzureOpenAI,
     OpenAICompatible,
-    OnetCli,
+    OmniHub,
 }
 
 impl ProviderType {
@@ -30,7 +30,7 @@ impl ProviderType {
             ProviderType::Google => "google",
             ProviderType::AzureOpenAI => "azure_openai",
             ProviderType::OpenAICompatible => "openai_compatible",
-            ProviderType::OnetCli => "onet_cli",
+            ProviderType::OmniHub => "onet_cli",
         }
     }
 
@@ -47,7 +47,7 @@ impl ProviderType {
             "google" => Some(ProviderType::Google),
             "azure_openai" => Some(ProviderType::AzureOpenAI),
             "openai_compatible" => Some(ProviderType::OpenAICompatible),
-            "onet_cli" => Some(ProviderType::OnetCli),
+            "onet_cli" => Some(ProviderType::OmniHub),
             _ => None,
         }
     }
@@ -65,7 +65,7 @@ impl ProviderType {
             ProviderType::Google => "Google (Gemini)",
             ProviderType::AzureOpenAI => "Azure OpenAI",
             ProviderType::OpenAICompatible => "OpenAI Compatible",
-            ProviderType::OnetCli => "Onet CLI",
+            ProviderType::OmniHub => "OmniHub",
         }
     }
 
@@ -82,17 +82,17 @@ impl ProviderType {
             ProviderType::Google,
             ProviderType::AzureOpenAI,
             ProviderType::OpenAICompatible,
-            ProviderType::OnetCli,
+            ProviderType::OmniHub,
         ]
     }
 
     pub fn requires_api_key(&self) -> bool {
-        !matches!(self, ProviderType::Ollama | ProviderType::OnetCli)
+        !matches!(self, ProviderType::Ollama | ProviderType::OmniHub)
     }
 
     /// 是否为内置 provider（不需要用户配置）
     pub fn is_builtin(&self) -> bool {
-        matches!(self, ProviderType::OnetCli)
+        matches!(self, ProviderType::OmniHub)
     }
 
     /// 返回用户可配置的 provider 类型列表（不包含内置类型）

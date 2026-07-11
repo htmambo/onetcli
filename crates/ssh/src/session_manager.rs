@@ -496,7 +496,7 @@ mod tests {
             &first,
             ShellIntegrationSetup {
                 home_dir: "/tmp/home".into(),
-                session_dir: "/tmp/home/.config/onetcli/sessions/1".into(),
+                session_dir: "/tmp/home/.config/omnihub/sessions/1".into(),
                 login_shell: Some("/bin/zsh".into()),
             },
         )

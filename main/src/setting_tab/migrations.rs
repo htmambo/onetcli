@@ -17,7 +17,7 @@ use terminal_view::{TerminalSettings, set_recovery_scrollback_lines};
 use super::app_settings::AppSettings;
 use super::hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
 use super::theme_utils;
-use crate::onetcli_app::GlobalHomePage;
+use crate::omnihub_app::GlobalHomePage;
 
 /// 旧版系统级激活热键 `ctrl-space` 与系统输入法切换冲突，启动时按平台迁移为新默认值。
 #[derive(Debug, Clone, Copy, Default)]

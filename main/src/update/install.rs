@@ -64,7 +64,7 @@ pub(super) fn cleanup_stale_update_backups() {
 }
 
 fn create_staging_dir() -> Result<PathBuf, String> {
-    let root = std::env::temp_dir().join("onetcli-update");
+    let root = std::env::temp_dir().join("omnihub-update");
     fs::create_dir_all(&root).map_err(|err| format!("创建更新临时目录失败: {err}"))?;
 
     let now = SystemTime::now()
@@ -96,12 +96,12 @@ fn spawn_windows_helper(staging_dir: &Path) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn find_windows_executable(staging_dir: &Path) -> Result<PathBuf, String> {
-    let direct = staging_dir.join("onetcli.exe");
+    let direct = staging_dir.join("omnihub.exe");
     if direct.is_file() {
         return Ok(direct);
     }
 
-    find_file_named(staging_dir, "onetcli.exe").ok_or_else(|| "未找到 onetcli.exe".to_string())
+    find_file_named(staging_dir, "omnihub.exe").ok_or_else(|| "未找到 omnihub.exe".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -244,7 +244,7 @@ fn find_first_app_bundle(staging_dir: &Path) -> Result<PathBuf, String> {
         }
     }
 
-    Err("未找到 OnetCli.app".to_string())
+    Err("未找到 OmniHub.app".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -311,17 +311,17 @@ fn install_linux(staging_dir: &Path) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn locate_linux_binary(staging_dir: &Path) -> Result<PathBuf, String> {
-    let packaged = staging_dir.join("usr/bin/onetcli");
+    let packaged = staging_dir.join("usr/bin/omnihub");
     if packaged.is_file() {
         return Ok(packaged);
     }
 
-    let direct = staging_dir.join("onetcli");
+    let direct = staging_dir.join("omnihub");
     if direct.is_file() {
         return Ok(direct);
     }
 
-    Err("未找到 Linux 更新二进制 onetcli".to_string())
+    Err("未找到 Linux 更新二进制 omnihub".to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -470,8 +470,8 @@ mod tests {
     #[test]
     fn replace_target_with_backup_rolls_back_on_replace_error() {
         let temp_dir = TestDir::new("replace-target-with-backup");
-        let target_path = temp_dir.path.join("onetcli");
-        let backup_path = temp_dir.path.join("onetcli.old");
+        let target_path = temp_dir.path.join("omnihub");
+        let backup_path = temp_dir.path.join("omnihub.old");
         std::fs::write(&target_path, b"old-binary").expect("写入旧版本失败");
 
         let result = replace_target_with_backup(&target_path, &backup_path, || {
@@ -490,7 +490,7 @@ mod tests {
         use super::apply_update_unix_with_target;
 
         let temp_dir = TestDir::new("apply-update-unix");
-        let target_path = temp_dir.path.join("onetcli");
+        let target_path = temp_dir.path.join("omnihub");
         let missing_download_path = temp_dir.path.join("missing-download");
         std::fs::write(&target_path, b"old-binary").expect("写入旧版本失败");
 
@@ -503,16 +503,16 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn locate_linux_binary_prefers_usr_bin_onetcli() {
+    fn locate_linux_binary_prefers_usr_bin_omnihub() {
         use super::locate_linux_binary;
 
         let temp_dir = TestDir::new("locate-linux-binary-priority");
         let usr_bin = temp_dir.path.join("usr/bin");
         std::fs::create_dir_all(&usr_bin).expect("创建 usr/bin 失败");
-        let preferred = usr_bin.join("onetcli");
-        let fallback = temp_dir.path.join("onetcli");
-        std::fs::write(&preferred, b"preferred").expect("写入 usr/bin/onetcli 失败");
-        std::fs::write(&fallback, b"fallback").expect("写入根目录 onetcli 失败");
+        let preferred = usr_bin.join("omnihub");
+        let fallback = temp_dir.path.join("omnihub");
+        std::fs::write(&preferred, b"preferred").expect("写入 usr/bin/omnihub 失败");
+        std::fs::write(&fallback, b"fallback").expect("写入根目录 omnihub 失败");
 
         let located = locate_linux_binary(&temp_dir.path).expect("应定位到 Linux 二进制");
 
@@ -521,14 +521,14 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn locate_linux_binary_falls_back_to_root_onetcli() {
+    fn locate_linux_binary_falls_back_to_root_omnihub() {
         use super::locate_linux_binary;
 
         let temp_dir = TestDir::new("locate-linux-binary-fallback");
-        let fallback = temp_dir.path.join("onetcli");
-        std::fs::write(&fallback, b"fallback").expect("写入根目录 onetcli 失败");
+        let fallback = temp_dir.path.join("omnihub");
+        std::fs::write(&fallback, b"fallback").expect("写入根目录 omnihub 失败");
 
-        let located = locate_linux_binary(&temp_dir.path).expect("应回退到根目录 onetcli");
+        let located = locate_linux_binary(&temp_dir.path).expect("应回退到根目录 omnihub");
 
         assert_eq!(located, fallback);
     }
@@ -538,11 +538,11 @@ mod tests {
     fn current_app_bundle_path_from_exe_returns_app_bundle() {
         use super::current_app_bundle_path_from_exe;
 
-        let exe = PathBuf::from("/Applications/OnetCli.app/Contents/MacOS/onetcli");
+        let exe = PathBuf::from("/Applications/OmniHub.app/Contents/MacOS/omnihub");
 
         let app = current_app_bundle_path_from_exe(&exe).expect("应能定位 .app bundle");
 
-        assert_eq!(app, PathBuf::from("/Applications/OnetCli.app"));
+        assert_eq!(app, PathBuf::from("/Applications/OmniHub.app"));
     }
 
     #[cfg(target_os = "macos")]
@@ -550,7 +550,7 @@ mod tests {
     fn current_app_bundle_path_from_exe_rejects_non_bundle_path() {
         use super::current_app_bundle_path_from_exe;
 
-        let exe = PathBuf::from("/tmp/onetcli");
+        let exe = PathBuf::from("/tmp/omnihub");
 
         let err = current_app_bundle_path_from_exe(&exe).expect_err("非 .app 路径应失败");
 

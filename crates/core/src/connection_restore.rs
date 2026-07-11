@@ -337,7 +337,7 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         let unique = format!(
-            "onetcli-connection-restore-{}-{}.json",
+            "omnihub-connection-restore-{}-{}.json",
             std::process::id(),
             name
         );

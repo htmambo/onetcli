@@ -9,16 +9,16 @@ use super::UpdateDialogInfo;
 const GITHUB_OWNER: &str = "htmambo";
 const GITHUB_REPO: &str = "onetcli";
 const GITHUB_API_URL: &str = "https://api.github.com/repos/htmambo/onetcli/releases/latest";
-const GITHUB_USER_AGENT: &str = "onetcli-updater";
+const GITHUB_USER_AGENT: &str = "omnihub-updater";
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-const EXPECTED_ARCHIVE_NAME: &str = "onetcli-aarch64-apple-darwin.tar.gz";
+const EXPECTED_ARCHIVE_NAME: &str = "omnihub-aarch64-apple-darwin.tar.gz";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-const EXPECTED_ARCHIVE_NAME: &str = "onetcli-x86_64-apple-darwin.tar.gz";
+const EXPECTED_ARCHIVE_NAME: &str = "omnihub-x86_64-apple-darwin.tar.gz";
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-const EXPECTED_ARCHIVE_NAME: &str = "onetcli-x86_64-unknown-linux-gnu.tar.gz";
+const EXPECTED_ARCHIVE_NAME: &str = "omnihub-x86_64-unknown-linux-gnu.tar.gz";
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-const EXPECTED_ARCHIVE_NAME: &str = "onetcli-x86_64-pc-windows-msvc.zip";
+const EXPECTED_ARCHIVE_NAME: &str = "omnihub-x86_64-pc-windows-msvc.zip";
 #[cfg(not(any(
     all(target_os = "macos", target_arch = "aarch64"),
     all(target_os = "macos", target_arch = "x86_64"),

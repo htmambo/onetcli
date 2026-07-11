@@ -102,10 +102,10 @@ fn is_history_restored_banner_line(line: &str) -> bool {
 }
 
 fn is_recovery_artifact_line(line: &str) -> bool {
-    line.contains("type onetcli_prompt_hook")
+    line.contains("type omnihub_prompt_hook")
         || line.contains("cd --")
         || line.contains("export PROMPT_COMMAND;")
-        || (line.contains("PROMPT_COMMAND") && line.contains("onetcli_prompt_hook"))
+        || (line.contains("PROMPT_COMMAND") && line.contains("omnihub_prompt_hook"))
 }
 
 fn strip_recovery_escape_sequences(input: &str) -> String {
@@ -181,10 +181,10 @@ fn normalize_recovery_scrollback_lines(lines: usize) -> usize {
 }
 
 /// 判断是否使用 hosted 本地 PTY 模式。
-/// 通过环境变量 `ONETCLI_HOSTED_LOCAL_PTY` 控制，默认关闭（fallback 到旧实现）。
+/// 通过环境变量 `OMNIHUB_HOSTED_LOCAL_PTY` 控制，默认关闭（fallback 到旧实现）。
 #[cfg(unix)]
 fn use_hosted_local_pty() -> bool {
-    std::env::var("ONETCLI_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
+    std::env::var("OMNIHUB_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
 }
 
 fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) -> Option<String> {
@@ -856,7 +856,7 @@ fn next_local_cwd_file_path() -> std::path::PathBuf {
 
     let file_id = NEXT_LOCAL_CWD_FILE_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "onetcli-cwd-{}-{}.txt",
+        "omnihub-cwd-{}-{}.txt",
         std::process::id(),
         file_id
     ))
@@ -1044,13 +1044,13 @@ pub fn resolve_local_working_dir(working_dir: Option<String>) -> Option<PathBuf>
 
 /// 准备本地终端的 Shell Integration 环境
 ///
-/// 将 `shell_integration.sh` 写入进程级临时目录 `/tmp/onetcli-<pid>/`，
-/// 仅对当前 OnetCli 进程内的终端会话生效，不污染全局配置。
+/// 将 `shell_integration.sh` 写入进程级临时目录 `/tmp/omnihub-<pid>/`，
+/// 仅对当前 OmniHub 进程内的终端会话生效，不污染全局配置。
 /// 返回 `(额外环境变量, shell 额外参数)`。
 #[cfg(not(target_os = "windows"))]
 fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec<String>) {
     // 使用进程级临时目录，确保不影响其他会话或工具
-    let session_dir = std::env::temp_dir().join(format!("onetcli-{}", std::process::id()));
+    let session_dir = std::env::temp_dir().join(format!("omnihub-{}", std::process::id()));
     if fs::create_dir_all(&session_dir).is_err() {
         tracing::warn!(
             "无法创建临时目录 {}，跳过 Shell Integration",
@@ -1067,7 +1067,7 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
     }
 
     let mut extra_env: Vec<(String, String)> =
-        vec![("ONETCLI_SHELL_INTEGRATION".into(), "1".into())];
+        vec![("OMNIHUB_SHELL_INTEGRATION".into(), "1".into())];
     let mut extra_args: Vec<String> = Vec::new();
 
     // 判断 shell 类型：优先用显式参数，否则读 $SHELL
@@ -1085,7 +1085,7 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
 
         let script = integration_path.display();
         let zshenv = format!(
-            "ZDOTDIR=\"${{_ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
+            "ZDOTDIR=\"${{_OMNIHUB_ORIG_ZDOTDIR:-$HOME}}\"\n\
              [[ -f \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\n\
              [[ -f \"$HOME/.zshenv\" ]] && source \"$HOME/.zshenv\"\n\
               source \"{script}\"\n"
@@ -1093,7 +1093,7 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
         let _ = fs::write(zsh_dir.join(".zshenv"), zshenv);
 
         let orig = std::env::var("ZDOTDIR").unwrap_or_default();
-        extra_env.push(("_ONETCLI_ORIG_ZDOTDIR".into(), orig));
+        extra_env.push(("_OMNIHUB_ORIG_ZDOTDIR".into(), orig));
         extra_env.push(("ZDOTDIR".into(), zsh_dir.display().to_string()));
 
         tracing::debug!(
@@ -1139,7 +1139,7 @@ fn prepare_local_shell_launch(mut config: LocalConfig) -> (LocalConfig, Option<P
     if let Some(path) = local_cwd_file.as_ref().and_then(|path| path.to_str()) {
         config
             .env
-            .push(("ONETCLI_CWD_FILE".to_string(), path.to_string()));
+            .push(("OMNIHUB_CWD_FILE".to_string(), path.to_string()));
     }
 
     (config, local_cwd_file)
@@ -1181,7 +1181,7 @@ fn build_remote_history_load_command() -> String {
         "sh -lc",
         "'",
         "if [ -f \"$HOME/.bash_history\" ]; then tail -n 512 \"$HOME/.bash_history\" 2>/dev/null || true; fi;",
-        "printf \"\\n__ONETCLI_HISTORY_SPLIT__\\n\";",
+        "printf \"\\n__OMNIHUB_HISTORY_SPLIT__\\n\";",
         "if [ -f \"$HOME/.zsh_history\" ]; then tail -n 512 \"$HOME/.zsh_history\" 2>/dev/null || true; fi",
         "'",
     ]
@@ -1190,7 +1190,7 @@ fn build_remote_history_load_command() -> String {
 
 fn parse_remote_history_output(output: &str) -> Vec<String> {
     let (bash_history, zsh_history) = output
-        .split_once("\n__ONETCLI_HISTORY_SPLIT__\n")
+        .split_once("\n__OMNIHUB_HISTORY_SPLIT__\n")
         .unwrap_or((output, ""));
 
     let mut commands = parse_shell_history(bash_history, ShellHistoryFormat::Bash);
@@ -1296,7 +1296,7 @@ pub struct Terminal {
     connection_name: Option<String>,
     /// 初始化命令（连接成功后执行）
     init_commands: Option<String>,
-    /// 当前 OnetCli 会话内记录的命令历史（富条目，含 frecency 元数据）
+    /// 当前 OmniHub 会话内记录的命令历史（富条目，含 frecency 元数据）
     session_history: VecDeque<HistoryEntry>,
     /// 从 shell 历史文件加载的持久化历史
     persisted_history: Vec<String>,
@@ -3182,8 +3182,8 @@ mod tests {
     #[test]
     fn resolve_local_working_dir_keeps_explicit_directory() {
         assert_eq!(
-            Some(std::path::PathBuf::from("/tmp/onetcli")),
-            resolve_local_working_dir(Some("/tmp/onetcli".to_string()))
+            Some(std::path::PathBuf::from("/tmp/omnihub")),
+            resolve_local_working_dir(Some("/tmp/omnihub".to_string()))
         );
     }
 
@@ -3275,7 +3275,7 @@ mod tests {
     #[test]
     fn resolve_default_windows_shell_prefers_pwsh_from_path() {
         let temp_dir =
-            std::env::temp_dir().join(format!("onetcli-terminal-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("omnihub-terminal-test-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("应创建临时目录");
 
         let pwsh = temp_dir.join("pwsh.exe");
@@ -3297,7 +3297,7 @@ mod tests {
     #[test]
     fn resolve_default_windows_shell_falls_back_to_comspec() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-terminal-test-comspec-{}",
+            "omnihub-terminal-test-comspec-{}",
             std::process::id()
         ));
         fs::create_dir_all(&temp_dir).expect("应创建临时目录");
@@ -3314,7 +3314,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn prepare_shell_integration_writes_lf_only_script() {
-        let session_dir = std::env::temp_dir().join(format!("onetcli-{}", std::process::id()));
+        let session_dir = std::env::temp_dir().join(format!("omnihub-{}", std::process::id()));
         let integration_path = session_dir.join("shell_integration.sh");
         let _ = fs::remove_dir_all(&session_dir);
 
@@ -3412,7 +3412,7 @@ mod tests {
             "\x1b[?2026hbuffered output\x1b[?2026l",
             "\x1b]4;0;rgb:14/09/19\x07",
             "4;1;rgb:75/20/94",
-            "type onetcli_prompt_hook",
+            "type omnihub_prompt_hook",
             "final prompt",
         ]
         .join("\r\n");

@@ -483,7 +483,7 @@ async fn test_proxy_connectivity(http_client: Arc<dyn HttpClient>) -> Result<(),
     let request = Request::builder()
         .method(Method::HEAD)
         .uri("https://www.gstatic.com/generate_204")
-        .header("User-Agent", "onetcli-updater")
+        .header("User-Agent", "omnihub-updater")
         .body(AsyncBody::empty())
         .map_err(|err| format!("构建代理测试请求失败: {}", err))?;
 

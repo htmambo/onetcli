@@ -23,25 +23,25 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 resolve_version() {
-    if [[ -n "${ONETCLI_VERSION:-}" ]]; then
-        echo "${ONETCLI_VERSION}"
+    if [[ -n "${OMNIHUB_VERSION:-}" ]]; then
+        echo "${OMNIHUB_VERSION}"
         return
     fi
 
     local version
     version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${PROJECT_DIR}/main/Cargo.toml" | head -n 1)"
     if [[ -z "${version}" ]]; then
-        echo "错误：无法从 main/Cargo.toml 读取版本号，且 ONETCLI_VERSION 未设置。" >&2
+        echo "错误：无法从 main/Cargo.toml 读取版本号，且 OMNIHUB_VERSION 未设置。" >&2
         exit 1
     fi
 
     echo "${version}"
 }
 
-APP_NAME="OnetCli"
-BINARY_NAME="onetcli"
+APP_NAME="OmniHub"
+BINARY_NAME="omnihub"
 TARGET="${1:-$(detect_macos_target)}"
-PROFILE_NAME="${ONETCLI_BUILD_PROFILE:-release}"
+PROFILE_NAME="${OMNIHUB_BUILD_PROFILE:-release}"
 VERSION="$(resolve_version)"
 APP_DIR="${PROJECT_DIR}/target/${APP_NAME}.app"
 
@@ -67,7 +67,7 @@ fi
 cp "$BINARY_PATH" "$APP_DIR/Contents/MacOS/${BINARY_NAME}"
 
 # Copy Info.plist and substitute version
-sed "s/\${ONETCLI_VERSION}/${VERSION}/g" \
+sed "s/\${OMNIHUB_VERSION}/${VERSION}/g" \
     "${PROJECT_DIR}/resources/macos/Info.plist" \
     > "$APP_DIR/Contents/Info.plist"
 
@@ -76,9 +76,9 @@ sed "s/\${ONETCLI_VERSION}/${VERSION}/g" \
 bash "${PROJECT_DIR}/script/generate-macos-icon.sh"
 
 # Copy icon
-ICNS_PATH="${PROJECT_DIR}/resources/macos/OnetCli.icns"
+ICNS_PATH="${PROJECT_DIR}/resources/macos/OmniHub.icns"
 if [ -f "$ICNS_PATH" ]; then
-    cp "$ICNS_PATH" "$APP_DIR/Contents/Resources/OnetCli.icns"
+    cp "$ICNS_PATH" "$APP_DIR/Contents/Resources/OmniHub.icns"
 else
     echo "警告：未找到图标文件 ${ICNS_PATH}"
 fi

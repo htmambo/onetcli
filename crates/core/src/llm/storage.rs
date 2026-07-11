@@ -139,12 +139,12 @@ impl ProviderRepository {
         })
     }
 
-    pub fn ensure_onetcli_provider(&self) -> Result<ProviderConfig> {
-        // 先查找已有的 OnetCli 类型 provider
+    pub fn ensure_omnihub_provider(&self) -> Result<ProviderConfig> {
+        // 先查找已有的 OmniHub 类型 provider
         if let Ok(list) = self.list() {
             if let Some(mut existing) = list
                 .into_iter()
-                .find(|p| p.provider_type == ProviderType::OnetCli)
+                .find(|p| p.provider_type == ProviderType::OmniHub)
             {
                 if !existing.enabled {
                     existing.enabled = true;
@@ -163,8 +163,8 @@ impl ProviderRepository {
 
         let mut config = ProviderConfig {
             id: now,
-            name: "OnetCli AI".to_string(),
-            provider_type: ProviderType::OnetCli,
+            name: "OmniHub AI".to_string(),
+            provider_type: ProviderType::OmniHub,
             api_key: Some("sk-imtest".to_string()),
             api_base: Some("http://localhost:8000/v1".to_string()),
             api_version: None,

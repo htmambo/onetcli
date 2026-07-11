@@ -5,29 +5,58 @@ use std::path::{Path, PathBuf};
 
 /// 主题版本文件，记录当前打包的 theme 集校验和。
 const THEMES_VERSION_FILE: &str = ".themes_version";
+const APP_DIR_NAME: &str = "omnihub";
+const DB_FILE_NAME: &str = "omnihub.db";
+const LEGACY_APP_DIR_NAMES: &[&str] = &["one-hub", "onetcli"];
+const LEGACY_DB_FILE_NAMES: &[&str] = &["one-hub.db", "onetcli.db"];
 
 pub fn get_config_dir() -> Result<PathBuf> {
-    let config_dir = if cfg!(target_os = "macos") {
-        dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
-            .join(".config")
-            .join("one-hub")
-    } else if cfg!(target_os = "windows") {
-        dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?
-            .join("one-hub")
+    let parent = if cfg!(target_os = "windows") {
+        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?
     } else {
         dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?
             .join(".config")
-            .join("one-hub")
     };
-
+    let config_dir = parent.join(APP_DIR_NAME);
+    migrate_legacy_path(&parent, APP_DIR_NAME, LEGACY_APP_DIR_NAMES);
     Ok(config_dir)
 }
 
 pub fn get_db_path() -> Result<PathBuf> {
-    Ok(get_config_dir()?.join("one-hub.db"))
+    let config_dir = get_config_dir()?;
+    migrate_legacy_path(&config_dir, DB_FILE_NAME, LEGACY_DB_FILE_NAMES);
+    Ok(config_dir.join(DB_FILE_NAME))
+}
+
+fn migrate_legacy_path(parent: &Path, target_name: &str, legacy_names: &[&str]) {
+    let target = parent.join(target_name);
+    if target.exists() {
+        return;
+    }
+    for legacy_name in legacy_names {
+        let legacy = parent.join(legacy_name);
+        if !legacy.exists() {
+            continue;
+        }
+        match std::fs::rename(&legacy, &target) {
+            Ok(()) => {
+                eprintln!(
+                    "[paths] migrated {} -> {}",
+                    legacy.display(),
+                    target.display()
+                );
+                return;
+            }
+            Err(err) => {
+                eprintln!(
+                    "[paths] failed to migrate {} -> {}: {err}",
+                    legacy.display(),
+                    target.display()
+                );
+            }
+        }
+    }
 }
 
 pub fn get_download_dir() -> Option<PathBuf> {
@@ -139,16 +168,16 @@ fn find_bundled_themes_dir() -> Option<PathBuf> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
 
     #[cfg(target_os = "linux")]
-    let installed_path = exe_dir.join("../share/onetcli/themes");
+    let installed_path = exe_dir.join("../share/omnihub/themes");
 
     #[cfg(target_os = "macos")]
     let installed_path = exe_dir.join("../Resources/themes");
 
     #[cfg(target_os = "windows")]
-    let installed_path = exe_dir.join("../share/onetcli/themes");
+    let installed_path = exe_dir.join("../share/omnihub/themes");
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    let installed_path = exe_dir.join("share/onetcli/themes");
+    let installed_path = exe_dir.join("share/omnihub/themes");
 
     if let Ok(installed) = installed_path.canonicalize() {
         if installed.exists() {

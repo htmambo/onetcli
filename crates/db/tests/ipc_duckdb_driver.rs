@@ -131,7 +131,7 @@ async fn duckdb_driver_ipc_full_integration() {
     // ---- metadata.list_tables ----
     let metadata = json!({"method":"metadata.list_tables","params":{}}).to_string();
     let result = conn
-        .query(&format!("/*onetcli-ipc-metadata*/ {metadata}"))
+        .query(&format!("/*omnihub-ipc-metadata*/ {metadata}"))
         .await
         .unwrap();
     match result {
@@ -147,7 +147,7 @@ async fn duckdb_driver_ipc_full_integration() {
     // ---- metadata.list_columns ----
     let metadata = json!({"method":"metadata.list_columns","params":{"table":"t"}}).to_string();
     let result = conn
-        .query(&format!("/*onetcli-ipc-metadata*/ {metadata}"))
+        .query(&format!("/*omnihub-ipc-metadata*/ {metadata}"))
         .await
         .unwrap();
     match result {

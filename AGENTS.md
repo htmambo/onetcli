@@ -337,8 +337,8 @@
 - **标题**：macOS 15+/26 上打包后的 .app 连接本地网络返回 `No route to host (os error 65)` 时，优先检查代码签名，不要先猜网络配置。
 - **触发信号**：`cargo run` 一切正常，但打包后的 `.app` 连接局域网 IP（`192.168.x.x`、`10.x.x.x` 等）时报 `No route to host`；外网连接始终正常；仅 macOS 15 (Sequoia) 或 26 (Tahoe) 出现。
 - **根因 / 约束**：macOS 15+/26 引入 Local Network Privacy，未签名（或签名无效）的 `.app` 从 Finder/LaunchServices 启动时，系统会直接对局域网连接返回 `EHOSTUNREACH`（errno 65），不会弹出权限请求；而 `cargo run` 从终端启动，继承 Terminal.app 的权限，因此不受影响。
-- **正确做法**：先对 `.app` 执行 ad-hoc 签名 `codesign --force --deep --sign - OnetCli.app`，然后重新启动应用触发权限弹窗；长期修复需在 `script/bundle-macos.sh` 打包末尾加入签名步骤。
-- **验证方式**：签名后启动应用连接内网服务器，确认不再报 `No route to host`；检查系统设置 > 隐私与安全 > 本地网络，OnetCli 应出现在列表中。
+- **正确做法**：先对 `.app` 执行 ad-hoc 签名 `codesign --force --deep --sign - OmniHub.app`，然后重新启动应用触发权限弹窗；长期修复需在 `script/bundle-macos.sh` 打包末尾加入签名步骤。
+- **验证方式**：签名后启动应用连接内网服务器，确认不再报 `No route to host`；检查系统设置 > 隐私与安全 > 本地网络，OmniHub 应出现在列表中。
 - **适用范围**：所有通过 `script/bundle-macos.sh` 打包的 macOS `.app`。
 
 - **标题**：单文件 ≥ 4000 行时不要在 Rust 2018+ 项目中 fullauto 拆分。

@@ -2,10 +2,10 @@
     <main class="home-page">
         <section class="hero">
             <div class="hero-copy">
-                <p class="eyebrow">OnetCli / 桌面工作台</p>
+                <p class="eyebrow">OmniHub / 桌面工作台</p>
                 <h1>把数据库、SSH / SFTP 和终端收进一个真正顺手的桌面客户端</h1>
                 <p class="hero-description">
-                    OnetCli 是一个跨平台桌面工作台，用来统一处理数据库连接、远程访问、文件传输和本地终端操作。
+                    OmniHub 是一个跨平台桌面工作台，用来统一处理数据库连接、远程访问、文件传输和本地终端操作。
                     AI 主要用于辅助数据分析、快速生成 SQL 和解释查询，帮助你更高效地完成日常工作。
                 </p>
                 <div class="hero-note">
@@ -15,7 +15,7 @@
                 </div>
                 <div class="hero-actions">
                     <a class="primary-action" href="https://github.com/htmambo/onetcli/releases" target="_blank" rel="noreferrer">
-                        <span>下载 OnetCli</span>
+                        <span>下载 OmniHub</span>
                     </a>
                     <a class="secondary-action" :href="withBase('/guide')">
                         <span>查看文档</span>
@@ -33,7 +33,7 @@
                 </dl>
             </div>
             <div class="hero-visual">
-                <img :src="heroImage" alt="OnetCli 应用主界面截图" />
+                <img :src="heroImage" alt="OmniHub 应用主界面截图" />
             </div>
         </section>
 
@@ -47,17 +47,17 @@
             </div>
             <div class="screenshot-grid">
                 <article class="screenshot-card">
-                    <img :src="databaseImage" alt="OnetCli 数据库界面截图" />
+                    <img :src="databaseImage" alt="OmniHub 数据库界面截图" />
                     <h3>多数据库管理</h3>
                     <p>在同一个客户端里处理 PostgreSQL、MySQL、SQLite、SQL Server、Oracle、ClickHouse。</p>
                 </article>
                 <article class="screenshot-card">
-                    <img :src="sshImage" alt="OnetCli SSH 与 SFTP 界面截图" />
+                    <img :src="sshImage" alt="OmniHub SSH 与 SFTP 界面截图" />
                     <h3>SSH 与 SFTP</h3>
                     <p>从远程终端到文件传输，用一套连接信息覆盖排查、部署和日常维护。</p>
                 </article>
                 <article class="screenshot-card">
-                    <img :src="chatdbImage" alt="OnetCli 查询与分析辅助界面截图" />
+                    <img :src="chatdbImage" alt="OmniHub 查询与分析辅助界面截图" />
                     <h3>查询与分析辅助</h3>
                     <p>用自然语言辅助生成 SQL、解释查询结果，并在数据分析场景里提升处理效率。</p>
                 </article>
@@ -91,7 +91,7 @@
 
         <section class="section-block value-section">
             <div class="section-heading">
-                <p class="section-label">为什么选择 OnetCli</p>
+                <p class="section-label">为什么选择 OmniHub</p>
                 <h2>更少切换，更快进入真正的工作状态</h2>
             </div>
             <div class="value-list">
@@ -101,7 +101,7 @@
                 </article>
                 <article>
                     <h3>桌面体验</h3>
-                    <p>作为跨平台桌面应用，OnetCli 更适合重度日常使用，也更贴近工程师的实际工作节奏。</p>
+                    <p>作为跨平台桌面应用，OmniHub 更适合重度日常使用，也更贴近工程师的实际工作节奏。</p>
                 </article>
                 <article>
                     <h3>面向真实任务</h3>
@@ -132,23 +132,23 @@
         <section class="section-block faq-section">
             <div class="section-heading">
                 <p class="section-label">FAQ</p>
-                <h2>关于 OnetCli 的几个高频问题</h2>
+                <h2>关于 OmniHub 的几个高频问题</h2>
             </div>
             <div class="faq-list">
                 <article>
-                    <h3>OnetCli 是什么？</h3>
-                    <p>OnetCli 是一个跨平台桌面客户端，用来统一处理数据库、SSH / SFTP 与终端操作，并提供面向数据库场景的智能辅助能力。</p>
+                    <h3>OmniHub 是什么？</h3>
+                    <p>OmniHub 是一个跨平台桌面客户端，用来统一处理数据库、SSH / SFTP 与终端操作，并提供面向数据库场景的智能辅助能力。</p>
                 </article>
                 <article>
-                    <h3>OnetCli 支持哪些数据库？</h3>
+                    <h3>OmniHub 支持哪些数据库？</h3>
                     <p>当前仓库文档中明确提到 PostgreSQL、MySQL、SQLite、SQL Server、Oracle、ClickHouse、Redis 和 MongoDB。</p>
                 </article>
                 <article>
-                    <h3>OnetCli 是否支持 SSH 和 SFTP？</h3>
-                    <p>支持。OnetCli 内置 SSH 终端与 SFTP 文件管理器，适合远程排查与文件操作。</p>
+                    <h3>OmniHub 是否支持 SSH 和 SFTP？</h3>
+                    <p>支持。OmniHub 内置 SSH 终端与 SFTP 文件管理器，适合远程排查与文件操作。</p>
                 </article>
                 <article>
-                    <h3>OnetCli 是否支持 AI 生成 SQL？</h3>
+                    <h3>OmniHub 是否支持 AI 生成 SQL？</h3>
                     <p>支持。智能辅助能力可用于自然语言生成 SQL、解释查询以及数据分析提效，核心目标是让数据库工作更快、更顺。</p>
                 </article>
             </div>
@@ -193,11 +193,11 @@ const structuredData = JSON.stringify(
         {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
-            name: "OnetCli",
+            name: "OmniHub",
             applicationCategory: "DeveloperApplication",
             operatingSystem: "macOS, Windows, Linux",
             description:
-                "OnetCli 是一个统一管理数据库、SSH / SFTP 与终端操作，并提供 SQL 生成与数据分析辅助能力的跨平台桌面客户端。",
+                "OmniHub 是一个统一管理数据库、SSH / SFTP 与终端操作，并提供 SQL 生成与数据分析辅助能力的跨平台桌面客户端。",
             downloadUrl: "https://github.com/htmambo/onetcli/releases",
         },
         {
@@ -206,23 +206,23 @@ const structuredData = JSON.stringify(
             mainEntity: [
                 {
                     "@type": "Question",
-                    name: "OnetCli 是什么？",
+                    name: "OmniHub 是什么？",
                     acceptedAnswer: {
                         "@type": "Answer",
-                        text: "OnetCli 是一个跨平台桌面客户端，用来统一处理数据库、SSH / SFTP 与终端操作，并提供面向数据库场景的智能辅助能力。",
+                        text: "OmniHub 是一个跨平台桌面客户端，用来统一处理数据库、SSH / SFTP 与终端操作，并提供面向数据库场景的智能辅助能力。",
                     },
                 },
                 {
                     "@type": "Question",
-                    name: "OnetCli 是否支持 SSH 和 SFTP？",
+                    name: "OmniHub 是否支持 SSH 和 SFTP？",
                     acceptedAnswer: {
                         "@type": "Answer",
-                        text: "支持。OnetCli 内置 SSH 终端与 SFTP 文件管理器，适合远程排查与文件操作。",
+                        text: "支持。OmniHub 内置 SSH 终端与 SFTP 文件管理器，适合远程排查与文件操作。",
                     },
                 },
                 {
                     "@type": "Question",
-                    name: "OnetCli 是否支持 AI 生成 SQL？",
+                    name: "OmniHub 是否支持 AI 生成 SQL？",
                     acceptedAnswer: {
                         "@type": "Answer",
                         text: "支持。智能辅助能力可用于自然语言生成 SQL、解释查询以及辅助数据分析，核心目标是让数据库工作更快、更顺。",

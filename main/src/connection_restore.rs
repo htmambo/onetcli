@@ -23,7 +23,7 @@ use one_core::{
     tab_persistence::load_tab_state,
 };
 
-use crate::{home_tab::HomePage, onetcli_app::GlobalMainWindowHandle};
+use crate::{home_tab::HomePage, omnihub_app::GlobalMainWindowHandle};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedConnectionRestoreItem {

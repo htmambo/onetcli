@@ -15,7 +15,7 @@ use rust_i18n::t;
 
 use super::global_user::GlobalCurrentUser;
 use crate::auth::{PasswordAuthAction, get_auth_service};
-use crate::onetcli_app::GlobalHomePage;
+use crate::omnihub_app::GlobalHomePage;
 use crate::sync_server_theme;
 
 /// 同步认证表单状态（独立 Entity，通过 lazy init 创建）

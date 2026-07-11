@@ -122,7 +122,7 @@ impl SyncTypeHandler for LlmProviderSyncType {
     }
 
     /// LLM Provider 的按名称回链策略：
-    /// - 内置（`OnetCli`）项允许按名称回链，便于跨设备共享同一份全局配置；
+    /// - 内置（`OmniHub`）项允许按名称回链，便于跨设备共享同一份全局配置；
     /// - 用户自建项**不**回链，避免本地新增的 API Key/模型等被云端旧值
     ///   通过 `update_from_cloud` 静默覆盖（"新增的也会消失"）。
     fn should_link_unlinked_local_by_name(&self, item: &ProviderConfig) -> bool {
@@ -145,11 +145,11 @@ mod tests {
         }
     }
 
-    /// 回归用例：内置 OnetCli 提供商允许按名称回链（跨设备共享同一份配置）。
+    /// 回归用例：内置 OmniHub 提供商允许按名称回链（跨设备共享同一份配置）。
     #[test]
     fn builtin_provider_should_link_by_name() {
         let handler = LlmProviderSyncType;
-        let item = provider(ProviderType::OnetCli, "OnetCli AI");
+        let item = provider(ProviderType::OmniHub, "OmniHub AI");
         assert!(handler.should_link_unlinked_local_by_name(&item));
     }
 
@@ -193,14 +193,14 @@ mod tests {
     }
 
     /// 内置项的回链策略**不依赖**名称字段，仅与 provider_type 绑定。
-    /// 验证即便用户重命名 OnetCli 内置项，仍允许按名称回链（跨设备共享全局配置）。
+    /// 验证即便用户重命名 OmniHub 内置项，仍允许按名称回链（跨设备共享全局配置）。
     #[test]
     fn builtin_provider_with_custom_name_still_links() {
         let handler = LlmProviderSyncType;
-        let item = provider(ProviderType::OnetCli, "用户重命名后的 OnetCli");
+        let item = provider(ProviderType::OmniHub, "用户重命名后的 OmniHub");
         assert!(
             handler.should_link_unlinked_local_by_name(&item),
-            "OnetCli 内置项无论名称如何都应允许按名称回链"
+            "OmniHub 内置项无论名称如何都应允许按名称回链"
         );
     }
 
@@ -222,8 +222,8 @@ mod tests {
             all.iter().copied().filter(ProviderType::is_builtin).collect();
         assert_eq!(
             builtin_members,
-            vec![ProviderType::OnetCli],
-            "唯一 builtin 成员应为 OnetCli"
+            vec![ProviderType::OmniHub],
+            "唯一 builtin 成员应为 OmniHub"
         );
 
         let handler = LlmProviderSyncType;

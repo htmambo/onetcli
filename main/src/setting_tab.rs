@@ -33,7 +33,7 @@ use terminal_view::{
 
 use crate::app_init::is_valid_system_hotkey;
 use crate::auth::get_auth_service;
-use crate::onetcli_app::GlobalHomePage;
+use crate::omnihub_app::GlobalHomePage;
 use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView};
 use crate::sync_server_theme;
 use crate::update;
@@ -256,7 +256,7 @@ pub(crate) fn build_app_http_client(
     proxy: &GlobalProxySettings,
 ) -> Result<Arc<ReqwestClient>, String> {
     let proxy_url = proxy.to_proxy_url()?;
-    ReqwestClient::proxy_and_user_agent(proxy_url, "one-hub")
+    ReqwestClient::proxy_and_user_agent(proxy_url, "omnihub")
         .map(Arc::new)
         .map_err(|err| format!("HTTP 客户端初始化失败: {}", err))
 }

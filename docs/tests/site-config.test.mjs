@@ -8,11 +8,11 @@ async function readConfig() {
   return readFile(configPath, "utf8");
 }
 
-test("站点配置切换为 OnetCli 品牌和 GitHub Pages 路径", async () => {
+test("站点配置切换为 OmniHub 品牌和 GitHub Pages 路径", async () => {
   const config = await readConfig();
 
-  assert.match(config, /title:\s*"OnetCli"/);
-  assert.match(config, /base:\s*"\/onetcli\/"/);
+  assert.match(config, /title:\s*"OmniHub"/);
+  assert.match(config, /base:\s*"\/omnihub\/"/);
   assert.match(config, /description:[\s\S]*数据库/);
 });
 
@@ -28,8 +28,8 @@ test("导航文档链接、仓库链接和搜索配置符合官网用途", async
   const config = await readConfig();
 
   assert.match(config, /link:\s*"\/guide"/);
-  assert.match(config, /htmambo\/onetcli/);
+  assert.match(config, /htmambo\/omnihub/);
   assert.match(config, /edit\/dev\/docs\/:path/);
-  assert.doesNotMatch(config, /htmambo\/onetcli/);
+  assert.doesNotMatch(config, /htmambo\/omnihub/);
   assert.doesNotMatch(config, /provider:\s*"local"/);
 });

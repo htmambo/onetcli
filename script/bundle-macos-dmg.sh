@@ -19,16 +19,16 @@ detect_macos_target() {
     esac
 }
 
-APP_NAME="OnetCli"
+APP_NAME="OmniHub"
 TARGET="${1:-$(detect_macos_target)}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="${ONETCLI_PROJECT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+PROJECT_DIR="${OMNIHUB_PROJECT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 APP_DIR="${PROJECT_DIR}/target/${APP_NAME}.app"
 TMP_DIR="${PROJECT_DIR}/target/dmg"
-DMG_NAME="onetcli-${TARGET}.dmg"
+DMG_NAME="omnihub-${TARGET}.dmg"
 DMG_PATH="${PROJECT_DIR}/${DMG_NAME}"
-DMG_RETRIES="${ONETCLI_DMG_RETRIES:-3}"
-DMG_RETRY_DELAY="${ONETCLI_DMG_RETRY_DELAY:-5}"
+DMG_RETRIES="${OMNIHUB_DMG_RETRIES:-3}"
+DMG_RETRY_DELAY="${OMNIHUB_DMG_RETRY_DELAY:-5}"
 
 if [ ! -d "$APP_DIR" ]; then
     echo "错误：未找到 App 包 ${APP_DIR}"

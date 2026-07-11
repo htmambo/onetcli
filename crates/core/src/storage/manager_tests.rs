@@ -50,7 +50,7 @@ fn with_temp_home() -> HomeDirGuard {
         .expect("系统时间异常")
         .as_nanos();
     let temp_home = std::env::temp_dir().join(format!(
-        "onetcli-storage-manager-{}-{}",
+        "omnihub-storage-manager-{}-{}",
         std::process::id(),
         unique
     ));
@@ -61,7 +61,7 @@ fn with_temp_home() -> HomeDirGuard {
 #[test]
 fn storage_manager_with_path_creates_database_file() {
     let temp_dir = tempfile::tempdir().expect("应创建临时目录");
-    let db_path = temp_dir.path().join("nested").join("one-hub.db");
+    let db_path = temp_dir.path().join("nested").join("omnihub.db");
 
     let manager = StorageManager::with_path(&db_path).expect("应创建 StorageManager");
 
@@ -74,14 +74,14 @@ fn runtime_paths_follow_home_config_directory() {
     let _guard = home_env_lock().lock().expect("获取 HOME 环境锁失败");
     let home_guard = with_temp_home();
 
-    let expected_config_dir = home_guard.temp_home.join(".config").join("one-hub");
+    let expected_config_dir = home_guard.temp_home.join(".config").join("omnihub");
     assert_eq!(
         get_config_dir().expect("应返回配置目录"),
         expected_config_dir
     );
     assert_eq!(
         get_db_path().expect("应返回数据库路径"),
-        expected_config_dir.join("one-hub.db")
+        expected_config_dir.join("omnihub.db")
     );
     assert_eq!(
         get_themes_dir().expect("应返回主题目录"),

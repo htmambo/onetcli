@@ -1,9 +1,9 @@
 <div align="center">
   <p>
-    <img src="logo.svg" alt="OnetCli" width="120" />
+    <img src="logo.svg" alt="OmniHub" width="120" />
   </p>
 
-  <h1>OnetCli</h1>
+  <h1>OmniHub</h1>
 
   <p><strong>Native all-in-one workspace for databases, SSH, SFTP, terminals, monitoring, and AI.</strong></p>
 
@@ -43,17 +43,17 @@
   </p>
 
   <p>
-    <img src="app.png" alt="OnetCli overview" width="820" />
+    <img src="app.png" alt="OmniHub overview" width="820" />
   </p>
 </div>
 
-## Why OnetCli?
+## Why OmniHub?
 
 <table>
   <tr>
     <td width="50%">
       <h3>Native desktop, not a browser shell</h3>
-      <p>OnetCli is built with Rust and GPUI for a native desktop experience with GPU-accelerated rendering.</p>
+      <p>OmniHub is built with Rust and GPUI for a native desktop experience with GPU-accelerated rendering.</p>
     </td>
     <td width="50%">
       <h3>One workspace for daily ops</h3>
@@ -92,7 +92,7 @@ Open integrated SSH sessions, manage SFTP files, connect to serial devices, and 
 
 ### Remote File Editing
 
-Edit remote files directly inside OnetCli with syntax highlighting and autocomplete. No need to open another editor or switch back and forth between terminal and file tools.
+Edit remote files directly inside OmniHub with syntax highlighting and autocomplete. No need to open another editor or switch back and forth between terminal and file tools.
 
 ### Monitoring & Charts
 
@@ -100,11 +100,11 @@ Use built-in server monitoring and native rendered charts to inspect remote mach
 
 ### AI Assistant
 
-Chat with AI inside the app. OnetCli supports natural language to SQL, query explanation, BI-style data analysis, chart generation, and streaming LLM responses. It can also generate terminal commands that you can quickly paste into a terminal session and run.
+Chat with AI inside the app. OmniHub supports natural language to SQL, query explanation, BI-style data analysis, chart generation, and streaming LLM responses. It can also generate terminal commands that you can quickly paste into a terminal session and run.
 
 ### Sync, Security & i18n
 
-Sync connections and settings across devices with encrypted key storage based on AES-GCM and Ed25519. OnetCli supports light and dark themes, English, Simplified Chinese, and Traditional Chinese.
+Sync connections and settings across devices with encrypted key storage based on AES-GCM and Ed25519. OmniHub supports light and dark themes, English, Simplified Chinese, and Traditional Chinese.
 
 ## Screenshots
 
@@ -147,7 +147,7 @@ Checksums are published as `sha256sums.txt` in each release.
 If macOS blocks the app after installing the DMG with "Apple cannot check it for malicious software", run:
 
 ```bash
-sudo xattr -rd com.apple.quarantine /Applications/OnetCli.app
+sudo xattr -rd com.apple.quarantine /Applications/OmniHub.app
 ```
 
 ### Oracle Support
@@ -156,7 +156,7 @@ Oracle connections require [Oracle Instant Client](https://www.oracle.com/databa
 
 ## Getting Started
 
-1. Open OnetCli and create your first database connection.
+1. Open OmniHub and create your first database connection.
 2. Add an SSH host and open a remote terminal.
 3. Open SFTP file management to browse remote directories or transfer files.
 4. Try Redis key browsing or MongoDB document browsing.
@@ -245,7 +245,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 <details>
 <summary><strong>Which databases are supported?</strong></summary>
 
-OnetCli has built-in database support for MySQL, PostgreSQL, SQLite, DuckDB, SQL Server, Oracle, and ClickHouse. It also includes dedicated Redis and MongoDB views.
+OmniHub has built-in database support for MySQL, PostgreSQL, SQLite, DuckDB, SQL Server, Oracle, and ClickHouse. It also includes dedicated Redis and MongoDB views.
 </details>
 
 <details>
@@ -255,15 +255,15 @@ Yes. Oracle connections require Oracle Instant Client to be installed and availa
 </details>
 
 <details>
-<summary><strong>Where can I download OnetCli?</strong></summary>
+<summary><strong>Where can I download OmniHub?</strong></summary>
 
 Use the GitHub [Releases](https://github.com/feigeCode/onetcli/releases/latest) page. The current release workflow publishes macOS, Linux, and Windows artifacts with checksums.
 </details>
 
 <details>
-<summary><strong>Is OnetCli free?</strong></summary>
+<summary><strong>Is OmniHub free?</strong></summary>
 
-All features are available without sponsorship. The source is licensed under Apache License 2.0, and distribution or product use is also subject to the OnetCli Supplementary License.
+All features are available without sponsorship. The source is licensed under Apache License 2.0, and distribution or product use is also subject to the OmniHub Supplementary License.
 </details>
 
 <details>
@@ -274,7 +274,7 @@ Open an issue on [GitHub Issues](https://github.com/feigeCode/onetcli/issues). F
 
 ## Support
 
-OnetCli is maintained by one person over the long term. If it saves you time, you can support the project through donations, stars, bug reports, or focused pull requests.
+OmniHub is maintained by one person over the long term. If it saves you time, you can support the project through donations, stars, bug reports, or focused pull requests.
 
 ### Donation
 
@@ -295,7 +295,7 @@ ER diagram rendering is based on [ferrum-flow](https://github.com/tu6ge/ferrum-f
 
 Licensed under [Apache License 2.0](LICENSE-APACHE).
 
-The distribution and use of the OnetCli application are additionally subject to the [OnetCli Supplementary License](ONETCLI_LICENSE), which adds the following restrictions on top of Apache 2.0:
+The distribution and use of the OmniHub application are additionally subject to the [OmniHub Supplementary License](OMNIHUB_LICENSE), which adds the following restrictions on top of Apache 2.0:
 
 - No redistribution, resale, or repackaging as a standalone product
 - No creating competing products or services based on this software
@@ -305,7 +305,7 @@ For licensing inquiries, contact xiaofei.hf@gmail.com.
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=feigeCode%2Fonetcli&type=date&logscale=&legend=top-left">
+<a href="https://www.star-history.com/?repos=feigeCode%2Fomnihub&type=date&logscale=&legend=top-left">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=feigeCode/onetcli&type=date&theme=dark&logscale&legend=top-left" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=feigeCode/onetcli&type=date&logscale&legend=top-left" />

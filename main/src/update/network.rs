@@ -4,7 +4,7 @@ use gpui::http_client::{AsyncBody, HttpClient, Method, Request};
 use rust_i18n::t;
 
 pub(crate) const GITHUB_API_HOST: &str = "https://api.github.com";
-const USER_AGENT: &str = "onetcli-updater";
+const USER_AGENT: &str = "omnihub-updater";
 
 pub(crate) async fn check_network_connectivity(
     http_client: Arc<dyn HttpClient>,

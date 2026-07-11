@@ -2,7 +2,7 @@
 
 If this project is helpful to you, you can invite the author to have a KFC or a cup of coffee.
 
-OnetCli is maintained by one person over the long term. If it saves you time, feel free to support it in a way that is comfortable for you. No support is also completely fine.
+OmniHub is maintained by one person over the long term. If it saves you time, feel free to support it in a way that is comfortable for you. No support is also completely fine.
 
 ## QR Codes
 
@@ -28,7 +28,7 @@ OnetCli is maintained by one person over the long term. If it saves you time, fe
 
 - Star the project
 - Submit suggestions or bug reports
-- Recommend OnetCli to friends
+- Recommend OmniHub to friends
 
 Project URL: <https://github.com/feigeCode/onetcli>
 
@@ -40,7 +40,7 @@ All features remain fully available without support. Sponsorship does not unlock
 
 如果这个项目对你有帮助，想请作者吃顿肯德基（KFC）或者喝杯咖啡，都是可以的。
 
-OnetCli 由个人长期维护。如果它帮你节省了时间，欢迎用你觉得舒服的方式支持我；不支持也完全没关系。
+OmniHub 由个人长期维护。如果它帮你节省了时间，欢迎用你觉得舒服的方式支持我；不支持也完全没关系。
 
 ## 赞助码
 

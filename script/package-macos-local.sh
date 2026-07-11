@@ -23,15 +23,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 resolve_version() {
-    if [[ -n "${ONETCLI_VERSION:-}" ]]; then
-        echo "${ONETCLI_VERSION}"
+    if [[ -n "${OMNIHUB_VERSION:-}" ]]; then
+        echo "${OMNIHUB_VERSION}"
         return
     fi
 
     local version
     version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${PROJECT_DIR}/main/Cargo.toml" | head -n 1)"
     if [[ -z "${version}" ]]; then
-        echo "错误：无法从 main/Cargo.toml 读取版本号，且 ONETCLI_VERSION 未设置。" >&2
+        echo "错误：无法从 main/Cargo.toml 读取版本号，且 OMNIHUB_VERSION 未设置。" >&2
         exit 1
     fi
 
@@ -39,7 +39,7 @@ resolve_version() {
 }
 
 TARGET="${1:-$(detect_macos_target)}"
-PROFILE_NAME="${ONETCLI_BUILD_PROFILE:-release-fast}"
+PROFILE_NAME="${OMNIHUB_BUILD_PROFILE:-release-fast}"
 VERSION="$(resolve_version)"
 BUILD_DMG="${BUILD_DMG:-false}"
 
@@ -52,8 +52,8 @@ cd "$PROJECT_DIR"
 
 cargo build --profile "${PROFILE_NAME}" -p main --target "${TARGET}"
 
-ONETCLI_BUILD_PROFILE="${PROFILE_NAME}" \
-ONETCLI_VERSION="${VERSION}" \
+OMNIHUB_BUILD_PROFILE="${PROFILE_NAME}" \
+OMNIHUB_VERSION="${VERSION}" \
     bash "${SCRIPT_DIR}/bundle-macos.sh" "${TARGET}"
 
 if [ "${BUILD_DMG}" = "true" ]; then

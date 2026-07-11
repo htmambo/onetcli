@@ -299,7 +299,7 @@ impl ChatPanel {
         };
 
         if is_logged_in {
-            if let Ok(provider) = repo.ensure_onetcli_provider() {
+            if let Ok(provider) = repo.ensure_omnihub_provider() {
                 if !providers.iter().any(|p| p.id == provider.id) {
                     providers.insert(0, provider);
                 }

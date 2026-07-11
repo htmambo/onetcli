@@ -857,8 +857,8 @@ impl DbFormConfig {
     /// SQLite form configuration
     pub fn sqlite() -> Self {
         let default_db_path = get_config_dir()
-            .map(|p| p.join("onetcli_default.db").to_string_lossy().to_string())
-            .unwrap_or_else(|_| "onetcli_default.db".to_string());
+            .map(|p| p.join("omnihub_default.db").to_string_lossy().to_string())
+            .unwrap_or_else(|_| "omnihub_default.db".to_string());
 
         Self {
             db_type: DatabaseType::SQLite,
@@ -900,11 +900,11 @@ impl DbFormConfig {
     pub fn duckdb() -> Self {
         let default_db_path = get_config_dir()
             .map(|p| {
-                p.join("onetcli_default.duckdb")
+                p.join("omnihub_default.duckdb")
                     .to_string_lossy()
                     .to_string()
             })
-            .unwrap_or_else(|_| "onetcli_default.duckdb".to_string());
+            .unwrap_or_else(|_| "omnihub_default.duckdb".to_string());
 
         Self {
             db_type: DatabaseType::DuckDB,

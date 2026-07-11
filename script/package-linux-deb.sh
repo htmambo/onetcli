@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="OnetCli"
-PACKAGE_NAME="onetcli"
-BINARY_NAME="onetcli"
+APP_NAME="OmniHub"
+PACKAGE_NAME="omnihub"
+BINARY_NAME="omnihub"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PROFILE_NAME="${ONETCLI_BUILD_PROFILE:-release-fast}"
-SKIP_BUILD="${ONETCLI_SKIP_BUILD:-false}"
-MAINTAINER="${ONETCLI_DEB_MAINTAINER:-OnetCli <xiaofei.hf@gmail.com>}"
-SECTION="${ONETCLI_DEB_SECTION:-utils}"
-PRIORITY="${ONETCLI_DEB_PRIORITY:-optional}"
-DESCRIPTION="${ONETCLI_DEB_DESCRIPTION:-One Net Client - Database, SSH, Terminal, AI Tools}"
+PROFILE_NAME="${OMNIHUB_BUILD_PROFILE:-release-fast}"
+SKIP_BUILD="${OMNIHUB_SKIP_BUILD:-false}"
+MAINTAINER="${OMNIHUB_DEB_MAINTAINER:-OmniHub <xiaofei.hf@gmail.com>}"
+SECTION="${OMNIHUB_DEB_SECTION:-utils}"
+PRIORITY="${OMNIHUB_DEB_PRIORITY:-optional}"
+DESCRIPTION="${OMNIHUB_DEB_DESCRIPTION:-OmniHub - Database, SSH, Terminal, AI Tools}"
 
 usage() {
     cat <<'EOF'
@@ -21,17 +21,17 @@ usage() {
 示例：
   script/package-linux-deb.sh
   script/package-linux-deb.sh x86_64-unknown-linux-gnu
-  ONETCLI_BUILD_PROFILE=release script/package-linux-deb.sh
-  ONETCLI_SKIP_BUILD=true script/package-linux-deb.sh
+  OMNIHUB_BUILD_PROFILE=release script/package-linux-deb.sh
+  OMNIHUB_SKIP_BUILD=true script/package-linux-deb.sh
 
 可选环境变量：
-  ONETCLI_BUILD_PROFILE    构建 profile，默认 release-fast，可选 dev/debug/release/release-fast
-  ONETCLI_SKIP_BUILD       为 true 时跳过 cargo build，默认 false
-  ONETCLI_VERSION          覆盖 deb 版本号，默认读取 main/Cargo.toml
-  ONETCLI_DEB_OUTPUT_DIR   deb 输出目录，默认 target/dist
-  ONETCLI_DEB_STAGING_DIR  deb 暂存目录，默认使用 /tmp，避免 NTFS/exFAT 权限问题
-  ONETCLI_DEB_DEPENDS      手动覆盖 Depends 字段
-  ONETCLI_DEB_MAINTAINER   覆盖 Maintainer 字段
+  OMNIHUB_BUILD_PROFILE    构建 profile，默认 release-fast，可选 dev/debug/release/release-fast
+  OMNIHUB_SKIP_BUILD       为 true 时跳过 cargo build，默认 false
+  OMNIHUB_VERSION          覆盖 deb 版本号，默认读取 main/Cargo.toml
+  OMNIHUB_DEB_OUTPUT_DIR   deb 输出目录，默认 target/dist
+  OMNIHUB_DEB_STAGING_DIR  deb 暂存目录，默认使用 /tmp，避免 NTFS/exFAT 权限问题
+  OMNIHUB_DEB_DEPENDS      手动覆盖 Depends 字段
+  OMNIHUB_DEB_MAINTAINER   覆盖 Maintainer 字段
 EOF
 }
 
@@ -71,8 +71,8 @@ target_to_deb_arch() {
 }
 
 resolve_version() {
-    if [[ -n "${ONETCLI_VERSION:-}" ]]; then
-        echo "${ONETCLI_VERSION}"
+    if [[ -n "${OMNIHUB_VERSION:-}" ]]; then
+        echo "${OMNIHUB_VERSION}"
         return
     fi
 
@@ -114,8 +114,8 @@ build_binary() {
 detect_depends() {
     local binary_path="$1"
 
-    if [[ -n "${ONETCLI_DEB_DEPENDS:-}" ]]; then
-        echo "${ONETCLI_DEB_DEPENDS}"
+    if [[ -n "${OMNIHUB_DEB_DEPENDS:-}" ]]; then
+        echo "${OMNIHUB_DEB_DEPENDS}"
         return
     fi
 
@@ -156,8 +156,8 @@ EOF
 }
 
 setup_staging_dir() {
-    if [[ -n "${ONETCLI_DEB_STAGING_DIR:-}" ]]; then
-        STAGING_DIR="${ONETCLI_DEB_STAGING_DIR}"
+    if [[ -n "${OMNIHUB_DEB_STAGING_DIR:-}" ]]; then
+        STAGING_DIR="${OMNIHUB_DEB_STAGING_DIR}"
         return
     fi
 
@@ -240,7 +240,7 @@ assert_package_permissions() {
     if [[ "${debian_dir_mode}" != "755" || "${control_mode}" != "644" ]]; then
         echo "错误：deb 暂存目录不支持所需的 Unix 权限。" >&2
         echo "当前权限：DEBIAN=${debian_dir_mode}, control=${control_mode}" >&2
-        echo "请将 ONETCLI_DEB_STAGING_DIR 指向支持 chmod 的本地文件系统（例如 /tmp）。" >&2
+        echo "请将 OMNIHUB_DEB_STAGING_DIR 指向支持 chmod 的本地文件系统（例如 /tmp）。" >&2
         exit 1
     fi
 }
@@ -254,29 +254,29 @@ copy_package_files() {
         "${STAGING_DIR}/usr/share/icons/hicolor/256x256/apps" \
         "${STAGING_DIR}/usr/share/icons/hicolor/512x512/apps" \
         "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}" \
-        "${STAGING_DIR}/usr/share/onetcli/themes"
+        "${STAGING_DIR}/usr/share/omnihub/themes"
 
     install -m 755 "${BINARY_PATH}" "${STAGING_DIR}/usr/bin/${BINARY_NAME}"
-    install -m 644 "${PROJECT_DIR}/resources/linux/onetcli.desktop" \
+    install -m 644 "${PROJECT_DIR}/resources/linux/omnihub.desktop" \
         "${STAGING_DIR}/usr/share/applications/${PACKAGE_NAME}.desktop"
-    install -m 644 "${PROJECT_DIR}/resources/linux/onetcli-128.png" \
+    install -m 644 "${PROJECT_DIR}/resources/linux/omnihub-128.png" \
         "${STAGING_DIR}/usr/share/icons/hicolor/128x128/apps/${PACKAGE_NAME}.png"
-    install -m 644 "${PROJECT_DIR}/resources/linux/onetcli-256.png" \
+    install -m 644 "${PROJECT_DIR}/resources/linux/omnihub-256.png" \
         "${STAGING_DIR}/usr/share/icons/hicolor/256x256/apps/${PACKAGE_NAME}.png"
-    install -m 644 "${PROJECT_DIR}/resources/linux/onetcli-512.png" \
+    install -m 644 "${PROJECT_DIR}/resources/linux/omnihub-512.png" \
         "${STAGING_DIR}/usr/share/icons/hicolor/512x512/apps/${PACKAGE_NAME}.png"
     install -m 644 "${PROJECT_DIR}/README.md" \
         "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}/README.md"
     install -m 644 "${PROJECT_DIR}/LICENSE-APACHE" \
         "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}/LICENSE-APACHE"
-    install -m 644 "${PROJECT_DIR}/ONETCLI_LICENSE" \
-        "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}/ONETCLI_LICENSE"
+    install -m 644 "${PROJECT_DIR}/OMNIHUB_LICENSE" \
+        "${STAGING_DIR}/usr/share/doc/${PACKAGE_NAME}/OMNIHUB_LICENSE"
 
-    # Copy bundled themes to /usr/share/onetcli/themes
+    # Copy bundled themes to /usr/share/omnihub/themes
     if [[ -d "${PROJECT_DIR}/themes" ]]; then
         for theme_file in "${PROJECT_DIR}/themes"/*.json "${PROJECT_DIR}/themes"/*.jsonc; do
             if [[ -f "${theme_file}" ]]; then
-                install -m 644 "${theme_file}" "${STAGING_DIR}/usr/share/onetcli/themes/"
+                install -m 644 "${theme_file}" "${STAGING_DIR}/usr/share/omnihub/themes/"
             fi
         done
     fi
@@ -287,10 +287,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     exit 0
 fi
 
-TARGET="${1:-${ONETCLI_TARGET:-$(detect_linux_target)}}"
+TARGET="${1:-${OMNIHUB_TARGET:-$(detect_linux_target)}}"
 VERSION="$(resolve_version)"
 DEB_ARCH="$(target_to_deb_arch "${TARGET}")"
-OUTPUT_DIR="${ONETCLI_DEB_OUTPUT_DIR:-${PROJECT_DIR}/target/dist}"
+OUTPUT_DIR="${OMNIHUB_DEB_OUTPUT_DIR:-${PROJECT_DIR}/target/dist}"
 DEB_PATH="${OUTPUT_DIR}/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.deb"
 PROFILE_DIR="$(profile_output_dir)"
 BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/${PROFILE_DIR}/${BINARY_NAME}"
@@ -311,7 +311,7 @@ build_binary
 
 if [[ ! -f "${BINARY_PATH}" ]]; then
     echo "错误：未找到二进制文件 ${BINARY_PATH}" >&2
-    echo "请先执行构建，或确认 ONETCLI_BUILD_PROFILE / TARGET 配置正确。" >&2
+    echo "请先执行构建，或确认 OMNIHUB_BUILD_PROFILE / TARGET 配置正确。" >&2
     exit 1
 fi
 

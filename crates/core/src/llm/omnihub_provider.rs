@@ -1,4 +1,4 @@
-//! Onet CLI LLM Provider
+//! OmniHub LLM Provider
 //!
 //! 使用云端同步服务提供的 AI 代理能力。
 //! 委托给 CloudApiClient 实现，支持 OpenAI 兼容的 /chat/completions 接口。
@@ -11,22 +11,22 @@ use std::sync::Arc;
 use super::connector::{ChatStream, LlmProvider};
 use crate::cloud_sync::client::CloudApiClient;
 
-/// Onet CLI LLM Provider
+/// OmniHub LLM Provider
 ///
 /// 使用云端 API 作为 AI 代理，委托给 CloudApiClient 实现。
-pub struct OnetCliLLMProvider {
+pub struct OmniHubLLMProvider {
     cloud_client: Arc<dyn CloudApiClient>,
 }
 
-impl OnetCliLLMProvider {
-    /// 创建新的 Onet CLI LLM Provider
+impl OmniHubLLMProvider {
+    /// 创建新的 OmniHub LLM Provider
     pub fn new(cloud_client: Arc<dyn CloudApiClient>) -> Self {
         Self { cloud_client }
     }
 }
 
 #[async_trait]
-impl LlmProvider for OnetCliLLMProvider {
+impl LlmProvider for OmniHubLLMProvider {
     async fn chat(&self, request: &ChatRequest) -> Result<String> {
         self.cloud_client
             .chat(request)

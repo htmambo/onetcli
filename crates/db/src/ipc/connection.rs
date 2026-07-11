@@ -126,7 +126,7 @@ impl DbConnection for ExternalDbConnection {
     }
 
     async fn query(&self, query: &str) -> Result<SqlResult, DbError> {
-        if let Some(request) = query.strip_prefix("/*onetcli-ipc-metadata*/ ") {
+        if let Some(request) = query.strip_prefix("/*omnihub-ipc-metadata*/ ") {
             let value: serde_json::Value = serde_json::from_str(request)
                 .map_err(|error| DbError::query_with_source("invalid metadata request", error))?;
             let method = value

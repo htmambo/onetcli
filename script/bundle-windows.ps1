@@ -136,13 +136,13 @@ else {
     }
 }
 
-$bundleName = "OnetCli-windows-x64"
-$artifactBaseName = "onetcli-$versionTag-windows-x64"
+$bundleName = "OmniHub-windows-x64"
+$artifactBaseName = "omnihub-$versionTag-windows-x64"
 $stageDir = Join-Path $distRoot $bundleName
 $zipPath = Join-Path $distRoot "$artifactBaseName.zip"
 $portableExePath = Join-Path $distRoot "$artifactBaseName.exe"
 $hashFilePath = Join-Path $distRoot "SHA256SUMS.txt"
-$binaryPath = Join-Path $projectDir "target\$Target\release\onetcli.exe"
+$binaryPath = Join-Path $projectDir "target\$Target\release\omnihub.exe"
 
 Write-Host "开始打包 Windows x64 应用..."
 Write-Host "项目目录: $projectDir"
@@ -172,10 +172,10 @@ if (Test-Path -LiteralPath $stageDir) {
 }
 New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 
-Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $stageDir "onetcli.exe") -Force
+Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $stageDir "omnihub.exe") -Force
 Copy-Item -LiteralPath $binaryPath -Destination $portableExePath -Force
 
-foreach ($file in @("LICENSE-APACHE", "ONETCLI_LICENSE", "README.md", "README_CN.md")) {
+foreach ($file in @("LICENSE-APACHE", "OMNIHUB_LICENSE", "README.md", "README_CN.md")) {
     $source = Join-Path $projectDir $file
     if (Test-Path -LiteralPath $source) {
         Copy-Item -LiteralPath $source -Destination (Join-Path $stageDir $file) -Force
@@ -200,11 +200,11 @@ else {
 }
 
 $buildInfo = @(
-    "应用: OnetCli"
+    "应用: OmniHub"
     "版本: $versionTag"
     "目标: $Target"
     "生成时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')"
-    "二进制: onetcli.exe"
+    "二进制: omnihub.exe"
 ) -join [Environment]::NewLine
 
 Set-Content -LiteralPath (Join-Path $stageDir "BUILD_INFO.txt") -Value $buildInfo -Encoding UTF8

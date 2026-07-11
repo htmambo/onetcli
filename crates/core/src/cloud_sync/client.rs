@@ -110,7 +110,7 @@ pub trait CloudApiClient: Send + Sync {
     async fn save_user_config(&self, config: &CloudUserConfig) -> Result<(), CloudApiError>;
 
     // ========================================================================
-    // OnetCli 模型列表
+    // OmniHub 模型列表
     // ========================================================================
 
     /// 获取当前可用模型列表

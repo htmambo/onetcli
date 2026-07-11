@@ -174,7 +174,27 @@ pub fn get_key_storage() -> Arc<dyn KeyStorage> {
 
 /// 获取数据目录路径
 fn get_data_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|p| p.join("one-hub"))
+    let parent = dirs::data_dir()?;
+    let target = parent.join("omnihub");
+    if !target.exists() {
+        for legacy_name in ["one-hub", "onetcli"] {
+            let legacy = parent.join(legacy_name);
+            if !legacy.exists() {
+                continue;
+            }
+            match std::fs::rename(&legacy, &target) {
+                Ok(()) => break,
+                Err(err) => {
+                    eprintln!(
+                        "[paths] failed to migrate data dir {} -> {}: {err}",
+                        legacy.display(),
+                        target.display()
+                    );
+                }
+            }
+        }
+    }
+    Some(target)
 }
 
 /// 获取本地密钥存储文件路径

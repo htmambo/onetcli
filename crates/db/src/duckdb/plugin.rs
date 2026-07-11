@@ -432,11 +432,11 @@ impl DuckDbPlugin {
 fn build_duckdb_ui_manifest() -> DatabaseUiManifest {
     let default_db_path = one_core::storage::get_config_dir()
         .map(|path| {
-            path.join("onetcli_default.duckdb")
+            path.join("omnihub_default.duckdb")
                 .to_string_lossy()
                 .to_string()
         })
-        .unwrap_or_else(|_| "onetcli_default.duckdb".to_string());
+        .unwrap_or_else(|_| "omnihub_default.duckdb".to_string());
 
     DatabaseUiManifest {
         forms: vec![

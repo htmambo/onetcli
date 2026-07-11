@@ -53,7 +53,7 @@ const ACTIVE_UPDATE_SOURCE: UpdateSource = UpdateSource::GitHub;
 enum UpdateSource {
     /// 通过 GitHub Releases 检查更新
     GitHub,
-    /// 通过自建 API 检查更新（需配置 ONETCLI_UPDATE_URL）
+    /// 通过自建 API 检查更新（需配置 OMNIHUB_UPDATE_URL）
     #[allow(dead_code)]
     CustomApi,
 }
@@ -264,7 +264,7 @@ async fn fetch_custom_dialog_info(
     current_version: &str,
 ) -> Result<Option<UpdateDialogInfo>, String> {
     if !config.is_valid() {
-        return Err("缺少 ONETCLI_UPDATE_URL，无法使用自定义更新接口兜底".to_string());
+        return Err("缺少 OMNIHUB_UPDATE_URL，无法使用自定义更新接口兜底".to_string());
     }
 
     let response = fetch_update_info(http_client, &config.update_url).await?;

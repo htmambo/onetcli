@@ -1168,7 +1168,7 @@ mod tests {
         let temp_db_dir =
             std::env::temp_dir().join(format!("one-core-connection-sync-test-{unique}"));
         std::fs::create_dir_all(&temp_db_dir).expect("should create temp dir");
-        let db_path = temp_db_dir.join("one-hub.db");
+        let db_path = temp_db_dir.join("omnihub.db");
 
         let storage = crate::storage::StorageManager::with_path(&db_path)
             .expect("should create isolated storage manager");

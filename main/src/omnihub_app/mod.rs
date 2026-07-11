@@ -14,7 +14,7 @@ use gpui::{Menu, MenuItem};
 use gpui_component::{WindowExt, WindowsSurfaceLayer, layered_level_surface_color};
 
 actions!(
-    onetcli_app,
+    omnihub_app,
     [
         ActivateTab1,
         ActivateTab2,
@@ -80,7 +80,7 @@ use window_actions::{
     activate_tab_by_number, duplicate_tab, open_sftp_from_tab, quit_app, toggle_fullscreen,
 };
 
-const APP_WINDOW_TITLE: &str = "OnetCli";
+const APP_WINDOW_TITLE: &str = "OmniHub";
 const GLOBAL_STATUS_BAR_HEIGHT: f32 = 28.0;
 const BACKGROUND_RECOVERY_SAVE_INTERVAL_SECS: u64 = 30;
 const BACKGROUND_TERMINAL_RECOVERY_SCROLLBACK_LINES: usize = 200;
@@ -321,7 +321,7 @@ pub fn init(cx: &mut App) -> AppSettings {
     settings
 }
 
-pub struct OnetCliApp {
+pub struct OmniHubApp {
     tab_container: Entity<TabContainer>,
     last_layout_state: Option<TabContainerState>,
     last_background_recovery_state: Option<TabContainerState>,
@@ -335,7 +335,7 @@ pub struct OnetCliApp {
 
 const WINDOW_BOUNDS_SAVE_DEBOUNCE_MS: u64 = 300;
 
-impl OnetCliApp {
+impl OmniHubApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.set_global(GlobalMainWindowHandle {
             window_handle: window.window_handle(),
@@ -944,7 +944,7 @@ impl OnetCliApp {
     }
 }
 
-impl Render for OnetCliApp {
+impl Render for OmniHubApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let next_window_title = {
             let active_title = self
@@ -999,19 +999,19 @@ mod tests {
 
     #[test]
     fn 活动标签存在时拼接应用名和标签名() {
-        assert_eq!(build_window_title(Some("终端")), "OnetCli - 终端");
+        assert_eq!(build_window_title(Some("终端")), "OmniHub - 终端");
     }
 
     #[test]
     fn 空标题时回退到应用名() {
-        assert_eq!(build_window_title(Some("   ")), "OnetCli");
-        assert_eq!(build_window_title(None), "OnetCli");
+        assert_eq!(build_window_title(Some("   ")), "OmniHub");
+        assert_eq!(build_window_title(None), "OmniHub");
     }
 
     #[test]
     fn 状态栏标题在空值时回退到应用名() {
-        assert_eq!(build_status_bar_title(Some("  ")), "OnetCli");
-        assert_eq!(build_status_bar_title(None), "OnetCli");
+        assert_eq!(build_status_bar_title(Some("  ")), "OmniHub");
+        assert_eq!(build_status_bar_title(None), "OmniHub");
     }
 
     #[test]

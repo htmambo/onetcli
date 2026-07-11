@@ -59,7 +59,7 @@ impl GoogleDriveAuthDialog {
         let verifier = generate_code_verifier();
         let challenge = generate_code_challenge(&verifier);
         let state = format!(
-            "ONetCli_GDrive_{}",
+            "OmniHub_GDrive_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -348,7 +348,7 @@ impl OneDriveAuthDialog {
         let verifier = generate_code_verifier();
         let challenge = generate_code_challenge(&verifier);
         let state = format!(
-            "ONetCli_ODrive_{}",
+            "OmniHub_ODrive_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

@@ -5403,7 +5403,7 @@ mod tests {
         let mut cx = TestAppContext::single();
         let previous_home = std::env::var_os("HOME");
         let temp_home = std::env::temp_dir().join(format!(
-            "onetcli-terminal-view-test-home-{}",
+            "omnihub-terminal-view-test-home-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
@@ -5466,7 +5466,7 @@ mod tests {
         let mut cx = TestAppContext::single();
         let previous_home = std::env::var_os("HOME");
         let temp_home = std::env::temp_dir().join(format!(
-            "onetcli-terminal-view-top-test-home-{}",
+            "omnihub-terminal-view-top-test-home-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");

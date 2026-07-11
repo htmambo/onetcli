@@ -53,7 +53,7 @@ struct SyncBundle {
 }
 
 /// Gist 存储使用的 blob key
-const BUNDLE_KEY: &str = "onetcli-vault.bundle";
+const BUNDLE_KEY: &str = "omnihub-vault.bundle";
 
 impl SyncEngine {
     /// BlobVault 后端同步流程

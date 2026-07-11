@@ -27,7 +27,7 @@ pub fn main_window_options(cx: &App) -> WindowOptions {
         }),
         window_background: AppSettings::global(cx).preferred_window_background(),
         #[cfg(target_os = "linux")]
-        app_id: Some("onetcli".to_string()),
+        app_id: Some("omnihub".to_string()),
         #[cfg(target_os = "linux")]
         window_decorations: Some(WindowDecorations::Client),
         kind: WindowKind::Normal,

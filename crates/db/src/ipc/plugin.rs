@@ -47,7 +47,7 @@ impl ExternalDatabasePlugin {
     {
         let sql = serde_json::json!({ "method": method, "params": params }).to_string();
         match connection
-            .query(&format!("/*onetcli-ipc-metadata*/ {sql}"))
+            .query(&format!("/*omnihub-ipc-metadata*/ {sql}"))
             .await?
         {
             SqlResult::Query(query) => decode_single_cell(query),

@@ -153,7 +153,7 @@ mod tests {
             .expect("系统时间异常")
             .as_nanos();
         let temp_home = std::env::temp_dir().join(format!(
-            "onetcli-tab-persistence-{}-{}",
+            "omnihub-tab-persistence-{}-{}",
             std::process::id(),
             unique
         ));
@@ -186,7 +186,7 @@ mod tests {
 
         save_tab_state(&state).expect("保存标签状态失败");
 
-        let config_dir = temp_home.join(".config").join("one-hub");
+        let config_dir = temp_home.join(".config").join("omnihub");
         assert!(config_dir.join("tab_state.json").exists());
         assert!(config_dir.join("connection_restore_state.json").exists());
 

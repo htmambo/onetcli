@@ -516,7 +516,7 @@ impl HomePage {
         let settings = crate::setting_tab::AppSettings::reload_global_from_disk(cx);
 
         cx.defer(move |cx| {
-            let Some(home) = cx.try_global::<crate::onetcli_app::GlobalHomePage>() else {
+            let Some(home) = cx.try_global::<crate::omnihub_app::GlobalHomePage>() else {
                 return;
             };
             let Some(window_id) = cx.active_window() else {

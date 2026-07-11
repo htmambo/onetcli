@@ -1,28 +1,28 @@
 ---
 title: 文档
-description: 快速开始使用 OnetCli，连接数据库、Redis、MongoDB、SSH/SFTP、终端与 AI 工作流
+description: 快速开始使用 OmniHub，连接数据库、Redis、MongoDB、SSH/SFTP、终端与 AI 工作流
 ---
 
 # 文档
 
-这一页负责把 OnetCli 的常用入口和第一条使用路径收拢到一起。更完整的源码结构、构建细节和版本文件，以 GitHub 仓库为准。
+这一页负责把 OmniHub 的常用入口和第一条使用路径收拢到一起。更完整的源码结构、构建细节和版本文件，以 GitHub 仓库为准。
 
 ## 快速开始
 
 1. 从 [GitHub Releases](https://github.com/feigeCode/onetcli/releases) 下载对应平台版本。
-2. 启动 OnetCli，先创建一个数据库连接，例如 MySQL、PostgreSQL 或 SQLite。
+2. 启动 OmniHub，先创建一个数据库连接，例如 MySQL、PostgreSQL 或 SQLite。
 3. 按你的运维或开发场景添加 SSH 主机，进入远程终端。
 4. 如果需要文件操作，打开 SFTP 文件管理或终端内置 SFTP 侧栏。
 5. 如果你使用 Redis 或 MongoDB，可以进入对应入口浏览 Key、集合和文档。
 6. 在 SQL、查询结果或终端排查场景中使用 AI 辅助生成、解释和整理下一步操作。
 
-![OnetCli 主应用工作台](/screenshots/app.png)
+![OmniHub 主应用工作台](/screenshots/app.png)
 
 ## 第一条推荐工作流
 
 ### 1. 创建连接
 
-先在工作区中创建数据库或服务器连接。OnetCli 的核心价值是让常用环境能被保存、复用，并保持上下文。
+先在工作区中创建数据库或服务器连接。OmniHub 的核心价值是让常用环境能被保存、复用，并保持上下文。
 
 ### 2. 定位对象
 
@@ -64,4 +64,4 @@ AI 可以辅助：
 
 ## 技术定位
 
-OnetCli 是纯 Rust 构建的原生桌面应用，基于 GPUI 和 GPU 渲染路线，不依赖 WebView，也就是官网首页强调的 No WebView。官网上的“高性能一体化运维工作台”指的是：把数据库、远程连接、文件传输、终端和 AI 辅助放到一个可长时间使用的桌面工作台中。
+OmniHub 是纯 Rust 构建的原生桌面应用，基于 GPUI 和 GPU 渲染路线，不依赖 WebView，也就是官网首页强调的 No WebView。官网上的“高性能一体化运维工作台”指的是：把数据库、远程连接、文件传输、终端和 AI 辅助放到一个可长时间使用的桌面工作台中。

@@ -584,7 +584,7 @@ where
         } => {
             // Write key content to a temp file since russh's decode_secret_key reads from a file path.
             let temp_dir = std::env::temp_dir();
-            let temp_key_path = temp_dir.join(format!("onetcli_ssh_key_{}", uuid::Uuid::new_v4()));
+            let temp_key_path = temp_dir.join(format!("omnihub_ssh_key_{}", uuid::Uuid::new_v4()));
             std::fs::write(&temp_key_path, &key_content)?;
             let key_pair = match load_secret_key(&temp_key_path, passphrase.as_deref()) {
                 Ok(kp) => {
@@ -1083,7 +1083,7 @@ mod tests {
         let _guard = env_lock.lock().expect("环境锁不应中毒");
 
         let temp_home = std::env::temp_dir().join(format!(
-            "onetcli-ssh-test-{}",
+            "omnihub-ssh-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("系统时间应晚于 unix epoch")
@@ -1129,7 +1129,7 @@ mod tests {
         let _guard = env_lock.lock().expect("环境锁不应中毒");
 
         let temp_home = std::env::temp_dir().join(format!(
-            "onetcli-ssh-test-expand-{}",
+            "omnihub-ssh-test-expand-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("系统时间应晚于 unix epoch")

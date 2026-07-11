@@ -29,7 +29,7 @@ const REQUEST_TIMEOUT_MS: u64 = 30_000;
 ///
 /// driver 启动时优先读这个变量来决定 listen 名,从而支持「同 driver 多实例」
 /// 场景:每个 ExternalDbConnection 都拿到独立的 socket,互不冲突。
-pub const SOCKET_ENV_VAR: &str = "ONETCLI_IPC_SOCKET";
+pub const SOCKET_ENV_VAR: &str = "OMNIHUB_IPC_SOCKET";
 
 /// 客户端「写半 / 路由表 / 关闭标记」共享状态。
 ///
@@ -295,13 +295,13 @@ async fn shutdown_child(child: &mut Option<Child>) {
 /// 使用短前缀避免 macOS `sockaddr_un.sun_path` 容量限制。
 fn make_socket_name(driver: &IpcDriverManifest) -> String {
     format!(
-        "onetcli-{}-{}.sock",
+        "omnihub-{}-{}.sock",
         driver.id,
         uuid::Uuid::new_v4().simple()
     )
 }
 
-/// 构造 driver 启动 Command,设置 `ONETCLI_IPC_SOCKET` env var 把动态 socket
+/// 构造 driver 启动 Command,设置 `OMNIHUB_IPC_SOCKET` env var 把动态 socket
 /// 名透传给子进程。抽出独立函数便于在 Drop / multi-instance 测试中验证 env。
 fn build_driver_command(driver: &IpcDriverManifest, socket_name: &str) -> Command {
     let mut command = Command::new(&driver.entry.command);
@@ -434,8 +434,8 @@ mod tests {
         let second = make_socket_name(&driver);
 
         assert_ne!(first, second);
-        assert!(first.starts_with("onetcli-socket-test-"));
-        assert!(second.starts_with("onetcli-socket-test-"));
+        assert!(first.starts_with("omnihub-socket-test-"));
+        assert!(second.starts_with("omnihub-socket-test-"));
         assert!(first.ends_with(".sock"));
         assert!(second.ends_with(".sock"));
     }
@@ -479,7 +479,7 @@ mod lifecycle_tests {
                 args: vec!["30".into()],
                 working_dir: None,
             },
-            transport: IpcDriverTransport::local_socket("onetcli-lifecycle-test.sock"),
+            transport: IpcDriverTransport::local_socket("omnihub-lifecycle-test.sock"),
             dialect: Default::default(),
             capabilities: None,
             ui: Default::default(),

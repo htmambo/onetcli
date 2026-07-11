@@ -1,11 +1,11 @@
 [Desktop Entry]
-Name=OnetCli
-Comment=One Net Client - Database, SSH, Terminal, AI Tools
-Exec=onetcli
-Icon=onetcli
+Name=OmniHub
+Comment=OmniHub - Database, SSH, Terminal, AI Tools
+Exec=omnihub
+Icon=omnihub
 Type=Application
 Categories=Development;Utility;Database;
 Terminal=false
-StartupWMClass=onetcli
+StartupWMClass=omnihub
 MimeType=
 Keywords=database;ssh;sftp;terminal;redis;mongodb;postgresql;mysql;

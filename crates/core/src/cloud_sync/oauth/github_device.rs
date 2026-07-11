@@ -248,7 +248,7 @@ pub async fn find_vault_gist(
         .method(Method::GET)
         .uri("https://api.github.com/gists")
         .header("Authorization", format!("Bearer {}", tokens.access_token))
-        .header("User-Agent", "onetcli")
+        .header("User-Agent", "omnihub")
         .header("Accept", "application/vnd.github+json")
         .body(AsyncBody::empty())
         .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
@@ -298,7 +298,7 @@ pub async fn create_vault_gist(
     );
 
     let body = serde_json::to_vec(&CreateGistRequest {
-        description: "ONetCli sync vault".to_string(),
+        description: "OmniHub sync vault".to_string(),
         is_public: false,
         files,
     })
@@ -308,7 +308,7 @@ pub async fn create_vault_gist(
         .method(Method::POST)
         .uri("https://api.github.com/gists")
         .header("Authorization", format!("Bearer {}", tokens.access_token))
-        .header("User-Agent", "ONetCli")
+        .header("User-Agent", "OmniHub")
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json")
         .body(AsyncBody::from(body))

@@ -10,14 +10,14 @@ mod connection_restore;
 mod home;
 mod home_tab;
 pub mod new_connection;
-mod onetcli_app;
+mod omnihub_app;
 mod saved_connection_picker;
 mod setting_tab;
 mod settings;
 mod sync_server_theme;
 mod update;
 
-use crate::onetcli_app::OnetCliApp;
+use crate::omnihub_app::OmniHubApp;
 use crate::setting_tab::HotkeyMigration;
 use db::GlobalDbState;
 use gpui::*;
@@ -40,7 +40,7 @@ fn main() {
         .with_quit_mode(QuitMode::LastWindowClosed);
 
     app.run(move |cx| {
-        let settings = onetcli_app::init(cx);
+        let settings = omnihub_app::init(cx);
 
         let hotkey_migration = setting_tab::init_settings_with(cx, Some(settings));
         bootstrap::theme::init_theme_runtime(cx);
@@ -56,7 +56,7 @@ fn main() {
                 window.activate_window();
                 app_init::init_window_systems(window, cx);
                 update::schedule_update_check(window, cx);
-                let view = cx.new(|cx| OnetCliApp::new(window, cx));
+                let view = cx.new(|cx| OmniHubApp::new(window, cx));
                 let root = cx.new(|cx| Root::new(view, window, cx));
                 maybe_show_hotkey_migration_toast(&hotkey_migration, window, cx);
                 root

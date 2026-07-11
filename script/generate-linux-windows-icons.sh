@@ -6,7 +6,7 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SOURCE_SVG="${1:-${PROJECT_DIR}/logo.svg}"
 LINUX_DIR="${PROJECT_DIR}/resources/linux"
 WINDOWS_DIR="${PROJECT_DIR}/resources/windows"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onetcli-transparent-icon.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/omnihub-transparent-icon.XXXXXX")"
 TRANSPARENT_SVG="${WORK_DIR}/logo-transparent.svg"
 
 cleanup() {
@@ -45,18 +45,18 @@ render_png() {
 }
 
 for size in 128 256 512; do
-    render_png "${size}" "${LINUX_DIR}/onetcli-${size}.png"
+    render_png "${size}" "${LINUX_DIR}/omnihub-${size}.png"
 done
 
 WINDOWS_SIZES=(16 24 32 48 64 128 256)
 WINDOWS_PNGS=()
 for size in "${WINDOWS_SIZES[@]}"; do
-    output="${WINDOWS_DIR}/onetcli-${size}.png"
+    output="${WINDOWS_DIR}/omnihub-${size}.png"
     render_png "${size}" "${output}"
     WINDOWS_PNGS+=("${output}")
 done
 
-python3 - "${WINDOWS_DIR}/onetcli.ico" "${WINDOWS_PNGS[@]}" <<'PY'
+python3 - "${WINDOWS_DIR}/omnihub.ico" "${WINDOWS_PNGS[@]}" <<'PY'
 import struct
 import sys
 from pathlib import Path
@@ -95,14 +95,14 @@ PY
 
 echo "已生成 Linux PNG 与 Windows PNG/ICO："
 printf '  %s\n' \
-    "${LINUX_DIR}/onetcli-128.png" \
-    "${LINUX_DIR}/onetcli-256.png" \
-    "${LINUX_DIR}/onetcli-512.png" \
-    "${WINDOWS_DIR}/onetcli-16.png" \
-    "${WINDOWS_DIR}/onetcli-24.png" \
-    "${WINDOWS_DIR}/onetcli-32.png" \
-    "${WINDOWS_DIR}/onetcli-48.png" \
-    "${WINDOWS_DIR}/onetcli-64.png" \
-    "${WINDOWS_DIR}/onetcli-128.png" \
-    "${WINDOWS_DIR}/onetcli-256.png" \
-    "${WINDOWS_DIR}/onetcli.ico"
+    "${LINUX_DIR}/omnihub-128.png" \
+    "${LINUX_DIR}/omnihub-256.png" \
+    "${LINUX_DIR}/omnihub-512.png" \
+    "${WINDOWS_DIR}/omnihub-16.png" \
+    "${WINDOWS_DIR}/omnihub-24.png" \
+    "${WINDOWS_DIR}/omnihub-32.png" \
+    "${WINDOWS_DIR}/omnihub-48.png" \
+    "${WINDOWS_DIR}/omnihub-64.png" \
+    "${WINDOWS_DIR}/omnihub-128.png" \
+    "${WINDOWS_DIR}/omnihub-256.png" \
+    "${WINDOWS_DIR}/omnihub.ico"

@@ -270,11 +270,11 @@ impl SqlitePlugin {
 fn build_sqlite_ui_manifest() -> DatabaseUiManifest {
     let default_db_path = one_core::storage::get_config_dir()
         .map(|path| {
-            path.join("onetcli_default.db")
+            path.join("omnihub_default.db")
                 .to_string_lossy()
                 .to_string()
         })
-        .unwrap_or_else(|_| "onetcli_default.db".to_string());
+        .unwrap_or_else(|_| "omnihub_default.db".to_string());
 
     DatabaseUiManifest {
         capabilities: DatabaseUiCapabilities {

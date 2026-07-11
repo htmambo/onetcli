@@ -1,6 +1,6 @@
 ---
 title: 更新日志
-description: 基于本地 git tag 和提交历史整理 OnetCli 最近版本与关键能力更新
+description: 基于本地 git tag 和提交历史整理 OmniHub 最近版本与关键能力更新
 ---
 
 # 更新日志

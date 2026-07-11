@@ -930,7 +930,7 @@ mod tests {
         // 云端去重/用户 UI 处理
     }
 
-    /// 回归用例：内置 OnetCli 提供商本地新增，云端已有同名记录。
+    /// 回归用例：内置 OmniHub 提供商本地新增，云端已有同名记录。
     ///
     /// 期望：本地项**不**进入 `to_upload`（允许按名称回链），云端条目也
     /// **不**进入 `to_download`（将被云端处理循环关联）。
@@ -940,8 +940,8 @@ mod tests {
 
         let mut local = ProviderConfig::default();
         local.id = 2;
-        local.name = "OnetCli AI".to_string();
-        local.provider_type = ProviderType::OnetCli;
+        local.name = "OmniHub AI".to_string();
+        local.provider_type = ProviderType::OmniHub;
         local.cloud_id = None;
         let local_items = vec![local.clone()];
 
@@ -949,7 +949,7 @@ mod tests {
             id: "cloud-uuid-2".to_string(),
             owner_id: "owner".to_string(),
             data_type: "llm_provider".to_string(),
-            name: "OnetCli AI".to_string(),
+            name: "OmniHub AI".to_string(),
             encrypted_data: String::new(),
             key_version: 1,
             checksum: String::new(),
@@ -1108,7 +1108,7 @@ mod tests {
         let mut local = ProviderConfig::default();
         local.id = 10;
         local.name = "stable".to_string();
-        local.provider_type = ProviderType::OnetCli;
+        local.provider_type = ProviderType::OmniHub;
         local.cloud_id = Some("cloud-stable".to_string());
         local.updated_at = 1_700_000_000;
         let local_items = vec![local];
@@ -1216,7 +1216,7 @@ mod tests {
         let mut local = ProviderConfig::default();
         local.id = 13;
         local.name = "preexisting-local".to_string();
-        local.provider_type = ProviderType::OnetCli;
+        local.provider_type = ProviderType::OmniHub;
         local.cloud_id = Some("cloud-preexisting".to_string());
         local.updated_at = 1_700_000_000;
         let local_items = vec![local];

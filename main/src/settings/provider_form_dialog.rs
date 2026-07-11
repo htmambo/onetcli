@@ -477,12 +477,12 @@ impl ProviderForm {
             updated_at: now,
         };
 
-        let is_onet_cli = provider_type.is_builtin();
+        let is_builtin_provider = provider_type.is_builtin();
         let global_provider_state = cx.global::<GlobalProviderState>().clone();
 
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let result = Tokio::spawn(cx, async move {
-                if is_onet_cli {
+                if is_builtin_provider {
                     let provider = global_provider_state
                         .manager()
                         .get_provider(&config)

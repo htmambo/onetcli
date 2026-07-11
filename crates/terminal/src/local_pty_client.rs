@@ -289,7 +289,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-        let marker = format!("__onetcli_spawn_output_{}__", std::process::id());
+        let marker = format!("__omnihub_spawn_output_{}__", std::process::id());
         let result = tokio::task::spawn_blocking(move || -> Result<bool> {
             let mut client = LocalPtyClient::connect()?;
             let mut config = crate::LocalConfig::default();
