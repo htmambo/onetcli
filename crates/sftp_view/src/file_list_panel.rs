@@ -1015,6 +1015,25 @@ impl FileListPanel {
                             });
                         })),
                 );
+
+                if crate::archive_kind_for_name(name).is_some() {
+                    let view_extract = view.clone();
+                    let extract_name = name.to_string();
+                    let extract_path = full_path.to_string();
+                    menu = menu.item(
+                        PopupMenuItem::new(t!("File.extract").to_string())
+                            .icon(IconName::Unarchive)
+                            .on_click(window.listener_for(
+                                &view_extract,
+                                move |_this, _, _, cx| {
+                                    cx.emit(FileListPanelEvent::Extract {
+                                        name: extract_name.clone(),
+                                        full_path: extract_path.clone(),
+                                    });
+                                },
+                            )),
+                    );
+                }
             }
 
             menu = menu.item(
@@ -1337,6 +1356,11 @@ pub enum FileListPanelEvent {
         full_path: String,
     },
     Edit {
+        full_path: String,
+    },
+    /// 远程解压压缩包
+    Extract {
+        name: String,
         full_path: String,
     },
     /// 修改权限

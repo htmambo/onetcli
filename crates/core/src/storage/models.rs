@@ -17,6 +17,9 @@ pub enum ConnectionType {
     MongoDB,
     ChatDB,
     Serial,
+    PortForwarding,
+    Rdp,
+    Vnc,
 }
 
 impl fmt::Display for ConnectionType {
@@ -29,6 +32,9 @@ impl fmt::Display for ConnectionType {
             ConnectionType::MongoDB => "MongoDB",
             ConnectionType::ChatDB => "ChatDB",
             ConnectionType::Serial => "Serial",
+            ConnectionType::PortForwarding => "PortForwarding",
+            ConnectionType::Rdp => "Rdp",
+            ConnectionType::Vnc => "Vnc",
         };
         write!(f, "{}", s)
     }
@@ -44,6 +50,9 @@ impl ConnectionType {
             ConnectionType::MongoDB,
             ConnectionType::ChatDB,
             ConnectionType::Serial,
+            ConnectionType::PortForwarding,
+            ConnectionType::Rdp,
+            ConnectionType::Vnc,
         ]
     }
     pub fn from_str(s: &str) -> Self {
@@ -54,6 +63,9 @@ impl ConnectionType {
             "MongoDB" => ConnectionType::MongoDB,
             "ChatDB" => ConnectionType::ChatDB,
             "Serial" => ConnectionType::Serial,
+            "PortForwarding" => ConnectionType::PortForwarding,
+            "Rdp" => ConnectionType::Rdp,
+            "Vnc" => ConnectionType::Vnc,
             _ => ConnectionType::Database,
         }
     }
@@ -67,6 +79,9 @@ impl ConnectionType {
             ConnectionType::MongoDB => t!("ConnectionType.mongodb").to_string(),
             ConnectionType::ChatDB => t!("ConnectionType.chatdb").to_string(),
             ConnectionType::Serial => t!("ConnectionType.serial").to_string(),
+            ConnectionType::PortForwarding => t!("ConnectionType.port_forwarding").to_string(),
+            ConnectionType::Rdp => t!("ConnectionType.rdp").to_string(),
+            ConnectionType::Vnc => t!("ConnectionType.vnc").to_string(),
         }
     }
 
@@ -79,6 +94,9 @@ impl ConnectionType {
             ConnectionType::MongoDB => IconName::MongoDB,
             ConnectionType::ChatDB => IconName::AI,
             ConnectionType::Serial => IconName::SerialPort,
+            ConnectionType::PortForwarding => IconName::PortForwardingColor,
+            ConnectionType::Rdp => IconName::Rdp,
+            ConnectionType::Vnc => IconName::Vnc,
         }
     }
 }
@@ -281,6 +299,63 @@ pub struct RedisClusterConfig {
     pub nodes: Vec<String>,
 }
 
+fn default_redis_ssh_port() -> u16 {
+    22
+}
+
+fn default_redis_ssh_auth_type() -> String {
+    "password".to_string()
+}
+
+/// Redis SSH 隧道配置。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedisSshTunnelConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub connection_id: Option<i64>,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default = "default_redis_ssh_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default = "default_redis_ssh_auth_type")]
+    pub auth_type: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    /// 私钥内容或文件路径（兼容引用 SSH 连接时写入内容）。
+    #[serde(default)]
+    pub private_key_path: Option<String>,
+    #[serde(default)]
+    pub private_key_passphrase: Option<String>,
+    #[serde(default)]
+    pub target_host: Option<String>,
+    #[serde(default)]
+    pub target_port: Option<u16>,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+}
+
+impl Default for RedisSshTunnelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            connection_id: None,
+            host: String::new(),
+            port: default_redis_ssh_port(),
+            username: String::new(),
+            auth_type: default_redis_ssh_auth_type(),
+            password: None,
+            private_key_path: None,
+            private_key_passphrase: None,
+            target_host: None,
+            target_port: None,
+            timeout: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedisParams {
     pub host: String,
@@ -306,6 +381,69 @@ pub struct RedisParams {
     /// 集群配置
     #[serde(default)]
     pub cluster: Option<RedisClusterConfig>,
+    /// SSH 隧道配置
+    #[serde(default)]
+    pub ssh_tunnel: Option<RedisSshTunnelConfig>,
+}
+
+impl RedisParams {
+    pub fn apply_referenced_ssh_tunnel(
+        &mut self,
+        ssh_connection: &StoredConnection,
+    ) -> Result<(), serde_json::Error> {
+        let Some(tunnel) = self.ssh_tunnel.as_mut() else {
+            return Ok(());
+        };
+        let Some(ssh_connection_id) = tunnel.connection_id else {
+            return Ok(());
+        };
+        if ssh_connection.id != Some(ssh_connection_id) {
+            return Ok(());
+        }
+        if ssh_connection.connection_type != ConnectionType::SshSftp {
+            return Ok(());
+        }
+
+        let ssh_params = ssh_connection.to_ssh_params()?;
+        tunnel.host = ssh_params.host;
+        tunnel.port = ssh_params.port;
+        tunnel.username = ssh_params.username;
+        tunnel.timeout = ssh_params.connect_timeout;
+        tunnel.target_host.get_or_insert_with(|| self.host.clone());
+        tunnel.target_port.get_or_insert(self.port);
+
+        match ssh_params.auth_method {
+            SshAuthMethod::Password { password } => {
+                tunnel.auth_type = "password".to_string();
+                tunnel.password = Some(password);
+                tunnel.private_key_path = None;
+                tunnel.private_key_passphrase = None;
+            }
+            SshAuthMethod::PrivateKey {
+                ssh_private_key,
+                passphrase,
+            } => {
+                tunnel.auth_type = "private_key".to_string();
+                tunnel.password = None;
+                tunnel.private_key_path = Some(ssh_private_key);
+                tunnel.private_key_passphrase = passphrase;
+            }
+            SshAuthMethod::Agent => {
+                tunnel.auth_type = "agent".to_string();
+                tunnel.password = None;
+                tunnel.private_key_path = None;
+                tunnel.private_key_passphrase = None;
+            }
+            SshAuthMethod::AutoPublicKey => {
+                tunnel.auth_type = "auto_publickey".to_string();
+                tunnel.password = None;
+                tunnel.private_key_path = None;
+                tunnel.private_key_passphrase = None;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,6 +577,83 @@ impl Default for SerialParams {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum PortForwardingKind {
+    #[default]
+    Local,
+    Dynamic,
+}
+
+impl PortForwardingKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Local => "Local",
+            Self::Dynamic => "Dynamic SOCKS",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortForwardingParams {
+    pub ssh_connection_id: i64,
+    #[serde(default)]
+    pub kind: PortForwardingKind,
+    #[serde(default = "default_forward_bind_host")]
+    pub bind_host: String,
+    #[serde(default)]
+    pub bind_port: u16,
+    #[serde(default)]
+    pub target_host: String,
+    #[serde(default)]
+    pub target_port: u16,
+}
+
+fn default_forward_bind_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteDesktopProtocol {
+    Rdp,
+    Vnc,
+}
+
+impl RemoteDesktopProtocol {
+    pub fn connection_type(self) -> ConnectionType {
+        match self {
+            Self::Rdp => ConnectionType::Rdp,
+            Self::Vnc => ConnectionType::Vnc,
+        }
+    }
+
+    pub fn default_port(self) -> u16 {
+        match self {
+            Self::Rdp => 3389,
+            Self::Vnc => 5900,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rdp => "RDP",
+            Self::Vnc => "VNC",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteDesktopParams {
+    pub protocol: RemoteDesktopProtocol,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
+}
+
 
 /// Connection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1010,6 +1225,62 @@ impl StoredConnection {
     pub fn to_serial_params(&self) -> Result<SerialParams, serde_json::Error> {
         serde_json::from_str(&self.params)
     }
+
+    pub fn new_port_forwarding(
+        name: String,
+        params: PortForwardingParams,
+        workspace_id: Option<i64>,
+    ) -> Self {
+        Self {
+            id: None,
+            name,
+            connection_type: ConnectionType::PortForwarding,
+            params: serde_json::to_string(&params).expect("PortForwardingParams 序列化不应失败"),
+            sort_order: None,
+            workspace_id,
+            selected_databases: None,
+            remark: None,
+            sync_enabled: true,
+            cloud_id: None,
+            last_synced_at: None,
+            created_at: None,
+            updated_at: None,
+            owner_id: None,
+        }
+    }
+
+    pub fn to_port_forwarding_params(&self) -> Result<PortForwardingParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
+
+    pub fn new_remote_desktop(
+        name: String,
+        params: RemoteDesktopParams,
+        workspace_id: Option<i64>,
+    ) -> Self {
+        Self {
+            id: None,
+            name,
+            connection_type: params.protocol.connection_type(),
+            params: serde_json::to_string(&params).expect("RemoteDesktopParams 序列化不应失败"),
+            sort_order: None,
+            workspace_id,
+            selected_databases: None,
+            remark: None,
+            sync_enabled: true,
+            cloud_id: None,
+            last_synced_at: None,
+            created_at: None,
+            updated_at: None,
+            owner_id: None,
+        }
+    }
+
+    pub fn to_remote_desktop_params(&self) -> Result<RemoteDesktopParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
+
+
 
     pub fn to_db_connection(&self) -> Result<DbConnectionConfig, serde_json::Error> {
         let mut params: DbConnectionConfig = serde_json::from_str(&self.params)?;
@@ -1680,6 +1951,148 @@ mod serial_tests {
         assert_eq!(rt.parity, SerialParity::Even);
         assert_eq!(rt.flow_control, SerialFlowControl::Hardware);
     }
+
+    #[test]
+    fn stored_connection_port_forwarding_roundtrip() {
+        let params = PortForwardingParams {
+            ssh_connection_id: 7,
+            kind: PortForwardingKind::Local,
+            bind_host: "127.0.0.1".to_string(),
+            bind_port: 5432,
+            target_host: "db.internal".to_string(),
+            target_port: 5432,
+        };
+        let conn =
+            StoredConnection::new_port_forwarding("postgres tunnel".to_string(), params, Some(42));
+        assert_eq!(conn.connection_type, ConnectionType::PortForwarding);
+        assert_eq!(conn.workspace_id, Some(42));
+        let rt = conn.to_port_forwarding_params().unwrap();
+        assert_eq!(rt.ssh_connection_id, 7);
+        assert_eq!(rt.kind, PortForwardingKind::Local);
+        assert_eq!(rt.bind_port, 5432);
+        assert_eq!(rt.target_host, "db.internal");
+        assert_eq!(rt.target_port, 5432);
+    }
+
+    #[test]
+    fn redis_params_can_apply_referenced_password_ssh_connection() {
+        let mut ssh = StoredConnection::new_ssh(
+            "bastion".to_string(),
+            SshParams {
+                host: "bastion.example.com".to_string(),
+                port: 2222,
+                username: "deploy".to_string(),
+                auth_method: SshAuthMethod::Password {
+                    password: "ssh-secret".to_string(),
+                },
+                credential_ref: None,
+                connect_timeout: Some(15),
+                keepalive_interval: None,
+                keepalive_max: None,
+                enable_legacy_kex: false,
+                default_directory: None,
+                init_script: None,
+                disable_shell_integration: None,
+                sftp_local_directory: None,
+                sftp_remote_directory: None,
+                jump_server: None,
+                proxy: None,
+            },
+            None,
+        );
+        ssh.id = Some(42);
+
+        let mut redis = RedisParams {
+            host: "redis.internal".to_string(),
+            port: 6379,
+            password: None,
+            username: None,
+            credential_ref: None,
+            db_index: 0,
+            mode: RedisMode::Standalone,
+            use_tls: false,
+            connect_timeout: Some(10),
+            sentinel: None,
+            cluster: None,
+            ssh_tunnel: Some(RedisSshTunnelConfig {
+                enabled: true,
+                connection_id: Some(42),
+                ..Default::default()
+            }),
+        };
+
+        redis
+            .apply_referenced_ssh_tunnel(&ssh)
+            .expect("referenced ssh connection should be applied");
+
+        let tunnel = redis
+            .ssh_tunnel
+            .as_ref()
+            .expect("ssh tunnel config should remain present");
+        assert_eq!("bastion.example.com", tunnel.host);
+        assert_eq!(2222, tunnel.port);
+        assert_eq!("deploy", tunnel.username);
+        assert_eq!("password", tunnel.auth_type);
+        assert_eq!(Some("ssh-secret".to_string()), tunnel.password);
+        assert_eq!(Some(15), tunnel.timeout);
+        assert_eq!(Some("redis.internal".to_string()), tunnel.target_host);
+        assert_eq!(Some(6379), tunnel.target_port);
+    }
+
+    #[test]
+    fn connection_type_port_forwarding_methods() {
+        assert_eq!(
+            ConnectionType::PortForwarding.label(),
+            t!("ConnectionType.port_forwarding").to_string()
+        );
+        assert_eq!(
+            ConnectionType::from_str("PortForwarding"),
+            ConnectionType::PortForwarding
+        );
+        assert_eq!(
+            format!("{}", ConnectionType::PortForwarding),
+            "PortForwarding"
+        );
+        assert!(ConnectionType::all().contains(&ConnectionType::PortForwarding));
+    }
+
+    #[test]
+    fn connection_type_remote_desktop_methods() {
+        assert_eq!(ConnectionType::Rdp.label(), t!("ConnectionType.rdp").to_string());
+        assert_eq!(ConnectionType::Vnc.label(), t!("ConnectionType.vnc").to_string());
+        assert_eq!(ConnectionType::from_str("Rdp"), ConnectionType::Rdp);
+        assert_eq!(ConnectionType::from_str("Vnc"), ConnectionType::Vnc);
+        assert_eq!(format!("{}", ConnectionType::Rdp), "Rdp");
+        assert_eq!(format!("{}", ConnectionType::Vnc), "Vnc");
+        assert!(ConnectionType::all().contains(&ConnectionType::Rdp));
+        assert!(ConnectionType::all().contains(&ConnectionType::Vnc));
+    }
+
+    #[test]
+    fn stored_connection_remote_desktop_uses_remote_desktop_params_shape() {
+        let params = RemoteDesktopParams {
+            protocol: RemoteDesktopProtocol::Rdp,
+            host: "10.0.0.8".to_string(),
+            port: 3389,
+            username: Some("admin".to_string()),
+            password: Some("secret".to_string()),
+            domain: None,
+            read_only: false,
+        };
+        let conn = StoredConnection::new_remote_desktop("win-rdp".to_string(), params, Some(42));
+        assert_eq!(conn.connection_type, ConnectionType::Rdp);
+        assert_eq!(conn.workspace_id, Some(42));
+        let parsed = conn
+            .to_remote_desktop_params()
+            .expect("RDP params parse as RemoteDesktopParams");
+        assert_eq!(parsed.protocol, RemoteDesktopProtocol::Rdp);
+        assert_eq!(parsed.host, "10.0.0.8");
+        assert_eq!(parsed.port, 3389);
+        assert_eq!(parsed.username.as_deref(), Some("admin"));
+        assert_eq!(RemoteDesktopProtocol::Vnc.default_port(), 5900);
+    }
+
+
 
     #[test]
     fn connection_type_serial_methods() {

@@ -1,15 +1,19 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod dynamic_socks;
 mod session_manager;
+mod socks5;
 mod ssh;
 
+pub use dynamic_socks::{DynamicSocksConfig, DynamicSocksTunnel, start_dynamic_socks_forward};
 pub use session_manager::SshSessionManager;
 pub use ssh::{
     AuthFailureMessages, ChannelEvent, JumpServerConnectConfig, KeyboardInteractivePrompt,
     KeyboardInteractiveRequest, KeyboardInteractiveResponder, KeyboardInteractiveTarget,
-    LocalPortForwardTunnel, ProxyConnectConfig, ProxyType, PtyConfig, RusshChannel, RusshClient,
-    ShellIntegrationSetup, SshAuth, SshChannel, SshClient, SshConnectConfig, SshConnectionStage,
-    authenticate_session, authenticate_session_with_fallbacks, authenticate_with_strategy,
-    build_client_config, defaults, expand_auto_publickey_auth, format_connection_progress_message,
-    start_local_port_forward, verify_server_key,
+    LocalPortForwardConfig, LocalPortForwardTunnel, ProxyConnectConfig, ProxyType, PtyConfig,
+    RusshChannel, RusshClient, ShellIntegrationSetup, SshAuth, SshChannel, SshClient,
+    SshConnectConfig, SshConnectionStage, authenticate_session,
+    authenticate_session_with_fallbacks, authenticate_with_strategy, build_client_config, defaults,
+    expand_auto_publickey_auth, format_connection_progress_message, start_local_port_forward,
+    start_local_port_forward_with_config, verify_server_key,
 };

@@ -633,6 +633,9 @@ fn supports_saved_connection_picker(connection_type: ConnectionType) -> bool {
             | ConnectionType::Redis
             | ConnectionType::MongoDB
             | ConnectionType::Serial
+            | ConnectionType::PortForwarding
+            | ConnectionType::Rdp
+            | ConnectionType::Vnc
     )
 }
 

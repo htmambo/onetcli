@@ -329,6 +329,14 @@ fn should_start_selection_from_pending_sgr_press(start: AlacPoint, current: Alac
     start != current
 }
 
+fn should_extend_selection_on_shift_click(
+    button: MouseButton,
+    modifiers: Modifiers,
+    has_selection: bool,
+) -> bool {
+    button == MouseButton::Left && modifiers.shift && has_selection
+}
+
 fn should_scroll_to_bottom_on_user_input(
     display_offset: usize,
     pending_display_offset: &StdCell<Option<usize>>,
@@ -3746,6 +3754,17 @@ impl TerminalView {
         let bounds = self.terminal_bounds;
 
         let point = self.pixel_to_point(event.position, bounds, cx);
+        let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
+        if should_extend_selection_on_shift_click(event.button, event.modifiers, has_selection) {
+            let side = self.pixel_to_side(event.position, bounds);
+            self.terminal.update(cx, |terminal, _| {
+                terminal.update_selection(point, side);
+            });
+            self.mouse_state.selecting = true;
+            cx.notify();
+            return;
+        }
+
         let screen_line = point.line.0 as usize;
         let column = point.column.0;
         let line_text = self.get_line_text(screen_line, cx);
@@ -3848,38 +3867,13 @@ impl TerminalView {
         let point = self.pixel_to_point(event.position, bounds, cx);
         let screen_line = point.line.0 as usize;
         let column = point.column.0;
-        if let Some(pending) = &self.mouse_state.pending_sgr_left_press {
-            if should_start_selection_from_pending_sgr_press(pending.point, point) {
-                let pending = self.mouse_state.pending_sgr_left_press.take().unwrap();
-                let now = std::time::Instant::now();
-                let is_double_click = self.mouse_state.last_click_point == Some(pending.point)
-                    && self
-                        .mouse_state
-                        .last_click_time
-                        .map_or(false, |t| now.duration_since(t).as_millis() < 500);
+        if !event.dragging() {
+            self.mouse_state.pending_sgr_left_press = None;
+            self.finish_mouse_selection(cx);
+        }
 
-                self.mouse_state.click_count = if is_double_click {
-                    self.mouse_state.click_count + 1
-                } else {
-                    1
-                };
-                self.mouse_state.last_click_point = Some(pending.point);
-                self.mouse_state.last_click_time = Some(now);
-                let selection_type = match self.mouse_state.click_count {
-                    1 => SelectionType::Simple,
-                    2 => SelectionType::Semantic,
-                    _ => SelectionType::Lines,
-                };
-
-                self.terminal.update(cx, |terminal, _| {
-                    terminal.start_selection(
-                        selection_type,
-                        pending.point,
-                        self.pixel_to_side(pending.position, bounds),
-                    );
-                });
-                self.mouse_state.selecting = true;
-            }
+        if event.dragging() {
+            self.start_selection_from_pending_sgr_press(point, bounds, cx);
         }
         let line_text = self.get_line_text(screen_line, cx);
         let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
@@ -3991,6 +3985,34 @@ impl TerminalView {
             );
             let _ = self.addon_manager.dispatch_mouse_up(&mut context);
         }
+        self.finish_mouse_selection(cx);
+    }
+
+    fn handle_window_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+
+        if self.mouse_state.pending_sgr_left_press.is_some() {
+            if !self.terminal_bounds.contains(&event.position) {
+                self.handle_mouse_up(event, window, cx);
+            }
+            return;
+        }
+
+        self.finish_mouse_selection(cx);
+    }
+
+    fn finish_mouse_selection(&mut self, cx: &mut Context<Self>) {
+        if !self.mouse_state.selecting {
+            return;
+        }
+
         self.mouse_state.selecting = false;
         if self.auto_copy_on_select {
             if let Some(text) = self.terminal.read(cx).selection_text() {
@@ -4000,6 +4022,54 @@ impl TerminalView {
             }
         }
         cx.notify();
+    }
+
+    fn start_selection_from_pending_sgr_press(
+        &mut self,
+        point: AlacPoint,
+        bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let should_start = self
+            .mouse_state
+            .pending_sgr_left_press
+            .as_ref()
+            .map_or(false, |pending| {
+                should_start_selection_from_pending_sgr_press(pending.point, point)
+            });
+        if !should_start {
+            return;
+        }
+
+        let pending = self.mouse_state.pending_sgr_left_press.take().unwrap();
+        let now = std::time::Instant::now();
+        let is_double_click = self.mouse_state.last_click_point == Some(pending.point)
+            && self
+                .mouse_state
+                .last_click_time
+                .map_or(false, |t| now.duration_since(t).as_millis() < 500);
+
+        self.mouse_state.click_count = if is_double_click {
+            self.mouse_state.click_count + 1
+        } else {
+            1
+        };
+        self.mouse_state.last_click_point = Some(pending.point);
+        self.mouse_state.last_click_time = Some(now);
+        let selection_type = match self.mouse_state.click_count {
+            1 => SelectionType::Simple,
+            2 => SelectionType::Semantic,
+            _ => SelectionType::Lines,
+        };
+
+        self.terminal.update(cx, |terminal, _| {
+            terminal.start_selection(
+                selection_type,
+                pending.point,
+                self.pixel_to_side(pending.position, bounds),
+            );
+        });
+        self.mouse_state.selecting = true;
     }
 
     fn send_tab(&mut self, _: &SendTab, _window: &mut Window, cx: &mut Context<Self>) {
@@ -4811,6 +4881,15 @@ impl Element for ResizeEventHandler {
                 }
             }
         });
+
+        window.on_mouse_event({
+            let view = self.view.clone();
+            move |e: &MouseUpEvent, phase, window, cx| {
+                if phase.bubble() {
+                    view.update(cx, |view, cx| view.handle_window_mouse_up(e, window, cx));
+                }
+            }
+        });
     }
 }
 
@@ -4828,7 +4907,7 @@ mod tests {
         should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
-        should_scroll_to_bottom_on_user_input, should_start_selection_from_pending_sgr_press,
+        should_extend_selection_on_shift_click, should_scroll_to_bottom_on_user_input, should_start_selection_from_pending_sgr_press,
         take_whole_scroll_lines, trim_recovery_content_to_recent_chars,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
@@ -4848,7 +4927,46 @@ mod tests {
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
 
+    
     #[test]
+    fn shift_left_click_extends_existing_terminal_selection_only() {
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let none = Modifiers::default();
+
+        assert!(should_extend_selection_on_shift_click(
+            MouseButton::Left,
+            shift,
+            true
+        ));
+        assert!(!should_extend_selection_on_shift_click(
+            MouseButton::Left,
+            shift,
+            false
+        ));
+        assert!(!should_extend_selection_on_shift_click(
+            MouseButton::Left,
+            none,
+            true
+        ));
+        assert!(!should_extend_selection_on_shift_click(
+            MouseButton::Right,
+            shift,
+            true
+        ));
+    }
+
+    #[test]
+    fn terminal_selection_has_window_mouse_up_fallback() {
+        let source = include_str!("view.rs");
+
+        assert!(source.matches("handle_window_mouse_up").count() >= 2);
+        assert!(source.contains("window.on_mouse_event({"));
+    }
+
+#[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {
         let mut accumulated = 0.4;
         assert_eq!(take_whole_scroll_lines(&mut accumulated), 0);

@@ -555,6 +555,7 @@ mod tests {
                 connect_timeout: None,
                 sentinel: None,
                 cluster: None,
+                ssh_tunnel: None,
             },
             Some(7),
         );

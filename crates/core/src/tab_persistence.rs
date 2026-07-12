@@ -164,6 +164,7 @@ mod tests {
             version: Some(1),
             tabs: vec![
                 TabItemState {
+                    metadata: Default::default(),
                     id: "ssh-terminal-42-1".into(),
                     from: "ssh".into(),
                     key: "Terminal".into(),
@@ -174,6 +175,7 @@ mod tests {
                     }),
                 },
                 TabItemState {
+                    metadata: Default::default(),
                     id: "settings".into(),
                     from: "home".into(),
                     key: "Settings".into(),

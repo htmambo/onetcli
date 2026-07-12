@@ -1474,7 +1474,9 @@ impl SqlEditor {
 }
 
 impl Render for SqlEditor {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        Input::new(&self.editor).size_full()
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        Input::new(&self.editor)
+            .font_family(crate::settings::current_sql_editor_font_family(cx))
+            .size_full()
     }
 }

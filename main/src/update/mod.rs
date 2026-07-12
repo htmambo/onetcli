@@ -17,7 +17,7 @@ mod install;
 mod network;
 mod util;
 
-use custom_api::{fetch_update_info, select_download_url};
+use custom_api::{fetch_update_info, select_download_url, select_fallback_download_url, select_sha256};
 use dialog::show_update_dialog;
 use github_release::{fetch_github_release, github_release_to_dialog_info};
 use install::{apply_update_helper, cleanup_stale_update_backups};
@@ -76,9 +76,28 @@ pub(crate) struct UpdateDialogInfo {
     current_version: String,
     latest_version: String,
     download_url: Option<String>,
+    fallback_download_url: Option<String>,
     expected_sha256: Option<String>,
     /// 发布页面 URL，方便用户手动下载
     release_page_url: Option<String>,
+}
+
+impl UpdateDialogInfo {
+    pub(crate) fn download_urls(&self) -> Vec<String> {
+        let mut urls = Vec::new();
+        push_unique_url(&mut urls, self.download_url.clone());
+        push_unique_url(&mut urls, self.fallback_download_url.clone());
+        urls
+    }
+}
+
+fn push_unique_url(urls: &mut Vec<String>, url: Option<String>) {
+    let Some(url) = url.filter(|url| !url.trim().is_empty()) else {
+        return;
+    };
+    if !urls.contains(&url) {
+        urls.push(url);
+    }
 }
 
 pub fn handle_update_command() -> bool {
@@ -281,7 +300,8 @@ async fn fetch_custom_dialog_info(
         current_version: current_version.to_string(),
         latest_version: response.version.clone(),
         download_url: select_download_url(&response, config.download_url.clone()),
-        expected_sha256: response.sha256.clone(),
+        fallback_download_url: select_fallback_download_url(&response),
+        expected_sha256: select_sha256(&response),
         release_page_url: None,
     }))
 }

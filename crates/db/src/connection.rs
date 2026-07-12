@@ -175,8 +175,12 @@ pub trait DbConnection: Sync + Send {
     ) -> Result<Vec<SqlResult>, DbError>;
     async fn query(&self, query: &str) -> Result<SqlResult, DbError>;
 
+    fn ping_query(&self) -> &'static str {
+        "SELECT 1"
+    }
+
     async fn ping(&self) -> Result<(), DbError> {
-        match self.query("SELECT 1").await? {
+        match self.query(self.ping_query()).await? {
             SqlResult::Error(error) => Err(DbError::connection(format!(
                 "connection ping failed: {}",
                 error.message

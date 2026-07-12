@@ -930,6 +930,7 @@ impl ChatPanel {
 
             // 处理 Agent 事件
             let mut full_content = String::new();
+            let mut full_reasoning = String::new();
             while let Some(event) = rx.recv().await {
                 match event {
                     AgentEvent::Progress(stage) => {
@@ -969,6 +970,28 @@ impl ChatPanel {
                                             msg.is_streaming = true;
                                         }
                                         msg.content = content_clone;
+                                    }
+                                    panel.scroll_to_bottom_and_mark();
+                                    cx.notify();
+                                });
+                            });
+                        }
+                    }
+                    AgentEvent::ReasoningDelta(delta) => {
+                        full_reasoning.push_str(&delta);
+                        if let Some(entity) = this.upgrade() {
+                            let reasoning_clone = full_reasoning.clone();
+                            let msg_id = assistant_msg_id.clone();
+                            let _ = cx.update(|cx| {
+                                entity.update(cx, |panel, cx| {
+                                    if let Some(msg) =
+                                        panel.messages.iter_mut().find(|m| m.id == msg_id)
+                                    {
+                                        if matches!(msg.variant, MessageVariant::Status { .. }) {
+                                            msg.variant = MessageVariant::Text;
+                                            msg.is_streaming = true;
+                                        }
+                                        msg.reasoning_content = reasoning_clone;
                                     }
                                     panel.scroll_to_bottom_and_mark();
                                     cx.notify();
@@ -1470,7 +1493,7 @@ impl ChatPanel {
     // 渲染
     // ========================================================================
 
-    fn render_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_messages(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let panel = cx.entity().clone();
         let total = self.messages.len();
         let hidden_count = total.saturating_sub(self.render_limit);
@@ -1553,7 +1576,7 @@ impl ChatPanel {
                                     self.messages
                                         .iter()
                                         .skip(hidden_count)
-                                        .map(|msg| self.render_message(msg, &panel, cx)),
+                                        .map(|msg| self.render_message(msg, &panel, window, cx)),
                                 )
                             }),
                     ),
@@ -1752,6 +1775,7 @@ impl ChatPanel {
         &self,
         msg: &ChatMessageUI,
         panel: &Entity<Self>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match msg.role {
@@ -1774,7 +1798,7 @@ impl ChatPanel {
                 MessageVariant::Status { title, is_done } => {
                     self.render_status_message(&msg.id, title, *is_done, panel, cx)
                 }
-                MessageVariant::Text => self.render_assistant_message(msg, panel, cx),
+                MessageVariant::Text => self.render_assistant_message(msg, panel, window, cx),
                 MessageVariant::SqlResult => self.render_sql_result(&msg.id, cx),
             },
             ChatRole::System => {
@@ -1890,9 +1914,10 @@ impl ChatPanel {
         &self,
         msg: &ChatMessageUI,
         panel: &Entity<Self>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if msg.is_streaming && msg.content.is_empty() {
+        if msg.is_streaming && msg.content.is_empty() && msg.reasoning_content.is_empty() {
             return div()
                 .w_full()
                 .py_2()
@@ -1908,17 +1933,22 @@ impl ChatPanel {
         let panel_for_actions = panel.clone();
         let panel_for_render = panel.clone();
         let message_id = msg.id.clone();
+        let reasoning_block = (!msg.reasoning_content.is_empty())
+            .then(|| one_core::ChatMessageRenderer::render_reasoning_block(msg, window, cx));
 
-        div()
+        v_flex()
             .w_full()
-            .child(
-                div().w_full().p_3().child(
-                    TextView::markdown(
-                        SharedString::from(format!("ai-sql-msg-{}", msg.id)),
-                        msg.content.clone(),
-                    )
-                    .selectable(true)
-                    .code_block_actions({
+            .gap_2()
+            .when_some(reasoning_block, |this, block| this.child(block))
+            .when(!msg.content.is_empty(), |this| {
+                this.child(
+                    div().w_full().p_3().child(
+                        TextView::markdown(
+                            SharedString::from(format!("ai-sql-msg-{}", msg.id)),
+                            msg.content.clone(),
+                        )
+                        .selectable(true)
+                        .code_block_actions({
                         let message_id = message_id.clone();
                         move |code_block, _window, _cx| {
                             let block = SqlCodeBlock::from_code_block(code_block, 0);
@@ -1960,39 +1990,41 @@ impl ChatPanel {
                                 .into_any_element()
                         }
                     })
-                    .code_block_renderer({
-                        let message_id = message_id.clone();
-                        let panel_for_collapse = panel_for_render.clone();
-                        move |code_block, options, default_element, _window, cx| {
-                            if let Some(chart_block) = parse_chart_json_block(
-                                &code_block.code(),
-                                code_block.lang().as_deref().map(|v| &**v),
-                            ) {
+                        .code_block_renderer({
+                            let message_id = message_id.clone();
+                            let panel_for_collapse = panel_for_render.clone();
+                            move |code_block, options, default_element, _window, cx| {
+                                if let Some(chart_block) = parse_chart_json_block(
+                                    &code_block.code(),
+                                    code_block.lang().as_deref().map(|v| &**v),
+                                ) {
+                                    let content = panel_for_collapse.read(cx);
+                                    return content.render_chart_block_container(
+                                        &chart_block,
+                                        default_element,
+                                        cx,
+                                    );
+                                }
+
+                                let block =
+                                    SqlCodeBlock::from_code_block(code_block, options.index);
+                                if !block.is_sql {
+                                    return default_element;
+                                }
+
                                 let content = panel_for_collapse.read(cx);
-                                return content.render_chart_block_container(
-                                    &chart_block,
+                                content.render_sql_block_container(
+                                    &message_id,
+                                    &block,
                                     default_element,
+                                    &panel_for_collapse,
                                     cx,
-                                );
+                                )
                             }
-
-                            let block = SqlCodeBlock::from_code_block(code_block, options.index);
-                            if !block.is_sql {
-                                return default_element;
-                            }
-
-                            let content = panel_for_collapse.read(cx);
-                            content.render_sql_block_container(
-                                &message_id,
-                                &block,
-                                default_element,
-                                &panel_for_collapse,
-                                cx,
-                            )
-                        }
-                    }),
-                ),
-            )
+                        }),
+                    ),
+                )
+            })
             .into_any_element()
     }
 
@@ -2267,7 +2299,7 @@ impl Render for ChatPanel {
                         div().flex_1().h_full().min_w_0().child(
                             v_flex()
                                 .size_full()
-                                .child(self.render_messages(cx))
+                                .child(self.render_messages(window, cx))
                                 .child(self.render_input(cx)),
                         ),
                     ),
@@ -2277,7 +2309,7 @@ impl Render for ChatPanel {
                 v_flex()
                     .size_full()
                     .child(self.render_sidebar_mode_header(window, cx))
-                    .child(self.render_messages(cx))
+                    .child(self.render_messages(window, cx))
                     .child(self.render_input(cx)),
             )
         }

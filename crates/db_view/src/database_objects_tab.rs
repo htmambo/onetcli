@@ -1,4 +1,7 @@
 use crate::database_view_plugin::{ToolbarButtonType, build_toolbar_buttons_for};
+use crate::search_shortcut::{
+    DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
+};
 use crate::db_tree_view::get_icon_for_node_type;
 use db::{DbNode, DbNodeType, GlobalDbState, ObjectView};
 use gpui::prelude::FluentBuilder;
@@ -247,6 +250,33 @@ pub struct DatabaseObjects {
 }
 
 impl DatabaseObjects {
+    fn on_action_focus_search(
+        &mut self,
+        _: &FocusSearchInput,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        focus_search_input(&self.search_input, window, cx);
+    }
+
+    fn on_action_open_selected_table_query(
+        &mut self,
+        _: &OpenSelectedTableQuery,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let nodes = self.build_nodes_for_selected_rows();
+        if nodes.len() != 1 {
+            window.push_notification(Notification::warning(t!("Common.select_row")), cx);
+            return;
+        }
+
+        let node = nodes[0].clone();
+        if matches!(node.node_type, DbNodeType::Table | DbNodeType::View) {
+            cx.emit(DatabaseObjectsEvent::CreateNewQuery { node });
+        }
+    }
+
     pub fn new(workspace: Option<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let loaded_data = cx.new(|_| ObjectView::default());
         let focus_handle = cx.focus_handle();
@@ -1030,6 +1060,10 @@ impl Render for DatabaseObjects {
 
         v_flex()
             .size_full()
+            .track_focus(&self.focus_handle)
+            .key_context(DB_SEARCH_CONTEXT)
+            .on_action(cx.listener(Self::on_action_focus_search))
+            .on_action(cx.listener(Self::on_action_open_selected_table_query))
             .child(
                 h_flex()
                     .gap_1()

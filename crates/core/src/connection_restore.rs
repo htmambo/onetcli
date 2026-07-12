@@ -372,18 +372,21 @@ mod tests {
             version: Some(1),
             tabs: vec![
                 TabItemState {
+                    metadata: Default::default(),
                     id: "ssh-terminal-42-1".into(),
                     from: "ssh".into(),
                     key: "Terminal".into(),
                     data: restorable.into_tab_data(),
                 },
                 TabItemState {
+                    metadata: Default::default(),
                     id: "home".into(),
                     from: "app".into(),
                     key: "Home".into(),
                     data: Value::Null,
                 },
                 TabItemState {
+                    metadata: Default::default(),
                     id: "local-terminal-1".into(),
                     from: "terminal".into(),
                     key: "Terminal".into(),
@@ -396,6 +399,7 @@ mod tests {
                     }),
                 },
                 TabItemState {
+                    metadata: Default::default(),
                     id: "workspace-db".into(),
                     from: "home".into(),
                     key: "Database".into(),

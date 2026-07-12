@@ -36,7 +36,7 @@ use one_core::tab_container::{TabContent, TabContentEvent};
 use remote_file_editor::open_remote_file_editor;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
-use ssh::SshConnectConfig;
+use ssh::{ChannelEvent, SshChannel, SshConnectConfig, SshSessionManager};
 use std::collections::VecDeque;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -431,6 +431,220 @@ fn join_remote_path(base: &str, name: &str) -> String {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct ActiveExtract {
+    name: String,
+    #[allow(dead_code)]
+    path: String,
+}
+
+struct RemoteCommandOutput {
+    stdout: String,
+    stderr: String,
+    exit_status: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArchiveKind {
+    Zip,
+    Tar,
+    TarGz,
+    Tgz,
+    TarBz2,
+    Tbz2,
+    TarXz,
+    Txz,
+    Gzip,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExtractConflictAction {
+    Overwrite,
+    SkipExisting,
+}
+
+pub(crate) fn archive_kind_for_name(name: &str) -> Option<ArchiveKind> {
+    let lower = name.to_lowercase();
+    [
+        (".tar.gz", ArchiveKind::TarGz),
+        (".tar.bz2", ArchiveKind::TarBz2),
+        (".tar.xz", ArchiveKind::TarXz),
+        (".tgz", ArchiveKind::Tgz),
+        (".tbz2", ArchiveKind::Tbz2),
+        (".txz", ArchiveKind::Txz),
+        (".tar", ArchiveKind::Tar),
+        (".zip", ArchiveKind::Zip),
+        (".gz", ArchiveKind::Gzip),
+    ]
+    .into_iter()
+    .find_map(|(suffix, kind)| lower.ends_with(suffix).then_some(kind))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn remote_path_parent(path: &str) -> String {
+    if path == "/" || path.is_empty() {
+        return "/".to_string();
+    }
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rfind('/') {
+        Some(0) => "/".to_string(),
+        Some(idx) => trimmed[..idx].to_string(),
+        None => ".".to_string(),
+    }
+}
+
+pub(crate) fn build_remote_extract_command(
+    path: &str,
+    name: &str,
+    action: ExtractConflictAction,
+) -> Option<String> {
+    let quoted_path = shell_quote(path);
+    let quoted_parent = shell_quote(&remote_path_parent(path));
+    let tar_skip = match action {
+        ExtractConflictAction::Overwrite => "",
+        ExtractConflictAction::SkipExisting => " --skip-old-files",
+    };
+
+    match (archive_kind_for_name(name)?, action) {
+        (ArchiveKind::Zip, ExtractConflictAction::Overwrite) => {
+            Some(format!("unzip -o -- {quoted_path} -d {quoted_parent}"))
+        }
+        (ArchiveKind::Zip, ExtractConflictAction::SkipExisting) => {
+            Some(format!("unzip -n -- {quoted_path} -d {quoted_parent}"))
+        }
+        (ArchiveKind::Tar, _) => Some(format!(
+            "tar{tar_skip} -xf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::TarGz | ArchiveKind::Tgz, _) => Some(format!(
+            "tar{tar_skip} -xzf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::TarBz2 | ArchiveKind::Tbz2, _) => Some(format!(
+            "tar{tar_skip} -xjf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::TarXz | ArchiveKind::Txz, _) => Some(format!(
+            "tar{tar_skip} -xJf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::Gzip, ExtractConflictAction::Overwrite) => {
+            Some(format!("gzip -dkf -- {quoted_path}"))
+        }
+        (ArchiveKind::Gzip, ExtractConflictAction::SkipExisting) => Some(format!(
+            "test -e {} || gzip -dk -- {quoted_path}",
+            shell_quote(&remote_gzip_target_path(path))
+        )),
+    }
+}
+
+fn remote_gzip_target_path(path: &str) -> String {
+    path.strip_suffix(".gz")
+        .or_else(|| path.strip_suffix(".GZ"))
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn build_archive_top_level_conflict_check_command(path: &str, list_command: String) -> String {
+    let quoted_parent = shell_quote(&remote_path_parent(path));
+    format!(
+        "parent={quoted_parent}; tmp=$(mktemp) || exit 2; if ! {list_command} > \"$tmp\" 2>/dev/null; then rm -f \"$tmp\"; exit 2; fi; awk -F/ 'NF {{ print $1 }}' \"$tmp\" | sort -u | while IFS= read -r entry; do [ -n \"$entry\" ] || continue; if [ -e \"$parent/$entry\" ]; then printf '%s\\n' \"$entry\"; exit 7; fi; done; status=$?; rm -f \"$tmp\"; if [ \"$status\" -eq 7 ]; then exit 0; fi; exit 1"
+    )
+}
+
+pub(crate) fn build_remote_extract_conflict_check_command(
+    path: &str,
+    name: &str,
+) -> Option<String> {
+    let quoted_path = shell_quote(path);
+    match archive_kind_for_name(name)? {
+        ArchiveKind::Zip => Some(build_archive_top_level_conflict_check_command(
+            path,
+            format!("unzip -Z1 -- {quoted_path}"),
+        )),
+        ArchiveKind::Tar
+        | ArchiveKind::TarGz
+        | ArchiveKind::Tgz
+        | ArchiveKind::TarBz2
+        | ArchiveKind::Tbz2
+        | ArchiveKind::TarXz
+        | ArchiveKind::Txz => Some(build_archive_top_level_conflict_check_command(
+            path,
+            format!("tar -tf {quoted_path}"),
+        )),
+        ArchiveKind::Gzip => Some(format!(
+            "if [ -e {} ]; then exit 0; else exit 1; fi",
+            shell_quote(&remote_gzip_target_path(path))
+        )),
+    }
+}
+
+pub(crate) async fn exec_remote_command(
+    session_manager: Arc<SshSessionManager>,
+    command: &str,
+) -> anyhow::Result<String> {
+    let output = exec_remote_command_output(session_manager, command).await?;
+    if output.exit_status != 0 {
+        anyhow::bail!(
+            "remote command exited with status {}: {}",
+            output.exit_status,
+            output.stderr
+        );
+    }
+    Ok(output.stdout)
+}
+
+async fn exec_remote_command_output(
+    session_manager: Arc<SshSessionManager>,
+    command: &str,
+) -> anyhow::Result<RemoteCommandOutput> {
+    let mut channel = session_manager.open_channel().await?;
+    channel.exec(command).await?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_status = 0u32;
+
+    while let Some(event) = channel.recv().await {
+        match event {
+            ChannelEvent::Data(data) => stdout.extend(data),
+            ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
+            ChannelEvent::ExitStatus(status) => exit_status = status,
+            ChannelEvent::ExitSignal {
+                signal_name,
+                error_message,
+            } => {
+                anyhow::bail!("remote command failed with signal {signal_name}: {error_message}");
+            }
+            ChannelEvent::Eof | ChannelEvent::Close => break,
+        }
+    }
+
+    let _ = channel.close().await;
+    Ok(RemoteCommandOutput {
+        stdout: String::from_utf8_lossy(&stdout).to_string(),
+        stderr: String::from_utf8_lossy(&stderr).to_string(),
+        exit_status,
+    })
+}
+
+pub(crate) async fn remote_extract_has_conflict(
+    session_manager: Arc<SshSessionManager>,
+    command: &str,
+) -> anyhow::Result<bool> {
+    let output = exec_remote_command_output(session_manager, command).await?;
+    match output.exit_status {
+        0 => Ok(true),
+        1 => Ok(false),
+        status => anyhow::bail!(
+            "remote conflict check exited with status {}: {}",
+            status,
+            output.stderr
+        ),
+    }
+}
+
+
+
 fn should_apply_remote_listing(current_path: &str, listed_path: &str) -> bool {
     current_path == listed_path
 }
@@ -559,6 +773,7 @@ pub struct SftpView {
     transfer_queue: TransferQueue,
     next_task_id: usize,
     transfer_client_pool: Arc<Mutex<TransferClientPool>>,
+    active_extract: Option<ActiveExtract>,
 
     focus_handle: FocusHandle,
 
@@ -736,6 +951,7 @@ impl SftpView {
             transfer_queue: TransferQueue::new(MAX_CONCURRENT_TRANSFERS),
             next_task_id: 0,
             transfer_client_pool,
+            active_extract: None,
             focus_handle,
             is_dragging_over_local: false,
             is_dragging_over_remote: false,
@@ -3203,10 +3419,39 @@ impl SftpView {
             )
     }
 
+    fn render_extract_queue_row(
+        &self,
+        extract: ActiveExtract,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(Icon::new(IconName::Unarchive).small())
+            .child(
+                div()
+                    .id("extract-name")
+                    .text_sm()
+                    .min_w(px(120.))
+                    .max_w(px(250.))
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(extract.name.clone()),
+            )
+            .child(div().flex_1().min_w(px(100.)).child(Spinner::new().small()))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t!("Extract.running").to_string()),
+            )
+    }
+
     fn render_transfer_queue(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let active_tasks = self.transfer_queue.active_tasks();
+        let has_extract = self.active_extract.is_some();
 
-        if active_tasks.is_empty() {
+        if active_tasks.is_empty() && !has_extract {
             return div().into_any_element();
         }
 
@@ -3215,6 +3460,9 @@ impl SftpView {
             .border_color(cx.theme().border)
             .p_2()
             .gap_1()
+            .when_some(self.active_extract.clone(), |el, extract| {
+                el.child(self.render_extract_queue_row(extract, cx))
+            })
             .children(active_tasks.into_iter().map(|task| {
                 let is_delete_op = matches!(
                     &task.operation,
@@ -3940,8 +4188,7 @@ impl TabContent for SftpView {
     ) -> gpui::Task<bool> {
         // 检查是否有正在进行的传输任务
         let active_tasks = self.transfer_queue.active_tasks();
-
-        if !active_tasks.is_empty() {
+        if !active_tasks.is_empty() || self.active_extract.is_some() {
             // 有正在进行的任务，弹出确认对话框
             let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
             let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -4132,5 +4379,38 @@ mod tests {
             Path::new("/tmp/b"),
             Path::new("/tmp/a")
         ));
+    }
+}
+
+#[cfg(test)]
+mod extract_archive_tests {
+    use super::{
+        archive_kind_for_name, build_remote_extract_command, build_remote_extract_conflict_check_command,
+        ExtractConflictAction,
+    };
+
+    #[test]
+    fn archive_kind_for_name_detects_common_suffixes() {
+        assert!(archive_kind_for_name("a.tar.gz").is_some());
+        assert!(archive_kind_for_name("b.ZIP").is_some());
+        assert!(archive_kind_for_name("c.txt").is_none());
+    }
+
+    #[test]
+    fn build_remote_extract_command_for_zip() {
+        let command = build_remote_extract_command(
+            "/tmp/demo.zip",
+            "demo.zip",
+            ExtractConflictAction::Overwrite,
+        )
+        .expect("zip");
+        assert!(command.contains("unzip -o"));
+    }
+
+    #[test]
+    fn build_remote_extract_conflict_check_for_gzip() {
+        let command = build_remote_extract_conflict_check_command("/tmp/app.log.gz", "app.log.gz")
+            .expect("gz");
+        assert!(command.contains("app.log"));
     }
 }

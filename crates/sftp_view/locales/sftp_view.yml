@@ -435,3 +435,46 @@ Transfer:
     en: "Closing now will cancel all operations. Are you sure you want to close?"
     zh-CN: "现在关闭将取消所有操作。确定要关闭吗？"
     zh-HK: "現在關閉將取消所有操作。確定要關閉嗎？"
+
+# 解压
+Extract:
+  extract:
+    en: Extract
+    zh-CN: 解压
+    zh-HK: 解壓
+  running:
+    en: Extracting...
+    zh-CN: 正在解压...
+    zh-HK: 正在解壓...
+  conflict_title:
+    en: Extract Conflict
+    zh-CN: 解压冲突
+    zh-HK: 解壓衝突
+  conflict_message:
+    en: "Existing files may be overwritten while extracting %{name}. Choose how to continue."
+    zh-CN: "解压 %{name} 可能会影响已有文件，请选择处理方式。"
+    zh-HK: "解壓 %{name} 可能會影響已有文件，請選擇處理方式。"
+  skip_existing:
+    en: Skip Existing
+    zh-CN: 跳过已有
+    zh-HK: 跳過已有
+
+Error:
+  extract_unsupported:
+    en: Unsupported archive type
+    zh-CN: 不支持的压缩包类型
+    zh-HK: 不支持的壓縮包類型
+  extract_check_failed:
+    en: "Failed to check existing files before extract: %{error}"
+    zh-CN: "解压前检查已有文件失败: %{error}"
+    zh-HK: "解壓前檢查已有文件失敗: %{error}"
+  extract_failed:
+    en: "Failed to extract: %{error}"
+    zh-CN: "解压失败: %{error}"
+    zh-HK: "解壓失敗: %{error}"
+
+Notification:
+  extract_success:
+    en: Extract completed
+    zh-CN: 解压完成
+    zh-HK: 解壓完成

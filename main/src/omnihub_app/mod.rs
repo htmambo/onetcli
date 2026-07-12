@@ -26,6 +26,7 @@ actions!(
         ActivateTab8,
         ActivateTab9,
         ToggleFullscreen,
+        ToggleAlwaysOnTop,
         MinimizeWindow,
         DuplicateTab,
         QuitApp,
@@ -79,6 +80,8 @@ use tab_restore::load_startup_tabs_without_connection_restore;
 use window_actions::{
     activate_tab_by_number, duplicate_tab, open_sftp_from_tab, quit_app, toggle_fullscreen,
 };
+#[cfg(target_os = "windows")]
+use window_actions::toggle_always_on_top;
 
 const APP_WINDOW_TITLE: &str = "OmniHub";
 const GLOBAL_STATUS_BAR_HEIGHT: f32 = 28.0;
@@ -179,6 +182,7 @@ pub fn init(cx: &mut App) -> AppSettings {
     gpui_component::init(cx);
     one_core::init(cx);
     one_ui::init(cx);
+    db_view::search_shortcut::init(cx);
     db_view::sql_editor_view::init(cx);
     db_view::chatdb::agents::init(cx);
     crate::auth::init(cx, &settings);
@@ -195,6 +199,7 @@ pub fn init(cx: &mut App) -> AppSettings {
     terminal_view::init(cx);
     redis_view::init(cx);
     mongodb_view::init(cx);
+    remote_desktop_view::init(cx);
     crate::home_tab::init(cx);
 
     // 初始化系统监控全局状态
@@ -242,6 +247,8 @@ pub fn init(cx: &mut App) -> AppSettings {
         KeyBinding::new("ctrl-cmd-f", ToggleFullscreen, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("alt-enter", ToggleFullscreen, None),
+        #[cfg(target_os = "windows")]
+        KeyBinding::new("ctrl-alt-t", ToggleAlwaysOnTop, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-shift-t", DuplicateTab, None),
         #[cfg(not(target_os = "macos"))]
@@ -264,6 +271,8 @@ pub fn init(cx: &mut App) -> AppSettings {
     cx.on_action(|_: &ActivateTab8, cx| activate_tab_by_number(8, cx));
     cx.on_action(|_: &ActivateTab9, cx| activate_tab_by_number(9, cx));
     cx.on_action(|_: &ToggleFullscreen, cx| toggle_fullscreen(cx));
+    #[cfg(target_os = "windows")]
+    cx.on_action(|_: &ToggleAlwaysOnTop, cx| toggle_always_on_top(cx));
     cx.on_action(|_: &DuplicateTab, cx| duplicate_tab(cx));
     cx.on_action(|_: &QuitApp, cx| quit_app(cx));
     cx.on_action(|_: &OpenConnectionQuickOpen, cx| {
@@ -370,6 +379,17 @@ impl OmniHubApp {
                             cx.quit();
                         }
                     })
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                container = container.with_always_on_top_control(
+                    Arc::new(|_window, cx| toggle_always_on_top(cx)),
+                    Arc::new(|| {
+                        use std::sync::atomic::Ordering;
+                        window_actions::ALWAYS_ON_TOP.load(Ordering::Relaxed)
+                    }),
+                )
             }
 
             container

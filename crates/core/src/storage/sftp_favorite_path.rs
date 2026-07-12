@@ -287,6 +287,7 @@ mod tests {
     fn favorite_connection_key_prefers_local_id_then_cloud_id_then_name() {
         let mut conn = StoredConnection {
             id: None,
+            sort_order: None,
             name: "prod".to_string(),
             connection_type: ConnectionType::SshSftp,
             params: "{}".to_string(),
@@ -298,7 +299,6 @@ mod tests {
             last_synced_at: None,
             created_at: None,
             updated_at: None,
-            team_id: None,
             owner_id: None,
         };
 

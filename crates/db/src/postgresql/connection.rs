@@ -20,6 +20,7 @@ use tracing::{debug, error, info, warn};
 use crate::connection::{DbConnection, DbError, StreamingProgress};
 use crate::executor::{
     ExecOptions, ExecResult, QueryColumnMeta, QueryResult, SqlErrorInfo, SqlResult, SqlSource,
+    apply_query_max_rows,
 };
 use crate::rustls_provider::ensure_rustls_crypto_provider;
 use crate::ssh_tunnel::resolve_connection_target;
@@ -700,6 +701,14 @@ impl DbConnection for PostgresDbConnection {
                     continue;
                 }
 
+                let sql_to_execute = apply_query_max_rows(
+                    plugin.name(),
+                    sql,
+                    options.max_rows,
+                    plugin.is_query_statement(sql),
+                );
+                let sql = sql_to_execute.as_ref();
+
                 let sql_preview = if sql.len() > 200 {
                     format!("{}...", truncate_str(&sql, 200))
                 } else {
@@ -816,6 +825,14 @@ impl DbConnection for PostgresDbConnection {
                 if sql.is_empty() {
                     continue;
                 }
+
+                let sql_to_execute = apply_query_max_rows(
+                    plugin.name(),
+                    sql,
+                    options.max_rows,
+                    plugin.is_query_statement(sql),
+                );
+                let sql = sql_to_execute.as_ref();
 
                 let sql_preview = if sql.len() > 200 {
                     format!("{}...", truncate_str(&sql, 200))
@@ -1146,6 +1163,13 @@ impl DbConnection for PostgresDbConnection {
                     debug!("[PostgreSQL] Streaming TX statement {}", current);
                     let start = Instant::now();
 
+                    let sql = apply_query_max_rows(
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let result = match tx.prepare(&sql).await {
                         Ok(stmt) => {
                             if stmt.columns().is_empty() {
@@ -1260,6 +1284,13 @@ impl DbConnection for PostgresDbConnection {
                     debug!("[PostgreSQL] Streaming statement {}", current);
                     let start = Instant::now();
 
+                    let sql = apply_query_max_rows(
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let result = match client.prepare(&sql).await {
                         Ok(stmt) => {
                             if stmt.columns().is_empty() {
@@ -1361,6 +1392,13 @@ impl DbConnection for PostgresDbConnection {
                     debug!("[PostgreSQL] Streaming TX statement {}/{}", current, total);
                     let start = Instant::now();
 
+                    let sql = apply_query_max_rows(
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let result = match tx.prepare(&sql).await {
                         Ok(stmt) => {
                             if stmt.columns().is_empty() {
@@ -1451,6 +1489,13 @@ impl DbConnection for PostgresDbConnection {
                     debug!("[PostgreSQL] Streaming statement {}/{}", current, total);
                     let start = Instant::now();
 
+                    let sql = apply_query_max_rows(
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let result = match client.prepare(&sql).await {
                         Ok(stmt) => {
                             if stmt.columns().is_empty() {

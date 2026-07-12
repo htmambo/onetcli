@@ -23,7 +23,7 @@ use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use rust_i18n::t;
 
 use super::UpdateDialogInfo;
-use super::download::{build_download_path, download_update_file, verify_sha256};
+use super::download::{build_download_path, download_update_file_from_sources, verify_sha256};
 use super::install::start_install_update;
 use super::util::{UpdateInstallAction, format_bytes};
 
@@ -109,7 +109,8 @@ impl UpdateDialogView {
             return;
         }
 
-        let Some(download_url) = self.info.download_url.clone() else {
+        let download_urls = self.info.download_urls();
+        let Some(download_url) = download_urls.first().cloned() else {
             self.error_message = Some(t!("Update.missing_download_url").to_string());
             self.status_message = t!("Update.download_failed").to_string();
             cx.notify();
@@ -163,9 +164,9 @@ impl UpdateDialogView {
 
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let download_task = Tokio::spawn(cx, async move {
-                download_update_file(
+                download_update_file_from_sources(
                     http_client,
-                    &download_url,
+                    &download_urls,
                     &download_path_for_task,
                     move |downloaded, total| {
                         if let Ok(mut progress) = progress_state_for_task.lock() {

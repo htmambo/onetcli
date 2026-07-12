@@ -73,6 +73,18 @@ Common:
 
 # 首页
 Home:
+  port_forwarding_started:
+    en: "Port Forwarding %{name} started on %{addr}"
+    zh-CN: "端口转发 %{name} 已启动：%{addr}"
+    zh-HK: "端口轉發 %{name} 已啟動：%{addr}"
+  port_forwarding_failed:
+    en: "Port Forwarding %{name} failed: %{error}"
+    zh-CN: "端口转发 %{name} 启动失败：%{error}"
+    zh-HK: "端口轉發 %{name} 啟動失敗：%{error}"
+  port_forwarding_missing_ssh:
+    en: Referenced SSH server was not found.
+    zh-CN: 找不到引用的 SSH 服务器。
+    zh-HK: 找不到引用的 SSH 伺服器。
   title:
     en: Home
     zh-CN: 首页
@@ -750,6 +762,10 @@ Settings:
         en: Switch the interface display language, some content requires restarting the application to take effect
         zh-CN: 切换界面显示语言，部分内容需要重启应用后生效
         zh-HK: 切換介面顯示語言，部分內容需要重啟應用後生效
+      system:
+        en: Follow System
+        zh-CN: 跟随系统
+        zh-HK: 跟隨系統
       zh_cn:
         en: Simplified Chinese
         zh-CN: 简体中文
@@ -1030,6 +1046,50 @@ Settings:
         en: Select the application font family
         zh-CN: 选择应用的字体系列
         zh-HK: 選擇應用的字型系列
+      sql_editor_font_family:
+        en: SQL Editor Font
+        zh-CN: SQL 编辑器字体
+        zh-HK: SQL 編輯器字型
+      sql_editor_font_family_desc:
+        en: Select the monospace font used by the SQL editor
+        zh-CN: 选择 SQL 编辑器使用的等宽字体
+        zh-HK: 選擇 SQL 編輯器使用的等寬字型
+      table_preview_font_family:
+        en: Table Preview Font
+        zh-CN: 表预览字体
+        zh-HK: 表預覽字型
+      table_preview_font_family_desc:
+        en: Select the monospace font used by table previews
+        zh-CN: 选择表预览使用的等宽字体
+        zh-HK: 選擇表預覽使用的等寬字型
+      custom_fonts:
+        en: Custom Fonts
+        zh-CN: 自定义字体
+        zh-HK: 自訂字型
+      custom_fonts_desc:
+        en: Import local .ttf, .otf, .ttc, or .otc font files for the application text renderer. Select the font family above after importing.
+        zh-CN: 导入本地 .ttf、.otf、.ttc 或 .otc 字体文件供应用文本渲染使用。导入后在上方选择对应字体系列。
+        zh-HK: 匯入本機 .ttf、.otf、.ttc 或 .otc 字型檔供應用程式文字渲染使用。匯入後在上方選擇對應字型系列。
+      import_custom_fonts:
+        en: Import Fonts
+        zh-CN: 导入字体
+        zh-HK: 匯入字型
+      select_font_files:
+        en: Select font files
+        zh-CN: 选择字体文件
+        zh-HK: 選擇字型檔
+      unsupported_font_file:
+        en: Unsupported font file
+        zh-CN: 不支持的字体文件
+        zh-HK: 不支援的字型檔
+      custom_fonts_import_success:
+        en: "Imported %{count} font file(s)"
+        zh-CN: "已导入 %{count} 个字体文件"
+        zh-HK: "已匯入 %{count} 個字型檔"
+      custom_fonts_import_empty:
+        en: No supported font files were imported
+        zh-CN: 未导入支持的字体文件
+        zh-HK: 未匯入支援的字型檔
       font_size:
         en: Font Size
         zh-CN: 字体大小
@@ -1204,6 +1264,14 @@ Settings:
         en: "Maximum number of undo steps for data editing (0 to disable)"
         zh-CN: 数据编辑的最大撤销步数（设为0则禁用逐步撤销）
         zh-HK: 資料編輯的最大撤銷步數（設為0則停用逐步撤銷）
+      sql_query_max_rows:
+        en: "SQL Query Max Rows"
+        zh-CN: "SQL 查询最大行数"
+        zh-HK: "SQL 查詢最大行數"
+      sql_query_max_rows_desc:
+        en: "Default max rows for SELECT results. 0 means no limit."
+        zh-CN: "SELECT 默认最大返回行数，0 表示不限制。"
+        zh-HK: "SELECT 預設最大返回行數，0 表示不限制。"
       ai_auto_title:
         en: AI Auto Session Title
         zh-CN: AI 自动生成会话标题
@@ -1404,6 +1472,10 @@ Settings:
       en: Terminal
       zh-CN: 终端
       zh-HK: 終端
+    database:
+      en: Database
+      zh-CN: 数据库
+      zh-HK: 資料庫
     minimize_window:
       en: Minimize / Activate Window
       zh-CN: 最小化 / 激活窗口
@@ -1412,6 +1484,10 @@ Settings:
       en: Toggle Fullscreen
       zh-CN: 切换全屏
       zh-HK: 切換全螢幕
+    toggle_always_on_top:
+      en: Toggle Always On Top
+      zh-CN: 切换窗口置顶
+      zh-HK: 切換視窗置頂
     toggle_zoom:
       en: Toggle Panel Zoom
       zh-CN: 切换面板缩放
@@ -1468,6 +1544,22 @@ Settings:
       en: Toggle Vi Mode
       zh-CN: 切换 Vi 模式
       zh-HK: 切換 Vi 模式
+    database_focus_search:
+      en: Focus Search
+      zh-CN: 聚焦搜索
+      zh-HK: 聚焦搜尋
+    database_open_table_query:
+      en: Query Selected Table
+      zh-CN: 查询选中表
+      zh-HK: 查詢選中表
+    sql_run_query:
+      en: Run Query
+      zh-CN: 执行查询
+      zh-HK: 執行查詢
+    database:
+      en: Database
+      zh-CN: 数据库
+      zh-HK: 資料庫
 
   # 配置迁移提示
   Migrations:
@@ -2165,6 +2257,15 @@ Serial:
     en: The current device does not support exclusive detection. If this is a virtual serial port, you can ignore this and continue saving.
     zh-CN: 当前设备不支持独占检测；如果这是虚拟串口，可以忽略该提示并继续保存。
     zh-HK: 當前裝置不支援獨佔檢測；如果這是虛擬串口，可以忽略此提示並繼續保存。
+PortForwarding:
+  new:
+    en: New Port Forwarding
+    zh-CN: 新建端口转发
+    zh-HK: 新建端口轉發
+  edit:
+    en: Edit Port Forwarding
+    zh-CN: 编辑端口转发
+    zh-HK: 編輯端口轉發
 
 # OAuth 授权对话框
 OAuth:
@@ -2335,6 +2436,30 @@ ConnectionRestore:
 
 # 新建连接类型
 NewConnection:
+  port_forwarding:
+    en: Port Forwarding
+    zh-CN: 端口转发
+    zh-HK: 埠轉發
+  description_port_forwarding:
+    en: SSH local port forwarding or SOCKS tunnel
+    zh-CN: SSH 本地端口转发或 SOCKS 隧道
+    zh-HK: SSH 本地端口轉發或 SOCKS 隧道
+  rdp:
+    en: RDP
+    zh-CN: RDP
+    zh-HK: RDP
+  vnc:
+    en: VNC
+    zh-CN: VNC
+    zh-HK: VNC
+  description_rdp:
+    en: Remote Desktop (RDP)
+    zh-CN: 远程桌面（RDP）
+    zh-HK: 遠程桌面（RDP）
+  description_vnc:
+    en: Remote Desktop (VNC)
+    zh-CN: 远程桌面（VNC）
+    zh-HK: 遠程桌面（VNC）
   workspace:
     en: Workspace
     zh-CN: 工作区
@@ -2347,3 +2472,13 @@ NewConnection:
     en: Database
     zh-CN: 数据库
     zh-HK: 資料庫
+
+RemoteDesktopForm:
+  title_new:
+    en: "New %{protocol}"
+    zh-CN: "新建 %{protocol}"
+    zh-HK: "新建 %{protocol}"
+  title_edit:
+    en: "Edit %{protocol}"
+    zh-CN: "编辑 %{protocol}"
+    zh-HK: "編輯 %{protocol}"

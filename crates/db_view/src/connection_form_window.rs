@@ -1,9 +1,10 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, div,
+    Styled, Window, div, px,
 };
 use gpui_component::{
+    IconName,
     ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -130,6 +131,12 @@ impl ConnectionFormWindow {
         });
     }
 
+    fn on_clear_test_result(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.form.update(cx, |form, cx| {
+            form.clear_test_result(cx);
+        });
+    }
+
     fn on_cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.form.update(cx, |form, cx| {
             form.trigger_cancel(cx);
@@ -184,7 +191,9 @@ impl Render for ConnectionFormWindow {
             .when_some(test_result_msg, |this, msg| {
                 let is_success = msg.starts_with("✓");
                 this.child(
-                    div()
+                    h_flex()
+                        .items_start()
+                        .gap_2()
                         .mx_4()
                         .mb_2()
                         .px_3()
@@ -200,11 +209,29 @@ impl Render for ConnectionFormWindow {
                         } else {
                             app_style::danger()
                         })
-                        .child(msg),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .max_h(px(96.0))
+                                .overflow_y_scrollbar()
+                                .text_sm()
+                                .child(msg),
+                        )
+                        .child(
+                            Button::new("clear-test-result")
+                                .xsmall()
+                                .ghost()
+                                .icon(IconName::Close)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.on_clear_test_result(window, cx);
+                                })),
+                        ),
                 )
             })
             .child(
                 h_flex()
+                    .flex_shrink_0()
                     .justify_end()
                     .gap_2()
                     .p_4()

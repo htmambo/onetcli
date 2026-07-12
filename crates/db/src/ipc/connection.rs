@@ -7,7 +7,7 @@ use crate::ipc::protocol::{
 use crate::ipc::registry::IpcDriverManifest;
 use crate::{DatabasePlugin, SqlErrorInfo, truncate_str};
 use async_trait::async_trait;
-use one_core::storage::DbConnectionConfig;
+use one_core::storage::{DatabaseType, DbConnectionConfig};
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error};
@@ -58,6 +58,78 @@ impl ExternalDbConnection {
 
         result
     }
+
+    async fn exec_schema_switch_sql(&self, sql: &str) -> Result<(), DbError> {
+        match self.query(sql).await? {
+            SqlResult::Error(info) => Err(DbError::query(info.message)),
+            _ => Ok(()),
+        }
+    }
+}
+
+
+#[derive(Clone, Copy)]
+enum SchemaSwitchDialect {
+    PostgreSql,
+    Oracle,
+    DuckDb,
+}
+
+impl SchemaSwitchDialect {
+    fn sql(self, schema: &str) -> String {
+        match self {
+            Self::PostgreSql => {
+                format!("SET search_path TO {}", quote_double_identifier(schema))
+            }
+            Self::Oracle => format!(
+                "ALTER SESSION SET CURRENT_SCHEMA = {}",
+                quote_double_identifier(schema)
+            ),
+            Self::DuckDb => format!("SET schema {}", quote_sql_string(schema)),
+        }
+    }
+}
+
+fn schema_switch_sql_for_driver(driver: &IpcDriverManifest, schema: &str) -> Option<String> {
+    if schema.trim().is_empty() {
+        return None;
+    }
+    schema_switch_dialect(driver).map(|dialect| dialect.sql(schema))
+}
+
+fn schema_switch_dialect(driver: &IpcDriverManifest) -> Option<SchemaSwitchDialect> {
+    match driver.dialect.compatible_database_type.as_ref() {
+        Some(DatabaseType::PostgreSQL) => Some(SchemaSwitchDialect::PostgreSql),
+        Some(DatabaseType::Oracle) => Some(SchemaSwitchDialect::Oracle),
+        Some(DatabaseType::DuckDB) => Some(SchemaSwitchDialect::DuckDb),
+        _ => schema_switch_dialect_from_driver_id(&driver.id),
+    }
+}
+
+fn schema_switch_dialect_from_driver_id(driver_id: &str) -> Option<SchemaSwitchDialect> {
+    let id = driver_id.to_ascii_lowercase();
+    if id.contains("postgres") || id.contains("kingbase") {
+        return Some(SchemaSwitchDialect::PostgreSql);
+    }
+    if id.contains("oracle") || id == "dm" || id.contains("dameng") {
+        return Some(SchemaSwitchDialect::Oracle);
+    }
+    if id.contains("duckdb") {
+        return Some(SchemaSwitchDialect::DuckDb);
+    }
+    None
+}
+
+fn quote_double_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+fn quote_sql_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn is_method_not_found(error: &DbError) -> bool {
+    matches!(error, DbError::NotSupported(_))
 }
 
 fn metadata_result(sql: &str, value: serde_json::Value) -> SqlResult {
@@ -161,8 +233,19 @@ impl DbConnection for ExternalDbConnection {
     }
 
     async fn switch_schema(&self, schema: &str) -> Result<(), DbError> {
-        let _: serde_json::Value = self.request("switch_schema", schema_params(schema)).await?;
-        Ok(())
+        let switch_result: Result<serde_json::Value, DbError> = self
+            .request("switch_schema", schema_params(schema))
+            .await;
+        let fallback_sql = schema_switch_sql_for_driver(&self.driver, schema);
+
+        match (switch_result, fallback_sql.as_deref()) {
+            (Ok(_), Some(sql)) => self.exec_schema_switch_sql(sql).await,
+            (Ok(_), None) => Ok(()),
+            (Err(error), Some(sql)) if is_method_not_found(&error) => {
+                self.exec_schema_switch_sql(sql).await
+            }
+            (Err(error), _) => Err(error),
+        }
     }
 
     async fn execute_streaming(
@@ -294,5 +377,80 @@ impl DbConnection for ExternalDbConnection {
 
         debug!("[MySQL] execute_streaming() completed");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod schema_switch_tests {
+    use super::*;
+    use crate::ipc::registry::{IpcDriverEntry, IpcDriverManifest, IpcDriverTransport};
+    use std::path::PathBuf;
+
+    fn test_driver(driver_id: &str, compatible: Option<DatabaseType>) -> IpcDriverManifest {
+        let mut driver = IpcDriverManifest {
+            id: driver_id.into(),
+            name: driver_id.into(),
+            description: String::new(),
+            version: String::new(),
+            entry: IpcDriverEntry {
+                command: "driver".into(),
+                args: Vec::new(),
+                working_dir: None,
+            },
+            transport: IpcDriverTransport::local_socket("driver.sock"),
+            dialect: Default::default(),
+            capabilities: None,
+            ui: Default::default(),
+            manifest_dir: PathBuf::from("/tmp"),
+        };
+        driver.dialect.compatible_database_type = compatible;
+        driver
+    }
+
+    #[test]
+    fn schema_switch_sql_uses_postgres_search_path_for_compatible_driver() {
+        let driver = test_driver("custom", Some(DatabaseType::PostgreSQL));
+        let sql = schema_switch_sql_for_driver(&driver, "tenant\"a");
+        assert_eq!(sql.as_deref(), Some("SET search_path TO \"tenant\"\"a\""));
+    }
+
+    #[test]
+    fn schema_switch_sql_uses_oracle_current_schema_for_compatible_driver() {
+        let driver = test_driver("custom", Some(DatabaseType::Oracle));
+        let sql = schema_switch_sql_for_driver(&driver, "APP");
+        assert_eq!(
+            sql.as_deref(),
+            Some("ALTER SESSION SET CURRENT_SCHEMA = \"APP\"")
+        );
+    }
+
+    #[test]
+    fn schema_switch_sql_treats_dm_driver_as_oracle_compatible() {
+        let driver = test_driver("dm", None);
+        let sql = schema_switch_sql_for_driver(&driver, "APP");
+        assert_eq!(
+            sql.as_deref(),
+            Some("ALTER SESSION SET CURRENT_SCHEMA = \"APP\"")
+        );
+    }
+
+    #[test]
+    fn schema_switch_sql_uses_duckdb_schema_setting() {
+        let driver = test_driver("duckdb", Some(DatabaseType::DuckDB));
+        let sql = schema_switch_sql_for_driver(&driver, "tenant'a");
+        assert_eq!(sql.as_deref(), Some("SET schema 'tenant''a'"));
+    }
+
+    #[test]
+    fn schema_switch_sql_skips_unknown_or_empty_schema() {
+        let driver = test_driver("custom", None);
+        assert!(schema_switch_sql_for_driver(&driver, "public").is_none());
+        assert!(schema_switch_sql_for_driver(&driver, "  ").is_none());
+    }
+
+    #[test]
+    fn is_method_not_found_matches_not_supported() {
+        assert!(is_method_not_found(&DbError::NotSupported("missing".into())));
+        assert!(!is_method_not_found(&DbError::query("boom")));
     }
 }

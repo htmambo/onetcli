@@ -1,12 +1,14 @@
 #[cfg(target_os = "linux")]
 use std::process::Command;
+use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use db_view::set_db_view_settings;
 use gpui::{
     App, AppContext, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString, StyleRefinement, Styled,
-    Window, WindowAppearance, div,
+    PathPromptOptions, Window, WindowAppearance, div,
 };
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
@@ -44,6 +46,7 @@ mod auth_form;
 mod cloud;
 mod global_user;
 mod hotkey;
+mod locale;
 mod migrations;
 mod proxy;
 mod proxy_view;
@@ -221,6 +224,110 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     )
 }
 
+
+fn monospace_font_options() -> Vec<(SharedString, SharedString)> {
+    [
+        "Menlo",
+        "Consolas",
+        "JetBrains Mono",
+        "Fira Code",
+        "Cascadia Mono",
+        "DejaVu Sans Mono",
+        "Source Code Pro",
+        "Noto Sans Mono CJK SC",
+        "Source Han Mono SC",
+        "Microsoft YaHei",
+        "PingFang SC",
+        "Courier New",
+    ]
+    .into_iter()
+    .map(|font| (font.into(), font.into()))
+    .collect()
+}
+
+fn mono_font_options_with_custom(custom_paths: &[String]) -> Vec<(SharedString, SharedString)> {
+    let mut options = monospace_font_options();
+    for path in custom_paths {
+        // 必须拥有字符串，避免 SharedString 从临时 &str 泄漏借用。
+        let name = Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(path.as_str())
+            .to_string();
+        let label: SharedString = name.into();
+        if !options.iter().any(|(value, _)| value == &label) {
+            options.push((label.clone(), label));
+        }
+    }
+    options
+}
+
+const FONT_FILE_EXTENSIONS: &[&str] = &["ttf", "otf", "ttc", "otc"];
+
+fn is_supported_font_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            FONT_FILE_EXTENSIONS
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
+fn load_custom_font_path(path: &Path, cx: &mut App) -> Result<(), String> {
+    if !is_supported_font_file(path) {
+        return Err(t!("Settings.General.Font.unsupported_font_file").to_string());
+    }
+    let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
+    cx.text_system()
+        .add_fonts(vec![Cow::Owned(bytes)])
+        .map_err(|err| err.to_string())
+}
+
+fn load_custom_fonts(paths: &[String], cx: &mut App) -> usize {
+    paths
+        .iter()
+        .filter(|path| load_custom_font_path(Path::new(path), cx).is_ok())
+        .count()
+}
+
+fn import_custom_font_paths(paths: Vec<PathBuf>, cx: &mut App) -> String {
+    // 先加载字体，再写入设置，避免 AppSettings 可变借用与 text_system 冲突。
+    let mut loaded_paths = Vec::new();
+    for path in paths {
+        if load_custom_font_path(&path, cx).is_err() {
+            continue;
+        }
+        loaded_paths.push(path.to_string_lossy().to_string());
+    }
+
+    if loaded_paths.is_empty() {
+        return t!("Settings.General.Font.custom_fonts_import_empty").to_string();
+    }
+
+    let loaded = loaded_paths.len();
+    {
+        let settings = AppSettings::global_mut(cx);
+        for path in loaded_paths {
+            if !settings
+                .custom_font_paths
+                .iter()
+                .any(|existing| existing == &path)
+            {
+                settings.custom_font_paths.push(path);
+            }
+        }
+        settings.save();
+    }
+    let settings = AppSettings::global(cx).clone();
+    settings.sync_db_view_settings(cx);
+    t!(
+        "Settings.General.Font.custom_fonts_import_success",
+        count = loaded
+    )
+    .to_string()
+}
+
 pub fn init_settings(cx: &mut App) -> HotkeyMigration {
     init_settings_with(cx, None)
 }
@@ -245,6 +352,8 @@ pub fn init_settings_with(cx: &mut App, preloaded: Option<AppSettings>) -> Hotke
     // apply() 内部可能会写回规范化后的主题设置，因此必须先注册全局状态。
     cx.set_global(settings);
     AppSettings::global(cx).clone().apply(cx);
+    let custom_font_paths = AppSettings::global(cx).custom_font_paths.clone();
+    load_custom_fonts(&custom_font_paths, cx);
     if hotkey_migration.any_changed() {
         AppSettings::save_global(cx);
     }
@@ -357,14 +466,21 @@ impl SettingsPanel {
                                 themed_setting_field(SettingField::dropdown(
                                     vec![
                                         (
-                                            "zh-CN".into(),
+                                            locale::LOCALE_SYSTEM.into(),
+                                            t!("Settings.General.Language.system").into(),
+                                        ),
+                                        (
+                                            locale::LOCALE_ZH_CN.into(),
                                             t!("Settings.General.Language.zh_cn").into(),
                                         ),
                                         (
-                                            "zh-HK".into(),
+                                            locale::LOCALE_ZH_HK.into(),
                                             t!("Settings.General.Language.zh_hk").into(),
                                         ),
-                                        ("en".into(), t!("Settings.General.Language.en").into()),
+                                        (
+                                            locale::LOCALE_EN.into(),
+                                            t!("Settings.General.Language.en").into(),
+                                        ),
                                     ],
                                     |cx: &App| {
                                         SharedString::from(AppSettings::global(cx).locale.clone())
@@ -372,7 +488,9 @@ impl SettingsPanel {
                                     |val: SharedString, cx: &mut App| {
                                         let settings = AppSettings::global_mut(cx);
                                         settings.locale = val.to_string();
-                                        gpui_component::set_locale(&settings.locale);
+                                        gpui_component::set_locale(
+                                            locale::effective_locale_for_setting(&settings.locale),
+                                        );
                                         settings.save();
                                     },
                                 ))
@@ -702,6 +820,103 @@ impl SettingsPanel {
                             .description(
                                 t!("Settings.General.Appearance.mono_font_family_desc")
                                     .to_string(),
+                            ),
+
+                            SettingItem::new(
+                                t!("Settings.General.Font.sql_editor_font_family"),
+                                themed_setting_field(SettingField::dropdown(
+                                    mono_font_options_with_custom(
+                                        &AppSettings::global(cx).custom_font_paths,
+                                    ),
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx).sql_editor_font_family.clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.sql_editor_font_family = val.to_string();
+                                            settings.save();
+                                        }
+                                        let settings = AppSettings::global(cx).clone();
+                                        settings.sync_db_view_settings(cx);
+                                    },
+                                ))
+                                .default_value(SharedString::from(
+                                    default_settings.sql_editor_font_family.clone(),
+                                )),
+                            )
+                            .description(
+                                t!("Settings.General.Font.sql_editor_font_family_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Font.table_preview_font_family"),
+                                themed_setting_field(SettingField::dropdown(
+                                    mono_font_options_with_custom(
+                                        &AppSettings::global(cx).custom_font_paths,
+                                    ),
+                                    |cx: &App| {
+                                        SharedString::from(
+                                            AppSettings::global(cx)
+                                                .table_preview_font_family
+                                                .clone(),
+                                        )
+                                    },
+                                    |val: SharedString, cx: &mut App| {
+                                        {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.table_preview_font_family = val.to_string();
+                                            settings.save();
+                                        }
+                                        let settings = AppSettings::global(cx).clone();
+                                        settings.sync_db_view_settings(cx);
+                                    },
+                                ))
+                                .default_value(SharedString::from(
+                                    default_settings.table_preview_font_family.clone(),
+                                )),
+                            )
+                            .description(
+                                t!("Settings.General.Font.table_preview_font_family_desc")
+                                    .to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Font.custom_fonts"),
+                                SettingField::render(|options, _window, _cx| {
+                                    Button::new("import-custom-fonts")
+                                        .label(
+                                            t!("Settings.General.Font.import_custom_fonts")
+                                                .to_string(),
+                                        )
+                                        .with_size(options.size)
+                                        .on_click(|_, window, cx| {
+                                            let future = cx.prompt_for_paths(PathPromptOptions {
+                                                files: true,
+                                                directories: false,
+                                                multiple: true,
+                                                prompt: Some(
+                                                    t!("Settings.General.Font.select_font_files")
+                                                        .to_string()
+                                                        .into(),
+                                                ),
+                                            });
+                                            window
+                                                .spawn(cx, async move |cx| {
+                                                    if let Ok(Ok(Some(paths))) = future.await {
+                                                        let _ = cx.update(|window, cx| {
+                                                            let message =
+                                                                import_custom_font_paths(paths, cx);
+                                                            window.push_notification(message, cx);
+                                                        });
+                                                    }
+                                                })
+                                                .detach();
+                                        })
+                                }),
+                            )
+                            .description(
+                                t!("Settings.General.Font.custom_fonts_desc").to_string(),
                             ),
                         ]),
                     themed_setting_group(SettingGroup::new(), cx)
@@ -1693,6 +1908,31 @@ impl SettingsPanel {
                             )
                             .description(
                                 t!("Settings.General.Database.undo_stack_size_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Database.sql_query_max_rows"),
+                                themed_setting_field(SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 0.0,
+                                        max: 1_000_000.0,
+                                        step: 100.0,
+                                        ..Default::default()
+                                    },
+                                    |cx: &App| AppSettings::global(cx).sql_query_max_rows as f64,
+                                    |val: f64, cx: &mut App| {
+                                        {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.sql_query_max_rows = val.max(0.0) as u32;
+                                            settings.save();
+                                        }
+                                        let settings = AppSettings::global(cx).clone();
+                                        settings.sync_db_view_settings(cx);
+                                    },
+                                ))
+                                .default_value(default_settings.sql_query_max_rows as f64),
+                            )
+                            .description(
+                                t!("Settings.General.Database.sql_query_max_rows_desc").to_string(),
                             ),
                             SettingItem::new(
                                 t!("Settings.General.Database.ai_auto_title"),

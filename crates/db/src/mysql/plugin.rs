@@ -1383,6 +1383,7 @@ impl DatabasePlugin for MySqlPlugin {
                         name: index_name,
                         columns: Vec::new(),
                         is_unique,
+                        is_primary: false,
                         index_type: index_type.clone(),
                     })
                     .columns

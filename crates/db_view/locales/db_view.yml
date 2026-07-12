@@ -1001,6 +1001,10 @@ Query:
     en: New Query
     zh-CN: 新建查询
     zh-HK: 新建查詢
+  query_table:
+    en: Query Table
+    zh-CN: 查询表
+    zh-HK: 查詢表
   no_sql_to_compress:
     en: No SQL statement to compress
     zh-CN: 没有待压缩的SQL语句
@@ -1021,6 +1025,10 @@ Query:
     en: Please select a database
     zh-CN: 请选择数据库
     zh-HK: 請選擇資料庫
+  please_select_schema:
+    en: Please select a schema
+    zh-CN: 请选择 Schema
+    zh-HK: 請選擇 Schema
   query_content_empty:
     en: Query content is empty
     zh-CN: 查询内容为空
@@ -2268,6 +2276,10 @@ TableDataGrid:
     en: Refresh
     zh-CN: 刷新
     zh-HK: 重新整理
+  search_placeholder:
+    en: Search current page
+    zh-CN: 搜索当前页
+    zh-HK: 搜尋當前頁
   column_visibility:
     en: Column Visibility
     zh-CN: 列可见性

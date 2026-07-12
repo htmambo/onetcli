@@ -42,6 +42,12 @@ const WINDOW_SHORTCUTS: &[ShortcutEntry] = &[
         key_other: "alt-enter",
         label_key: "Settings.Shortcuts.toggle_fullscreen",
     },
+    // 窗口置顶仅 Windows 实现；设置页仍展示快捷键说明
+    ShortcutEntry {
+        key_macos: "ctrl-alt-t",
+        key_other: "ctrl-alt-t",
+        label_key: "Settings.Shortcuts.toggle_always_on_top",
+    },
     ShortcutEntry {
         key_macos: "shift-escape",
         key_other: "shift-escape",
@@ -120,6 +126,24 @@ const TERMINAL_SHORTCUTS: &[ShortcutEntry] = &[
     },
 ];
 
+const DATABASE_SHORTCUTS: &[ShortcutEntry] = &[
+    ShortcutEntry {
+        key_macos: "cmd-f",
+        key_other: "ctrl-f",
+        label_key: "Settings.Shortcuts.database_focus_search",
+    },
+    ShortcutEntry {
+        key_macos: "cmd-shift-enter",
+        key_other: "ctrl-shift-enter",
+        label_key: "Settings.Shortcuts.database_open_table_query",
+    },
+    ShortcutEntry {
+        key_macos: "cmd-enter",
+        key_other: "ctrl-enter",
+        label_key: "Settings.Shortcuts.sql_run_query",
+    },
+];
+
 const SHORTCUT_GROUPS: &[ShortcutGroup] = &[
     ShortcutGroup {
         title_key: "Settings.Shortcuts.window",
@@ -132,6 +156,10 @@ const SHORTCUT_GROUPS: &[ShortcutGroup] = &[
     ShortcutGroup {
         title_key: "Settings.Shortcuts.terminal",
         entries: TERMINAL_SHORTCUTS,
+    },
+    ShortcutGroup {
+        title_key: "Settings.Shortcuts.database",
+        entries: DATABASE_SHORTCUTS,
     },
 ];
 

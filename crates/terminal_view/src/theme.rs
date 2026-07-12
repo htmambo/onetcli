@@ -261,6 +261,8 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "Courier New".into(),
             "Apple Color Emoji".into(),
             "Apple Symbols".into(),
+            "Noto Sans Mono CJK SC".into(),
+            "Source Han Mono SC".into(),
             "PingFang SC".into(),
             "PingFang TC".into(),
             "Hiragino Sans GB".into(),
@@ -273,6 +275,8 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "JetBrains Mono".into(),
             "Lucida Console".into(),
             "Segoe UI Emoji".into(),
+            "Noto Sans Mono CJK SC".into(),
+            "Source Han Mono SC".into(),
             "Microsoft YaHei".into(),
             "SimSun".into(),
         ]
@@ -284,6 +288,8 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "Courier New".into(),
             "JetBrains Mono".into(),
             "Noto Color Emoji".into(),
+            "Noto Sans Mono CJK SC".into(),
+            "Source Han Mono SC".into(),
             "Noto Sans CJK SC".into(),
             "WenQuanYi Micro Hei".into(),
         ]
@@ -803,7 +809,7 @@ fn prefer_light_variant(light: Hsla, fallback: Hsla) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use super::{TerminalTheme, FOLLOW_APP_THEME_NAME};
+    use super::{default_font_fallbacks, TerminalTheme, FOLLOW_APP_THEME_NAME};
     use gpui_component::Theme as UiTheme;
 
     #[test]
@@ -857,6 +863,30 @@ mod tests {
                 TerminalTheme::find_by_name(theme_name).is_some(),
                 "expected terminal theme `{theme_name}` to exist"
             );
+        }
+    }
+
+    #[test]
+    fn terminal_default_fallbacks_include_monospace_cjk_fonts_first() {
+        let fallbacks = default_font_fallbacks()
+            .into_iter()
+            .map(|font| font.to_string())
+            .collect::<Vec<_>>();
+
+        let noto_mono = fallbacks
+            .iter()
+            .position(|font| font == "Noto Sans Mono CJK SC")
+            .expect("Noto Sans Mono CJK SC should be a terminal fallback");
+        let source_han_mono = fallbacks
+            .iter()
+            .position(|font| font == "Source Han Mono SC")
+            .expect("Source Han Mono SC should be a terminal fallback");
+
+        for ui_font in ["PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC"] {
+            if let Some(ui_index) = fallbacks.iter().position(|font| font == ui_font) {
+                assert!(noto_mono < ui_index);
+                assert!(source_han_mono < ui_index);
+            }
         }
     }
 }

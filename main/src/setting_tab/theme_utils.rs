@@ -96,3 +96,10 @@ pub(super) fn default_db_undo_stack_size() -> usize {
 pub(super) fn default_sync_backend_type() -> String {
     "sync_server".to_string()
 }
+
+pub(super) const DEFAULT_SQL_QUERY_MAX_ROWS: u32 = 1000;
+
+pub(super) fn default_sql_query_max_rows() -> u32 {
+    DEFAULT_SQL_QUERY_MAX_ROWS
+}
+

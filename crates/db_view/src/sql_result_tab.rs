@@ -290,17 +290,19 @@ impl SqlResultTabContainer {
         .detach();
 
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let (global_state, database_type) = cx.update(|cx| {
+            let (global_state, database_type, max_rows) = cx.update(|cx| {
                 let global_state = cx.global::<GlobalDbState>();
                 let config = global_state.get_config(&connection_id);
                 let database_type = config
                     .map(|c| c.database_type)
                     .unwrap_or(one_core::storage::DatabaseType::MySQL);
-                (global_state.clone(), database_type)
+                let max_rows = crate::settings::current_sql_query_max_rows(cx);
+                (global_state.clone(), database_type, max_rows)
             });
 
             let exec_opts = db::ExecOptions {
                 stop_on_error: false,
+                max_rows,
                 ..Default::default()
             };
             let mut rx = match global_state.execute_streaming(

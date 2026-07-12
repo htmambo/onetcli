@@ -34,6 +34,9 @@ use tracing::log::{error, info, trace, warn};
 
 // 3. 当前 crate 导入（按模块分组）
 use crate::database_view_plugin::build_context_menu_for;
+use crate::search_shortcut::{
+    DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
+};
 use db::{DbNode, DbNodeType, GlobalDbState};
 use gpui_component::label::Label;
 use gpui_component::menu::PopupMenu;
@@ -2263,6 +2266,34 @@ impl DbTreeView {
     }
 }
 
+impl DbTreeView {
+    fn on_action_focus_search(
+        &mut self,
+        _: &FocusSearchInput,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        focus_search_input(&self.search_input, window, cx);
+    }
+
+    fn on_action_open_selected_table_query(
+        &mut self,
+        _: &OpenSelectedTableQuery,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node_id) = self.selected_node_id.clone() else {
+            return;
+        };
+        let Some(node) = self.db_nodes.get(&node_id) else {
+            return;
+        };
+        if matches!(node.node_type, DbNodeType::Table | DbNodeType::View) {
+            cx.emit(DbTreeViewEvent::CreateNewQuery { node_id });
+        }
+    }
+}
+
 impl Render for DbTreeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entries_len = self.flat_entries.len();
@@ -2279,6 +2310,10 @@ impl Render for DbTreeView {
         v_flex()
             .id("db-tree-view")
             .size_full()
+            .track_focus(&self.focus_handle)
+            .key_context(DB_SEARCH_CONTEXT)
+            .on_action(cx.listener(Self::on_action_focus_search))
+            .on_action(cx.listener(Self::on_action_open_selected_table_query))
             .bg(sidebar_bg)
             .child({
                 let view_for_collapse = cx.entity();

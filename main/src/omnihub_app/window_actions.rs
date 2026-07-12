@@ -1,6 +1,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use gpui::{App, AppContext};
+use gpui::App;
+#[cfg(target_os = "windows")]
+use gpui::Window;
+#[cfg(target_os = "windows")]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use super::close_guard::{
     GlobalAppCloseState, request_app_close_without_window, request_main_window_close,
@@ -48,6 +52,71 @@ pub fn toggle_fullscreen(cx: &mut App) {
             window.toggle_fullscreen();
         });
     });
+}
+
+
+/// 窗口置顶状态（单窗口应用，使用静态原子量足够）。仅 Windows 平台实现。
+#[cfg(target_os = "windows")]
+pub(crate) static ALWAYS_ON_TOP: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+pub fn toggle_always_on_top(cx: &mut App) {
+    let Some(active_window) = cx.active_window() else {
+        return;
+    };
+    let tab_container = cx
+        .try_global::<GlobalTabContainer>()
+        .map(|global| global.tab_container.clone());
+    cx.defer(move |cx| {
+        _ = active_window.update(cx, |_, window, cx| {
+            let next = !ALWAYS_ON_TOP.load(Ordering::Relaxed);
+            if set_window_always_on_top(window, next).is_ok() {
+                ALWAYS_ON_TOP.store(next, Ordering::Relaxed);
+                if let Some(tab_container) = tab_container {
+                    tab_container.update(cx, |_, cx| cx.notify());
+                }
+            }
+        });
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn set_window_always_on_top(window: &Window, always_on_top: bool) -> anyhow::Result<()> {
+    let handle = HasWindowHandle::window_handle(window)
+        .map_err(|err| anyhow::anyhow!("获取窗口句柄失败: {err:?}"))?
+        .as_raw();
+    match handle {
+        RawWindowHandle::Win32(handle) => {
+            set_windows_always_on_top(handle.hwnd.get(), always_on_top)
+        }
+        _ => Err(anyhow::anyhow!("当前平台暂不支持窗口置顶")),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_always_on_top(hwnd: isize, always_on_top: bool) -> anyhow::Result<()> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+    };
+
+    let insert_after = if always_on_top {
+        HWND_TOPMOST
+    } else {
+        HWND_NOTOPMOST
+    };
+    unsafe {
+        SetWindowPos(
+            HWND(hwnd as *mut _),
+            Some(insert_after),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn duplicate_tab(cx: &mut App) {

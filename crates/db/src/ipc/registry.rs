@@ -1,6 +1,6 @@
 use crate::connection::DbError;
 use crate::plugin_manifest::{DatabaseCapabilities, DatabaseUiManifest};
-use one_core::storage::get_config_dir;
+use one_core::storage::{DatabaseType, get_config_dir};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -69,6 +69,9 @@ pub struct IpcDriverDialect {
     pub supports_sequences: bool,
     #[serde(default)]
     pub uses_schema_as_database: bool,
+    /// 可选：声明外部驱动兼容的宿主数据库类型，用于 SQL 方言回退（如 schema 切换）。
+    #[serde(default)]
+    pub compatible_database_type: Option<DatabaseType>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -88,6 +91,7 @@ impl Default for IpcDriverDialect {
             supports_schema: false,
             supports_sequences: false,
             uses_schema_as_database: false,
+            compatible_database_type: None,
         }
     }
 }

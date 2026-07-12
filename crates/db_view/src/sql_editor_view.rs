@@ -68,6 +68,52 @@ fn sql_text_for_run(editor_text: &str, selected_text: &str) -> String {
     }
 }
 
+
+fn should_render_schema_select(supports_schema: bool, uses_schema_as_database: bool) -> bool {
+    supports_schema || uses_schema_as_database
+}
+
+fn non_empty_initial_value(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty())
+}
+
+fn initial_database_select_value(
+    initial_database: Option<String>,
+    initial_schema: Option<String>,
+    uses_schema_as_database: bool,
+) -> Option<String> {
+    if uses_schema_as_database {
+        non_empty_initial_value(initial_schema)
+            .or_else(|| non_empty_initial_value(initial_database))
+    } else {
+        non_empty_initial_value(initial_database)
+    }
+}
+
+fn set_select_items_with_initial_value(
+    state: &mut SelectState<SearchableVec<String>>,
+    values: Vec<String>,
+    selected_name: Option<&str>,
+    empty_label: String,
+    window: &mut Window,
+    cx: &mut Context<SelectState<SearchableVec<String>>>,
+) {
+    if values.is_empty() {
+        let items = SearchableVec::new(vec![
+            t!("Common.no_available", item = empty_label).to_string(),
+        ]);
+        state.set_items(items, window, cx);
+        state.set_selected_index(None, window, cx);
+        return;
+    }
+
+    let selected_index = selected_name
+        .and_then(|name| values.iter().position(|value| value == name))
+        .unwrap_or(0);
+    state.set_items(SearchableVec::new(values), window, cx);
+    state.set_selected_index(Some(IndexPath::new(selected_index)), window, cx);
+}
+
 // Events emitted by SqlEditorTabContent
 #[derive(Debug, Clone)]
 pub enum SqlEditorEvent {
@@ -123,13 +169,18 @@ impl SqlEditorTab {
         let supports_schema = capabilities.supports_schema;
         let uses_schema_as_database = capabilities.uses_schema_as_database;
         let connection_id_str = connection_id.into();
+        let initial_select_value = initial_database_select_value(
+            initial_database.clone(),
+            initial_schema.clone(),
+            uses_schema_as_database,
+        );
 
         let should_load_file = file_path.is_some();
         let resolved_file_path = file_path.unwrap_or_else(|| {
             Self::generate_new_file_path(
                 &database_type,
                 &connection_id_str,
-                initial_database.as_deref().unwrap_or("default"),
+                initial_select_value.as_deref().unwrap_or("default"),
             )
         });
 
@@ -160,7 +211,7 @@ impl SqlEditorTab {
         instance.bind_select_event(cx);
         instance.bind_auto_save(auto_save_seq, is_dirty, window, cx);
         instance.load_databases_async(
-            initial_database,
+            initial_select_value,
             initial_schema,
             resolved_file_path,
             should_load_file,
@@ -467,13 +518,14 @@ impl SqlEditorTab {
         let global_state = cx.global::<GlobalDbState>().clone();
         let connection_id = self.connection_id.clone();
         let database_select = self.database_select.clone();
+        let schema_select = self.schema_select.clone();
         let editor = self.editor.clone();
         let initial_database = init_db.clone();
         let instance = self.clone();
         let uses_schema_as_database = self.uses_schema_as_database;
 
         cx.spawn(async move |_handle, cx: &mut AsyncApp| {
-            let databases = if uses_schema_as_database {
+            let select_items = if uses_schema_as_database {
                 match global_state
                     .list_schemas(cx, connection_id.clone(), String::new())
                     .await
@@ -508,35 +560,33 @@ impl SqlEditorTab {
                 None
             };
 
-            let resolved_database = initial_database.clone();
-            let selected_name = resolved_database
+            let selected_name = initial_database
                 .clone()
-                .or_else(|| databases.first().cloned());
+                .or_else(|| select_items.first().cloned());
+            let resolved_database = selected_name.clone();
 
             cx.update(|cx: &mut App| {
                 if let Some(window_id) = cx.active_window() {
                     cx.update_window(window_id, |_entity, window, cx| {
-                        database_select.update(cx, |state, cx| {
-                            if databases.is_empty() {
-                                let items = SearchableVec::new(vec![
-                                    t!("Common.no_available", item = &t!("Database.database"))
-                                        .to_string(),
-                                ]);
-                                state.set_items(items, window, cx);
-                                state.set_selected_index(None, window, cx);
-                            } else {
-                                let items = SearchableVec::new(databases.clone());
-                                state.set_items(items, window, cx);
-                                if let Some(name) = selected_name.as_ref() {
-                                    if let Some(index) = databases.iter().position(|d| d == name) {
-                                        state.set_selected_index(
-                                            Some(IndexPath::new(index)),
-                                            window,
-                                            cx,
-                                        );
-                                    }
-                                }
-                            }
+                        let target_select = if uses_schema_as_database {
+                            schema_select.clone()
+                        } else {
+                            database_select.clone()
+                        };
+                        let empty_label = if uses_schema_as_database {
+                            t!("Schema.schema").to_string()
+                        } else {
+                            t!("Database.database").to_string()
+                        };
+                        target_select.update(cx, |state, cx| {
+                            set_select_items_with_initial_value(
+                                state,
+                                select_items.clone(),
+                                selected_name.as_deref(),
+                                empty_label,
+                                window,
+                                cx,
+                            );
                         });
                         if let Some(sql) = sql_content {
                             editor.update(cx, |e, cx| {
@@ -551,7 +601,7 @@ impl SqlEditorTab {
             .ok();
 
             if let Some(ref db) = resolved_database {
-                if instance.supports_schema {
+                if instance.supports_schema && !instance.uses_schema_as_database {
                     instance
                         .load_schemas_for_db(global_state.clone(), db, init_schema, cx)
                         .await;
@@ -667,18 +717,13 @@ impl SqlEditorTab {
         let connection_id = self.connection_id.clone();
         let sql_result_tab_container = self.sql_result_tab_container.clone();
 
-        let selected_value = self.database_select.read(cx).selected_value().cloned();
-
-        // For non-Oracle databases, database selection is required
-        if !self.uses_schema_as_database && selected_value.is_none() {
-            window.push_notification(t!("Query.please_select_database").to_string(), cx);
-            return;
-        }
-
-        // For Oracle (uses_schema_as_database), the database_select contains schema values
         let (current_database_value, current_schema_value) = if self.uses_schema_as_database {
-            (None, selected_value)
+            (
+                None,
+                self.schema_select.read(cx).selected_value().cloned(),
+            )
         } else {
+            let selected_value = self.database_select.read(cx).selected_value().cloned();
             let schema = if self.supports_schema {
                 self.schema_select.read(cx).selected_value().cloned()
             } else {
@@ -686,6 +731,16 @@ impl SqlEditorTab {
             };
             (selected_value, schema)
         };
+
+        if self.uses_schema_as_database {
+            if current_schema_value.is_none() {
+                window.push_notification(t!("Query.please_select_schema").to_string(), cx);
+                return;
+            }
+        } else if current_database_value.is_none() {
+            window.push_notification(t!("Query.please_select_database").to_string(), cx);
+            return;
+        }
 
         if sql.trim().is_empty() {
             window.push_notification(t!("Query.please_enter_query").to_string(), cx);
@@ -800,7 +855,11 @@ impl SqlEditorTab {
         });
         cx.emit(SqlEditorEvent::QuerySaved {
             connection_id: self.connection_id.clone(),
-            database: self.database_select.read(cx).selected_value().cloned(),
+            database: if self.uses_schema_as_database {
+                self.schema_select.read(cx).selected_value().cloned()
+            } else {
+                self.database_select.read(cx).selected_value().cloned()
+            },
         });
     }
 
@@ -815,7 +874,11 @@ impl SqlEditorTab {
         window.push_notification(t!("Query.query_saved").to_string(), cx);
         cx.emit(SqlEditorEvent::QuerySaved {
             connection_id: self.connection_id.clone(),
-            database: self.database_select.read(cx).selected_value().cloned(),
+            database: if self.uses_schema_as_database {
+                self.schema_select.read(cx).selected_value().cloned()
+            } else {
+                self.database_select.read(cx).selected_value().cloned()
+            },
         });
     }
 
@@ -914,18 +977,13 @@ impl SqlEditorTab {
             return;
         }
 
-        let selected_value = self.database_select.read(cx).selected_value().cloned();
-
-        // For non-Oracle databases, database selection is required
-        if !self.uses_schema_as_database && selected_value.is_none() {
-            window.push_notification(t!("Query.please_select_database").to_string(), cx);
-            return;
-        }
-
-        // For Oracle (uses_schema_as_database), the database_select contains schema values
         let (current_database_value, current_schema_value) = if self.uses_schema_as_database {
-            (None, selected_value)
+            (
+                None,
+                self.schema_select.read(cx).selected_value().cloned(),
+            )
         } else {
+            let selected_value = self.database_select.read(cx).selected_value().cloned();
             let schema = if self.supports_schema {
                 self.schema_select.read(cx).selected_value().cloned()
             } else {
@@ -933,6 +991,16 @@ impl SqlEditorTab {
             };
             (selected_value, schema)
         };
+
+        if self.uses_schema_as_database {
+            if current_schema_value.is_none() {
+                window.push_notification(t!("Query.please_select_schema").to_string(), cx);
+                return;
+            }
+        } else if current_database_value.is_none() {
+            window.push_notification(t!("Query.please_select_database").to_string(), cx);
+            return;
+        }
 
         let Ok(plugin) = DbManager::default().get_plugin(&self.database_type) else {
             window.push_notification("未找到当前数据库插件".to_string(), cx);
@@ -995,24 +1063,22 @@ impl SqlEditorTab {
                                 .w(px(200.)),
                         )
                     })
-                    .when(uses_schema_as_database, |this| {
-                        this.child(
-                            // Schema selector for Oracle (using database_select entity)
-                            Select::new(&database_select)
-                                .with_size(Size::Small)
-                                .placeholder(t!("Query.select_schema"))
-                                .w(px(200.)),
-                        )
-                    })
-                    .when(supports_schema, |this| {
-                        this.child(
-                            // Schema selector for PostgreSQL
-                            Select::new(&schema_select)
-                                .with_size(Size::Small)
-                                .placeholder(t!("Query.select_schema"))
-                                .w(px(150.)),
-                        )
-                    })
+                    .when(
+                        should_render_schema_select(supports_schema, uses_schema_as_database),
+                        |this| {
+                            this.child(
+                                // Schema selector（含 schema-as-database 模式）
+                                Select::new(&schema_select)
+                                    .with_size(Size::Small)
+                                    .placeholder(t!("Query.select_schema"))
+                                    .w(if uses_schema_as_database {
+                                        px(200.)
+                                    } else {
+                                        px(150.)
+                                    }),
+                            )
+                        },
+                    )
                     .child(
                         Button::new("run-query")
                             .with_size(Size::Small)
@@ -1252,7 +1318,7 @@ impl Element for ResizeEventHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{RUN_QUERY_KEY_BINDINGS, sql_text_for_run};
+    use super::{RUN_QUERY_KEY_BINDINGS, initial_database_select_value, should_render_schema_select, sql_text_for_run};
     use db::DbManager;
     use one_core::storage::DatabaseType;
 
@@ -1276,6 +1342,39 @@ mod tests {
 
         assert_eq!("select * from users;", actual);
     }
+
+    #[test]
+    fn schema_select_is_visible_when_schema_is_database() {
+        assert!(should_render_schema_select(true, true));
+        assert!(should_render_schema_select(false, true));
+        assert!(should_render_schema_select(true, false));
+        assert!(!should_render_schema_select(false, false));
+    }
+
+    #[test]
+    fn schema_as_database_initial_selection_prefers_schema() {
+        assert_eq!(
+            Some("COMI_SERVER2112".to_string()),
+            initial_database_select_value(
+                Some(String::new()),
+                Some("COMI_SERVER2112".to_string()),
+                true,
+            )
+        );
+    }
+
+    #[test]
+    fn normal_database_initial_selection_uses_database() {
+        assert_eq!(
+            Some("app_db".to_string()),
+            initial_database_select_value(
+                Some("app_db".to_string()),
+                Some("public".to_string()),
+                false,
+            )
+        );
+    }
+
 
     #[test]
     fn run_query_key_bindings_include_platform_shortcuts() {

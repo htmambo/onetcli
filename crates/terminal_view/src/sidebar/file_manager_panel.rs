@@ -14,7 +14,7 @@ use gpui::{
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, InteractiveElementExt, Sizable, Size, WindowExt,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
-    button::{Button, ButtonVariants},
+    button::{Button, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -36,7 +36,7 @@ use one_core::storage::{
 use remote_file_editor::open_remote_file_editor;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
-use ssh::SshSessionManager;
+use ssh::{ChannelEvent, SshChannel, SshSessionManager};
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -599,6 +599,202 @@ async fn delete_targets_with_progress(
     }
 }
 
+
+struct ActiveExtract {
+    name: String,
+    #[allow(dead_code)]
+    path: String,
+}
+
+struct RemoteCommandOutput {
+    stdout: String,
+    stderr: String,
+    exit_status: u32,
+}
+
+enum ArchiveKind {
+    Zip,
+    Tar,
+    TarGz,
+    Tgz,
+    TarBz2,
+    Tbz2,
+    TarXz,
+    Txz,
+    Gzip,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtractConflictAction {
+    Overwrite,
+    SkipExisting,
+}
+
+fn archive_kind_for_name(name: &str) -> Option<ArchiveKind> {
+    let lower = name.to_lowercase();
+    [
+        (".tar.gz", ArchiveKind::TarGz),
+        (".tar.bz2", ArchiveKind::TarBz2),
+        (".tar.xz", ArchiveKind::TarXz),
+        (".tgz", ArchiveKind::Tgz),
+        (".tbz2", ArchiveKind::Tbz2),
+        (".txz", ArchiveKind::Txz),
+        (".tar", ArchiveKind::Tar),
+        (".zip", ArchiveKind::Zip),
+        (".gz", ArchiveKind::Gzip),
+    ]
+    .into_iter()
+    .find_map(|(suffix, kind)| lower.ends_with(suffix).then_some(kind))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn build_remote_extract_command(
+    path: &str,
+    name: &str,
+    action: ExtractConflictAction,
+) -> Option<String> {
+    let quoted_path = shell_quote(path);
+    let quoted_parent = shell_quote(&remote_path_parent(path));
+    let tar_skip = match action {
+        ExtractConflictAction::Overwrite => "",
+        ExtractConflictAction::SkipExisting => " --skip-old-files",
+    };
+
+    match (archive_kind_for_name(name)?, action) {
+        (ArchiveKind::Zip, ExtractConflictAction::Overwrite) => {
+            Some(format!("unzip -o -- {quoted_path} -d {quoted_parent}"))
+        }
+        (ArchiveKind::Zip, ExtractConflictAction::SkipExisting) => {
+            Some(format!("unzip -n -- {quoted_path} -d {quoted_parent}"))
+        }
+        (ArchiveKind::Tar, _) => Some(format!(
+            "tar{tar_skip} -xf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::TarGz | ArchiveKind::Tgz, _) => Some(format!(
+            "tar{tar_skip} -xzf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::TarBz2 | ArchiveKind::Tbz2, _) => Some(format!(
+            "tar{tar_skip} -xjf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::TarXz | ArchiveKind::Txz, _) => Some(format!(
+            "tar{tar_skip} -xJf {quoted_path} -C {quoted_parent}"
+        )),
+        (ArchiveKind::Gzip, ExtractConflictAction::Overwrite) => {
+            Some(format!("gzip -dkf -- {quoted_path}"))
+        }
+        (ArchiveKind::Gzip, ExtractConflictAction::SkipExisting) => Some(format!(
+            "test -e {} || gzip -dk -- {quoted_path}",
+            shell_quote(&remote_gzip_target_path(path))
+        )),
+    }
+}
+
+fn remote_gzip_target_path(path: &str) -> String {
+    path.strip_suffix(".gz")
+        .or_else(|| path.strip_suffix(".GZ"))
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn build_archive_top_level_conflict_check_command(path: &str, list_command: String) -> String {
+    let quoted_parent = shell_quote(&remote_path_parent(path));
+    format!(
+        "parent={quoted_parent}; tmp=$(mktemp) || exit 2; if ! {list_command} > \"$tmp\" 2>/dev/null; then rm -f \"$tmp\"; exit 2; fi; awk -F/ 'NF {{ print $1 }}' \"$tmp\" | sort -u | while IFS= read -r entry; do [ -n \"$entry\" ] || continue; if [ -e \"$parent/$entry\" ]; then printf '%s\\n' \"$entry\"; exit 7; fi; done; status=$?; rm -f \"$tmp\"; if [ \"$status\" -eq 7 ]; then exit 0; fi; exit 1"
+    )
+}
+
+fn build_remote_extract_conflict_check_command(path: &str, name: &str) -> Option<String> {
+    let quoted_path = shell_quote(path);
+    match archive_kind_for_name(name)? {
+        ArchiveKind::Zip => Some(build_archive_top_level_conflict_check_command(
+            path,
+            format!("unzip -Z1 -- {quoted_path}"),
+        )),
+        ArchiveKind::Tar
+        | ArchiveKind::TarGz
+        | ArchiveKind::Tgz
+        | ArchiveKind::TarBz2
+        | ArchiveKind::Tbz2
+        | ArchiveKind::TarXz
+        | ArchiveKind::Txz => Some(build_archive_top_level_conflict_check_command(
+            path,
+            format!("tar -tf {quoted_path}"),
+        )),
+        ArchiveKind::Gzip => Some(format!(
+            "if [ -e {} ]; then exit 0; else exit 1; fi",
+            shell_quote(&remote_gzip_target_path(path))
+        )),
+    }
+}
+
+async fn exec_remote_command(
+    session_manager: Arc<SshSessionManager>,
+    command: &str,
+) -> anyhow::Result<String> {
+    let output = exec_remote_command_output(session_manager, command).await?;
+    if output.exit_status != 0 {
+        anyhow::bail!(
+            "remote command exited with status {}: {}",
+            output.exit_status,
+            output.stderr
+        );
+    }
+    Ok(output.stdout)
+}
+
+async fn exec_remote_command_output(
+    session_manager: Arc<SshSessionManager>,
+    command: &str,
+) -> anyhow::Result<RemoteCommandOutput> {
+    let mut channel = session_manager.open_channel().await?;
+    channel.exec(command).await?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_status = 0u32;
+
+    while let Some(event) = channel.recv().await {
+        match event {
+            ChannelEvent::Data(data) => stdout.extend(data),
+            ChannelEvent::ExtendedData { data, .. } => stderr.extend(data),
+            ChannelEvent::ExitStatus(status) => exit_status = status,
+            ChannelEvent::ExitSignal {
+                signal_name,
+                error_message,
+            } => {
+                anyhow::bail!("remote command failed with signal {signal_name}: {error_message}");
+            }
+            ChannelEvent::Eof | ChannelEvent::Close => break,
+        }
+    }
+
+    let _ = channel.close().await;
+    Ok(RemoteCommandOutput {
+        stdout: String::from_utf8_lossy(&stdout).to_string(),
+        stderr: String::from_utf8_lossy(&stderr).to_string(),
+        exit_status,
+    })
+}
+
+async fn remote_extract_has_conflict(
+    session_manager: Arc<SshSessionManager>,
+    command: &str,
+) -> anyhow::Result<bool> {
+    let output = exec_remote_command_output(session_manager, command).await?;
+    match output.exit_status {
+        0 => Ok(true),
+        1 => Ok(false),
+        status => anyhow::bail!(
+            "remote conflict check exited with status {}: {}",
+            status,
+            output.stderr
+        ),
+    }
+}
+
 /// 从 StoredConnection 构建 SshConnectConfig
 // ── FileManagerPanel ──────────────────────────────────────────
 
@@ -665,6 +861,8 @@ pub struct FileManagerPanel {
     is_dragging_over: bool,
     /// 终端当前工作目录缓存，用于首次连接和导航失败恢复
     working_dir_hint: Option<String>,
+    /// 当前远程解压任务
+    active_extract: Option<ActiveExtract>,
 }
 
 impl FileManagerPanel {
@@ -767,6 +965,7 @@ impl FileManagerPanel {
             progress_refresh_task: None,
             is_dragging_over: false,
             working_dir_hint: None,
+            active_extract: None,
         }
     }
 
@@ -2359,6 +2558,210 @@ impl FileManagerPanel {
         });
     }
 
+
+    fn extract_archive(
+        &mut self,
+        name: String,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_extract.is_some() {
+            window.push_notification(Notification::info(t!("FileManager.extract_running")), cx);
+            return;
+        }
+
+        let Some(command) =
+            build_remote_extract_command(&path, &name, ExtractConflictAction::Overwrite)
+        else {
+            window.push_notification(
+                Notification::error(t!("FileManager.extract_unsupported")),
+                cx,
+            );
+            return;
+        };
+        let Some(check_command) = build_remote_extract_conflict_check_command(&path, &name) else {
+            window.push_notification(
+                Notification::error(t!("FileManager.extract_unsupported")),
+                cx,
+            );
+            return;
+        };
+
+        let session_manager = self.session_manager.clone();
+        let view = cx.entity().clone();
+        let task = Tokio::spawn(cx, async move {
+            remote_extract_has_conflict(session_manager, &check_command).await
+        });
+
+        window
+            .spawn(cx, async move |cx| match task.await {
+                Ok(Ok(has_conflict)) => {
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        if has_conflict {
+                            this.show_extract_conflict_dialog(name, path, command, window, cx);
+                        } else {
+                            this.start_extract_archive(name, path, command, window, cx);
+                        }
+                    });
+                }
+                Ok(Err(error)) => {
+                    let message = t!("FileManager.extract_check_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |_this, window, cx| {
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+                Err(error) => {
+                    let message = t!("FileManager.extract_check_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |_this, window, cx| {
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+            })
+            .detach();
+    }
+
+    fn show_extract_conflict_dialog(
+        &mut self,
+        name: String,
+        path: String,
+        overwrite_command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(skip_command) =
+            build_remote_extract_command(&path, &name, ExtractConflictAction::SkipExisting)
+        else {
+            window.push_notification(
+                Notification::error(t!("FileManager.extract_unsupported")),
+                cx,
+            );
+            return;
+        };
+
+        let view = cx.entity().clone();
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let view_skip = view.clone();
+            let view_overwrite = view.clone();
+            let skip_name = name.clone();
+            let skip_path = path.clone();
+            let overwrite_name = name.clone();
+            let overwrite_path = path.clone();
+            let skip_command = skip_command.clone();
+            let overwrite_command = overwrite_command.clone();
+
+            dialog
+                .title(t!("FileManager.extract_conflict_title").to_string())
+                .w(px(380.))
+                .child(div().text_sm().child(t!(
+                    "FileManager.extract_conflict_message",
+                    name = name.clone()
+                )))
+                .child(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("extract-cancel")
+                                .label(t!("Common.cancel").to_string())
+                                .ghost()
+                                .on_click(|_, window, cx| {
+                                    window.close_dialog(cx);
+                                }),
+                        )
+                        .child(
+                            Button::new("extract-skip-existing")
+                                .label(t!("FileManager.extract_skip_existing").to_string())
+                                .ghost()
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view_skip.update(cx, |this, cx| {
+                                        this.start_extract_archive(
+                                            skip_name.clone(),
+                                            skip_path.clone(),
+                                            skip_command.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("extract-overwrite")
+                                .label(t!("Conflict.overwrite").to_string())
+                                .primary()
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view_overwrite.update(cx, |this, cx| {
+                                        this.start_extract_archive(
+                                            overwrite_name.clone(),
+                                            overwrite_path.clone(),
+                                            overwrite_command.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn start_extract_archive(
+        &mut self,
+        name: String,
+        path: String,
+        command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_extract.is_some() {
+            window.push_notification(Notification::info(t!("FileManager.extract_running")), cx);
+            return;
+        }
+
+        self.active_extract = Some(ActiveExtract {
+            name: name.clone(),
+            path: path.clone(),
+        });
+        cx.notify();
+
+        let session_manager = self.session_manager.clone();
+        let view = cx.entity().clone();
+        let task = Tokio::spawn(cx, async move {
+            exec_remote_command(session_manager, &command).await
+        });
+
+        window
+            .spawn(cx, async move |cx| match task.await {
+                Ok(Ok(_)) => {
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        this.active_extract = None;
+                        window.push_notification(
+                            Notification::success(t!("FileManager.extract_success")),
+                            cx,
+                        );
+                        this.refresh_dir(cx);
+                    });
+                }
+                Ok(Err(error)) => {
+                    let message = t!("FileManager.extract_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        this.active_extract = None;
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+                Err(error) => {
+                    let message = t!("FileManager.extract_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        this.active_extract = None;
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+            })
+            .detach();
+    }
+
     fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let targets = delete_targets_for_selection(
             &self.current_path,
@@ -3306,6 +3709,27 @@ impl FileManagerPanel {
                         this.open_remote_editor(path_for_edit.clone(), window, cx);
                     })),
             );
+
+            if archive_kind_for_name(name).is_some() {
+                let view_extract = view.clone();
+                let extract_name = name.to_string();
+                let extract_path = full_path.to_string();
+                menu = menu.item(
+                    PopupMenuItem::new(t!("FileManager.extract"))
+                        .icon(IconName::Unarchive)
+                        .on_click(window.listener_for(
+                            &view_extract,
+                            move |this, _, window, cx| {
+                                this.extract_archive(
+                                    extract_name.clone(),
+                                    extract_path.clone(),
+                                    window,
+                                    cx,
+                                );
+                            },
+                        )),
+                );
+            }
         }
 
         // 文件夹：在终端中 CD
@@ -3408,6 +3832,36 @@ impl FileManagerPanel {
             );
 
         menu
+    }
+
+
+    /// 渲染底部解压进度条
+    fn render_extract_progress(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(extract) = self.active_extract.as_ref() else {
+            return div().into_any_element();
+        };
+
+        h_flex()
+            .w_full()
+            .px_2()
+            .py_1()
+            .gap_2()
+            .items_center()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(Spinner::new().small())
+            .child(
+                div()
+                    .text_xs()
+                    .text_ellipsis()
+                    .flex_1()
+                    .child(format!(
+                        "{} {}",
+                        t!("FileManager.extract_running"),
+                        extract.name
+                    )),
+            )
+            .into_any_element()
     }
 
     /// 渲染底部传输进度条（紧凑型，适合侧边栏窄宽度）
@@ -3685,6 +4139,7 @@ impl FileManagerPanel {
         let scroll_handle = self.scroll_handle.clone();
         let is_loading = self.loading;
         let has_active_transfer = self.transfer_queue.has_active();
+        let has_active_extract = self.active_extract.is_some();
         let is_dragging = self.is_dragging_over;
 
         v_flex()
@@ -3834,9 +4289,12 @@ impl FileManagerPanel {
                         .when(is_dragging, |el| el.child(self.render_drop_overlay(cx))),
                 )
             })
-            // 底部传输进度条
+            // 底部传输进度条 / 解压状态
             .when(has_active_transfer, |el| {
                 el.child(self.render_transfer_progress(cx))
+            })
+            .when(!has_active_transfer && has_active_extract, |el| {
+                el.child(self.render_extract_progress(cx))
             })
     }
 }
@@ -4059,5 +4517,31 @@ mod tests {
 
         let single_selection = HashSet::from([0usize]);
         assert!(!super::should_use_context_selection(&single_selection, 0));
+    }
+}
+
+#[cfg(test)]
+mod extract_archive_tests {
+    use super::{
+        archive_kind_for_name, build_remote_extract_command, ExtractConflictAction,
+    };
+
+    #[test]
+    fn archive_kind_for_name_detects_common_suffixes() {
+        assert!(archive_kind_for_name("a.tar.gz").is_some());
+        assert!(archive_kind_for_name("b.ZIP").is_some());
+        assert!(archive_kind_for_name("c.txt").is_none());
+    }
+
+    #[test]
+    fn build_remote_extract_command_for_zip_overwrite() {
+        let command = build_remote_extract_command(
+            "/tmp/demo.zip",
+            "demo.zip",
+            ExtractConflictAction::Overwrite,
+        )
+        .expect("zip supported");
+        assert!(command.contains("unzip -o"));
+        assert!(command.contains("/tmp/demo.zip"));
     }
 }

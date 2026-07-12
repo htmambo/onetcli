@@ -10,6 +10,7 @@ mod db_tree_event;
 pub mod db_tree_view;
 pub mod er_diagram;
 mod import_export;
+pub mod search_shortcut;
 pub mod settings;
 mod sidebar;
 pub mod sql_editor;
@@ -25,7 +26,7 @@ pub mod table_designer_tab;
 pub use common::DatabaseFormEvent;
 pub use one_core::ai_chat::ask_ai::{AskAiButton, emit_ask_ai_event, init_ask_ai_notifier};
 pub use settings::{
-    DbViewSettings, LargeTextEditorOpenMode, current_db_undo_stack_size,
-    current_settings as current_db_view_settings, init_settings as init_db_view_settings,
-    set_db_view_settings, set_large_text_editor_open_mode,
+    DbViewFontSettings, DbViewSettings, LargeTextEditorOpenMode, current_db_undo_stack_size,
+    current_settings as current_db_view_settings, init_font_settings,
+    init_settings as init_db_view_settings, set_db_view_settings, set_large_text_editor_open_mode,
 };

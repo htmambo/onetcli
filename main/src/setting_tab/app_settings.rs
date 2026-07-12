@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use db_view::DbViewSettings;
+use db_view::{DbViewFontSettings, DbViewSettings};
 use gpui::{
     App, Pixels, SharedString, Size, Window, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, px,
@@ -31,7 +31,7 @@ use super::types::{
     ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode, DatabaseOpenMode,
     LargeTextCellEditorOpenMode,
 };
-use super::{hotkey, theme_utils};
+use super::{hotkey, locale, theme_utils};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -73,6 +73,15 @@ pub struct AppSettings {
     pub scrollbar_show: String,
     #[serde(default = "theme_utils::default_mono_font_family")]
     pub mono_font_family: String,
+    /// SQL 编辑器等宽字体
+    #[serde(default = "theme_utils::default_mono_font_family")]
+    pub sql_editor_font_family: String,
+    /// 表数据预览等宽字体
+    #[serde(default = "theme_utils::default_mono_font_family")]
+    pub table_preview_font_family: String,
+    /// 用户导入的本地字体文件路径
+    #[serde(default)]
+    pub custom_font_paths: Vec<String>,
     #[serde(default = "theme_utils::default_radius")]
     pub radius: f64,
     #[serde(default = "theme_utils::default_true")]
@@ -137,6 +146,9 @@ pub struct AppSettings {
     /// 数据库编辑器撤销栈容量，0表示禁用逐步撤销
     #[serde(default = "theme_utils::default_db_undo_stack_size")]
     pub db_undo_stack_size: usize,
+    /// SQL 查询默认最大返回行数，0 表示不限制（仅客户端截断关闭时仍可能很大）
+    #[serde(default = "theme_utils::default_sql_query_max_rows")]
+    pub sql_query_max_rows: u32,
     /// 是否使用 AI 自动生成会话标题
     #[serde(default)]
     pub ai_auto_generate_session_title: bool,
@@ -152,7 +164,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            locale: "zh-CN".to_string(),
+            locale: locale::LOCALE_SYSTEM.to_string(),
             theme_mode: "auto".to_string(),
             auto_switch_theme: false,
             enable_glass_effect: theme_utils::default_true(),
@@ -171,6 +183,9 @@ impl Default for AppSettings {
             theme_name: theme_utils::default_theme_name(),
             scrollbar_show: theme_utils::default_scrollbar_show(),
             mono_font_family: theme_utils::default_mono_font_family(),
+            sql_editor_font_family: theme_utils::default_mono_font_family(),
+            table_preview_font_family: theme_utils::default_mono_font_family(),
+            custom_font_paths: Vec::new(),
             radius: theme_utils::default_radius(),
             shadow: true,
             terminal_theme: theme_utils::default_terminal_theme(),
@@ -200,6 +215,7 @@ impl Default for AppSettings {
             enable_sql_auto_save: true,
             sql_auto_save_interval: theme_utils::default_auto_save_interval(),
             db_undo_stack_size: theme_utils::default_db_undo_stack_size(),
+            sql_query_max_rows: theme_utils::default_sql_query_max_rows(),
             ai_auto_generate_session_title: false,
             system_hotkey_macos: hotkey::default_system_hotkey_macos(),
             system_hotkey_other: hotkey::default_system_hotkey_other(),
@@ -544,7 +560,7 @@ impl AppSettings {
     }
 
     pub fn apply(&self, cx: &mut App) {
-        gpui_component::set_locale(&self.locale);
+        gpui_component::set_locale(locale::effective_locale_for_setting(&self.locale));
         self.apply_theme_preferences(None, cx);
         set_recovery_scrollback_lines(cx, self.normalized_terminal_recovery_scrollback_lines());
 
@@ -570,6 +586,14 @@ impl AppSettings {
             DbViewSettings {
                 db_undo_stack_size: self.db_undo_stack_size,
                 large_text_editor_open_mode: self.large_text_cell_editor_open_mode.into(),
+                sql_query_max_rows: self.sql_query_max_rows,
+            },
+        );
+        db_view::init_font_settings(
+            cx,
+            DbViewFontSettings {
+                sql_editor_font_family: self.sql_editor_font_family.clone().into(),
+                table_preview_font_family: self.table_preview_font_family.clone().into(),
             },
         );
     }

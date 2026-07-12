@@ -963,6 +963,21 @@ impl AiChatPanel {
                             return;
                         }
                     }
+                    StreamEvent::ReasoningDelta { full_reasoning, .. } => {
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.engine
+                                        .update_streaming_reasoning(&msg_id, full_reasoning);
+                                    this.engine.scroll_to_bottom();
+                                    cx.notify();
+                                })
+                            });
+                        } else {
+                            return;
+                        }
+                    }
                     StreamEvent::Completed { full_content } => {
                         if let Some(entity) = this.upgrade() {
                             let msg_id = assistant_msg_id.clone();
@@ -1117,7 +1132,7 @@ impl AiChatPanel {
             )
     }
 
-    fn render_messages(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_messages(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let code_block_actions = self.engine.code_block_actions.clone();
 
         div()
@@ -1132,7 +1147,7 @@ impl AiChatPanel {
             .child(
                 v_flex().w_full().gap_4().children(
                     self.engine.messages.iter().map(|msg| {
-                        ChatMessageRenderer::render_message(msg, &code_block_actions, cx)
+                        ChatMessageRenderer::render_message(msg, &code_block_actions, window, cx)
                     }),
                 ),
             )

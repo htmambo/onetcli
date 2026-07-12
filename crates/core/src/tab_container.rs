@@ -1171,6 +1171,10 @@ pub struct TabContainer {
     tab_list: Option<Entity<ListState<TabListDelegate>>>,
     closing_tabs: HashSet<SharedString>,
     show_window_controls: bool,
+    /// 窗口置顶切换回调，由上层注入；为 None 时不渲染置顶按钮
+    on_toggle_always_on_top: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+    /// 当前窗口置顶状态读取器，由上层注入
+    is_always_on_top: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     window_close_handler: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
     tab_bar_trailing_view: Option<AnyView>,
     tab_list_header_action_label: Option<SharedString>,
@@ -1207,6 +1211,8 @@ impl TabContainer {
             tab_list: None,
             closing_tabs: HashSet::new(),
             show_window_controls: false,
+            on_toggle_always_on_top: None,
+            is_always_on_top: None,
             window_close_handler: None,
             tab_bar_trailing_view: None,
             tab_list_header_action_label: None,
@@ -1268,6 +1274,18 @@ impl TabContainer {
 
     pub fn with_window_controls(mut self, show: bool) -> Self {
         self.show_window_controls = show;
+        self
+    }
+
+    /// 注入窗口置顶切换逻辑：`on_toggle` 在用户点击置顶按钮时调用，
+    /// `is_active` 在每次渲染时被调用以决定按钮的视觉状态。
+    pub fn with_always_on_top_control(
+        mut self,
+        on_toggle: Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>,
+        is_active: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.on_toggle_always_on_top = Some(on_toggle);
+        self.is_always_on_top = Some(is_active);
         self
     }
 
@@ -3056,6 +3074,14 @@ impl TabContainer {
             .items_center()
             .flex_shrink_0()
             .h_full()
+            .when_some(self.on_toggle_always_on_top.clone(), |el, on_toggle| {
+                let is_active = self
+                    .is_always_on_top
+                    .as_ref()
+                    .map(|probe| probe())
+                    .unwrap_or(false);
+                el.child(self.render_always_on_top_button(on_toggle, is_active))
+            })
             .child(self.render_control_button(
                 "minimize",
                 IconName::WindowMinimize,
@@ -3160,6 +3186,44 @@ impl TabContainer {
             })
             .child(Icon::new(icon).with_size(Size::Small))
     }
+
+    /// 渲染窗口置顶按钮，位于最小化按钮左侧。
+    /// 该按钮不声明系统窗口控制区，点击时由上层注入的回调完成切换。
+    fn render_always_on_top_button(
+        &self,
+        on_toggle: Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>,
+        is_active: bool,
+    ) -> impl IntoElement {
+        // 置顶激活时用琥珀色高亮，提示当前窗口已置顶
+        let icon_color = if is_active {
+            gpui::rgb(0xfbbf24)
+        } else {
+            gpui::rgb(0xffffff)
+        };
+
+        div()
+            .id("always-on-top")
+            .flex()
+            .w(px(34.0))
+            .h_full()
+            .flex_shrink_0()
+            .justify_center()
+            .content_center()
+            .items_center()
+            .text_color(icon_color)
+            .hover(move |style| style.bg(gpui::rgb(0x3a3a3a)).text_color(icon_color))
+            .active(move |style| style.bg(gpui::rgb(0x2a2a2a)).text_color(icon_color))
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+            })
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                on_toggle(window, cx);
+            })
+            .child(Icon::new(IconName::Pin).with_size(Size::Small))
+    }
+
 }
 
 impl Focusable for TabContainer {

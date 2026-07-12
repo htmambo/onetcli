@@ -2,11 +2,19 @@
 //!
 //! 本模块实现 FileListPanel 右键菜单的所有功能
 
-use crate::{FileListPanelEvent, PanelSide, SftpView, SftpViewEvent, join_remote_path};
-use gpui::{AppContext, ClipboardItem, Context, ParentElement, Styled, Window};
+use crate::{
+    ActiveExtract, ExtractConflictAction, FileListPanelEvent, PanelSide, SftpView, SftpViewEvent,
+    build_remote_extract_command, build_remote_extract_conflict_check_command, exec_remote_command,
+    join_remote_path, remote_extract_has_conflict,
+};
+use gpui::{
+    AppContext, ClipboardItem, Context, ParentElement, Styled, Window, div, px,
+};
 use gpui_component::{
     WindowExt,
+    button::{Button, ButtonVariants as _},
     dialog::DialogButtonProps,
+    h_flex,
     input::{Input, InputState},
     notification::Notification,
     v_flex,
@@ -14,7 +22,9 @@ use gpui_component::{
 use one_core::gpui_tokio::Tokio;
 use rust_i18n::t;
 use sftp::SftpClient;
+use ssh::SshSessionManager;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 fn is_valid_entry_name(name: &str) -> bool {
     !name.is_empty()
@@ -23,6 +33,205 @@ fn is_valid_entry_name(name: &str) -> bool {
         && !name.contains('/')
         && !name.contains('\\')
         && !name.contains('\0')
+}
+
+impl SftpView {
+    pub(crate) fn extract_archive(
+        &mut self,
+        name: String,
+        full_path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_extract.is_some() {
+            window.push_notification(Notification::info(t!("Extract.running")), cx);
+            return;
+        }
+
+        let Some(command) =
+            build_remote_extract_command(&full_path, &name, ExtractConflictAction::Overwrite)
+        else {
+            window.push_notification(Notification::error(t!("Error.extract_unsupported")), cx);
+            return;
+        };
+        let Some(check_command) =
+            build_remote_extract_conflict_check_command(&full_path, &name)
+        else {
+            window.push_notification(Notification::error(t!("Error.extract_unsupported")), cx);
+            return;
+        };
+
+        let session_manager = Arc::new(SshSessionManager::new(self.sftp_config.clone()));
+        let view = cx.entity().clone();
+        let task = Tokio::spawn(cx, async move {
+            remote_extract_has_conflict(session_manager, &check_command).await
+        });
+
+        window
+            .spawn(cx, async move |cx| match task.await {
+                Ok(Ok(has_conflict)) => {
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        if has_conflict {
+                            this.show_extract_conflict_dialog(name, full_path, command, window, cx);
+                        } else {
+                            this.start_extract_archive(name, full_path, command, window, cx);
+                        }
+                    });
+                }
+                Ok(Err(error)) => {
+                    let message = t!("Error.extract_check_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |_this, window, cx| {
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+                Err(error) => {
+                    let message = t!("Error.extract_check_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |_this, window, cx| {
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+            })
+            .detach();
+    }
+
+    fn show_extract_conflict_dialog(
+        &mut self,
+        name: String,
+        full_path: String,
+        overwrite_command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(skip_command) =
+            build_remote_extract_command(&full_path, &name, ExtractConflictAction::SkipExisting)
+        else {
+            window.push_notification(Notification::error(t!("Error.extract_unsupported")), cx);
+            return;
+        };
+
+        let view = cx.entity().clone();
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let view_skip = view.clone();
+            let view_overwrite = view.clone();
+            let skip_name = name.clone();
+            let skip_path = full_path.clone();
+            let overwrite_name = name.clone();
+            let overwrite_path = full_path.clone();
+            let skip_command = skip_command.clone();
+            let overwrite_command = overwrite_command.clone();
+
+            dialog
+                .title(t!("Extract.conflict_title").to_string())
+                .w(px(380.))
+                .child(
+                    div()
+                        .text_sm()
+                        .child(t!("Extract.conflict_message", name = name.clone())),
+                )
+                .child(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("extract-cancel")
+                                .label(t!("Common.cancel").to_string())
+                                .ghost()
+                                .on_click(|_, window, cx| {
+                                    window.close_dialog(cx);
+                                }),
+                        )
+                        .child(
+                            Button::new("extract-skip-existing")
+                                .label(t!("Extract.skip_existing").to_string())
+                                .ghost()
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view_skip.update(cx, |this, cx| {
+                                        this.start_extract_archive(
+                                            skip_name.clone(),
+                                            skip_path.clone(),
+                                            skip_command.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("extract-overwrite")
+                                .label(t!("Conflict.overwrite").to_string())
+                                .primary()
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let _ = view_overwrite.update(cx, |this, cx| {
+                                        this.start_extract_archive(
+                                            overwrite_name.clone(),
+                                            overwrite_path.clone(),
+                                            overwrite_command.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn start_extract_archive(
+        &mut self,
+        name: String,
+        full_path: String,
+        command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_extract.is_some() {
+            window.push_notification(Notification::info(t!("Extract.running")), cx);
+            return;
+        }
+
+        self.active_extract = Some(ActiveExtract {
+            name: name.clone(),
+            path: full_path.clone(),
+        });
+        cx.notify();
+
+        let session_manager = Arc::new(SshSessionManager::new(self.sftp_config.clone()));
+        let view = cx.entity().clone();
+        let task = Tokio::spawn(cx, async move {
+            exec_remote_command(session_manager, &command).await
+        });
+
+        window
+            .spawn(cx, async move |cx| match task.await {
+                Ok(Ok(_)) => {
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        this.active_extract = None;
+                        window.push_notification(
+                            Notification::success(t!("Notification.extract_success")),
+                            cx,
+                        );
+                        this.refresh_remote_dir(cx);
+                    });
+                }
+                Ok(Err(error)) => {
+                    let message = t!("Error.extract_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        this.active_extract = None;
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+                Err(error) => {
+                    let message = t!("Error.extract_failed", error = error).to_string();
+                    let _ = view.update_in(cx, |this, window, cx| {
+                        this.active_extract = None;
+                        window.push_notification(Notification::error(message), cx);
+                    });
+                }
+            })
+            .detach();
+    }
 }
 
 /// 右键菜单处理 trait
@@ -184,6 +393,9 @@ impl ContextMenuHandler for SftpView {
             }
             FileListPanelEvent::Edit { full_path } => {
                 self.open_remote_editor(full_path.clone(), window, cx);
+            }
+            FileListPanelEvent::Extract { name, full_path } => {
+                self.extract_archive(name.clone(), full_path.clone(), window, cx);
             }
             FileListPanelEvent::ChangePermissions { name, full_path } => {
                 self.change_permissions(name, full_path, window, cx);

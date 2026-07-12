@@ -157,6 +157,8 @@ pub struct EditorTableDelegate {
     filtered_row_indices: Option<Vec<usize>>,
     /// Column filter conditions: col_ix -> selected values
     column_filters: HashMap<usize, HashSet<String>>,
+    /// Local table data search query. Empty means no row search.
+    row_search_query: String,
     /// Whether cells are editable
     editable: bool,
     /// Whether the table is currently loading data
@@ -253,6 +255,7 @@ impl Clone for EditorTableDelegate {
             active_filter_columns: self.active_filter_columns.clone(),
             filtered_row_indices: self.filtered_row_indices.clone(),
             column_filters: self.column_filters.clone(),
+            row_search_query: self.row_search_query.clone(),
             editable: self.editable,
             loading: self.loading,
             database_type: self.database_type,
@@ -338,6 +341,7 @@ impl EditorTableDelegate {
             active_filter_columns: HashSet::new(),
             filtered_row_indices: None,
             column_filters: HashMap::new(),
+            row_search_query: String::new(),
             editable,
             loading: false,
             database_type,
@@ -1059,11 +1063,7 @@ impl EditorTableDelegate {
             .collect();
         self.clear_changes();
 
-        if !self.column_filters.is_empty() {
-            self.recalculate_filtered_indices();
-        } else {
-            self.filtered_row_indices = None;
-        }
+        self.recalculate_filtered_indices();
     }
 
     /// Revert all changes and restore to original state
@@ -1086,9 +1086,7 @@ impl EditorTableDelegate {
         self.clear_changes();
 
         // Recalculate filter results with restored data
-        if !self.column_filters.is_empty() {
-            self.recalculate_filtered_indices();
-        }
+        self.recalculate_filtered_indices();
     }
 
     /// Check if there are any pending changes
@@ -1254,12 +1252,34 @@ impl EditorTableDelegate {
     pub fn clear_all_filters(&mut self) {
         self.column_filters.clear();
         self.active_filter_columns.clear();
-        self.filtered_row_indices = None;
+        self.recalculate_filtered_indices();
     }
 
-    /// 重新计算筛选后的行索引（多列 AND 组合）
+    pub fn set_row_search_query(&mut self, query: impl Into<String>) {
+        self.row_search_query = normalize_row_search_query(&query.into());
+        self.recalculate_filtered_indices();
+    }
+
+    fn has_active_filters(&self) -> bool {
+        !self.column_filters.is_empty() || !self.row_search_query.is_empty()
+    }
+
+    fn row_matches_column_filters(&self, row: &[Option<String>]) -> bool {
+        self.column_filters
+            .iter()
+            .all(|(&col_ix, selected_values)| {
+                let cell_value = row
+                    .get(col_ix)
+                    .and_then(|opt| opt.as_ref())
+                    .map(|s| s.as_str())
+                    .unwrap_or("NULL");
+                selected_values.contains(cell_value)
+            })
+    }
+
+    /// 重新计算筛选后的行索引（列筛选和本地搜索使用 AND 组合）
     fn recalculate_filtered_indices(&mut self) {
-        if self.column_filters.is_empty() {
+        if !self.has_active_filters() {
             self.filtered_row_indices = None;
             return;
         }
@@ -1268,29 +1288,32 @@ impl EditorTableDelegate {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, row)| {
-                // 所有筛选条件都必须满足（AND）
-                self.column_filters
-                    .iter()
-                    .all(|(&col_ix, selected_values)| {
-                        let cell_value = row
-                            .get(col_ix)
-                            .and_then(|opt| opt.as_ref())
-                            .map(|s| s.as_str())
-                            .unwrap_or("NULL");
-                        selected_values.contains(cell_value)
-                    })
-            })
+            .filter(|(_, row)| self.row_matches_column_filters(row))
+            .filter(|(_, row)| row_matches_search_query(row, &self.row_search_query))
             .map(|(ix, _)| ix)
             .collect();
 
-        // 如果筛选后的行数等于总行数，说明没有实际筛选效果
-        if filtered_indices.len() == self.rows.len() {
+
+        // 若无实际筛选效果且无搜索词，则清除过滤索引
+        if filtered_indices.len() == self.rows.len() && self.row_search_query.is_empty() {
             self.filtered_row_indices = None;
         } else {
             self.filtered_row_indices = Some(filtered_indices);
         }
     }
+}
+
+
+fn normalize_row_search_query(query: &str) -> String {
+    query.trim().to_lowercase()
+}
+
+fn row_matches_search_query(row: &[Option<String>], normalized_query: &str) -> bool {
+    normalized_query.is_empty()
+        || row.iter().any(|cell| {
+            let value = cell.as_deref().unwrap_or("NULL").to_lowercase();
+            value.contains(normalized_query)
+        })
 }
 
 impl EditTableDelegate for EditorTableDelegate {
@@ -1894,12 +1917,15 @@ impl EditTableDelegate for EditorTableDelegate {
                 .flatten()
         });
 
+        let font_family = crate::settings::current_table_preview_font_family(cx);
         match value {
             None => div()
+                .font_family(font_family.clone())
                 .text_color(cx.theme().muted_foreground.opacity(0.5))
                 .italic()
                 .child("NULL"),
             Some(s) => div()
+                .font_family(font_family)
                 .w_full()
                 .overflow_hidden()
                 .whitespace_nowrap()
@@ -2462,7 +2488,7 @@ impl EditTableDelegate for EditorTableDelegate {
                 selected_values.contains(cell_value)
             });
 
-            if passes_other_filters {
+            if passes_other_filters && row_matches_search_query(row, &self.row_search_query) {
                 let value = row
                     .get(actual_col_ix)
                     .and_then(|opt| opt.clone())
@@ -2722,6 +2748,7 @@ impl EditorTableDelegate {
 
 #[cfg(test)]
 mod tests {
+    use super::{normalize_row_search_query, row_matches_search_query};
     use super::*;
     use one_ui::edit_table::ColumnSort;
 
@@ -2766,6 +2793,7 @@ mod tests {
             active_filter_columns: HashSet::new(),
             filtered_row_indices: None,
             column_filters: HashMap::new(),
+            row_search_query: String::new(),
             editable: true,
             loading: false,
             database_type: DatabaseType::SQLite,
@@ -3030,4 +3058,24 @@ mod tests {
         );
         assert!(!delegate.cell_changes.contains_key(&(0, 1)));
     }
+
+    #[test]
+    fn row_search_normalizes_whitespace_and_case() {
+        assert_eq!(normalize_row_search_query("  ALIce  "), "alice");
+    }
+
+    #[test]
+    fn row_search_matches_cells_case_insensitively() {
+        let row = vec![Some("1".to_string()), Some("Alice Zhang".to_string())];
+        assert!(row_matches_search_query(&row, "alice"));
+        assert!(row_matches_search_query(&row, "zhang"));
+        assert!(!row_matches_search_query(&row, "bob"));
+    }
+
+    #[test]
+    fn row_search_matches_null_cells() {
+        let row = vec![Some("1".to_string()), None];
+        assert!(row_matches_search_query(&row, "null"));
+    }
+
 }

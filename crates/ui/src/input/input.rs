@@ -32,6 +32,31 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
     (bg, fg)
 }
 
+fn should_handle_vertical_navigation(is_multi_line: bool, context_menu_open: bool) -> bool {
+    is_multi_line || context_menu_open
+}
+
+#[cfg(test)]
+mod vertical_nav_tests {
+    use super::should_handle_vertical_navigation;
+
+    #[test]
+    fn single_line_input_handles_vertical_navigation_when_menu_is_open() {
+        assert!(should_handle_vertical_navigation(false, true));
+    }
+
+    #[test]
+    fn single_line_input_without_menu_keeps_vertical_navigation_for_parent() {
+        assert!(!should_handle_vertical_navigation(false, false));
+    }
+
+    #[test]
+    fn multi_line_input_always_handles_vertical_navigation() {
+        assert!(should_handle_vertical_navigation(true, false));
+        assert!(should_handle_vertical_navigation(true, true));
+    }
+}
+
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
@@ -305,6 +330,10 @@ impl RenderOnce for Input {
 
         let state = self.state.read(cx);
         let focused = state.focus_handle.is_focused(window) && !state.disabled;
+        let handle_vertical_navigation = should_handle_vertical_navigation(
+            state.mode.is_multi_line(),
+            state.is_context_menu_open(cx),
+        );
         let gap_x = match self.size {
             Size::Small => px(4.),
             Size::Large => px(8.),
@@ -362,10 +391,12 @@ impl RenderOnce for Input {
             .on_action(window.listener_for(&self.state, InputState::right))
             .on_action(window.listener_for(&self.state, InputState::select_left))
             .on_action(window.listener_for(&self.state, InputState::select_right))
-            .when(state.mode.is_multi_line(), |this| {
+            .when(handle_vertical_navigation, |this| {
                 this.on_action(window.listener_for(&self.state, InputState::up))
                     .on_action(window.listener_for(&self.state, InputState::down))
-                    .on_action(window.listener_for(&self.state, InputState::select_up))
+            })
+            .when(state.mode.is_multi_line(), |this| {
+                this.on_action(window.listener_for(&self.state, InputState::select_up))
                     .on_action(window.listener_for(&self.state, InputState::select_down))
                     .on_action(window.listener_for(&self.state, InputState::page_up))
                     .on_action(window.listener_for(&self.state, InputState::page_down))

@@ -20,6 +20,7 @@ use crate::import_export::table_export_view::DataExportView;
 use crate::settings::{LargeTextEditorOpenMode, current_settings as current_db_view_settings};
 use crate::sql_editor::SqlEditor;
 use crate::table_data::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
+use crate::search_shortcut::{DB_SEARCH_CONTEXT, FocusSearchInput, focus_search_input};
 use crate::table_data::filter_editor::{FilterEditorEvent, TableFilterEditor, TableSchema};
 use crate::table_data::results_delegate::{EditorTableDelegate, RowChange};
 use chrono::Local;
@@ -29,6 +30,7 @@ use db::{
 };
 use gpui_component::button::ButtonVariants;
 use gpui_component::dialog::DialogButtonProps;
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::tab_container::TabContainer;
@@ -365,6 +367,10 @@ pub struct DataGrid {
     filter_editor: Entity<TableFilterEditor>,
     /// 过滤器事件订阅
     _filter_sub: Option<Subscription>,
+    /// 当前页本地搜索
+    search_input: Entity<InputState>,
+    /// 搜索框事件订阅
+    _search_sub: Option<Subscription>,
     /// 隐藏的列（本地持久化）
     hidden_columns: HashSet<SharedString>,
     /// 列可见性是否已加载
@@ -400,6 +406,11 @@ impl DataGrid {
         });
         let focus_handle = cx.focus_handle();
         let filter_editor = cx.new(|cx| TableFilterEditor::new(window, cx));
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("TableDataGrid.search_placeholder").to_string())
+                .clean_on_escape()
+        });
         let table_data_info = cx.new(|_| TableDataInfo::default());
 
         let mut result = Self {
@@ -410,6 +421,8 @@ impl DataGrid {
             table_data_info,
             filter_editor,
             _filter_sub: None,
+            search_input,
+            _search_sub: None,
             hidden_columns: HashSet::new(),
             column_visibility_loaded: false,
             is_large_text_editor_sidebar_open: false,
@@ -418,6 +431,7 @@ impl DataGrid {
         result.bind_table_event(window, cx);
         if is_table_data {
             result.bind_filter_event(window, cx);
+            result.bind_search_event(window, cx);
             result.load_data_with_clauses(1, cx);
         }
         result
@@ -454,6 +468,40 @@ impl DataGrid {
         );
         self._filter_sub = Some(sub);
     }
+
+    fn bind_search_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let sub = cx.subscribe_in(
+            &self.search_input,
+            window,
+            |this: &mut DataGrid, input, evt: &InputEvent, _window, cx| {
+                if let InputEvent::Change = evt {
+                    let query = input.read(cx).text().to_string();
+                    this.apply_row_search_query(query, cx);
+                }
+            },
+        );
+        self._search_sub = Some(sub);
+    }
+
+    fn apply_row_search_query(&mut self, query: String, cx: &mut Context<Self>) {
+        self.table.update(cx, |state, cx| {
+            state.delegate_mut().set_row_search_query(query);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    fn on_action_focus_search(
+        &mut self,
+        _: &FocusSearchInput,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.config.usage == DataGridUsage::TableData {
+            focus_search_input(&self.search_input, window, cx);
+        }
+    }
+
 
     fn apply_column_visibility(&self, cx: &mut App) {
         self.table.update(cx, |state, cx| {
@@ -1653,7 +1701,8 @@ impl DataGrid {
     }
 
     pub fn has_unsaved_changes(&self, cx: &App) -> bool {
-        !self.get_changes(cx).is_empty()
+        let table = self.table.read(cx);
+        table.editing_cell().is_some() || !table.delegate().get_changes().is_empty()
     }
 
     pub fn get_page_info(&self, cx: &App) -> (usize, usize) {
@@ -1928,6 +1977,9 @@ impl DataGrid {
     }
 
     pub fn save_changes(&self, window: &mut Window, cx: &mut App) {
+        self.table.update(cx, |state, cx| {
+            state.commit_cell_edit(window, cx);
+        });
         self.handle_save_changes(&gpui::ClickEvent::default(), window, cx);
     }
 
@@ -2484,6 +2536,19 @@ impl DataGrid {
                     .disabled(loading)
                     .on_click(cx.listener(Self::handle_toolbar_refresh)),
             )
+            .when(self.config.usage == DataGridUsage::TableData, |this| {
+                this.child(
+                    div().w(px(220.)).child(
+                        Input::new(&self.search_input)
+                            .prefix(
+                                Icon::new(IconName::Search).text_color(cx.theme().muted_foreground),
+                            )
+                            .cleanable(true)
+                            .small()
+                            .w_full(),
+                    ),
+                )
+            })
             .when(editable, |this| {
                 this.child(
                     Button::new("add-row")
@@ -2960,6 +3025,9 @@ impl Render for DataGrid {
                     .on_action(cx.listener(Self::handle_page_change_500))
                     .on_action(cx.listener(Self::handle_page_change_1000))
             })
+            .track_focus(&self.focus_handle)
+            .key_context(DB_SEARCH_CONTEXT)
+            .on_action(cx.listener(Self::on_action_focus_search))
             .size_full()
             .gap_0()
             .child(self.render_toolbar(window, cx))
@@ -2999,6 +3067,8 @@ impl Clone for DataGrid {
             table_data_info: self.table_data_info.clone(),
             filter_editor: self.filter_editor.clone(),
             _filter_sub: None,
+            search_input: self.search_input.clone(),
+            _search_sub: None,
             hidden_columns: self.hidden_columns.clone(),
             column_visibility_loaded: self.column_visibility_loaded,
             is_large_text_editor_sidebar_open: self.is_large_text_editor_sidebar_open,

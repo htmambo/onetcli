@@ -91,6 +91,38 @@ where
     Ok(())
 }
 
+pub(crate) async fn download_update_file_from_sources<F>(
+    http_client: Arc<dyn HttpClient>,
+    download_urls: &[String],
+    download_path: &Path,
+    mut on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64, Option<u64>),
+{
+    let mut last_error = None;
+    for download_url in download_urls {
+        match download_update_file(
+            http_client.clone(),
+            download_url,
+            download_path,
+            |done, total| {
+                on_progress(done, total);
+            },
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                let _ = std::fs::remove_file(download_path);
+                last_error = Some(err);
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "缺少可用的更新下载源".to_string()))
+}
+
 pub(crate) fn build_download_path(version: &str, download_url: &str) -> Result<PathBuf, String> {
     let file_name = download_file_name(version, download_url);
     let dir = std::env::temp_dir().join("omnihub-update");
@@ -173,7 +205,12 @@ async fn cleanup_old_downloads(dir: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::download_file_name;
+    use std::sync::Arc;
+
+    use gpui::http_client::HttpClient;
+
+    use super::{download_file_name, download_update_file_from_sources};
+    use crate::update::test_support::FakeHttpClient;
 
     #[test]
     fn download_file_name_preserves_tar_gz_suffix() {
@@ -193,5 +230,32 @@ mod tests {
         );
 
         assert_eq!(file_name, "omnihub-update-0.3.2.zip");
+    }
+
+    #[tokio::test]
+    async fn download_update_file_from_sources_falls_back_to_second_url() {
+        let temp_dir = tempfile::TempDir::new().expect("创建临时目录失败");
+        let download_path = temp_dir.path().join("omnihub.tar.gz");
+        let client = Arc::new(FakeHttpClient::new(vec![
+            FakeHttpClient::response(503, "unavailable"),
+            FakeHttpClient::response(200, "payload-ok"),
+        ]));
+        let http_client: Arc<dyn HttpClient> = client.clone();
+
+        download_update_file_from_sources(
+            http_client,
+            &[
+                "https://primary.example/omnihub.tar.gz".to_string(),
+                "https://fallback.example/omnihub.tar.gz".to_string(),
+            ],
+            &download_path,
+            |_, _| {},
+        )
+        .await
+        .expect("第二源应下载成功");
+
+        let content = std::fs::read_to_string(&download_path).expect("读取下载文件失败");
+        assert_eq!(content, "payload-ok");
+        assert_eq!(client.take_requests().len(), 2);
     }
 }

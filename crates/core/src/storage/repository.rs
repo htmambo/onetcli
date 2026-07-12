@@ -868,6 +868,23 @@ impl ConnectionRepository {
         })
     }
 
+    /// 同步写回后若本地已有新编辑，一并抬高 updated_at，避免被 last_synced_at 吞掉 pending 状态。
+    pub fn update_sync_status_with_updated_at(
+        &self,
+        id: i64,
+        cloud_id: Option<String>,
+        last_synced_at: Option<i64>,
+        updated_at: i64,
+    ) -> Result<()> {
+        self.conn.with_connection(|conn| {
+            conn.execute(
+                "UPDATE connections SET cloud_id = ?1, last_synced_at = ?2, updated_at = ?3 WHERE id = ?4",
+                params![cloud_id, last_synced_at, updated_at, id],
+            )?;
+            Ok(())
+        })
+    }
+
     /// 查询需要同步的连接（sync_enabled=true 且 cloud_id 为空或 updated_at > last_synced_at）
     pub fn list_pending_sync(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {

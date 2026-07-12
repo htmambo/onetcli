@@ -42,6 +42,13 @@ use one_core::storage::{
     Workspace, WorkspaceRepository,
 };
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
+use port_forwarding::{
+    DynamicForwardingRequest, LocalForwardingRequest, PortForwardingRuntime,
+    build_dynamic_forwarding_request, build_local_forwarding_request,
+};
+use port_forwarding_view::{PortForwardingFormWindow, PortForwardingFormWindowConfig};
+use remote_desktop_view::remote_desktop_form::{RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig};
+use one_core::storage::RemoteDesktopProtocol;
 use redis_view::{RedisFormWindow, RedisFormWindowConfig};
 use rust_i18n::t;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
@@ -283,6 +290,8 @@ pub struct HomePage {
     master_key_unlock_prompt_pending: bool,
     /// 防止主密钥对话框被启动提示和用户点击重复打开。
     master_key_dialog_open: bool,
+    /// 端口转发运行时（本地/动态 SOCKS 隧道）
+    port_forwarding_runtime: std::sync::Arc<tokio::sync::Mutex<PortForwardingRuntime>>,
 }
 
 impl HomePage {
@@ -359,6 +368,7 @@ impl HomePage {
             scroll_handle: ScrollHandle::new(),
             master_key_unlock_prompt_pending: false,
             master_key_dialog_open: false,
+            port_forwarding_runtime: std::sync::Arc::new(tokio::sync::Mutex::new(PortForwardingRuntime::new())),
         };
 
         // 异步加载工作区
@@ -1896,6 +1906,12 @@ impl HomePage {
                 let config = RedisFormWindowConfig {
                     editing_connection: Some(connection),
                     workspaces: self.workspaces.clone(),
+                    ssh_connections: self
+                        .connections
+                        .iter()
+                        .filter(|connection| connection.connection_type == ConnectionType::SshSftp)
+                        .cloned()
+                        .collect(),
                 };
 
                 open_popup_window(
@@ -1933,7 +1949,60 @@ impl HomePage {
                     cx,
                 );
             }
+            ConnectionType::PortForwarding => {
+                let ssh_connections = self
+                    .connections
+                    .iter()
+                    .filter(|connection| connection.connection_type == ConnectionType::SshSftp)
+                    .cloned()
+                    .collect();
+                let config = PortForwardingFormWindowConfig {
+                    editing_connection: Some(connection),
+                    ssh_connections,
+                    workspaces: self.workspaces.clone(),
+                };
+
+                open_popup_window(
+                    window,
+                    PopupWindowOptions::new(t!("PortForwarding.edit").to_string()).size(700.0, 520.0),
+                    move |window, cx| cx.new(|cx| PortForwardingFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+                        ConnectionType::Rdp => {
+                let config = RemoteDesktopFormWindowConfig {
+                    protocol: RemoteDesktopProtocol::Rdp,
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+                open_popup_window(
+                    window,
+                    PopupWindowOptions::new(
+                        t!("RemoteDesktopForm.title_edit", protocol = "RDP").to_string(),
+                    )
+                    .size(700.0, 560.0),
+                    move |window, cx| cx.new(|cx| RemoteDesktopFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
+            ConnectionType::Vnc => {
+                let config = RemoteDesktopFormWindowConfig {
+                    protocol: RemoteDesktopProtocol::Vnc,
+                    editing_connection: Some(connection),
+                    workspaces: self.workspaces.clone(),
+                };
+                open_popup_window(
+                    window,
+                    PopupWindowOptions::new(
+                        t!("RemoteDesktopForm.title_edit", protocol = "VNC").to_string(),
+                    )
+                    .size(700.0, 560.0),
+                    move |window, cx| cx.new(|cx| RemoteDesktopFormWindow::new(config, window, cx)),
+                    cx,
+                );
+            }
             _ => {}
+
         }
     }
 
@@ -2383,6 +2452,12 @@ impl HomePage {
         let config = RedisFormWindowConfig {
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
+            ssh_connections: self
+                .connections
+                .iter()
+                .filter(|connection| connection.connection_type == ConnectionType::SshSftp)
+                .cloned()
+                .collect(),
         };
 
         self.editing_connection_id = None;
@@ -2462,6 +2537,200 @@ impl HomePage {
             move |window, cx| cx.new(|cx| SerialFormWindow::new(config, window, cx)),
             cx,
         );
+    }
+
+
+    pub(crate) fn show_port_forwarding_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
+            return;
+        }
+
+        let editing_connection = self.editing_connection_id.and_then(|id| {
+            self.connections
+                .iter()
+                .find(|c| c.id == Some(id) && c.connection_type == ConnectionType::PortForwarding)
+                .cloned()
+        });
+        let ssh_connections = self
+            .connections
+            .iter()
+            .filter(|connection| connection.connection_type == ConnectionType::SshSftp)
+            .cloned()
+            .collect();
+
+        let config = PortForwardingFormWindowConfig {
+            editing_connection,
+            ssh_connections,
+            workspaces: self.workspaces.clone(),
+        };
+
+        self.editing_connection_id = None;
+
+        open_popup_window(
+            window,
+            PopupWindowOptions::new(if config.editing_connection.is_some() {
+                t!("PortForwarding.edit").to_string()
+            } else {
+                t!("PortForwarding.new").to_string()
+            })
+            .size(700.0, 520.0),
+            move |window, cx| cx.new(|cx| PortForwardingFormWindow::new(config, window, cx)),
+            cx,
+        );
+    }
+
+
+    pub(crate) fn show_remote_desktop_form(
+        &mut self,
+        protocol: RemoteDesktopProtocol,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
+            return;
+        }
+        let connection_type = protocol.connection_type();
+        let editing_connection = self.editing_connection_id.and_then(|id| {
+            self.connections
+                .iter()
+                .find(|c| c.id == Some(id) && c.connection_type == connection_type)
+                .cloned()
+        });
+        let config = RemoteDesktopFormWindowConfig {
+            protocol,
+            editing_connection,
+            workspaces: self.workspaces.clone(),
+        };
+        self.editing_connection_id = None;
+        open_popup_window(
+            window,
+            PopupWindowOptions::new(if config.editing_connection.is_some() {
+                t!("RemoteDesktopForm.title_edit", protocol = protocol.label()).to_string()
+            } else {
+                t!("RemoteDesktopForm.title_new", protocol = protocol.label()).to_string()
+            })
+            .size(700.0, 560.0),
+            move |window, cx| cx.new(|cx| RemoteDesktopFormWindow::new(config, window, cx)),
+            cx,
+        );
+    }
+
+    pub(crate) fn open_port_forwarding(
+        &mut self,
+        connection: StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let connection_name = connection.name.clone();
+        let Some(connection_id) = connection.id else {
+            window.push_notification(
+                t!(
+                    "Home.port_forwarding_failed",
+                    name = connection_name,
+                    error = "missing connection id"
+                )
+                .to_string(),
+                cx,
+            );
+            return;
+        };
+        let params = match connection.to_port_forwarding_params() {
+            Ok(params) => params,
+            Err(error) => {
+                window.push_notification(
+                    t!(
+                        "Home.port_forwarding_failed",
+                        name = connection_name,
+                        error = error.to_string()
+                    )
+                    .to_string(),
+                    cx,
+                );
+                return;
+            }
+        };
+        let Some(ssh_connection) = self
+            .connections
+            .iter()
+            .find(|conn| conn.id == Some(params.ssh_connection_id))
+            .cloned()
+        else {
+            window.push_notification(t!("Home.port_forwarding_missing_ssh").to_string(), cx);
+            return;
+        };
+
+        enum StartRequest {
+            Local(LocalForwardingRequest),
+            Dynamic(DynamicForwardingRequest),
+        }
+
+        let request = match params.kind {
+            one_core::storage::PortForwardingKind::Local => {
+                build_local_forwarding_request(&connection, &ssh_connection)
+                    .map(StartRequest::Local)
+            }
+            one_core::storage::PortForwardingKind::Dynamic => {
+                build_dynamic_forwarding_request(&connection, &ssh_connection)
+                    .map(StartRequest::Dynamic)
+            }
+        };
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                window.push_notification(
+                    t!(
+                        "Home.port_forwarding_failed",
+                        name = connection_name,
+                        error = error.to_string()
+                    )
+                    .to_string(),
+                    cx,
+                );
+                return;
+            }
+        };
+
+        let runtime = std::sync::Arc::clone(&self.port_forwarding_runtime);
+        cx.spawn(async move |_this, cx: &mut AsyncApp| {
+            let result = {
+                let mut runtime = runtime.lock().await;
+                match request {
+                    StartRequest::Local(request) => {
+                        runtime.start_local(connection_id, request).await
+                    }
+                    StartRequest::Dynamic(request) => {
+                        runtime.start_dynamic(connection_id, request).await
+                    }
+                }
+            };
+            if result.is_ok() {
+                let _ = cx.update(|cx| {
+                    cx.global_mut::<ActiveConnections>().add(connection_id);
+                });
+            }
+            let message = match result {
+                Ok(local_addr) => t!(
+                    "Home.port_forwarding_started",
+                    name = connection_name,
+                    addr = local_addr.to_string()
+                )
+                .to_string(),
+                Err(error) => t!(
+                    "Home.port_forwarding_failed",
+                    name = connection_name,
+                    error = error.to_string()
+                )
+                .to_string(),
+            };
+            let _ = cx.update(|cx| {
+                if let Some(window_id) = cx.active_window() {
+                    let _ = cx.update_window(window_id, |_, window, cx| {
+                        window.push_notification(message.clone(), cx);
+                    });
+                }
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn ensure_master_key_ready_for_new_connection(
@@ -2819,6 +3088,51 @@ impl HomePage {
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_serial_form(window, cx);
+                                                },
+                                            )),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(t!("NewConnection.port_forwarding"))
+                                            .icon(
+                                                IconName::PortForwardingColor
+                                                    .color()
+                                                    .with_size(Size::Medium),
+                                            )
+                                            .on_click(window.listener_for(
+                                                &view_for_new_connection,
+                                                move |this, _, window, cx| {
+                                                    this.editing_connection_id = None;
+                                                    this.show_port_forwarding_form(window, cx);
+                                                },
+                                            )),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(t!("NewConnection.rdp"))
+                                            .icon(IconName::Rdp.color().with_size(Size::Medium))
+                                            .on_click(window.listener_for(
+                                                &view_for_new_connection,
+                                                move |this, _, window, cx| {
+                                                    this.editing_connection_id = None;
+                                                    this.show_remote_desktop_form(
+                                                        RemoteDesktopProtocol::Rdp,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                },
+                                            )),
+                                    )
+                                    .item(
+                                        PopupMenuItem::new(t!("NewConnection.vnc"))
+                                            .icon(IconName::Vnc.color().with_size(Size::Medium))
+                                            .on_click(window.listener_for(
+                                                &view_for_new_connection,
+                                                move |this, _, window, cx| {
+                                                    this.editing_connection_id = None;
+                                                    this.show_remote_desktop_form(
+                                                        RemoteDesktopProtocol::Vnc,
+                                                        window,
+                                                        cx,
+                                                    );
                                                 },
                                             )),
                                     )
@@ -4190,6 +4504,21 @@ impl HomePage {
                     "MongoDB".to_string()
                 }
             }),
+            ConnectionType::PortForwarding => conn.to_port_forwarding_params().ok().map(|params| {
+                match params.kind {
+                    one_core::storage::PortForwardingKind::Local => format!(
+                        "{}:{} -> {}:{}",
+                        params.bind_host, params.bind_port, params.target_host, params.target_port
+                    ),
+                    one_core::storage::PortForwardingKind::Dynamic => {
+                        format!("SOCKS {}:{}", params.bind_host, params.bind_port)
+                    }
+                }
+            }),
+            ConnectionType::Rdp | ConnectionType::Vnc => conn
+                .to_remote_desktop_params()
+                .ok()
+                .map(|params| format!("{}:{}", params.host, params.port)),
             ConnectionType::Serial => conn.to_serial_params().ok().map(|params| {
                 let parity_char = match params.parity {
                     one_core::storage::models::SerialParity::None => 'N',
@@ -4230,6 +4559,18 @@ impl HomePage {
                 .with_size(px(size))
                 .text_color(gpui::white()),
             ConnectionType::Serial => IconName::SerialPort
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            ConnectionType::PortForwarding => IconName::PortForwardingColor
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            ConnectionType::Rdp => IconName::Rdp
+                .color()
+                .with_size(px(size))
+                .text_color(gpui::white()),
+            ConnectionType::Vnc => IconName::Vnc
                 .color()
                 .with_size(px(size))
                 .text_color(gpui::white()),
@@ -5482,6 +5823,26 @@ impl HomePage {
                                             this.editing_connection_id = Some(conn_id);
                                             this.show_serial_form(window, cx);
                                         }
+                                        ConnectionType::PortForwarding => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_port_forwarding_form(window, cx);
+                                        }
+                                        ConnectionType::Rdp => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_remote_desktop_form(
+                                                RemoteDesktopProtocol::Rdp,
+                                                window,
+                                                cx,
+                                            );
+                                        }
+                                        ConnectionType::Vnc => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_remote_desktop_form(
+                                                RemoteDesktopProtocol::Vnc,
+                                                window,
+                                                cx,
+                                            );
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -6196,6 +6557,26 @@ impl HomePage {
                                         ConnectionType::Serial => {
                                             this.editing_connection_id = Some(conn_id);
                                             this.show_serial_form(window, cx);
+                                        }
+                                        ConnectionType::PortForwarding => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_port_forwarding_form(window, cx);
+                                        }
+                                        ConnectionType::Rdp => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_remote_desktop_form(
+                                                RemoteDesktopProtocol::Rdp,
+                                                window,
+                                                cx,
+                                            );
+                                        }
+                                        ConnectionType::Vnc => {
+                                            this.editing_connection_id = Some(conn_id);
+                                            this.show_remote_desktop_form(
+                                                RemoteDesktopProtocol::Vnc,
+                                                window,
+                                                cx,
+                                            );
                                         }
                                         _ => {}
                                     }

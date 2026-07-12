@@ -303,12 +303,28 @@ fn make_socket_name(driver: &IpcDriverManifest) -> String {
 
 /// 构造 driver 启动 Command,设置 `OMNIHUB_IPC_SOCKET` env var 把动态 socket
 /// 名透传给子进程。抽出独立函数便于在 Drop / multi-instance 测试中验证 env。
+
+fn resolve_command_program(command: &str, cwd: &std::path::Path) -> std::path::PathBuf {
+    let program = std::path::PathBuf::from(command);
+    if program.is_absolute() || !has_explicit_path_component(command) {
+        program
+    } else {
+        cwd.join(program)
+    }
+}
+
+fn has_explicit_path_component(command: &str) -> bool {
+    command.contains('/') || command.contains('\\')
+}
+
 fn build_driver_command(driver: &IpcDriverManifest, socket_name: &str) -> Command {
-    let mut command = Command::new(&driver.entry.command);
+    let cwd = driver.command_working_dir();
+    let program = resolve_command_program(&driver.entry.command, &cwd);
+    let mut command = Command::new(program);
     command
         .args(&driver.entry.args)
         .env(SOCKET_ENV_VAR, socket_name)
-        .current_dir(driver.command_working_dir())
+        .current_dir(cwd)
         // 关键:确保 client 异常 drop 时子进程被回收,不变孤儿。
         // 详见 P0-3 改造 — 仅 `Child::kill().await` 不足以应对 panic / runtime abort 场景。
         .kill_on_drop(true)
@@ -438,6 +454,34 @@ mod tests {
         assert!(second.starts_with("omnihub-socket-test-"));
         assert!(first.ends_with(".sock"));
         assert!(second.ends_with(".sock"));
+    }
+
+
+    #[test]
+    fn resolve_command_program_joins_relative_path_to_cwd() {
+        let cwd = std::path::PathBuf::from("/tmp/omnihub-test");
+        assert_eq!(
+            resolve_command_program("./driver.exe", &cwd),
+            cwd.join("./driver.exe")
+        );
+    }
+
+    #[test]
+    fn resolve_command_program_keeps_path_lookup_command() {
+        let cwd = std::path::PathBuf::from("/tmp/omnihub-test");
+        assert_eq!(
+            resolve_command_program("python3", &cwd),
+            std::path::PathBuf::from("python3")
+        );
+    }
+
+    #[test]
+    fn resolve_command_program_keeps_absolute_path() {
+        let cwd = std::path::PathBuf::from("/tmp/omnihub-test");
+        assert_eq!(
+            resolve_command_program("/usr/bin/driver", &cwd),
+            std::path::PathBuf::from("/usr/bin/driver")
+        );
     }
 
     fn make_test_manifest(socket_name: &str) -> IpcDriverManifest {

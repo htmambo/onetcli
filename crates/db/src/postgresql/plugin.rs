@@ -1355,6 +1355,7 @@ impl DatabasePlugin for PostgresPlugin {
                         name: index_name,
                         columns: Vec::new(),
                         is_unique,
+                        is_primary: false,
                         index_type: Some("btree".to_string()),
                     })
                     .columns
@@ -1887,7 +1888,7 @@ impl DatabasePlugin for PostgresPlugin {
     }
 
     fn build_limit_clause(&self) -> String {
-        " LIMIT 1".to_string()
+        String::new()
     }
 
     fn build_where_and_limit_clause(
@@ -1915,6 +1916,22 @@ impl DatabasePlugin for PostgresPlugin {
         } else {
             format!("DROP TABLE IF EXISTS {}", self.quote_identifier(table))
         }
+    }
+
+    fn truncate_table_with_schema(
+        &self,
+        _database: &str,
+        schema: Option<&str>,
+        table: &str,
+    ) -> String {
+        if let Some(schema) = schema {
+            return format!(
+                "TRUNCATE TABLE {}.{}",
+                self.quote_identifier(schema),
+                self.quote_identifier(table)
+            );
+        }
+        format!("TRUNCATE TABLE {}", self.quote_identifier(table))
     }
 
     fn rename_table(&self, _database: &str, old_name: &str, new_name: &str) -> String {
@@ -2199,7 +2216,10 @@ mod tests {
     use super::*;
     use crate::plugin::DatabasePlugin;
     use crate::plugin_manifest::{DatabaseActionId, DatabaseFormKind};
-    use crate::types::{ColumnDefinition, IndexDefinition, TableDesign, TableOptions};
+    use crate::types::{
+        ColumnDefinition, ColumnInfo, IndexDefinition, TableDesign, TableOptions, TableRowChange,
+        TableSaveRequest,
+    };
     use std::collections::HashMap;
 
     fn create_plugin() -> PostgresPlugin {
@@ -2301,6 +2321,15 @@ mod tests {
         let sql = plugin.truncate_table("test_db", "users");
         assert!(sql.contains("TRUNCATE TABLE"));
         assert!(sql.contains("\"users\""));
+    }
+
+
+    #[test]
+    fn test_truncate_table_with_schema() {
+        let plugin = create_plugin();
+        let sql = plugin.truncate_table_with_schema("test_db", Some("app"), "users");
+        assert_eq!(sql, "TRUNCATE TABLE \"app\".\"users\"");
+        assert!(!sql.contains("test_db"));
     }
 
     #[test]
@@ -2723,6 +2752,47 @@ mod tests {
         let sql = plugin.build_alter_table_sql(&original, &new);
         assert!(sql.contains("SET NOT NULL"));
         assert!(sql.contains("SET DEFAULT 'guest'"));
+    }
+
+    #[test]
+    fn test_generate_delete_row_sql_without_limit() {
+        let plugin = create_plugin();
+        let request = TableSaveRequest {
+            database: "app".to_string(),
+            schema: Some("public".to_string()),
+            table: "users".to_string(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    is_nullable: false,
+                    is_primary_key: true,
+                    default_value: None,
+                    comment: None,
+                    charset: None,
+                    collation: None,
+                },
+                ColumnInfo {
+                    name: "name".to_string(),
+                    data_type: "TEXT".to_string(),
+                    is_nullable: true,
+                    is_primary_key: false,
+                    default_value: None,
+                    comment: None,
+                    charset: None,
+                    collation: None,
+                },
+            ],
+            index_infos: vec![],
+            changes: vec![TableRowChange::Deleted {
+                original_data: vec!["42".to_string(), "Ada".to_string()],
+                rowid: None,
+            }],
+        };
+
+        let sql = plugin.generate_table_changes_sql(&request);
+
+        assert_eq!("DELETE FROM \"public\".\"users\" WHERE \"id\" = '42';", sql);
     }
 
     // ==================== Data Types Tests ====================
