@@ -2788,6 +2788,7 @@ mod tests {
                 original_data: vec!["42".to_string(), "Ada".to_string()],
                 rowid: None,
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);

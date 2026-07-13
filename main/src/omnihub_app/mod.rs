@@ -80,7 +80,7 @@ use tab_restore::load_startup_tabs_without_connection_restore;
 use window_actions::{
     activate_tab_by_number, duplicate_tab, open_sftp_from_tab, quit_app, toggle_fullscreen,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use window_actions::toggle_always_on_top;
 
 const APP_WINDOW_TITLE: &str = "OmniHub";
@@ -247,7 +247,7 @@ pub fn init(cx: &mut App) -> AppSettings {
         KeyBinding::new("ctrl-cmd-f", ToggleFullscreen, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("alt-enter", ToggleFullscreen, None),
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
         KeyBinding::new("ctrl-alt-t", ToggleAlwaysOnTop, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-shift-t", DuplicateTab, None),
@@ -271,7 +271,7 @@ pub fn init(cx: &mut App) -> AppSettings {
     cx.on_action(|_: &ActivateTab8, cx| activate_tab_by_number(8, cx));
     cx.on_action(|_: &ActivateTab9, cx| activate_tab_by_number(9, cx));
     cx.on_action(|_: &ToggleFullscreen, cx| toggle_fullscreen(cx));
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     cx.on_action(|_: &ToggleAlwaysOnTop, cx| toggle_always_on_top(cx));
     cx.on_action(|_: &DuplicateTab, cx| duplicate_tab(cx));
     cx.on_action(|_: &QuitApp, cx| quit_app(cx));
@@ -321,8 +321,8 @@ pub fn init(cx: &mut App) -> AppSettings {
     #[cfg(target_os = "macos")]
     {
         cx.set_menus(vec![Menu {
-            name: "OneNet".into(),
-            items: vec![MenuItem::action("Quit OneNet", QuitApp)],
+            name: "OmniHub".into(),
+            items: vec![MenuItem::action("Quit OmniHub", QuitApp)],
         }]);
     }
 

@@ -3,6 +3,7 @@ use crate::plugin_manifest::{DatabaseCapabilities, DatabaseUiManifest};
 use one_core::storage::{DatabaseType, get_config_dir};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub const EXTERNAL_DRIVER_ID_PARAM: &str = "external_driver_id";
@@ -281,14 +282,29 @@ impl IpcDriverRegistry {
         }
 
         let mut drivers = Vec::new();
-        for entry in std::fs::read_dir(dir).map_err(read_dir_error)? {
-            let entry = entry.map_err(read_dir_error)?;
-            if entry.file_type().map_err(read_dir_error)?.is_dir() {
-                if let Ok(driver) = load_manifest(&entry.path()) {
-                    drivers.push(driver);
+        // 支持：1) 目录本身即驱动包；2) 解压后的单层包裹目录（outer/inner/driver.json）
+        let mut root_is_wrapped_driver = false;
+        if let Some(driver_dir) = driver_manifest_dir_for(dir)? {
+            root_is_wrapped_driver = driver_dir != dir;
+            if let Ok(driver) = load_manifest(&driver_dir) {
+                drivers.push(driver);
+            }
+        }
+
+        if !root_is_wrapped_driver {
+            for entry in std::fs::read_dir(dir).map_err(read_dir_error)? {
+                let entry = entry.map_err(read_dir_error)?;
+                if !entry.file_type().map_err(read_dir_error)?.is_dir() {
+                    continue;
+                }
+                if let Some(driver_dir) = driver_manifest_dir_for(&entry.path())? {
+                    if let Ok(driver) = load_manifest(&driver_dir) {
+                        drivers.push(driver);
+                    }
                 }
             }
         }
+
         drivers.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(Self { drivers })
     }
@@ -332,6 +348,44 @@ fn load_manifest(driver_dir: &Path) -> Result<IpcDriverManifest, DbError> {
     manifest.manifest_dir = driver_dir.to_path_buf();
     manifest.validate()?;
     Ok(manifest)
+}
+
+fn driver_manifest_dir_for(dir: &Path) -> Result<Option<PathBuf>, DbError> {
+    if dir.join(DRIVER_MANIFEST_FILE).is_file() {
+        return Ok(Some(dir.to_path_buf()));
+    }
+    single_wrapped_driver_dir(dir)
+}
+
+fn single_wrapped_driver_dir(dir: &Path) -> Result<Option<PathBuf>, DbError> {
+    let mut found_dir = None;
+    for entry in std::fs::read_dir(dir).map_err(read_dir_error)? {
+        let entry = entry.map_err(read_dir_error)?;
+        if ignored_archive_metadata(&entry.file_name()) {
+            continue;
+        }
+        if !entry.file_type().map_err(read_dir_error)?.is_dir() {
+            return Ok(None);
+        }
+        if found_dir.replace(entry.path()).is_some() {
+            return Ok(None);
+        }
+    }
+    let Some(driver_dir) = found_dir else {
+        return Ok(None);
+    };
+    if driver_dir.join(DRIVER_MANIFEST_FILE).is_file() {
+        Ok(Some(driver_dir))
+    } else {
+        Ok(None)
+    }
+}
+
+fn ignored_archive_metadata(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    name == ".DS_Store" || name == "__MACOSX" || name.starts_with("._")
 }
 
 fn read_dir_error(error: std::io::Error) -> DbError {
@@ -387,6 +441,57 @@ mod tests {
         let registry = IpcDriverRegistry::load_from_dir(temp.path()).unwrap();
         assert_eq!(registry.drivers().len(), 1);
         assert_eq!(registry.find("demo").unwrap().name, "Demo");
+    }
+
+    #[test]
+    fn scans_single_wrapped_driver_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let outer_dir = temp.path().join("gbase8s");
+        let driver_dir = outer_dir.join("gbase8s");
+        fs::create_dir_all(&driver_dir).unwrap();
+        fs::write(
+            driver_dir.join(DRIVER_MANIFEST_FILE),
+            r#"{"id":"gbase8s","name":"GBase 8s","entry":{"command":"./gbase8s-ipc-driver"},"transport":{"name":"gbase8s.sock"}}"#,
+        )
+        .unwrap();
+
+        let registry = IpcDriverRegistry::load_from_dir(temp.path()).unwrap();
+
+        assert_eq!(registry.drivers().len(), 1);
+        assert_eq!(registry.find("gbase8s").unwrap().manifest_dir, driver_dir);
+    }
+
+    #[test]
+    fn scans_single_driver_directory_as_root() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join(DRIVER_MANIFEST_FILE),
+            r#"{"id":"demo","name":"Demo","entry":{"command":"python3"},"transport":{"name":"demo.sock"}}"#,
+        )
+        .unwrap();
+
+        let registry = IpcDriverRegistry::load_from_dir(temp.path()).unwrap();
+        assert_eq!(registry.drivers().len(), 1);
+        assert_eq!(registry.find("demo").unwrap().manifest_dir, temp.path());
+    }
+
+    #[test]
+    fn ignores_macos_archive_metadata_in_wrapped_driver_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let outer_dir = temp.path().join("gbase8s");
+        let driver_dir = outer_dir.join("gbase8s");
+        fs::create_dir_all(&driver_dir).unwrap();
+        fs::write(outer_dir.join(".DS_Store"), b"").unwrap();
+        fs::create_dir(outer_dir.join("__MACOSX")).unwrap();
+        fs::write(
+            driver_dir.join(DRIVER_MANIFEST_FILE),
+            r#"{"id":"gbase8s","name":"GBase 8s","entry":{"command":"./gbase8s-ipc-driver"},"transport":{"name":"gbase8s.sock"}}"#,
+        )
+        .unwrap();
+
+        let registry = IpcDriverRegistry::load_from_dir(temp.path()).unwrap();
+        assert_eq!(registry.drivers().len(), 1);
+        assert_eq!(registry.find("gbase8s").unwrap().manifest_dir, driver_dir);
     }
 
     #[test]

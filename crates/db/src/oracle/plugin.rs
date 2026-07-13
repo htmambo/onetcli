@@ -3090,6 +3090,7 @@ mod tests {
                 }],
                 rowid: Some("AAABBB".to_string()),
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);
@@ -3121,6 +3122,7 @@ mod tests {
                 }],
                 rowid: Some("AAABBB".to_string()),
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);
@@ -3154,6 +3156,7 @@ mod tests {
                 }],
                 rowid: Some("AAABBB".to_string()),
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);
@@ -3179,6 +3182,7 @@ mod tests {
             changes: vec![TableRowChange::Added {
                 data: vec!["1".to_string(), "2026-06-21 14:05:06".to_string()],
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);
@@ -3211,6 +3215,7 @@ mod tests {
                 }],
                 rowid: Some("AAABBB".to_string()),
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);
@@ -3236,6 +3241,7 @@ mod tests {
             changes: vec![TableRowChange::Added {
                 data: vec!["1".to_string(), "2026-06-21 14:05:06 +08:00".to_string()],
             }],
+            driver_id: None,
         };
 
         let sql = plugin.generate_table_changes_sql(&request);

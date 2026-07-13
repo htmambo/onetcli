@@ -1,9 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::App;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use gpui::Window;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use super::close_guard::{
@@ -55,11 +55,11 @@ pub fn toggle_fullscreen(cx: &mut App) {
 }
 
 
-/// 窗口置顶状态（单窗口应用，使用静态原子量足够）。仅 Windows 平台实现。
-#[cfg(target_os = "windows")]
+/// 窗口置顶状态（单窗口应用，使用静态原子量足够）。Windows / macOS 实现。
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) static ALWAYS_ON_TOP: AtomicBool = AtomicBool::new(false);
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub fn toggle_always_on_top(cx: &mut App) {
     let Some(active_window) = cx.active_window() else {
         return;
@@ -80,17 +80,65 @@ pub fn toggle_always_on_top(cx: &mut App) {
     });
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn set_window_always_on_top(window: &Window, always_on_top: bool) -> anyhow::Result<()> {
     let handle = HasWindowHandle::window_handle(window)
         .map_err(|err| anyhow::anyhow!("获取窗口句柄失败: {err:?}"))?
         .as_raw();
     match handle {
+        #[cfg(target_os = "macos")]
+        RawWindowHandle::AppKit(handle) => {
+            set_macos_always_on_top(handle.ns_view.as_ptr(), always_on_top)
+        }
+        #[cfg(target_os = "windows")]
         RawWindowHandle::Win32(handle) => {
             set_windows_always_on_top(handle.hwnd.get(), always_on_top)
         }
         _ => Err(anyhow::anyhow!("当前平台暂不支持窗口置顶")),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_always_on_top(
+    ns_view: *mut std::ffi::c_void,
+    always_on_top: bool,
+) -> anyhow::Result<()> {
+    if ns_view.is_null() {
+        return Err(anyhow::anyhow!("获取 NSView 失败"));
+    }
+
+    type Id = *mut std::ffi::c_void;
+    type Sel = *mut std::ffi::c_void;
+
+    #[link(name = "objc")]
+    unsafe extern "C" {
+        #[link_name = "sel_registerName"]
+        fn sel_register_name(name: *const std::ffi::c_char) -> Sel;
+        #[link_name = "objc_msgSend"]
+        fn objc_msg_send(receiver: Id, selector: Sel, ...) -> Id;
+    }
+
+    const NS_NORMAL_WINDOW_LEVEL: isize = 0;
+    const NS_FLOATING_WINDOW_LEVEL: isize = 3;
+    let level = if always_on_top {
+        NS_FLOATING_WINDOW_LEVEL
+    } else {
+        NS_NORMAL_WINDOW_LEVEL
+    };
+    let window_selector = std::ffi::CString::new("window")?;
+    let set_level_selector = std::ffi::CString::new("setLevel:")?;
+    unsafe {
+        let ns_window = objc_msg_send(ns_view.cast(), sel_register_name(window_selector.as_ptr()));
+        if ns_window.is_null() {
+            return Err(anyhow::anyhow!("获取 NSWindow 失败"));
+        }
+        objc_msg_send(
+            ns_window,
+            sel_register_name(set_level_selector.as_ptr()),
+            level,
+        );
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

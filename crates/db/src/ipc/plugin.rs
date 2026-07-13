@@ -7,6 +7,7 @@ use crate::import_export::{
 use crate::ipc::connection::ExternalDbConnection;
 use crate::ipc::protocol::{database_metadata_params, table_metadata_params};
 use crate::ipc::registry::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverDialect, IpcDriverManifest, IpcDriverRegistry, TableReferenceSchemaMode};
+use crate::oracle::OraclePlugin;
 use crate::plugin::{DatabasePlugin, SqlCompletionInfo};
 use crate::plugin_manifest::{DatabaseCapabilities, DatabaseUiCapabilities, DatabaseUiManifest};
 use crate::types::*;
@@ -34,6 +35,50 @@ impl ExternalDatabasePlugin {
         self.registry.find(driver_id).ok_or_else(|| {
             DbError::connection(format!("external driver '{}' not found", driver_id))
         })
+    }
+
+    fn driver_for_id(&self, driver_id: &str) -> Option<IpcDriverManifest> {
+        self.registry.find(driver_id)
+    }
+
+    fn is_oracle_compatible_driver(driver: &IpcDriverManifest) -> bool {
+        matches!(
+            driver.dialect.compatible_database_type,
+            Some(DatabaseType::Oracle)
+        ) || {
+            let id = driver.id.to_ascii_lowercase();
+            id.contains("oracle") || id == "dm" || id.contains("dameng")
+        }
+    }
+
+    fn oracle_table_save_request(
+        driver: &IpcDriverManifest,
+        request: &TableSaveRequest,
+    ) -> TableSaveRequest {
+        let mut request = request.clone();
+        let uses_schema_as_database = driver.dialect.uses_schema_as_database
+            || driver.effective_capabilities().uses_schema_as_database;
+        if request.schema.is_none()
+            && uses_schema_as_database
+            && !request.database.trim().is_empty()
+        {
+            request.schema = Some(request.database.clone());
+        }
+        request
+    }
+
+    fn generate_default_table_changes_sql(&self, request: &TableSaveRequest) -> String {
+        let mut sql_statements = Vec::new();
+        for change in &request.changes {
+            if let Some(sql) = self.build_table_change_sql(request, change) {
+                sql_statements.push(sql);
+            }
+        }
+        if sql_statements.is_empty() {
+            rust_i18n::t!("Error.no_changes").to_string()
+        } else {
+            sql_statements.join(";\n\n") + ";"
+        }
     }
 
     async fn metadata<T>(
@@ -666,6 +711,20 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         )
     }
 
+    fn generate_table_changes_sql(&self, request: &TableSaveRequest) -> String {
+        if let Some(driver_id) = request.driver_id.as_deref() {
+            if let Some(driver) = self.driver_for_id(driver_id) {
+                if Self::is_oracle_compatible_driver(&driver) {
+                    let oracle_plugin = OraclePlugin::new();
+                    return oracle_plugin.generate_table_changes_sql(
+                        &Self::oracle_table_save_request(&driver, request),
+                    );
+                }
+            }
+        }
+        self.generate_default_table_changes_sql(request)
+    }
+
     fn rename_table(&self, _database: &str, old_name: &str, new_name: &str) -> String {
         format!(
             "ALTER TABLE {} RENAME TO {}",
@@ -884,5 +943,147 @@ mod tests {
         assert_eq!(1, checks.len());
         assert_eq!("events_payload_check", checks[0].name);
         assert_eq!("events", checks[0].table_name);
+    }
+}
+
+#[cfg(test)]
+mod oracle_table_save_tests {
+    use super::*;
+    use crate::ipc::registry::{
+        IpcDriverEntry, IpcDriverTransport, IpcDriverUi, LimitStyle, TableReferenceSchemaMode,
+    };
+    use std::path::PathBuf;
+
+    fn column_info(name: &str, data_type: &str, is_primary_key: bool) -> ColumnInfo {
+        ColumnInfo {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            is_nullable: !is_primary_key,
+            is_primary_key,
+            default_value: None,
+            comment: None,
+            charset: None,
+            collation: None,
+        }
+    }
+
+    fn oracle_driver(id: &str) -> IpcDriverManifest {
+        let mut driver = IpcDriverManifest {
+            id: id.to_string(),
+            name: id.to_string(),
+            category: None,
+            description: String::new(),
+            version: String::new(),
+            entry: IpcDriverEntry {
+                command: "driver".to_string(),
+                args: Vec::new(),
+                working_dir: None,
+                commands: Default::default(),
+                env_from_config: Default::default(),
+            },
+            transport: IpcDriverTransport::local_socket(format!("{id}.sock")),
+            dialect: Default::default(),
+            capabilities: None,
+            ui: IpcDriverUi {
+                icon: String::new(),
+                default_port: None,
+                form: None,
+            },
+            manifest_dir: PathBuf::from("."),
+        };
+        driver.dialect.compatible_database_type = Some(DatabaseType::Oracle);
+        driver.dialect.uses_schema_as_database = true;
+        driver.dialect.table_reference_schema_mode = TableReferenceSchemaMode::PreferSchema;
+        driver.dialect.limit_style = LimitStyle::OffsetFetch;
+        driver
+    }
+
+    #[test]
+    fn external_oracle_table_changes_use_oracle_date_literals() {
+        let driver = oracle_driver("oracle-go");
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+        let request = TableSaveRequest {
+            database: "APP".to_string(),
+            schema: None,
+            table: "EVENTS".to_string(),
+            columns: vec![
+                column_info("ID", "NUMBER", true),
+                column_info("STARTED_AT", "DATE", false),
+            ],
+            index_infos: vec![],
+            changes: vec![TableRowChange::Added {
+                data: vec!["1".to_string(), "2026-06-21 14:05:06".to_string()],
+            }],
+            driver_id: Some("oracle-go".to_string()),
+        };
+
+        let sql = plugin.generate_table_changes_sql(&request);
+        assert_eq!(
+            "INSERT INTO \"APP\".\"EVENTS\" (\"ID\", \"STARTED_AT\") VALUES ('1', TO_DATE('2026-06-21 14:05:06', 'YYYY-MM-DD HH24:MI:SS'));",
+            sql
+        );
+    }
+
+    #[test]
+    fn external_oracle_table_changes_use_oracle_lob_literals() {
+        let driver = oracle_driver("oracle-go");
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+        let request = TableSaveRequest {
+            database: "APP".to_string(),
+            schema: None,
+            table: "DOCS".to_string(),
+            columns: vec![
+                column_info("ID", "NUMBER", true),
+                column_info("BODY", "CLOB", false),
+            ],
+            index_infos: vec![],
+            changes: vec![TableRowChange::Updated {
+                original_data: vec!["1".to_string(), "old".to_string()],
+                changes: vec![TableCellChange {
+                    column_index: 1,
+                    column_name: "BODY".to_string(),
+                    old_value: "old".to_string(),
+                    new_value: "a".repeat(3_050),
+                }],
+                rowid: Some("AAABBB".to_string()),
+            }],
+            driver_id: Some("oracle-go".to_string()),
+        };
+
+        let sql = plugin.generate_table_changes_sql(&request);
+        assert!(
+            sql.contains("UPDATE \"APP\".\"DOCS\" SET \"BODY\" = TO_CLOB('"),
+            "got: {sql}"
+        );
+        assert!(sql.contains(" || TO_CLOB('"), "got: {sql}");
+        assert!(sql.contains("WHERE ROWID = 'AAABBB'"), "got: {sql}");
+    }
+
+    #[test]
+    fn external_non_oracle_driver_keeps_default_sql() {
+        let mut driver = oracle_driver("pg-go");
+        driver.dialect.compatible_database_type = Some(DatabaseType::PostgreSQL);
+        driver.dialect.uses_schema_as_database = false;
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+        let request = TableSaveRequest {
+            database: "app".to_string(),
+            schema: Some("public".to_string()),
+            table: "events".to_string(),
+            columns: vec![column_info("id", "INT", true)],
+            index_infos: vec![],
+            changes: vec![TableRowChange::Added {
+                data: vec!["1".to_string()],
+            }],
+            driver_id: Some("pg-go".to_string()),
+        };
+        let sql = plugin.generate_table_changes_sql(&request);
+        assert!(!sql.contains("TO_DATE("), "unexpected oracle sql: {sql}");
+        assert!(sql.to_ascii_uppercase().contains("INSERT"), "{sql}");
     }
 }

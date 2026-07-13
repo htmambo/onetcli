@@ -42,7 +42,7 @@ const WINDOW_SHORTCUTS: &[ShortcutEntry] = &[
         key_other: "alt-enter",
         label_key: "Settings.Shortcuts.toggle_fullscreen",
     },
-    // 窗口置顶仅 Windows 实现；设置页仍展示快捷键说明
+    // 窗口置顶：Windows / macOS 实现；Linux 暂不支持
     ShortcutEntry {
         key_macos: "ctrl-alt-t",
         key_other: "ctrl-alt-t",

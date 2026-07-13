@@ -28,12 +28,14 @@ use db::{
     ColumnInfo, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult, TableCellChange,
     TableDataRequest, TableRowChange, TableSaveRequest,
 };
+use db::ipc::EXTERNAL_DRIVER_ID_PARAM;
 use gpui_component::button::ButtonVariants;
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::tab_container::TabContainer;
+use one_core::storage::DatabaseType;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
 
@@ -1966,6 +1968,14 @@ impl DataGrid {
             return None;
         }
 
+        let driver_id = if self.config.database_type == DatabaseType::External {
+            cx.try_global::<GlobalDbState>()
+                .and_then(|state| state.get_config(&self.config.connection_id))
+                .and_then(|config| config.get_param(EXTERNAL_DRIVER_ID_PARAM).cloned())
+        } else {
+            None
+        };
+
         Some(TableSaveRequest {
             database: self.config.database_name.clone(),
             schema: self.config.schema_name.clone(),
@@ -1973,6 +1983,7 @@ impl DataGrid {
             columns,
             index_infos,
             changes: table_changes,
+            driver_id,
         })
     }
 

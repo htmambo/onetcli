@@ -653,6 +653,8 @@ pub struct TableSaveRequest {
     pub columns: Vec<ColumnInfo>,
     pub index_infos: Vec<IndexInfo>,
     pub changes: Vec<TableRowChange>,
+    /// 外部驱动 id（多驱动 registry 下生成方言感知 SQL 时使用）。
+    pub driver_id: Option<String>,
 }
 
 /// Request for generating copy SQL (INSERT, UPDATE, DELETE statements)

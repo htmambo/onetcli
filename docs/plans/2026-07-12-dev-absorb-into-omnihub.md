@@ -663,3 +663,59 @@
 - [x] 验证：`deserializes_optional_category` ✅
 - [x] 验证：`cargo test -p main --bin omnihub domestic_database` ✅ 2
 - [x] 验证：`cargo test -p db_view --lib connection_title` ✅ 2
+
+### Phase 1.x macOS 窗口置顶（已接入）
+
+- [x] `4c5c2411` / `e35c2f85` macOS 分支：`set_macos_always_on_top`（NSView→NSWindow `setLevel:`）
+- [x] `ALWAYS_ON_TOP` / `toggle_always_on_top` / action+快捷键：`windows | macos`
+- [x] 标题栏置顶按钮仍仅 Windows（macOS 原生标题栏，与 origin 一致）
+- [x] 验证：`cargo check -p main` ✅
+
+### Phase 1.x 缺省 locale 跟随系统（补齐）
+
+- [x] `282c2e8e` 适配：`AppSettings.locale` serde 默认改为 `system`（此前 `#[serde(default)]` 会落空串→英文）
+- [x] `resolve_locale_setting` 将 `""` 视为 system
+- [x] 验证：`cargo test -p main --bin omnihub -- locale app_settings_` ✅ 4 passed
+
+### 下一包评估（续 11）
+
+- 已本地：system locale 主体、windows_subsystem、Oracle commit、is_primary 表设计、relative command path、switch_schema
+- 可选中等：`ef2553a4` 外部 Oracle 表变更 SQL 走 OraclePlugin（本地 multi-driver 无 for_driver 上下文，需设计 request/driver 解析）
+- 高冲突：`cc555c44` external DDL、`f48c1564` 全量 lifecycle locks
+- 重包：MCP / extension / port_forwarding / remote_desktop / team-website
+
+### Phase 1.x 包裹式 IPC 驱动目录扫描（已接入）
+
+- [x] `2f4363bf`：`driver_manifest_dir_for` / `single_wrapped_driver_dir`
+- [x] 忽略 `.DS_Store` / `__MACOSX` / `._*` 归档元数据
+- [x] 支持 root 本身即驱动包、以及 outer/inner/driver.json 解压结构
+- [x] 验证：`scans_driver_manifests` / `scans_single_wrapped_driver_directory` / `scans_single_driver_directory_as_root` ✅
+
+### Phase 1.x 杂项轻量补齐
+
+- [x] macOS 应用菜单 `OneNet` → `OmniHub`（显示名；仓库 URL 仍为 onetcli）
+- 验证：`cargo check -p main -p db` ✅
+- 验证：locale / wrapped driver 单测 ✅
+
+### 下一包评估（续 12）
+
+- 轻量包本波已收口：macOS 置顶、locale serde 默认、包裹驱动目录、菜单文案
+- 中等待设计：`ef2553a4` 外部 Oracle 表变更 SQL（需 multi-driver 上下文）
+- 高冲突：`cc555c44` external DDL、`f48c1564` 全量 lifecycle locks、`6c376c51` object view metadata
+- 重包：MCP / extension / port_forwarding / remote_desktop / team-website
+
+### Phase 1.x 外部 Oracle 表数据编辑 SQL（已接入，multi-driver 适配）
+
+- [x] `ef2553a4` 适配：`TableSaveRequest.driver_id` 携带外部驱动 id
+- [x] `ExternalDatabasePlugin::generate_table_changes_sql` 按驱动 dialect/`compatible_database_type` 路由到 `OraclePlugin`
+- [x] `uses_schema_as_database` 时把 `database` 回填为 `schema`
+- [x] `data_grid.create_save_request` 从连接配置注入 `external_driver_id`
+- [x] 验证：`external_oracle_table_changes_*` ✅ 2、`external_non_oracle_*` ✅ 1、`table_change_sql*` ✅ 6
+
+### 下一包评估（续 13）
+
+- 已收：macOS 置顶、locale 默认、包裹驱动目录、外部 Oracle 表编辑 SQL
+- 中等可选：`52e9cb39` compatible DDL fallback（本地无 wire async DDL 路径，价值有限）
+- 高冲突：`cc555c44` external DDL、`f48c1564` lifecycle locks、`6c376c51` object view metadata 增量
+- 重包：MCP / extension / port_forwarding / remote_desktop
+

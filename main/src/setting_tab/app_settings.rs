@@ -35,7 +35,7 @@ use super::{hotkey, locale, theme_utils};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
-    #[serde(default)]
+    #[serde(default = "default_locale")]
     pub locale: String,
     #[serde(default)]
     pub theme_mode: String,
@@ -159,6 +159,10 @@ pub struct AppSettings {
     /// SSH 自动接受新密钥（密钥变更时自动替换）
     #[serde(default)]
     pub ssh_auto_accept_new_keys: bool,
+}
+
+fn default_locale() -> String {
+    locale::LOCALE_SYSTEM.to_string()
 }
 
 impl Default for AppSettings {
@@ -620,3 +624,25 @@ impl AppSettings {
         settings
     }
 }
+
+#[cfg(test)]
+mod locale_default_tests {
+    use super::AppSettings;
+    use super::locale;
+
+    #[test]
+    fn app_settings_default_follows_system_locale() {
+        let settings = AppSettings::default();
+        assert_eq!(locale::LOCALE_SYSTEM, settings.locale);
+    }
+
+    #[test]
+    fn app_settings_deserializes_missing_locale_as_system_mode() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "theme_mode": "dark"
+        }))
+        .expect("缺少 locale 的旧版 settings.json 应能读取");
+        assert_eq!(locale::LOCALE_SYSTEM, settings.locale);
+    }
+}
+
