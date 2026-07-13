@@ -1,12 +1,12 @@
 use crate::connection::{DbConnection, DbError};
-use crate::executor::SqlResult;
+use crate::executor::{QueryResult, SqlResult};
 use crate::import_export::{
     ExportConfig, ExportProgressSender, ExportResult, ImportConfig, ImportProgressSender,
     ImportResult,
 };
 use crate::ipc::connection::ExternalDbConnection;
 use crate::ipc::protocol::{database_metadata_params, table_metadata_params};
-use crate::ipc::registry::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverManifest, IpcDriverRegistry};
+use crate::ipc::registry::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverDialect, IpcDriverManifest, IpcDriverRegistry, TableReferenceSchemaMode};
 use crate::plugin::{DatabasePlugin, SqlCompletionInfo};
 use crate::plugin_manifest::{DatabaseCapabilities, DatabaseUiCapabilities, DatabaseUiManifest};
 use crate::types::*;
@@ -88,7 +88,18 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     }
 
     fn quote_identifier(&self, identifier: &str) -> String {
+        // 无连接上下文时使用默认双引号；query_table_data 使用驱动 dialect。
         format!("\"{}\"", identifier.replace('"', "\"\""))
+    }
+
+    fn format_table_reference(&self, database: &str, schema: Option<&str>, table: &str) -> String {
+        // 多驱动 registry 无单驱动上下文：schema 优先（兼容 PreferSchema / PG-like）。
+        IpcDriverDialect {
+            table_reference_schema_mode: TableReferenceSchemaMode::PreferSchema,
+            supports_schema: true,
+            ..IpcDriverDialect::default()
+        }
+        .format_table_reference(database, schema, table)
     }
 
     fn get_completion_info(&self) -> SqlCompletionInfo {
@@ -101,6 +112,96 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     ) -> Result<Box<dyn DbConnection + Send + Sync>, DbError> {
         let driver = self.driver_for_config(&config)?;
         Ok(Box::new(ExternalDbConnection::new(config, driver)))
+    }
+
+    async fn query_table_data(
+        &self,
+        connection: &dyn DbConnection,
+        request: TableDataRequest,
+    ) -> Result<TableDataResponse> {
+        let start_time = std::time::Instant::now();
+        let driver = self.driver_for_config(connection.config())?;
+        let dialect = &driver.dialect;
+
+        let where_clause = match request.where_clause {
+            Some(ref clause) if !clause.trim().is_empty() => format!(" WHERE {}", clause.trim()),
+            _ => String::new(),
+        };
+        let mut order_clause = match request.order_by_clause {
+            Some(ref clause) if !clause.trim().is_empty() => format!(" ORDER BY {}", clause.trim()),
+            _ => String::new(),
+        };
+        if order_clause.is_empty() {
+            if let Some(default_order_by) = dialect
+                .default_order_by
+                .as_deref()
+                .filter(|order_by| !order_by.trim().is_empty())
+            {
+                order_clause = format!(" ORDER BY {}", default_order_by.trim());
+            }
+        }
+
+        let offset = (request.page.saturating_sub(1)) * request.page_size;
+        let table_ref = dialect.format_table_reference(
+            &request.database,
+            request.schema.as_deref(),
+            &request.table,
+        );
+
+        let count_sql = format!("SELECT COUNT(*) FROM {}{}", table_ref, where_clause);
+        let total_count = match connection.query(&count_sql).await? {
+            SqlResult::Query(result) => result
+                .rows
+                .first()
+                .and_then(|row| row.first())
+                .and_then(|value| value.as_ref())
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0),
+            _ => 0,
+        };
+
+        let pagination = dialect.format_pagination(request.page_size, offset, &order_clause);
+        let data_sql = if let Some(row_id_column) = dialect
+            .row_id_column
+            .as_deref()
+            .filter(|column| !column.trim().is_empty())
+        {
+            let row_id_alias = dialect
+                .row_id_alias
+                .as_deref()
+                .filter(|alias| !alias.trim().is_empty())
+                .unwrap_or("__rowid__");
+            format!(
+                "SELECT {} AS {}, t.* FROM {} t{}{}{}",
+                row_id_column.trim(),
+                dialect.quote_identifier(row_id_alias.trim()),
+                table_ref,
+                where_clause,
+                order_clause,
+                pagination
+            )
+        } else {
+            format!(
+                "SELECT * FROM {}{}{}{}",
+                table_ref, where_clause, order_clause, pagination
+            )
+        };
+
+        let sql_result = connection.query(&data_sql).await?;
+        let duration = start_time.elapsed().as_millis();
+        let query_result = match sql_result {
+            SqlResult::Query(query_result) => Ok::<QueryResult, anyhow::Error>(query_result),
+            SqlResult::Exec(_) => Err(anyhow!("query type error")),
+            SqlResult::Error(sql_error_info) => Err(anyhow!(sql_error_info.message)),
+        }?;
+
+        Ok(TableDataResponse {
+            query_result,
+            total_count,
+            page: request.page,
+            page_size: request.page_size,
+            duration,
+        })
     }
 
     async fn list_databases(&self, connection: &dyn DbConnection) -> Result<Vec<String>> {
@@ -332,14 +433,15 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         schema: Option<String>,
         table: &str,
     ) -> Result<Vec<TriggerInfo>> {
-        Ok(self
+        let triggers = self
             .optional_metadata(
                 connection,
                 "metadata.list_table_triggers",
                 table_metadata_params(database, schema, table),
             )
             .await?
-            .unwrap_or_default())
+            .unwrap_or_default();
+        Ok(fill_trigger_table_names(triggers, table))
     }
 
     async fn list_table_checks(
@@ -349,14 +451,15 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         schema: Option<String>,
         table: &str,
     ) -> Result<Vec<CheckInfo>> {
-        Ok(self
+        let checks = self
             .optional_metadata(
                 connection,
                 "metadata.list_table_checks",
                 table_metadata_params(database, schema, table),
             )
             .await?
-            .unwrap_or_default())
+            .unwrap_or_default();
+        Ok(fill_check_table_names(checks, table))
     }
 
     async fn list_functions(
@@ -624,6 +727,32 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     }
 }
 
+
+/// 驱动省略 table_name 时，用请求中的表名回填。
+fn fill_trigger_table_names(triggers: Vec<TriggerInfo>, fallback_table: &str) -> Vec<TriggerInfo> {
+    triggers
+        .into_iter()
+        .map(|mut trigger| {
+            if trigger.table_name.is_empty() {
+                trigger.table_name = fallback_table.to_string();
+            }
+            trigger
+        })
+        .collect()
+}
+
+fn fill_check_table_names(checks: Vec<CheckInfo>, fallback_table: &str) -> Vec<CheckInfo> {
+    checks
+        .into_iter()
+        .map(|mut check| {
+            if check.table_name.is_empty() {
+                check.table_name = fallback_table.to_string();
+            }
+            check
+        })
+        .collect()
+}
+
 fn decode_single_cell<T>(query: crate::executor::QueryResult) -> Result<T>
 where
     T: serde::de::DeserializeOwned,
@@ -701,5 +830,59 @@ fn object_view(
             .map(|name| gpui_component::table::Column::new(name, name))
             .collect(),
         rows,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_table_name_falls_back_to_request_table() {
+        let triggers = fill_trigger_table_names(
+            vec![TriggerInfo {
+                name: "events_audit_trigger".into(),
+                table_name: String::new(),
+                event: "insert".into(),
+                timing: "after".into(),
+                definition: Some("INSERT INTO audit VALUES (NEW.id)".into()),
+            }],
+            "events",
+        );
+        assert_eq!(1, triggers.len());
+        assert_eq!("events_audit_trigger", triggers[0].name);
+        assert_eq!("events", triggers[0].table_name);
+        assert_eq!("insert", triggers[0].event);
+        assert_eq!("after", triggers[0].timing);
+    }
+
+    #[test]
+    fn trigger_table_name_keeps_driver_value_when_present() {
+        let triggers = fill_trigger_table_names(
+            vec![TriggerInfo {
+                name: "t1".into(),
+                table_name: "orders".into(),
+                event: "update".into(),
+                timing: "before".into(),
+                definition: None,
+            }],
+            "events",
+        );
+        assert_eq!("orders", triggers[0].table_name);
+    }
+
+    #[test]
+    fn check_table_name_falls_back_to_request_table() {
+        let checks = fill_check_table_names(
+            vec![CheckInfo {
+                name: "events_payload_check".into(),
+                table_name: String::new(),
+                definition: Some("payload IS NOT NULL".into()),
+            }],
+            "events",
+        );
+        assert_eq!(1, checks.len());
+        assert_eq!("events_payload_check", checks[0].name);
+        assert_eq!("events", checks[0].table_name);
     }
 }

@@ -596,7 +596,19 @@ fn external_form_config(driver: &IpcDriverManifest, cx: &mut App) -> Option<DbFo
     config.title = format!("{} ({})", translate("Common.new"), driver.name);
     config.hidden_params =
         HashMap::from([(EXTERNAL_DRIVER_ID_PARAM.to_string(), driver.id.clone())]);
+    ensure_external_ssh_tab(&mut config);
     Some(config)
+}
+
+fn ensure_external_ssh_tab(config: &mut DbFormConfig) {
+    if config
+        .tab_groups
+        .iter()
+        .any(|group| group.name == "ssh")
+    {
+        return;
+    }
+    config.tab_groups.push(DbFormConfig::ssh_tab_group());
 }
 
 fn default_external_form_config(driver: &IpcDriverManifest) -> DbFormConfig {
@@ -646,6 +658,7 @@ fn default_external_form_config(driver: &IpcDriverManifest) -> DbFormConfig {
                 )
                 .optional(),
             ]),
+            DbFormConfig::ssh_tab_group(),
         ],
     }
 }

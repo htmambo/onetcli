@@ -212,7 +212,7 @@ impl DbFormConfig {
             )])
     }
 
-    fn ssh_tab_group() -> TabGroup {
+    pub(crate) fn ssh_tab_group() -> TabGroup {
         TabGroup::new("ssh", t!("ConnectionForm.ssh")).fields(vec![
             FormField::new(
                 "ssh_tunnel_enabled",

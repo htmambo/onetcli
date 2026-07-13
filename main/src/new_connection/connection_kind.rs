@@ -1,3 +1,4 @@
+use crate::external_driver_display::external_driver_icon_for_driver_id;
 use db::ipc::IpcDriverRegistry;
 use gpui::{Styled, px};
 use gpui_component::{Icon, IconName, Sizable};
@@ -137,7 +138,11 @@ impl NewConnectionKind {
             Self::Rdp => IconName::Rdp.color().with_size(px(40.0)),
             Self::Vnc => IconName::Vnc.color().with_size(px(40.0)),
             Self::Database(db_type) => db_type.as_icon().with_size(px(40.0)),
-            Self::ExternalDatabase { .. } => IconName::Database.color().with_size(px(40.0)),
+            Self::ExternalDatabase { driver_id, .. } => {
+                external_driver_icon_for_driver_id(driver_id, px(40.0)).unwrap_or_else(|| {
+                    IconName::Database.color().with_size(px(40.0))
+                })
+            }
         }
     }
 }

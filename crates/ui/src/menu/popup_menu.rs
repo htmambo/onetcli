@@ -1134,7 +1134,13 @@ impl PopupMenu {
                     .items_center()
                     .gap_x_1()
                     .children(Self::render_icon(has_left_icon, false, None, window, cx))
-                    .child(div().flex_1().child(label.clone())),
+                    .child(
+                        div()
+                            .flex_1()
+                            .whitespace_nowrap()
+                            .overflow_x_hidden()
+                            .child(label.clone()),
+                    ),
             ),
             PopupMenuItem::ElementItem {
                 render,
@@ -1197,7 +1203,15 @@ impl PopupMenu {
                         .gap_3()
                         .items_center()
                         .justify_between()
-                        .when(!show_link_icon, |this| this.child(label.clone()))
+                        .when(!show_link_icon, |this| {
+                            this.child(
+                                div()
+                                    .flex_1()
+                                    .whitespace_nowrap()
+                                    .overflow_x_hidden()
+                                    .child(label.clone()),
+                            )
+                        })
                         .children(right_check_icon)
                         .when(show_link_icon, |this| {
                             this.child(
@@ -1205,7 +1219,13 @@ impl PopupMenu {
                                     .w_full()
                                     .justify_between()
                                     .gap_1p5()
-                                    .child(label.clone())
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .whitespace_nowrap()
+                                            .overflow_x_hidden()
+                                            .child(label.clone()),
+                                    )
                                     .child(
                                         Icon::new(IconName::ExternalLink)
                                             .xsmall()
@@ -1244,7 +1264,13 @@ impl PopupMenu {
                                 .gap_2()
                                 .items_center()
                                 .justify_between()
-                                .child(label.clone())
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .whitespace_nowrap()
+                                        .overflow_x_hidden()
+                                        .child(label.clone()),
+                                )
                                 .child(
                                     Icon::new(IconName::ChevronRight)
                                         .xsmall()

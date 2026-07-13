@@ -63,6 +63,7 @@ use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
 use crate::new_connection::NewConnectionWindow;
+use crate::external_driver_display::external_driver_icon_for_config;
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
     GlobalCurrentUser,
@@ -4542,7 +4543,10 @@ impl HomePage {
         let icon = match conn.connection_type {
             ConnectionType::Database => conn
                 .to_db_connection()
-                .map(|c| c.database_type.as_icon())
+                .map(|c| {
+                    external_driver_icon_for_config(&c, px(size))
+                        .unwrap_or_else(|| c.database_type.as_icon())
+                })
                 .unwrap_or_else(|_| IconName::Database.color())
                 .with_size(px(size))
                 .text_color(gpui::white()),

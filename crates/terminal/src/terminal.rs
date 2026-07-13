@@ -299,6 +299,8 @@ pub enum TerminalModelEvent {
     PromptStart,
     /// shell prompt 已渲染完成，用户可以输入（OSC 133;B）
     InputStart,
+    /// shell 命令开始执行（OSC 133;C）
+    CommandStart,
     /// 终端标题已更改
     TitleChanged(String),
     /// 终端响铃
@@ -2527,6 +2529,8 @@ impl Terminal {
             TerminalEvent::CommandStart => {
                 // 不直接修改 ssh_process_state，因为 bash DEBUG trap
                 // 可能在 PS1 的命令 substitution 中误触发。
+                // 仍向上游发出 CommandStart，供历史提示/关闭确认等 UI 使用。
+                cx.emit(TerminalModelEvent::CommandStart);
             }
             TerminalEvent::TitleChanged(title) => {
                 self.title = title.clone();

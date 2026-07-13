@@ -36,6 +36,8 @@ fn make_driver(binary: &std::path::Path, manifest_dir: &std::path::Path) -> IpcD
             command: binary.to_string_lossy().into_owned(),
             args: Vec::new(),
             working_dir: None,
+            commands: Default::default(),
+            env_from_config: Default::default(),
         },
         dialect: Default::default(),
         capabilities: None,

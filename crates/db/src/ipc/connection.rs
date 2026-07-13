@@ -2,12 +2,14 @@ use crate::connection::{DbConnection, DbError, StreamingProgress};
 use crate::executor::{ExecOptions, QueryColumnMeta, QueryResult, SqlResult, SqlSource};
 use crate::ipc::client::JsonRpcClient;
 use crate::ipc::protocol::{
-    connection_config_params, database_params, empty_params, schema_params, sql_params,
+    connection_config_params_with_target, database_params, empty_params, schema_params, sql_params,
 };
 use crate::ipc::registry::IpcDriverManifest;
+use crate::ssh_tunnel::resolve_connection_target;
 use crate::{DatabasePlugin, SqlErrorInfo, truncate_str};
 use async_trait::async_trait;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
+use ssh::LocalPortForwardTunnel;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error};
@@ -15,6 +17,8 @@ use tracing::{debug, error};
 pub struct ExternalDbConnection {
     config: DbConnectionConfig,
     driver: IpcDriverManifest,
+    /// 宿主建立的本地端口转发；driver 只看到 target host/port。
+    tunnel: Option<LocalPortForwardTunnel>,
     /// `Arc` 让 `request` 能短锁拿 clone 后立刻释放,允许多 caller 并发调用
     /// `JsonRpcClient::request`。`Mutex<Option<...>>` 处理 connect/disconnect 的
     /// owner 切换。
@@ -26,6 +30,7 @@ impl ExternalDbConnection {
         Self {
             config,
             driver,
+            tunnel: None,
             client: Mutex::new(None),
         }
     }
@@ -153,13 +158,20 @@ impl DbConnection for ExternalDbConnection {
     }
 
     async fn connect(&mut self) -> Result<(), DbError> {
-        let client = JsonRpcClient::start(&self.driver).await?;
+        self.tunnel = None;
+        let target = resolve_connection_target(&self.config).await?;
+        let client =
+            JsonRpcClient::start_with_connection_config(&self.driver, Some(&self.config)).await?;
         // initialize / connect 走 `&self`,这里直接用 owned client(尚未 Arc),
         // 任一步失败就把 client drop 掉 → reader_task abort + child kill_on_drop。
         let _: serde_json::Value = client.request("initialize", empty_params()).await?;
         let _: serde_json::Value = client
-            .request("connect", connection_config_params(&self.config))
+            .request(
+                "connect",
+                connection_config_params_with_target(&self.config, &target.host, target.port),
+            )
             .await?;
+        self.tunnel = target.tunnel;
         *self.client.lock().await = Some(Arc::new(client));
         Ok(())
     }
@@ -175,6 +187,7 @@ impl DbConnection for ExternalDbConnection {
             // 而立即收到 disconnected 错误,然后 Arc 自然 drop。
             client_arc.shutdown().await;
         }
+        self.tunnel = None;
         Ok(())
     }
 
@@ -396,6 +409,8 @@ mod schema_switch_tests {
                 command: "driver".into(),
                 args: Vec::new(),
                 working_dir: None,
+                commands: Default::default(),
+                env_from_config: Default::default(),
             },
             transport: IpcDriverTransport::local_socket("driver.sock"),
             dialect: Default::default(),

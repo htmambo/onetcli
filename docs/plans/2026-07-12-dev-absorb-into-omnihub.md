@@ -434,7 +434,7 @@
 - `564857f3` release page URL：本地已有 `GITHUB_LATEST_RELEASE_URL`，**跳过**
 - `d15ecfc8` query selected table：本地 search_shortcut 已覆盖 OpenSelectedTableQuery，**跳过**
 - `5652798e` database objects 列宽：本地已用 `Table`/`col_resizable`，**跳过**手写 resize handle
-- `16e5b1dc` table designer 列宽：与本地 designer 冲突风险高，稍后
+- `16e5b1dc` table designer 列宽：已接入
 - `7e125934` IPC Datetime 格式化：本地 `ipc/connection.rs` 无 CellValue 分派，**跳过**
 - MCP / extension：继续延后
 
@@ -454,3 +454,202 @@
 - [x] 验证：`cargo test -p db_view --lib test_loaded_column_type_missing` ✅ 1 passed
 - 未搬：IPC wire `index.is_primary` 映射（本地 wire 结构不同，延后）
 
+
+### Phase 1.x External schema switch SQL 回退（已接入）
+
+- [x] `IpcDriverDialect.compatible_database_type` 可选字段
+- [x] `switch_schema`：RPC 成功后附加方言 SQL；`NotSupported` 时 SQL 回退
+- [x] Postgres `SET search_path` / Oracle `ALTER SESSION` / DuckDB `SET schema` / dm→Oracle
+- [x] 验证：`cargo test -p db --lib schema_switch` ✅ 6 passed
+- 适配：本地 RPC 为 `switch_schema`（非 dev `conn/use`）
+
+### Phase 1.x Table designer 列宽拖拽（进行中/已接入）
+
+- [x] `16e5b1dc`：ColumnsEditor 可调整列宽 + min/max 边界
+- [x] header resize handle + 行宽绑定 `column_widths`
+- [x] 验证：`cargo test -p db_view --lib column_editor_resize` ✅ 2 passed
+
+### 下一包评估（续 2）
+
+- `ce5bb446` 暂停 sort_order 优先：本地保留 Manual 排序，**跳过**
+- `d19c56f3` registry reloader 优先：本地无 reloader 架构，**跳过**
+- `e0cfb693` IPC startup env_from_config：本地 entry 无 commands/env_from_config，延后
+- `0bfe928d` 外部驱动图标：已接入（见下）
+- MCP / extension：继续延后
+
+
+### Phase 1.x 外部驱动标签页图标（已接入）
+
+- [x] `0bfe928d`：外部驱动图标显示（适配本地 `External` + `extra_params[external_driver_id]`）
+- [x] `Icon.file_path` + color 模式 `ImageSource` 文件系统渲染（`crates/ui/src/icon.rs`）
+- [x] `crates/db/src/ipc/display.rs`：`IpcDriverDisplay` / `display_for_config` / asset+file 图标解析
+- [x] `IpcDriverRegistry::from_drivers` 测试辅助
+- [x] `DatabaseTabView::icon` 优先驱动文件图标 → 内置资源图标 → 类型图标
+- [x] 验证：`cargo test -p db --lib display` ✅ 3 passed
+- [x] 验证：`cargo test -p db_view --lib database_tab_icon` ✅ 3 passed
+- [x] 验证：`cargo check -p main -p db_view` ✅
+- 适配：无 `icon_color` / `DatabaseType::External { driver_id }`；driver id 走 `EXTERNAL_DRIVER_ID_PARAM`
+- 未搬：树节点/新建连接表单图标（可作轻量续包）
+
+### 下一包评估（续 3）
+
+- 可选：`db_tree_view` 外部驱动图标：已接入（见下）
+- `e0cfb693` IPC startup `env_from_config` / platform commands：entry 模型差异大，中重
+- `52ae6634` external SQL dialect exposure：中重
+- MCP / extension / tool_runtime：继续延后
+
+
+### Phase 1.x 外部驱动树节点图标（已接入）
+
+- [x] 延续 `0bfe928d` / `88f598b0`：`db_tree_view` 连接节点写入外部驱动 display 元数据
+- [x] `connection_node` / `connection_node_icon` / `apply_connection_node_config`
+- [x] 创建、更新、添加连接时刷新 metadata；图标优先 file → asset → `as_node_icon`
+- [x] 验证：`cargo test -p db_view --lib external_connection_metadata` ✅ 1 passed
+- [x] 验证：`cargo test -p db_view --lib external_driver`（树 metadata + tab icon） ✅
+- [x] 验证：`cargo test -p db_view --lib apply_connection_node_config` ✅ 2 passed
+- 适配：driver id 仍走 `extra_params[external_driver_id]`
+- 未搬：首页 `home_tab` / 新建连接列表的 external driver 图标（依赖 home 统一渲染，中等）
+
+### 下一包评估（续 4）
+
+- 首页/新建连接 external driver 图标：已接入（见下）
+- `e0cfb693` IPC startup env_from_config：中重
+- `52ae6634` external SQL dialect：中重
+- MCP / extension：继续延后
+
+
+### Phase 1.x 首页/新建连接外部驱动图标（已接入）
+
+- [x] `main/src/external_driver_display.rs`：`external_driver_icon_for_config` / `for_driver_id`
+- [x] `home_tab::render_connection_icon` 优先外部驱动图标
+- [x] `NewConnectionKind::ExternalDatabase` 图标走驱动 display
+- [x] 验证：`cargo test -p main --bin omnihub external_driver_icon` ✅ 2 passed
+- 适配：无 category / builtin skip 列表（本地仍列出全部 external drivers）
+
+### 下一包评估（续 5）
+
+- `e0cfb693` IPC startup env_from_config：已接入（见下）
+- `52ae6634` external SQL dialect exposure：中重
+- MCP / extension / tool_runtime：继续延后
+
+
+### Phase 1.x IPC 启动配置 env_from_config / platform commands（已接入）
+
+- [x] `e0cfb693`：`IpcDriverEntry.commands` + `env_from_config`
+- [x] `command_for_platform` / `command_for_current_platform`（windows → commands.windows，否则 default → command）
+- [x] `config_value` 支持 host/port/user/password/database/extra_params.*
+- [x] `JsonRpcClient::start_with_connection_config`；`ExternalDbConnection::connect` 传入 config
+- [x] `build_driver_command` 注入环境变量（适配本地 tokio Command，非 extension_host SpawnConfig）
+- [x] 验证：`cargo test -p db --lib command_for_platform` ✅ 2 passed
+- [x] 验证：`cargo test -p db --lib env_from_config` ✅ 1 passed
+- [x] 回归：`cargo test -p db --lib display` ✅ 3 passed
+- 适配：本地 spawn 路径与 dev 不同，按 Command/.env 接入
+
+### 下一包评估（续 6）
+
+- `52ae6634` external SQL dialect exposure：已接入（见下）
+- MCP / extension / tool_runtime：继续延后
+
+
+### Phase 1.x External SQL dialect 表引用/分页/row_id（已接入）
+
+- [x] `52ae6634` 核心：`IpcDriverDialect` 增加 `limit_style` / `table_reference_schema_mode` / `row_id_*` / `default_order_by`
+- [x] `LimitStyle`（LimitOffset | OffsetFetch）与 `TableReferenceSchemaMode`（Auto | PreferSchema）
+- [x] dialect helpers：`quote_identifier` / `format_table_reference` / `format_pagination`
+- [x] `ExternalDatabasePlugin::query_table_data` 按连接驱动 dialect 生成 COUNT/SELECT SQL
+- [x] `format_table_reference` 多驱动下 schema 优先回退
+- [x] 验证：`prefer_schema_table_reference_uses_schema` ✅
+- [x] 验证：`offset_fetch_pagination_style` ✅
+- 适配：本地为 registry 多驱动，无 `for_driver` 单驱动插件；query_table_data 从 connection 解析 driver
+
+### 下一包评估（续 7）
+
+- MCP / extension / tool_runtime：继续延后
+- 终端 CJK/selection：本地已具备，跳过
+- 其余 medium 项按需评估
+
+
+### Phase 1.x 表触发器/检查项表名回填（已接入）
+
+- [x] `768afafa` 适配：驱动省略 `table_name` 时用请求表名回填
+- [x] `fill_trigger_table_names` / `fill_check_table_names`（metadata JSON 路径，非 wire helper）
+- [x] `list_table_triggers` / `list_table_checks` 接入回填
+- [x] 验证：`cargo test -p db --lib table_name_` ✅ 含 3 项 fallback/keep 测试 passed
+- 未搬：extension-protocol serde default（本地无该 crate 路径）
+
+### Phase 1.x SQL 补全使用驱动函数（已接入）
+
+- [x] `ffc9d7f4`：`SqlSchema.functions` + `with_functions`
+- [x] completion 优先展示 schema/driver 动态函数
+- [x] `GlobalDbState::list_functions` + `sql_editor_view` 加载函数签名
+- [x] 验证：`cargo test -p db_view --lib with_dynamic_functions` ✅ 1 passed
+- 适配：本地无 wire `function_info_from_wire`；参数已是 `Vec<String>`
+
+### 下一包评估（续 8）
+
+扫描结论（轻→中大多已在当前分支）：
+
+- 已本地：`cf0c2f65` Oracle DUAL ping、`e754f8e5` PG truncate+schema、`034ff5f3` 连接错误可关闭、
+  `cddac422` redis namespace 搜索、`0df1545b` 跳板多认证、`e35c2f85` 窗口置顶、
+  `d68184d6` sql max rows、`c5767f5c` 自定义字体/SQL 字体、`bd939f8a` redis SSH tunnel、
+  终端 CJK/selection、home Manual 拖拽排序、external form title
+- 高冲突延后：`cc555c44` external DDL（依赖 wire_ddl + 单驱动 `for_driver` + connectionless RPC）
+- 重包延后：MCP / extension / tool_runtime / port_forwarding / remote_desktop / team-website
+- 可选中等后续：external 驱动 CreateDatabase 表单 i18n（需 `external_driver_manifest` 与 per-connection 插件上下文）、
+  home 统一渲染细部 diff（`4c5c2411`）若仍有差异
+
+### 本波验证证据
+
+- `cargo test -p db --lib table_name_` ✅ 4 passed（含 3 项表名回填）
+- `cargo test -p db_view --lib with_dynamic_functions` ✅ 1 passed
+- `cargo check -p main -p db_view -p db` ✅
+
+
+### Phase 1.x IPC 经宿主 SSH 隧道路由（已接入）
+
+- [x] `7ccd8f64` 适配：`resolve_connection_target` + 保留 `LocalPortForwardTunnel`
+- [x] `connection_config_params_with_target` 把 host/port 改写为隧道本地地址
+- [x] 外部连接表单补 SSH tab（`ensure_external_ssh_tab` / default form）
+- [x] 验证：`cargo test -p db --lib connection_config` ✅ 2 passed
+- 适配：本地 RPC 为 `connect` + config（非 wire `conn/open`）
+
+### Phase 1.x 显式 IPC identifier quote pair（已接入）
+
+- [x] `46ab8acd` 适配：`identifier_quote_left` / `identifier_quote_right`（兼容旧 `identifier_quote`）
+- [x] 支持 MSSQL 风格 `[name]` 引号对
+- [x] 验证：`cargo test -p db --lib quote_identifier` ✅ 含 bracket/legacy 测试
+
+### 下一包评估（续 9）
+
+- `ca48bbf1` 本地终端关闭确认：本地已有 `has_blocking_terminal_activity` + 关闭确认对话框，**跳过**（OSC 跟踪为替代实现）
+- 可选：`f48c1564` 单文件连接生命周期强化（若仍有缺口）
+- 可选：`6c376c51` IPC object view metadata（中重）
+- 高冲突：`cc555c44` external DDL
+- 重包：MCP / extension / port_forwarding / remote_desktop
+
+### 本波验证证据（续）
+
+- `cargo test -p db --lib connection_config` ✅ 2
+- `cargo test -p db --lib quote_identifier` ✅ 9（含 bracket/legacy）
+- `cargo check -p db_view -p db` ✅
+
+
+### Phase 1.x 禁用 TUI 内终端历史提示（已接入）
+
+- [x] `46fc6077`：`shell_prompt_input_active` + application mode 守卫
+- [x] `TerminalModelEvent::CommandStart` 向上游发射（不改 ssh_process_state）
+- [x] history prompt 仅在 SSH + 可输入 prompt + 非 TUI 模式显示
+- [x] 验证：`cargo test -p terminal_view --lib history_prompt` ✅ 31 passed
+
+### Phase 1.x 菜单长标签溢出修复（已接入）
+
+- [x] `d385c9ef`：popup_menu / sidebar 标签 `whitespace_nowrap` + `overflow_x_hidden`
+- 验证：随 `cargo check -p gpui-component` 覆盖
+
+### 下一包评估（续 10）
+
+- `b21cf654` table design is_primary：本地已有，跳过
+- `f48c1564` 单文件连接生命周期：部分本地有 close_on_release
+- `6c376c51` IPC object view metadata：中重
+- `81ea737d` 驱动分类：可选 UI
+- 高冲突：external DDL / MCP / extension / port_forwarding / remote_desktop

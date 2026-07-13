@@ -37,6 +37,8 @@ fn make_manifest(socket_name: String) -> IpcDriverManifest {
             command: String::new(),
             args: Vec::new(),
             working_dir: None,
+            commands: Default::default(),
+            env_from_config: Default::default(),
         },
         dialect: Default::default(),
         capabilities: None,

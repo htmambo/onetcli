@@ -8,6 +8,7 @@ mod app_init;
 mod bootstrap;
 mod connection_restore;
 mod home;
+mod external_driver_display;
 mod home_tab;
 pub mod new_connection;
 mod omnihub_app;

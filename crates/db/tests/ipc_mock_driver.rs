@@ -34,6 +34,8 @@ async fn external_connection_uses_mock_local_socket_driver() {
             command: String::new(),
             args: Vec::new(),
             working_dir: None,
+            commands: Default::default(),
+            env_from_config: Default::default(),
         },
         dialect: Default::default(),
         capabilities: None,

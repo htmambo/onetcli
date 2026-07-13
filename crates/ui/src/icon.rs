@@ -1,9 +1,10 @@
 use crate::{ActiveTheme, Sizable, Size};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, ParentElement, Radians,
-    Render, RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window, div,
-    img, prelude::FluentBuilder as _, svg,
+    AnyElement, App, AppContext, Context, Entity, Hsla, ImageSource, IntoElement, ParentElement,
+    Radians, Render, RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation,
+    Window, div, img, prelude::FluentBuilder as _, svg,
 };
+use std::path::PathBuf;
 
 /// Types implementing this trait can automatically be converted to [`Icon`].
 ///
@@ -429,6 +430,7 @@ pub struct Icon {
     base: Svg,
     style: StyleRefinement,
     path: SharedString,
+    image_source: Option<ImageSource>,
     text_color: Option<Hsla>,
     size: Option<Size>,
     rotation: Option<Radians>,
@@ -441,6 +443,7 @@ impl Default for Icon {
             base: svg().flex_none().size_4(),
             style: StyleRefinement::default(),
             path: "".into(),
+            image_source: None,
             text_color: None,
             size: None,
             rotation: None,
@@ -457,6 +460,7 @@ impl Clone for Icon {
         this.size = self.size;
         this.text_color = self.text_color;
         this.color_mode = self.color_mode;
+        this.image_source = self.image_source.clone();
         this
     }
 }
@@ -475,6 +479,17 @@ impl Icon {
     /// For example: `icons/foo.svg`
     pub fn path(mut self, path: impl Into<SharedString>) -> Self {
         self.path = path.into();
+        self.image_source = None;
+        self
+    }
+
+    /// Set the icon source to a filesystem path.
+    ///
+    /// This is used for external assets that are not embedded in the application asset bundle.
+    pub fn file_path(mut self, path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        self.path = path.display().to_string().into();
+        self.image_source = Some(path.into());
         self
     }
 
@@ -578,7 +593,12 @@ impl RenderOnce for Icon {
                     .flex_shrink_0()
                     .w(w)
                     .h(h)
-                    .child(img(self.path.clone()).size_full())
+                    .child(
+                        img(self
+                            .image_source
+                            .unwrap_or_else(|| self.path.clone().into()))
+                        .size_full(),
+                    )
                     .into_any_element()
             }
         }
@@ -635,7 +655,13 @@ impl Render for Icon {
                     .flex_shrink_0()
                     .w(w)
                     .h(h)
-                    .child(img(self.path.clone()).size_full())
+                    .child(
+                        img(self
+                            .image_source
+                            .clone()
+                            .unwrap_or_else(|| self.path.clone().into()))
+                        .size_full(),
+                    )
                     .into_any_element()
             }
         }

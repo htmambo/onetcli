@@ -1,5 +1,6 @@
 use crate::connection::DbError;
 use crate::ipc::registry::IpcDriverManifest;
+use one_core::storage::DbConnectionConfig;
 use interprocess::local_socket::{
     GenericNamespaced,
     tokio::{Stream as LocalSocketStream, prelude::*},
@@ -60,18 +61,26 @@ pub struct JsonRpcClient {
 
 impl JsonRpcClient {
     pub async fn start(driver: &IpcDriverManifest) -> Result<Self, DbError> {
+        Self::start_with_connection_config(driver, None).await
+    }
+
+    pub async fn start_with_connection_config(
+        driver: &IpcDriverManifest,
+        connection_config: Option<&DbConnectionConfig>,
+    ) -> Result<Self, DbError> {
         // command 为空 → 测试 / 预 listen 模式:server 已绑定 transport.name,直接连。
         // 否则 → 生产模式:每实例生成独立 socket 名,通过 env var 透传给 driver。
-        let socket_name = if driver.entry.command.trim().is_empty() {
+        let launch_command = command_for_current_platform(driver);
+        let socket_name = if launch_command.trim().is_empty() {
             driver.transport.name.clone()
         } else {
             make_socket_name(driver)
         };
 
-        let mut child = if driver.entry.command.trim().is_empty() {
+        let mut child = if launch_command.trim().is_empty() {
             None
         } else {
-            Some(spawn_driver_process(driver, &socket_name).await?)
+            Some(spawn_driver_process(driver, &socket_name, connection_config).await?)
         };
 
         let stream =
@@ -317,9 +326,64 @@ fn has_explicit_path_component(command: &str) -> bool {
     command.contains('/') || command.contains('\\')
 }
 
-fn build_driver_command(driver: &IpcDriverManifest, socket_name: &str) -> Command {
+fn command_for_current_platform(driver: &IpcDriverManifest) -> &str {
+    if cfg!(windows) {
+        command_for_platform(driver, "windows")
+    } else {
+        command_for_platform(driver, "default")
+    }
+}
+
+fn command_for_platform<'a>(driver: &'a IpcDriverManifest, platform: &str) -> &'a str {
+    driver
+        .entry
+        .commands
+        .get(platform)
+        .or_else(|| driver.entry.commands.get("default"))
+        .map(String::as_str)
+        .unwrap_or(driver.entry.command.as_str())
+}
+
+fn config_value(config: &DbConnectionConfig, path: &str) -> Option<String> {
+    match path {
+        "id" => Some(config.id.clone()),
+        "name" => Some(config.name.clone()),
+        "host" => Some(config.host.clone()),
+        "port" => Some(config.port.to_string()),
+        "username" => Some(config.username.clone()),
+        "password" => Some(config.password.clone()),
+        "database" => config.database.clone(),
+        "service_name" => config.service_name.clone(),
+        "sid" => config.sid.clone(),
+        "database_type" => Some(config.database_type.as_str().to_string()),
+        path => path
+            .strip_prefix("extra_params.")
+            .and_then(|key| config.extra_params.get(key).cloned()),
+    }
+}
+
+fn env_pairs_from_connection_config(
+    driver: &IpcDriverManifest,
+    connection_config: &DbConnectionConfig,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for (env_key, config_path) in &driver.entry.env_from_config {
+        if let Some(value) = config_value(connection_config, config_path) {
+            if !value.trim().is_empty() {
+                pairs.push((env_key.clone(), value));
+            }
+        }
+    }
+    pairs
+}
+
+fn build_driver_command(
+    driver: &IpcDriverManifest,
+    socket_name: &str,
+    connection_config: Option<&DbConnectionConfig>,
+) -> Command {
     let cwd = driver.command_working_dir();
-    let program = resolve_command_program(&driver.entry.command, &cwd);
+    let program = resolve_command_program(command_for_current_platform(driver), &cwd);
     let mut command = Command::new(program);
     command
         .args(&driver.entry.args)
@@ -331,14 +395,20 @@ fn build_driver_command(driver: &IpcDriverManifest, socket_name: &str) -> Comman
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    if let Some(connection_config) = connection_config {
+        for (env_key, value) in env_pairs_from_connection_config(driver, connection_config) {
+            command.env(env_key, value);
+        }
+    }
     command
 }
 
 async fn spawn_driver_process(
     driver: &IpcDriverManifest,
     socket_name: &str,
+    connection_config: Option<&DbConnectionConfig>,
 ) -> Result<Child, DbError> {
-    let mut command = build_driver_command(driver, socket_name);
+    let mut command = build_driver_command(driver, socket_name, connection_config);
     let mut child = command.spawn().map_err(|error| {
         DbError::connection_with_source(
             format!("failed to start external driver '{}'", driver.id),
@@ -484,6 +554,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn command_for_platform_uses_platform_specific_entry_command() {
+        let mut manifest = make_test_manifest("sock");
+        manifest.entry.command = "./fallback".into();
+        manifest
+            .entry
+            .commands
+            .insert("windows".into(), "./driver.cmd".into());
+        manifest
+            .entry
+            .commands
+            .insert("default".into(), "./driver".into());
+
+        assert_eq!(command_for_platform(&manifest, "windows"), "./driver.cmd");
+        assert_eq!(command_for_platform(&manifest, "linux"), "./driver");
+        assert_eq!(command_for_platform(&manifest, "default"), "./driver");
+    }
+
+    #[test]
+    fn command_for_platform_falls_back_to_entry_command() {
+        let mut manifest = make_test_manifest("sock");
+        manifest.entry.command = "./only-command".into();
+        assert_eq!(command_for_platform(&manifest, "windows"), "./only-command");
+    }
+
+    #[test]
+    fn env_from_config_maps_connection_fields_and_extra_params() {
+        let mut manifest = make_test_manifest("sock");
+        manifest
+            .entry
+            .env_from_config
+            .insert("GBASE8S_JDK_HOME".into(), "extra_params.jdk_home".into());
+        manifest
+            .entry
+            .env_from_config
+            .insert("DB_HOST".into(), "host".into());
+        manifest
+            .entry
+            .env_from_config
+            .insert("DB_PORT".into(), "port".into());
+        manifest
+            .entry
+            .env_from_config
+            .insert("EMPTY_SKIP".into(), "extra_params.missing".into());
+
+        let mut config = DbConnectionConfig {
+            id: "1".into(),
+            database_type: one_core::storage::DatabaseType::External,
+            name: "saved".into(),
+            host: "db.example".into(),
+            port: 9088,
+            username: String::new(),
+            password: String::new(),
+            database: None,
+            service_name: None,
+            sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
+            workspace_id: None,
+            extra_params: Default::default(),
+        };
+        config
+            .extra_params
+            .insert("jdk_home".into(), "/opt/jdk".into());
+
+        let pairs = env_pairs_from_connection_config(&manifest, &config);
+        assert!(pairs.contains(&("GBASE8S_JDK_HOME".into(), "/opt/jdk".into())));
+        assert!(pairs.contains(&("DB_HOST".into(), "db.example".into())));
+        assert!(pairs.contains(&("DB_PORT".into(), "9088".into())));
+        assert!(!pairs.iter().any(|(k, _)| k == "EMPTY_SKIP"));
+    }
+
     fn make_test_manifest(socket_name: &str) -> IpcDriverManifest {
         IpcDriverManifest {
             id: "socket-test".into(),
@@ -494,6 +636,8 @@ mod tests {
                 command: "sleep".into(),
                 args: vec!["30".into()],
                 working_dir: None,
+                commands: Default::default(),
+                env_from_config: Default::default(),
             },
             transport: crate::ipc::registry::IpcDriverTransport::local_socket(socket_name),
             dialect: Default::default(),
@@ -522,6 +666,8 @@ mod lifecycle_tests {
                 command: "sleep".into(),
                 args: vec!["30".into()],
                 working_dir: None,
+                commands: Default::default(),
+                env_from_config: Default::default(),
             },
             transport: IpcDriverTransport::local_socket("omnihub-lifecycle-test.sock"),
             dialect: Default::default(),
@@ -551,7 +697,7 @@ mod lifecycle_tests {
     async fn spawn_driver_process_kills_child_when_handle_drops() {
         let manifest = make_sleep_manifest();
         let socket_name = manifest.transport.name.clone();
-        let child = spawn_driver_process(&manifest, &socket_name)
+        let child = spawn_driver_process(&manifest, &socket_name, None)
             .await
             .expect("spawn driver child process");
         let pid = child.id().expect("child pid should be available");
