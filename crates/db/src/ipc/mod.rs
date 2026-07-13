@@ -11,6 +11,6 @@ pub use display::{
     IpcDriverDisplay, driver_icon_from_asset_path, driver_icon_from_file_path,
 };
 pub use registry::{
-    EXTERNAL_DRIVER_ID_PARAM, IpcDriverEntry, IpcDriverManifest, IpcDriverRegistry,
-    IpcDriverTransport, IpcDriverUi, LimitStyle, TableReferenceSchemaMode,
+    EXTERNAL_DRIVER_ID_PARAM, IpcDriverConnection, IpcDriverEntry, IpcDriverManifest,
+    IpcDriverRegistry, IpcDriverTransport, IpcDriverUi, LimitStyle, TableReferenceSchemaMode,
 };

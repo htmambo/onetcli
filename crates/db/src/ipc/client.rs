@@ -644,6 +644,7 @@ mod tests {
             dialect: Default::default(),
             capabilities: None,
             ui: Default::default(),
+            connection: Default::default(),
             manifest_dir: std::path::PathBuf::from("/tmp"),
         }
     }
@@ -675,6 +676,7 @@ mod lifecycle_tests {
             dialect: Default::default(),
             capabilities: None,
             ui: Default::default(),
+            connection: Default::default(),
             manifest_dir: PathBuf::from("/tmp"),
         }
     }

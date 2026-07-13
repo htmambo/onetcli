@@ -14,6 +14,7 @@ use crate::types::*;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
+use gpui::{TextAlign, px};
 use sqlparser::dialect::{Dialect, GenericDialect};
 
 #[derive(Clone)]
@@ -79,6 +80,37 @@ impl ExternalDatabasePlugin {
         } else {
             sql_statements.join(";\n\n") + ";"
         }
+    }
+
+    async fn custom_object_view(
+        &self,
+        connection: &dyn DbConnection,
+        view: ObjectViewKind,
+        db_node_type: DbNodeType,
+        default_title: &str,
+        scope: ObjectViewScope<'_>,
+    ) -> Result<Option<ObjectView>> {
+        let mut params = serde_json::Map::new();
+        params.insert("view".to_string(), serde_json::json!(view.as_str()));
+        if let Some(database) = scope.database {
+            params.insert("database".to_string(), serde_json::json!(database));
+        }
+        if let Some(schema) = scope.schema {
+            params.insert("schema".to_string(), serde_json::json!(schema));
+        }
+        if let Some(table) = scope.table {
+            params.insert("table".to_string(), serde_json::json!(table));
+        }
+
+        let view = self
+            .optional_metadata::<DriverObjectView>(
+                connection,
+                "metadata.object_view",
+                serde_json::Value::Object(params),
+            )
+            .await?;
+
+        Ok(view.and_then(|view| object_view_from_driver(db_node_type, default_title, view)))
     }
 
     async fn metadata<T>(
@@ -255,6 +287,19 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     }
 
     async fn list_databases_view(&self, connection: &dyn DbConnection) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Databases,
+                DbNodeType::Database,
+                "Databases",
+                ObjectViewScope::default(),
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_databases_detailed(connection)
             .await?
@@ -315,6 +360,41 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         .await
     }
 
+    async fn list_schemas_view(
+        &self,
+        connection: &dyn DbConnection,
+        database: &str,
+    ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Schemas,
+                DbNodeType::Schema,
+                "Schemas",
+                ObjectViewScope {
+                    database: Some(database),
+                    ..Default::default()
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
+        let rows = self
+            .list_schemas(connection, database)
+            .await?
+            .into_iter()
+            .map(|schema| vec![schema])
+            .collect();
+        Ok(object_view(
+            DbNodeType::Schema,
+            "Schemas",
+            vec!["Name"],
+            rows,
+        ))
+    }
+
     async fn list_tables(
         &self,
         connection: &dyn DbConnection,
@@ -335,6 +415,23 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         database: &str,
         schema: Option<String>,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Tables,
+                DbNodeType::Table,
+                "Tables",
+                ObjectViewScope {
+                    database: Some(database),
+                    schema: schema.as_deref(),
+                    table: None,
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_tables(connection, database, schema)
             .await?
@@ -371,6 +468,23 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         schema: Option<String>,
         table: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Columns,
+                DbNodeType::Column,
+                "Columns",
+                ObjectViewScope {
+                    database: Some(database),
+                    schema: schema.as_deref(),
+                    table: Some(table),
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_columns(connection, database, schema, table)
             .await?
@@ -407,6 +521,23 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         schema: Option<&str>,
         table: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Indexes,
+                DbNodeType::Index,
+                "Indexes",
+                ObjectViewScope {
+                    database: Some(database),
+                    schema,
+                    table: Some(table),
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_indexes(connection, database, schema.map(str::to_string), table)
             .await?
@@ -440,6 +571,22 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         connection: &dyn DbConnection,
         database: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Views,
+                DbNodeType::View,
+                "Views",
+                ObjectViewScope {
+                    database: Some(database),
+                    ..Default::default()
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_views(connection, database, None)
             .await?
@@ -527,6 +674,22 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         connection: &dyn DbConnection,
         database: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Functions,
+                DbNodeType::Function,
+                "Functions",
+                ObjectViewScope {
+                    database: Some(database),
+                    ..Default::default()
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_functions(connection, database)
             .await?
@@ -569,6 +732,22 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         connection: &dyn DbConnection,
         database: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Procedures,
+                DbNodeType::Procedure,
+                "Procedures",
+                ObjectViewScope {
+                    database: Some(database),
+                    ..Default::default()
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_procedures(connection, database)
             .await?
@@ -603,6 +782,22 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         connection: &dyn DbConnection,
         database: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Triggers,
+                DbNodeType::Trigger,
+                "Triggers",
+                ObjectViewScope {
+                    database: Some(database),
+                    ..Default::default()
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_triggers(connection, database)
             .await?
@@ -638,6 +833,22 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         connection: &dyn DbConnection,
         database: &str,
     ) -> Result<ObjectView> {
+        if let Some(view) = self
+            .custom_object_view(
+                connection,
+                ObjectViewKind::Sequences,
+                DbNodeType::Sequence,
+                "Sequences",
+                ObjectViewScope {
+                    database: Some(database),
+                    ..Default::default()
+                },
+            )
+            .await?
+        {
+            return Ok(view);
+        }
+
         let rows = self
             .list_sequences(connection, database, None)
             .await?
@@ -875,6 +1086,120 @@ fn merge_capabilities(
         })
 }
 
+
+const MIN_CUSTOM_COLUMN_WIDTH_PX: f32 = 1.0;
+
+#[derive(Debug, Clone, Copy)]
+enum ObjectViewKind {
+    Databases,
+    Schemas,
+    Tables,
+    Columns,
+    Indexes,
+    Views,
+    Functions,
+    Procedures,
+    Triggers,
+    Sequences,
+}
+
+impl ObjectViewKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Databases => "databases",
+            Self::Schemas => "schemas",
+            Self::Tables => "tables",
+            Self::Columns => "columns",
+            Self::Indexes => "indexes",
+            Self::Views => "views",
+            Self::Functions => "functions",
+            Self::Procedures => "procedures",
+            Self::Triggers => "triggers",
+            Self::Sequences => "sequences",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ObjectViewScope<'a> {
+    database: Option<&'a str>,
+    schema: Option<&'a str>,
+    table: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct DriverObjectView {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    columns: Vec<DriverObjectViewColumn>,
+    #[serde(default)]
+    rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct DriverObjectViewColumn {
+    key: String,
+    name: String,
+    #[serde(default)]
+    width_px: Option<f32>,
+    #[serde(default)]
+    align: Option<String>,
+}
+
+fn object_view_from_driver(
+    db_node_type: DbNodeType,
+    default_title: &str,
+    view: DriverObjectView,
+) -> Option<ObjectView> {
+    if view.columns.is_empty() {
+        return None;
+    }
+    let column_count = view.columns.len();
+    let columns = view.columns.into_iter().map(column_from_driver).collect();
+    let rows = view
+        .rows
+        .into_iter()
+        .map(|row| normalize_object_view_row(row, column_count))
+        .collect();
+    let title = if view.title.trim().is_empty() {
+        default_title.to_string()
+    } else {
+        view.title
+    };
+    Some(ObjectView {
+        db_node_type,
+        title,
+        columns,
+        rows,
+    })
+}
+
+fn column_from_driver(column: DriverObjectViewColumn) -> gpui_component::table::Column {
+    let mut col = gpui_component::table::Column::new(column.key, column.name);
+    if let Some(width_px) = column.width_px {
+        let width = width_px.max(MIN_CUSTOM_COLUMN_WIDTH_PX);
+        col = col.width(px(width));
+    }
+    if let Some(align) = column.align.as_deref() {
+        col.align = match align.to_ascii_lowercase().as_str() {
+            "center" => TextAlign::Center,
+            "right" => TextAlign::Right,
+            _ => TextAlign::Left,
+        };
+    }
+    col
+}
+
+fn normalize_object_view_row(mut row: Vec<String>, column_count: usize) -> Vec<String> {
+    if row.len() < column_count {
+        row.resize(column_count, String::new());
+    } else if row.len() > column_count {
+        row.truncate(column_count);
+    }
+    row
+}
+
 fn object_view(
     db_node_type: DbNodeType,
     title: impl Into<String>,
@@ -946,6 +1271,59 @@ mod tests {
     }
 }
 
+
+
+#[cfg(test)]
+mod object_view_tests {
+    use super::*;
+
+    #[test]
+    fn object_view_from_driver_maps_columns_and_pads_rows() {
+        let view = DriverObjectView {
+            title: "Event Columns".into(),
+            columns: vec![
+                DriverObjectViewColumn {
+                    key: "name".into(),
+                    name: "Field".into(),
+                    width_px: Some(220.0),
+                    align: None,
+                },
+                DriverObjectViewColumn {
+                    key: "nullable".into(),
+                    name: "Null?".into(),
+                    width_px: Some(72.0),
+                    align: Some("right".into()),
+                },
+            ],
+            rows: vec![vec!["id".into()]],
+        };
+
+        let object = object_view_from_driver(DbNodeType::Column, "Columns", view).unwrap();
+        assert_eq!("Event Columns", object.title);
+        assert_eq!(2, object.columns.len());
+        assert_eq!(vec!["id".to_string(), String::new()], object.rows[0]);
+        assert_eq!(TextAlign::Right, object.columns[1].align);
+    }
+
+    #[test]
+    fn object_view_from_driver_returns_none_without_columns() {
+        let view = DriverObjectView {
+            title: "Empty".into(),
+            columns: vec![],
+            rows: vec![],
+        };
+        assert!(object_view_from_driver(DbNodeType::Table, "Tables", view).is_none());
+    }
+
+    #[test]
+    fn normalize_object_view_row_truncates_extra_cells() {
+        assert_eq!(
+            vec!["a".to_string(), "b".to_string()],
+            normalize_object_view_row(vec!["a".into(), "b".into(), "c".into()], 2)
+        );
+    }
+}
+
 #[cfg(test)]
 mod oracle_table_save_tests {
     use super::*;
@@ -989,6 +1367,7 @@ mod oracle_table_save_tests {
                 default_port: None,
                 form: None,
             },
+            connection: Default::default(),
             manifest_dir: PathBuf::from("."),
         };
         driver.dialect.compatible_database_type = Some(DatabaseType::Oracle);

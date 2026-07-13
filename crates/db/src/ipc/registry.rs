@@ -26,10 +26,30 @@ pub struct IpcDriverManifest {
     pub dialect: IpcDriverDialect,
     #[serde(default)]
     pub capabilities: Option<DatabaseCapabilities>,
+    /// 连接生命周期策略（单文件驱动、释放时关闭等）。
+    #[serde(default)]
+    pub connection: IpcDriverConnection,
     #[serde(default)]
     pub ui: IpcDriverUi,
     #[serde(skip)]
     pub manifest_dir: PathBuf,
+}
+
+/// IPC 驱动连接生命周期声明（manifest `connection` 段）。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct IpcDriverConnection {
+    /// 会话释放时是否关闭底层连接（单文件 DB 常用）。
+    #[serde(default)]
+    pub close_on_release: bool,
+    /// 是否为单文件数据库。
+    #[serde(default)]
+    pub single_file: bool,
+    /// 是否限制为单物理连接。
+    #[serde(default)]
+    pub single_connection: bool,
+    /// 从配置解析文件路径的字段路径（如 `host`、`extra_params.path`）。
+    #[serde(default)]
+    pub path_fields: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -441,6 +461,19 @@ mod tests {
         let registry = IpcDriverRegistry::load_from_dir(temp.path()).unwrap();
         assert_eq!(registry.drivers().len(), 1);
         assert_eq!(registry.find("demo").unwrap().name, "Demo");
+    }
+
+
+    #[test]
+    fn parses_connection_lifecycle_from_manifest() {
+        let manifest: IpcDriverManifest = serde_json::from_str(
+            r#"{"id":"sf","name":"SF","entry":{"command":"x"},"transport":{"name":"sf.sock"},"connection":{"close_on_release":true,"single_file":true,"single_connection":true,"path_fields":["host"]}}"#,
+        )
+        .unwrap();
+        assert!(manifest.connection.close_on_release);
+        assert!(manifest.connection.single_file);
+        assert!(manifest.connection.single_connection);
+        assert_eq!(vec!["host".to_string()], manifest.connection.path_fields);
     }
 
     #[test]

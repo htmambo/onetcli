@@ -26,6 +26,7 @@ fn driver_binary() -> PathBuf {
     target_dir.join(name)
 }
 
+connection: Default::default(),
 fn make_driver(binary: &std::path::Path, manifest_dir: &std::path::Path) -> IpcDriverManifest {
     IpcDriverManifest {
         id: "duckdb".into(),
@@ -44,6 +45,7 @@ fn make_driver(binary: &std::path::Path, manifest_dir: &std::path::Path) -> IpcD
         capabilities: None,
         ui: Default::default(),
         transport: IpcDriverTransport::local_socket("duckdb-driver.sock"),
+        connection: Default::default(),
         manifest_dir: manifest_dir.to_path_buf(),
     }
 }

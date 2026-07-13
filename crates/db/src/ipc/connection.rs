@@ -157,6 +157,10 @@ impl DbConnection for ExternalDbConnection {
         self.config.database = database;
     }
 
+    fn close_on_release(&self) -> bool {
+        self.driver.connection.close_on_release
+    }
+
     async fn connect(&mut self) -> Result<(), DbError> {
         self.tunnel = None;
         let target = resolve_connection_target(&self.config).await?;
@@ -417,6 +421,7 @@ mod schema_switch_tests {
             dialect: Default::default(),
             capabilities: None,
             ui: Default::default(),
+            connection: Default::default(),
             manifest_dir: PathBuf::from("/tmp"),
         };
         driver.dialect.compatible_database_type = compatible;
@@ -468,5 +473,29 @@ mod schema_switch_tests {
     fn is_method_not_found_matches_not_supported() {
         assert!(is_method_not_found(&DbError::NotSupported("missing".into())));
         assert!(!is_method_not_found(&DbError::query("boom")));
+    }
+
+    #[test]
+    fn close_on_release_follows_manifest() {
+        let mut driver = test_driver("sf", None);
+        driver.connection.close_on_release = true;
+        let config = DbConnectionConfig {
+            id: "1".into(),
+            database_type: DatabaseType::External,
+            name: "sf".into(),
+            host: "/tmp/a.db".into(),
+            port: 0,
+            username: String::new(),
+            password: String::new(),
+            database: None,
+            service_name: None,
+            sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
+            workspace_id: None,
+            extra_params: Default::default(),
+        };
+        let conn = ExternalDbConnection::new(config, driver);
+        assert!(conn.close_on_release());
     }
 }

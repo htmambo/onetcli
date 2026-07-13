@@ -719,3 +719,18 @@
 - 高冲突：`cc555c44` external DDL、`f48c1564` lifecycle locks、`6c376c51` object view metadata 增量
 - 重包：MCP / extension / port_forwarding / remote_desktop
 
+### Phase 1.x IPC 自定义 Object View + 连接生命周期（已接入）
+
+- [x] `6c376c51` 适配：`metadata.object_view`（非 wire schema/object_view）
+  - 驱动可返回自定义 title/columns(width/align)/rows
+  - 各 `list_*_view` 优先走自定义，失败回退原实现
+  - 补 `list_schemas_view`
+- [x] `f48c1564` 轻量：`IpcDriverConnection` manifest 段 + `ExternalDbConnection::close_on_release`
+  - 未搬：全量 physical open lock / ConnectionManager 重写
+- [x] 验证：`object_view_*` ✅ 3、`parses_connection_lifecycle_from_manifest` ✅、`close_on_release_follows_manifest` ✅
+
+### 下一包评估（续 14）
+
+- 已收：object view 自定义、manifest close_on_release
+- 仍延后：physical open lock 全量、external DDL、MCP/extension/port_forward/remote_desktop
+

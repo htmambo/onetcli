@@ -753,6 +753,7 @@ mod tests {
                 default_port: None,
                 form: None,
             },
+            connection: Default::default(),
             manifest_dir: PathBuf::from("/drivers/demo"),
         }
     }
