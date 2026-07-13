@@ -3192,6 +3192,7 @@ mod tests {
         db::ipc::IpcDriverManifest {
             id: "demo".to_string(),
             name: "DemoDB".to_string(),
+            category: None,
             description: String::new(),
             version: String::new(),
             entry: db::ipc::IpcDriverEntry {

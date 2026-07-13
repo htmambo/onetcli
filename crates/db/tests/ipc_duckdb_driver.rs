@@ -30,6 +30,7 @@ fn make_driver(binary: &std::path::Path, manifest_dir: &std::path::Path) -> IpcD
     IpcDriverManifest {
         id: "duckdb".into(),
         name: "DuckDB".into(),
+        category: None,
         description: String::new(),
         version: String::new(),
         entry: IpcDriverEntry {

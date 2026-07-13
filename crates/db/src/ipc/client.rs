@@ -630,6 +630,7 @@ mod tests {
         IpcDriverManifest {
             id: "socket-test".into(),
             name: "Socket Test".into(),
+            category: None,
             description: String::new(),
             version: String::new(),
             entry: crate::ipc::registry::IpcDriverEntry {
@@ -660,6 +661,7 @@ mod lifecycle_tests {
         IpcDriverManifest {
             id: "lifecycle-test".into(),
             name: "Lifecycle Test".into(),
+            category: None,
             description: String::new(),
             version: String::new(),
             entry: IpcDriverEntry {

@@ -28,6 +28,7 @@ async fn external_connection_uses_mock_local_socket_driver() {
     let driver = IpcDriverManifest {
         id: "mock".into(),
         name: "Mock".into(),
+        category: None,
         description: String::new(),
         version: String::new(),
         entry: IpcDriverEntry {

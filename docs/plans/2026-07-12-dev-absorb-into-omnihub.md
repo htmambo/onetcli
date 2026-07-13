@@ -653,3 +653,13 @@
 - `6c376c51` IPC object view metadata：中重
 - `81ea737d` 驱动分类：可选 UI
 - 高冲突：external DDL / MCP / extension / port_forwarding / remote_desktop
+
+
+### Phase 1.x IPC 驱动分类 / 国产数据库分组（已接入）
+
+- [x] `81ea737d`：`IpcDriverManifest.category`
+- [x] 新建连接 `DomesticDatabase` 分类（`domestic_database`）
+- [x] 连接表单标题使用外部驱动显示名
+- [x] 验证：`deserializes_optional_category` ✅
+- [x] 验证：`cargo test -p main --bin omnihub domestic_database` ✅ 2
+- [x] 验证：`cargo test -p db_view --lib connection_title` ✅ 2

@@ -403,6 +403,7 @@ mod schema_switch_tests {
         let mut driver = IpcDriverManifest {
             id: driver_id.into(),
             name: driver_id.into(),
+            category: None,
             description: String::new(),
             version: String::new(),
             entry: IpcDriverEntry {

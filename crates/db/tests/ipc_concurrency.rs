@@ -31,6 +31,7 @@ fn make_manifest(socket_name: String) -> IpcDriverManifest {
     IpcDriverManifest {
         id: "concurrency-mock".into(),
         name: "Concurrency Mock".into(),
+        category: None,
         description: String::new(),
         version: String::new(),
         entry: IpcDriverEntry {

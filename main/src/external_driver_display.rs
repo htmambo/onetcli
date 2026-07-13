@@ -54,6 +54,7 @@ mod tests {
         IpcDriverManifest {
             id: id.to_string(),
             name: format!("{id}-name"),
+            category: None,
             description: String::new(),
             version: String::new(),
             entry: IpcDriverEntry {

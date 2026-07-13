@@ -12,6 +12,9 @@ const DRIVER_MANIFEST_FILE: &str = "driver.json";
 pub struct IpcDriverManifest {
     pub id: String,
     pub name: String,
+    /// 驱动分类，如 `domestic_database` 用于国产数据库分组。
+    #[serde(default)]
+    pub category: Option<String>,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -460,5 +463,14 @@ mod tests {
             ..IpcDriverDialect::default()
         };
         assert_eq!("`users`", dialect.quote_identifier("users"));
+    }
+
+    #[test]
+    fn deserializes_optional_category() {
+        let driver: IpcDriverManifest = serde_json::from_str(
+            r#"{"id":"dm","name":"Dameng","category":"domestic_database","entry":{"command":"x"},"transport":{"name":"dm.sock"}}"#,
+        )
+        .unwrap();
+        assert_eq!(Some("domestic_database".to_string()), driver.category);
     }
 }
