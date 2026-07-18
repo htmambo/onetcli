@@ -687,7 +687,7 @@ impl RemoteDesktopView {
             .py_1()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            .bg(gpui::black())
             .child(
                 div()
                     .text_xs()
@@ -1036,10 +1036,12 @@ impl Render for RemoteDesktopView {
                 )
             });
 
+        // 纯黑不透明背景：远程帧未覆盖区域（letterbox/首帧前）不能透出窗口下层内容。
         div()
             .size_full()
             .flex()
             .flex_col()
+            .bg(gpui::black())
             .child(self.display_mode_toolbar(cx))
             .child(div().flex_1().min_h_0().child(frame_area))
     }
