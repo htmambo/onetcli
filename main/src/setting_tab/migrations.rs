@@ -9,7 +9,7 @@
 //! `HotkeyMigration` 通过父模块以 `pub(crate) use` 重导出，维持
 //! `crate::setting_tab::HotkeyMigration` 外部引用路径不变。
 
-use gpui::{App, AppContext};
+use gpui::App;
 use one_core::cloud_sync::sync_server::SyncServerClient;
 use terminal_view::settings::{GlobalTerminalSettings, TerminalSettingsStore};
 use terminal_view::{TerminalSettings, set_recovery_scrollback_lines};
@@ -17,7 +17,7 @@ use terminal_view::{TerminalSettings, set_recovery_scrollback_lines};
 use super::app_settings::AppSettings;
 use super::hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
 use super::theme_utils;
-use crate::omnihub_app::GlobalHomePage;
+use crate::omnihub_app::{GlobalHomePage, GlobalMainWindowHandle};
 
 /// 旧版系统级激活热键 `ctrl-space` 与系统输入法切换冲突，启动时按平台迁移为新默认值。
 #[derive(Debug, Clone, Copy, Default)]
@@ -95,11 +95,13 @@ pub(super) fn sync_terminal_settings_to_all(settings: AppSettings, cx: &mut App)
     let Some(home) = cx.try_global::<GlobalHomePage>() else {
         return;
     };
-    let Some(window_id) = cx.active_window() else {
+    // 不调用 cx.active_window()：在 Linux/X11 下它会 borrow 已被事件循环
+    // borrow_mut 占用的 client RefCell，导致重入 panic。改用全局主窗口句柄。
+    let Some(main_window) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
         return;
     };
     let home_page = home.home_page.clone();
-    let _ = cx.update_window(window_id, move |_, window, cx| {
+    let _ = main_window.window_handle.update(cx, move |_, window, cx| {
         home_page.update(cx, |hp, cx| {
             hp.apply_terminal_settings_to_all(&settings, window, cx);
         });
@@ -112,14 +114,15 @@ pub(super) fn sync_follow_app_terminal_themes(cx: &mut App) {
         let Some(home) = cx.try_global::<GlobalHomePage>() else {
             return;
         };
-        let Some(window_id) = cx.active_window() else {
+        // 不调用 cx.active_window()：本闭包经 appearance 事件回调在 flush_effects
+        // 阶段执行，此时 Linux/X11 事件循环仍持有 client RefCell 的 borrow_mut，
+        // active_window() 的二次 borrow 会直接 panic。改用全局主窗口句柄，
+        // 同时避免在 HomePage 自己的 update 调用栈里重入 home_page.update。
+        let Some(main_window) = cx.try_global::<GlobalMainWindowHandle>().copied() else {
             return;
         };
-
-        // 避免在 HomePage 自己的 update 调用栈里再次触发 home_page.update，
-        // 否则启动阶段会命中 gpui 的重入保护并直接 panic。
         let home_page = home.home_page.clone();
-        let _ = cx.update_window(window_id, move |_, window, cx| {
+        let _ = main_window.window_handle.update(cx, move |_, window, cx| {
             home_page.update(cx, |hp, cx| {
                 hp.apply_app_settings(&settings, window, cx);
             });
