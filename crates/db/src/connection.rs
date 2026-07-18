@@ -34,6 +34,11 @@ pub enum DbError {
     #[error("operation not supported: {0}")]
     NotSupported(String),
 
+    /// 外部驱动 manifest 校验/加载失败（协议不兼容、字段非法等）。
+    /// 与 `Internal` 区分：这是用户可预期的配置问题，非程序内部错误。
+    #[error("invalid driver manifest: {0}")]
+    InvalidManifest(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

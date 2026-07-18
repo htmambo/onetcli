@@ -490,8 +490,8 @@ fn load_manifest(driver_dir: &Path) -> Result<IpcDriverManifest, DbError> {
         }
         ProtocolCheck::Reject(message) => {
             // 由 load_from_dir 的兜底 warn 统一留痕，此处仅返回错误避免双重日志。
-            return Err(DbError::Internal(format!(
-                "manifest protocol check failed: {message}"
+            return Err(DbError::InvalidManifest(format!(
+                "protocol check failed: {message}"
             )));
         }
     }
@@ -782,6 +782,24 @@ mod tests {
             Some("1.0".to_string()),
             registry.find("demo").unwrap().protocol_version
         );
+    }
+
+    #[test]
+    fn explicit_matching_version_is_ok_not_warning() {
+        // 显式声明与宿主一致的版本 → 严格 Ok（无告警），与遗留隐式区分开。
+        let manifest: IpcDriverManifest =
+            serde_json::from_str(&manifest_json(r#""protocol_version":"1.0""#)).unwrap();
+        assert_eq!(ProtocolCheck::Ok, check_manifest_protocol(&manifest));
+    }
+
+    #[test]
+    fn legacy_implicit_version_yields_warning() {
+        // 未声明版本 → OkWithWarning（遗留放行告警），而非静默 Ok。
+        let manifest: IpcDriverManifest = serde_json::from_str(&manifest_json("")).unwrap();
+        assert!(matches!(
+            check_manifest_protocol(&manifest),
+            ProtocolCheck::OkWithWarning(_)
+        ));
     }
 
     #[test]
