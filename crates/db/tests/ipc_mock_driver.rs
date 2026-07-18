@@ -31,6 +31,7 @@ async fn external_connection_uses_mock_local_socket_driver() {
         category: None,
         description: String::new(),
         version: String::new(),
+        protocol_version: None,
         entry: IpcDriverEntry {
             command: String::new(),
             args: Vec::new(),

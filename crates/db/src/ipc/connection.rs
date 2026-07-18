@@ -410,6 +410,7 @@ mod schema_switch_tests {
             category: None,
             description: String::new(),
             version: String::new(),
+            protocol_version: None,
             entry: IpcDriverEntry {
                 command: "driver".into(),
                 args: Vec::new(),

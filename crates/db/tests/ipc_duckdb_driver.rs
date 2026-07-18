@@ -26,7 +26,6 @@ fn driver_binary() -> PathBuf {
     target_dir.join(name)
 }
 
-connection: Default::default(),
 fn make_driver(binary: &std::path::Path, manifest_dir: &std::path::Path) -> IpcDriverManifest {
     IpcDriverManifest {
         id: "duckdb".into(),
@@ -34,6 +33,7 @@ fn make_driver(binary: &std::path::Path, manifest_dir: &std::path::Path) -> IpcD
         category: None,
         description: String::new(),
         version: String::new(),
+        protocol_version: None,
         entry: IpcDriverEntry {
             command: binary.to_string_lossy().into_owned(),
             args: Vec::new(),

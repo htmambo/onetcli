@@ -20,6 +20,10 @@ pub struct IpcDriverManifest {
     pub description: String,
     #[serde(default)]
     pub version: String,
+    /// 驱动声明的 IPC 协议版本（如 `1.0`）。缺省视为遗留驱动，按
+    /// `LEGACY_IMPLICIT_VERSION` 兼容放行并告警；显式声明则按协议门禁校验。
+    #[serde(default)]
+    pub protocol_version: Option<String>,
     pub entry: IpcDriverEntry,
     pub transport: IpcDriverTransport,
     #[serde(default)]
@@ -237,6 +241,82 @@ fn default_identifier_quote() -> String {
     "\"".to_string()
 }
 
+/// 宿主当前实现的 IPC 协议版本。
+pub const HOST_PROTOCOL_VERSION: &str = "1.0";
+/// 未显式声明 `protocol_version` 的遗留驱动被隐式认定的协议版本。
+pub const LEGACY_IMPLICIT_VERSION: &str = "1.0";
+
+/// 协议版本门禁结果。
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProtocolCheck {
+    /// 版本兼容，静默放行。
+    Ok,
+    /// 版本兼容但存在隐患（更高 minor、遗留隐式），放行并告警。
+    OkWithWarning(String),
+    /// 版本不兼容，拒绝加载该驱动。
+    Reject(String),
+}
+
+/// 解析 `major.minor[.patch]` 形式的协议版本，返回 `(major, minor)`。
+/// 接受 `1` / `1.0` / `1.0.0` 等简写；patch 段若存在必须是数字；
+/// 非数字、空段或超过三段返回 `None`。
+fn parse_protocol_version(version: &str) -> Option<(u64, u64)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next().map_or(Some(0), |m| m.parse::<u64>().ok())?;
+    if let Some(patch) = parts.next() {
+        // patch 段存在则必须是数字，且版本必须止于三段。
+        patch.parse::<u64>().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+    }
+    Some((major, minor))
+}
+
+/// 校验驱动声明的协议版本与宿主的兼容性。
+fn check_manifest_protocol(manifest: &IpcDriverManifest) -> ProtocolCheck {
+    // 宿主常量为合法版本是编译期契约；拼错应立即可见而非静默放开门禁。
+    let (host_major, host_minor) = parse_protocol_version(HOST_PROTOCOL_VERSION)
+        .expect("HOST_PROTOCOL_VERSION must be a valid protocol version");
+
+    let declared = match &manifest.protocol_version {
+        // 遗留驱动：未显式声明协议版本 → 按隐式版本放行并告警。
+        None => {
+            return ProtocolCheck::OkWithWarning(format!(
+                "external driver '{}' does not declare protocol_version; assuming legacy {}",
+                manifest.id, LEGACY_IMPLICIT_VERSION
+            ));
+        }
+        Some(declared) => declared.trim(),
+    };
+
+    let Some((driver_major, driver_minor)) = parse_protocol_version(declared) else {
+        return ProtocolCheck::Reject(format!(
+            "external driver '{}' has invalid protocol_version '{}'",
+            manifest.id, declared
+        ));
+    };
+
+    // major 不一致（无论新旧）一律拒绝：协议语义可能已破坏性变更。
+    if driver_major != host_major {
+        return ProtocolCheck::Reject(format!(
+            "external driver '{}' protocol_version '{}' is incompatible with host '{}'",
+            manifest.id, declared, HOST_PROTOCOL_VERSION
+        ));
+    }
+
+    // 同 major 下驱动 minor 更高：协议向后兼容，放行并告警提示升级宿主。
+    if driver_minor > host_minor {
+        return ProtocolCheck::OkWithWarning(format!(
+            "external driver '{}' protocol_version '{}' is newer than host '{}'; loading anyway",
+            manifest.id, declared, HOST_PROTOCOL_VERSION
+        ));
+    }
+
+    ProtocolCheck::Ok
+}
+
 impl IpcDriverManifest {
     pub fn command_working_dir(&self) -> PathBuf {
         self.entry
@@ -306,9 +386,7 @@ impl IpcDriverRegistry {
         let mut root_is_wrapped_driver = false;
         if let Some(driver_dir) = driver_manifest_dir_for(dir)? {
             root_is_wrapped_driver = driver_dir != dir;
-            if let Ok(driver) = load_manifest(&driver_dir) {
-                drivers.push(driver);
-            }
+            push_driver_if_loadable(&mut drivers, &driver_dir);
         }
 
         if !root_is_wrapped_driver {
@@ -318,9 +396,7 @@ impl IpcDriverRegistry {
                     continue;
                 }
                 if let Some(driver_dir) = driver_manifest_dir_for(&entry.path())? {
-                    if let Ok(driver) = load_manifest(&driver_dir) {
-                        drivers.push(driver);
-                    }
+                    push_driver_if_loadable(&mut drivers, &driver_dir);
                 }
             }
         }
@@ -358,6 +434,19 @@ pub fn default_driver_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("ipc-drivers"))
 }
 
+/// 尝试加载单个驱动目录：成功则压入 `drivers`，失败则记录 warn 并跳过（不中止整体扫描）。
+/// 所有失败路径（协议门禁 / JSON / validate / IO）在此统一留痕，避免被静默吞掉。
+fn push_driver_if_loadable(drivers: &mut Vec<IpcDriverManifest>, driver_dir: &Path) {
+    match load_manifest(driver_dir) {
+        Ok(driver) => drivers.push(driver),
+        Err(error) => tracing::warn!(
+            driver_dir = %driver_dir.display(),
+            error = %error,
+            "skipped external driver due to load error"
+        ),
+    }
+}
+
 fn load_manifest(driver_dir: &Path) -> Result<IpcDriverManifest, DbError> {
     let path = driver_dir.join(DRIVER_MANIFEST_FILE);
     let content = std::fs::read_to_string(&path).map_err(|error| {
@@ -367,6 +456,18 @@ fn load_manifest(driver_dir: &Path) -> Result<IpcDriverManifest, DbError> {
         .map_err(|error| DbError::connection_with_source("invalid driver manifest", error))?;
     manifest.manifest_dir = driver_dir.to_path_buf();
     manifest.validate()?;
+    match check_manifest_protocol(&manifest) {
+        ProtocolCheck::Ok => {}
+        ProtocolCheck::OkWithWarning(message) => {
+            tracing::warn!(driver_id = %manifest.id, "{message}");
+        }
+        ProtocolCheck::Reject(message) => {
+            // 由 load_from_dir 的兜底 warn 统一留痕，此处仅返回错误避免双重日志。
+            return Err(DbError::Internal(format!(
+                "manifest protocol check failed: {message}"
+            )));
+        }
+    }
     Ok(manifest)
 }
 
@@ -610,5 +711,109 @@ mod tests {
         )
         .unwrap();
         assert_eq!(Some("domestic_database".to_string()), driver.category);
+    }
+
+    /// 构造最小合法 manifest JSON，注入指定 `protocol_version` 字段（空串表示不声明）。
+    fn manifest_json(protocol_fragment: &str) -> String {
+        let fragment = if protocol_fragment.is_empty() {
+            String::new()
+        } else {
+            format!("{protocol_fragment},")
+        };
+        format!(
+            r#"{{"id":"demo","name":"Demo",{fragment}"entry":{{"command":"python3"}},"transport":{{"name":"demo.sock"}}}}"#
+        )
+    }
+
+    fn load_single_driver(protocol_fragment: &str) -> Result<IpcDriverRegistry, DbError> {
+        let temp = tempfile::tempdir().unwrap();
+        let driver_dir = temp.path().join("demo");
+        fs::create_dir(&driver_dir).unwrap();
+        fs::write(
+            driver_dir.join(DRIVER_MANIFEST_FILE),
+            manifest_json(protocol_fragment),
+        )
+        .unwrap();
+        // 保持 tempdir 存活到扫描完成。
+        let registry = IpcDriverRegistry::load_from_dir(temp.path());
+        drop(temp);
+        registry
+    }
+
+    #[test]
+    fn legacy_manifest_without_protocol_version_loads() {
+        let registry = load_single_driver("").unwrap();
+        assert_eq!(registry.drivers().len(), 1);
+        assert!(registry.find("demo").unwrap().protocol_version.is_none());
+    }
+
+    #[test]
+    fn explicit_v1_0_loads_cleanly() {
+        let registry = load_single_driver(r#""protocol_version":"1.0""#).unwrap();
+        assert_eq!(registry.drivers().len(), 1);
+        assert_eq!(
+            Some("1.0".to_string()),
+            registry.find("demo").unwrap().protocol_version
+        );
+    }
+
+    #[test]
+    fn explicit_v2_0_is_rejected() {
+        let registry = load_single_driver(r#""protocol_version":"2.0""#).unwrap();
+        assert!(registry.drivers().is_empty());
+    }
+
+    #[test]
+    fn future_minor_loads_with_warning() {
+        let registry = load_single_driver(r#""protocol_version":"1.5""#).unwrap();
+        assert_eq!(registry.drivers().len(), 1);
+    }
+
+    #[test]
+    fn invalid_semver_is_rejected() {
+        for bad in ["abc", "1.x", "", "1.0.0.0"] {
+            let fragment = format!(r#""protocol_version":"{}""#, bad);
+            let registry = load_single_driver(&fragment).unwrap();
+            assert!(
+                registry.drivers().is_empty(),
+                "protocol_version '{bad}' should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_protocol_version_accepts_shorthand() {
+        assert_eq!(Some((1, 0)), parse_protocol_version("1"));
+        assert_eq!(Some((1, 0)), parse_protocol_version("1.0"));
+        assert_eq!(Some((1, 2)), parse_protocol_version("1.2"));
+        assert_eq!(Some((1, 2)), parse_protocol_version("1.2.3"));
+        assert_eq!(None, parse_protocol_version("x.0"));
+        assert_eq!(None, parse_protocol_version("1.0.0.0"));
+        // patch 段必须是数字。
+        assert_eq!(None, parse_protocol_version("1.0.abc"));
+        assert_eq!(None, parse_protocol_version("1.0."));
+    }
+
+    #[test]
+    fn host_protocol_version_const_parses() {
+        assert!(parse_protocol_version(HOST_PROTOCOL_VERSION).is_some());
+    }
+
+    #[test]
+    fn older_major_is_rejected() {
+        let registry = load_single_driver(r#""protocol_version":"0.9""#).unwrap();
+        assert!(registry.drivers().is_empty());
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        let registry = load_single_driver(r#""protocol_version":"  1.0  ""#).unwrap();
+        assert_eq!(registry.drivers().len(), 1);
+    }
+
+    #[test]
+    fn three_segment_version_loads() {
+        let registry = load_single_driver(r#""protocol_version":"1.0.0""#).unwrap();
+        assert_eq!(registry.drivers().len(), 1);
     }
 }

@@ -34,6 +34,7 @@ fn make_manifest(socket_name: String) -> IpcDriverManifest {
         category: None,
         description: String::new(),
         version: String::new(),
+        protocol_version: None,
         entry: IpcDriverEntry {
             command: String::new(),
             args: Vec::new(),

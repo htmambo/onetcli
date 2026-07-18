@@ -633,6 +633,7 @@ mod tests {
             category: None,
             description: String::new(),
             version: String::new(),
+            protocol_version: None,
             entry: crate::ipc::registry::IpcDriverEntry {
                 command: "sleep".into(),
                 args: vec!["30".into()],
@@ -665,6 +666,7 @@ mod lifecycle_tests {
             category: None,
             description: String::new(),
             version: String::new(),
+            protocol_version: None,
             entry: IpcDriverEntry {
                 command: "sleep".into(),
                 args: vec!["30".into()],
