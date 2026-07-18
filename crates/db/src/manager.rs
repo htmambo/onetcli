@@ -28,7 +28,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
+
+const BUSY_CLOSE_ON_RELEASE_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// Macro to reduce boilerplate for plugin operations with session management
 macro_rules! with_plugin_session {
@@ -226,6 +229,8 @@ enum SessionState {
 /// Connection session - represents a single database connection
 struct ConnectionSession {
     connection: Box<dyn DbConnection + Send + Sync>,
+    /// 创建时从 ConnectionLifecycle 固化，避免释放路径依赖连接对象动态判断。
+    close_on_release: bool,
     last_active: Instant,
     created_at: Instant,
     session_id: String,
@@ -234,10 +239,15 @@ struct ConnectionSession {
 }
 
 impl ConnectionSession {
-    fn new(connection: Box<dyn DbConnection + Send + Sync>, session_id: String) -> Self {
+    fn new(
+        connection: Box<dyn DbConnection + Send + Sync>,
+        session_id: String,
+        close_on_release: bool,
+    ) -> Self {
         let now = Instant::now();
         Self {
             connection,
+            close_on_release,
             last_active: now,
             created_at: now,
             session_id,
@@ -317,6 +327,8 @@ pub struct ConnectionManager {
     /// sessions or pool mutations. The outer `RwLock` only protects the map
     /// structure and never spans an `.await`.
     sessions: Arc<RwLock<HashMap<String, Vec<Arc<AsyncMutex<ConnectionSession>>>>>>,
+    /// 单文件驱动物理打开互斥锁：同一 lock key 串行化 create_connection。
+    physical_open_locks: Arc<AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
     /// Connection idle timeout (default: 5 minutes)
     idle_timeout: Duration,
     /// Maximum connection lifetime (default: 30 minutes)
@@ -329,6 +341,7 @@ impl ConnectionManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            physical_open_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             idle_timeout: Duration::from_secs(300), // 5 minutes
             max_lifetime: Duration::from_secs(1800), // 30 minutes
             session_counter: Arc::new(tokio::sync::Mutex::new(0)),
@@ -338,10 +351,26 @@ impl ConnectionManager {
     pub fn with_config(idle_timeout: Duration, max_lifetime: Duration) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            physical_open_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             idle_timeout,
             max_lifetime,
             session_counter: Arc::new(tokio::sync::Mutex::new(0)),
         }
+    }
+
+    async fn acquire_physical_open_lock(
+        &self,
+        key: Option<String>,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        let key = key?;
+        let lock = {
+            let mut locks = self.physical_open_locks.lock().await;
+            locks
+                .entry(key)
+                .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+                .clone()
+        };
+        Some(lock.lock_owned().await)
     }
 
     /// Generate unique session ID
@@ -364,10 +393,21 @@ impl ConnectionManager {
             return Ok(session_id);
         }
 
+        let plugin = db_manager.get_plugin(&config.database_type)?;
+        let lifecycle = plugin.connection_lifecycle(&config);
+        // 单文件驱动：串行化物理打开，避免并发 open 同一路径
+        let _physical_guard = self
+            .acquire_physical_open_lock(lifecycle.physical_open_lock_key.clone())
+            .await;
+
+        // 拿到物理锁后再尝试复用（可能已有其他会话建好）
+        if let Some(session_id) = self.try_acquire_session(&config).await? {
+            return Ok(session_id);
+        }
+
         let session_id = self.generate_session_id(&config_id).await;
 
         // Create new connection (slow path: outside any global lock)
-        let plugin = db_manager.get_plugin(&config.database_type)?;
         let connection = plugin.create_connection(config.clone()).await?;
         info!(
             "Created new session: {} (database: {:?})",
@@ -375,7 +415,11 @@ impl ConnectionManager {
         );
 
         // Store session under a brief global write lock
-        let mut session = ConnectionSession::new(connection, session_id.clone());
+        let mut session = ConnectionSession::new(
+            connection,
+            session_id.clone(),
+            lifecycle.close_on_release,
+        );
         session.mark_in_use();
         let new_arc = Arc::new(AsyncMutex::new(session));
 
@@ -452,86 +496,111 @@ impl ConnectionManager {
         &self,
         config: &DbConnectionConfig,
     ) -> Result<Option<String>, DbError> {
-        // Phase 1: claim a matching idle session under the global write lock.
-        let (claimed_arc, claimed_session_id) = {
-            let sessions = self.sessions.write().await;
-            let mut found: Option<(Arc<AsyncMutex<ConnectionSession>>, String)> = None;
+        loop {
+            // Phase 1: claim idle matching session, or detect busy close_on_release.
+            enum ClaimOutcome {
+                Idle(Arc<AsyncMutex<ConnectionSession>>, String),
+                BusyCloseOnRelease,
+                NoneAvailable,
+            }
 
-            if let Some(session_list) = sessions.get(&config.id) {
-                for arc in session_list.iter() {
-                    // Non-blocking inspection: only proceed if we can grab the
-                    // inner lock without awaiting.
-                    let Ok(guard) = arc.try_lock() else {
-                        continue;
-                    };
-                    let matches = guard.state == SessionState::Active
-                        && !guard.in_use
-                        && Self::db_equals(guard.connection.config(), config);
-                    if matches {
-                        found = Some((Arc::clone(arc), guard.session_id.clone()));
+            let claim = {
+                let sessions = self.sessions.write().await;
+                let mut found: Option<(Arc<AsyncMutex<ConnectionSession>>, String)> = None;
+                let mut has_busy_close_on_release = false;
+
+                if let Some(session_list) = sessions.get(&config.id) {
+                    for arc in session_list.iter() {
+                        let Ok(guard) = arc.try_lock() else {
+                            continue;
+                        };
+                        if guard.state != SessionState::Active {
+                            drop(guard);
+                            continue;
+                        }
+                        if !Self::db_equals(guard.connection.config(), config) {
+                            drop(guard);
+                            continue;
+                        }
+                        if !guard.in_use {
+                            found = Some((Arc::clone(arc), guard.session_id.clone()));
+                            drop(guard);
+                            break;
+                        }
+                        if guard.close_on_release {
+                            has_busy_close_on_release = true;
+                        }
+                        drop(guard);
                     }
+                }
+
+                if let Some((arc, session_id)) = found {
+                    ClaimOutcome::Idle(arc, session_id)
+                } else if has_busy_close_on_release {
+                    ClaimOutcome::BusyCloseOnRelease
+                } else {
+                    ClaimOutcome::NoneAvailable
+                }
+            };
+
+            let (claimed_arc, claimed_session_id) = match claim {
+                ClaimOutcome::Idle(arc, session_id) => (arc, session_id),
+                ClaimOutcome::BusyCloseOnRelease => {
+                    // 单连接文件库：占用中的 close_on_release 会话未释放前，禁止返回 None
+                    // 以免 create_session 再开第二条物理连接。
+                    sleep(BUSY_CLOSE_ON_RELEASE_RETRY_DELAY).await;
+                    continue;
+                }
+                ClaimOutcome::NoneAvailable => return Ok(None),
+            };
+
+            // Phase 2: ping outside any global lock. If it fails, remove and close.
+            let ping_ok = {
+                let mut guard = claimed_arc.lock().await;
+                if guard.state != SessionState::Active {
                     drop(guard);
-                    if found.is_some() {
-                        break;
+                    return Ok(None);
+                }
+                match guard.connection.ping().await {
+                    Ok(()) => {
+                        guard.mark_in_use();
+                        true
+                    }
+                    Err(error) => {
+                        warn!(
+                            "Discarding stale session {} before reuse: {}",
+                            guard.session_id, error
+                        );
+                        guard.state = SessionState::Closing;
+                        false
                     }
                 }
-            }
-            // found already holds clones; global lock is dropped at end of block
-            match found {
-                Some(pair) => pair,
-                None => return Ok(None),
-            }
-        };
-        // Global write lock dropped here.
+            };
 
-        // Phase 2: ping outside any global lock. If it fails, remove and close.
-        let ping_ok = {
-            let mut guard = claimed_arc.lock().await;
-            if guard.state != SessionState::Active {
-                // Someone else closed/released it concurrently.
-                drop(guard);
-                return Ok(None);
+            if ping_ok {
+                debug!(
+                    "Reusing session: {} (database: {:?})",
+                    claimed_session_id, config.database
+                );
+                return Ok(Some(claimed_session_id));
             }
-            match guard.connection.ping().await {
-                Ok(()) => {
-                    guard.mark_in_use();
-                    true
-                }
-                Err(error) => {
-                    warn!(
-                        "Discarding stale session {} before reuse: {}",
-                        guard.session_id, error
-                    );
-                    guard.state = SessionState::Closing;
-                    false
+
+            {
+                let mut sessions = self.sessions.write().await;
+                if let Some(list) = sessions.get_mut(&config.id) {
+                    list.retain(|s| {
+                        s.try_lock()
+                            .map(|g| g.session_id != claimed_session_id)
+                            .unwrap_or(true)
+                    });
                 }
             }
-        };
-
-        if ping_ok {
-            debug!(
-                "Reusing session: {} (database: {:?})",
-                claimed_session_id, config.database
-            );
-            return Ok(Some(claimed_session_id));
-        }
-
-        // Ping failed: remove the now-closing session from the pool and close it.
-        {
-            let mut sessions = self.sessions.write().await;
-            if let Some(list) = sessions.get_mut(&config.id) {
-                list.retain(|s| {
-                    s.try_lock()
-                        .map(|g| g.session_id != claimed_session_id)
-                        .unwrap_or(true)
-                });
+            {
+                let mut guard = claimed_arc.lock().await;
+                guard.close().await;
             }
+            return Ok(None);
         }
-        {
-            let mut guard = claimed_arc.lock().await;
-            guard.close().await;
-        }
-        Ok(None)
     }
 }
 
@@ -631,8 +700,7 @@ impl ConnectionManager {
                     return Ok(());
                 }
                 guard.state = SessionState::Closing;
-                let needs_close = guard.connection.close_on_release()
-                    && close_idle_file_connection;
+                let needs_close = guard.close_on_release && close_idle_file_connection;
                 drop(guard);
                 found = Some((arc, config_id.clone(), needs_close));
                 break;
@@ -934,6 +1002,7 @@ impl Clone for ConnectionManager {
     fn clone(&self) -> Self {
         Self {
             sessions: Arc::clone(&self.sessions),
+            physical_open_locks: Arc::clone(&self.physical_open_locks),
             idle_timeout: self.idle_timeout,
             max_lifetime: self.max_lifetime,
             session_counter: Arc::clone(&self.session_counter),
@@ -2846,6 +2915,7 @@ mod tests {
         let session = ConnectionSession::new(
             Box::new(MockConnection::new(config.clone(), false)),
             "conn1:session:1".to_string(),
+            false,
         );
 
         manager
@@ -2877,6 +2947,7 @@ mod tests {
                 Arc::clone(&disconnect_count),
             )),
             "duckdb-conn:session:1".to_string(),
+            true,
         );
         session.mark_in_use();
 
@@ -2911,6 +2982,7 @@ mod tests {
                 Arc::clone(&disconnect_count),
             )),
             "duckdb-transaction:session:1".to_string(),
+            true,
         );
         session.mark_in_use();
 
@@ -2931,5 +3003,54 @@ mod tests {
         assert_eq!(0, disconnect_count.load(Ordering::SeqCst));
         assert_eq!(1, sessions.len());
         assert!(!sessions[0].in_use);
+    }
+
+    #[tokio::test]
+    async fn try_acquire_session_waits_for_busy_close_on_release_session_before_returning_none() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let mut config = test_config("duckdb-busy");
+        config.database_type = DatabaseType::DuckDB;
+        let mut session = ConnectionSession::new(
+            Box::new(MockConnection::new(config.clone(), true)),
+            "duckdb-busy:session:1".to_string(),
+            true,
+        );
+        session.mark_in_use();
+
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let release_manager = manager.clone();
+        tokio::spawn(async move {
+            release_rx.await.unwrap();
+            release_manager
+                .close_session("duckdb-busy:session:1")
+                .await
+                .unwrap();
+        });
+
+        let acquire_manager = manager.clone();
+        let acquire_config = config.clone();
+        let acquire_task =
+            tokio::spawn(async move { acquire_manager.try_acquire_session(&acquire_config).await });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !acquire_task.is_finished(),
+            "busy close-on-release session should not allow opening a second physical connection"
+        );
+
+        release_tx.send(()).unwrap();
+        let acquired = acquire_task.await.unwrap().unwrap();
+
+        // 会话被 close 后池中无可用连接，应返回 None（而不是在 busy 时立刻 None 去开第二连接）。
+        assert!(acquired.is_none());
     }
 }

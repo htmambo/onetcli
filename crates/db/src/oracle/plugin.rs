@@ -939,6 +939,13 @@ impl DatabasePlugin for OraclePlugin {
         }
     }
 
+    fn format_copy_value(&self, value: &Option<String>, col_info: Option<&ColumnInfo>) -> String {
+        match value {
+            None => "NULL".to_string(),
+            Some(v) => self.table_change_value_expr(v, col_info),
+        }
+    }
+
     async fn query_table_data(
         &self,
         connection: &dyn DbConnection,

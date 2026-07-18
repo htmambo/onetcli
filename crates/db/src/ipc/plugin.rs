@@ -8,7 +8,7 @@ use crate::ipc::connection::ExternalDbConnection;
 use crate::ipc::protocol::{database_metadata_params, table_metadata_params};
 use crate::ipc::registry::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverDialect, IpcDriverManifest, IpcDriverRegistry, TableReferenceSchemaMode};
 use crate::oracle::OraclePlugin;
-use crate::plugin::{DatabasePlugin, SqlCompletionInfo};
+use crate::plugin::{ConnectionLifecycle, DatabasePlugin, SqlCompletionInfo};
 use crate::plugin_manifest::{DatabaseCapabilities, DatabaseUiCapabilities, DatabaseUiManifest};
 use crate::types::*;
 use anyhow::{Result, anyhow};
@@ -66,6 +66,19 @@ impl ExternalDatabasePlugin {
             request.schema = Some(request.database.clone());
         }
         request
+    }
+
+    fn with_oracle_copy_sql<F>(&self, request: &CopySqlRequest, f: F) -> Option<String>
+    where
+        F: FnOnce(&OraclePlugin, &CopySqlRequest) -> String,
+    {
+        let driver_id = request.driver_id.as_deref()?;
+        let driver = self.driver_for_id(driver_id)?;
+        if !Self::is_oracle_compatible_driver(&driver) {
+            return None;
+        }
+        let oracle_plugin = OraclePlugin::new();
+        Some(f(&oracle_plugin, request))
     }
 
     fn generate_default_table_changes_sql(&self, request: &TableSaveRequest) -> String {
@@ -189,6 +202,30 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     ) -> Result<Box<dyn DbConnection + Send + Sync>, DbError> {
         let driver = self.driver_for_config(&config)?;
         Ok(Box::new(ExternalDbConnection::new(config, driver)))
+    }
+
+    fn connection_lifecycle(&self, config: &DbConnectionConfig) -> ConnectionLifecycle {
+        let Ok(driver) = self.driver_for_config(config) else {
+            return ConnectionLifecycle::default();
+        };
+
+        let close_on_release = driver.connection.close_on_release;
+        let physical_open_lock_key =
+            if driver.connection.single_file && driver.connection.single_connection {
+                ConnectionLifecycle::single_file(
+                    &driver.id,
+                    config,
+                    &driver.connection.path_fields,
+                )
+                .physical_open_lock_key
+            } else {
+                None
+            };
+
+        ConnectionLifecycle {
+            close_on_release,
+            physical_open_lock_key,
+        }
     }
 
     async fn query_table_data(
@@ -936,6 +973,42 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         self.generate_default_table_changes_sql(request)
     }
 
+    fn generate_copy_insert_sql(&self, request: &CopySqlRequest) -> String {
+        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
+            plugin.generate_copy_insert_sql(req)
+        }) {
+            return sql;
+        }
+        crate::plugin::default_generate_copy_insert_sql(self, request)
+    }
+
+    fn generate_copy_insert_with_comments_sql(&self, request: &CopySqlRequest) -> String {
+        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
+            plugin.generate_copy_insert_with_comments_sql(req)
+        }) {
+            return sql;
+        }
+        crate::plugin::default_generate_copy_insert_with_comments_sql(self, request)
+    }
+
+    fn generate_copy_update_sql(&self, request: &CopySqlRequest) -> String {
+        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
+            plugin.generate_copy_update_sql(req)
+        }) {
+            return sql;
+        }
+        crate::plugin::default_generate_copy_update_sql(self, request)
+    }
+
+    fn generate_copy_delete_sql(&self, request: &CopySqlRequest) -> String {
+        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
+            plugin.generate_copy_delete_sql(req)
+        }) {
+            return sql;
+        }
+        crate::plugin::default_generate_copy_delete_sql(self, request)
+    }
+
     fn rename_table(&self, _database: &str, old_name: &str, new_name: &str) -> String {
         format!(
             "ALTER TABLE {} RENAME TO {}",
@@ -1464,5 +1537,169 @@ mod oracle_table_save_tests {
         let sql = plugin.generate_table_changes_sql(&request);
         assert!(!sql.contains("TO_DATE("), "unexpected oracle sql: {sql}");
         assert!(sql.to_ascii_uppercase().contains("INSERT"), "{sql}");
+    }
+
+    #[test]
+    fn external_oracle_copy_insert_uses_oracle_date_literals() {
+        let driver = oracle_driver("oracle-go");
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+        let request = CopySqlRequest::new(
+            "EVENTS",
+            vec![
+                column_info("ID", "NUMBER", true),
+                column_info("STARTED_AT", "DATE", false),
+            ],
+        )
+        .with_schema("APP")
+        .with_column_names(vec!["ID".into(), "STARTED_AT".into()])
+        .with_rows(vec![vec![
+            Some("1".into()),
+            Some("2026-06-21 14:05:06".into()),
+        ]])
+        .with_driver_id("oracle-go");
+
+        let sql = plugin.generate_copy_insert_sql(&request);
+        assert_eq!(
+            r#"INSERT INTO "APP"."EVENTS" ("ID", "STARTED_AT") VALUES ('1', TO_DATE('2026-06-21 14:05:06', 'YYYY-MM-DD HH24:MI:SS'));"#,
+            sql
+        );
+    }
+
+    #[test]
+    fn external_non_oracle_copy_keeps_default_literals() {
+        let mut driver = oracle_driver("pg-go");
+        driver.dialect.compatible_database_type = Some(DatabaseType::PostgreSQL);
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+        let request = CopySqlRequest::new(
+            "events",
+            vec![
+                column_info("id", "INT", true),
+                column_info("started_at", "TIMESTAMP", false),
+            ],
+        )
+        .with_schema("public")
+        .with_column_names(vec!["id".into(), "started_at".into()])
+        .with_rows(vec![vec![
+            Some("1".into()),
+            Some("2026-06-21 14:05:06".into()),
+        ]])
+        .with_driver_id("pg-go");
+
+        let sql = plugin.generate_copy_insert_sql(&request);
+        assert!(!sql.contains("TO_DATE("), "got: {sql}");
+        assert!(sql.contains("'2026-06-21 14:05:06'"), "got: {sql}");
+    }
+}
+
+
+#[cfg(test)]
+mod connection_lifecycle_tests {
+    use super::*;
+    use crate::ipc::registry::{
+        IpcDriverConnection, IpcDriverEntry, IpcDriverTransport, IpcDriverUi,
+    };
+    use std::path::PathBuf;
+
+    fn base_driver(id: &str) -> IpcDriverManifest {
+        IpcDriverManifest {
+            id: id.to_string(),
+            name: id.to_string(),
+            category: None,
+            description: String::new(),
+            version: String::new(),
+            entry: IpcDriverEntry {
+                command: "driver".to_string(),
+                args: Vec::new(),
+                working_dir: None,
+                commands: Default::default(),
+                env_from_config: Default::default(),
+            },
+            transport: IpcDriverTransport::local_socket(format!("{id}.sock")),
+            dialect: Default::default(),
+            capabilities: None,
+            ui: IpcDriverUi {
+                icon: String::new(),
+                default_port: None,
+                form: None,
+            },
+            connection: Default::default(),
+            manifest_dir: PathBuf::from("."),
+        }
+    }
+
+    fn external_config(driver_id: &str, host: &str) -> DbConnectionConfig {
+        let mut extra_params = std::collections::HashMap::new();
+        extra_params.insert(EXTERNAL_DRIVER_ID_PARAM.to_string(), driver_id.to_string());
+        DbConnectionConfig {
+            id: "cfg-1".to_string(),
+            database_type: DatabaseType::External,
+            name: "external".to_string(),
+            host: host.to_string(),
+            port: 0,
+            username: String::new(),
+            password: String::new(),
+            database: None,
+            service_name: None,
+            sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
+            workspace_id: None,
+            extra_params,
+        }
+    }
+
+    #[test]
+    fn external_single_file_lifecycle_sets_close_and_lock_key() {
+        let mut driver = base_driver("sqlite-go");
+        driver.connection = IpcDriverConnection {
+            close_on_release: true,
+            single_file: true,
+            single_connection: true,
+            path_fields: vec!["host".to_string()],
+        };
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+
+        let lifecycle = plugin.connection_lifecycle(&external_config(
+            "sqlite-go",
+            "file:/tmp/shared.db",
+        ));
+        assert!(lifecycle.close_on_release);
+        assert_eq!(
+            Some("sqlite-go:/tmp/shared.db".to_string()),
+            lifecycle.physical_open_lock_key
+        );
+    }
+
+    #[test]
+    fn external_lifecycle_without_single_file_has_no_lock() {
+        let mut driver = base_driver("pg-go");
+        driver.connection = IpcDriverConnection {
+            close_on_release: true,
+            single_file: false,
+            single_connection: false,
+            path_fields: vec![],
+        };
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![driver]),
+        };
+
+        let lifecycle = plugin.connection_lifecycle(&external_config("pg-go", "localhost"));
+        assert!(lifecycle.close_on_release);
+        assert!(lifecycle.physical_open_lock_key.is_none());
+    }
+
+    #[test]
+    fn external_lifecycle_missing_driver_returns_default() {
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::from_drivers(vec![]),
+        };
+        let lifecycle = plugin.connection_lifecycle(&external_config("missing", "/tmp/x.db"));
+        assert_eq!(ConnectionLifecycle::default(), lifecycle);
     }
 }

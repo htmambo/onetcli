@@ -1718,10 +1718,42 @@ impl DataGrid {
 
     // ========== 复制为 SQL 语句 ==========
 
-    /// 复制选中行为 INSERT 语句
-    pub fn copy_as_insert(&self, row_indices: &[usize], cx: &App) -> String {
+    fn external_driver_id_for_copy(&self, cx: &App) -> Option<String> {
+        if self.config.database_type != DatabaseType::External {
+            return None;
+        }
+        cx.try_global::<GlobalDbState>()
+            .and_then(|state| state.get_config(&self.config.connection_id))
+            .and_then(|config| config.get_param(EXTERNAL_DRIVER_ID_PARAM).cloned())
+    }
+
+    fn build_copy_sql_request(
+        &self,
+        columns_meta: Vec<db::ColumnInfo>,
+        column_names: Vec<String>,
+        rows_data: Vec<Vec<Option<String>>>,
+        original_rows: Option<Vec<Vec<Option<String>>>>,
+        cx: &App,
+    ) -> db::CopySqlRequest {
         use db::CopySqlRequest;
 
+        let mut request = CopySqlRequest::new(&self.config.table_name, columns_meta)
+            .with_rows(rows_data)
+            .with_column_names(column_names);
+        if let Some(schema) = &self.config.schema_name {
+            request = request.with_schema(schema);
+        }
+        if let Some(original_rows) = original_rows {
+            request = request.with_original_rows(original_rows);
+        }
+        if let Some(driver_id) = self.external_driver_id_for_copy(cx) {
+            request = request.with_driver_id(driver_id);
+        }
+        request
+    }
+
+    /// 复制选中行为 INSERT 语句
+    pub fn copy_as_insert(&self, row_indices: &[usize], cx: &App) -> String {
         let table = self.table.read(cx);
         let delegate = table.delegate();
 
@@ -1732,29 +1764,21 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
+        let request =
+            self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
             .db_manager
             .get_plugin(&self.config.database_type)
         {
-            Ok(plugin) => {
-                let mut request = CopySqlRequest::new(&self.config.table_name, columns_meta)
-                    .with_rows(rows_data)
-                    .with_column_names(column_names);
-                if let Some(schema) = &self.config.schema_name {
-                    request = request.with_schema(schema);
-                }
-                plugin.generate_copy_insert_sql(&request)
-            }
+            Ok(plugin) => plugin.generate_copy_insert_sql(&request),
             Err(_) => String::new(),
         }
     }
 
     /// 复制选中行为 INSERT 语句（带字段注释）
     pub fn copy_as_insert_with_comments(&self, row_indices: &[usize], cx: &App) -> String {
-        use db::CopySqlRequest;
-
         let table = self.table.read(cx);
         let delegate = table.delegate();
 
@@ -1765,29 +1789,21 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
+        let request =
+            self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
             .db_manager
             .get_plugin(&self.config.database_type)
         {
-            Ok(plugin) => {
-                let mut request = CopySqlRequest::new(&self.config.table_name, columns_meta)
-                    .with_rows(rows_data)
-                    .with_column_names(column_names);
-                if let Some(schema) = &self.config.schema_name {
-                    request = request.with_schema(schema);
-                }
-                plugin.generate_copy_insert_with_comments_sql(&request)
-            }
+            Ok(plugin) => plugin.generate_copy_insert_with_comments_sql(&request),
             Err(_) => String::new(),
         }
     }
 
     /// 复制选中行为 UPDATE 语句
     pub fn copy_as_update(&self, row_indices: &[usize], cx: &App) -> String {
-        use db::CopySqlRequest;
-
         let table = self.table.read(cx);
         let delegate = table.delegate();
 
@@ -1799,30 +1815,26 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
+        let request = self.build_copy_sql_request(
+            columns_meta,
+            column_names,
+            rows_data,
+            Some(original_rows),
+            cx,
+        );
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
             .db_manager
             .get_plugin(&self.config.database_type)
         {
-            Ok(plugin) => {
-                let mut request = CopySqlRequest::new(&self.config.table_name, columns_meta)
-                    .with_rows(rows_data)
-                    .with_original_rows(original_rows)
-                    .with_column_names(column_names);
-                if let Some(schema) = &self.config.schema_name {
-                    request = request.with_schema(schema);
-                }
-                plugin.generate_copy_update_sql(&request)
-            }
+            Ok(plugin) => plugin.generate_copy_update_sql(&request),
             Err(_) => String::new(),
         }
     }
 
     /// 复制选中行为 DELETE 语句
     pub fn copy_as_delete(&self, row_indices: &[usize], cx: &App) -> String {
-        use db::CopySqlRequest;
-
         let table = self.table.read(cx);
         let delegate = table.delegate();
 
@@ -1833,21 +1845,15 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
+        let request =
+            self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
             .db_manager
             .get_plugin(&self.config.database_type)
         {
-            Ok(plugin) => {
-                let mut request = CopySqlRequest::new(&self.config.table_name, columns_meta)
-                    .with_rows(rows_data)
-                    .with_column_names(column_names);
-                if let Some(schema) = &self.config.schema_name {
-                    request = request.with_schema(schema);
-                }
-                plugin.generate_copy_delete_sql(&request)
-            }
+            Ok(plugin) => plugin.generate_copy_delete_sql(&request),
             Err(_) => String::new(),
         }
     }

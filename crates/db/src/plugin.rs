@@ -99,6 +99,59 @@ pub struct DatabaseOperationRequest {
     pub field_values: HashMap<String, String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConnectionLifecycle {
+    pub close_on_release: bool,
+    pub physical_open_lock_key: Option<String>,
+}
+
+impl ConnectionLifecycle {
+    pub fn single_file(
+        driver_id: &str,
+        config: &DbConnectionConfig,
+        path_fields: &[String],
+    ) -> Self {
+        let path = first_config_value(config, path_fields)
+            .or_else(|| first_config_value(config, &default_file_path_fields()))
+            .unwrap_or(config.id.as_str());
+
+        Self {
+            close_on_release: true,
+            physical_open_lock_key: Some(format!("{driver_id}:{}", normalize_file_lock_path(path))),
+        }
+    }
+}
+
+fn default_file_path_fields() -> Vec<String> {
+    vec![
+        "host".to_string(),
+        "database".to_string(),
+        "extra_params.path".to_string(),
+    ]
+}
+
+fn first_config_value<'a>(config: &'a DbConnectionConfig, fields: &[String]) -> Option<&'a str> {
+    fields
+        .iter()
+        .filter_map(|field| config_value_for_field(config, field))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+}
+
+fn config_value_for_field<'a>(config: &'a DbConnectionConfig, field: &str) -> Option<&'a str> {
+    match field {
+        "host" => Some(config.host.as_str()),
+        "database" => config.database.as_deref(),
+        other => other
+            .strip_prefix("extra_params.")
+            .and_then(|key| config.extra_params.get(key).map(String::as_str)),
+    }
+}
+
+fn normalize_file_lock_path(path: &str) -> &str {
+    path.strip_prefix("file:").unwrap_or(path)
+}
+
 impl SqlCompletionInfo {
     /// Create completion info with standard SQL functions and keywords included
     pub fn with_standard_sql(mut self) -> Self {
@@ -114,6 +167,148 @@ impl SqlCompletionInfo {
 
         self
     }
+}
+
+
+pub(crate) fn default_generate_copy_insert_sql<P: DatabasePlugin + ?Sized>(
+    plugin: &P,
+    request: &CopySqlRequest,
+) -> String {
+    if request.rows.is_empty() || request.column_names.is_empty() {
+        return String::new();
+    }
+
+    let table_name = plugin.format_copy_table_name(request.schema.as_deref(), &request.table);
+    let quoted_columns: Vec<String> = request
+        .column_names
+        .iter()
+        .map(|c| plugin.quote_identifier(c))
+        .collect();
+    let columns_str = quoted_columns.join(", ");
+
+    let mut statements = Vec::new();
+    for row in &request.rows {
+        let values: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(i, val)| {
+                let col_info = request.columns.get(i);
+                plugin.format_copy_value(val, col_info)
+            })
+            .collect();
+        let values_str = values.join(", ");
+        statements.push(format!(
+            "INSERT INTO {} ({}) VALUES ({});",
+            table_name, columns_str, values_str
+        ));
+    }
+    statements.join("
+")
+}
+
+pub(crate) fn default_generate_copy_insert_with_comments_sql<P: DatabasePlugin + ?Sized>(
+    plugin: &P,
+    request: &CopySqlRequest,
+) -> String {
+    if request.rows.is_empty() || request.column_names.is_empty() {
+        return String::new();
+    }
+
+    let table_name = plugin.format_copy_table_name(request.schema.as_deref(), &request.table);
+    let columns_with_comments: Vec<String> = request
+        .column_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let quoted = plugin.quote_identifier(name);
+            if let Some(col_info) = request.columns.get(i) {
+                if let Some(comment) = &col_info.comment {
+                    if !comment.is_empty() {
+                        return format!("{} /* {} */", quoted, comment);
+                    }
+                }
+            }
+            quoted
+        })
+        .collect();
+    let columns_str = columns_with_comments.join(", ");
+
+    let mut statements = Vec::new();
+    for row in &request.rows {
+        let values: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(i, val)| {
+                let col_info = request.columns.get(i);
+                plugin.format_copy_value(val, col_info)
+            })
+            .collect();
+        let values_str = values.join(", ");
+        statements.push(format!(
+            "INSERT INTO {} ({}) VALUES ({});",
+            table_name, columns_str, values_str
+        ));
+    }
+    statements.join("
+")
+}
+
+pub(crate) fn default_generate_copy_update_sql<P: DatabasePlugin + ?Sized>(
+    plugin: &P,
+    request: &CopySqlRequest,
+) -> String {
+    if request.rows.is_empty() || request.column_names.is_empty() {
+        return String::new();
+    }
+
+    let original_rows = request.original_rows.as_ref().unwrap_or(&request.rows);
+    let table_name = plugin.format_copy_table_name(request.schema.as_deref(), &request.table);
+    let mut statements = Vec::new();
+
+    for (row, original_row) in request.rows.iter().zip(original_rows.iter()) {
+        let set_parts: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(i, val)| {
+                let col_name = plugin.quote_identifier(
+                    request
+                        .column_names
+                        .get(i)
+                        .map(|s| s.as_str())
+                        .unwrap_or(""),
+                );
+                let col_info = request.columns.get(i);
+                let value = plugin.format_copy_value(val, col_info);
+                format!("{} = {}", col_name, value)
+            })
+            .collect();
+        let set_str = set_parts.join(", ");
+        let where_str = plugin.generate_copy_where_clause(request, original_row);
+        statements.push(format!(
+            "UPDATE {} SET {} WHERE {};",
+            table_name, set_str, where_str
+        ));
+    }
+    statements.join("
+")
+}
+
+pub(crate) fn default_generate_copy_delete_sql<P: DatabasePlugin + ?Sized>(
+    plugin: &P,
+    request: &CopySqlRequest,
+) -> String {
+    if request.rows.is_empty() || request.column_names.is_empty() {
+        return String::new();
+    }
+
+    let table_name = plugin.format_copy_table_name(request.schema.as_deref(), &request.table);
+    let mut statements = Vec::new();
+    for row in &request.rows {
+        let where_str = plugin.generate_copy_where_clause(request, row);
+        statements.push(format!("DELETE FROM {} WHERE {};", table_name, where_str));
+    }
+    statements.join("
+")
 }
 
 /// Database plugin trait for supporting multiple database types
@@ -133,6 +328,10 @@ pub trait DatabasePlugin: Send + Sync {
         &self,
         config: DbConnectionConfig,
     ) -> Result<Box<dyn DbConnection + Send + Sync>, DbError>;
+
+    fn connection_lifecycle(&self, _config: &DbConnectionConfig) -> ConnectionLifecycle {
+        ConnectionLifecycle::default()
+    }
 
     // === Database/Schema Level Operations ===
     async fn list_databases(&self, connection: &dyn DbConnection) -> Result<Vec<String>>;
@@ -1537,146 +1736,22 @@ pub trait DatabasePlugin: Send + Sync {
 
     /// Generate INSERT SQL statements for copying
     fn generate_copy_insert_sql(&self, request: &CopySqlRequest) -> String {
-        if request.rows.is_empty() || request.column_names.is_empty() {
-            return String::new();
-        }
-
-        let table_name = self.format_copy_table_name(request.schema.as_deref(), &request.table);
-        let quoted_columns: Vec<String> = request
-            .column_names
-            .iter()
-            .map(|c| self.quote_identifier(c))
-            .collect();
-        let columns_str = quoted_columns.join(", ");
-
-        let mut statements = Vec::new();
-
-        for row in &request.rows {
-            let values: Vec<String> = row
-                .iter()
-                .enumerate()
-                .map(|(i, val)| {
-                    let col_info = request.columns.get(i);
-                    self.format_copy_value(val, col_info)
-                })
-                .collect();
-            let values_str = values.join(", ");
-
-            statements.push(format!(
-                "INSERT INTO {} ({}) VALUES ({});",
-                table_name, columns_str, values_str
-            ));
-        }
-
-        statements.join("\n")
+        default_generate_copy_insert_sql(self, request)
     }
 
     /// Generate INSERT SQL statements with column comments for copying
     fn generate_copy_insert_with_comments_sql(&self, request: &CopySqlRequest) -> String {
-        if request.rows.is_empty() || request.column_names.is_empty() {
-            return String::new();
-        }
-
-        let table_name = self.format_copy_table_name(request.schema.as_deref(), &request.table);
-
-        // Generate column names with comments
-        let columns_with_comments: Vec<String> = request
-            .column_names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| {
-                let quoted = self.quote_identifier(name);
-                if let Some(col_info) = request.columns.get(i) {
-                    if let Some(comment) = &col_info.comment {
-                        if !comment.is_empty() {
-                            return format!("{} /* {} */", quoted, comment);
-                        }
-                    }
-                }
-                quoted
-            })
-            .collect();
-        let columns_str = columns_with_comments.join(", ");
-
-        let mut statements = Vec::new();
-
-        for row in &request.rows {
-            let values: Vec<String> = row
-                .iter()
-                .enumerate()
-                .map(|(i, val)| {
-                    let col_info = request.columns.get(i);
-                    self.format_copy_value(val, col_info)
-                })
-                .collect();
-            let values_str = values.join(", ");
-
-            statements.push(format!(
-                "INSERT INTO {} ({}) VALUES ({});",
-                table_name, columns_str, values_str
-            ));
-        }
-
-        statements.join("\n")
+        default_generate_copy_insert_with_comments_sql(self, request)
     }
 
     /// Generate UPDATE SQL statements for copying
     fn generate_copy_update_sql(&self, request: &CopySqlRequest) -> String {
-        if request.rows.is_empty() || request.column_names.is_empty() {
-            return String::new();
-        }
-
-        let original_rows = request.original_rows.as_ref().unwrap_or(&request.rows);
-        let table_name = self.format_copy_table_name(request.schema.as_deref(), &request.table);
-        let mut statements = Vec::new();
-
-        for (row, original_row) in request.rows.iter().zip(original_rows.iter()) {
-            // Generate SET clause
-            let set_parts: Vec<String> = row
-                .iter()
-                .enumerate()
-                .map(|(i, val)| {
-                    let col_name = self.quote_identifier(
-                        request
-                            .column_names
-                            .get(i)
-                            .map(|s| s.as_str())
-                            .unwrap_or(""),
-                    );
-                    let col_info = request.columns.get(i);
-                    let value = self.format_copy_value(val, col_info);
-                    format!("{} = {}", col_name, value)
-                })
-                .collect();
-            let set_str = set_parts.join(", ");
-
-            // Generate WHERE clause
-            let where_str = self.generate_copy_where_clause(request, original_row);
-
-            statements.push(format!(
-                "UPDATE {} SET {} WHERE {};",
-                table_name, set_str, where_str
-            ));
-        }
-
-        statements.join("\n")
+        default_generate_copy_update_sql(self, request)
     }
 
     /// Generate DELETE SQL statements for copying
     fn generate_copy_delete_sql(&self, request: &CopySqlRequest) -> String {
-        if request.rows.is_empty() || request.column_names.is_empty() {
-            return String::new();
-        }
-
-        let table_name = self.format_copy_table_name(request.schema.as_deref(), &request.table);
-        let mut statements = Vec::new();
-
-        for row in &request.rows {
-            let where_str = self.generate_copy_where_clause(request, row);
-            statements.push(format!("DELETE FROM {} WHERE {};", table_name, where_str));
-        }
-
-        statements.join("\n")
+        default_generate_copy_delete_sql(self, request)
     }
 
     /// Format table name for copy SQL (with optional schema)
@@ -2809,6 +2884,74 @@ mod tests {
         let capabilities = DatabasePlugin::capabilities(&plugin);
         assert!(capabilities.supports_functions);
         assert!(capabilities.supports_procedures);
+    }
+
+    // ==================== connection_lifecycle tests ====================
+
+    fn lifecycle_config(id: &str, host: &str, database: Option<&str>) -> DbConnectionConfig {
+        DbConnectionConfig {
+            id: id.to_string(),
+            database_type: DatabaseType::DuckDB,
+            name: "test".to_string(),
+            host: host.to_string(),
+            port: 0,
+            username: String::new(),
+            password: String::new(),
+            database: database.map(str::to_string),
+            service_name: None,
+            sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
+            workspace_id: None,
+            extra_params: Default::default(),
+        }
+    }
+
+    #[test]
+    fn connection_lifecycle_single_file_prefers_path_fields_and_strips_file_prefix() {
+        let mut config = lifecycle_config("cfg-1", "ignored-host", Some("/tmp/db.duckdb"));
+        config
+            .extra_params
+            .insert("path".to_string(), "file:/data/shared.db".to_string());
+
+        let lifecycle = ConnectionLifecycle::single_file(
+            "duckdb",
+            &config,
+            &["extra_params.path".to_string()],
+        );
+
+        assert!(lifecycle.close_on_release);
+        assert_eq!(
+            Some("duckdb:/data/shared.db".to_string()),
+            lifecycle.physical_open_lock_key
+        );
+    }
+
+    #[test]
+    fn connection_lifecycle_single_file_falls_back_to_host_then_id() {
+        let by_host = ConnectionLifecycle::single_file(
+            "duckdb",
+            &lifecycle_config("cfg-host", "/tmp/a.duckdb", None),
+            &[],
+        );
+        assert_eq!(
+            Some("duckdb:/tmp/a.duckdb".to_string()),
+            by_host.physical_open_lock_key
+        );
+
+        let empty = lifecycle_config("cfg-id-only", "", None);
+        let by_id = ConnectionLifecycle::single_file("duckdb", &empty, &[]);
+        assert_eq!(
+            Some("duckdb:cfg-id-only".to_string()),
+            by_id.physical_open_lock_key
+        );
+    }
+
+    #[test]
+    fn connection_lifecycle_default_has_no_physical_lock() {
+        let lifecycle = ConnectionLifecycle::default();
+        assert!(!lifecycle.close_on_release);
+        assert!(lifecycle.physical_open_lock_key.is_none());
     }
 
     // ==================== is_query_stmt tests (AST-based) ====================

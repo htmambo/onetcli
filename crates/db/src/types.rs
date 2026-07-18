@@ -672,6 +672,8 @@ pub struct CopySqlRequest {
     pub original_rows: Option<Vec<Vec<Option<String>>>>,
     /// Column names
     pub column_names: Vec<String>,
+    /// 外部驱动 id（多驱动 registry 下生成方言感知 Copy SQL 时使用）。
+    pub driver_id: Option<String>,
 }
 
 impl CopySqlRequest {
@@ -684,6 +686,7 @@ impl CopySqlRequest {
             rows: Vec::new(),
             original_rows: None,
             column_names,
+            driver_id: None,
         }
     }
 
@@ -704,6 +707,11 @@ impl CopySqlRequest {
 
     pub fn with_column_names(mut self, column_names: Vec<String>) -> Self {
         self.column_names = column_names;
+        self
+    }
+
+    pub fn with_driver_id(mut self, driver_id: impl Into<String>) -> Self {
+        self.driver_id = Some(driver_id.into());
         self
     }
 }

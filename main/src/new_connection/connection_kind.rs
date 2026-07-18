@@ -202,6 +202,7 @@ mod tests {
             transport: IpcDriverTransport::local_socket(format!("{id}.sock")),
             dialect: Default::default(),
             capabilities: None,
+            connection: Default::default(),
             ui: Default::default(),
             manifest_dir: PathBuf::from("/tmp"),
         }

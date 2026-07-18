@@ -67,6 +67,7 @@ mod tests {
             transport: IpcDriverTransport::local_socket(format!("{id}.sock")),
             dialect: Default::default(),
             capabilities: None,
+            connection: Default::default(),
             ui: IpcDriverUi {
                 icon: icon.to_string(),
                 default_port: None,
