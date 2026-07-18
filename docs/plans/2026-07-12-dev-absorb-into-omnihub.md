@@ -245,7 +245,10 @@
 - [x] 修复 `remote_desktop_form/view.rs` 语法残留
 - [x] 验证：`cargo check -p remote_desktop -p remote_desktop_view -p main` ✅
 - [ ] 手工验证 RDP/VNC 连接与输入转发
-- [ ] 辅助进程打包/helper 命名路径回归（omnihub-*-helper）
+- [~] 辅助进程打包/helper 命名路径回归（omnihub-*-helper）
+  - 2026-07-13：已移植 provider 安装引导（`main/src/remote_desktop_install/`）：打开连接时检测 provider，缺失则弹窗 → 市场下载（sha256 校验）→ 安全解包安装（备份/回滚）→ 自动打开连接；语义对齐 dev `remote_desktop_provider_install`，未引入 extension-runtime
+  - helper 仍沿用市场包内命名（`onetcli-*-helper`，manifest `entry.command` 驱动，无需改名）
+  - 待办：打包流程与 GUI 端到端冒烟
 
 ### 移植备注（远程桌面）
 
@@ -726,11 +729,37 @@
   - 各 `list_*_view` 优先走自定义，失败回退原实现
   - 补 `list_schemas_view`
 - [x] `f48c1564` 轻量：`IpcDriverConnection` manifest 段 + `ExternalDbConnection::close_on_release`
-  - 未搬：全量 physical open lock / ConnectionManager 重写
-- [x] 验证：`object_view_*` ✅ 3、`parses_connection_lifecycle_from_manifest` ✅、`close_on_release_follows_manifest` ✅
+- [x] `f48c1564` 核心：`ConnectionLifecycle` + DuckDB/External 覆盖 + `ConnectionManager` physical open lock（串行化 create_session 物理打开）
+  - 未搬：busy close_on_release 重试循环、session 级 close_on_release 字段、占用中禁止复用第二物理连接
+- [x] Copy SQL 方言：`CopySqlRequest.driver_id` + Oracle `format_copy_value`（TO_DATE/TO_CLOB）+ External 委托
+- [x] 验证：`connection_lifecycle*` ✅ 7、`external_oracle*` ✅ 3、`external_non_oracle_copy*` ✅ 1、`object_view_*` ✅ 3、`close_on_release*` ✅、`cargo check -p db` ✅
 
 ### 下一包评估（续 14）
 
 - 已收：object view 自定义、manifest close_on_release
-- 仍延后：physical open lock 全量、external DDL、MCP/extension/port_forward/remote_desktop
+- 仍延后：lifecycle busy-retry 全量、external DDL、MCP/extension/port_forward/remote_desktop
 
+## 进度更新 2026-07-13（续）
+
+### 已完成
+
+1. **ConnectionLifecycle + physical open lock**（`f48c1564` 轻量核）
+   - `crates/db/src/plugin.rs`：`ConnectionLifecycle` / `single_file` / 路径规范化
+   - DuckDB + External plugin 覆盖
+   - `ConnectionManager`：`physical_open_locks` + create_session 二次 try_acquire
+2. **Copy SQL Oracle 方言**
+   - `CopySqlRequest.driver_id`
+   - Oracle `format_copy_value` → temporal/LOB 字面量
+   - External 按 driver 委托；默认实现提取为 `default_generate_copy_*`
+   - `data_grid` 复制 SQL 路径传入 `driver_id`
+
+### 验证
+
+- `cargo check -p db` ✅
+- `connection_lifecycle` 7 ✅ / `external_oracle` 3 ✅ / `external_non_oracle_copy` 1 ✅ / `object_view_` 3 ✅
+
+### 下一批（轻→重）
+
+1. 可选：compatible DDL fallback 多驱动上下文（若可设计）
+2. 重：lifecycle busy-retry 全量
+3. 重：external DDL / MCP / extension / port_forward / remote_desktop
