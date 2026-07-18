@@ -189,7 +189,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: onetcli-${{ matrix.target }}.dmg
+          name: omnihub-${{ matrix.target }}.dmg
           path: "*.dmg"
 
   release:
@@ -213,16 +213,16 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum onetcli-* > sha256sums.txt
+          sha256sum omnihub-* > sha256sums.txt
           cat sha256sums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: OnetCli ${{ github.ref_name }}
+          name: OmniHub ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            artifacts/onetcli-*.tar.gz
-            artifacts/onetcli-*.zip
-            artifacts/onetcli-*.dmg
+            artifacts/omnihub-*.tar.gz
+            artifacts/omnihub-*.zip
+            artifacts/omnihub-*.dmg
             artifacts/sha256sums.txt
