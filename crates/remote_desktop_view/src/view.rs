@@ -33,6 +33,9 @@ const CLIPBOARD_SYNC_INTERVAL: Duration = Duration::from_millis(500);
 const RDP_DISPLAY_MIN_SIZE: f32 = 200.0;
 const RDP_DISPLAY_MAX_SIZE: f32 = 8192.0;
 const REMOTE_DESKTOP_CONTEXT: &str = "RemoteDesktopView";
+/// 常规帧的最小渲染间隔（≈15 FPS），降频以减半 CPU clone / GPU upload 稳态开销。
+/// 关键帧（Connected/整帧/断连）不受此限，保证首帧与重连即时。
+const RENDER_MIN_INTERVAL: Duration = Duration::from_millis(66);
 
 #[cfg(target_os = "macos")]
 const REMOTE_COPY_SHORTCUT: &str = "cmd-c";
@@ -53,6 +56,23 @@ fn remote_desktop_tab_title(title: &str, tab_index: Option<usize>) -> String {
         format!("{title}({index})")
     } else {
         title.to_string()
+    }
+}
+
+/// `drain_output` 的处理结果：区分"本 tick 真的渲染了帧"与"有非帧 UI 变化"，
+/// 供 timer 决定是否 notify（避免节流帧白白触发无效 render）。
+#[derive(Clone, Copy, Debug, Default)]
+struct DrainOutcome {
+    /// 本 tick 是否真的构造了新帧（整帧渲染或到期的增量渲染）。
+    did_render: bool,
+    /// 是否有非帧输出（状态/剪贴板/Connected/断连）需要刷新 UI。
+    non_frame_output: bool,
+}
+
+impl DrainOutcome {
+    /// 是否需要触发 gpui 重绘。
+    fn should_notify(self) -> bool {
+        self.did_render || self.non_frame_output
     }
 }
 
@@ -87,29 +107,54 @@ pub struct RemoteDesktopView {
     display_mode: DisplayMode,
     /// Original(1:1) 模式下的滚动偏移（逻辑像素）。
     scroll_offset: (f32, f32),
+    /// 上次渲染时间（降频节流用）。
+    last_render_at: Instant,
+    /// 底图有 patch 但因节流未呈现（timer 到期时补偿渲染，防最后一帧被吞）。
+    pending_frame_dirty: bool,
 }
 
 impl RemoteDesktopView {
     pub fn new(config: RemoteDesktopViewConfig, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
 
-        // 事件驱动渲染：有新输出才触发重绘，避免静止时 33ms 空渲染。
+        // 事件驱动渲染：有新帧/非帧输出才触发重绘，节流帧不触发（避免静止/无效空渲染）。
         // 另加低频兜底（~500ms），保证剪贴板同步 / resize 防抖等维护任务在无帧时也执行。
         cx.spawn(async move |this, cx| {
             let mut idle_ticks = 0u32;
             loop {
                 let result = this.update(cx, |view, cx| {
-                    let got_output = view.drain_output(cx);
-                    idle_ticks = if got_output {
-                        cx.notify();
-                        0
-                    } else {
-                        idle_ticks.saturating_add(1)
-                    };
-                    // 约 500ms 无输出时兜底重绘一次（驱动剪贴板/resize 维护）。
-                    if idle_ticks >= 15 {
+                    let outcome = view.drain_output(cx);
+                    let mut need_notify = outcome.should_notify();
+
+                    // 补偿渲染：底图有节流未呈现的 patch 且已到期 → 立即渲染，
+                    // 防止"最后一帧"被吞到 500ms 兜底才呈现。
+                    if !need_notify
+                        && view.pending_frame_dirty
+                        && view.last_render_at.elapsed() >= RENDER_MIN_INTERVAL
+                    {
+                        match view.render_frame_buffer() {
+                            Ok(image) => {
+                                view.set_frame(image);
+                                view.last_render_at = Instant::now();
+                                view.pending_frame_dirty = false;
+                                need_notify = true;
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "compensation render failed");
+                            }
+                        }
+                    }
+
+                    if need_notify {
                         cx.notify();
                         idle_ticks = 0;
+                    } else {
+                        idle_ticks = idle_ticks.saturating_add(1);
+                        // 约 500ms 无输出时兜底重绘一次（驱动剪贴板/resize 维护）。
+                        if idle_ticks >= 15 {
+                            cx.notify();
+                            idle_ticks = 0;
+                        }
                     }
                 });
                 // view 已销毁则退出循环，避免后台任务空转泄漏。
@@ -145,6 +190,12 @@ impl RemoteDesktopView {
             tab_index: config.tab_index,
             display_mode: DisplayMode::default(),
             scroll_offset: (0.0, 0.0),
+            // 初始化为"早已过去"，保证首帧立即可渲染（不被节流挡住）。
+            // checked_sub 消除极端场景（系统启动 <66ms）下 Instant 减法 panic 的风险。
+            last_render_at: Instant::now()
+                .checked_sub(RENDER_MIN_INTERVAL)
+                .unwrap_or_else(Instant::now),
+            pending_frame_dirty: false,
         }
     }
 
@@ -164,23 +215,27 @@ impl RemoteDesktopView {
         self.status = SharedString::from("Connecting");
     }
 
-    /// 收取并处理一波后端输出。返回本轮是否收到任何输出（用于决定是否触发重绘）。
+    /// 收取并处理一波后端输出。
     ///
     /// 性能关键：一 tick 内可能到达多个增量帧。本函数先把它们全部 patch 进底图，
     /// 最后**只构造一次 RenderImage**（避免每帧整帧 clone 导致的累积卡顿）。
-    fn drain_output(&mut self, cx: &mut Context<Self>) -> bool {
+    /// 常规增量帧按 RENDER_MIN_INTERVAL 限频渲染；返回是否本 tick 真的渲染/有 UI 变化。
+    fn drain_output(&mut self, cx: &mut Context<Self>) -> DrainOutcome {
         let Some(output_rx) = self.output_rx.as_ref() else {
-            return false;
+            return DrainOutcome::default();
         };
         let mut outputs = Vec::new();
         while let Ok(output) = output_rx.try_recv() {
             outputs.push(output);
         }
-        let received = !outputs.is_empty();
         // 底图是否被本 tick 的帧更新（决定是否需要重建 RenderImage）。
         let mut frame_dirty = false;
         // RDP 的 RGBA 整帧（不走增量底图路径），仅保留最新一帧。
         let mut latest_rgba_frame: Option<(u16, u16, Vec<u8>)> = None;
+        // 关键帧（Connected/整帧/断连）跳过降频节流，保证首帧与重连即时。
+        let mut force_render = false;
+        // 是否有非帧输出（状态/剪贴板/光标/Connected/断连），需要 notify 刷新 UI。
+        let mut non_frame_output = false;
 
         for output in outputs {
             match output {
@@ -188,6 +243,8 @@ impl RemoteDesktopView {
                     self.remote_size = Some((width, height));
                     self.frame_buffer = None; // 重连/尺寸变化后等首帧整帧重建底图
                     self.status = SharedString::from("Connected");
+                    force_render = true;
+                    non_frame_output = true;
                 }
                 RemoteDesktopOutput::Frame {
                     width,
@@ -196,6 +253,7 @@ impl RemoteDesktopView {
                 } => {
                     self.remote_size = Some((width, height));
                     latest_rgba_frame = Some((width, height, rgba));
+                    force_render = true; // RDP 整帧视为关键帧
                 }
                 RemoteDesktopOutput::FrameBgra {
                     width,
@@ -206,6 +264,7 @@ impl RemoteDesktopView {
                     // 整帧作为底图（move 存入），不在此渲染，末尾统一构造一次。
                     self.frame_buffer = Some((width, height, bgra));
                     frame_dirty = true;
+                    force_render = true; // 整帧是关键帧，即时渲染
                 }
                 RemoteDesktopOutput::FrameRectsBgra {
                     width,
@@ -240,10 +299,15 @@ impl RemoteDesktopView {
                         }
                     }
                 }
-                RemoteDesktopOutput::Status(message) => self.status = SharedString::from(message),
+                RemoteDesktopOutput::Status(message) => {
+                    self.status = SharedString::from(message);
+                    non_frame_output = true;
+                }
                 RemoteDesktopOutput::ConnectionFailure(message)
                 | RemoteDesktopOutput::Terminated(message) => {
-                    self.handle_disconnect_status(message)
+                    self.handle_disconnect_status(message);
+                    force_render = true;
+                    non_frame_output = true;
                 }
                 RemoteDesktopOutput::CursorDefault
                 | RemoteDesktopOutput::CursorHidden
@@ -253,6 +317,7 @@ impl RemoteDesktopView {
                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                         self.last_clipboard_text = Some(text);
                         self.last_clipboard_sync_at = Some(Instant::now());
+                        non_frame_output = true;
                     }
                 }
             }
@@ -260,25 +325,45 @@ impl RemoteDesktopView {
 
         // 统一渲染：本 tick 内所有帧 patch 已合并进底图，只构造一次 RenderImage。
         // 避免每个增量帧都整帧 clone + notify 导致的累积卡顿。
+        let mut did_render = false;
         if let Some((width, height, rgba)) = latest_rgba_frame {
             // RDP 路径：直接渲染最新 RGBA 整帧（不走增量底图）。
             match rgba_to_render_image(width, height, rgba) {
-                Ok(image) => self.set_frame(image),
+                Ok(image) => {
+                    self.set_frame(image);
+                    did_render = true;
+                }
                 Err(error) => {
                     tracing::error!(%error, "rgba_to_render_image failed");
                     self.status = SharedString::from(error.to_string());
                 }
             }
         } else if frame_dirty {
-            match self.render_frame_buffer() {
-                Ok(image) => self.set_frame(image),
-                Err(error) => {
-                    tracing::error!(%error, "render_frame_buffer failed");
-                    self.status = SharedString::from(error.to_string());
+            // 降频节流：常规增量帧按 RENDER_MIN_INTERVAL 限频渲染（≈15 FPS），
+            // 减半稳态 clone/upload 开销；关键帧（整帧/Connected/断连）跳过节流即时渲染。
+            // 未渲染的 patch 已入底图，由 timer 到期时补偿呈现（见 pending_frame_dirty）。
+            if force_render || self.last_render_at.elapsed() >= RENDER_MIN_INTERVAL {
+                match self.render_frame_buffer() {
+                    Ok(image) => {
+                        self.set_frame(image);
+                        self.last_render_at = Instant::now();
+                        self.pending_frame_dirty = false;
+                        did_render = true;
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "render_frame_buffer failed");
+                        self.status = SharedString::from(error.to_string());
+                    }
                 }
+            } else {
+                // 被节流：底图有 patch 但未呈现，标记待 timer 到期补偿。
+                self.pending_frame_dirty = true;
             }
         }
-        received
+        DrainOutcome {
+            did_render,
+            non_frame_output,
+        }
     }
 
     /// 替换当前帧：被替换的旧帧进入待释放队列，由 render() 统一 drop_image 释放 GPU 纹理。
