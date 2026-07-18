@@ -108,9 +108,9 @@ jobs:
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             VERSION="${{ github.ref_name }}"
             VERSION="${VERSION#v}"
-            echo "ONETCLI_VERSION=${VERSION}" >> "$GITHUB_ENV"
+            echo "OMNIHUB_VERSION=${VERSION}" >> "$GITHUB_ENV"
           else
-            echo "ONETCLI_VERSION=0.0.0-dev.$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+            echo "OMNIHUB_VERSION=0.0.0-dev.$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
           fi
 
       - name: Verify secrets are set
