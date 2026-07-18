@@ -7,9 +7,9 @@ description: 基于本地 git tag 和提交历史整理 OmniHub 最近版本与�
 
 本页基于当前仓库的本地 `git tag` 和提交历史整理，适合在官网中展示最近版本的产品变化。完整发布包、安装文件和历史版本仍以 [GitHub Releases](https://github.com/feigeCode/onetcli/releases) 为准。
 
-## 0.6.0
+## 0.6.0 (unreleased)
 
-发布时间：2026-07-18
+发布时间：待定（release.yml 修复后打 tag 发布）
 
 ### Highlights
 
@@ -26,6 +26,7 @@ OmniHub 独立版本线的首个里程碑：吸收上游 OnetCli 分支的核心
 
 - IPC 驱动协议版本门禁（major 拒绝 / minor 放行+告警 / 遗留隐式放行）。
 - manifest 未知字段软告警（serde_ignored，完整字段路径）。
+- 新增 DbError::InvalidManifest 变体，区分驱动配置问题与内部错误。
 - 子进程 stderr 背压：单行 64KB 截断、20 行/秒速率限制、drain/log 解耦防管道阻塞、EOF 汇总。
 
 ### Versioning
