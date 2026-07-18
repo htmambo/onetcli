@@ -783,7 +783,7 @@
 | 5 远程桌面 | ✅ | 110% | 超预期：基础接入 + provider 安装引导 + VNC ARD 兼容(libvncclient) + 增量帧协议 + 显存崩溃修复 + 降频渲染 + 4 种显示模式 |
 | 6 MCP/CLI/tool runtime | ⏳ 延后 | 0% | 架构级重依赖，单独立项评估 |
 | 7 扩展系统/外部驱动 | 🟡 | ~40% | 外部驱动多驱动插件系统✅(adfe96e0)；extension-*/wasm host 延后 |
-| 8 版本/CI/文档收口 | ⏳ | 0% | 版本线分叉（本地 0.4.8 vs dev 0.7.2） |
+| 8 版本/CI/文档收口 | ✅ | ~85% | 版本 bump 0.6.0（独立版本线）✅；bump-version.sh -p main✅；CHANGELOG+README 能力清单✅；release.yml 修复 4 真 bug+品牌对齐✅；fork 不做正式 release（无 supabase，rc1 验证已删） |
 
 ### 本波完成度检查发现并修复
 
@@ -797,7 +797,7 @@
    - Redis SSH 隧道 密码/私钥/Agent 连通（Phase 3.x）
 2. **helper 打包流程冒烟**（Phase 5 待办）：`omnihub-*-helper` 命名 + 安装引导端到端
 3. **Phase 6/7 决策**：MCP / extension / tool_runtime 是否继续吸收，或与外部驱动插件并存后收口
-4. **Phase 8 版本收口**：版本线统一、CI workflow 合并、README 能力清单
+4. **Phase 8 版本收口** - ✅ 完成：版本 bump 0.6.0（独立版本线，不对齐 dev 0.7.2）+ bump-version.sh -p main（防库污染）+ CHANGELOG 0.6.0 + README 能力清单 + release.yml 修复（binary/资源/app/env 名对齐 omnihub，4 真 bug）。fork 不做正式 release（无 supabase，rc1 验证暴露 secrets 缺失后已删）
 5. **高冲突延后项**：external DDL（cc555c44，依赖 wire_ddl + for_driver 单驱动上下文）、lifecycle busy-retry 全量
 
 
