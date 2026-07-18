@@ -69,6 +69,8 @@ pub struct RemoteDesktopView {
     output_rx: Option<std::sync::mpsc::Receiver<RemoteDesktopOutput>>,
     focus_handle: FocusHandle,
     frame: Option<Arc<RenderImage>>,
+    /// 已被替换、待从 GPU 图集释放纹理的旧帧（防显存泄漏）。
+    stale_frames: Vec<Arc<RenderImage>>,
     /// 本地 BGRA 帧缓冲底图（增量帧按矩形 patch 于此），尺寸 = remote_size。
     frame_buffer: Option<(u16, u16, Vec<u8>)>,
     remote_size: Option<(u16, u16)>,
@@ -128,6 +130,7 @@ impl RemoteDesktopView {
             output_rx: None,
             focus_handle,
             frame: None,
+            stale_frames: Vec::new(),
             frame_buffer: None,
             remote_size: None,
             content_bounds: None,
@@ -260,7 +263,7 @@ impl RemoteDesktopView {
         if let Some((width, height, rgba)) = latest_rgba_frame {
             // RDP 路径：直接渲染最新 RGBA 整帧（不走增量底图）。
             match rgba_to_render_image(width, height, rgba) {
-                Ok(image) => self.frame = Some(Arc::new(image)),
+                Ok(image) => self.set_frame(image),
                 Err(error) => {
                     tracing::error!(%error, "rgba_to_render_image failed");
                     self.status = SharedString::from(error.to_string());
@@ -268,7 +271,7 @@ impl RemoteDesktopView {
             }
         } else if frame_dirty {
             match self.render_frame_buffer() {
-                Ok(image) => self.frame = Some(Arc::new(image)),
+                Ok(image) => self.set_frame(image),
                 Err(error) => {
                     tracing::error!(%error, "render_frame_buffer failed");
                     self.status = SharedString::from(error.to_string());
@@ -276,6 +279,16 @@ impl RemoteDesktopView {
             }
         }
         received
+    }
+
+    /// 替换当前帧：被替换的旧帧进入待释放队列，由 render() 统一 drop_image 释放 GPU 纹理。
+    /// 防止每帧新建 RenderImage（新 image_id）导致图集纹理无界累积（OutOfDeviceMemory）。
+    /// 保留语义：stale 中的帧可能仍被本帧绘制命令引用，故推迟到 render 阶段统一释放，
+    /// 由 gpui 的纹理回收（decrement_ref_count）保证在不再被引用时才真正销毁。
+    fn set_frame(&mut self, image: RenderImage) {
+        if let Some(old) = self.frame.replace(Arc::new(image)) {
+            self.stale_frames.push(old);
+        }
     }
 
     /// 从本地底图渲染当前帧。
@@ -778,6 +791,12 @@ impl TabContent for RemoteDesktopView {
 impl Render for RemoteDesktopView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // drain_output 只在后台 timer 任务中执行（单一消费者，避免与 render 竞争 channel）。
+        // 释放已被替换的旧帧的 GPU 纹理（防显存泄漏崩溃 OutOfDeviceMemory）。
+        if !self.stale_frames.is_empty() {
+            for stale in self.stale_frames.drain(..) {
+                let _ = window.drop_image(stale);
+            }
+        }
         self.sync_local_clipboard(window, cx);
         self.flush_pending_resize();
         let view = cx.entity();
