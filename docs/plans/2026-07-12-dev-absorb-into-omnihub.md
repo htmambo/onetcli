@@ -831,7 +831,14 @@
 
 ### 配套动作
 
-- [ ] 对照 `extension-driver` 对本地 `db/ipc` 插件系统做 gap 分析：版本协商 / 崩溃隔离与自动重启 / 权限沙箱声明 / marketplace 签名校验（按需回补，工作量远小于吸收全套）
+- [~] 对照 `extension-driver` 对本地 `db/ipc` 插件系统做 gap 分析（按需回补，工作量远小于吸收全套）：
+  - [x] **版本协商**：manifest `protocol_version` 门禁（major 拒绝 / minor 放行+告警 / 遗留隐式放行）— `9259a5f9`（两轮外部审核 APPROVED）
+  - [x] **manifest schema 加固**：`serde_ignored` 未知字段软告警（完整路径，与协议门禁同构）— `bb235972`（APPROVED）
+  - [x] **错误语义化**：`DbError::InvalidManifest` 变体 + 版本判别测试 — `b8d0c514`（APPROVED）
+  - [x] **子进程可观测性**：stderr 背压（单行 64KB 截断 + 20/s 速率限制 + drain/log 解耦防管道阻塞 + EOF 汇总）— `ebb1be36`（两轮 APPROVED，含 suppressed 双重计数 P0 修复）
+  - [ ] 崩溃隔离与自动重启 + 熔断退避 — 待业务信号触发（用户报"驱动挂了要手动重连"痛点时回补）
+  - [ ] 权限沙箱声明 — 待跑不可信驱动的明确需求（OS 级方案成本高，前期进程隔离兜底）
+  - [ ] marketplace 签名校验 — 待引入第三方 driver registry（分发模型未定型）
 - [ ] 跨越 rename 边界的任何后续吸收，先做 rename 提交再做功能提交（分两次 PR）
 
 
