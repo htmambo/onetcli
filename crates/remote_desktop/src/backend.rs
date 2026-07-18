@@ -5,7 +5,7 @@ use crate::{
 };
 
 const MIN_RDP_PROVIDER_VERSION: &str = "0.1.3";
-const MIN_VNC_PROVIDER_VERSION: &str = "0.1.1";
+const MIN_VNC_PROVIDER_VERSION: &str = "0.2.0";
 
 pub trait RemoteDesktopBackend: Send + 'static {
     fn name(&self) -> &'static str {
@@ -230,7 +230,7 @@ mod tests {
             .expect("version error");
         assert_eq!(RemoteDesktopProtocol::Vnc, version_error.protocol);
         assert_eq!("0.1.0", version_error.installed);
-        assert_eq!("0.1.1", version_error.required);
+        assert_eq!("0.2.0", version_error.required);
         assert!(!version_error.invalid);
     }
 

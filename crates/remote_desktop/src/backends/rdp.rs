@@ -550,6 +550,12 @@ fn read_helper_output(reader: &mut impl BufRead) -> anyhow::Result<Option<Helper
             height,
             bgra_len,
         } => read_binary_bgra_frame_output(reader, width, height, bgra_len).map(Some),
+        HelperEvent::FrameRectsBgra {
+            width,
+            height,
+            rects,
+            bgra_len,
+        } => read_binary_rects_bgra_frame_output(reader, width, height, rects, bgra_len).map(Some),
         event => Ok(Some(HelperOutput {
             output: helper_event_to_output(event)?,
             connected,
@@ -612,6 +618,40 @@ where
     })
 }
 
+fn read_binary_rects_bgra_frame_output<R>(
+    reader: &mut R,
+    width: u16,
+    height: u16,
+    rects: Vec<crate::helper_protocol::FrameRect>,
+    bgra_len: usize,
+) -> anyhow::Result<HelperOutput>
+where
+    R: Read + ?Sized,
+{
+    // bgra_len 应等于各矩形面积和 × 4。
+    let expected_len: usize = rects
+        .iter()
+        .map(|rect| usize::from(rect.width) * usize::from(rect.height) * 4)
+        .sum();
+    if bgra_len != expected_len {
+        anyhow::bail!(
+            "invalid rects BGRA payload length: expected {expected_len}, got {bgra_len}"
+        );
+    }
+    let mut bgra = vec![0; bgra_len];
+    reader.read_exact(&mut bgra)?;
+    Ok(HelperOutput {
+        output: RemoteDesktopOutput::FrameRectsBgra {
+            width,
+            height,
+            rects,
+            bgra,
+        },
+        connected: false,
+        disconnect_message: None,
+    })
+}
+
 fn forward_helper_output(
     helper_output: HelperOutput,
     output_tx: &std::sync::mpsc::Sender<RemoteDesktopOutput>,
@@ -657,6 +697,9 @@ fn helper_event_to_output(event: HelperEvent) -> anyhow::Result<RemoteDesktopOut
         },
         HelperEvent::FrameBytes { .. } | HelperEvent::FrameBgraBytes { .. } => {
             anyhow::bail!("binary frame payload is missing")
+        }
+        HelperEvent::FrameRectsBgra { .. } => {
+            anyhow::bail!("binary rects frame payload is missing")
         }
         HelperEvent::CursorDefault => RemoteDesktopOutput::CursorDefault,
         HelperEvent::CursorHidden => RemoteDesktopOutput::CursorHidden,

@@ -186,6 +186,15 @@ impl HelperMouseButton {
     }
 }
 
+/// 帧内一个脏矩形（增量更新区域）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameRect {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum HelperEvent {
@@ -209,6 +218,13 @@ pub enum HelperEvent {
     FrameBgraBytes {
         width: u16,
         height: u16,
+        bgra_len: usize,
+    },
+    /// 增量帧：整帧尺寸 + 若干脏矩形，bgra 二进制体紧随其后（长度 = 各矩形面积和 × 4）。
+    FrameRectsBgra {
+        width: u16,
+        height: u16,
+        rects: Vec<FrameRect>,
         bgra_len: usize,
     },
     CursorDefault,
