@@ -41,8 +41,6 @@ use std::path::PathBuf;
 
 #[cfg(test)]
 use db::DbManager;
-#[cfg(test)]
-use one_core::storage::DatabaseType;
 
 actions!(data_grid, [Page100, Page200, Page300, Page500, Page1000]);
 
