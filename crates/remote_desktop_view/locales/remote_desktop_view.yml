@@ -15,6 +15,27 @@ RemoteDesktop:
     en: "%{protocol} provider version %{installed} is invalid. Please update the provider to %{required} or newer."
     zh-CN: "%{protocol} 扩展版本 %{installed} 无效，请更新到 %{required} 或更高版本。"
     zh-HK: "%{protocol} 擴展版本 %{installed} 無效，請更新到 %{required} 或更高版本。"
+  display_mode:
+    label:
+      en: "View"
+      zh-CN: "显示"
+      zh-HK: "顯示"
+    contain:
+      en: "Fit to window"
+      zh-CN: "适应窗口"
+      zh-HK: "適應視窗"
+    original:
+      en: "Actual size"
+      zh-CN: "原始尺寸"
+      zh-HK: "原始尺寸"
+    cover:
+      en: "Fill (crop)"
+      zh-CN: "填满裁剪"
+      zh-HK: "填滿裁剪"
+    fill:
+      en: "Stretch"
+      zh-CN: "拉伸铺满"
+      zh-HK: "拉伸鋪滿"
 
 
 # 团队同步

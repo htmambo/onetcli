@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::{ActiveTheme, Icon, IconName};
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable};
 use one_core::tab_container::{TabContent, TabContentEvent};
 use remote_desktop::{
     RemoteDesktopConnectionOptions, RemoteDesktopInput, RemoteDesktopOutput, RemoteDesktopProtocol,
@@ -12,11 +13,15 @@ use remote_desktop::{
 };
 use rust_i18n::t;
 
+use crate::display_mode::DisplayMode;
 use crate::ime_guard::RemoteDesktopImeGuard;
 use crate::keyboard::keystroke_to_remote_key_for_protocol;
 use crate::modifiers::modifier_inputs;
 use crate::pixels::{bgra_to_render_image, rgba_to_render_image};
-use crate::pointer::{LocalBounds, scale_filled_window_pointer_position};
+use crate::pointer::{
+    LocalBounds, scale_cover_window_pointer_position, scale_filled_window_pointer_position,
+    scale_original_pointer_position, scale_window_pointer_position,
+};
 use crate::shortcuts::{
     ClipboardShortcut, clipboard_shortcut_inputs, is_clipboard_platform_shortcut,
 };
@@ -75,6 +80,9 @@ pub struct RemoteDesktopView {
     last_clipboard_sync_at: Option<Instant>,
     status: SharedString,
     tab_index: Option<usize>,
+    display_mode: DisplayMode,
+    /// Original(1:1) 模式下的滚动偏移（逻辑像素）。
+    scroll_offset: (f32, f32),
 }
 
 impl RemoteDesktopView {
@@ -109,6 +117,8 @@ impl RemoteDesktopView {
             last_clipboard_sync_at: None,
             status: SharedString::from("Waiting for layout"),
             tab_index: config.tab_index,
+            display_mode: DisplayMode::default(),
+            scroll_offset: (0.0, 0.0),
         }
     }
 
@@ -383,13 +393,28 @@ impl RemoteDesktopView {
             return;
         };
         let bounds = self.pointer_bounds(window);
-        let Some((x, y)) = scale_filled_window_pointer_position(
-            pixels_to_f32(position.x),
-            pixels_to_f32(position.y),
-            bounds,
-            remote_width,
-            remote_height,
-        ) else {
+        let px_x = pixels_to_f32(position.x);
+        let px_y = pixels_to_f32(position.y);
+        let mapped = match self.display_mode {
+            DisplayMode::Fill => {
+                scale_filled_window_pointer_position(px_x, px_y, bounds, remote_width, remote_height)
+            }
+            DisplayMode::Contain => {
+                scale_window_pointer_position(px_x, px_y, bounds, remote_width, remote_height)
+            }
+            DisplayMode::Cover => {
+                scale_cover_window_pointer_position(px_x, px_y, bounds, remote_width, remote_height)
+            }
+            DisplayMode::Original => scale_original_pointer_position(
+                px_x - bounds.left,
+                px_y - bounds.top,
+                self.scroll_offset.0,
+                self.scroll_offset.1,
+                remote_width,
+                remote_height,
+            ),
+        };
+        let Some((x, y)) = mapped else {
             return;
         };
         self.send_input(RemoteDesktopInput::MouseMove { x, y });
@@ -402,13 +427,34 @@ impl RemoteDesktopView {
         self.send_input(RemoteDesktopInput::MouseButton { button, pressed });
     }
 
-    fn send_scroll(&self, event: &ScrollWheelEvent) {
-        match event.delta {
-            ScrollDelta::Lines(delta) => self.send_scroll_delta(delta.x, delta.y, 100.0),
-            ScrollDelta::Pixels(delta) => {
-                self.send_scroll_delta(pixels_to_f32(delta.x), pixels_to_f32(delta.y), 1.0)
-            }
+    fn send_scroll(&mut self, event: &ScrollWheelEvent) {
+        let (dx, dy) = match event.delta {
+            ScrollDelta::Lines(delta) => (delta.x * 100.0, delta.y * 100.0),
+            ScrollDelta::Pixels(delta) => (pixels_to_f32(delta.x), pixels_to_f32(delta.y)),
+        };
+        // Original(1:1) 模式下滚轮用于滚动视图，而不是发给远端。
+        if self.display_mode.is_scrollable() {
+            self.scroll_view(dx, dy);
+            return;
         }
+        self.send_scroll_delta(dx, dy, 1.0);
+    }
+
+    /// Original(1:1) 模式下滚动视图：调整偏移并限制在可滚动范围内。
+    fn scroll_view(&mut self, dx: f32, dy: f32) {
+        let Some((remote_w, remote_h)) = self.remote_size else {
+            return;
+        };
+        let Some(bounds) = self.content_bounds else {
+            return;
+        };
+        let view_w = pixels_to_f32(bounds.size.width);
+        let view_h = pixels_to_f32(bounds.size.height);
+        let max_x = (f32::from(remote_w) - view_w).max(0.0);
+        let max_y = (f32::from(remote_h) - view_h).max(0.0);
+        // 滚轮向下（dy>0）内容向上移动 = 偏移增大。
+        self.scroll_offset.0 = (self.scroll_offset.0 + dx).clamp(0.0, max_x);
+        self.scroll_offset.1 = (self.scroll_offset.1 + dy).clamp(0.0, max_y);
     }
 
     fn send_scroll_delta(&self, x: f32, y: f32, multiplier: f32) {
@@ -424,6 +470,51 @@ impl RemoteDesktopView {
                 units: (y * multiplier) as i16,
             });
         }
+    }
+
+    fn set_display_mode(&mut self, mode: DisplayMode, cx: &mut Context<Self>) {
+        if self.display_mode == mode {
+            return;
+        }
+        self.display_mode = mode;
+        if !mode.is_scrollable() {
+            self.scroll_offset = (0.0, 0.0);
+        }
+        cx.notify();
+    }
+
+    /// 顶部显示模式切换条：分段按钮，当前模式高亮。
+    fn display_mode_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.display_mode;
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t!("RemoteDesktop.display_mode.label").to_string()),
+            )
+            .children(DisplayMode::ALL.into_iter().map(|mode| {
+                let button = Button::new(format!("display-mode-{}", mode.id_key()))
+                    .xsmall()
+                    .label(mode.label())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.set_display_mode(mode, cx);
+                    }));
+                if mode == current {
+                    button.primary()
+                } else {
+                    button.ghost()
+                }
+            }))
     }
 
     fn pointer_bounds(&self, window: &mut Window) -> LocalBounds {
@@ -657,7 +748,22 @@ impl Render for RemoteDesktopView {
                 .size_full(),
             )
             .when_some(self.frame.clone(), |this, frame| {
-                this.child(img(frame).size_full().object_fit(ObjectFit::Fill))
+                match self.display_mode {
+                    DisplayMode::Original => {
+                        // 原始尺寸 1:1：图像保持远端分辨率，用负偏移实现滚动。
+                        let (ox, oy) = self.scroll_offset;
+                        this.child(
+                            div().size_full().overflow_hidden().child(
+                                img(frame)
+                                    .object_fit(ObjectFit::None)
+                                    .absolute()
+                                    .left(px(-ox))
+                                    .top(px(-oy)),
+                            ),
+                        )
+                    }
+                    mode => this.child(img(frame).size_full().object_fit(mode.object_fit())),
+                }
             })
             .when(self.frame.is_none(), |this| {
                 this.child(
@@ -669,7 +775,7 @@ impl Render for RemoteDesktopView {
                 )
             });
 
-        div()
+        let frame_area = div()
             .size_full()
             .relative()
             .on_children_prepainted(move |bounds, window, cx| {
@@ -703,7 +809,14 @@ impl Render for RemoteDesktopView {
                         }))
                         .child(self.status.clone()),
                 )
-            })
+            });
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(self.display_mode_toolbar(cx))
+            .child(div().flex_1().min_h_0().child(frame_area))
     }
 }
 
