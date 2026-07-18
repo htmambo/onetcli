@@ -19,6 +19,12 @@ then
   exit 1
 fi
 
+# 安全断言：仅 bump main 应用版本，库 crate（0.5.x 系）与内部 crate（0.1.x）保持独立版本线。
+if ! grep -q '^name = "main"' main/Cargo.toml 2>/dev/null; then
+  echo -e "${RED}${BOLD}Error:${RESET} main/Cargo.toml not found or package not named 'main'"
+  exit 1
+fi
+
 # Logging functions
 function log_header() {
   local message=$1
@@ -53,10 +59,10 @@ function log_error() {
 # Start release process
 log_header "Starting Release Process for v$new_version"
 
-# Step 1: Update crates version
-log_step "1/4" "Updating crates to version ${BOLD}v$new_version${RESET}"
-if cargo set-version "$new_version"; then
-  log_success "Crates version updated successfully"
+# Step 1: Update main app version（仅 main，库 crate 与内部 crate 保持独立版本线）
+log_step "1/4" "Updating main app to version ${BOLD}v$new_version${RESET}"
+if cargo set-version -p main "$new_version"; then
+  log_success "Main app version updated successfully"
 else
   log_error "Failed to update crates version"
   exit 1
