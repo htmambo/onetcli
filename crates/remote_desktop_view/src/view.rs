@@ -162,6 +162,9 @@ impl RemoteDesktopView {
     }
 
     /// 收取并处理一波后端输出。返回本轮是否收到任何输出（用于决定是否触发重绘）。
+    ///
+    /// 性能关键：一 tick 内可能到达多个增量帧。本函数先把它们全部 patch 进底图，
+    /// 最后**只构造一次 RenderImage**（避免每帧整帧 clone 导致的累积卡顿）。
     fn drain_output(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(output_rx) = self.output_rx.as_ref() else {
             return false;
@@ -171,6 +174,11 @@ impl RemoteDesktopView {
             outputs.push(output);
         }
         let received = !outputs.is_empty();
+        // 底图是否被本 tick 的帧更新（决定是否需要重建 RenderImage）。
+        let mut frame_dirty = false;
+        // RDP 的 RGBA 整帧（不走增量底图路径），仅保留最新一帧。
+        let mut latest_rgba_frame: Option<(u16, u16, Vec<u8>)> = None;
+
         for output in outputs {
             match output {
                 RemoteDesktopOutput::Connected { width, height, .. } => {
@@ -184,10 +192,7 @@ impl RemoteDesktopView {
                     rgba,
                 } => {
                     self.remote_size = Some((width, height));
-                    match rgba_to_render_image(width, height, rgba) {
-                        Ok(image) => self.frame = Some(Arc::new(image)),
-                        Err(error) => self.status = SharedString::from(error.to_string()),
-                    }
+                    latest_rgba_frame = Some((width, height, rgba));
                 }
                 RemoteDesktopOutput::FrameBgra {
                     width,
@@ -195,15 +200,9 @@ impl RemoteDesktopView {
                     bgra,
                 } => {
                     self.remote_size = Some((width, height));
-                    // 整帧作为底图缓存（move 存入），渲染从缓存克隆——仅整帧（低频）拷贝一次。
+                    // 整帧作为底图（move 存入），不在此渲染，末尾统一构造一次。
                     self.frame_buffer = Some((width, height, bgra));
-                    match self.render_frame_buffer() {
-                        Ok(image) => self.frame = Some(Arc::new(image)),
-                        Err(error) => {
-                            tracing::error!(%error, "render_frame_buffer failed");
-                            self.status = SharedString::from(error.to_string());
-                        }
-                    }
+                    frame_dirty = true;
                 }
                 RemoteDesktopOutput::FrameRectsBgra {
                     width,
@@ -227,11 +226,14 @@ impl RemoteDesktopView {
                         let len = width as usize * height as usize * 4;
                         self.frame_buffer = Some((width, height, vec![0u8; len]));
                     }
-                    match self.apply_frame_rects(width, height, &rects, &bgra) {
-                        Ok(image) => self.frame = Some(Arc::new(image)),
-                        Err(error) => {
-                            tracing::error!(%error, "apply_frame_rects failed");
-                            self.status = SharedString::from(error.to_string());
+                    // 只 patch 底图，不在此渲染。
+                    if let Some((_, _, buffer)) = self.frame_buffer.as_mut() {
+                        match patch_bgra_rects(buffer, width, &rects, &bgra) {
+                            Ok(()) => frame_dirty = true,
+                            Err(error) => {
+                                tracing::error!(%error, "patch_bgra_rects failed");
+                                self.status = SharedString::from(error.to_string());
+                            }
                         }
                     }
                 }
@@ -252,29 +254,28 @@ impl RemoteDesktopView {
                 }
             }
         }
-        received
-    }
 
-    /// 把一组脏矩形的 BGRA 数据 patch 进本地底图，再整体渲染。
-    /// 增量帧的 bgra 为各矩形按顺序拼接的字节。
-    fn apply_frame_rects(
-        &mut self,
-        width: u16,
-        height: u16,
-        rects: &[remote_desktop::helper_protocol::FrameRect],
-        bgra: &[u8],
-    ) -> anyhow::Result<RenderImage> {
-        // 无底图（尚未收到首帧整帧）时无法增量，返回错误等待整帧。
-        let (bw, bh, buffer) = self
-            .frame_buffer
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("no base frame for incremental update"))?;
-        anyhow::ensure!(
-            *bw == width && *bh == height,
-            "incremental frame size mismatch"
-        );
-        patch_bgra_rects(buffer, width, rects, bgra)?;
-        self.render_frame_buffer()
+        // 统一渲染：本 tick 内所有帧 patch 已合并进底图，只构造一次 RenderImage。
+        // 避免每个增量帧都整帧 clone + notify 导致的累积卡顿。
+        if let Some((width, height, rgba)) = latest_rgba_frame {
+            // RDP 路径：直接渲染最新 RGBA 整帧（不走增量底图）。
+            match rgba_to_render_image(width, height, rgba) {
+                Ok(image) => self.frame = Some(Arc::new(image)),
+                Err(error) => {
+                    tracing::error!(%error, "rgba_to_render_image failed");
+                    self.status = SharedString::from(error.to_string());
+                }
+            }
+        } else if frame_dirty {
+            match self.render_frame_buffer() {
+                Ok(image) => self.frame = Some(Arc::new(image)),
+                Err(error) => {
+                    tracing::error!(%error, "render_frame_buffer failed");
+                    self.status = SharedString::from(error.to_string());
+                }
+            }
+        }
+        received
     }
 
     /// 从本地底图渲染当前帧。
