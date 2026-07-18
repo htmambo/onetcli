@@ -447,15 +447,42 @@ fn push_driver_if_loadable(drivers: &mut Vec<IpcDriverManifest>, driver_dir: &Pa
     }
 }
 
+/// 反序列化 manifest 内容，同时收集未识别字段的完整路径（如 `entry.argss`）。
+///
+/// 注意：未知字段检测以反序列化成功为前提。若拼错的是必填字段（无 `serde(default)`），
+/// serde 会先以 `missing field` 报错，此时不会进入未知字段收集分支——这是符合预期的
+/// 行为，两类错误由 serde 的原生诊断消息各自负责。
+fn parse_manifest_with_unknown(
+    content: &str,
+) -> Result<(IpcDriverManifest, Vec<String>), DbError> {
+    let mut unknown_fields: Vec<String> = Vec::new();
+    let mut deserializer = serde_json::Deserializer::from_str(content);
+    let manifest: IpcDriverManifest =
+        serde_ignored::deserialize(&mut deserializer, |ignored_path| {
+            unknown_fields.push(ignored_path.to_string());
+        })
+        .map_err(|error| DbError::connection_with_source("invalid driver manifest", error))?;
+    Ok((manifest, unknown_fields))
+}
+
 fn load_manifest(driver_dir: &Path) -> Result<IpcDriverManifest, DbError> {
     let path = driver_dir.join(DRIVER_MANIFEST_FILE);
     let content = std::fs::read_to_string(&path).map_err(|error| {
         DbError::connection_with_source("failed to read driver manifest", error)
     })?;
-    let mut manifest: IpcDriverManifest = serde_json::from_str(&content)
-        .map_err(|error| DbError::connection_with_source("invalid driver manifest", error))?;
+    // 与协议门禁同构：未知字段软告警放行（不拒绝加载），仅提示可能的拼写错误。
+    let (mut manifest, unknown_fields) = parse_manifest_with_unknown(&content)?;
     manifest.manifest_dir = driver_dir.to_path_buf();
     manifest.validate()?;
+    if !unknown_fields.is_empty() {
+        tracing::warn!(
+            driver_id = %manifest.id,
+            manifest_path = %path.display(),
+            unknown_fields = ?unknown_fields,
+            "driver manifest contains {} unrecognized field(s); they will be ignored (check for typos)",
+            unknown_fields.len()
+        );
+    }
     match check_manifest_protocol(&manifest) {
         ProtocolCheck::Ok => {}
         ProtocolCheck::OkWithWarning(message) => {
@@ -815,5 +842,53 @@ mod tests {
     fn three_segment_version_loads() {
         let registry = load_single_driver(r#""protocol_version":"1.0.0""#).unwrap();
         assert_eq!(registry.drivers().len(), 1);
+    }
+
+    #[test]
+    fn unknown_top_level_field_is_collected() {
+        let json = r#"{"id":"demo","name":"Demo","entry":{"command":"python3"},"transport":{"name":"demo.sock"},"sandbox":{"level":1}}"#;
+        let (manifest, unknown) = parse_manifest_with_unknown(json).unwrap();
+        assert_eq!(manifest.id, "demo");
+        assert_eq!(unknown, vec!["sandbox".to_string()]);
+    }
+
+    #[test]
+    fn typo_in_nested_field_reports_full_path() {
+        // 拼错有默认值的可选字段（args → argss），command 保持合法使反序列化成功。
+        let json = r#"{"id":"demo","name":"Demo","entry":{"command":"python3","argss":["-x"]},"transport":{"name":"demo.sock"}}"#;
+        let (manifest, unknown) = parse_manifest_with_unknown(json).unwrap();
+        assert_eq!(manifest.entry.command, "python3");
+        assert_eq!(unknown, vec!["entry.argss".to_string()]);
+    }
+
+    #[test]
+    fn multiple_unknown_fields_are_all_collected() {
+        let json = r#"{"id":"demo","name":"Demo","entry":{"command":"python3","bogus":1},"transport":{"name":"demo.sock"},"extra_top":true}"#;
+        let (_manifest, unknown) = parse_manifest_with_unknown(json).unwrap();
+        assert!(unknown.contains(&"entry.bogus".to_string()));
+        assert!(unknown.contains(&"extra_top".to_string()));
+        assert_eq!(unknown.len(), 2);
+    }
+
+    #[test]
+    fn clean_manifest_produces_no_unknown_fields() {
+        let json = r#"{"id":"demo","name":"Demo","entry":{"command":"python3"},"transport":{"name":"demo.sock"}}"#;
+        let (_manifest, unknown) = parse_manifest_with_unknown(json).unwrap();
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn absent_optional_section_does_not_trigger_unknown() {
+        // 不提供 capabilities/ui/connection 等可选块 → 缺省不等于未知。
+        let json = r#"{"id":"demo","name":"Demo","entry":{"command":"python3"},"transport":{"name":"demo.sock"}}"#;
+        let (_manifest, unknown) = parse_manifest_with_unknown(json).unwrap();
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn unknown_field_inside_optional_section_is_detected() {
+        let json = r#"{"id":"demo","name":"Demo","entry":{"command":"python3"},"transport":{"name":"demo.sock"},"connection":{"close_on_release":true,"bogus_field":1}}"#;
+        let (_manifest, unknown) = parse_manifest_with_unknown(json).unwrap();
+        assert_eq!(unknown, vec!["connection.bogus_field".to_string()]);
     }
 }
