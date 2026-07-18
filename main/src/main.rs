@@ -12,6 +12,7 @@ mod external_driver_display;
 mod home_tab;
 pub mod new_connection;
 mod omnihub_app;
+mod remote_desktop_install;
 mod saved_connection_picker;
 mod setting_tab;
 mod settings;

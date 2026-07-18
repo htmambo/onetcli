@@ -122,7 +122,13 @@ struct RemoteDesktopOpenStrategy {
 
 impl ConnectionOpenStrategy for RemoteDesktopOpenStrategy {
     fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        home.open_remote_desktop(self.connection, self.protocol, window, cx);
+        crate::remote_desktop_install::open_remote_desktop_with_provider_guard(
+            home,
+            self.connection,
+            self.protocol,
+            window,
+            cx,
+        );
     }
 }
 

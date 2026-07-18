@@ -10,7 +10,7 @@ use one_core::config::UpdateConfig;
 
 mod custom_api;
 mod dialog;
-mod download;
+pub(crate) mod download;
 mod extract;
 mod github_release;
 mod install;

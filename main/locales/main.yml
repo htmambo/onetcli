@@ -2482,3 +2482,29 @@ RemoteDesktopForm:
     en: "Edit %{protocol}"
     zh-CN: "编辑 %{protocol}"
     zh-HK: "編輯 %{protocol}"
+
+RemoteDesktop:
+  install_required_title:
+    en: Remote Desktop Provider Required
+    zh-CN: 需要安装远程桌面插件
+    zh-HK: 需要安裝遠端桌面插件
+  install_required_message:
+    en: 'The connection "%{connection}" requires the "%{label}" remote desktop provider.'
+    zh-CN: 连接「%{connection}」需要安装「%{label}」远程桌面插件。
+    zh-HK: 連線「%{connection}」需要安裝「%{label}」遠端桌面插件。
+  install_confirm:
+    en: Download and Install
+    zh-CN: 下载并安装
+    zh-HK: 下載並安裝
+  install_progress_title:
+    en: Installing Remote Desktop Provider
+    zh-CN: 正在安装远程桌面插件
+    zh-HK: 正在安裝遠端桌面插件
+  install_success:
+    en: '"%{label}" remote desktop provider installed'
+    zh-CN: 已安装「%{label}」远程桌面插件
+    zh-HK: 已安裝「%{label}」遠端桌面插件
+  install_failed:
+    en: "Failed to install remote desktop provider: %{error}"
+    zh-CN: "安装远程桌面插件失败: %{error}"
+    zh-HK: "安裝遠端桌面插件失敗: %{error}"
