@@ -800,3 +800,38 @@
 4. **Phase 8 版本收口**：版本线统一、CI workflow 合并、README 能力清单
 5. **高冲突延后项**：external DDL（cc555c44，依赖 wire_ddl + for_driver 单驱动上下文）、lifecycle busy-retry 全量
 
+
+## ADR-001：Phase 6/7（MCP / 扩展系统）收口决策（2026-07-18）
+
+### 决策
+
+**0.x 版本采用"能力特化"扩展模型，不引入 dev 的通用 wasm 扩展框架（extension-* 全家桶）与 MCP/tool_runtime。** Phase 6/7 标记为"不吸收，另起大版本评估"。
+
+### 背景与量化依据
+
+- dev 侧待吸收包代码量：extension 全家桶（7 crate）≈ 23,700 行；MCP/runtime/cli ≈ 10,100 行，合计约 34,000 行。
+- 本地已用特化实现覆盖核心用户价值：
+  - 数据库外部驱动 → `crates/db/src/ipc`（registry/plugin/protocol/connection/display/client，多驱动 registry）
+  - 远程桌面 Provider 安装 → `main/src/remote_desktop_install`（marketplace 下载/sha256 校验/安装/备份/回滚）
+  - 端口转发 → `crates/port_forwarding` + `port_forwarding_view`（内置能力）
+  - VNC helper 经 marketplace release 包安装（已实测）
+
+### 理由（经外部审核确认）
+
+1. **边际价值 < 边际成本**：本地 ~5-8k 行特化实现已覆盖 dev 34k 行通用框架约 80% 的当前场景价值，剩余 20%（通用任意扩展）在 0.x 无落地场景。
+2. **避免二元架构**：强吸收会形成"外部驱动走 IPC 插件、其它扩展走 wasm host"的双扩展体系，注册/生命周期/沙箱模型翻倍，长期维护成本高。
+3. **MCP/tool_runtime 无 GUI 场景**：`public_mcp`/`onetcli_runtime` 面向 CLI/Agent，与 OmniHub GUI 客户端定位不匹配，吸收后成死代码。
+4. **冲突风险**：dev 部分功能依赖 teams（本地无 TeamOption），34k 行预计 15-30% 需人工裁剪，且 rename 边界改名 diff 会污染功能 diff。
+
+### 未来演进
+
+如需通用扩展框架，作为 **1.0 大版本独立立项**：
+- 参考 `dev/extension-protocol`（6516 行）的 schema 设计作为蓝本归档
+- 不复用其 host/runtime 实现；不与现有 IPC 插件体系过渡期共存
+
+### 配套动作
+
+- [ ] 对照 `extension-driver` 对本地 `db/ipc` 插件系统做 gap 分析：版本协商 / 崩溃隔离与自动重启 / 权限沙箱声明 / marketplace 签名校验（按需回补，工作量远小于吸收全套）
+- [ ] 跨越 rename 边界的任何后续吸收，先做 rename 提交再做功能提交（分两次 PR）
+
+
