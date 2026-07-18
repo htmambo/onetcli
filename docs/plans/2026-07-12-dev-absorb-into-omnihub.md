@@ -798,7 +798,9 @@
 2. **helper 打包流程冒烟**（Phase 5 待办）：`omnihub-*-helper` 命名 + 安装引导端到端
 3. **Phase 6/7 决策**：MCP / extension / tool_runtime 是否继续吸收，或与外部驱动插件并存后收口
 4. **Phase 8 版本收口** - ✅ 完成：版本 bump 0.6.0（独立版本线，不对齐 dev 0.7.2）+ bump-version.sh -p main（防库污染）+ CHANGELOG 0.6.0 + README 能力清单 + release.yml 修复（binary/资源/app/env 名对齐 omnihub，4 真 bug）。fork 不做正式 release（无 supabase，rc1 验证暴露 secrets 缺失后已删）
-5. **高冲突延后项**：external DDL（cc555c44，依赖 wire_ddl + for_driver 单驱动上下文）、lifecycle busy-retry 全量
+5. **高冲突延后项**：
+   - external DDL（cc555c44）- ✅ 机制层 MVP（`ee6a7eca`）：wire_ddl 类型 + capabilities `supports_ddl_build_database` + connectionless_ddl_build（无 fallback）；cc555c44 是破坏性提交（wire_ddl 未定义），从零设计；未接 trait async/UI 待真实 driver
+   - lifecycle busy-retry 全量 - ✅ 已完成（f48c1564 全量移植）：BUSY_CLOSE_ON_RELEASE_RETRY_DELAY + physical_open_locks + acquire_physical_open_lock + 12 个测试
 
 
 ## ADR-001：Phase 6/7（MCP / 扩展系统）收口决策（2026-07-18）
