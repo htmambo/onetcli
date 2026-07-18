@@ -126,6 +126,7 @@ fn build_mysql_ui_manifest() -> DatabaseUiManifest {
             supports_schema: false,
             uses_schema_as_database: false,
             supports_sequences: false,
+            supports_ddl_build_database: false,
             supports_functions: true,
             supports_procedures: true,
             supports_triggers: true,

@@ -3,6 +3,25 @@ use serde_json::{Value, json};
 
 pub use ipc::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// external driver DDL 构建方法名（CreateDatabase 等，connectionless，经 JsonRpcClient 调用）。
+pub const DDL_BUILD: &str = "ddl.build";
+
+/// external driver 创建数据库请求参数（强类型，对齐 `DatabaseOperationRequest`）。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateDatabaseParams {
+    pub database_name: String,
+    pub field_values: HashMap<String, String>,
+}
+
+/// external driver DDL 构建结果。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuildDdlResult {
+    pub statements: Vec<String>,
+}
+
 pub fn connection_config_params(config: &DbConnectionConfig) -> Value {
     connection_config_params_with_target(config, &config.host, config.port)
 }

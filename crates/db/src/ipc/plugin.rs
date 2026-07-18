@@ -4,8 +4,12 @@ use crate::import_export::{
     ExportConfig, ExportProgressSender, ExportResult, ImportConfig, ImportProgressSender,
     ImportResult,
 };
+use crate::ipc::client::JsonRpcClient;
 use crate::ipc::connection::ExternalDbConnection;
-use crate::ipc::protocol::{database_metadata_params, table_metadata_params};
+use crate::ipc::protocol::{
+    BuildDdlResult, CreateDatabaseParams, DDL_BUILD, database_metadata_params,
+    table_metadata_params,
+};
 use crate::ipc::registry::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverDialect, IpcDriverManifest, IpcDriverRegistry, TableReferenceSchemaMode};
 use crate::oracle::OraclePlugin;
 use crate::plugin::{ConnectionLifecycle, DatabasePlugin, SqlCompletionInfo};
@@ -93,6 +97,34 @@ impl ExternalDatabasePlugin {
         } else {
             sql_statements.join(";\n\n") + ";"
         }
+    }
+
+    /// 经 connectionless JSON-RPC 调 external driver 构建 DDL（如 CreateDatabase）。
+    ///
+    /// 不支持时直接报错，不 fallback 到本地 SQL（本地不了解 external driver 的方言）。
+    ///
+    /// 状态：机制层 MVP。当前无消费方接入（trait async 改造与 UI 集成待真实
+    /// driver 支持 DDL_BUILD 后再做）。若长期无 driver 接入，可移除以避免死代码。
+    async fn connectionless_ddl_build(
+        &self,
+        driver: &IpcDriverManifest,
+        params: CreateDatabaseParams,
+    ) -> Result<BuildDdlResult> {
+        if !driver
+            .effective_capabilities()
+            .supports_ddl_build_database
+        {
+            return Err(anyhow!(
+                "external driver '{}' does not support DDL build",
+                driver.id
+            ));
+        }
+        let client = JsonRpcClient::start(driver).await?;
+        let result = client
+            .request::<BuildDdlResult>(DDL_BUILD, serde_json::to_value(&params)?)
+            .await;
+        client.shutdown().await;
+        result.map_err(Into::into)
     }
 
     async fn custom_object_view(
@@ -1631,6 +1663,43 @@ mod connection_lifecycle_tests {
             connection: Default::default(),
             manifest_dir: PathBuf::from("."),
         }
+    }
+
+    #[tokio::test]
+    async fn connectionless_ddl_build_rejects_unsupported_driver() {
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::empty(),
+        };
+        let driver = base_driver("ddl-test");
+        let params = CreateDatabaseParams {
+            database_name: "test_db".to_string(),
+            field_values: std::collections::HashMap::new(),
+        };
+        let result = plugin.connectionless_ddl_build(&driver, params).await;
+        assert!(result.is_err());
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("does not support DDL build"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn connectionless_ddl_build_rejects_when_capability_explicitly_disabled() {
+        let plugin = ExternalDatabasePlugin {
+            registry: IpcDriverRegistry::empty(),
+        };
+        let mut driver = base_driver("ddl-disabled");
+        driver.capabilities = Some(DatabaseUiCapabilities {
+            supports_ddl_build_database: false,
+            ..Default::default()
+        });
+        let params = CreateDatabaseParams {
+            database_name: "test_db".to_string(),
+            field_values: std::collections::HashMap::new(),
+        };
+        let result = plugin.connectionless_ddl_build(&driver, params).await;
+        assert!(result.is_err());
     }
 
     fn external_config(driver_id: &str, host: &str) -> DbConnectionConfig {

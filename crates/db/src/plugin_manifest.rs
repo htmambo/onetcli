@@ -29,6 +29,7 @@ pub struct DatabaseUiCapabilities {
     pub supports_schema: bool,
     pub uses_schema_as_database: bool,
     pub supports_sequences: bool,
+    pub supports_ddl_build_database: bool,
     pub supports_functions: bool,
     pub supports_procedures: bool,
     pub supports_triggers: bool,
