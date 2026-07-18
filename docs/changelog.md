@@ -7,14 +7,30 @@ description: 基于本地 git tag 和提交历史整理 OmniHub 最近版本与�
 
 本页基于当前仓库的本地 `git tag` 和提交历史整理，适合在官网中展示最近版本的产品变化。完整发布包、安装文件和历史版本仍以 [GitHub Releases](https://github.com/feigeCode/onetcli/releases) 为准。
 
-## 开发中
+## 0.6.0
 
-当前分支在 `v0.4.8` 之后还有一组终端 AI 交互改动，尚未归入正式 tag：
+发布时间：2026-07-18
 
-- 新增终端 AI 命令流入口。
-- 尝试将终端 AI 结果以内联 transcript / flow block 形式呈现。
-- 优化终端 AI overlay 控件。
-- 修复终端 AI transcript 字符集重置、布局流和错误后释放终端等问题。
+### Highlights
+
+OmniHub 独立版本线的首个里程碑：吸收上游 OnetCli 分支的核心能力，完成外部驱动插件系统的可观测性加固，并引入远程桌面、端口转发、外部数据库驱动三项用户可见能力。
+
+### New Features
+
+- **远程桌面**：连接 VNC 兼容服务端（含 macOS 屏幕共享 / ARD），支持 Contain / Original / Cover / Fill 四种显示模式与实时键鼠转发；Provider 经 marketplace 按需安装，含 SHA-256 校验与回滚。
+- **端口转发**：本地端口转发与动态 SOCKS 转发，独立视图集中管理多条规则。
+- **外部数据库驱动**：通过版本化 IPC 协议加载第三方数据库引擎，含 manifest schema 校验与 marketplace 发现。
+- **终端 AI**：新增命令流入口，结果以内联 transcript / flow block 呈现，优化 overlay 控件，修复 transcript 字符集重置与错误后释放终端等问题。
+
+### Internal Improvements
+
+- IPC 驱动协议版本门禁（major 拒绝 / minor 放行+告警 / 遗留隐式放行）。
+- manifest 未知字段软告警（serde_ignored，完整字段路径）。
+- 子进程 stderr 背压：单行 64KB 截断、20 行/秒速率限制、drain/log 解耦防管道阻塞、EOF 汇总。
+
+### Versioning
+
+OmniHub 采用独立版本线，与上游 OnetCli 项目不共用版本号，两者版本号不可比较。
 
 ## v0.4.8
 
