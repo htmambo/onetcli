@@ -24,20 +24,20 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: onetcli
-            archive: onetcli-aarch64-apple-darwin.tar.gz
+            binary: omnihub
+            archive: omnihub-aarch64-apple-darwin.tar.gz
           - target: x86_64-apple-darwin
             os: macos-15-intel
-            binary: onetcli
-            archive: onetcli-x86_64-apple-darwin.tar.gz
+            binary: omnihub
+            archive: omnihub-x86_64-apple-darwin.tar.gz
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: onetcli
-            archive: onetcli-x86_64-unknown-linux-gnu.tar.gz
+            binary: omnihub
+            archive: omnihub-x86_64-unknown-linux-gnu.tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: onetcli.exe
-            archive: onetcli-x86_64-pc-windows-msvc.zip
+            binary: omnihub.exe
+            archive: omnihub-x86_64-pc-windows-msvc.zip
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -132,6 +132,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # TODO: 将以下 secrets 改名为 OMNIHUB_*（需用户先在 GitHub repo settings 更新 secret 名后，再改此处引用与 config.rs 的 ONETCLI 兼容分支）
           ONETCLI_UPDATE_URL: ${{ secrets.ONETCLI_UPDATE_URL }}
           ONETCLI_UPDATE_DOWNLOAD_URL: ${{ secrets.ONETCLI_UPDATE_DOWNLOAD_URL }}
           ONETCLI_WECHAT_QR_URL: ${{ secrets.ONETCLI_WECHAT_QR_URL }}
@@ -155,7 +156,7 @@ jobs:
           chmod +x script/bundle-macos-dmg.sh
           script/bundle-macos.sh ${{ matrix.target }}
           script/bundle-macos-dmg.sh ${{ matrix.target }}
-          tar czf ${{ matrix.archive }} -C target OnetCli.app
+          tar czf ${{ matrix.archive }} -C target OmniHub.app
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -166,10 +167,10 @@ jobs:
           mkdir -p package/usr/share/icons/hicolor/256x256/apps
           mkdir -p package/usr/share/icons/hicolor/512x515/apps
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} package/usr/bin/
-          cp resources/linux/onetcli.desktop package/usr/share/applications/
-          cp resources/linux/onetcli-128.png package/usr/share/icons/hicolor/128x128/apps/onetcli.png
-          cp resources/linux/onetcli-256.png package/usr/share/icons/hicolor/256x256/apps/onetcli.png
-          cp resources/linux/onetcli-512.png package/usr/share/icons/hicolor/512x515/apps/onetcli.png
+          cp resources/linux/omnihub.desktop package/usr/share/applications/
+          cp resources/linux/omnihub-128.png package/usr/share/icons/hicolor/128x128/apps/omnihub.png
+          cp resources/linux/omnihub-256.png package/usr/share/icons/hicolor/256x256/apps/omnihub.png
+          cp resources/linux/omnihub-512.png package/usr/share/icons/hicolor/512x515/apps/omnihub.png
           tar czf ${{ matrix.archive }} -C package .
 
       - name: Package (Windows)
