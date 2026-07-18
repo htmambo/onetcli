@@ -17,12 +17,12 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader, ReadHalf, WriteHalf, split};
+use tokio::io::{AsyncRead, AsyncReadExt, ReadHalf, WriteHalf, split};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep, timeout};
-use tracing::warn;
+use tracing::{info, warn};
 
 const REQUEST_TIMEOUT_MS: u64 = 30_000;
 
@@ -461,19 +461,179 @@ async fn connect_local_socket(name: &str, timeout_ms: u64) -> Result<LocalSocket
     }
 }
 
-fn spawn_stderr_logger(driver_id: String, stderr: tokio::process::ChildStderr) {
+fn spawn_stderr_logger<R>(driver_id: String, stderr: R)
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
     tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            warn!(driver = %driver_id, "external driver stderr: {}", line);
-        }
+        drain_stderr(driver_id, stderr).await;
     });
+}
+
+/// 单次 read 的字节上限。
+const STDERR_READ_CHUNK: usize = 8 * 1024;
+/// 单行累积上限：超出后进入截断态，后续字节继续 drain 但不入缓冲。
+const STDERR_MAX_LINE: usize = 64 * 1024;
+/// 速率限制窗口与窗口内最大 warn 条数（超出聚合为 suppressed 计数）。
+const STDERR_RATE_WINDOW: Duration = Duration::from_secs(1);
+const STDERR_RATE_LIMIT: u32 = 20;
+
+/// 速率限制器的准入决策。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Admission {
+    /// 正常放行本条 warn。
+    Emit,
+    /// 本条被抑制（超出窗口限额）。
+    Suppress,
+    /// 窗口滚动：放行本条，并附带上一窗口被抑制的条数。
+    EmitWithFlush { suppressed: u32 },
+}
+
+/// 固定窗口速率限制器：窗口内前 `STDERR_RATE_LIMIT` 条放行，之后累计 suppressed，
+/// 窗口切换时把上一窗口的 suppressed 数随本条一起上报。仅决定「是否 log」，
+/// 与「是否 drain 管道」完全解耦——字节始终流出管道，避免子进程写 stderr 阻塞。
+struct RateLimiter {
+    window_start: Instant,
+    emitted: u32,
+    suppressed: u32,
+}
+
+impl RateLimiter {
+    fn new() -> Self {
+        Self {
+            window_start: Instant::now(),
+            emitted: 0,
+            suppressed: 0,
+        }
+    }
+
+    fn admit(&mut self) -> Admission {
+        let now = Instant::now();
+        if now.duration_since(self.window_start) >= STDERR_RATE_WINDOW {
+            let flushed = self.suppressed;
+            self.window_start = now;
+            self.emitted = 1;
+            self.suppressed = 0;
+            return if flushed > 0 {
+                Admission::EmitWithFlush { suppressed: flushed }
+            } else {
+                Admission::Emit
+            };
+        }
+        if self.emitted < STDERR_RATE_LIMIT {
+            self.emitted += 1;
+            Admission::Emit
+        } else {
+            self.suppressed += 1;
+            Admission::Suppress
+        }
+    }
+}
+
+/// 按速率限制决策转发一条 stderr 行，并累计放行/抑制总数供 EOF 汇总。
+fn emit_stderr_line(
+    driver_id: &str,
+    line: &[u8],
+    truncated: bool,
+    limiter: &mut RateLimiter,
+    emitted_total: &mut u64,
+    suppressed_total: &mut u64,
+) {
+    let text = String::from_utf8_lossy(line);
+    let suffix = if truncated { " …[truncated]" } else { "" };
+    match limiter.admit() {
+        Admission::Emit => {
+            *emitted_total += 1;
+            warn!(driver = %driver_id, "external driver stderr: {}{}", text, suffix);
+        }
+        Admission::EmitWithFlush { suppressed } => {
+            *emitted_total += 1;
+            // suppressed_total 已在 Suppress 分支实时累加，此处仅播报窗口聚合数，勿重复累加。
+            warn!(driver = %driver_id, "external driver stderr: {}{}", text, suffix);
+            warn!(driver = %driver_id, "suppressed {suppressed} stderr line(s) in previous window");
+        }
+        Admission::Suppress => {
+            *suppressed_total += 1;
+        }
+    }
+}
+
+/// 持续 drain 子进程 stderr 并逐行转发为 warn!，带单行上限与速率限制。
+///
+/// 关键不变量：**drain（read）与 log（warn）解耦**。无论某行是否被限流抑制，
+/// 字节都必须流出管道，否则管道缓冲区满会阻塞子进程写 stderr 导致其卡死。
+/// 超长行进入截断态后继续 read 但不入缓冲；UTF-8 边界截断用 lossy 兜底。
+async fn drain_stderr<R>(driver_id: String, mut reader: R) -> (u64, u64)
+where
+    R: AsyncRead + Unpin,
+{
+    let mut buf = [0u8; STDERR_READ_CHUNK];
+    let mut line_buf: Vec<u8> = Vec::with_capacity(1024);
+    // 当前行已超 STDERR_MAX_LINE：后续字节吞掉直到遇到换行。
+    let mut truncating = false;
+    let mut limiter = RateLimiter::new();
+    let mut emitted_total = 0u64;
+    let mut suppressed_total = 0u64;
+
+    loop {
+        let n = match reader.read(&mut buf).await {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
+            Err(error) => {
+                warn!(driver = %driver_id, error = %error, "external driver stderr read error");
+                break;
+            }
+        };
+        for &byte in &buf[..n] {
+            if byte == b'\n' {
+                emit_stderr_line(
+                    &driver_id,
+                    &line_buf,
+                    truncating,
+                    &mut limiter,
+                    &mut emitted_total,
+                    &mut suppressed_total,
+                );
+                line_buf.clear();
+                truncating = false;
+            } else if !truncating {
+                if line_buf.len() >= STDERR_MAX_LINE {
+                    truncating = true;
+                } else {
+                    line_buf.push(byte);
+                }
+            }
+            // truncating 时：字节被 read 走（drain），但不入缓冲、不计入行。
+        }
+    }
+
+    // EOF 时冲刷未换行的残留（常见于进程死前未写换行的 panic 消息）。
+    // 注：truncating 蕴含 line_buf 非空（进入截断态时 line_buf 已达 MAX_LINE），
+    // 故 `|| truncating` 为防御性冗余，保留以防未来不变量被破坏。
+    if !line_buf.is_empty() || truncating {
+        emit_stderr_line(
+            &driver_id,
+            &line_buf,
+            truncating,
+            &mut limiter,
+            &mut emitted_total,
+            &mut suppressed_total,
+        );
+    }
+    info!(
+        driver = %driver_id,
+        emitted = emitted_total,
+        suppressed = suppressed_total,
+        "external driver stderr closed (EOF)"
+    );
+    (emitted_total, suppressed_total)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ipc::{IpcErrorCode, ProtocolVersion};
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn accepts_matching_response() {
@@ -649,6 +809,156 @@ mod tests {
             manifest_dir: std::path::PathBuf::from("/tmp"),
         }
     }
+    #[test]
+    fn rate_limiter_emits_up_to_limit_then_suppresses() {
+        let mut limiter = RateLimiter::new();
+        for i in 0..STDERR_RATE_LIMIT {
+            assert_eq!(
+                Admission::Emit,
+                limiter.admit(),
+                "line {i} within limit should emit"
+            );
+        }
+        // 超出限额 → 抑制。
+        assert_eq!(Admission::Suppress, limiter.admit());
+        assert_eq!(Admission::Suppress, limiter.admit());
+    }
+
+    #[test]
+    fn rate_limiter_flushes_suppressed_count_on_window_rollover() {
+        let mut limiter = RateLimiter::new();
+        // 填满窗口并产生抑制。
+        for _ in 0..STDERR_RATE_LIMIT {
+            limiter.admit();
+        }
+        limiter.admit();
+        limiter.admit(); // suppressed = 2
+                       // 手动把窗口起点拨回过去，触发滚动。
+        limiter.window_start = Instant::now() - STDERR_RATE_WINDOW - Duration::from_millis(1);
+        assert_eq!(
+            Admission::EmitWithFlush { suppressed: 2 },
+            limiter.admit()
+        );
+        // 滚动后无累计抑制 → 普通 Emit。
+        assert_eq!(Admission::Emit, limiter.admit());
+    }
+
+    #[tokio::test]
+    async fn drain_stderr_does_not_block_on_oversized_unterminated_stream() {
+        // CRITICAL REGRESSION GUARD（勿删）：守护「drain 与 log 解耦、字节永不积压」核心不变量。
+        // 否则 writer 会因管道满而 hang。若实现退化为"读满即停"，本测试会超时失败。
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let payload = vec![b'x'; 100_000]; // 无 \n
+        let drain = tokio::spawn(drain_stderr("drv".to_string(), reader));
+
+        let write_result = timeout(Duration::from_secs(2), async {
+            writer.write_all(&payload).await.unwrap();
+            // 触发 EOF。
+            drop(writer);
+        })
+        .await;
+        assert!(
+            write_result.is_ok(),
+            "writer should complete within 2s; drain must not stall"
+        );
+        timeout(Duration::from_secs(2), drain)
+            .await
+            .expect("drain task should finish after EOF")
+            .expect("drain task should not panic");
+    }
+
+    #[tokio::test]
+    async fn drain_stderr_recovers_after_truncated_line() {
+        // 超长行（> MAX_LINE）进入截断态，遇 \n 后恢复；后续正常行仍被处理，EOF 正常结束。
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let drain = tokio::spawn(drain_stderr("drv".to_string(), reader));
+
+        let mut payload = vec![b'y'; STDERR_MAX_LINE + 5000];
+        payload.push(b'\n');
+        payload.extend_from_slice(b"short line\n");
+        writer.write_all(&payload).await.unwrap();
+        drop(writer);
+
+        timeout(Duration::from_secs(2), drain)
+            .await
+            .expect("drain should finish after EOF")
+            .expect("drain should not panic");
+    }
+
+    #[tokio::test]
+    async fn drain_stderr_flushes_unterminated_line_at_eof() {
+        // EOF 前无换行的残留行必须被冲刷处理（常见于进程崩溃前的 panic 输出）。
+        let (mut writer, reader) = tokio::io::duplex(256);
+        let drain = tokio::spawn(drain_stderr("drv".to_string(), reader));
+
+        writer.write_all(b"partial without newline").await.unwrap();
+        drop(writer); // EOF，无 \n
+
+        timeout(Duration::from_secs(2), drain)
+            .await
+            .expect("drain should finish after EOF")
+            .expect("drain should not panic");
+    }
+
+    #[tokio::test]
+    async fn drain_stderr_empty_stream_terminates_cleanly() {
+        // 空 stderr（立即 EOF）→ drain 直接结束，无 panic、无挂起。
+        let (writer, reader) = tokio::io::duplex(64);
+        drop(writer);
+        let drain = tokio::spawn(drain_stderr("drv".to_string(), reader));
+        timeout(Duration::from_secs(2), drain)
+            .await
+            .expect("drain should finish immediately on EOF")
+            .expect("drain should not panic");
+    }
+
+    #[tokio::test]
+    async fn drain_stderr_splits_lines_across_read_chunks() {
+        // 跨 chunk 的 \n 切分：分两次写入半行，line_buf 必须跨 read 循环正确保持状态。
+        let (mut writer, reader) = tokio::io::duplex(1024);
+        let drain = tokio::spawn(drain_stderr("drv".to_string(), reader));
+
+        writer.write_all(b"line1\npartial-").await.unwrap();
+        tokio::task::yield_now().await; // 让 drain 读走第一批
+        writer.write_all(b"continued\n").await.unwrap();
+        drop(writer);
+
+        let (emitted, _suppressed) = timeout(Duration::from_secs(2), drain)
+            .await
+            .expect("drain should finish after EOF")
+            .expect("drain should not panic");
+        // 两条完整行（line1 / partial-continued）都应被放行计数。
+        assert_eq!(2, emitted, "two logical lines should both be emitted");
+    }
+
+    #[tokio::test]
+    async fn drain_stderr_suppressed_total_is_not_double_counted() {
+        // CRITICAL GUARD：抑制计数只能在 Suppress 分支累加一次。
+        // 同一窗口内写 RATE_LIMIT + 5 行 → 5 行被抑制；随后等过窗口触发 EmitWithFlush，
+        // 若 EmitWithFlush 分支误再加 suppressed，suppressed_total 会翻倍成 10。
+        let (mut writer, reader) = tokio::io::duplex(64 * 1024);
+        let drain = tokio::spawn(drain_stderr("drv".to_string(), reader));
+
+        // 同一窗口内快速写 STDERR_RATE_LIMIT + 5 行（每行短）。
+        let mut payload = Vec::new();
+        for i in 0..(STDERR_RATE_LIMIT + 5) {
+            payload.extend_from_slice(format!("line{i}\n").as_bytes());
+        }
+        writer.write_all(&payload).await.unwrap();
+        // 等过窗口期，让后续行触发 EmitWithFlush 播报聚合。
+        tokio::time::sleep(STDERR_RATE_WINDOW + Duration::from_millis(100)).await;
+        writer.write_all(b"after-window\n").await.unwrap();
+        drop(writer);
+
+        let (_emitted, suppressed) = timeout(Duration::from_secs(3), drain)
+            .await
+            .expect("drain should finish after EOF")
+            .expect("drain should not panic");
+        assert_eq!(
+            5, suppressed,
+            "suppressed_total must equal actual suppressed lines (5), not doubled"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -733,4 +1043,5 @@ mod lifecycle_tests {
             "child pid={pid} should be killed within 2s after Child handle drops"
         );
     }
+
 }
