@@ -78,6 +78,10 @@
 
 Connect to MySQL, PostgreSQL, SQLite, DuckDB, SQL Server, Oracle, and ClickHouse from a single interface. Browse schemas, tables, columns, indexes, foreign keys, procedures, functions, triggers, and sequences where supported.
 
+### External Database Drivers
+
+Extend database support beyond the built-in engines via external IPC drivers. Drop in a driver package (manifest + binary) and OmniHub loads it through a versioned protocol with manifest schema validation. Third-party drivers can be discovered through the marketplace.
+
 ### SQL Editor & Schema Tools
 
 Work with a SQL editor backed by syntax tooling, schema-aware browsing, table structure editing, query execution, explain support, and ER diagrams.
@@ -90,9 +94,17 @@ Use the dedicated Redis viewer for key browsing, value inspection, and cluster c
 
 Open integrated SSH sessions, manage SFTP files, connect to serial devices, and keep local terminals in multi-tab sessions. The terminal includes an SFTP sidebar with drag-and-drop upload support, path favorites, and quick jumps to frequently used directories.
 
+### Port Forwarding
+
+Run local port forwarding and dynamic SOCKS forwarding without leaving the app. Tunnel remote services to localhost for debugging or route traffic through SSH, with multi-rule management in a dedicated view.
+
 ### Remote File Editing
 
 Edit remote files directly inside OmniHub with syntax highlighting and autocomplete. No need to open another editor or switch back and forth between terminal and file tools.
+
+### Remote Desktop
+
+Connect to any VNC-compatible server (including macOS Screen Sharing / ARD) with selectable display modes (Contain / Original / Cover / Fill) and real-time keyboard and mouse forwarding. Providers are installed on demand via a marketplace with SHA-256 verification and rollback.
 
 ### Monitoring & Charts
 

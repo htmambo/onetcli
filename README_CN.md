@@ -78,6 +78,10 @@
 
 在同一界面连接 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 和 ClickHouse。可浏览数据库、Schema、表、字段、索引、外键、过程、函数、触发器和序列等对象，具体能力取决于数据库类型。
 
+### 外部数据库驱动
+
+通过外部 IPC 驱动扩展数据库支持，突破内置引擎范围。放入驱动包（manifest + 可执行文件），OmniHub 按版本化协议加载并做 manifest schema 校验。第三方驱动可通过 marketplace 发现。
+
 ### SQL 编辑器与 Schema 工具
 
 提供 SQL 编辑、语法相关能力、Schema 浏览、表结构编辑、查询执行、Explain 支持与 ER 图等数据库工作流。
@@ -90,9 +94,17 @@
 
 集成 SSH 会话、SFTP 文件管理、串口连接和本地终端，支持多标签页同时操作。终端内置 SFTP 侧边栏，可直接拖拽上传文件，也支持 SFTP 路径收藏和常用目录快速跳转。
 
+### 端口转发
+
+无需离开应用即可运行本地端口转发与动态 SOCKS 转发。将远程服务转发到本地用于调试，或通过 SSH 隧道转发流量，并在独立视图中集中管理多条转发规则。
+
 ### 远程文件编辑
 
 可直接在 OmniHub 内编辑远程文件，支持语法高亮和自动补全。无需额外打开其他编辑器，也无需在终端和文件工具之间来回切换。
+
+### 远程桌面
+
+连接任意 VNC 兼容服务端（含 macOS 屏幕共享 / ARD），支持可选显示模式（Contain / Original / Cover / Fill）与实时键鼠输入转发。Provider 通过 marketplace 按需安装，含 SHA-256 校验与回滚。
 
 ### 监控与图表
 
