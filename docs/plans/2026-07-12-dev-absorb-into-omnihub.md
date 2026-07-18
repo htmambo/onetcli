@@ -779,7 +779,7 @@
 | 1 低冲突修复包 | ✅ | ~90% | 30+ 项小修复全接入，均带 cargo test 验证 |
 | 2 首页与连接体验 | 🟡 | ~50% | 同步保留编辑✅；首页拖拽/布局本地已有，不整包回灌 |
 | 3 SSH 隧道与 Redis/DB | ✅ | ~85% | Redis tunnel✅ 跳板多认证✅ IPC 经宿主隧道路由✅ |
-| 4 端口转发 | ✅ | ~85% | crate+storage+接线✅；手工验证本地转发/SOCKS 待办 |
+| 4 端口转发 | ✅ | ~90% | crate+storage+接线✅；UI smoke test 通过（功能正常）；真实转发流量 E2E 可选 |
 | 5 远程桌面 | ✅ | 110% | 超预期：基础接入 + provider 安装引导 + VNC ARD 兼容(libvncclient) + 增量帧协议 + 显存崩溃修复 + 降频渲染 + 4 种显示模式 |
 | 6 MCP/CLI/tool runtime | ⏳ 延后 | 0% | 架构级重依赖，单独立项评估 |
 | 7 扩展系统/外部驱动 | 🟡 | ~40% | 外部驱动多驱动插件系统✅(adfe96e0)；extension-*/wasm host 延后 |
@@ -793,7 +793,7 @@
 
 1. **手工/端到端验证**（最大缺口）：
    - RDP/VNC 连接与输入转发实机冒烟（Phase 5）
-   - 端口转发 本地转发 / 动态 SOCKS（Phase 4）
+   - 端口转发 本地转发 / 动态 SOCKS（Phase 4）- UI smoke test 通过（功能正常）；真实转发流量 E2E 可选
    - Redis SSH 隧道 密码/私钥/Agent 连通（Phase 3.x）
 2. **helper 打包流程冒烟**（Phase 5 待办）：`omnihub-*-helper` 命名 + 安装引导端到端
 3. **Phase 6/7 决策**：MCP / extension / tool_runtime 是否继续吸收，或与外部驱动插件并存后收口
