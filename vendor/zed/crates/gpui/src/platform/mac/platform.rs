@@ -1258,16 +1258,41 @@ extern "C" fn on_keyboard_layout_change(this: &mut Object, _: Sel, _: id) {
 }
 
 extern "C" fn on_thermal_state_change(this: &mut Object, _: Sel, _: id) {
+    use super::dispatcher::{dispatch_get_main_queue, dispatch_sys::dispatch_async_f};
+
     let platform = unsafe { get_mac_platform(this) };
     let mut lock = platform.0.lock();
-    if let Some(mut callback) = lock.on_thermal_state_change.take() {
+    if let Some(callback) = lock.on_thermal_state_change.take() {
         drop(lock);
-        callback();
-        platform
-            .0
-            .lock()
-            .on_thermal_state_change
-            .get_or_insert(callback);
+        // NSProcessInfoThermalStateDidChangeNotification 可能在任意后台队列上投递，
+        // 而回调会访问 App 的 RefCell，必须切回主队列执行，否则后台线程上的
+        // borrow_mut 与主线程冲突会直接 panic（release 下表现为 SIGSEGV）。
+        struct ThermalStateContext {
+            platform: *const MacPlatform,
+            callback: Box<dyn FnMut()>,
+        }
+        unsafe extern "C" fn invoke_on_main_thread(context: *mut c_void) {
+            let context = unsafe { Box::from_raw(context as *mut ThermalStateContext) };
+            let mut callback = context.callback;
+            callback();
+            let platform = unsafe { &*context.platform };
+            platform
+                .0
+                .lock()
+                .on_thermal_state_change
+                .get_or_insert(callback);
+        }
+        let context = Box::into_raw(Box::new(ThermalStateContext {
+            platform,
+            callback,
+        })) as *mut c_void;
+        unsafe {
+            dispatch_async_f(
+                dispatch_get_main_queue(),
+                context,
+                Some(invoke_on_main_thread),
+            );
+        }
     }
 }
 

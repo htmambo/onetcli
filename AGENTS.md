@@ -362,6 +362,13 @@
 - **验证方式**：提交工具调用前确认文本无 U+2026，必要时分段二分定位触发字符。
 - **适用范围**：本机环境下所有 Write/Edit/Bash/Agent 调用。
 
+- **标题**：macOS 崩溃堆栈落在 gpui 平台回调 + `panic_already_borrowed` 时，优先检查该回调是否被系统在后台线程投递。
+- **触发信号**：release 包随机 SIGSEGV，崩溃线程是 `com.apple.root.*-qos` dispatch 队列而非 main，堆栈为 `on_thermal_state_change` / `on_keyboard_layout_change` -> `App::new_app` 闭包 -> `core::cell::panic_already_borrowed` -> `_Unwind_RaiseException`。
+- **根因 / 约束**：`NSProcessInfoThermalStateDidChangeNotification` 由 Foundation 在任意后台队列投递；gpui 回调无条件 `app.borrow_mut()`，与主线程持有的 RefCell borrow 冲突直接 panic，release 下展开为 SIGSEGV。即使没有 App 订阅 thermal observer 也会崩（gpui 自身先 borrow）。
+- **正确做法**：在 `vendor/zed/crates/gpui/src/platform/mac/platform.rs` 的 extern 回调里用 `dispatch_async_f(dispatch_get_main_queue(), ...)` 把回调切回主队列再执行（参考本次 thermal 修复的 `ThermalStateContext` 模式）；不要在 app 层用 `try_borrow_mut` 静默丢事件。
+- **验证方式**：`cargo check -p gpui` 与 `cargo check -p main`；复测时让机器升温触发 thermal state 变化或长时间挂机，确认不再崩溃。
+- **适用范围**：所有 gpui mac 平台层由系统通知触发的回调；`on_keyboard_layout_change` 目前依赖系统主线程投递，若出现同类崩溃按同一模式修。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
