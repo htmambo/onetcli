@@ -1379,6 +1379,34 @@ impl HomePage {
         // 创建策略选择状态
         let strategies = cx.new(|_| default_strategies);
 
+        // 构造全选按钮：当前所有冲突均为该策略时高亮，点击批量写入
+        fn select_all_button(
+            strategies: Entity<HashMap<String, ConflictResolution>>,
+            all_ids: &[String],
+            cx: &mut App,
+            resolution: ConflictResolution,
+            id_str: &'static str,
+            label: String,
+        ) -> Button {
+            let all_set = {
+                let map = strategies.read(cx);
+                !all_ids.is_empty() && all_ids.iter().all(|id| map.get(id) == Some(&resolution))
+            };
+            let ids = all_ids.to_vec();
+            Button::new(ElementId::Name(id_str.into()))
+                .label(label)
+                .with_variant(if all_set { ButtonVariant::Primary } else { ButtonVariant::Ghost })
+                .xsmall()
+                .on_click(move |_, _, cx| {
+                    strategies.update(cx, |s, cx| {
+                        for id in &ids {
+                            s.insert(id.clone(), resolution);
+                        }
+                        cx.notify();
+                    });
+                })
+        }
+
         window.open_dialog(cx, move |dialog, _window, cx| {
             let conflicts_count = conflicts.len();
             let conflict_items: Vec<AnyElement> = conflicts
@@ -1510,6 +1538,46 @@ impl HomePage {
             let view_clone = view.clone();
             let strategies_for_ok = strategies.clone();
 
+            // 全选操作栏：一键将所有冲突设为同一策略（置于滚动容器外，常驻可见）
+            let all_cloud_ids: Vec<String> = conflicts.iter().map(|c| c.cloud.id.clone()).collect();
+
+            let select_all_bar = h_flex()
+                .gap_2()
+                .justify_end()
+                .pb_2()
+                .border_b_1()
+                .border_color(gpui::hsla(0.0, 0.0, 0.5, 0.15))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(gpui::hsla(0.0, 0.0, 0.5, 0.8))
+                        .child(t!("Home.sync_conflict_select_all_label").to_string()),
+                )
+                .child(select_all_button(
+                    strategies.clone(),
+                    &all_cloud_ids,
+                    cx,
+                    ConflictResolution::UseCloud,
+                    "select_all_cloud",
+                    t!("Home.sync_conflict_select_all_cloud").to_string(),
+                ))
+                .child(select_all_button(
+                    strategies.clone(),
+                    &all_cloud_ids,
+                    cx,
+                    ConflictResolution::UseLocal,
+                    "select_all_local",
+                    t!("Home.sync_conflict_select_all_local").to_string(),
+                ))
+                .child(select_all_button(
+                    strategies.clone(),
+                    &all_cloud_ids,
+                    cx,
+                    ConflictResolution::KeepBoth,
+                    "select_all_both",
+                    t!("Home.sync_conflict_select_all_both").to_string(),
+                ));
+
             dialog
                 .title(
                     t!("Home.sync_conflict_dialog_title", count = conflicts_count)
@@ -1518,13 +1586,20 @@ impl HomePage {
                 )
                 .child(
                     div()
-                        .id("conflict_items")
                         .flex()
                         .flex_col()
-                        .gap_3()
-                        .max_h(px(400.0))
-                        .overflow_y_scroll()
-                        .children(conflict_items)
+                        .child(select_all_bar)
+                        .child(
+                            div()
+                                .id("conflict_items")
+                                .flex()
+                                .flex_col()
+                                .gap_3()
+                                .max_h(px(400.0))
+                                .overflow_y_scroll()
+                                .children(conflict_items)
+                                .into_any_element(),
+                        )
                         .into_any_element(),
                 )
                 .confirm()

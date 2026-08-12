@@ -285,6 +285,22 @@ Home:
     en: Keep both versions
     zh-CN: 保留两个版本
     zh-HK: 保留兩個版本
+  sync_conflict_select_all_label:
+    en: "Apply to all:"
+    zh-CN: "全部设为："
+    zh-HK: "全部設為："
+  sync_conflict_select_all_cloud:
+    en: Use cloud version
+    zh-CN: 全部使用云端
+    zh-HK: 全部使用雲端
+  sync_conflict_select_all_local:
+    en: Use local version
+    zh-CN: 全部使用本地
+    zh-HK: 全部使用本地
+  sync_conflict_select_all_both:
+    en: Keep both
+    zh-CN: 全部保留
+    zh-HK: 全部保留
   sync_conflict_apply:
     en: Apply
     zh-CN: 应用
