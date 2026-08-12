@@ -3247,16 +3247,14 @@ if should_reset_history_prompt_for_terminal_event(event) {
 
         // 单次 lock：先 dispatch_frame（&term），再 RenderCache::update（&mut term）。
         // context 在内部作用域 drop 后 &term 借用结束，NLL 允许后续 &mut term。
-        let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let terminal = self.terminal.read(cx);
+        let is_local = terminal.connection_kind() == TerminalConnectionKind::Local;
         let local_working_dir = if is_local {
-            self.terminal
-                .read(cx)
-                .latest_working_dir()
-                .map(PathBuf::from)
+            terminal.latest_working_dir().map(PathBuf::from)
         } else {
             None
         };
-        let mut term = self.terminal.read(cx).term().lock();
+        let mut term = terminal.term().lock();
         let display_offset = term.grid().display_offset();
         let visible_lines = 0..term.screen_lines();
         // 一次性解析 TermDamage，避免 dispatch_frame 与 RenderCache::update
