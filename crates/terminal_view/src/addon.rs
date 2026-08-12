@@ -4,7 +4,7 @@
 
 use crate::settings::TerminalHighlightRule;
 use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Column, Point as AlacPoint};
+use alacritty_terminal::index::{Column, Line, Point as AlacPoint};
 use alacritty_terminal::term::Term;
 use alacritty_terminal::term::search::RegexSearch;
 use gpui::*;
@@ -899,34 +899,46 @@ impl TerminalAddon for CustomHighlightAddon {
     }
 
     fn on_frame(&mut self, context: &TerminalAddonFrameContext) {
-        self.cached_matches.clear();
         if self.compiled_rules.is_empty() {
             return;
         }
 
+        let dirty_lines = &context.dirty_lines;
+        if dirty_lines.is_empty() {
+            // 屏幕无变化，cached_matches 保持上一帧结果即可
+            return;
+        }
+
         let term = context.term;
-        let content = term.renderable_content();
-        let display_offset = content.display_offset;
-        let mut seen_lines = std::collections::HashSet::new();
+        let display_offset = context.display_offset;
 
-        for cell in content.display_iter {
-            let screen_line = cell.point.line.0 + display_offset as i32;
-            if screen_line < 0 {
+        // 仅淘汰 dirty_lines 的旧匹配；其余行结果跨帧保留
+        let to_remove: Vec<usize> = self
+            .cached_matches
+            .iter()
+            .filter(|m| dirty_lines.contains(&m.line))
+            .map(|m| m.line)
+            .collect();
+        if !to_remove.is_empty() {
+            let remove: std::collections::HashSet<usize> = to_remove.iter().copied().collect();
+            self.cached_matches.retain(|m| !remove.contains(&m.line));
+        }
+
+        for &line_idx in dirty_lines {
+            if !context.visible_lines.contains(&line_idx) {
                 continue;
             }
-            let line_idx = screen_line as usize;
-
-            if !context.visible_lines.contains(&line_idx) || seen_lines.contains(&line_idx) {
+            let grid_line_idx = line_idx as i32 - display_offset as i32;
+            if grid_line_idx < 0 {
                 continue;
             }
-            seen_lines.insert(line_idx);
 
             let grid = term.grid();
-            let mut line_text = String::new();
+            let mut line_text = String::with_capacity(term.columns());
             for col in 0..term.columns() {
-                let cell = &grid[cell.point.line][Column(col)];
-                if cell.c != '\0' {
-                    line_text.push(cell.c);
+                let c = grid[Line(grid_line_idx)][Column(col)].c;
+                if c != '\0' {
+                    line_text.push(c);
                 }
             }
 

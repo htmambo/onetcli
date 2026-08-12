@@ -224,6 +224,22 @@ impl DecorationManager {
         }
     }
 
+    /// 增量刷新装饰：按 dirty_lines 参数重算 addons 提供的结果。
+    ///
+    /// addons（特别是 CustomHighlightAddon）已在其 `on_frame` 中按 dirty_lines
+    /// 增量维护自身状态；本方法只需重新聚合 `provide_decorations` 输出
+    /// （O(addons × visible_lines) 聚合；addons 内部是 O(dirty_lines)）。
+    #[allow(unused_variables)]
+    pub fn refresh_for_lines(
+        &mut self,
+        addon_manager: &AddonManager,
+        visible_lines: Range<usize>,
+        display_offset: usize,
+        dirty_lines: &[usize],
+    ) {
+        self.collect_from_addons(addon_manager, visible_lines, display_offset);
+    }
+
     /// Get all decorations for a specific cell
     pub fn get_decorations_for_cell(
         &self,
@@ -413,14 +429,6 @@ impl RenderCache {
 
         let damage = DamageSnapshot::from_term_damage(term.damage());
         term.reset_damage();
-        // 注：dirty_lines 由 view::render_terminal 预先解析传入；
-        // 当前 commit 仍走 DamageSnapshot 路径，下一 commit 切换为 dirty_lines 增量。
-        let _ = dirty_lines;
-
-        // Collect decorations from all addons
-        let display_offset = term.grid().display_offset();
-        self.decoration_manager
-            .collect_from_addons(addon_manager, 0..num_lines, display_offset);
 
         // Check if custom foreground changed
         let fg_changed = theme.foreground != self.custom_foreground;
@@ -444,23 +452,31 @@ impl RenderCache {
             self.default_bg = convert_color(Color::Named(NamedColor::Background), &self.colors);
         }
 
-        // 主题颜色变化或存在装饰时保守全量重建。
-        let has_decorations = !self.decoration_manager.decorations_by_line.is_empty();
-        if fg_changed || bg_changed || colors_changed || has_decorations {
+        let display_offset = term.grid().display_offset();
+
+        // 主题/颜色变化仍走全量；装饰不再触发全量。
+        if fg_changed || bg_changed || colors_changed {
+            self.decoration_manager.refresh_for_lines(
+                addon_manager,
+                0..num_lines,
+                display_offset,
+                dirty_lines,
+            );
             tracing::debug!(
                 target: "terminal_residue",
                 fg_changed,
                 bg_changed,
                 colors_changed,
-                has_decorations,
                 num_lines,
-                "rebuild_all (forced by theme/decoration)"
+                "rebuild_all (forced by theme/colors)"
             );
             self.rebuild_all_and_update_state(term);
             return;
         }
 
-        let mut dirty_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // 增量路径：合并 dirty_lines + 选中区变化 + 左边缘变化
+        let mut dirty_set: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+
         match damage {
             DamageSnapshot::Full => {
                 tracing::debug!(
@@ -468,21 +484,37 @@ impl RenderCache {
                     num_lines,
                     "rebuild_all (TermDamage::Full)"
                 );
+                self.decoration_manager.refresh_for_lines(
+                    addon_manager,
+                    0..num_lines,
+                    display_offset,
+                    dirty_lines,
+                );
                 self.rebuild_all_and_update_state(term);
                 return;
             }
             DamageSnapshot::Partial(lines) => {
                 if !lines.is_empty() {
-                    tracing::debug!(
+                    tracing::trace!(
                         target: "terminal_residue",
                         damaged = ?lines,
-                        num_lines,
                         "Partial damage"
                     );
                 }
-                dirty_lines.extend(lines);
+                dirty_set.extend(lines);
             }
         }
+
+        // 把 view.rs 预先解析的 dirty_lines 合并进来
+        dirty_set.extend(dirty_lines.iter().copied());
+
+        // 装饰按 dirty_set 增量刷新
+        self.decoration_manager.refresh_for_lines(
+            addon_manager,
+            0..num_lines,
+            display_offset,
+            &dirty_set.iter().copied().collect::<Vec<_>>(),
+        );
 
         // Incremental selection update: only rebuild affected lines
         let has_selection = term.selection.is_some();
@@ -501,7 +533,7 @@ impl RenderCache {
                     sel_offset,
                 );
                 for line in selection_lines {
-                    dirty_lines.insert(line);
+                    dirty_set.insert(line);
                 }
                 self.last_selection = current_selection;
             }
@@ -510,14 +542,14 @@ impl RenderCache {
         // 首列兜底：检测左边缘变化但未被 damage 标记的行。
         let edge_changed_lines = self.detect_left_edge_changed_lines(term, 4);
         for line in &edge_changed_lines {
-            dirty_lines.insert(*line);
+            dirty_set.insert(*line);
         }
 
         // Rebuild dirty lines or just update cursor
-        if dirty_lines.is_empty() {
+        if dirty_set.is_empty() {
             self.update_cursor(term);
         } else {
-            let lines: Vec<usize> = dirty_lines.into_iter().collect();
+            let lines: Vec<usize> = dirty_set.into_iter().collect();
             self.rebuild_lines(term, &lines);
         }
     }
