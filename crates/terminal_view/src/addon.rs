@@ -447,6 +447,28 @@ struct CompiledHighlightRule {
     priority: u8,
 }
 
+impl CompiledHighlightRule {
+    /// 构造当前规则的 CellDecoration；fg/bg 都缺省时返回 None（应被上层 skip）
+    fn decoration(&self) -> Option<CellDecoration> {
+        match (self.foreground, self.background) {
+            (Some(foreground), Some(background)) => Some(CellDecoration::Highlight {
+                foreground,
+                background,
+                priority: self.priority,
+            }),
+            (Some(color), None) => Some(CellDecoration::Foreground {
+                color,
+                priority: self.priority,
+            }),
+            (None, Some(color)) => Some(CellDecoration::Background {
+                color,
+                priority: self.priority,
+            }),
+            (None, None) => None,
+        }
+    }
+}
+
 fn compile_custom_highlight_rules(rules: &[TerminalHighlightRule]) -> Vec<CompiledHighlightRule> {
     // 按 pattern 长度升序排序：短规则（如字面量 "root"、"hello"）regex 匹配更快，
     // 先匹配可减少 find_iter 累计耗时；priority 语义独立（编入 Decoration，
@@ -854,11 +876,33 @@ impl CustomHighlightAddon {
             return Vec::new();
         }
 
-        // 单次扫描构建 (byte_offset, char_offset) 映射；后续 match 用二分查找换算列号，
-        // 避免 N 次 `chars().count()` 的 O(N·n) 退化（中文/emoji 行尤甚）。
-        let offsets = build_char_offsets(line_text);
-
         let mut matches = Vec::with_capacity(self.compiled_rules.len());
+
+        // ASCII 快路径：byte offset == char offset，省 char_offset_map 构建与 N 次二分
+        // 常见 PTY 输出（命令、路径、错误信息）几乎全是 ASCII
+        if line_text.is_ascii() {
+            for rule in &self.compiled_rules {
+                for mat in rule.regex.find_iter(line_text) {
+                    let start_col = mat.start();
+                    let end_col = mat.end();
+                    if start_col >= end_col {
+                        continue;
+                    }
+                    let Some(decoration) = rule.decoration() else {
+                        continue;
+                    };
+                    matches.push(CustomHighlightMatch {
+                        line,
+                        col_range: start_col..end_col,
+                        decoration,
+                    });
+                }
+            }
+            return matches;
+        }
+
+        // 非 ASCII（CJK/emoji）路径：构建 (byte, char) 映射并二分查找换算列号
+        let offsets = build_char_offsets(line_text);
         for rule in &self.compiled_rules {
             for mat in rule.regex.find_iter(line_text) {
                 let start_col = byte_to_char(&offsets, mat.start());
@@ -866,24 +910,9 @@ impl CustomHighlightAddon {
                 if start_col >= end_col {
                     continue;
                 }
-
-                let decoration = match (rule.foreground, rule.background) {
-                    (Some(foreground), Some(background)) => CellDecoration::Highlight {
-                        foreground,
-                        background,
-                        priority: rule.priority,
-                    },
-                    (Some(color), None) => CellDecoration::Foreground {
-                        color,
-                        priority: rule.priority,
-                    },
-                    (None, Some(color)) => CellDecoration::Background {
-                        color,
-                        priority: rule.priority,
-                    },
-                    (None, None) => continue,
+                let Some(decoration) = rule.decoration() else {
+                    continue;
                 };
-
                 matches.push(CustomHighlightMatch {
                     line,
                     col_range: start_col..end_col,
