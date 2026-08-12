@@ -223,9 +223,10 @@ impl DecorationManager {
         }
 
         // Sort decorations by priority (ascending, so lower priority first)
+// 同 priority 内顺序不影响 apply_decorations_on（覆盖语义），用 unstable 排序更快
         for decorations in &mut self.decorations_by_line {
             if !decorations.is_empty() {
-                decorations.sort_by_key(|d| d.decoration.priority());
+                decorations.sort_unstable_by_key(|d| d.decoration.priority());
             }
         }
     }
