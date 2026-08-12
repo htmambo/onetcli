@@ -130,9 +130,9 @@ pub struct TerminalAddonFrameContext<'a> {
     /// 本帧 dirty 行（屏幕坐标系）
     ///
     /// 由 `view::render_terminal` 从 `term.damage()` 解析后传入；
-    /// TermDamage::Full 时包含所有可见行；空 Vec 表示屏幕无变化。
+    /// TermDamage::Full 时包含所有可见行；空切片表示屏幕无变化。
     /// addon 可按此字段做增量计算（如自定义高亮只对脏行跑正则）。
-    pub dirty_lines: Vec<usize>,
+    pub dirty_lines: &'a [usize],
 }
 
 // ============================================================================
@@ -971,7 +971,7 @@ impl TerminalAddon for CustomHighlightAddon {
             return;
         }
 
-        let dirty_lines = &context.dirty_lines;
+        let dirty_lines = context.dirty_lines;
         if dirty_lines.is_empty() {
             // 屏幕无变化，cached_matches 保持上一帧结果即可
             return;

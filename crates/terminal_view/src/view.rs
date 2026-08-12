@@ -3269,7 +3269,7 @@ if should_reset_history_prompt_for_terminal_event(event) {
                 display_offset,
                 is_local,
                 base_dir: local_working_dir.as_deref(),
-                dirty_lines: dirty_lines.clone(),
+                dirty_lines: &dirty_lines,
             };
             self.addon_manager.dispatch_frame(&context);
             (damage, dirty_lines)
