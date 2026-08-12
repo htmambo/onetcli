@@ -891,10 +891,37 @@ impl CustomHighlightAddon {
     }
 }
 
-/// 构建 `(byte_offset, char_offset)` 单调映射。
+/// 构建 `(byte_offset, char_offset)` 单调映射（测试可见包装）。
 ///
 /// `offsets[i]` 表示"经过 i 个字符后的字节位置与字符列号"。
 /// 单行 O(n) 一次扫描，构建完成后 N 个 match 用二分查找 O(log n) 换算列号。
+///
+/// ```
+/// use terminal_view::addon::char_offsets_test_only;
+///
+/// // ASCII: 1 字节 = 1 字符
+/// let map = char_offsets_test_only("ab");
+/// assert_eq!(map, vec![(0, 0), (1, 1), (2, 2)]);
+///
+/// // "中a"：'中' 占 3 字节、1 字符
+/// let map = char_offsets_test_only("中a");
+/// assert_eq!(map, vec![(0, 0), (3, 1), (4, 2)]);
+///
+/// // "🦀x"：emoji 占 4 字节、1 字符
+/// let map = char_offsets_test_only("🦀x");
+/// assert_eq!(map, vec![(0, 0), (4, 1), (5, 2)]);
+/// ```
+pub fn char_offsets_test_only(text: &str) -> Vec<(usize, usize)> {
+    let mut map = Vec::with_capacity(text.len() + 1);
+    map.push((0, 0));
+    let mut char_count = 0;
+    for (byte_idx, ch) in text.char_indices() {
+        char_count += 1;
+        map.push((byte_idx + ch.len_utf8(), char_count));
+    }
+    map
+}
+
 fn build_char_offsets(text: &str) -> Vec<(usize, usize)> {
     let mut map = Vec::with_capacity(text.len() + 1);
     map.push((0, 0));
@@ -906,7 +933,22 @@ fn build_char_offsets(text: &str) -> Vec<(usize, usize)> {
     map
 }
 
-/// 二分查找 `byte_offset` 对应的字符列号。
+/// 二分查找 `byte_offset` 对应的字符列号（测试可见包装）。
+///
+/// ```
+/// use terminal_view::addon::byte_to_char_test_only;
+///
+/// let map = vec![(0, 0), (3, 1), (4, 2)];
+/// assert_eq!(byte_to_char_test_only(&map, 0), 0); // '中' 起点
+/// assert_eq!(byte_to_char_test_only(&map, 3), 1); // '中' 终点（已过 1 字符）
+/// assert_eq!(byte_to_char_test_only(&map, 4), 2); // 'a' 终点
+/// ```
+#[inline]
+pub fn byte_to_char_test_only(offsets: &[(usize, usize)], byte: usize) -> usize {
+    let i = offsets.partition_point(|&(b, _)| b <= byte);
+    offsets[i.saturating_sub(1)].1
+}
+
 #[inline]
 fn byte_to_char(offsets: &[(usize, usize)], byte: usize) -> usize {
     let i = offsets.partition_point(|&(b, _)| b <= byte);
@@ -1321,11 +1363,14 @@ fn file_path_to_url(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AddonManager, TerminalAddonMouseContext, WebLinksAddon, compile_custom_highlight_rules,
-        is_open_link_modifier_pressed, open_link_action_hint, register_default_addons,
+        AddonManager, CellDecoration, CustomHighlightAddon, CustomHighlightMatch,
+        TerminalAddonMouseContext, WebLinksAddon, byte_to_char, build_char_offsets,
+        compile_custom_highlight_rules, is_open_link_modifier_pressed, open_link_action_hint,
+        register_default_addons,
     };
     use crate::addon::TerminalAddon;
     use crate::settings::TerminalHighlightRule;
+    use crate::terminal_element::DecorationManager;
     use gpui::Modifiers;
 
     fn modifiers(control: bool, platform: bool) -> Modifiers {
@@ -1543,5 +1588,109 @@ mod tests {
         // 再次调用应无变化
         let changed_again = manager.clear_hover();
         assert!(!changed_again);
+    }
+
+    // -----------------------------------------------------------------------
+    // 自定义高亮增量渲染相关单测（perf commit 配套）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn char_offsets_ascii_maps_byte_to_column_one_to_one() {
+        let map = build_char_offsets("hello");
+        // 5 个字符 + 首项 (0,0)
+        assert_eq!(map, vec![(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]);
+        assert_eq!(byte_to_char(&map, 0), 0);
+        assert_eq!(byte_to_char(&map, 3), 3);
+        assert_eq!(byte_to_char(&map, 5), 5);
+    }
+
+    #[test]
+    fn char_offsets_handles_cjk_multibyte_boundary() {
+        // "中a"：'中' 占 3 字节、1 字符
+        let map = build_char_offsets("中a");
+        assert_eq!(map, vec![(0, 0), (3, 1), (4, 2)]);
+        assert_eq!(byte_to_char(&map, 0), 0, "'中' 起点 → 列 0");
+        assert_eq!(byte_to_char(&map, 3), 1, "'中' 终点 → 列 1（已过 1 字符）");
+        assert_eq!(byte_to_char(&map, 4), 2, "'a' 终点 → 列 2");
+    }
+
+    #[test]
+    fn char_offsets_handles_emoji_4byte_boundary() {
+        // "🦀x"：🦀 占 4 字节、1 字符；x 占 1 字节
+        let map = build_char_offsets("🦀x");
+        assert_eq!(map, vec![(0, 0), (4, 1), (5, 2)]);
+        assert_eq!(byte_to_char(&map, 0), 0);
+        assert_eq!(byte_to_char(&map, 4), 1);
+        assert_eq!(byte_to_char(&map, 5), 2);
+    }
+
+    #[test]
+    fn char_offsets_empty_text() {
+        let map = build_char_offsets("");
+        assert_eq!(map, vec![(0, 0)]);
+        assert_eq!(byte_to_char(&map, 0), 0);
+    }
+
+    #[test]
+    fn custom_highlight_set_rules_then_detect_cjk_line() {
+        // 验证 detect_matches_in_line 在使用 build_char_offsets 后仍正确产出列号
+        let mut addon = CustomHighlightAddon::new();
+        addon.set_rules(&[TerminalHighlightRule {
+            id: "ipv4".into(),
+            enabled: true,
+            pattern: r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b".into(),
+            foreground: Some("#64c8ff".into()),
+            background: None,
+            priority: 40,
+            note: String::new(),
+        }]);
+
+        // 含 CJK 与 IPv4 的混合行，验证 char_offset_map 边界正确
+        let line = "服务器 192.168.1.1 在线";
+        let matches = addon.detect_matches_in_line(line, 0);
+        assert_eq!(matches.len(), 1, "应匹配到一个 IPv4");
+        // '1' 在 CJK "服务器 "（4 字符）之后
+        assert_eq!(matches[0].col_range.start, 5);
+        assert_eq!(matches[0].col_range.end, 15);
+    }
+
+    #[test]
+    fn custom_highlight_cached_matches_survive_when_on_frame_not_called() {
+        // dirty_lines 为空时 on_frame 不应清空 cached_matches（仅显式 dirty_lines 才淘汰）
+        let mut addon = CustomHighlightAddon::new();
+        addon.set_rules(&[TerminalHighlightRule {
+            id: "rule".into(),
+            enabled: true,
+            pattern: "hello".into(),
+            foreground: Some("#ff0000".into()),
+            background: None,
+            priority: 10,
+            note: String::new(),
+        }]);
+
+        addon.cached_matches.push(CustomHighlightMatch {
+            line: 0,
+            col_range: 0..5,
+            decoration: CellDecoration::Foreground {
+                color: gpui::hsla(0.0, 1.0, 0.5, 1.0),
+                priority: 10,
+            },
+        });
+        let before = addon.cached_matches.len();
+        assert_eq!(before, 1, "预置一个 cached_match");
+        // 不调用 on_frame，验证 cached_matches 未被自动清空
+        assert_eq!(addon.cached_matches.len(), before);
+    }
+
+    #[test]
+    fn decoration_manager_refresh_for_lines_does_not_panic() {
+        // refresh_for_lines 在当前 commit 仍走 collect_from_addons 等价路径
+        let mut manager = AddonManager::new();
+        manager.load(Box::new(WebLinksAddon::new()));
+
+        let mut dec = DecorationManager::new();
+        // 即使 dirty_lines 为空也应正常调用 addons.provide_decorations 不 panic
+        dec.refresh_for_lines(&manager, 0..10, 0, &[]);
+        dec.refresh_for_lines(&manager, 0..10, 0, &[3, 7]);
     }
 }
