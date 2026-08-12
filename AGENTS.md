@@ -369,6 +369,20 @@
 - **验证方式**：`cargo check -p gpui` 与 `cargo check -p main`；复测时让机器升温触发 thermal state 变化或长时间挂机，确认不再崩溃。
 - **适用范围**：所有 gpui mac 平台层由系统通知触发的回调；`on_keyboard_layout_change` 目前依赖系统主线程投递，若出现同类崩溃按同一模式修。
 
+- **标题**：终端自定义高亮开启时，全量重建 `rebuild_all` 钳制会让 `RenderCache` 的 `TermDamage` 增量失效。
+- **触发信号**：性能分析显示 `RenderCache::update` 在 `has_decorations=true` 时调用 `rebuild_all_and_update_state`，即便 `TermDamage::Partial` 只标记 1 行；单行 PTY 输出仍触发全屏 30× cells 重建。`crates/terminal_view/src/terminal_element.rs` 的 `if fg_changed || bg_changed || colors_changed || has_decorations { rebuild_all; return; }` 是元凶。
+- **根因 / 约束**：`DecorationManager` 没有按行缓存，所有装饰的存在本身（即便与本次 dirty 行无关）就会触发全量重建。`RenderCache` 的核心优化是基于 `TermDamage::Partial` 的增量，装饰一旦开启就被废止。
+- **正确做法**：(1) 让 `CustomHighlightAddon::on_frame` 按 `context.dirty_lines` 增量维护 `cached_matches`（仅淘汰 dirty 行旧匹配、重算 dirty 行），未脏行跨帧复用；(2) `RenderCache::update` 移除 `has_decorations` 早返回，仅在主题/颜色变化时全量；(3) `DecorationManager` 提供 `decorations_for_line(line) -> &[DecorationSpan]` 与 `apply_decorations_on(&[DecorationSpan], col, fg, bg)`，让 `build_line_cache` 在循环外一次预取、循环内复用，省每 cell 的 `Vec.get(line)` 边界检查。
+- **验证方式**：`tracing::debug!(target: "terminal_residue", "rebuild_all (forced by theme/decoration)")` 出现频率应大幅下降；静态屏空转 CPU 从 ~6% 单核降至 < 1%；自定义高亮设置与颜色渲染保留（按 PLAN §1.4 边界不修改 `settings.rs` / `highlight_presets.rs` / `sidebar/` / `core/src/storage/`）。
+- **适用范围**：所有走 `DecorationManager` 的 addon（`CustomHighlightAddon`、`WebLinksAddon`、`FilePathAddon`、`SearchAddon`）；扩展到其他需要增量的 addon 时复用同一 `dirty_lines` 通路。
+
+- **标题**：CJK / emoji 行的正则匹配用 `line[..mat.start()].chars().count()` 做列号换算会退化到 O(N·n)。
+- **触发信号**：单行内 N 个 regex match、对每个 match 调 `chars().count()`；中文行（"服务器 192.168.1.1"）每次 `chars().count()` 都做完整 UTF-8 解码（4 字节/字符），整体 O(N·n) 退化。
+- **根因 / 约束**：`regex::Match::start()/end()` 返回字节偏移，需要换算为字符列号（终端按字符列定位）。`chars().count()` 是 O(n) 操作，每 match 都重新扫描前缀。
+- **正确做法**：单行开头构建一次 `(byte_offset, char_offset)` 单调映射 `Vec<(usize, usize)>`；之后对每个 match 用 `partition_point(|&(b, _)| b <= byte)` 二分查找 O(log n)。doctest helper `char_offsets_test_only` / `byte_to_char_test_only` 可作为参考实现。注意 `Range<usize>` 在 Rust 2024 中**不是** `Copy`，不要误删 `col_range.clone()`。
+- **验证方式**：`cargo test --doc test_only` 2 passed；包含 ASCII、CJK（"中a"）、emoji（"🦀x"）、空文本边界用例。
+- **适用范围**：所有终端/文本处理场景中 regex 字节偏移需换算为字符列/索引的代码；扩展到其他 alacritty 相关 crate 时复用同模式。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
