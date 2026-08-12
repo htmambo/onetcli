@@ -448,7 +448,10 @@ struct CompiledHighlightRule {
 }
 
 fn compile_custom_highlight_rules(rules: &[TerminalHighlightRule]) -> Vec<CompiledHighlightRule> {
-    rules
+    // 按 pattern 长度升序排序：短规则（如字面量 "root"、"hello"）regex 匹配更快，
+    // 先匹配可减少 find_iter 累计耗时；priority 语义独立（编入 Decoration，
+    // 由 apply_decorations 按 priority 升序应用，与遍历顺序无关）。
+    let mut compiled: Vec<CompiledHighlightRule> = rules
         .iter()
         .filter(|rule| rule.enabled)
         .filter(|rule| rule.validate().is_ok())
@@ -474,7 +477,9 @@ fn compile_custom_highlight_rules(rules: &[TerminalHighlightRule]) -> Vec<Compil
                 priority: rule.priority,
             })
         })
-        .collect()
+        .collect();
+    compiled.sort_by_key(|r| r.regex.as_str().len());
+    compiled
 }
 
 #[derive(Clone, Debug)]
