@@ -3245,24 +3245,24 @@ if should_reset_history_prompt_for_terminal_event(event) {
     fn render_terminal(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let effective_theme = effective_terminal_theme(&self.current_theme, cx);
 
-        // Prepare addons before rendering
-        let (damage, dirty_lines): (DamageSnapshot, Vec<usize>) = {
-            let is_local =
-                self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
-            let local_working_dir = if is_local {
-                self.terminal
-                    .read(cx)
-                    .latest_working_dir()
-                    .map(PathBuf::from)
-            } else {
-                None
-            };
-            let mut term = self.terminal.read(cx).term().lock();
-            let display_offset = term.grid().display_offset();
-            let visible_lines = 0..term.screen_lines();
-            // 一次性解析 TermDamage，避免 dispatch_frame 与 RenderCache::update
-            // 各自调用导致 dirty_lines 状态错乱
-            let (damage, dirty_lines) = parse_damage(&mut term);
+        // 单次 lock：先 dispatch_frame（&term），再 RenderCache::update（&mut term）。
+        // context 在内部作用域 drop 后 &term 借用结束，NLL 允许后续 &mut term。
+        let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let local_working_dir = if is_local {
+            self.terminal
+                .read(cx)
+                .latest_working_dir()
+                .map(PathBuf::from)
+        } else {
+            None
+        };
+        let mut term = self.terminal.read(cx).term().lock();
+        let display_offset = term.grid().display_offset();
+        let visible_lines = 0..term.screen_lines();
+        // 一次性解析 TermDamage，避免 dispatch_frame 与 RenderCache::update
+        // 各自调用导致 dirty_lines 状态错乱
+        let (damage, dirty_lines) = parse_damage(&mut term);
+        {
             let context = TerminalAddonFrameContext {
                 term: &term,
                 visible_lines,
@@ -3272,22 +3272,14 @@ if should_reset_history_prompt_for_terminal_event(event) {
                 dirty_lines: &dirty_lines,
             };
             self.addon_manager.dispatch_frame(&context);
-            (damage, dirty_lines)
-        };
-
-        // Update render cache with decorations from all addons
-        {
-            let term = self.terminal.read(cx).term().clone();
-            let mut term = term.lock();
-
-            self.render_cache.update(
-                &mut term,
-                &self.addon_manager,
-                &effective_theme,
-                damage,
-                &dirty_lines,
-            );
         }
+        self.render_cache.update(
+            &mut term,
+            &self.addon_manager,
+            &effective_theme,
+            damage,
+            &dirty_lines,
+        );
 
         // 获取光标可见性
         let cursor_visible = if self.cursor_blink_enabled {
