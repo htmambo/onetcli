@@ -981,16 +981,9 @@ impl TerminalAddon for CustomHighlightAddon {
         let display_offset = context.display_offset;
 
         // 仅淘汰 dirty_lines 的旧匹配；其余行结果跨帧保留
-        let to_remove: Vec<usize> = self
-            .cached_matches
-            .iter()
-            .filter(|m| dirty_lines.contains(&m.line))
-            .map(|m| m.line)
-            .collect();
-        if !to_remove.is_empty() {
-            let remove: std::collections::HashSet<usize> = to_remove.iter().copied().collect();
-            self.cached_matches.retain(|m| !remove.contains(&m.line));
-        }
+        // dirty_lines 通常 ≤30、cached_matches 通常 ≤几十条，O(N·K) 的 Vec contains 优于 HashSet 分配
+        self.cached_matches
+            .retain(|m| !dirty_lines.contains(&m.line));
 
         for &line_idx in dirty_lines {
             if !context.visible_lines.contains(&line_idx) {
