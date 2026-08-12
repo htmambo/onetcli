@@ -885,7 +885,7 @@ impl RenderCache {
 
             // Apply decorations from addons (unless selected)
             let mut underline = false;
-            if !cell.is_selected {
+            if !cell.is_selected && !line_decorations.is_empty() {
                 let (deco_fg, deco_bg, deco_underline) = self.decoration_manager
                     .apply_decorations_on(line_decorations, cell.column, fg, bg);
                 fg = deco_fg;
