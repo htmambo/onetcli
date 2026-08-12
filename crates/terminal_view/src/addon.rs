@@ -849,11 +849,15 @@ impl CustomHighlightAddon {
             return Vec::new();
         }
 
+        // 单次扫描构建 (byte_offset, char_offset) 映射；后续 match 用二分查找换算列号，
+        // 避免 N 次 `chars().count()` 的 O(N·n) 退化（中文/emoji 行尤甚）。
+        let offsets = build_char_offsets(line_text);
+
         let mut matches = Vec::new();
         for rule in &self.compiled_rules {
             for mat in rule.regex.find_iter(line_text) {
-                let start_col = line_text[..mat.start()].chars().count();
-                let end_col = line_text[..mat.end()].chars().count();
+                let start_col = byte_to_char(&offsets, mat.start());
+                let end_col = byte_to_char(&offsets, mat.end());
                 if start_col >= end_col {
                     continue;
                 }
@@ -885,6 +889,28 @@ impl CustomHighlightAddon {
 
         matches
     }
+}
+
+/// 构建 `(byte_offset, char_offset)` 单调映射。
+///
+/// `offsets[i]` 表示"经过 i 个字符后的字节位置与字符列号"。
+/// 单行 O(n) 一次扫描，构建完成后 N 个 match 用二分查找 O(log n) 换算列号。
+fn build_char_offsets(text: &str) -> Vec<(usize, usize)> {
+    let mut map = Vec::with_capacity(text.len() + 1);
+    map.push((0, 0));
+    let mut char_count = 0;
+    for (byte_idx, ch) in text.char_indices() {
+        char_count += 1;
+        map.push((byte_idx + ch.len_utf8(), char_count));
+    }
+    map
+}
+
+/// 二分查找 `byte_offset` 对应的字符列号。
+#[inline]
+fn byte_to_char(offsets: &[(usize, usize)], byte: usize) -> usize {
+    let i = offsets.partition_point(|&(b, _)| b <= byte);
+    offsets[i.saturating_sub(1)].1
 }
 
 impl Default for CustomHighlightAddon {
