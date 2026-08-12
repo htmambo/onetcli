@@ -15,7 +15,6 @@ use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{RenderableContent, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Rgb};
 use gpui::*;
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use terminal::pty_backend::GpuiEventProxy;
@@ -186,14 +185,17 @@ fn block_element_geometry(c: char) -> Option<Vec<BlockRect>> {
 
 /// Manages decorations from all addons
 pub struct DecorationManager {
-    // Decorations indexed by line number
-    decorations_by_line: HashMap<usize, Vec<DecorationSpan>>,
+    /// 按行索引的装饰 span 列表；外层 Vec 长度为 `num_lines`，
+    /// 内层 Vec 仅在行内有装饰时非空。
+    /// 用 Vec<Vec> 而非 HashMap 是因为屏幕行数小（≤ 200），
+    /// 直接索引避免每次 HashMap.get 的哈希开销。
+    decorations_by_line: Vec<Vec<DecorationSpan>>,
 }
 
 impl DecorationManager {
     pub fn new() -> Self {
         Self {
-            decorations_by_line: HashMap::new(),
+            decorations_by_line: Vec::new(),
         }
     }
 
@@ -204,23 +206,27 @@ impl DecorationManager {
         visible_lines: Range<usize>,
         display_offset: usize,
     ) {
+        let num_lines = visible_lines.end;
         self.decorations_by_line.clear();
+        self.decorations_by_line
+            .resize_with(num_lines, Vec::new);
 
         // Collect decorations from each addon
         for addon in addon_manager.iter_addons() {
             let decorations = addon.provide_decorations(visible_lines.clone(), display_offset);
 
             for deco in decorations {
-                self.decorations_by_line
-                    .entry(deco.line)
-                    .or_insert_with(Vec::new)
-                    .push(deco);
+                if deco.line < num_lines {
+                    self.decorations_by_line[deco.line].push(deco);
+                }
             }
         }
 
         // Sort decorations by priority (ascending, so lower priority first)
-        for decorations in self.decorations_by_line.values_mut() {
-            decorations.sort_by_key(|d| d.decoration.priority());
+        for decorations in &mut self.decorations_by_line {
+            if !decorations.is_empty() {
+                decorations.sort_by_key(|d| d.decoration.priority());
+            }
         }
     }
 
@@ -247,7 +253,7 @@ impl DecorationManager {
         col: usize,
     ) -> impl Iterator<Item = &CellDecoration> + '_ {
         self.decorations_by_line
-            .get(&line)
+            .get(line)
             .into_iter()
             .flat_map(move |decorations| {
                 decorations
