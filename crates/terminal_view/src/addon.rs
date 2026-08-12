@@ -858,7 +858,7 @@ impl CustomHighlightAddon {
         // 避免 N 次 `chars().count()` 的 O(N·n) 退化（中文/emoji 行尤甚）。
         let offsets = build_char_offsets(line_text);
 
-        let mut matches = Vec::new();
+        let mut matches = Vec::with_capacity(self.compiled_rules.len());
         for rule in &self.compiled_rules {
             for mat in rule.regex.find_iter(line_text) {
                 let start_col = byte_to_char(&offsets, mat.start());
