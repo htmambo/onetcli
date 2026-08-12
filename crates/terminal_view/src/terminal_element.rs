@@ -393,6 +393,7 @@ impl RenderCache {
         term: &mut Term<GpuiEventProxy>,
         addon_manager: &AddonManager,
         theme: &TerminalTheme,
+        dirty_lines: &[usize],
     ) {
         let num_cols = term.columns();
         let num_lines = term.screen_lines();
@@ -412,6 +413,9 @@ impl RenderCache {
 
         let damage = DamageSnapshot::from_term_damage(term.damage());
         term.reset_damage();
+        // 注：dirty_lines 由 view::render_terminal 预先解析传入；
+        // 当前 commit 仍走 DamageSnapshot 路径，下一 commit 切换为 dirty_lines 增量。
+        let _ = dirty_lines;
 
         // Collect decorations from all addons
         let display_offset = term.grid().display_offset();

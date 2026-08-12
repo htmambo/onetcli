@@ -1,7 +1,8 @@
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::SelectionType;
-use alacritty_terminal::term::TermMode;
+use alacritty_terminal::term::{Term, TermDamage, TermMode};
+use terminal::pty_backend::GpuiEventProxy;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariants};
@@ -125,6 +126,18 @@ const TERMINAL_SEARCH_BACKWARD_SHORTCUT: &str = "ctrl-shift-g";
 const TERMINAL_TOGGLE_VI_MODE_SHORTCUT: &str = "f7";
 
 const DEFAULT_CELL_WIDTH: Pixels = px(8.0);
+
+/// 一次性解析 `TermDamage` 为屏幕坐标系 dirty_lines。
+///
+/// `TermDamage::Full` → 所有可见行；`Partial` → alacritty iterator 已自动
+/// 加 display_offset 并过滤不可见 damage；空 → 返回空 Vec（屏幕无变化）。
+/// 调用方负责在用完后调 `term.reset_damage()`，否则下次仍会拿到同样的 dirty_lines。
+fn parse_dirty_lines(term: &mut Term<GpuiEventProxy>) -> Vec<usize> {
+    match term.damage() {
+        TermDamage::Full => (0..term.screen_lines()).collect(),
+        TermDamage::Partial(iter) => iter.map(|line_damage| line_damage.line).collect(),
+    }
+}
 
 fn preserve_theme_typography(current: &TerminalTheme, target: &TerminalTheme) -> TerminalTheme {
     target
@@ -3225,7 +3238,7 @@ if should_reset_history_prompt_for_terminal_event(event) {
         let effective_theme = effective_terminal_theme(&self.current_theme, cx);
 
         // Prepare addons before rendering
-        {
+        let dirty_lines: Vec<usize> = {
             let is_local =
                 self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
             let local_working_dir = if is_local {
@@ -3236,26 +3249,35 @@ if should_reset_history_prompt_for_terminal_event(event) {
             } else {
                 None
             };
-            let term = self.terminal.read(cx).term().lock();
+            let mut term = self.terminal.read(cx).term().lock();
             let display_offset = term.grid().display_offset();
             let visible_lines = 0..term.screen_lines();
+            // 一次性解析 TermDamage，避免 dispatch_frame 与 RenderCache::update
+            // 各自调用导致 dirty_lines 状态错乱
+            let dirty_lines = parse_dirty_lines(&mut term);
             let context = TerminalAddonFrameContext {
                 term: &term,
                 visible_lines,
                 display_offset,
                 is_local,
                 base_dir: local_working_dir.as_deref(),
+                dirty_lines: dirty_lines.clone(),
             };
             self.addon_manager.dispatch_frame(&context);
-        }
+            dirty_lines
+        };
 
         // Update render cache with decorations from all addons
         {
             let term = self.terminal.read(cx).term().clone();
             let mut term = term.lock();
 
-            self.render_cache
-                .update(&mut term, &self.addon_manager, &effective_theme);
+            self.render_cache.update(
+                &mut term,
+                &self.addon_manager,
+                &effective_theme,
+                &dirty_lines,
+            );
             term.reset_damage();
         }
 

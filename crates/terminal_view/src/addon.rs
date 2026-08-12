@@ -127,6 +127,12 @@ pub struct TerminalAddonFrameContext<'a> {
     pub display_offset: usize,
     pub is_local: bool,
     pub base_dir: Option<&'a Path>,
+    /// 本帧 dirty 行（屏幕坐标系）
+    ///
+    /// 由 `view::render_terminal` 从 `term.damage()` 解析后传入；
+    /// TermDamage::Full 时包含所有可见行；空 Vec 表示屏幕无变化。
+    /// addon 可按此字段做增量计算（如自定义高亮只对脏行跑正则）。
+    pub dirty_lines: Vec<usize>,
 }
 
 // ============================================================================
