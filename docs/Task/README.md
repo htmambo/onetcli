@@ -6,6 +6,9 @@
 
 ## 已完成任务 (Archive)
 
+### 2026-08
+- ✅ [终端"自定义高亮"性能优化](Archive/2026-08/TERMINAL_CUSTOM_HIGHLIGHT_PERF_PLAN.md) - 完成于 2026-08-12（4 commits：`b145afce refactor` 抽离 decoration 数据通路与 damage 预解析；`18d54dc4 perf` 解除全量重建钳制，启用脏行增量渲染；`555cb89a perf` char_offset_map 替代 chars().count()；`f49bc012 test` doctest + 单测）
+
 ### 2026-07
 - ✅ [SSH GEX 最小组尺寸兼容修复](Archive/2026-07/SSH_GEX_MIN_GROUP_SIZE_PLAN.md) - 完成于 2026-07-01（`dca6b674`；RusshClient::connect 统一走 build_client_config；russh 0.60.3 默认 3072 → 2048，修复 4 次 "DH prime size (2048 bits) not within requested range" 后 KexInit 失败）
 
