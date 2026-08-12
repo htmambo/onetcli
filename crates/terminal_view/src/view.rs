@@ -27,6 +27,7 @@ use crate::addon::{
     register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
     TerminalAddonFrameContext, TerminalAddonMouseContext,
 };
+use crate::terminal_element::DamageSnapshot;
 use crate::cd_completion::{
     build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
 };
@@ -127,15 +128,22 @@ const TERMINAL_TOGGLE_VI_MODE_SHORTCUT: &str = "f7";
 
 const DEFAULT_CELL_WIDTH: Pixels = px(8.0);
 
-/// 一次性解析 `TermDamage` 为屏幕坐标系 dirty_lines。
+/// 一次性解析 `TermDamage` 为可跨函数传递的 (DamageSnapshot, dirty_lines)。
 ///
-/// `TermDamage::Full` → 所有可见行；`Partial` → alacritty iterator 已自动
-/// 加 display_offset 并过滤不可见 damage；空 → 返回空 Vec（屏幕无变化）。
+/// `TermDamage::Full` → dirty_lines 包含所有可见行、DamageSnapshot::Full；
+/// `Partial` → alacritty iterator 已自动加 display_offset 并过滤不可见 damage；
+/// 空 → 返回空 Vec、DamageSnapshot::Partial([])。
 /// 调用方负责在用完后调 `term.reset_damage()`，否则下次仍会拿到同样的 dirty_lines。
-fn parse_dirty_lines(term: &mut Term<GpuiEventProxy>) -> Vec<usize> {
+fn parse_damage(term: &mut Term<GpuiEventProxy>) -> (DamageSnapshot, Vec<usize>) {
     match term.damage() {
-        TermDamage::Full => (0..term.screen_lines()).collect(),
-        TermDamage::Partial(iter) => iter.map(|line_damage| line_damage.line).collect(),
+        TermDamage::Full => {
+            let lines = (0..term.screen_lines()).collect();
+            (DamageSnapshot::Full, lines)
+        }
+        TermDamage::Partial(iter) => {
+            let lines: Vec<usize> = iter.map(|line_damage| line_damage.line).collect();
+            (DamageSnapshot::Partial(lines.clone()), lines)
+        }
     }
 }
 
@@ -3238,7 +3246,7 @@ if should_reset_history_prompt_for_terminal_event(event) {
         let effective_theme = effective_terminal_theme(&self.current_theme, cx);
 
         // Prepare addons before rendering
-        let dirty_lines: Vec<usize> = {
+        let (damage, dirty_lines): (DamageSnapshot, Vec<usize>) = {
             let is_local =
                 self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
             let local_working_dir = if is_local {
@@ -3254,7 +3262,7 @@ if should_reset_history_prompt_for_terminal_event(event) {
             let visible_lines = 0..term.screen_lines();
             // 一次性解析 TermDamage，避免 dispatch_frame 与 RenderCache::update
             // 各自调用导致 dirty_lines 状态错乱
-            let dirty_lines = parse_dirty_lines(&mut term);
+            let (damage, dirty_lines) = parse_damage(&mut term);
             let context = TerminalAddonFrameContext {
                 term: &term,
                 visible_lines,
@@ -3264,7 +3272,7 @@ if should_reset_history_prompt_for_terminal_event(event) {
                 dirty_lines: dirty_lines.clone(),
             };
             self.addon_manager.dispatch_frame(&context);
-            dirty_lines
+            (damage, dirty_lines)
         };
 
         // Update render cache with decorations from all addons
@@ -3276,9 +3284,9 @@ if should_reset_history_prompt_for_terminal_event(event) {
                 &mut term,
                 &self.addon_manager,
                 &effective_theme,
+                damage,
                 &dirty_lines,
             );
-            term.reset_damage();
         }
 
         // 获取光标可见性

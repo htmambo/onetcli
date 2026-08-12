@@ -360,13 +360,14 @@ struct CachedCursor {
     shape: CursorShape,
 }
 
-enum DamageSnapshot {
+/// 渲染相关的 TermDamage 子集（不含 grid 借用，可跨函数传递）
+pub enum DamageSnapshot {
     Full,
     Partial(Vec<usize>),
 }
 
 impl DamageSnapshot {
-    fn from_term_damage(damage: TermDamage<'_>) -> Self {
+    pub fn from_term_damage(damage: TermDamage<'_>) -> Self {
         match damage {
             TermDamage::Full => Self::Full,
             TermDamage::Partial(iter) => {
@@ -409,6 +410,7 @@ impl RenderCache {
         term: &mut Term<GpuiEventProxy>,
         addon_manager: &AddonManager,
         theme: &TerminalTheme,
+        damage: DamageSnapshot,
         dirty_lines: &[usize],
     ) {
         let num_cols = term.columns();
@@ -427,7 +429,6 @@ impl RenderCache {
             self.resize(num_lines, num_cols);
         }
 
-        let damage = DamageSnapshot::from_term_damage(term.damage());
         term.reset_damage();
 
         // Check if custom foreground changed
