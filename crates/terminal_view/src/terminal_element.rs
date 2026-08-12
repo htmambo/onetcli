@@ -263,10 +263,31 @@ impl DecorationManager {
             })
     }
 
+    /// 获取某行的装饰 span 列表（推荐在 build_line_cache 循环外调用一次，
+    /// 循环内复用，避免每 cell 重复 Vec.get 边界检查）
+    pub fn decorations_for_line(&self, line: usize) -> &[DecorationSpan] {
+        self.decorations_by_line
+            .get(line)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// Apply decorations to get final cell colors and underline
     pub fn apply_decorations(
         &self,
         line: usize,
+        col: usize,
+        default_fg: Hsla,
+        default_bg: Hsla,
+    ) -> (Hsla, Hsla, bool) {
+        let decorations = self.decorations_for_line(line);
+        self.apply_decorations_on(decorations, col, default_fg, default_bg)
+    }
+
+    /// 在预先获取的装饰切片上应用（避免每 cell 重复 Vec.get）
+    pub fn apply_decorations_on(
+        &self,
+        decorations: &[DecorationSpan],
         col: usize,
         default_fg: Hsla,
         default_bg: Hsla,
@@ -276,8 +297,11 @@ impl DecorationManager {
         let mut underline = false;
 
         // Apply decorations in priority order (low to high)
-        for decoration in self.get_decorations_for_cell(line, col) {
-            match decoration {
+        for span in decorations {
+            if !span.col_range.contains(&col) {
+                continue;
+            }
+            match &span.decoration {
                 CellDecoration::Foreground { color, .. } => fg = *color,
                 CellDecoration::Background { color, .. } => bg = *color,
                 CellDecoration::Underline { .. } => underline = true,
@@ -825,6 +849,9 @@ impl RenderCache {
 
         cells.sort_unstable_by_key(|c| c.column);
 
+        // 循环外预先获取该行装饰引用，避免每 cell 重复 Vec.get(line_idx) 边界检查
+        let line_decorations = self.decoration_manager.decorations_for_line(line_idx);
+
         let line = &mut self.lines[line_idx];
         let mut bg_span: Option<(usize, Hsla)> = None;
         let mut text_run: Option<CachedTextRun> = None;
@@ -858,9 +885,8 @@ impl RenderCache {
             // Apply decorations from addons (unless selected)
             let mut underline = false;
             if !cell.is_selected {
-                let (deco_fg, deco_bg, deco_underline) =
-                    self.decoration_manager
-                        .apply_decorations(line_idx, cell.column, fg, bg);
+                let (deco_fg, deco_bg, deco_underline) = self.decoration_manager
+                    .apply_decorations_on(line_decorations, cell.column, fg, bg);
                 fg = deco_fg;
                 bg = deco_bg;
                 underline = deco_underline;
