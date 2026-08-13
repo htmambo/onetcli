@@ -71,12 +71,16 @@ sed "s/\${OMNIHUB_VERSION}/${VERSION}/g" \
     "${PROJECT_DIR}/resources/macos/Info.plist" \
     > "$APP_DIR/Contents/Info.plist"
 
-# 从 logo-macos.svg 重新生成 icns（脚本内部会清空旧 icns 后重新生成，
-# 增量更新由 generate-macos-icon.sh 内部的 PNG IEND 清理保证输出稳定）。
-bash "${PROJECT_DIR}/script/generate-macos-icon.sh"
+# 仅在 icns 缺失时才从 logo-macos.svg 生成。
+# sips/iconutil 的输出随 macOS 版本变化，每次打包都重新生成会污染工作区，
+# 因此 icns 作为已提交资源复用；需要更新图标时请手动执行
+# script/generate-macos-icon.sh 并提交变更。
+ICNS_PATH="${PROJECT_DIR}/resources/macos/OmniHub.icns"
+if [ ! -f "$ICNS_PATH" ]; then
+    bash "${PROJECT_DIR}/script/generate-macos-icon.sh"
+fi
 
 # Copy icon
-ICNS_PATH="${PROJECT_DIR}/resources/macos/OmniHub.icns"
 if [ -f "$ICNS_PATH" ]; then
     cp "$ICNS_PATH" "$APP_DIR/Contents/Resources/OmniHub.icns"
 else
