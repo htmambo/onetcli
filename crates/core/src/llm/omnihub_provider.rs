@@ -49,6 +49,6 @@ impl LlmProvider for OmniHubLLMProvider {
     }
 
     fn provider_name(&self) -> &str {
-        "onet_cli"
+        "omnihub"
     }
 }

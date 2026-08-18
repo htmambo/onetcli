@@ -30,7 +30,7 @@ impl ProviderType {
             ProviderType::Google => "google",
             ProviderType::AzureOpenAI => "azure_openai",
             ProviderType::OpenAICompatible => "openai_compatible",
-            ProviderType::OmniHub => "onet_cli",
+            ProviderType::OmniHub => "omnihub",
         }
     }
 
@@ -47,7 +47,8 @@ impl ProviderType {
             "google" => Some(ProviderType::Google),
             "azure_openai" => Some(ProviderType::AzureOpenAI),
             "openai_compatible" => Some(ProviderType::OpenAICompatible),
-            "onet_cli" => Some(ProviderType::OmniHub),
+            // "omnihub" 为改名后的新存储值，"onet_cli" 为改名前旧版写入的遗留值，两者均需兼容解析
+            "omnihub" | "onet_cli" => Some(ProviderType::OmniHub),
             _ => None,
         }
     }
@@ -205,7 +206,7 @@ impl SyncableItem for ProviderConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::ProviderConfig;
+    use super::{ProviderConfig, ProviderType};
     use crate::cloud_sync::sync_type::SyncableItem;
 
     /// 回归用例：`sync_enabled = false` 的提供商在同步计算时应被排除。
@@ -220,5 +221,21 @@ mod tests {
             !item.sync_enabled(),
             "关闭同步的提供商应当不参与同步"
         );
+    }
+
+    /// 回归用例：应用由 onetcli 改名为 omnihub 后，新版本写入的
+    /// `provider_type = "omnihub"` 必须能被解析，否则整个 provider 列表加载失败
+    /// （"Invalid provider type: omnihub"）。旧值 "onet_cli" 也需保持兼容。
+    #[test]
+    fn from_str_accepts_both_onetcli_and_omnihub_aliases() {
+        assert_eq!(
+            ProviderType::from_str("omnihub"),
+            Some(ProviderType::OmniHub)
+        );
+        assert_eq!(
+            ProviderType::from_str("onet_cli"),
+            Some(ProviderType::OmniHub)
+        );
+        assert_eq!(ProviderType::from_str("unknown"), None);
     }
 }

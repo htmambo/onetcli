@@ -542,6 +542,38 @@ mod tests {
         assert_eq!(pending[0].entity_type, "llm_provider");
     }
 
+    /// 回归用例：改名遗留数据。旧/新版本数据库中可能存有
+    /// `provider_type = "omnihub"` 的行，加载整表时不得因单行解析失败而全部报错
+    /// （"Invalid provider type: omnihub"）。
+    #[test]
+    fn list_tolerates_legacy_omnihub_provider_type_value() {
+        let temp_dir = tempfile::tempdir().expect("应创建临时目录");
+        let db_path = temp_dir.path().join("llm-provider-legacy-alias.db");
+        let conn = SqliteConnection::open(&db_path).expect("应打开测试数据库");
+        conn.with_connection(|db| {
+            run_migrations(db)?;
+            Ok(())
+        })
+        .expect("应完成数据库迁移");
+        conn.with_connection(|db| {
+            db.execute(
+                "INSERT INTO llm_providers (name, provider_type, model, enabled, is_default, sync_enabled, created_at, updated_at)
+                 VALUES ('legacy-omnihub', 'omnihub', 'glm-5', 1, 0, 1, 1, 1)",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("应插入遗留数据行");
+
+        let repo = ProviderRepository::new(conn);
+        let list = repo.list().expect("含 omnihub 别名行的列表应能加载");
+        let legacy = list
+            .iter()
+            .find(|p| p.name == "legacy-omnihub")
+            .expect("应找到遗留 provider");
+        assert_eq!(legacy.provider_type, ProviderType::OmniHub);
+    }
+
     // ============================================================================
     // T9：恰好一个默认 provider 不变式（采纳 Codex Phase 1 风险 #5）
     // ============================================================================
