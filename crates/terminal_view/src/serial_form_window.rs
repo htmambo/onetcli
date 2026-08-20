@@ -4,8 +4,7 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use gpui_component::{
-    app_style,
-    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar,
+    ActiveTheme, Disableable, IndexPath, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,

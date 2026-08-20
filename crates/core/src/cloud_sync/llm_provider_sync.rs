@@ -185,9 +185,7 @@ mod tests {
              请同步更新 ProviderType::is_builtin 与本测试的硬编码数量"
         );
         assert!(
-            user_configurable
-                .iter()
-                .all(|pt| !pt.is_builtin()),
+            user_configurable.iter().all(|pt| !pt.is_builtin()),
             "user_configurable 中不得包含 builtin 成员"
         );
     }
@@ -218,8 +216,11 @@ mod tests {
              请同步更新 is_builtin、user_configurable 与本测试"
         );
 
-        let builtin_members: Vec<ProviderType> =
-            all.iter().copied().filter(ProviderType::is_builtin).collect();
+        let builtin_members: Vec<ProviderType> = all
+            .iter()
+            .copied()
+            .filter(ProviderType::is_builtin)
+            .collect();
         assert_eq!(
             builtin_members,
             vec![ProviderType::OmniHub],

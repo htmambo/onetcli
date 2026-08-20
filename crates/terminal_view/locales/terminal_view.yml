@@ -1478,3 +1478,117 @@ Conflict:
     en: "%{name} and %{count} other files"
     zh-CN: "%{name} 等 %{count} 个文件"
     zh-HK: "%{name} 等 %{count} 個文件"
+AgentBridge:
+  risk_confirm_title:
+    en: AI Requests to Run a Risky Command
+    zh-CN: AI 请求执行高危命令
+    zh-HK: AI 請求執行高危命令
+  risk_confirm_message:
+    en: "The AI assistant wants to run the following command in the terminal (risk level: %{level}). It will only execute after your approval."
+    zh-CN: "AI 助手请求在终端执行以下命令（风险等级：%{level}），批准后立即写入终端。"
+    zh-HK: "AI 助手請求在終端執行以下命令（風險等級：%{level}），批准後立即寫入終端。"
+  risk_confirm_ok:
+    en: Run
+    zh-CN: 执行
+    zh-HK: 執行
+  risk_confirm_cancel:
+    en: Reject
+    zh-CN: 拒绝
+    zh-HK: 拒絕
+  risk_level_low:
+    en: low
+    zh-CN: 低
+    zh-HK: 低
+  risk_level_medium:
+    en: medium
+    zh-CN: 中
+    zh-HK: 中
+  risk_level_high:
+    en: high
+    zh-CN: 高
+    zh-HK: 高
+  risk_level_critical:
+    en: critical
+    zh-CN: 严重
+    zh-HK: 嚴重
+TerminalAgent:
+  provider_not_support_tools:
+    en: The current model provider does not support tool calling. Please switch to an OpenAI-compatible provider in Settings.
+    zh-CN: 当前模型 Provider 不支持工具调用，请在设置中切换为 OpenAI 兼容的 Provider。
+    zh-HK: 當前模型 Provider 不支持工具調用，請在設置中切換為 OpenAI 兼容的 Provider。
+  capability_missing:
+    en: Terminal capability is not available (bridge not initialized).
+    zh-CN: 终端能力不可用（桥接层未初始化）。
+    zh-HK: 終端能力不可用（橋接層未初始化）。
+  get_provider_failed:
+    en: "Failed to get LLM provider: %{error}"
+    zh-CN: "获取模型 Provider 失败：%{error}"
+    zh-HK: "獲取模型 Provider 失敗：%{error}"
+  round_timeout:
+    en: Model response timed out (120s).
+    zh-CN: 模型响应超时（120 秒）。
+    zh-HK: 模型響應超時（120 秒）。
+  repeated_tool_call:
+    en: "Detected repeated tool call (%{name}); aborted to prevent an infinite loop."
+    zh-CN: "检测到重复的工具调用（%{name}），已终止以防止死循环。"
+    zh-HK: "檢測到重複的工具調用（%{name}），已終止以防止死循環。"
+  max_rounds_reached:
+    en: "Reached the maximum number of tool-call rounds (%{max}); task aborted."
+    zh-CN: "已达到最大工具调用轮次（%{max}），任务终止。"
+    zh-HK: "已達到最大工具調用輪次（%{max}），任務終止。"
+  no_write_warning:
+    en: "\n\n(Note: no terminal write was actually performed in this session; the claim above may be inaccurate.)"
+    zh-CN: "\n\n（提示：本次会话未实际执行任何终端写入操作，以上描述可能不准确。）"
+    zh-HK: "\n\n（提示：本次會話未實際執行任何終端寫入操作，以上描述可能不準確。）"
+  tool_status_success:
+    en: "success"
+    zh-CN: "成功"
+    zh-HK: "成功"
+  tool_status_failed:
+    en: "failed"
+    zh-CN: "失败"
+    zh-HK: "失敗"
+  args_default_terminal:
+    en: "default terminal"
+    zh-CN: "默认终端"
+    zh-HK: "預設終端"
+  args_terminal_list:
+    en: "all terminals"
+    zh-CN: "所有终端"
+    zh-HK: "所有終端"
+  args_terminal_with_id:
+    en: "terminal %{id}"
+    zh-CN: "终端 %{id}"
+    zh-HK: "終端 %{id}"
+  args_read_output:
+    en: "terminal %{id}, last %{lines} lines"
+    zh-CN: "终端 %{id}，最近 %{lines} 行"
+    zh-HK: "終端 %{id}，最近 %{lines} 行"
+  action_terminal_list:
+    en: "List all terminals"
+    zh-CN: "获取所有终端"
+    zh-HK: "獲取所有終端"
+  action_write_command:
+    en: "Run command, %{command}"
+    zh-CN: "执行命令，%{command}"
+    zh-HK: "執行命令，%{command}"
+  action_task_complete:
+    en: "Task complete, preparing reply"
+    zh-CN: "任务完成，正在准备回复"
+    zh-HK: "任務完成，正在準備回覆"
+  action_read_output:
+    en: "Read terminal output (%{id}, last %{lines} lines)"
+    zh-CN: "读取终端输出（%{id}，最近 %{lines} 行）"
+    zh-HK: "讀取終端輸出（%{id}，最近 %{lines} 行）"
+  action_get_cwd:
+    en: "Get working directory (%{id})"
+    zh-CN: "获取工作目录（%{id}）"
+    zh-HK: "獲取工作目錄（%{id}）"
+  action_get_selection:
+    en: "Get selected text (%{id})"
+    zh-CN: "获取选中文本（%{id}）"
+    zh-HK: "獲取選中文本（%{id}）"
+  action_focus_terminal:
+    en: "Focus terminal (%{id})"
+    zh-CN: "聚焦终端（%{id}）"
+    zh-HK: "聚焦終端（%{id}）"

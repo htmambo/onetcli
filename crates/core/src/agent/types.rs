@@ -97,6 +97,28 @@ pub enum AgentEvent {
     TextDelta(String),
     /// Incremental reasoning/thinking content.
     ReasoningDelta(String),
+    /// A tool call started executing (agent loop with native tool calling).
+    ToolCallStarted {
+        /// Provider-issued tool call id.
+        call_id: String,
+        /// Tool name.
+        name: String,
+        /// 序号（同一次 Agent 运行内从 1 递增）。
+        seq: u32,
+        /// 折叠态头部展示的动作摘要（如「执行命令，ls -la」）。
+        title: String,
+        /// Short human-readable summary of the arguments.
+        args_summary: String,
+    },
+    /// A tool call finished executing.
+    ToolCallFinished {
+        /// Provider-issued tool call id.
+        call_id: String,
+        /// Whether execution succeeded.
+        ok: bool,
+        /// Short summary of the tool output.
+        output: String,
+    },
     /// Agent finished successfully.
     Completed(AgentResult),
     /// An error occurred.

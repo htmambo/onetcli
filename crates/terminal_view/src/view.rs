@@ -2,7 +2,6 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
 use alacritty_terminal::selection::SelectionType;
 use alacritty_terminal::term::{Term, TermDamage, TermMode};
-use terminal::pty_backend::GpuiEventProxy;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariants};
@@ -11,8 +10,8 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
-    kbd::Kbd, ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
-    Theme as UiTheme, WindowExt,
+    ActiveTheme, BlinkCursor, Icon, IconName, Root, Sizable, SystemNotificationOptions,
+    Theme as UiTheme, WindowExt, kbd::Kbd,
 };
 use one_core::gpui_tokio::Tokio;
 use std::borrow::Cow;
@@ -22,46 +21,47 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
+use terminal::pty_backend::GpuiEventProxy;
 
 use crate::addon::{
-    register_default_addons, AddonManager, CustomHighlightAddon, SearchAddon,
-    TerminalAddonFrameContext, TerminalAddonMouseContext,
+    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
+    TerminalAddonMouseContext, register_default_addons,
 };
-use crate::terminal_element::DamageSnapshot;
 use crate::cd_completion::{
-    build_cd_completion_suggestions, parse_cd_completion_query, CdCompletionQuery,
+    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
 };
 use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
 use crate::settings::{
-    current_settings, update_settings, GlobalTerminalSettings, TerminalHighlightRule,
-    TerminalSettings, TerminalSettingsEvent,
+    GlobalTerminalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
+    current_settings, update_settings,
 };
 use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
-use crate::terminal_element::{terminal_font_features, RenderCache, TerminalElement};
+use crate::terminal_element::DamageSnapshot;
+use crate::terminal_element::{RenderCache, TerminalElement, terminal_font_features};
 use crate::theme::{
-    TerminalTheme, DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE,
-    MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE,
+    DEFAULT_FONT_SIZE, FOLLOW_APP_THEME_NAME, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
+    MIN_LINE_HEIGHT_SCALE, TerminalTheme,
 };
 use gpui::AnyWindowHandle;
+use one_core::RunningState;
 use one_core::connection_restore::{
-    restore_payload_from_tab_data, ConnectionRestoreKind, ConnectionRestorePayload,
-    LocalTerminalRestoreState, SshTerminalRestoreState,
+    ConnectionRestoreKind, ConnectionRestorePayload, LocalTerminalRestoreState,
+    SshTerminalRestoreState, restore_payload_from_tab_data,
 };
 use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::ActiveConnections;
 use one_core::storage::models::StoredConnection;
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
-use one_core::RunningState;
-use one_ui::resize_handle::{resize_handle, HandlePlacement, ResizePanel};
+use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
-use terminal::terminal::{
-    ConnectionState, SshSessionManager, Terminal, TerminalConnectionKind, TerminalModelEvent,
-    TerminalScrollProxy, TerminalScrollSnapshot, DEFAULT_RECOVERY_SCROLLBACK_LINES,
-};
 use terminal::LocalConfig;
+use terminal::terminal::{
+    ConnectionState, DEFAULT_RECOVERY_SCROLLBACK_LINES, SshSessionManager, Terminal,
+    TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy, TerminalScrollSnapshot,
+};
 use tokio::sync::Mutex;
 
 actions!(
@@ -753,6 +753,8 @@ pub struct TerminalView {
     tab_container: Option<Entity<TabContainer>>,
     /// 当前窗口句柄，用于关闭标签页时传递 Window 参数
     window_handle: Option<AnyWindowHandle>,
+    /// AI 终端操作员注册表分配的终端 id（首次渲染时注册）
+    agent_registry_id: Option<u64>,
 }
 
 /// Mouse interaction state
@@ -984,7 +986,13 @@ impl TerminalView {
         let connection_id = conn.id;
         let stored_conn = conn.clone();
         let terminal = cx.new(|cx| {
-            Terminal::new_ssh(conn, cx, working_dir, sync_path_with_terminal, auto_accept_new_keys)
+            Terminal::new_ssh(
+                conn,
+                cx,
+                working_dir,
+                sync_path_with_terminal,
+                auto_accept_new_keys,
+            )
         });
         Self::new_with_terminal(
             terminal,
@@ -1175,6 +1183,7 @@ impl TerminalView {
             scrollbar_handle,
             tab_container: None,
             window_handle: None,
+            agent_registry_id: None,
         };
         let initial_settings = current_settings(cx);
         this.apply_settings_snapshot(&initial_settings, window, cx);
@@ -1910,7 +1919,7 @@ impl TerminalView {
             reset = should_reset_history_prompt_for_terminal_event(event),
             "terminal model event observed"
         );
-                match event {
+        match event {
             TerminalModelEvent::InputStart => self.shell_prompt_input_active = true,
             TerminalModelEvent::PromptStart | TerminalModelEvent::CommandStart => {
                 self.shell_prompt_input_active = false;
@@ -1919,7 +1928,7 @@ impl TerminalView {
             _ => {}
         }
 
-if should_reset_history_prompt_for_terminal_event(event) {
+        if should_reset_history_prompt_for_terminal_event(event) {
             self.dismiss_history_prompt();
             self.log_history_prompt_state("terminal_event_reset", "prompt lifecycle event", cx);
         }
@@ -2063,6 +2072,38 @@ if should_reset_history_prompt_for_terminal_event(event) {
     /// 获取 SSH 连接 ID（本地终端返回 None）
     pub fn connection_id(&self, cx: &App) -> Option<i64> {
         self.terminal.read(cx).connection_id()
+    }
+
+    /// 终端模型实体（clone 返回）。
+    ///
+    /// 供 AI 终端操作员桥接层读取终端状态；写入操作仍收敛在桥接泵内。
+    pub fn terminal(&self) -> Entity<Terminal> {
+        self.terminal.clone()
+    }
+
+    /// 聚焦终端输入区（供桥接层 focus 操作调用）。
+    pub fn request_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_terminal(window, cx);
+    }
+
+    /// 向 AI 终端操作员注册表登记本终端（首次渲染注册，后续补登记窗口句柄）。
+    fn register_agent_presence(&mut self, cx: &mut Context<Self>) {
+        // 已注册且窗口句柄已就位时跳过，避免每次 render 都触发全局更新。
+        // 前提：窗口句柄只经 set_window_handle 注入一次；若未来支持标签跨窗口
+        // 移动，此处需要恢复按帧刷新句柄。
+        if self.agent_registry_id.is_some() && self.window_handle.is_some() {
+            return;
+        }
+        if !cx.has_global::<crate::registry::TerminalViewRegistry>() {
+            return;
+        }
+        let entity = cx.entity();
+        let window_handle = self.window_handle;
+        let known_id = self.agent_registry_id;
+        let id = cx.update_global::<crate::registry::TerminalViewRegistry, _>(|registry, _| {
+            registry.register_or_refresh(&entity, window_handle, known_id)
+        });
+        self.agent_registry_id = Some(id);
     }
 
     /// Get all available themes
@@ -2410,7 +2451,11 @@ if should_reset_history_prompt_for_terminal_event(event) {
         self.reconnect_internal(false, cx);
     }
 
-    pub fn reconnect_with_auto_accept_keys(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn reconnect_with_auto_accept_keys(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.reconnect_internal(true, cx);
     }
 
@@ -2428,29 +2473,31 @@ if should_reset_history_prompt_for_terminal_event(event) {
             }
         });
 
-        cx.spawn(async move |this, cx| loop {
-            let state = match this.update(cx, |this, cx| {
-                this.terminal.read(cx).connection_state().clone()
-            }) {
-                Ok(state) => state,
-                Err(_) => break,
-            };
+        cx.spawn(async move |this, cx| {
+            loop {
+                let state = match this.update(cx, |this, cx| {
+                    this.terminal.read(cx).connection_state().clone()
+                }) {
+                    Ok(state) => state,
+                    Err(_) => break,
+                };
 
-            match state {
-                ConnectionState::Connected => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.sidebar.update(cx, |sidebar, cx| {
-                            sidebar.reconnect_file_manager(working_dir.clone(), cx);
-                            sidebar.reconnect_server_monitor(cx);
+                match state {
+                    ConnectionState::Connected => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.sidebar.update(cx, |sidebar, cx| {
+                                sidebar.reconnect_file_manager(working_dir.clone(), cx);
+                                sidebar.reconnect_server_monitor(cx);
+                            });
                         });
-                    });
-                    break;
-                }
-                ConnectionState::Disconnected { .. } => break,
-                ConnectionState::Connecting => {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(100))
-                        .await;
+                        break;
+                    }
+                    ConnectionState::Disconnected { .. } => break,
+                    ConnectionState::Connecting => {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                    }
                 }
             }
         })
@@ -4478,6 +4525,7 @@ impl TabContent for TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.register_agent_presence(cx);
         // 创建与 terminal_element 一致的字体配置（包含 fallbacks）
         let fallbacks = if self.current_theme.font_fallbacks.is_empty() {
             None
@@ -4949,15 +4997,15 @@ mod tests {
     use super::TerminalView;
     use super::{
         DEFAULT_FONT_SIZE, UnbracketedPasteHazard, alt_screen_scroll_arrow,
-        detect_unbracketed_paste_hazard, encode_mouse_modifiers,
-        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
-        history_prompt_dropdown_origin, history_prompt_overlay_bounds, mouse_button_code,
-        multiline_non_empty_line_count, preserve_theme_typography, sgr_mouse_button_report,
-        sgr_mouse_mode_enabled, sgr_mouse_wheel_report,
-        should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
-        should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
-        should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
-        should_extend_selection_on_shift_click, should_scroll_to_bottom_on_user_input, should_start_selection_from_pending_sgr_press,
+        detect_unbracketed_paste_hazard, encode_mouse_modifiers, has_trailing_line_continuation,
+        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
+        history_prompt_overlay_bounds, mouse_button_code, multiline_non_empty_line_count,
+        preserve_theme_typography, sgr_mouse_button_report, sgr_mouse_mode_enabled,
+        sgr_mouse_wheel_report, should_defer_inline_history_prompt_input_to_text_system,
+        should_defer_sgr_left_press, should_dismiss_history_prompt_for_keystroke,
+        should_dismiss_history_prompt_for_mouse, should_dismiss_history_prompt_for_scroll,
+        should_extend_selection_on_shift_click, should_reset_history_prompt_for_terminal_event,
+        should_scroll_to_bottom_on_user_input, should_start_selection_from_pending_sgr_press,
         take_whole_scroll_lines, trim_recovery_content_to_recent_chars,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
@@ -4966,18 +5014,17 @@ mod tests {
     use alacritty_terminal::term::TermMode;
     #[cfg(target_os = "macos")]
     use gpui::TestAppContext;
-    use gpui::{px, size, Bounds, Keystroke, Modifiers, MouseButton, Point, SharedString};
+    use gpui::{Bounds, Keystroke, Modifiers, MouseButton, Point, SharedString, px, size};
     use std::cell::Cell as StdCell;
     #[cfg(target_os = "macos")]
     use std::{
         thread,
         time::{Duration, Instant},
     };
-    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
     #[cfg(target_os = "macos")]
     use terminal::LocalConfig;
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
 
-    
     #[test]
     fn shift_left_click_extends_existing_terminal_selection_only() {
         let shift = Modifiers {
@@ -5016,7 +5063,7 @@ mod tests {
         assert!(source.contains("window.on_mouse_event({"));
     }
 
-#[test]
+    #[test]
     fn take_whole_scroll_lines_preserves_fractional_remainder() {
         let mut accumulated = 0.4;
         assert_eq!(take_whole_scroll_lines(&mut accumulated), 0);
@@ -5362,7 +5409,6 @@ mod tests {
             true,
         ));
     }
-
 
     #[test]
     fn history_prompt_dropdown_flips_above_when_cursor_is_near_bottom() {

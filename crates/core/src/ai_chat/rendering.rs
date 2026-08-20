@@ -5,7 +5,9 @@
 
 use crate::ai_chat::panel::CodeBlockActionRegistry;
 use crate::ai_chat::reasoning;
-use crate::ai_chat::types::{ChatMessageUIGeneric, ChatRole, MessageExtension, MessageVariant};
+use crate::ai_chat::types::{
+    ChatMessageUIGeneric, ChatRole, MessageExtension, MessageVariant, ToolCallStatus,
+};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, InteractiveElement, IntoElement, ParentElement, SharedString, Styled, Window,
@@ -13,11 +15,13 @@ use gpui::{
 };
 use gpui_component::button::Button;
 use gpui_component::clipboard::Clipboard;
+use gpui_component::text::CodeBlockRenderer;
 use gpui_component::{
     ActiveTheme, Icon, IconName, Sizable, Size, button::ButtonVariants, h_flex, text::TextView,
     v_flex,
 };
 use rust_i18n::t;
+use std::sync::Arc;
 
 /// 共享消息渲染器
 pub struct ChatMessageRenderer;
@@ -121,6 +125,7 @@ impl ChatMessageRenderer {
     pub fn render_assistant_text<E: MessageExtension>(
         msg: &ChatMessageUIGeneric<E>,
         code_block_actions: &CodeBlockActionRegistry,
+        code_block_renderer: Option<Arc<CodeBlockRenderer>>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -135,14 +140,146 @@ impl ChatMessageRenderer {
                 this.child(Self::render_reasoning_block(msg, window, cx))
             })
             .when(!msg.content.is_empty(), |this| {
-                this.child(Self::render_assistant_content(msg, code_block_actions))
+                this.child(Self::render_assistant_content(
+                    msg,
+                    code_block_actions,
+                    code_block_renderer,
+                ))
             })
             .into_any_element()
+    }
+
+    /// 渲染工具调用卡片（可折叠：图标 + 工具名 + 状态 + 输出）
+    pub fn render_tool_call_message<E: MessageExtension>(
+        msg: &ChatMessageUIGeneric<E>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let MessageVariant::ToolCall {
+            call_id,
+            name,
+            seq,
+            title,
+            status,
+            args_summary,
+            output,
+        } = &msg.variant
+        else {
+            return div().into_any_element();
+        };
+
+        let state_id = SharedString::from(format!("tool-call-expanded-{}", msg.id));
+        let expanded_state = window.use_keyed_state(state_id, cx, |_, _| msg.is_expanded);
+        let is_expanded = *expanded_state.read(cx);
+
+        let (status_icon, status_color) = match status {
+            ToolCallStatus::Running => (IconName::Loader, cx.theme().muted_foreground),
+            ToolCallStatus::Success => (IconName::Check, cx.theme().success),
+            ToolCallStatus::Failed => (IconName::TriangleAlert, cx.theme().danger),
+        };
+        // 折叠态只展示序号 + 动作摘要（如「[2]:执行命令，ls -la」）；seq=0 为旧记录，退化为纯摘要
+        let header_text = if *seq > 0 {
+            format!("[{seq}]:{title}")
+        } else {
+            title.clone()
+        };
+        let header_summary = truncate_chars(&header_text, TOOL_CARD_HEADER_MAX_CHARS);
+        // 展开态显示完整详情：工具名 + 参数摘要 + 输出（失败时为错误输出）
+        let detail = Self::tool_call_detail(name, args_summary, output);
+        let call_id = call_id.clone();
+
+        v_flex()
+            .w_full()
+            .gap_1()
+            .pl_2()
+            .border_l_2()
+            .border_color(status_color.opacity(0.7))
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Button::new(SharedString::from(format!("tool-call-toggle-{}", msg.id)))
+                            .ghost()
+                            .xsmall()
+                            .icon(if is_expanded {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .tooltip(if is_expanded {
+                                t!("AiChat.tool_call_collapse").to_string()
+                            } else {
+                                t!("AiChat.tool_call_expand").to_string()
+                            })
+                            .on_click(move |_, _, cx| {
+                                expanded_state.update(cx, |expanded, cx| {
+                                    *expanded = !*expanded;
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        Icon::new(status_icon)
+                            .with_size(Size::Small)
+                            .text_color(status_color),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(header_summary),
+                    ),
+            )
+            .when(is_expanded && !detail.is_empty(), |this| {
+                this.child(
+                    div()
+                        .pl_6()
+                        .pr_2()
+                        .pb_1()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(
+                            TextView::markdown(
+                                SharedString::from(format!("tool-call-msg-{}", call_id)),
+                                detail,
+                            )
+                            .text_xs()
+                            .selectable(true),
+                        ),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// 组装工具卡片展开态详情：工具名 + 参数摘要 + 输出（失败时输出即错误信息）。
+    fn tool_call_detail(name: &str, args_summary: &str, output: &str) -> String {
+        let mut detail = format!("**{}** {}", t!("AiChat.tool_call_detail_tool"), name);
+        if !args_summary.is_empty() {
+            detail.push_str(&format!(
+                "\n**{}** {}",
+                t!("AiChat.tool_call_detail_args"),
+                args_summary
+            ));
+        }
+        if !output.is_empty() {
+            detail.push_str(&format!(
+                "\n**{}** {}",
+                t!("AiChat.tool_call_detail_output"),
+                output
+            ));
+        }
+        detail
     }
 
     fn render_assistant_content<E: MessageExtension>(
         msg: &ChatMessageUIGeneric<E>,
         code_block_actions: &CodeBlockActionRegistry,
+        code_block_renderer: Option<Arc<CodeBlockRenderer>>,
     ) -> AnyElement {
         let view_id = SharedString::from(format!("ai-msg-{}", msg.id));
 
@@ -153,7 +290,14 @@ impl ChatMessageRenderer {
                 .child(
                     TextView::markdown(view_id, msg.content.clone())
                         .p_3()
-                        .selectable(true),
+                        .selectable(true)
+                        .when_some(code_block_renderer, |view, renderer| {
+                            view.code_block_renderer(
+                                move |code_block, options, element, window, cx| {
+                                    renderer(code_block, options, element, window, cx)
+                                },
+                            )
+                        }),
                 )
                 .into_any_element()
         } else {
@@ -198,6 +342,13 @@ impl ChatMessageRenderer {
 
                             row
                         })
+                        .when_some(code_block_renderer, |view, renderer| {
+                            view.code_block_renderer(
+                                move |code_block, options, element, window, cx| {
+                                    renderer(code_block, options, element, window, cx)
+                                },
+                            )
+                        })
                         .p_3()
                         .selectable(true),
                 )
@@ -209,6 +360,7 @@ impl ChatMessageRenderer {
     pub fn render_message<E: MessageExtension>(
         msg: &ChatMessageUIGeneric<E>,
         code_block_actions: &CodeBlockActionRegistry,
+        code_block_renderer: Option<Arc<CodeBlockRenderer>>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -218,9 +370,14 @@ impl ChatMessageRenderer {
                 MessageVariant::Status { title, is_done } => {
                     Self::render_status_message(&msg.id, title, *is_done, cx)
                 }
-                MessageVariant::Text => {
-                    Self::render_assistant_text(msg, code_block_actions, window, cx)
-                }
+                MessageVariant::Text => Self::render_assistant_text(
+                    msg,
+                    code_block_actions,
+                    code_block_renderer,
+                    window,
+                    cx,
+                ),
+                MessageVariant::ToolCall { .. } => Self::render_tool_call_message(msg, window, cx),
                 MessageVariant::SqlResult => {
                     // SqlResult 需要特殊渲染，默认只显示占位符
                     div()
@@ -238,4 +395,17 @@ impl ChatMessageRenderer {
             ChatRole::System => Self::render_system_message(msg, cx),
         }
     }
+}
+
+/// 工具卡片 header 摘要的最大字符数
+const TOOL_CARD_HEADER_MAX_CHARS: usize = 80;
+
+/// 截断为最多 max_chars 个字符（超出时追加省略标记）
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars).collect();
+    out.push_str("...");
+    out
 }

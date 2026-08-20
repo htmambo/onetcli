@@ -14,7 +14,7 @@
 //! - 在 `muted` 上使用 `foreground` 或 `muted_foreground`
 //! - 在 `accent` 上使用 `accent_foreground`
 
-use gpui::{rgb, Hsla, Pixels, Rgba, SharedString};
+use gpui::{Hsla, Pixels, Rgba, SharedString, rgb};
 use gpui_component::{Theme as UiTheme, level_surface_color};
 
 pub const FOLLOW_APP_THEME_NAME: &str = "App Theme";
@@ -809,7 +809,7 @@ fn prefer_light_variant(light: Hsla, fallback: Hsla) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_font_fallbacks, TerminalTheme, FOLLOW_APP_THEME_NAME};
+    use super::{FOLLOW_APP_THEME_NAME, TerminalTheme, default_font_fallbacks};
     use gpui_component::Theme as UiTheme;
 
     #[test]
@@ -852,12 +852,7 @@ mod tests {
     #[test]
     fn 内置终端主题已加入主题列表() {
         for theme_name in [
-            "midnight",
-            "daylight",
-            "ocean",
-            "obsidian",
-            "crimson",
-            "matrix",
+            "midnight", "daylight", "ocean", "obsidian", "crimson", "matrix",
         ] {
             assert!(
                 TerminalTheme::find_by_name(theme_name).is_some(),

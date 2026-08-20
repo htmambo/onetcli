@@ -217,10 +217,7 @@ mod tests {
         assert!(item.sync_enabled, "默认应启用同步");
 
         item.sync_enabled = false;
-        assert!(
-            !item.sync_enabled(),
-            "关闭同步的提供商应当不参与同步"
-        );
+        assert!(!item.sync_enabled(), "关闭同步的提供商应当不参与同步");
     }
 
     /// 回归用例：应用由 onetcli 改名为 omnihub 后，新版本写入的

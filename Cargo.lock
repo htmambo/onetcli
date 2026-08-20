@@ -11013,6 +11013,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "futures",
  "gpui",
  "gpui-component",
  "one-core",
@@ -11027,6 +11028,7 @@ dependencies = [
  "ssh",
  "terminal",
  "tokio",
+ "tokio-util",
  "tracing",
  "url",
 ]

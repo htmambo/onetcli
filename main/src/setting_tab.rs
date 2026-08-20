@@ -348,6 +348,7 @@ pub fn init_settings_with(cx: &mut App, preloaded: Option<AppSettings>) -> Hotke
     // 初始化聊天全局设置
     cx.set_global(GlobalChatSettings {
         ai_auto_generate_session_title: settings.ai_auto_generate_session_title,
+        ai_terminal_agent_enabled: settings.ai_terminal_agent_enabled,
     });
     // apply() 内部可能会写回规范化后的主题设置，因此必须先注册全局状态。
     cx.set_global(settings);
@@ -1941,11 +1942,15 @@ impl SettingsPanel {
                                         AppSettings::global(cx).ai_auto_generate_session_title
                                     },
                                     |val: bool, cx: &mut App| {
-                                        let settings = AppSettings::global_mut(cx);
-                                        settings.ai_auto_generate_session_title = val;
-                                        settings.save();
+                                        let terminal_agent_enabled = {
+                                            let settings = AppSettings::global_mut(cx);
+                                            settings.ai_auto_generate_session_title = val;
+                                            settings.save();
+                                            settings.ai_terminal_agent_enabled
+                                        };
                                         cx.set_global(GlobalChatSettings {
                                             ai_auto_generate_session_title: val,
+                                            ai_terminal_agent_enabled: terminal_agent_enabled,
                                         });
                                     },
                                 )

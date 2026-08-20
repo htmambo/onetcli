@@ -1,11 +1,11 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
+    App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
 };
 use gpui_component::{
-    app_style,
+    ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -14,14 +14,14 @@ use gpui_component::{
     select::{Select, SelectDelegate, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Disableable, Sizable, Size, StyledExt, TitleBar,
+    v_flex,
 };
 use one_core::certificate_manager::open_certificate_manager_popup;
 use one_core::certificate_notifier::{
-    get_notifier as get_certificate_notifier, CertificateDataEvent,
+    CertificateDataEvent, get_notifier as get_certificate_notifier,
 };
 use one_core::cloud_sync::GlobalCloudUser;
-use one_core::connection_notifier::{get_notifier, ConnectionDataEvent};
+use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
@@ -30,8 +30,8 @@ use one_core::storage::{
 };
 use rust_i18n::t;
 use ssh::{
-    format_connection_progress_message, JumpServerConnectConfig, ProxyConnectConfig, ProxyType,
-    RusshClient, SshAuth, SshConnectConfig, SshConnectionStage,
+    JumpServerConnectConfig, ProxyConnectConfig, ProxyType, RusshClient, SshAuth, SshConnectConfig,
+    SshConnectionStage, format_connection_progress_message,
 };
 use std::time::{Duration, Instant};
 
@@ -263,8 +263,11 @@ impl SshFormWindow {
                 .placeholder(t!("SSH.password_placeholder"))
                 .masked(true)
         });
-        let key_path_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("SSH.key_path_placeholder")).multi_line(true));
+        let key_path_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("SSH.key_path_placeholder"))
+                .multi_line(true)
+        });
         let pending_key_content = cx.new(|_| None);
         let pending_jump_key_content = cx.new(|_| None);
         let passphrase_input = cx.new(|cx| {
@@ -302,15 +305,13 @@ impl SshFormWindow {
                 .placeholder(t!("SSH.password_placeholder"))
                 .masked(true)
         });
-        let jump_key_path_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(t!("SSH.key_path_placeholder"))
-        });
+        let jump_key_path_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("SSH.key_path_placeholder")));
         let jump_passphrase_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(t!("SSH.passphrase_placeholder"))
                 .masked(true)
         });
-
 
         // 代理设置
         let proxy_host_input =
@@ -745,11 +746,7 @@ impl SshFormWindow {
                     let key_content = self.key_path_input.read(cx).text().to_string();
                     let passphrase = {
                         let p = self.passphrase_input.read(cx).text().to_string();
-                        if p.is_empty() {
-                            None
-                        } else {
-                            Some(p)
-                        }
+                        if p.is_empty() { None } else { Some(p) }
                     };
                     SshAuthMethod::PrivateKey {
                         ssh_private_key: key_content,
@@ -787,35 +784,19 @@ impl SshFormWindow {
         // 初始化设置
         let default_directory = {
             let d = self.default_directory_input.read(cx).text().to_string();
-            if d.is_empty() {
-                None
-            } else {
-                Some(d)
-            }
+            if d.is_empty() { None } else { Some(d) }
         };
         let init_script = {
             let s = self.init_script_input.read(cx).text().to_string();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
+            if s.is_empty() { None } else { Some(s) }
         };
         let sftp_local_directory = {
             let d = self.sftp_local_directory_input.read(cx).text().to_string();
-            if d.is_empty() {
-                None
-            } else {
-                Some(d)
-            }
+            if d.is_empty() { None } else { Some(d) }
         };
         let sftp_remote_directory = {
             let d = self.sftp_remote_directory_input.read(cx).text().to_string();
-            if d.is_empty() {
-                None
-            } else {
-                Some(d)
-            }
+            if d.is_empty() { None } else { Some(d) }
         };
 
         // 跳板机配置
@@ -864,19 +845,11 @@ impl SshFormWindow {
                     .unwrap_or(1080);
                 let proxy_username = {
                     let u = self.proxy_username_input.read(cx).text().to_string();
-                    if u.is_empty() {
-                        None
-                    } else {
-                        Some(u)
-                    }
+                    if u.is_empty() { None } else { Some(u) }
                 };
                 let proxy_password = {
                     let p = self.proxy_password_input.read(cx).text().to_string();
-                    if p.is_empty() {
-                        None
-                    } else {
-                        Some(p)
-                    }
+                    if p.is_empty() { None } else { Some(p) }
                 };
                 let proxy_type = match self.proxy_type {
                     ProxyTypeSelection::Socks5 => StorageProxyType::Socks5,
@@ -1514,12 +1487,9 @@ impl SshFormWindow {
                             .child(
                                 Radio::new("jump-auth-auto")
                                     .label(t!("SSH.auto_publickey").to_string())
-                                    .checked(
-                                        jump_auth_method == AuthMethodSelection::AutoPublicKey,
-                                    )
+                                    .checked(jump_auth_method == AuthMethodSelection::AutoPublicKey)
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.jump_auth_method =
-                                            AuthMethodSelection::AutoPublicKey;
+                                        this.jump_auth_method = AuthMethodSelection::AutoPublicKey;
                                         cx.notify();
                                     })),
                             ),
@@ -1535,44 +1505,50 @@ impl SshFormWindow {
                         ),
                     )
                 })
-                .when(jump_auth_method == AuthMethodSelection::PrivateKey, |this| {
-                    this.child(
-                        self.render_form_row(
-                            &t!("SSH.jump_key_path"),
-                            h_flex()
-                                .flex_1()
-                                .gap_2()
-                                .child(
-                                    self.styled_input(Input::new(&self.jump_key_path_input))
-                                        .h(px(80.)),
-                                )
-                                .child(
-                                    Button::new("browse-jump-key-file")
-                                        .small()
-                                        .label("...")
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.browse_jump_key_file(window, cx);
-                                        })),
-                                ),
-                        ),
-                    )
-                    .child(
-                        self.render_form_row(
-                            &t!("SSH.jump_passphrase"),
-                            self.styled_input(Input::new(&self.jump_passphrase_input))
-                                .mask_toggle()
-                                .disable_ime(),
-                        ),
-                    )
-                })
-                .when(jump_auth_method == AuthMethodSelection::AutoPublicKey, |this| {
-                    this.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(t!("SSH.auto_publickey_hint").to_string()),
-                    )
-                })
+                .when(
+                    jump_auth_method == AuthMethodSelection::PrivateKey,
+                    |this| {
+                        this.child(
+                            self.render_form_row(
+                                &t!("SSH.jump_key_path"),
+                                h_flex()
+                                    .flex_1()
+                                    .gap_2()
+                                    .child(
+                                        self.styled_input(Input::new(&self.jump_key_path_input))
+                                            .h(px(80.)),
+                                    )
+                                    .child(
+                                        Button::new("browse-jump-key-file")
+                                            .small()
+                                            .label("...")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.browse_jump_key_file(window, cx);
+                                            })),
+                                    ),
+                            ),
+                        )
+                        .child(
+                            self.render_form_row(
+                                &t!("SSH.jump_passphrase"),
+                                self.styled_input(Input::new(&self.jump_passphrase_input))
+                                    .mask_toggle()
+                                    .disable_ime(),
+                            ),
+                        )
+                    },
+                )
+                .when(
+                    jump_auth_method == AuthMethodSelection::AutoPublicKey,
+                    |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("SSH.auto_publickey_hint").to_string()),
+                        )
+                    },
+                )
             })
     }
 
@@ -1692,20 +1668,22 @@ impl SshFormWindow {
 
     fn spawn_test_status_tick(cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
-        cx.spawn(async move |_, cx: &mut AsyncApp| loop {
-            cx.background_executor().timer(Duration::from_secs(1)).await;
-            let keep_running = entity
-                .update(cx, |this, cx| {
-                    if this.is_testing && this.test_started_at.is_some() {
-                        cx.notify();
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or(false);
-            if !keep_running {
-                break;
+        cx.spawn(async move |_, cx: &mut AsyncApp| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_running = entity
+                    .update(cx, |this, cx| {
+                        if this.is_testing && this.test_started_at.is_some() {
+                            cx.notify();
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
             }
         })
         .detach();

@@ -599,7 +599,6 @@ async fn delete_targets_with_progress(
     }
 }
 
-
 struct ActiveExtract {
     name: String,
     #[allow(dead_code)]
@@ -2051,26 +2050,26 @@ impl FileManagerPanel {
 
         self.progress_refresh_task = Some(cx.spawn(async move |this, cx| {
             loop {
-            let should_continue = this
-                .update(cx, |this, cx| {
-                    let has_active = this.transfer_queue.has_active();
-                    if has_active {
-                        cx.notify();
-                        true
-                    } else {
-                        this.progress_refresh_task = None;
-                        false
-                    }
-                })
-                .unwrap_or(false);
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        let has_active = this.transfer_queue.has_active();
+                        if has_active {
+                            cx.notify();
+                            true
+                        } else {
+                            this.progress_refresh_task = None;
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
 
-            if !should_continue {
-                break;
-            }
+                if !should_continue {
+                    break;
+                }
 
-            cx.background_executor()
-                .timer(Duration::from_millis(100))
-                .await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
             }
         }));
     }
@@ -2557,7 +2556,6 @@ impl FileManagerPanel {
                 })
         });
     }
-
 
     fn extract_archive(
         &mut self,
@@ -3834,7 +3832,6 @@ impl FileManagerPanel {
         menu
     }
 
-
     /// 渲染底部解压进度条
     fn render_extract_progress(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(extract) = self.active_extract.as_ref() else {
@@ -3850,17 +3847,11 @@ impl FileManagerPanel {
             .border_t_1()
             .border_color(cx.theme().border)
             .child(Spinner::new().small())
-            .child(
-                div()
-                    .text_xs()
-                    .text_ellipsis()
-                    .flex_1()
-                    .child(format!(
-                        "{} {}",
-                        t!("FileManager.extract_running"),
-                        extract.name
-                    )),
-            )
+            .child(div().text_xs().text_ellipsis().flex_1().child(format!(
+                "{} {}",
+                t!("FileManager.extract_running"),
+                extract.name
+            )))
             .into_any_element()
     }
 
@@ -4522,9 +4513,7 @@ mod tests {
 
 #[cfg(test)]
 mod extract_archive_tests {
-    use super::{
-        archive_kind_for_name, build_remote_extract_command, ExtractConflictAction,
-    };
+    use super::{ExtractConflictAction, archive_kind_for_name, build_remote_extract_command};
 
     #[test]
     fn archive_kind_for_name_detects_common_suffixes() {

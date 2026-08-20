@@ -1,18 +1,20 @@
 //! AI Chat Panel - 数据库 AI 助手对话面板
 
+use crate::agent::registry::AgentRegistry;
+use crate::agent::{AgentContext, AgentDispatcher, AgentEvent, SessionAffinity};
 use crate::cloud_sync::GlobalCloudUser;
 use crate::gpui_tokio::Tokio;
 use crate::llm::chat_history::ChatMessage;
 use crate::llm::{
-    Message, Role,
+    Message, ProviderConfig, Role,
     chat_history::{MessageRepository, SessionRepository},
     manager::GlobalProviderState,
     storage::ProviderRepository,
 };
-use crate::storage::{GlobalStorageState, traits::Repository};
+use crate::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use gpui::{
-    App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    AnyElement, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle,
+    Focusable, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
@@ -23,9 +25,11 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     list::{List, ListState},
     popover::Popover,
+    text::{CodeBlock, CodeBlockRenderOptions, CodeBlockRenderer},
     v_flex,
 };
 use rust_i18n::t;
+use std::any::Any;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -33,6 +37,7 @@ use tracing::{info, warn};
 use super::engine::ChatEngine;
 use super::rendering::ChatMessageRenderer;
 use super::stream::{ChatStreamProcessor, StreamEvent};
+use super::types::{ChatMessageUI, MessageVariant, ToolCallStatus};
 // 使用共享组件
 use super::components::{
     ModelSettings, ModelSettingsEvent, ModelSettingsPanel, ProviderItem, ProviderSelectEvent,
@@ -294,6 +299,9 @@ pub enum AiChatPanelEvent {
     },
 }
 
+/// Agent 能力注入器：构建 AgentContext 时逐个调用
+type CapabilityInjector = Box<dyn Fn(&mut AgentContext) + Send + Sync>;
+
 /// AI 聊天面板
 pub struct AiChatPanel {
     focus_handle: FocusHandle,
@@ -316,6 +324,14 @@ pub struct AiChatPanel {
     is_logged_in: bool,
     /// 场景专属系统提示词，仅在发送消息时前置注入
     system_instruction: Option<String>,
+    /// Agent 调度模式开关（启用后 send_message 走 AgentDispatcher）
+    agent_mode: bool,
+    /// Agent 能力注入器（构建 AgentContext 时逐个调用）
+    capability_injectors: Vec<CapabilityInjector>,
+    /// Agent 会话亲和性（跨请求保持同一路由）
+    session_affinity: SessionAffinity,
+    /// 自定义代码块渲染器（如终端工具卡片重建）
+    code_block_renderer: Option<Arc<CodeBlockRenderer>>,
 }
 
 impl AiChatPanel {
@@ -396,6 +412,10 @@ impl AiChatPanel {
             settings_panel,
             is_logged_in: GlobalCloudUser::is_logged_in(cx),
             system_instruction: None,
+            agent_mode: false,
+            capability_injectors: Vec::new(),
+            session_affinity: SessionAffinity::new(),
+            code_block_renderer: None,
         };
 
         // 加载 providers
@@ -469,6 +489,39 @@ impl AiChatPanel {
             let trimmed = instruction.trim();
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         });
+        cx.notify();
+    }
+
+    /// 启用或关闭 Agent 调度模式
+    ///
+    /// 启用后 `send_message` 改走 `AgentDispatcher::dispatch`，支持工具调用；
+    /// 未启用时行为与原流式聊天路径完全一致。
+    pub fn set_agent_dispatch(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.agent_mode = enabled;
+        cx.notify();
+    }
+
+    /// 注册 Agent 能力值，Agent 模式构建 `AgentContext` 时自动注入
+    pub fn set_capability_value<T: Any + Send + Sync + Clone>(
+        &mut self,
+        key: impl Into<String>,
+        value: T,
+    ) {
+        let key = key.into();
+        self.capability_injectors.push(Box::new(move |ctx| {
+            ctx.set_capability(key.clone(), value.clone());
+        }));
+    }
+
+    /// 设置自定义代码块渲染器（如终端工具卡片重建）
+    pub fn set_code_block_renderer<F>(&mut self, renderer: F, cx: &mut Context<Self>)
+    where
+        F: Fn(&CodeBlock, CodeBlockRenderOptions, AnyElement, &mut Window, &mut App) -> AnyElement
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.code_block_renderer = Some(Arc::new(renderer));
         cx.notify();
     }
 
@@ -558,6 +611,7 @@ impl AiChatPanel {
     // 创建新会话 - 同步返回，异步保存
     pub fn start_new_session(&mut self, cx: &mut Context<Self>) {
         self.engine.start_new_session();
+        self.session_affinity.reset();
         cx.notify();
     }
 
@@ -795,6 +849,7 @@ impl AiChatPanel {
                     entity.update(cx, |this, cx| {
                         this.engine.session_id = Some(session_id);
                         this.engine.messages = ChatEngine::messages_from_history(&messages);
+                        this.session_affinity.reset();
                         this.history_popover_open = false;
                         cx.notify();
                     });
@@ -806,6 +861,12 @@ impl AiChatPanel {
 
     fn send_message(&mut self, content: String, cx: &mut Context<Self>) {
         if content.trim().is_empty() || self.engine.is_loading {
+            return;
+        }
+
+        // Agent 调度模式：走 AgentDispatcher 路由（支持工具调用）
+        if self.agent_mode {
+            self.send_via_agent(content, cx);
             return;
         }
 
@@ -1052,6 +1113,369 @@ impl AiChatPanel {
         .detach();
     }
 
+    /// Agent 调度模式入口：通过 AgentDispatcher 路由并消费 AgentEvent 流
+    fn send_via_agent(&mut self, content: String, cx: &mut Context<Self>) {
+        let Some(provider_id_str) = self.engine.provider_id.clone() else {
+            self.engine
+                .push_assistant(t!("AiChat.select_provider_first").to_string());
+            cx.notify();
+            return;
+        };
+
+        let provider_id: i64 = match provider_id_str.parse() {
+            Ok(id) => id,
+            Err(_) => {
+                self.engine
+                    .push_assistant(t!("AiChat.invalid_provider_id").to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        // 确保会话存在并持久化用户消息
+        if let Some(session_id) = self.ensure_session_id(&provider_id_str, cx) {
+            self.persist_user_message(session_id, &content, cx);
+        }
+
+        let global_provider_state = cx.global::<GlobalProviderState>().clone();
+        let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
+        let session_id = self.engine.session_id;
+        let history_count = self.engine.model_settings.history_count;
+        let provider_config = self.build_agent_provider_config(provider_id);
+
+        // 添加用户消息到 UI 并创建助手消息占位符
+        self.engine.push_user_message(content.clone());
+        let assistant_msg_id = self.engine.push_streaming_assistant();
+
+        self.engine.auto_scroll_enabled = true;
+        self.engine.is_loading = true;
+
+        let cancel_token = CancellationToken::new();
+        self.engine.cancel_token = Some(cancel_token.clone());
+        self.engine.scroll_to_bottom();
+        cx.notify();
+
+        let registry = cx.global::<AgentRegistry>().clone();
+        let mut affinity = self.session_affinity.clone();
+        let tokio_handle = Tokio::handle(cx);
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let _guard = tokio_handle.enter();
+
+            // 构建聊天历史（agent 自带系统提示词，不注入 system_instruction）
+            let history = Self::build_agent_history_messages(
+                &storage_manager,
+                session_id,
+                history_count,
+                &content,
+            );
+
+            let mut ctx_agent = AgentContext::new(
+                content,
+                history,
+                provider_config,
+                global_provider_state,
+                storage_manager,
+                cancel_token,
+            );
+
+            // 注入外部能力（如终端操作句柄）
+            if let Some(entity) = this.upgrade() {
+                cx.update(|cx| {
+                    entity.update(cx, |this, _cx| {
+                        for injector in &this.capability_injectors {
+                            injector(&mut ctx_agent);
+                        }
+                    });
+                });
+            }
+
+            let mut rx = AgentDispatcher::dispatch(ctx_agent, &registry, &mut affinity).await;
+
+            // 回写亲和性状态
+            if let Some(entity) = this.upgrade() {
+                let affinity_clone = affinity.clone();
+                cx.update(|cx| {
+                    entity.update(cx, |this, _cx| {
+                        this.session_affinity = affinity_clone;
+                    });
+                });
+            }
+
+            // __AGENT_EVENT_LOOP__
+            let mut full_content = String::new();
+            let mut full_reasoning = String::new();
+            while let Some(event) = rx.recv().await {
+                match event {
+                    AgentEvent::Progress(stage) => {
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    if let Some(msg) =
+                                        this.engine.messages.iter_mut().find(|m| m.id == msg_id)
+                                    {
+                                        msg.variant = MessageVariant::Status {
+                                            title: stage,
+                                            is_done: false,
+                                        };
+                                    }
+                                    this.engine.scroll_to_bottom();
+                                    cx.notify();
+                                });
+                            });
+                        } else {
+                            return;
+                        }
+                    }
+                    AgentEvent::TextDelta(delta) => {
+                        full_content.push_str(&delta);
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            let content_clone = full_content.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.engine.update_streaming_content(&msg_id, content_clone);
+                                    this.engine.scroll_to_bottom();
+                                    cx.notify();
+                                });
+                            });
+                        } else {
+                            return;
+                        }
+                    }
+                    AgentEvent::ReasoningDelta(delta) => {
+                        full_reasoning.push_str(&delta);
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            let reasoning_clone = full_reasoning.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.engine
+                                        .update_streaming_reasoning(&msg_id, reasoning_clone);
+                                    cx.notify();
+                                });
+                            });
+                        } else {
+                            return;
+                        }
+                    }
+                    AgentEvent::ToolCallStarted {
+                        call_id,
+                        name,
+                        seq,
+                        title,
+                        args_summary,
+                    } => {
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.insert_tool_call_message(
+                                        &msg_id,
+                                        call_id,
+                                        name,
+                                        seq,
+                                        title,
+                                        args_summary,
+                                    );
+                                    this.engine.scroll_to_bottom();
+                                    cx.notify();
+                                });
+                            });
+                        } else {
+                            return;
+                        }
+                    }
+                    AgentEvent::ToolCallFinished {
+                        call_id,
+                        ok,
+                        output,
+                    } => {
+                        if let Some(entity) = this.upgrade() {
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.update_tool_call_message(&call_id, ok, output);
+                                    cx.notify();
+                                });
+                            });
+                        } else {
+                            return;
+                        }
+                    }
+                    AgentEvent::Completed(result) => {
+                        if let Some(entity) = this.upgrade() {
+                            // result.content 是权威终态（含 fenced 工具记录）；
+                            // 仅在为空时回落到流式累积内容
+                            let final_content = if result.content.is_empty() {
+                                full_content.clone()
+                            } else {
+                                result.content
+                            };
+                            // 实时会话已由独立工具卡片展示，展示内容剥离 fenced 记录块避免重复渲染；
+                            // 持久化仍保留完整内容（重载时由卡片渲染器重建）
+                            let display_content = strip_tool_record_blocks(&final_content);
+                            let msg_id = assistant_msg_id.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.engine.finalize_streaming(&msg_id, display_content);
+                                    this.engine.is_loading = false;
+                                    this.engine.cancel_token = None;
+                                    this.engine.scroll_to_bottom();
+                                    // 持久化助手消息（含 fenced 工具记录）
+                                    if let Some(sid) = session_id {
+                                        this.engine.persist_assistant_message(sid, final_content);
+                                    }
+                                    cx.notify();
+                                });
+                            });
+                        }
+                        break;
+                    }
+                    AgentEvent::Error(message) => {
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.engine.set_message_error(&msg_id, message);
+                                    this.engine.is_loading = false;
+                                    this.engine.cancel_token = None;
+                                    this.engine.scroll_to_bottom();
+                                    cx.notify();
+                                });
+                            });
+                        }
+                        break;
+                    }
+                    AgentEvent::Cancelled => {
+                        info!("Agent run cancelled by user");
+                        if let Some(entity) = this.upgrade() {
+                            let msg_id = assistant_msg_id.clone();
+                            cx.update(|cx| {
+                                entity.update(cx, |this, cx| {
+                                    if !full_content.is_empty() {
+                                        this.engine
+                                            .finalize_streaming(&msg_id, full_content.clone());
+                                    }
+                                    this.engine.is_loading = false;
+                                    this.engine.cancel_token = None;
+                                    cx.notify();
+                                });
+                            });
+                        }
+                        break;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// 构建 Agent 调度使用的 ProviderConfig（基础配置 + 用户选择覆盖）
+    fn build_agent_provider_config(&self, provider_id: i64) -> ProviderConfig {
+        let base = self
+            .engine
+            .provider_configs
+            .iter()
+            .find(|c| c.id == provider_id)
+            .cloned()
+            .unwrap_or_default();
+        ProviderConfig {
+            model: self.engine.selected_model.clone().unwrap_or(base.model),
+            // 0 表示不限制，传 None 让 Provider 使用默认值
+            max_tokens: (self.engine.model_settings.max_tokens > 0)
+                .then_some(self.engine.model_settings.max_tokens as i32),
+            temperature: Some(self.engine.model_settings.temperature),
+            ..base
+        }
+    }
+
+    /// 构建发送给 Agent 的历史消息（从 DB 读取、按条数截断、去除末尾重复输入）
+    fn build_agent_history_messages(
+        storage_manager: &StorageManager,
+        session_id: Option<i64>,
+        history_count: usize,
+        content: &str,
+    ) -> Vec<Message> {
+        let mut messages: Vec<Message> = match session_id {
+            Some(sid) => match storage_manager.get::<MessageRepository>() {
+                Some(repo) => match repo.list_by_session(sid) {
+                    Ok(rows) => rows
+                        .iter()
+                        .map(|msg| {
+                            let role = match msg.role.as_str() {
+                                "user" => Role::User,
+                                "assistant" => Role::Assistant,
+                                "system" => Role::System,
+                                _ => Role::User,
+                            };
+                            Message::text(role, &msg.content)
+                        })
+                        .collect(),
+                    Err(_) => vec![Message::text(Role::User, content)],
+                },
+                None => vec![Message::text(Role::User, content)],
+            },
+            None => vec![Message::text(Role::User, content)],
+        };
+
+        // 从头部截断到 history_count 条（0 表示不携带历史）
+        let keep_from = messages.len().saturating_sub(history_count);
+        messages = messages.split_off(keep_from);
+        // 去掉末尾与当前输入重复的用户消息（user_input 由 AgentContext 单独携带）
+        if messages
+            .last()
+            .is_some_and(|m| m.role == Role::User && m.content_as_text() == content)
+        {
+            messages.pop();
+        }
+        messages
+    }
+
+    /// 在流式占位消息之前插入工具调用卡片，保持助手回复始终位于执行过程下方
+    fn insert_tool_call_message(
+        &mut self,
+        assistant_msg_id: &str,
+        call_id: String,
+        name: String,
+        seq: u32,
+        title: String,
+        args_summary: String,
+    ) {
+        let msg = ChatMessageUI::tool_call(call_id, name, seq, title, args_summary);
+        match self
+            .engine
+            .messages
+            .iter()
+            .position(|m| m.id == assistant_msg_id)
+        {
+            Some(pos) => self.engine.messages.insert(pos, msg),
+            None => self.engine.messages.push(msg),
+        }
+    }
+
+    /// 更新工具调用卡片的最终状态与输出摘要
+    fn update_tool_call_message(&mut self, call_id: &str, ok: bool, output: String) {
+        for msg in self.engine.messages.iter_mut().rev() {
+            if let MessageVariant::ToolCall {
+                call_id: id,
+                status,
+                output: out,
+                ..
+            } = &mut msg.variant
+                && id == call_id
+            {
+                *status = if ok {
+                    ToolCallStatus::Success
+                } else {
+                    ToolCallStatus::Failed
+                };
+                *out = output;
+                return;
+            }
+        }
+    }
+
     fn render_header(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = self.border(cx);
         let muted = self.muted(cx);
@@ -1134,6 +1558,7 @@ impl AiChatPanel {
 
     fn render_messages(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let code_block_actions = self.engine.code_block_actions.clone();
+        let code_block_renderer = self.code_block_renderer.clone();
 
         div()
             .id("chat-messages-list")
@@ -1145,11 +1570,18 @@ impl AiChatPanel {
             .p_1()
             .pb_4()
             .child(
-                v_flex().w_full().gap_4().children(
-                    self.engine.messages.iter().map(|msg| {
-                        ChatMessageRenderer::render_message(msg, &code_block_actions, window, cx)
-                    }),
-                ),
+                v_flex()
+                    .w_full()
+                    .gap_4()
+                    .children(self.engine.messages.iter().map(|msg| {
+                        ChatMessageRenderer::render_message(
+                            msg,
+                            &code_block_actions,
+                            code_block_renderer.clone(),
+                            window,
+                            cx,
+                        )
+                    })),
             )
     }
 
@@ -1307,5 +1739,79 @@ impl Render for AiChatPanel {
                 .child(self.render_messages(window, cx))
                 .child(self.render_input(window, cx)),
         )
+    }
+}
+
+/// 剥离内容中的 omnihub-tool fenced 记录块（实时会话已由独立卡片展示，避免重复渲染）
+fn strip_tool_record_blocks(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut in_block = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if !in_block && trimmed.starts_with("```omnihub-tool") {
+            in_block = true;
+            continue;
+        }
+        if in_block {
+            if trimmed.starts_with("```") {
+                in_block = false;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_storage() -> StorageManager {
+        let path =
+            std::env::temp_dir().join(format!("omnihub-ai-chat-test-{}.db", uuid::Uuid::new_v4()));
+        StorageManager::with_path(&path).expect("创建测试存储失败")
+    }
+
+    /// history_count=0 时不携带任何历史消息
+    #[test]
+    fn agent_history_count_zero_carries_nothing() {
+        let storage = temp_storage();
+        let history = AiChatPanel::build_agent_history_messages(&storage, None, 0, "你好");
+        assert!(history.is_empty());
+    }
+
+    /// 末尾与当前输入重复的用户消息会被去除（user_input 由 AgentContext 单独携带）
+    #[test]
+    fn agent_history_dedups_trailing_current_input() {
+        let storage = temp_storage();
+        // 无会话时历史仅含当前输入一条，去重后应为空
+        let history = AiChatPanel::build_agent_history_messages(&storage, None, 10, "你好");
+        assert!(history.is_empty());
+    }
+
+    /// 剥离 omnihub-tool 记录块，保留其余正文
+    #[test]
+    fn strip_removes_tool_record_blocks() {
+        let content = "结论如下\n```omnihub-tool\n{\"name\":\"write\"}\n```\n补充说明";
+        assert_eq!(strip_tool_record_blocks(content), "结论如下\n补充说明");
+    }
+
+    /// 普通 fenced 代码块不受影响
+    #[test]
+    fn strip_keeps_normal_code_blocks() {
+        let content = "```bash\nls -la\n```";
+        assert_eq!(strip_tool_record_blocks(content), "```bash\nls -la\n```");
+    }
+
+    /// 未闭合的记录块剥离到文末，且输入无记录块时原样返回
+    #[test]
+    fn strip_handles_unclosed_block_and_passthrough() {
+        assert_eq!(
+            strip_tool_record_blocks("前文\n```omnihub-tool\n{\"name\":\"x\"}"),
+            "前文"
+        );
+        assert_eq!(strip_tool_record_blocks("纯文本"), "纯文本");
     }
 }

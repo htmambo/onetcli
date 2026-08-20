@@ -10,7 +10,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme, Colorize, Icon, IconName, Sizable, Size, WindowExt,
+    ActiveTheme, Colorize, Icon, IconName, Sizable, Size, Theme as UiTheme, WindowExt,
     button::{Button, ButtonVariants},
     color_picker::{ColorPicker, ColorPickerState},
     dialog::DialogButtonProps,
@@ -20,14 +20,15 @@ use gpui_component::{
     select::{Select, SelectEvent, SelectState},
     switch::Switch,
     try_parse_color, v_flex,
-    Theme as UiTheme,
 };
 use rust_i18n::t;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     TerminalHighlightRule,
-    theme::{TerminalTheme, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE},
+    theme::{
+        MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
+    },
 };
 
 /// 设置面板事件
@@ -1051,11 +1052,9 @@ impl SettingsPanel {
                                     .small()
                                     .on_click(cx.listener(|this, checked: &bool, _window, cx| {
                                         this.vim_scroll_to_arrow_keys = *checked;
-                                        cx.emit(
-                                            SettingsPanelEvent::VimScrollToArrowKeysChanged(
-                                                *checked,
-                                            ),
-                                        );
+                                        cx.emit(SettingsPanelEvent::VimScrollToArrowKeysChanged(
+                                            *checked,
+                                        ));
                                     })),
                             ),
                     ),

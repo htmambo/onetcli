@@ -185,6 +185,7 @@ pub fn init(cx: &mut App) -> AppSettings {
     db_view::search_shortcut::init(cx);
     db_view::sql_editor_view::init(cx);
     db_view::chatdb::agents::init(cx);
+    terminal_view::agents::init(cx);
     crate::auth::init(cx, &settings);
     {
         let auth_service = crate::auth::get_auth_service(cx);

@@ -1141,15 +1141,9 @@ mod tests {
         .expect("计算同步计划应当成功");
 
         assert!(plan.to_upload.is_empty(), "双向无变化，不应上传");
-        assert!(
-            plan.to_update_cloud.is_empty(),
-            "双向无变化，不应更新云端"
-        );
+        assert!(plan.to_update_cloud.is_empty(), "双向无变化，不应更新云端");
         assert!(plan.to_download.is_empty(), "双向无变化，不应下载");
-        assert!(
-            plan.to_update_local.is_empty(),
-            "双向无变化，不应更新本地"
-        );
+        assert!(plan.to_update_local.is_empty(), "双向无变化，不应更新本地");
     }
 
     /// 双向都已变化（uses_sync_state=false, last_synced_at=None），本地秒级时间戳
@@ -1261,11 +1255,7 @@ mod tests {
         )
         .expect("计算同步计划应当成功");
 
-        assert_eq!(
-            plan.to_download.len(),
-            1,
-            "未见过的云端条目应进入下载队列"
-        );
+        assert_eq!(plan.to_download.len(), 1, "未见过的云端条目应进入下载队列");
         assert_eq!(plan.to_download[0].id, "cloud-brand-new");
         assert!(
             plan.to_update_local.is_empty(),

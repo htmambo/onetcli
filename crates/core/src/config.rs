@@ -25,8 +25,8 @@ impl UpdateConfig {
 
     /// 获取更新接口地址
     fn get_update_url() -> String {
-        if let Some(url) = env_or_option("OMNIHUB_UPDATE_URL")
-            .or_else(|| env_or_option("ONETCLI_UPDATE_URL"))
+        if let Some(url) =
+            env_or_option("OMNIHUB_UPDATE_URL").or_else(|| env_or_option("ONETCLI_UPDATE_URL"))
         {
             return url;
         }
@@ -53,9 +53,13 @@ fn env_or_option(key: &str) -> Option<String> {
     }
     match key {
         "OMNIHUB_UPDATE_URL" => option_env!("OMNIHUB_UPDATE_URL").map(str::to_string),
-        "OMNIHUB_UPDATE_DOWNLOAD_URL" => option_env!("OMNIHUB_UPDATE_DOWNLOAD_URL").map(str::to_string),
+        "OMNIHUB_UPDATE_DOWNLOAD_URL" => {
+            option_env!("OMNIHUB_UPDATE_DOWNLOAD_URL").map(str::to_string)
+        }
         "ONETCLI_UPDATE_URL" => option_env!("ONETCLI_UPDATE_URL").map(str::to_string),
-        "ONETCLI_UPDATE_DOWNLOAD_URL" => option_env!("ONETCLI_UPDATE_DOWNLOAD_URL").map(str::to_string),
+        "ONETCLI_UPDATE_DOWNLOAD_URL" => {
+            option_env!("ONETCLI_UPDATE_DOWNLOAD_URL").map(str::to_string)
+        }
         _ => None,
     }
     .and_then(|value| {

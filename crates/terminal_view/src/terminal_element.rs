@@ -208,8 +208,7 @@ impl DecorationManager {
     ) {
         let num_lines = visible_lines.end;
         self.decorations_by_line.clear();
-        self.decorations_by_line
-            .resize_with(num_lines, Vec::new);
+        self.decorations_by_line.resize_with(num_lines, Vec::new);
 
         // Collect decorations from each addon
         for addon in addon_manager.iter_addons() {
@@ -223,7 +222,7 @@ impl DecorationManager {
         }
 
         // Sort decorations by priority (ascending, so lower priority first)
-// 同 priority 内顺序不影响 apply_decorations_on（覆盖语义），用 unstable 排序更快
+        // 同 priority 内顺序不影响 apply_decorations_on（覆盖语义），用 unstable 排序更快
         for decorations in &mut self.decorations_by_line {
             if !decorations.is_empty() {
                 decorations.sort_unstable_by_key(|d| d.decoration.priority());
@@ -886,7 +885,8 @@ impl RenderCache {
             // Apply decorations from addons (unless selected)
             let mut underline = false;
             if !cell.is_selected && !line_decorations.is_empty() {
-                let (deco_fg, deco_bg, deco_underline) = self.decoration_manager
+                let (deco_fg, deco_bg, deco_underline) = self
+                    .decoration_manager
                     .apply_decorations_on(line_decorations, cell.column, fg, bg);
                 fg = deco_fg;
                 bg = deco_bg;
@@ -1618,7 +1618,7 @@ fn indexed_color_to_hsla(idx: u8) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use super::{hsla_eq, terminal_font_features, CellData, RenderCache};
+    use super::{CellData, RenderCache, hsla_eq, terminal_font_features};
     use alacritty_terminal::term::cell::Flags;
     use alacritty_terminal::term::color::Colors;
     use alacritty_terminal::vte::ansi::{Color, NamedColor};

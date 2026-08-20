@@ -5,12 +5,17 @@ pub mod omnihub_provider;
 pub mod storage;
 pub mod types;
 
-pub use connector::{ChatStream, LlmConnector, LlmProvider};
+pub use connector::{
+    ChatStream, LlmConnector, LlmProvider, assistant_tool_calls_message, tool_message,
+};
 pub use manager::{GlobalProviderState, ProviderManager};
 pub use omnihub_provider::OmniHubLLMProvider;
 pub use types::{ProviderConfig, ProviderType};
 
-pub use llm_connector::types::{ChatRequest, Message, MessageBlock, Role, StreamingResponse};
+pub use llm_connector::types::{
+    ChatRequest, ChatResponse, Delta, FunctionCall, Message, MessageBlock, Role, StreamingChoice,
+    StreamingResponse, Tool, ToolCall, ToolChoice,
+};
 
 use gpui::App;
 

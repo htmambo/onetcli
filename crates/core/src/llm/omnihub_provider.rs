@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use llm_connector::types::ChatRequest;
+use llm_connector::types::{ChatRequest, ChatResponse};
 use std::sync::Arc;
 
 use super::connector::{ChatStream, LlmProvider};
@@ -27,11 +27,17 @@ impl OmniHubLLMProvider {
 
 #[async_trait]
 impl LlmProvider for OmniHubLLMProvider {
-    async fn chat(&self, request: &ChatRequest) -> Result<String> {
-        self.cloud_client
+    async fn chat_full(&self, request: &ChatRequest) -> Result<ChatResponse> {
+        let content = self
+            .cloud_client
             .chat(request)
             .await
-            .map_err(|e| anyhow::anyhow!("{}", e))
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        // 云端接口仅返回正文文本，构造仅含 content 的响应
+        Ok(ChatResponse {
+            content,
+            ..Default::default()
+        })
     }
 
     async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream> {
@@ -50,5 +56,11 @@ impl LlmProvider for OmniHubLLMProvider {
 
     fn provider_name(&self) -> &str {
         "omnihub"
+    }
+
+    fn supports_tools(&self) -> bool {
+        // 云端 /chat 接口尚未实现（sync_server 返回 unsupported），tools 透传无从验证，
+        // 按不支持处理；待云端落地 OpenAI 兼容 tools 后再打开。
+        false
     }
 }

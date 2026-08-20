@@ -277,6 +277,26 @@ AiChat:
     en: "SQL result"
     zh-CN: "SQL 结果"
     zh-HK: "SQL 結果"
+  tool_call_expand:
+    en: "Expand tool call"
+    zh-CN: "展开工具调用"
+    zh-HK: "展開工具調用"
+  tool_call_collapse:
+    en: "Collapse tool call"
+    zh-CN: "收起工具调用"
+    zh-HK: "收起工具調用"
+  tool_call_detail_tool:
+    en: "Tool"
+    zh-CN: "工具"
+    zh-HK: "工具"
+  tool_call_detail_args:
+    en: "Arguments"
+    zh-CN: "参数"
+    zh-HK: "參數"
+  tool_call_detail_output:
+    en: "Output"
+    zh-CN: "输出"
+    zh-HK: "輸出"
   unknown_time:
     en: "Unknown time"
     zh-CN: "未知时间"

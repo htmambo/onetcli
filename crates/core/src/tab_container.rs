@@ -14,8 +14,8 @@ use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::{
     ActiveTheme, Colorize, Icon, IconName, IndexPath, InteractiveElementExt as _, Selectable,
-    Sizable, Size, WindowExt as _, h_flex, linux_prefers_system_window_controls,
-    should_render_custom_window_controls, v_flex, WindowsSurfaceLayer, layered_level_surface_color,
+    Sizable, Size, WindowExt as _, WindowsSurfaceLayer, h_flex, layered_level_surface_color,
+    linux_prefers_system_window_controls, should_render_custom_window_controls, v_flex,
 };
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -2845,31 +2845,28 @@ impl TabContainer {
                                 };
                                 let has_tabs_left = idx > 0;
                                 let has_tabs_right = idx < tab_count - 1;
-                                let menu =
-                                    if is_ssh_tab {
-                                        if let Some(tab_id) = tab_id {
-                                            menu.item(
-                                                PopupMenuItem::new(
-                                                    t!("TabContainer.menu_open_sftp").to_string(),
-                                                )
-                                                .on_click(window.listener_for(
-                                                    &view_for_menu,
-                                                    move |_this: &mut TabContainer, _, _window, cx| {
-                                                        cx.emit(
-                                                            TabContainerEvent::OpenSftpRequested {
-                                                                tab_id: tab_id.clone(),
-                                                            },
-                                                        );
-                                                    },
-                                                )),
+                                let menu = if is_ssh_tab {
+                                    if let Some(tab_id) = tab_id {
+                                        menu.item(
+                                            PopupMenuItem::new(
+                                                t!("TabContainer.menu_open_sftp").to_string(),
                                             )
-                                            .item(PopupMenuItem::separator())
-                                        } else {
-                                            menu
-                                        }
+                                            .on_click(window.listener_for(
+                                                &view_for_menu,
+                                                move |_this: &mut TabContainer, _, _window, cx| {
+                                                    cx.emit(TabContainerEvent::OpenSftpRequested {
+                                                        tab_id: tab_id.clone(),
+                                                    });
+                                                },
+                                            )),
+                                        )
+                                        .item(PopupMenuItem::separator())
                                     } else {
                                         menu
-                                    };
+                                    }
+                                } else {
+                                    menu
+                                };
 
                                 menu.item(
                                     PopupMenuItem::new(t!("TabContainer.menu_close").to_string())
@@ -3223,7 +3220,6 @@ impl TabContainer {
             })
             .child(Icon::new(IconName::Pin).with_size(Size::Small))
     }
-
 }
 
 impl Focusable for TabContainer {
@@ -3262,12 +3258,13 @@ impl Render for TabContainer {
 #[cfg(test)]
 mod tests {
     use super::{
-        TabBarDragPlan, build_tab_bar_drag_plan, default_inactive_tab_border_color,
-        default_inactive_tab_color, inactive_tab_background_alpha, is_regular_tab_active,
-        layered_level_surface_color, resolve_inactive_tab_color, resolve_tab_bar_color,
-        should_render_inline_drag_spacer, should_render_windows_drag_spacer,
-        should_suppress_duplicate_status_summary, tab_chrome_width, tab_title_measure_font_size,
-        tab_title_text_scale, uses_manual_window_move, WindowsSurfaceLayer,
+        TabBarDragPlan, WindowsSurfaceLayer, build_tab_bar_drag_plan,
+        default_inactive_tab_border_color, default_inactive_tab_color,
+        inactive_tab_background_alpha, is_regular_tab_active, layered_level_surface_color,
+        resolve_inactive_tab_color, resolve_tab_bar_color, should_render_inline_drag_spacer,
+        should_render_windows_drag_spacer, should_suppress_duplicate_status_summary,
+        tab_chrome_width, tab_title_measure_font_size, tab_title_text_scale,
+        uses_manual_window_move,
     };
     use gpui::{hsla, px};
 
@@ -3431,13 +3428,7 @@ mod tests {
 
         assert_eq!(
             resolved,
-            layered_level_surface_color(
-                theme_tab,
-                false,
-                1.0,
-                2,
-                WindowsSurfaceLayer::ContentBase
-            )
+            layered_level_surface_color(theme_tab, false, 1.0, 2, WindowsSurfaceLayer::ContentBase)
         );
     }
 

@@ -37,6 +37,17 @@ pub enum ChatRole {
 // 消息变体
 // ============================================================================
 
+/// 工具调用状态（Agent 模式工具卡片）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolCallStatus {
+    /// 正在执行
+    Running,
+    /// 执行成功
+    Success,
+    /// 执行失败
+    Failed,
+}
+
 /// 消息变体类型
 #[derive(Clone, Debug, PartialEq)]
 pub enum MessageVariant {
@@ -50,6 +61,23 @@ pub enum MessageVariant {
         title: String,
         /// 是否已完成
         is_done: bool,
+    },
+    /// 工具调用卡片（Agent 模式，按 call_id 更新状态与输出）
+    ToolCall {
+        /// Provider 下发的工具调用 id
+        call_id: String,
+        /// 工具名称
+        name: String,
+        /// 序号（同一次 Agent 运行内从 1 递增；0 表示未知/旧记录）
+        seq: u32,
+        /// 折叠态头部展示的动作摘要（如「执行命令，ls -la」）
+        title: String,
+        /// 执行状态
+        status: ToolCallStatus,
+        /// 参数摘要（Running 时展示）
+        args_summary: String,
+        /// 输出摘要（结束后展示）
+        output: String,
     },
 }
 
@@ -171,6 +199,36 @@ impl<E: MessageExtension + Default> ChatMessageUIGeneric<E> {
             },
             is_streaming: !is_done,
             is_expanded: !is_done,
+            is_reasoning_expanded: false,
+            cached_content_hash: None,
+            extension: E::default(),
+        }
+    }
+
+    /// 创建工具调用卡片消息（Agent 模式，初始为 Running）
+    pub fn tool_call(
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        seq: u32,
+        title: impl Into<String>,
+        args_summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            role: ChatRole::Assistant,
+            content: String::new(),
+            reasoning_content: String::new(),
+            variant: MessageVariant::ToolCall {
+                call_id: call_id.into(),
+                name: name.into(),
+                seq,
+                title: title.into(),
+                status: ToolCallStatus::Running,
+                args_summary: args_summary.into(),
+                output: String::new(),
+            },
+            is_streaming: false,
+            is_expanded: false,
             is_reasoning_expanded: false,
             cached_content_hash: None,
             extension: E::default(),
@@ -389,5 +447,43 @@ impl ModelSelectItem {
     /// 创建新的模型选择项
     pub fn new(id: impl Into<String>) -> Self {
         Self { id: id.into() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_call_message_starts_running() {
+        let msg = ChatMessageUI::tool_call(
+            "call-1",
+            "write_terminal_input",
+            1,
+            "执行命令，ls -la",
+            "ls -la",
+        );
+        assert!(matches!(msg.role, ChatRole::Assistant));
+        assert!(!msg.is_streaming);
+        match &msg.variant {
+            MessageVariant::ToolCall {
+                call_id,
+                name,
+                seq,
+                title,
+                status,
+                args_summary,
+                output,
+            } => {
+                assert_eq!(call_id, "call-1");
+                assert_eq!(name, "write_terminal_input");
+                assert_eq!(*seq, 1);
+                assert_eq!(title, "执行命令，ls -la");
+                assert_eq!(*status, ToolCallStatus::Running);
+                assert_eq!(args_summary, "ls -la");
+                assert!(output.is_empty());
+            }
+            other => panic!("应为 ToolCall 变体，实际为 {other:?}"),
+        }
     }
 }

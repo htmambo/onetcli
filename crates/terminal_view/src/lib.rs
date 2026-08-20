@@ -1,10 +1,14 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod addon;
+pub mod agent_bridge;
+pub mod agents;
 pub mod cd_completion;
 pub mod highlight_presets;
 pub mod history_prompt;
 pub mod keys;
+pub mod registry;
+pub mod risk;
 pub mod serial_form_window;
 pub mod settings;
 pub mod sidebar;
@@ -28,11 +32,11 @@ pub use terminal::terminal::{
 };
 pub use terminal::terminal::{DEFAULT_RECOVERY_SCROLLBACK_LINES, MAX_RECOVERY_SCROLLBACK_LINES};
 pub use theme::{
-    default_font_fallbacks, AnsiPalette, TerminalTheme, DEFAULT_FONT_SIZE,
-    DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE, MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE,
-    MIN_LINE_HEIGHT_SCALE,
+    AnsiPalette, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE,
+    MAX_LINE_HEIGHT_SCALE, MIN_FONT_SIZE, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
+    default_font_fallbacks,
 };
 pub use view::{
-    build_local_terminal, init, set_recovery_scrollback_lines, with_recovery_snapshot_overrides,
-    TerminalView, TerminalViewEvent,
+    TerminalView, TerminalViewEvent, build_local_terminal, init, set_recovery_scrollback_lines,
+    with_recovery_snapshot_overrides,
 };

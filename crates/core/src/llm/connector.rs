@@ -4,7 +4,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
 use llm_connector::LlmClient;
-use llm_connector::types::{ChatRequest, Message, Role, StreamingResponse};
+use llm_connector::types::{
+    ChatRequest, ChatResponse, Message, MessageBlock, Role, StreamingResponse, Tool, ToolCall,
+    ToolChoice,
+};
 
 use super::types::{ProviderConfig, ProviderType};
 
@@ -22,21 +25,67 @@ const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 const GOOGLE_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 pub use llm_connector::types::{
-    ChatRequest as LlmChatRequest, Message as LlmMessage, Role as LlmRole,
+    ChatRequest as LlmChatRequest, ChatResponse as LlmChatResponse, Message as LlmMessage,
+    Role as LlmRole, Tool as LlmTool, ToolCall as LlmToolCall, ToolChoice as LlmToolChoice,
 };
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    async fn chat(&self, request: &ChatRequest) -> Result<String>;
+    /// 非流式对话，仅返回正文文本。
+    ///
+    /// 默认实现基于 `chat_full` 取正文；不支持工具调用的 Provider 可仅实现 `chat`。
+    /// 注意：tool_calls 会被丢弃，携带 tools 的请求不得走此方法。
+    async fn chat(&self, request: &ChatRequest) -> Result<String> {
+        let response = self.chat_full(request).await?;
+        if response.content.is_empty() && response.has_tool_calls() {
+            tracing::warn!("chat() 丢弃了响应中的 tool_calls，仅正文被返回");
+        }
+        Ok(response.content)
+    }
+
+    /// 非流式对话，返回完整响应（含 tool_calls 等）。
+    async fn chat_full(&self, request: &ChatRequest) -> Result<ChatResponse>;
+
     async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream>;
 
     async fn models(&self) -> Result<Vec<String>>;
     fn provider_name(&self) -> &str;
+
+    /// 当前 Provider 是否支持原生工具调用（请求可携带 tools 且响应可解析 tool_calls）。
+    ///
+    /// 默认 false；Agent 循环必须在 `supports_tools() == true` 时才携带工具。
+    fn supports_tools(&self) -> bool {
+        false
+    }
+}
+
+/// 按 Provider 类型判定工具调用支持矩阵（基于 llm-connector 1.1.14 序列化路径实测）。
+///
+/// - OpenAI 系（OpenAI/DeepSeek/Moonshot/Volcengine/Zhipu/Azure/OpenAICompatible）：全支持
+/// - Aliyun：仅兼容模式（OpenAI 协议）支持
+/// - Anthropic/Ollama：请求序列化不含 tools 字段
+/// - Google：流式丢弃 functionCall，统一按不支持处理
+fn provider_supports_tools(config: &ProviderConfig) -> bool {
+    match config.provider_type {
+        ProviderType::OpenAI
+        | ProviderType::DeepSeek
+        | ProviderType::Moonshot
+        | ProviderType::Volcengine
+        | ProviderType::Zhipu
+        | ProviderType::AzureOpenAI
+        | ProviderType::OpenAICompatible => true,
+        ProviderType::Aliyun => aliyun_prefers_compatible_mode(config),
+        ProviderType::Anthropic
+        | ProviderType::Ollama
+        | ProviderType::Google
+        | ProviderType::OmniHub => false,
+    }
 }
 
 pub struct LlmConnector {
     client: LlmClient,
     provider_type: ProviderType,
+    supports_tools: bool,
 }
 
 impl LlmConnector {
@@ -143,6 +192,7 @@ impl LlmConnector {
         Ok(Self {
             client,
             provider_type: config.provider_type,
+            supports_tools: provider_supports_tools(config),
         })
     }
 
@@ -171,6 +221,31 @@ impl LlmConnector {
 
         request
     }
+
+    /// 构建携带工具定义的请求（供 Agent 多轮工具调用使用）。
+    ///
+    /// Provider 不支持工具调用时直接报错（fail-fast，避免 tools 被静默丢弃）；
+    /// `tools` 为空时退化为普通请求（空数组会被 OpenAI 系端点拒绝）。
+    pub fn build_request_with_tools(
+        &self,
+        config: &ProviderConfig,
+        messages: Vec<Message>,
+        tools: Vec<Tool>,
+        tool_choice: Option<ToolChoice>,
+    ) -> Result<ChatRequest> {
+        if !self.supports_tools && !tools.is_empty() {
+            anyhow::bail!(
+                "Provider {} 不支持工具调用（当前协议序列化不含 tools 字段）",
+                self.provider_type.as_str()
+            );
+        }
+        let mut request = self.build_request(config, messages);
+        if !tools.is_empty() {
+            request.tools = Some(tools);
+            request.tool_choice = tool_choice;
+        }
+        Ok(request)
+    }
 }
 
 fn provider_base_url<'a>(config: &'a ProviderConfig, default_base_url: &'static str) -> &'a str {
@@ -195,9 +270,9 @@ fn aliyun_prefers_compatible_mode(config: &ProviderConfig) -> bool {
 
 #[async_trait]
 impl LlmProvider for LlmConnector {
-    async fn chat(&self, request: &ChatRequest) -> Result<String> {
+    async fn chat_full(&self, request: &ChatRequest) -> Result<ChatResponse> {
         let response = self.client.chat(request).await?;
-        Ok(response.content)
+        Ok(response)
     }
 
     async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream> {
@@ -216,6 +291,10 @@ impl LlmProvider for LlmConnector {
     fn provider_name(&self) -> &str {
         self.provider_type.as_str()
     }
+
+    fn supports_tools(&self) -> bool {
+        self.supports_tools
+    }
 }
 
 pub fn create_message(role: Role, content: impl Into<String>) -> Message {
@@ -232,6 +311,24 @@ pub fn assistant_message(content: impl Into<String>) -> Message {
 
 pub fn system_message(content: impl Into<String>) -> Message {
     create_message(Role::System, content)
+}
+
+/// 构造工具结果消息（Role::Tool），供 Agent 循环回灌工具执行结果。
+pub fn tool_message(content: impl Into<String>, tool_call_id: impl Into<String>) -> Message {
+    Message::tool(content, tool_call_id)
+}
+
+/// 构造携带 tool_calls 的 assistant 消息，可附带文本正文。
+///
+/// 传入 `Some("")` 时会保留空文本块（序列化为 `"content": ""`），
+/// 以兼容要求 assistant tool_calls 消息的 content 必须为字符串的严格提供方；
+/// 传 `None` 则不携带正文。
+pub fn assistant_tool_calls_message(tool_calls: Vec<ToolCall>, content: Option<String>) -> Message {
+    let mut message = Message::assistant_with_tool_calls(tool_calls);
+    if let Some(text) = content {
+        message.content = vec![MessageBlock::text(text)];
+    }
+    message
 }
 
 #[cfg(test)]
@@ -296,5 +393,202 @@ mod tests {
         };
 
         assert!(!aliyun_prefers_compatible_mode(&config));
+    }
+
+    #[test]
+    fn supports_tools_matrix_matches_llm_connector_capabilities() {
+        let tool_capable = [
+            ProviderType::OpenAI,
+            ProviderType::DeepSeek,
+            ProviderType::Moonshot,
+            ProviderType::Volcengine,
+            ProviderType::Zhipu,
+            ProviderType::AzureOpenAI,
+            ProviderType::OpenAICompatible,
+        ];
+        for provider_type in tool_capable {
+            let config = ProviderConfig {
+                provider_type,
+                ..Default::default()
+            };
+            assert!(
+                provider_supports_tools(&config),
+                "{provider_type:?} 应支持工具调用"
+            );
+        }
+
+        let tool_incapable = [
+            ProviderType::Anthropic,
+            ProviderType::Ollama,
+            ProviderType::Google,
+            ProviderType::OmniHub,
+        ];
+        for provider_type in tool_incapable {
+            let config = ProviderConfig {
+                provider_type,
+                ..Default::default()
+            };
+            assert!(
+                !provider_supports_tools(&config),
+                "{provider_type:?} 不应支持工具调用"
+            );
+        }
+    }
+
+    #[test]
+    fn supports_tools_aliyun_only_in_compatible_mode() {
+        let compatible = ProviderConfig {
+            provider_type: ProviderType::Aliyun,
+            model: "qwen3.5-plus".to_string(),
+            ..Default::default()
+        };
+        assert!(provider_supports_tools(&compatible));
+
+        let private_protocol = ProviderConfig {
+            provider_type: ProviderType::Aliyun,
+            api_base: Some("https://dashscope.aliyuncs.com".to_string()),
+            model: "qwen-plus".to_string(),
+            ..Default::default()
+        };
+        assert!(!provider_supports_tools(&private_protocol));
+    }
+
+    #[test]
+    fn build_request_with_tools_serializes_tools_and_tool_choice() {
+        let connector = LlmConnector {
+            client: LlmClient::ollama(OLLAMA_BASE_URL).expect("创建测试客户端失败"),
+            provider_type: ProviderType::OpenAI,
+            supports_tools: true,
+        };
+        let config = ProviderConfig {
+            provider_type: ProviderType::OpenAI,
+            model: "gpt-4o".to_string(),
+            ..Default::default()
+        };
+        let tools = vec![Tool::function(
+            "read_terminal_output",
+            Some("读取终端输出".to_string()),
+            serde_json::json!({"type": "object", "properties": {}}),
+        )];
+
+        let request = connector
+            .build_request_with_tools(
+                &config,
+                vec![user_message("hi")],
+                tools,
+                Some(ToolChoice::auto()),
+            )
+            .expect("构建带工具请求失败");
+
+        let payload = serde_json::to_value(&request).expect("序列化请求失败");
+        assert_eq!(payload["tools"][0]["type"], "function");
+        assert_eq!(
+            payload["tools"][0]["function"]["name"],
+            "read_terminal_output"
+        );
+        assert_eq!(payload["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn build_request_with_tools_rejects_unsupported_provider() {
+        let connector = LlmConnector {
+            client: LlmClient::ollama(OLLAMA_BASE_URL).expect("创建测试客户端失败"),
+            provider_type: ProviderType::Anthropic,
+            supports_tools: false,
+        };
+        let config = ProviderConfig {
+            provider_type: ProviderType::Anthropic,
+            model: "claude-sonnet-4".to_string(),
+            thinking_budget: Some(1024),
+            ..Default::default()
+        };
+        let tools = vec![Tool::function(
+            "t",
+            None,
+            serde_json::json!({"type": "object"}),
+        )];
+
+        let result =
+            connector.build_request_with_tools(&config, vec![user_message("hi")], tools, None);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_request_with_tools_degrades_to_plain_request_when_tools_empty() {
+        let connector = LlmConnector {
+            client: LlmClient::ollama(OLLAMA_BASE_URL).expect("创建测试客户端失败"),
+            provider_type: ProviderType::Anthropic,
+            supports_tools: false,
+        };
+        let config = ProviderConfig {
+            provider_type: ProviderType::Anthropic,
+            model: "claude-sonnet-4".to_string(),
+            thinking_budget: Some(1024),
+            ..Default::default()
+        };
+
+        let request = connector
+            .build_request_with_tools(&config, vec![user_message("hi")], vec![], None)
+            .expect("空 tools 应退化为普通请求");
+
+        assert_eq!(request.thinking_budget, Some(1024));
+        assert!(request.tools.is_none());
+    }
+
+    #[test]
+    fn tool_message_carries_role_and_call_id() {
+        let message = tool_message("执行结果", "call-1");
+
+        assert_eq!(message.role, Role::Tool);
+        assert_eq!(message.tool_call_id.as_deref(), Some("call-1"));
+    }
+
+    #[test]
+    fn assistant_tool_calls_message_attaches_optional_content() {
+        let tool_call = ToolCall {
+            id: "call-1".to_string(),
+            call_type: "function".to_string(),
+            ..Default::default()
+        };
+
+        let with_content =
+            assistant_tool_calls_message(vec![tool_call.clone()], Some("说明".to_string()));
+        assert_eq!(with_content.role, Role::Assistant);
+        assert_eq!(with_content.tool_calls.as_ref().map(Vec::len), Some(1));
+        assert!(!with_content.content.is_empty());
+
+        let without_content = assistant_tool_calls_message(vec![tool_call.clone()], None);
+        assert!(without_content.content.is_empty());
+
+        // 空字符串保留为空文本块（序列化为 "content": ""），兼容严格提供方
+        let empty_content = assistant_tool_calls_message(vec![tool_call], Some(String::new()));
+        assert_eq!(empty_content.content.len(), 1);
+        assert!(empty_content.content[0].is_text());
+    }
+
+    #[test]
+    fn assistant_tool_calls_message_serializes_arguments_as_json_string() {
+        // OpenAI 规范要求 function.arguments 是 JSON 字符串而非对象
+        let tool_call = ToolCall {
+            id: "call-1".to_string(),
+            call_type: "function".to_string(),
+            function: llm_connector::types::FunctionCall {
+                name: "write_to_terminal".to_string(),
+                arguments: "{\"command\":\"ls\"}".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let message = assistant_tool_calls_message(vec![tool_call], None);
+        let payload = serde_json::to_value(&message).expect("序列化消息失败");
+
+        assert_eq!(payload["role"], "assistant");
+        assert_eq!(payload["tool_calls"][0]["id"], "call-1");
+        assert!(
+            payload["tool_calls"][0]["function"]["arguments"].is_string(),
+            "arguments 必须序列化为 JSON 字符串"
+        );
     }
 }

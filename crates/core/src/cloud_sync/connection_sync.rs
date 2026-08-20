@@ -530,8 +530,7 @@ impl SyncEngine {
             .collect();
 
         // 预计算云端名称集合，将按名匹配从 O(n×m) 降为 O(n+m)
-        let cloud_names_set: HashSet<&str> =
-            cloud_name_map.values().map(|s| s.as_str()).collect();
+        let cloud_names_set: HashSet<&str> = cloud_name_map.values().map(|s| s.as_str()).collect();
 
         let local_unlinked_by_name: HashMap<&str, &StoredConnection> = local_connections
             .iter()
@@ -771,10 +770,7 @@ impl SyncEngine {
         })
     }
 
-    async fn upload_connection(
-        &self,
-        conn: &StoredConnection,
-    ) -> Result<CloudSyncData, SyncError> {
+    async fn upload_connection(&self, conn: &StoredConnection) -> Result<CloudSyncData, SyncError> {
         let cloud_data = self.prepare_connection_sync_data_upload(conn)?;
         let created = self
             .cloud_client

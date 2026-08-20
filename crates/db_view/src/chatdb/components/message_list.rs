@@ -224,6 +224,16 @@ impl MessageListRenderer {
                 }
                 MessageVariant::Text => Self::render_assistant_text_message(msg, cx),
                 MessageVariant::SqlResult => Self::render_sql_result_message(&msg.id, ctx, cx),
+                MessageVariant::ToolCall { name, .. } => {
+                    // ChatDB 的 Agent 不发起工具调用，此处仅作兜底渲染
+                    div()
+                        .w_full()
+                        .p_3()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("[tool] {}", name))
+                        .into_any_element()
+                }
             },
             ChatRole::System => ChatMessageRenderer::render_system_message(msg, cx),
         }

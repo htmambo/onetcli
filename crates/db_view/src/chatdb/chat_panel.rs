@@ -1106,6 +1106,8 @@ impl ChatPanel {
                         }
                         break;
                     }
+                    // ChatDB 的 Agent 不发起工具调用；工具事件由终端侧栏面板消费
+                    AgentEvent::ToolCallStarted { .. } | AgentEvent::ToolCallFinished { .. } => {}
                 }
             }
         })
@@ -1800,6 +1802,12 @@ impl ChatPanel {
                 }
                 MessageVariant::Text => self.render_assistant_message(msg, panel, window, cx),
                 MessageVariant::SqlResult => self.render_sql_result(&msg.id, cx),
+                MessageVariant::ToolCall { .. } => {
+                    // ChatDB 的 Agent 不发起工具调用，此处复用核心渲染兜底
+                    one_core::ai_chat::ChatMessageRenderer::render_tool_call_message(
+                        msg, window, cx,
+                    )
+                }
             },
             ChatRole::System => {
                 // 系统消息渲染为居中的灰色文本

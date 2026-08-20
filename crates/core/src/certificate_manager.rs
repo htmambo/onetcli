@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, px,
+    IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IndexPath, Sizable, StyledExt as _, TitleBar, WindowExt, app_style,
@@ -619,18 +619,12 @@ impl CertificateForm {
                 CertificateKind::SshPrivateKey => {
                     obj.remove("password");
                     if let Some(kc) = key_content {
-                        obj.insert(
-                            "ssh_private_key".to_string(),
-                            serde_json::Value::String(kc),
-                        );
+                        obj.insert("ssh_private_key".to_string(), serde_json::Value::String(kc));
                     } else {
                         obj.remove("ssh_private_key");
                     }
                     if let Some(ph) = passphrase {
-                        obj.insert(
-                            "passphrase".to_string(),
-                            serde_json::Value::String(ph),
-                        );
+                        obj.insert("passphrase".to_string(), serde_json::Value::String(ph));
                     } else {
                         obj.remove("passphrase");
                     }
@@ -724,11 +718,7 @@ impl Render for CertificateForm {
                             h_flex()
                                 .w_full()
                                 .gap_2()
-                                .child(
-                                    Input::new(&self.key_path_input)
-                                        .flex_1()
-                                        .h(px(80.)),
-                                )
+                                .child(Input::new(&self.key_path_input).flex_1().h(px(80.)))
                                 .child(
                                     Button::new("browse-key-file")
                                         .small()

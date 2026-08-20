@@ -55,8 +55,8 @@ pub mod ask_ai;
 pub mod components;
 pub mod engine;
 mod panel;
-pub mod rendering;
 mod reasoning;
+pub mod rendering;
 pub mod services;
 pub mod stream;
 mod types;
@@ -68,6 +68,7 @@ pub use panel::*;
 pub use types::{
     ChatMessageUI, ChatMessageUIGeneric, ChatRole, MESSAGE_RENDER_LIMIT, MESSAGE_RENDER_STEP,
     MessageExtension, MessageVariant, ModelSelectItem, NoExtension, ProviderSelectItem,
+    ToolCallStatus,
 };
 
 // 导出引擎
@@ -88,10 +89,21 @@ pub use services::{SessionError, SessionService, extract_session_name};
 use gpui::Global;
 
 /// 全局聊天设置
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct GlobalChatSettings {
     /// 是否使用 AI 自动生成会话标题
     pub ai_auto_generate_session_title: bool,
+    /// 是否在终端侧栏启用 Agent 调度模式（关闭时降级为纯聊天路径）
+    pub ai_terminal_agent_enabled: bool,
+}
+
+impl Default for GlobalChatSettings {
+    fn default() -> Self {
+        Self {
+            ai_auto_generate_session_title: false,
+            ai_terminal_agent_enabled: true,
+        }
+    }
 }
 
 impl Global for GlobalChatSettings {}

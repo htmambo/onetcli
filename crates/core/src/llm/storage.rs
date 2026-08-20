@@ -634,14 +634,8 @@ mod tests {
         let all = repo.list().expect("应查询");
         let first_after = all.iter().find(|p| p.id == first_id).expect("应存在");
         let second_after = all.iter().find(|p| p.id == second_id).expect("应存在");
-        assert!(
-            !first_after.is_default,
-            "第一个默认应被降级为非默认"
-        );
-        assert!(
-            second_after.is_default,
-            "最新插入的应保持默认"
-        );
+        assert!(!first_after.is_default, "第一个默认应被降级为非默认");
+        assert!(second_after.is_default, "最新插入的应保持默认");
     }
 
     /// `update_from_cloud` 同样应执行 is_default 去重（防御性兜底，与 insert 行为对齐）。
@@ -658,7 +652,8 @@ mod tests {
         // 模拟云端下载：构造一个来自云端的 is_default=true provider
         let mut cloud_provider = make_provider("cloud-default", true);
         cloud_provider.cloud_id = Some("cloud-uuid".to_string());
-        repo.insert(&mut cloud_provider).expect("应插入云端 provider");
+        repo.insert(&mut cloud_provider)
+            .expect("应插入云端 provider");
 
         // 用 update_from_cloud 走"下载 + 更新本地"路径
         let mut cloud_provider_for_update = cloud_provider.clone();

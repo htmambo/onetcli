@@ -654,7 +654,6 @@ pub struct RemoteDesktopParams {
     pub read_only: bool,
 }
 
-
 /// Connection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbConnectionConfig {
@@ -1279,8 +1278,6 @@ impl StoredConnection {
     pub fn to_remote_desktop_params(&self) -> Result<RemoteDesktopParams, serde_json::Error> {
         serde_json::from_str(&self.params)
     }
-
-
 
     pub fn to_db_connection(&self) -> Result<DbConnectionConfig, serde_json::Error> {
         let mut params: DbConnectionConfig = serde_json::from_str(&self.params)?;
@@ -2058,8 +2055,14 @@ mod serial_tests {
 
     #[test]
     fn connection_type_remote_desktop_methods() {
-        assert_eq!(ConnectionType::Rdp.label(), t!("ConnectionType.rdp").to_string());
-        assert_eq!(ConnectionType::Vnc.label(), t!("ConnectionType.vnc").to_string());
+        assert_eq!(
+            ConnectionType::Rdp.label(),
+            t!("ConnectionType.rdp").to_string()
+        );
+        assert_eq!(
+            ConnectionType::Vnc.label(),
+            t!("ConnectionType.vnc").to_string()
+        );
         assert_eq!(ConnectionType::from_str("Rdp"), ConnectionType::Rdp);
         assert_eq!(ConnectionType::from_str("Vnc"), ConnectionType::Vnc);
         assert_eq!(format!("{}", ConnectionType::Rdp), "Rdp");
@@ -2091,8 +2094,6 @@ mod serial_tests {
         assert_eq!(parsed.username.as_deref(), Some("admin"));
         assert_eq!(RemoteDesktopProtocol::Vnc.default_port(), 5900);
     }
-
-
 
     #[test]
     fn connection_type_serial_methods() {

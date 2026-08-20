@@ -152,6 +152,9 @@ pub struct AppSettings {
     /// 是否使用 AI 自动生成会话标题
     #[serde(default)]
     pub ai_auto_generate_session_title: bool,
+    /// 是否在终端侧栏启用 Agent 调度模式（关闭时降级为纯聊天）
+    #[serde(default = "theme_utils::default_true")]
+    pub ai_terminal_agent_enabled: bool,
     #[serde(default = "hotkey::default_system_hotkey_macos")]
     pub system_hotkey_macos: String,
     #[serde(default = "hotkey::default_system_hotkey_other")]
@@ -221,6 +224,7 @@ impl Default for AppSettings {
             db_undo_stack_size: theme_utils::default_db_undo_stack_size(),
             sql_query_max_rows: theme_utils::default_sql_query_max_rows(),
             ai_auto_generate_session_title: false,
+            ai_terminal_agent_enabled: true,
             system_hotkey_macos: hotkey::default_system_hotkey_macos(),
             system_hotkey_other: hotkey::default_system_hotkey_other(),
             ssh_auto_accept_new_keys: false,

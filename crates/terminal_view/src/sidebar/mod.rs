@@ -10,6 +10,7 @@ pub mod file_manager_panel;
 mod quick_command_panel;
 mod server_monitor_panel;
 mod settings_panel;
+mod tool_card;
 
 pub use file_manager_panel::{FileManagerPanel, FileManagerPanelEvent};
 pub use quick_command_panel::QuickCommandPanel;
@@ -17,17 +18,18 @@ pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
 use crate::{
-    settings::current_settings,
-    theme::{TerminalTheme, TerminalColors},
     TerminalHighlightRule,
+    settings::current_settings,
+    theme::{TerminalColors, TerminalTheme},
 };
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
-use gpui_component::{v_flex, ActiveTheme, Icon, IconName, Sizable, Size};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, v_flex};
+use one_core::ai_chat::GlobalChatSettings;
 use one_core::layout::TOOLBAR_WIDTH;
 use one_core::storage::models::StoredConnection;
 use one_core::{AiChatPanel, AiChatPanelEvent, CodeBlockAction, LanguageMatcher};
@@ -207,6 +209,24 @@ impl TerminalSidebar {
         let sidebar_entity = cx.entity();
         ai_chat_panel.update(cx, |panel, cx| {
             panel.set_system_instruction(Some(TERMINAL_AI_SYSTEM_INSTRUCTION.to_string()), cx);
+            // Agent 调度模式：全局开关开启且桥接可用时启用，注入终端操作能力；
+            // 未启用时保持纯聊天路径（TERMINAL_AI_SYSTEM_INSTRUCTION 兜底）。
+            let agent_enabled = cx
+                .try_global::<GlobalChatSettings>()
+                .map(|settings| settings.ai_terminal_agent_enabled)
+                .unwrap_or(true);
+            if agent_enabled {
+                if let Some(handle) = crate::agent_bridge::operator_handle(cx) {
+                    panel.set_agent_dispatch(true, cx);
+                    panel.set_capability_value(crate::agent_bridge::CAP_TERMINAL, handle);
+                    panel.set_code_block_renderer(tool_card::render_omnihub_tool_block, cx);
+                } else {
+                    // 桥接未就绪时静默降级为纯聊天路径，但留下日志便于排查
+                    tracing::warn!(
+                        "[terminal_sidebar] agent 模式已开启但终端桥接不可用，降级为纯聊天"
+                    );
+                }
+            }
             // 注册复制操作（默认已有，这里只是确保）
             // 注册粘贴到终端操作
             if let Some(paste_action) = CodeBlockAction::new("paste-to-terminal")
@@ -635,7 +655,7 @@ impl TerminalSidebar {
         let has_file_manager = self.file_manager_panel.is_some();
         let has_server_monitor = self.server_monitor_panel.is_some();
         let toolbar_bg = gpui::Hsla {
-            a: 0.72,  // ← 单独设置 Toolbar 透明度（0.0 ~ 1.0）
+            a: 0.72, // ← 单独设置 Toolbar 透明度（0.0 ~ 1.0）
             ..cx.theme().sidebar
         };
 

@@ -1391,7 +1391,7 @@ fn file_path_to_url(path: &Path) -> Option<String> {
 mod tests {
     use super::{
         AddonManager, CellDecoration, CustomHighlightAddon, CustomHighlightMatch,
-        TerminalAddonMouseContext, WebLinksAddon, byte_to_char, build_char_offsets,
+        TerminalAddonMouseContext, WebLinksAddon, build_char_offsets, byte_to_char,
         compile_custom_highlight_rules, is_open_link_modifier_pressed, open_link_action_hint,
         register_default_addons,
     };
