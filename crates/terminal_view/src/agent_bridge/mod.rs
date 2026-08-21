@@ -74,7 +74,7 @@ pub fn operator_handle(cx: &App) -> Option<TerminalOperatorHandle> {
 /// 桥接命令请求（每个变体携带 oneshot 回执）。
 pub(crate) enum TerminalOpRequest {
     ListTerminals {
-        reply: oneshot::Sender<Vec<TerminalInfo>>,
+        reply: oneshot::Sender<TerminalListSnapshot>,
     },
     ReadOutput {
         terminal_id: u64,
@@ -100,6 +100,17 @@ pub(crate) enum TerminalOpRequest {
         terminal_id: u64,
         reply: oneshot::Sender<Result<()>>,
     },
+}
+
+/// 面向 Agent 的终端摘要列表（带当前焦点）。
+///
+/// `focused_id` 是当前获得 GPUI 焦点的 TerminalView 的 id；
+/// 若所有终端都未获得焦点则为 None。`terminals` 仍是完整列表（包含 `is_focused` 字段），
+/// Agent 工具层在 `terminal_id` 缺省时应优先使用 `focused_id`。
+#[derive(Debug, Clone)]
+pub struct TerminalListSnapshot {
+    pub terminals: Vec<TerminalInfo>,
+    pub focused_id: Option<u64>,
 }
 
 /// 面向 Agent 的终端操作句柄（Send + Sync + Clone，仅持通道发送端）。
@@ -144,8 +155,8 @@ impl TerminalOperatorHandle {
         }
     }
 
-    /// 枚举当前存活终端。
-    pub async fn list_terminals(&self) -> Result<Vec<TerminalInfo>> {
+    /// 枚举当前存活终端（含当前焦点 id）。
+    pub async fn list_terminals(&self) -> Result<TerminalListSnapshot> {
         self.roundtrip(|reply| TerminalOpRequest::ListTerminals { reply })
             .await
     }

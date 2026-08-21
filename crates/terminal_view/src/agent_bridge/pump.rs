@@ -48,9 +48,15 @@ pub(super) async fn pump_loop(cx: &mut AsyncApp, mut rx: mpsc::Receiver<Terminal
 async fn dispatch(cx: &mut AsyncApp, request: TerminalOpRequest) {
     match request {
         TerminalOpRequest::ListTerminals { reply } => {
-            let infos =
-                cx.update_global::<TerminalViewRegistry, _>(|registry, cx| registry.snapshot(cx));
-            let _ = reply.send(infos);
+            let snapshot = cx.update_global::<TerminalViewRegistry, _>(|registry, cx| {
+                let terminals = registry.snapshot(cx);
+                let focused_id = terminals.iter().find(|t| t.is_focused).map(|t| t.id);
+                super::TerminalListSnapshot {
+                    terminals,
+                    focused_id,
+                }
+            });
+            let _ = reply.send(snapshot);
         }
         TerminalOpRequest::ReadOutput {
             terminal_id,

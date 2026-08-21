@@ -194,8 +194,9 @@ pub(crate) async fn execute_tool(
             }
         }
         "get_terminal_list" => match handle.list_terminals().await {
-            Ok(terminals) => {
-                let items: Vec<serde_json::Value> = terminals
+            Ok(snapshot) => {
+                let items: Vec<serde_json::Value> = snapshot
+                    .terminals
                     .iter()
                     .map(|info| {
                         serde_json::json!({
@@ -203,12 +204,18 @@ pub(crate) async fn execute_tool(
                             "title": info.title,
                             "kind": format!("{:?}", info.connection_kind),
                             "cwd": info.cwd,
+                            "is_focused": info.is_focused,
                         })
                     })
                     .collect();
+                // 顶层附加 focused_id，让模型明确知道缺省 terminal_id 会操作哪个。
+                let payload = serde_json::json!({
+                    "focused_id": snapshot.focused_id,
+                    "terminals": items,
+                });
                 (
                     true,
-                    serde_json::to_string_pretty(&items).unwrap_or_default(),
+                    serde_json::to_string_pretty(&payload).unwrap_or_default(),
                     ToolEffect::None,
                 )
             }
@@ -247,7 +254,14 @@ pub(crate) async fn execute_tool(
     }
 }
 
-/// 解析 terminal_id 参数；缺省（未传或 null）时取终端列表第一个，非法值报错。
+/// 解析 terminal_id 参数。
+///
+/// 优先级：
+/// 1. 调用方显式传入 `terminal_id`（包括 0）→ 直接采用；
+/// 2. 未传 / null → 采用 `list_terminals().focused_id`（当前激活终端）；
+/// 3. 没有任何终端获得焦点 → 报错要求用户先点击目标终端，避免误操作。
+///
+/// 非法值（非整数）也会报错。
 async fn resolve_terminal(
     handle: &TerminalOperatorHandle,
     args: &serde_json::Value,
@@ -257,14 +271,15 @@ async fn resolve_terminal(
             .as_u64()
             .ok_or_else(|| format!("terminal_id 必须是非负整数，收到: {value}")),
         _ => {
-            let terminals = handle
+            let snapshot = handle
                 .list_terminals()
                 .await
                 .map_err(|err| format!("枚举终端失败: {err}"))?;
-            terminals
-                .first()
-                .map(|info| info.id)
-                .ok_or_else(|| "当前没有可用的终端".to_string())
+            snapshot
+                .focused_id
+                .ok_or_else(|| {
+                    "当前没有任何终端获得焦点。请先在界面上点击你想操作的终端标签，再让 AI 操作。".to_string()
+                })
         }
     }
 }
@@ -609,5 +624,75 @@ mod tests {
         assert_eq!(s, "hello");
         let s = sanitize_for_header("\n\nfoo\n\n");
         assert_eq!(s, "foo");
+    }
+
+    // ---- resolve_terminal 焦点优先语义（review P0）----
+
+    fn mock_args(terminal_id: Option<u64>) -> serde_json::Value {
+        match terminal_id {
+            Some(id) => serde_json::json!({ "terminal_id": id }),
+            None => serde_json::json!({}),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_terminal_prefers_focused_when_id_omitted() {
+        // mock 桥：list 中 id=1 非聚焦、id=2 聚焦；resolve 缺省应返回 2
+        let bridge = crate::agents::tests::spawn_mock_bridge_with_focus();
+        let id = resolve_terminal(&bridge.handle, &mock_args(None))
+            .await
+            .expect("应有聚焦终端");
+        assert_eq!(id, 2, "缺省 terminal_id 时应取聚焦 id=2，而非列表第一个 id=1");
+    }
+
+    #[tokio::test]
+    async fn resolve_terminal_explicit_id_wins_over_focused() {
+        // 即使聚焦 id=2，调用方显式传 1 也必须采用
+        let bridge = crate::agents::tests::spawn_mock_bridge_with_focus();
+        let id = resolve_terminal(&bridge.handle, &mock_args(Some(1)))
+            .await
+            .expect("显式 id 应通过");
+        assert_eq!(id, 1);
+    }
+
+    #[tokio::test]
+    async fn resolve_terminal_errors_when_no_focus() {
+        // 没有任何终端获得焦点 → 必须报错而非默默取第一个
+        let bridge = crate::agents::tests::spawn_mock_bridge_no_focus();
+        let err = resolve_terminal(&bridge.handle, &mock_args(None))
+            .await
+            .expect_err("无焦点应报错");
+        assert!(
+            err.contains("焦点") || err.contains("点击"),
+            "报错文案应引导用户先点击目标终端：{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_terminal_list_payload_includes_focused_id_and_flag() {
+        // 验证工具输出 JSON 同时携带顶层 focused_id 与每项 is_focused
+        let bridge = crate::agents::tests::spawn_mock_bridge_with_focus();
+        let (ok, output, _) = execute_tool(
+            &bridge.handle,
+            &one_core::llm::ToolCall {
+                id: "c1".into(),
+                call_type: "function".into(),
+                function: one_core::llm::FunctionCall {
+                    name: "get_terminal_list".into(),
+                    arguments: "{}".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(ok);
+        let payload: serde_json::Value =
+            serde_json::from_str(&output).expect("JSON 应可解析");
+        assert_eq!(payload["focused_id"], serde_json::json!(2));
+        let terms = payload["terminals"].as_array().expect("terminals 是数组");
+        assert_eq!(terms.len(), 2);
+        assert_eq!(terms[0]["is_focused"], serde_json::json!(false));
+        assert_eq!(terms[1]["is_focused"], serde_json::json!(true));
     }
 }

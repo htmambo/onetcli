@@ -3,18 +3,23 @@
 //! `TerminalView` 首次渲染时注册（并持续刷新窗口句柄），
 //! 失活的弱引用在每次访问时惰性清扫。
 
-use gpui::{AnyWindowHandle, App, Entity, Global, WeakEntity};
+use gpui::{AnyWindowHandle, App, AppContext, Entity, Global, WeakEntity};
 use terminal::terminal::{Terminal, TerminalConnectionKind};
 
 use crate::view::TerminalView;
 
 /// 面向 Agent 的终端摘要信息。
+///
+/// `is_focused` 仅当该 TerminalView 的 `focus_handle` 在当前窗口获得焦点时为 true；
+/// 由 `snapshot` 在枚举时实时检查，用于让 Agent 缺省操作当前激活的终端。
 #[derive(Debug, Clone)]
 pub struct TerminalInfo {
     pub id: u64,
     pub title: String,
     pub connection_kind: TerminalConnectionKind,
     pub cwd: Option<String>,
+    /// 当前是否在所属窗口内获得焦点（实时检查）。
+    pub is_focused: bool,
 }
 
 pub(crate) struct RegistryEntry {
@@ -69,12 +74,29 @@ impl TerminalViewRegistry {
     }
 
     /// 当前存活终端的摘要列表。
-    pub fn snapshot(&mut self, cx: &App) -> Vec<TerminalInfo> {
+    ///
+    /// 同步检查每个 TerminalView 的 `focus_handle` 是否在所属窗口获得焦点，
+    /// 结果反映在 `TerminalInfo.is_focused` 上，供 Agent 推断当前激活终端。
+    ///
+    /// 实现说明：GPUI 没有公开的"全局焦点视图"API，采用两步——
+    /// 1. `cx.active_window()` 拿到当前激活窗口；
+    /// 2. 在该窗口上调用 `window.focused()` 拿到当前 FocusHandle；
+    /// 3. 与每个 TerminalView 的 `focus_handle` 比较。
+    pub fn snapshot(&mut self, cx: &mut App) -> Vec<TerminalInfo> {
         self.sweep();
+        let focused_handle = cx.active_window().and_then(|window_handle| {
+            cx.update_window(window_handle, |_, window, cx| window.focused(cx))
+                .ok()
+                .flatten()
+        });
         self.entries
             .iter()
             .filter_map(|entry| {
                 let view = entry.weak.upgrade()?;
+                let view_focus = view.read(cx).focus_handle_for_agent();
+                let is_focused = focused_handle
+                    .as_ref()
+                    .is_some_and(|focused| focused == &view_focus);
                 let terminal = view.read(cx).terminal();
                 let terminal = terminal.read(cx);
                 Some(TerminalInfo {
@@ -82,6 +104,7 @@ impl TerminalViewRegistry {
                     title: terminal_title(terminal),
                     connection_kind: terminal.connection_kind(),
                     cwd: terminal.latest_working_dir(),
+                    is_focused,
                 })
             })
             .collect()

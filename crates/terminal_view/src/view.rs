@@ -4281,6 +4281,15 @@ impl Focusable for TerminalView {
     }
 }
 
+impl TerminalView {
+    /// 提供给 Agent 注册表读取的 FocusHandle 克隆（避免破坏 `focus_handle` 字段私有性）。
+    ///
+    /// 不可变借用：调用方仅用于与 `Window::focused` 返回值做相等比较。
+    pub(crate) fn focus_handle_for_agent(&self) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
 impl EventEmitter<TabContentEvent> for TerminalView {}
 

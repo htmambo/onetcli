@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::terminal_operator::TerminalOperatorAgent;
 use crate::TerminalConnectionKind;
-use crate::agent_bridge::{TerminalOpRequest, TerminalOperatorHandle, WriteOutcome};
+use crate::agent_bridge::{TerminalListSnapshot, TerminalOpRequest, TerminalOperatorHandle, WriteOutcome};
 use crate::registry::TerminalInfo;
 
 /// 脚本化 mock Provider：每次 chat_stream 弹出一段预设 chunk 序列。
@@ -114,9 +114,9 @@ impl one_core::llm::LlmProvider for MockProvider {
 }
 
 /// 脚本化桥接消费者：记录写入的命令与等待时长，其余请求返回固定值。
-struct MockBridge {
-    handle: TerminalOperatorHandle,
-    written: Arc<Mutex<Vec<(String, u64)>>>,
+pub(super) struct MockBridge {
+    pub(super) handle: TerminalOperatorHandle,
+    pub(super) written: Arc<Mutex<Vec<(String, u64)>>>,
 }
 
 fn spawn_mock_bridge() -> MockBridge {
@@ -127,12 +127,16 @@ fn spawn_mock_bridge() -> MockBridge {
         while let Some(request) = rx.recv().await {
             match request {
                 TerminalOpRequest::ListTerminals { reply } => {
-                    let _ = reply.send(vec![TerminalInfo {
-                        id: 1,
-                        title: "local".to_string(),
-                        connection_kind: TerminalConnectionKind::Local,
-                        cwd: Some("/tmp".to_string()),
-                    }]);
+                    let _ = reply.send(TerminalListSnapshot {
+                        focused_id: Some(1),
+                        terminals: vec![TerminalInfo {
+                            id: 1,
+                            title: "local".to_string(),
+                            connection_kind: TerminalConnectionKind::Local,
+                            cwd: Some("/tmp".to_string()),
+                            is_focused: true,
+                        }],
+                    });
                 }
                 TerminalOpRequest::ReadOutput { reply, .. } => {
                     let _ = reply.send(Ok("file-a\nfile-b".to_string()));
@@ -146,6 +150,117 @@ fn spawn_mock_bridge() -> MockBridge {
                     written_clone.lock().unwrap().push((command, wait_ms));
                     let _ = reply.send(Ok(WriteOutcome {
                         output: "total 2".to_string(),
+                        timed_out: false,
+                        line_count_before_write: 0,
+                    }));
+                }
+                TerminalOpRequest::GetCwd { reply, .. } => {
+                    let _ = reply.send(Ok(Some("/tmp".to_string())));
+                }
+                TerminalOpRequest::GetSelection { reply, .. } => {
+                    let _ = reply.send(Ok(None));
+                }
+                TerminalOpRequest::Focus { reply, .. } => {
+                    let _ = reply.send(Ok(()));
+                }
+            }
+        }
+    });
+    MockBridge {
+        handle: TerminalOperatorHandle::from_sender(tx),
+        written,
+    }
+}
+
+/// 构造一个 mock bridge：返回两个终端（id=1 未聚焦、id=2 已聚焦）。
+/// 用于验证 `resolve_terminal` 缺省时优先选聚焦终端而非第一个。
+pub(super) fn spawn_mock_bridge_with_focus() -> MockBridge {
+    let (tx, mut rx) = mpsc::channel::<TerminalOpRequest>(16);
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let written_clone = written.clone();
+    tokio::spawn(async move {
+        while let Some(request) = rx.recv().await {
+            match request {
+                TerminalOpRequest::ListTerminals { reply } => {
+                    let _ = reply.send(TerminalListSnapshot {
+                        focused_id: Some(2),
+                        terminals: vec![
+                            TerminalInfo {
+                                id: 1,
+                                title: "first-no-focus".to_string(),
+                                connection_kind: TerminalConnectionKind::Local,
+                                cwd: Some("/tmp".to_string()),
+                                is_focused: false,
+                            },
+                            TerminalInfo {
+                                id: 2,
+                                title: "second-focused".to_string(),
+                                connection_kind: TerminalConnectionKind::Local,
+                                cwd: Some("/tmp".to_string()),
+                                is_focused: true,
+                            },
+                        ],
+                    });
+                }
+                TerminalOpRequest::ReadOutput { reply, .. } => {
+                    let _ = reply.send(Ok("from-focused\n".to_string()));
+                }
+                TerminalOpRequest::WriteCommand {
+                    command,
+                    wait_ms,
+                    reply,
+                    ..
+                } => {
+                    written_clone.lock().unwrap().push((command, wait_ms));
+                    let _ = reply.send(Ok(WriteOutcome {
+                        output: "ok".to_string(),
+                        timed_out: false,
+                        line_count_before_write: 0,
+                    }));
+                }
+                TerminalOpRequest::GetCwd { reply, .. } => {
+                    let _ = reply.send(Ok(Some("/tmp".to_string())));
+                }
+                TerminalOpRequest::GetSelection { reply, .. } => {
+                    let _ = reply.send(Ok(None));
+                }
+                TerminalOpRequest::Focus { reply, .. } => {
+                    let _ = reply.send(Ok(()));
+                }
+            }
+        }
+    });
+    MockBridge {
+        handle: TerminalOperatorHandle::from_sender(tx),
+        written,
+    }
+}
+
+/// 构造一个 mock bridge：没有任何终端获得焦点（focused_id = None）。
+pub(super) fn spawn_mock_bridge_no_focus() -> MockBridge {
+    let (tx, mut rx) = mpsc::channel::<TerminalOpRequest>(16);
+    let written = Arc::new(Mutex::new(Vec::new()));
+    tokio::spawn(async move {
+        while let Some(request) = rx.recv().await {
+            match request {
+                TerminalOpRequest::ListTerminals { reply } => {
+                    let _ = reply.send(TerminalListSnapshot {
+                        focused_id: None,
+                        terminals: vec![TerminalInfo {
+                            id: 1,
+                            title: "no-focus".to_string(),
+                            connection_kind: TerminalConnectionKind::Local,
+                            cwd: Some("/tmp".to_string()),
+                            is_focused: false,
+                        }],
+                    });
+                }
+                TerminalOpRequest::ReadOutput { reply, .. } => {
+                    let _ = reply.send(Ok("x".to_string()));
+                }
+                TerminalOpRequest::WriteCommand { reply, .. } => {
+                    let _ = reply.send(Ok(WriteOutcome {
+                        output: "y".to_string(),
                         timed_out: false,
                         line_count_before_write: 0,
                     }));
