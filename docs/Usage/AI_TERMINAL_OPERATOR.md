@@ -31,4 +31,14 @@
 - 需要支持工具调用（function calling）的 Provider（OpenAI 兼容系列）；Anthropic/Ollama 等不支持的 Provider 会收到明确报错提示。
 - 本地终端命令完成检测为启发式（静默期判定），交互式命令（top、vim、sudo 密码提示）可能判定不准。
 - 模型上下文无独立 token 预算，复用聊天面板的 `history_count` 截断；工具输出超过阈值会被截断。
-- **`task_complete` 是唯一明确的完成信号**：模型在执行完工具调用后若返回纯文本而未调用 `task_complete`，Agent 循环会按"主动完成"处理退出。如果遇到"自动停止但任务未完成"的现象，请检查模型是否在多轮工具调用后忘记调用 `task_complete`，或在上一次 `write_to_terminal` 后触发了 `finish_reason=length`（max_tokens 截断）。Agent 循环会在 `tracing::warn!` 中记录 `已执行过 tool_call 后返回 text-only` 路径，便于排查。
+
+## 假性终结防护（Reminder 机制）
+
+`task_complete` 仍是唯一明确的完成信号。为缓解"模型多轮工具调用后返回纯文本中间态（如'继续'）而忘记调 `task_complete` 导致自动停止"，终端 Agent 在 2026-08-21 引入了 reminder 机制：
+
+- **触发条件**：在已执行过 tool_call 的会话中，模型返回纯文本（非空）且 `finish_reason != "length"`，Agent 会注入一条 reminder 用户消息，让模型补 `task_complete` 或继续调用工具。
+- **配额**：默认 1 次（`ai_terminal_agent_mid_session_reminders: 1`）。配额耗尽后仍 text-only，按假性终结处理，UI 会追加"reminder 配额耗尽"提示。
+- **可关闭**：在 `AppSettings` 中将 `ai_terminal_agent_mid_session_reminders` 设为 0 即可关闭 reminder，行为完全等价于关闭前的版本（commit 0dddf152）。
+- **可观测性**：6 个结构化埋点（`reminder_injected` INFO / `length_path_triggered` WARN / `premature_break_after_reminder_quota` ERROR / `content_filter_triggered` ERROR / `null_finish_reason` WARN / `unknown_finish_reason_break` WARN）。
+
+如果遇到"自动停止但任务未完成"的现象，请检查日志中是否出现 `premature_break_after_reminder_quota`（说明 reminder 配额耗尽）或 `length_path_triggered`（说明触发了 max_tokens 截断）。

@@ -7,6 +7,7 @@ mod tools;
 use gpui::{App, BorrowAppContext};
 use one_core::agent::registry::AgentRegistry;
 
+pub use terminal_operator::CAP_MAX_REMINDERS;
 pub use terminal_operator::TerminalOperatorAgent;
 
 /// 初始化终端桥接层并注册终端操作员 Agent（幂等）。

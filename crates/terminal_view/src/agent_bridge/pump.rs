@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use terminal::terminal::{Terminal, TerminalConnectionKind};
 
-use super::{TerminalOpRequest, WriteOutcome};
+use super::{TerminalBridge, TerminalOpRequest, WriteOutcome};
 use crate::registry::TerminalViewRegistry;
 use crate::risk::{RiskLevel, assess_command};
 
@@ -55,9 +55,10 @@ async fn dispatch(cx: &mut AsyncApp, request: TerminalOpRequest) {
         TerminalOpRequest::ReadOutput {
             terminal_id,
             max_lines,
+            from_line,
             reply,
         } => {
-            let result = cx.update(|cx| read_output(cx, terminal_id, max_lines));
+            let result = cx.update(|cx| read_output(cx, terminal_id, max_lines, from_line));
             let _ = reply.send(result);
         }
         TerminalOpRequest::WriteCommand {
@@ -67,6 +68,14 @@ async fn dispatch(cx: &mut AsyncApp, request: TerminalOpRequest) {
             reply,
         } => {
             let result = write_command(cx, terminal_id, &command, wait_ms).await;
+            // since_last_write 跟踪：写入成功后把"当前总行数"写入共享 map
+            if let Ok(ref outcome) = result {
+                let line_count = outcome.line_count_before_write;
+                let last_write_map = cx.update_global::<TerminalBridge, _>(|bridge, _| {
+                    bridge.last_write_lines.clone()
+                });
+                last_write_map.set(terminal_id, line_count);
+            }
             let _ = reply.send(result);
         }
         TerminalOpRequest::GetCwd { terminal_id, reply } => {
@@ -108,7 +117,7 @@ fn lookup_terminal(
 }
 
 /// 读取终端回滚内容（按行截断），无回滚时退回可见屏幕。
-fn read_output(cx: &App, terminal_id: u64, max_lines: usize) -> Result<String> {
+fn read_output(cx: &App, terminal_id: u64, max_lines: usize, from_line: usize) -> Result<String> {
     let (terminal, _) = lookup_terminal(cx, terminal_id)?;
     let terminal = terminal.read(cx);
     if terminal.mode().contains(TermMode::ALT_SCREEN) {
@@ -117,7 +126,7 @@ fn read_output(cx: &App, terminal_id: u64, max_lines: usize) -> Result<String> {
     }
     let max_lines = max_lines.clamp(1, MAX_READ_LINES);
     Ok(terminal
-        .recovery_content(max_lines)
+        .recovery_content(max_lines, from_line)
         .unwrap_or_else(|| terminal.visible_content()))
 }
 
@@ -140,12 +149,14 @@ async fn write_command(
         }
     }
 
-    let (kind, initial_hash) = cx.update(|cx| -> Result<_> {
+    let (kind, initial_hash, line_count_before_write) = cx.update(|cx| -> Result<_> {
         let (terminal, _) = lookup_terminal(cx, terminal_id)?;
         let (kind, mode) = {
             let terminal_ref = terminal.read(cx);
             (terminal_ref.connection_kind(), terminal_ref.mode())
         };
+        // 写前记录总行数（since_last_write 起点）
+        let line_count_before_write = terminal.read(cx).total_line_count();
         // 写前滚到底（与键盘输入路径语义一致）
         terminal
             .read(cx)
@@ -154,16 +165,26 @@ async fn write_command(
             .scroll_display(Scroll::Bottom);
         let data = wrap_agent_command(command, mode);
         terminal.read(cx).write_user_input(data.as_bytes());
-        Ok((kind, content_hash(terminal.read(cx))))
+        Ok((
+            kind,
+            content_hash(terminal.read(cx)),
+            line_count_before_write,
+        ))
     })?;
 
     let timed_out = wait_for_completion(cx, terminal_id, kind, wait_ms, initial_hash).await?;
     // 回读失败（终端关闭 / 进入全屏交互模式）降级为原因说明，写入本身已生效
-    let output = cx.update(|cx| match read_output(cx, terminal_id, WRITE_TAIL_LINES) {
-        Ok(text) => text,
-        Err(err) => format!("(回读输出失败: {err})"),
-    });
-    Ok(WriteOutcome { output, timed_out })
+    let output = cx.update(
+        |cx| match read_output(cx, terminal_id, WRITE_TAIL_LINES, 0) {
+            Ok(text) => text,
+            Err(err) => format!("(回读输出失败: {err})"),
+        },
+    );
+    Ok(WriteOutcome {
+        output,
+        timed_out,
+        line_count_before_write,
+    })
 }
 
 /// 包装待写入命令：bracketed-paste 感知 + 末尾回车（复用粘贴路径语义）。
@@ -229,7 +250,7 @@ fn poll_state(cx: &App, terminal_id: u64, kind: TerminalConnectionKind) -> Optio
 /// 终端尾部内容哈希，用于静默期检测（避免全量序列化比对）。
 fn content_hash(terminal: &Terminal) -> u64 {
     let tail = terminal
-        .recovery_content(WRITE_TAIL_LINES)
+        .recovery_content(WRITE_TAIL_LINES, 0)
         .unwrap_or_default();
     let mut hasher = DefaultHasher::new();
     tail.hash(&mut hasher);

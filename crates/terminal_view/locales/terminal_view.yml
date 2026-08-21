@@ -1540,6 +1540,18 @@ TerminalAgent:
     en: "\n\n(Note: no terminal write was actually performed in this session; the claim above may be inaccurate.)"
     zh-CN: "\n\n（提示：本次会话未实际执行任何终端写入操作，以上描述可能不准确。）"
     zh-HK: "\n\n（提示：本次會話未實際執行任何終端寫入操作，以上描述可能不準確。）"
+  response_truncated:
+    en: "\n\n(Note: the model's response was truncated by max_tokens; remaining steps may be unfinished.)"
+    zh-CN: "\n\n（提示：模型响应因 max_tokens 触顶被截断，后续步骤可能未完成。）"
+    zh-HK: "\n\n（提示：模型響應因 max_tokens 觸頂被截斷，後續步驟可能未完成。）"
+  content_filtered:
+    en: "The model refused to continue due to a content filter; the task was aborted."
+    zh-CN: "模型因内容合规拦截拒绝继续，任务已中止。"
+    zh-HK: "模型因內容合規攔截拒絕繼續，任務已中止。"
+  mid_session_aborted:
+    en: "\n\n(Note: the model returned only text without calling task_complete; the Agent loop ended after the reminder quota was exhausted.)"
+    zh-CN: "\n\n（提示：模型仅返回文字但未调用 task_complete，Agent 循环在 reminder 配额耗尽后结束。）"
+    zh-HK: "\n\n（提示：模型僅返回文字但未調用 task_complete，Agent 循環在 reminder 配額耗盡後結束。）"
   tool_status_success:
     en: "success"
     zh-CN: "成功"

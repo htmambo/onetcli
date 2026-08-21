@@ -187,7 +187,11 @@ fn use_hosted_local_pty() -> bool {
     std::env::var("OMNIHUB_HOSTED_LOCAL_PTY").is_ok_and(|v| v == "1" || v == "true")
 }
 
-fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) -> Option<String> {
+fn serialize_term_for_recovery(
+    term: &Term<GpuiEventProxy>,
+    max_lines: usize,
+    from_line: usize,
+) -> Option<String> {
     let max_lines = normalize_recovery_scrollback_lines(max_lines);
     if max_lines == 0 || term.mode().contains(TermMode::ALT_SCREEN) {
         return None;
@@ -236,6 +240,11 @@ fn serialize_term_for_recovery(term: &Term<GpuiEventProxy>, max_lines: usize) ->
 
     if !current_line.is_empty() {
         lines.push(current_line.trim_end_matches(' ').to_string());
+    }
+
+    // from_line 跳过：截断到"自 from_line 起"
+    if from_line > 0 && from_line < lines.len() {
+        lines = lines.split_off(from_line);
     }
 
     if lines.len() > max_lines {
@@ -2764,12 +2773,21 @@ impl Terminal {
     /// 捕获整个终端内容为纯文本
     pub fn visible_content(&self) -> String {
         let term = self.term.lock();
-        serialize_term_for_recovery(&term, 500).unwrap_or_default()
+        serialize_term_for_recovery(&term, 500, 0).unwrap_or_default()
     }
 
-    pub fn recovery_content(&self, max_lines: usize) -> Option<String> {
+    /// 返回尾部 `max_lines` 行的恢复内容
+    /// （`since_last_write`：传入 `from_line` 起点可截断掉之前的行；
+    /// `from_line` 表示绝对行号，相对 history 起点为 0；超过总行数则返回空）
+    pub fn recovery_content(&self, max_lines: usize, from_line: usize) -> Option<String> {
         let term = self.term.lock();
-        serialize_term_for_recovery(&term, max_lines)
+        serialize_term_for_recovery(&term, max_lines, from_line)
+    }
+
+    /// 返回当前总行数（含 history + screen）。供 since_last_write 跟踪使用。
+    pub fn total_line_count(&self) -> usize {
+        let term = self.term.lock();
+        term.history_size() + term.screen_lines()
     }
 
     pub fn history_suggestions(&self, prefix: &str, limit: usize) -> Vec<String> {

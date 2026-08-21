@@ -27,6 +27,14 @@ const MAX_ROUNDS: usize = 20;
 const ROUND_TIMEOUT: Duration = Duration::from_secs(120);
 /// 连续相同工具调用熔断阈值。
 const REPEAT_LIMIT: usize = 3;
+/// text-only 中间态的最大 reminder 续轮次数（默认 1；0 = 关闭 reminder 退回原行为）。
+const DEFAULT_MAX_MID_SESSION_REMINDERS: usize = 1;
+/// Capability key：从 AgentContext.capabilities 读取 max_mid_session_reminders 的 key。
+pub const CAP_MAX_REMINDERS: &str = "terminal.max_mid_session_reminders";
+/// 注入到消息流的 reminder 文案：明确告诉模型"text-only 不算完成"。
+const MID_SESSION_REMINDER_TEXT: &str = "你刚才只返回了文字总结，但还没有调用 task_complete。\
+     请继续调用必要的工具，直到所有步骤完成后再调用 task_complete。\
+     如果确实无法继续（例如等待用户输入），请调用 task_complete 并说明阻塞原因。";
 
 static DESCRIPTOR: AgentDescriptor = AgentDescriptor {
     id: "terminal_operator",
@@ -76,6 +84,37 @@ enum RoundError {
     Failed(String),
 }
 
+/// 归一化后的 finish_reason 分类（review_code P1-4）。
+/// 原文档 §4.5 矩阵的最小子集；归一化大小写后用此 enum 替代魔法字符串。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FinishReasonKind {
+    /// `stop` — 流式正常结束
+    Stop,
+    /// `length` — max_tokens 截断
+    Length,
+    /// `content_filter` — 合规拦截
+    ContentFilter,
+    /// `tool_calls` — 模型返回了工具调用（不在此处处理，由外层 break 'rounds）
+    ToolCalls,
+    /// `null` 或字段缺失 — provider 协议差异
+    Null,
+    /// 其他未识别字符串（保留原值便于诊断）
+    Unknown(String),
+}
+
+/// 解析 finish_reason 字符串为归一化枚举（review_code P0-2）。
+/// `null` 与字段缺失（None）统一映射到 Null。
+fn classify_finish_reason(fr: Option<&str>) -> FinishReasonKind {
+    match fr.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("null") => FinishReasonKind::Null,
+        Some("stop") => FinishReasonKind::Stop,
+        Some("length") => FinishReasonKind::Length,
+        Some("content_filter") => FinishReasonKind::ContentFilter,
+        Some("tool_calls") => FinishReasonKind::ToolCalls,
+        Some(other) => FinishReasonKind::Unknown(other.to_string()),
+    }
+}
+
 impl TerminalOperatorAgent {
     async fn run(&self, ctx: AgentContext, tx: &mpsc::Sender<AgentEvent>) -> Result<(), String> {
         let handle = ctx
@@ -116,6 +155,13 @@ impl TerminalOperatorAgent {
         let mut tool_seq: u32 = 0;
         // 用于诊断"自动停止"：在已有 tool_call 历史后出现的 text-only 终止会被打 warn 日志
         let mut had_tool_in_session: bool = false;
+        // text-only 中间态 reminder 注入计数；钳制到 effective_max_reminders
+        let mut mid_session_reminder_count: usize = 0;
+        // 从 capability 读取 settings；缺失则用编译期默认值（向后兼容既有 execute 调用方）
+        let max_mid_session_reminders: usize = ctx
+            .get_capability::<usize>(CAP_MAX_REMINDERS)
+            .copied()
+            .unwrap_or(DEFAULT_MAX_MID_SESSION_REMINDERS);
 
         let mut round = 0;
         'rounds: loop {
@@ -153,12 +199,119 @@ impl TerminalOperatorAgent {
             full_text.push_str(&outcome.text);
 
             if outcome.tool_calls.is_empty() {
-                // 首轮空响应可能是模型预热问题，重试一次；其后视为正常结束
-                if round == 1 && outcome.text.is_empty() {
+                let is_empty_text = outcome.text.is_empty();
+                // effective_max_reminders：钳制到 MAX_ROUNDS-1，避免 reminder 突破 round 硬限
+                let effective_max_reminders =
+                    max_mid_session_reminders.min(MAX_ROUNDS.saturating_sub(round));
+                let fr_kind = classify_finish_reason(outcome.finish_reason.as_deref());
+
+                // 场景 1：首轮空响应（不论 finish_reason）可能是模型预热问题，重试一次（既有）
+                if round == 1 && is_empty_text {
                     continue;
                 }
-                // 已有 tool_call 历史时记录可疑信号，方便调试「自动停止」问题
-                if had_tool_in_session && !outcome.text.is_empty() {
+
+                match fr_kind {
+                    FinishReasonKind::Length => {
+                        tracing::warn!(
+                            event = "length_path_triggered",
+                            round = round,
+                            had_tool = had_tool_in_session,
+                            text_len = outcome.text.len(),
+                            finish_reason = ?outcome.finish_reason,
+                            "[terminal_agent] max_tokens 截断；不续轮"
+                        );
+                        full_text.push_str("\n\n");
+                        full_text.push_str(&t!("TerminalAgent.response_truncated").to_string());
+                        break;
+                    }
+                    FinishReasonKind::ContentFilter => {
+                        tracing::error!(
+                            event = "content_filter_triggered",
+                            round = round,
+                            had_tool = had_tool_in_session,
+                            text_len = outcome.text.len(),
+                            "[terminal_agent] 触发 content_filter；终止循环"
+                        );
+                        // 先发 Error 事件再返回 Err（与 Agent::execute 包装行为对齐，
+                        // 让 run_loop 直接调用方也能收到 Error 事件）
+                        let err_msg = t!("TerminalAgent.content_filtered").to_string();
+                        let _ = tx.send(AgentEvent::Error(err_msg.clone())).await;
+                        return Err(err_msg);
+                    }
+                    FinishReasonKind::Unknown(raw) => {
+                        tracing::warn!(
+                            event = "unknown_finish_reason_break",
+                            round = round,
+                            raw_finish_reason = raw.as_str(),
+                            had_tool = had_tool_in_session,
+                            "[terminal_agent] 遇到未识别的 finish_reason；按 fail-safe break 处理"
+                        );
+                        break;
+                    }
+                    FinishReasonKind::Null => {
+                        // 字段缺失或字符串 "null"：首轮/空文本视为截断变体；否则走 stop 路径
+                        tracing::warn!(
+                            event = "null_finish_reason",
+                            round = round,
+                            had_tool = had_tool_in_session,
+                            text_len = outcome.text.len(),
+                            "[terminal_agent] finish_reason=null"
+                        );
+                        if !had_tool_in_session || is_empty_text {
+                            break;
+                        }
+                        // 落入 stop 分支（下方统一处理 reminder 注入）
+                    }
+                    FinishReasonKind::Stop | FinishReasonKind::ToolCalls => {
+                        // stop：流式正常结束；tool_calls 在此处不可达（已被外层 tool_calls 非空捕获）
+                    }
+                }
+
+                // stop / null(归一化后) 路径：had_tool + text>0 + effective>0 → reminder 注入
+                if had_tool_in_session && !is_empty_text && effective_max_reminders > 0 {
+                    if mid_session_reminder_count < effective_max_reminders {
+                        mid_session_reminder_count += 1;
+                        tracing::info!(
+                            event = "reminder_injected",
+                            round = round,
+                            reminder_count = mid_session_reminder_count,
+                            max_reminders = effective_max_reminders,
+                            had_tool = had_tool_in_session,
+                            text_len = outcome.text.len(),
+                            finish_reason = ?outcome.finish_reason,
+                            "[terminal_agent] reminder 注入本轮循环"
+                        );
+                        messages.push(Message::text(Role::User, MID_SESSION_REMINDER_TEXT));
+                        continue;
+                    } else {
+                        // 区分两种 cause（review_code P1-2）：
+                        // - quota_exhausted: 用户配额（max_mid_session_reminders）已用完
+                        // - rounds_exhausted: 剩余 MAX_ROUNDS 不足继续 reminder
+                        let cause = if mid_session_reminder_count >= max_mid_session_reminders {
+                            "quota_exhausted"
+                        } else {
+                            "rounds_exhausted"
+                        };
+                        tracing::warn!(
+                            event = "premature_break",
+                            cause = cause,
+                            round = round,
+                            reminder_count = mid_session_reminder_count,
+                            max_reminders = max_mid_session_reminders,
+                            effective_max_reminders = effective_max_reminders,
+                            had_tool = had_tool_in_session,
+                            text_len = outcome.text.len(),
+                            finish_reason = ?outcome.finish_reason,
+                            "[terminal_agent] 假性终结 break ({cause})"
+                        );
+                        full_text.push_str("\n\n");
+                        full_text.push_str(&t!("TerminalAgent.mid_session_aborted").to_string());
+                        break;
+                    }
+                }
+
+                // 既有 warn 日志保留——便于排查"自动停止"路径
+                if had_tool_in_session && !is_empty_text {
                     tracing::warn!(
                         "[terminal_agent] 第 {round} 轮已执行过 tool_call 后返回 text-only (text={}B, finish_reason={:?})；用户报告的『自动停止』疑似本路径",
                         outcome.text.len(),

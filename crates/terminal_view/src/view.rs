@@ -881,7 +881,7 @@ impl TerminalView {
     ) -> Self {
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
-        let terminal = cx.new(move |cx| {
+        let terminal = <gpui::App as gpui::AppContext>::new(cx, move |cx| {
             let (terminal, error) = Terminal::new_local_or_disconnected(config, cx);
             *init_error_clone.borrow_mut() = error;
             terminal
@@ -924,7 +924,7 @@ impl TerminalView {
             .unwrap_or(true)
             .then_some(restore_state.pty_session_id.clone())
             .flatten();
-        let terminal = cx.new(move |cx| {
+        let terminal = <gpui::App as gpui::AppContext>::new(cx, move |cx| {
             #[cfg(unix)]
             if let Some(session_id) = pty_session_id.clone() {
                 match Terminal::new_local_hosted_attach(config.clone(), session_id, cx) {
@@ -985,7 +985,7 @@ impl TerminalView {
         // 创建 SSH Terminal Entity
         let connection_id = conn.id;
         let stored_conn = conn.clone();
-        let terminal = cx.new(|cx| {
+        let terminal = <gpui::App as gpui::AppContext>::new(cx, |cx| {
             Terminal::new_ssh(
                 conn,
                 cx,
@@ -1017,7 +1017,7 @@ impl TerminalView {
     ) -> Self {
         let connection_id = conn.id;
         let stored_conn = conn.clone();
-        let terminal = cx.new(|cx| {
+        let terminal = <gpui::App as gpui::AppContext>::new(cx, |cx| {
             Terminal::new_ssh_with_recovery(
                 conn,
                 cx,
@@ -1049,7 +1049,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Self {
         let connection_id = conn.id;
-        let terminal = cx.new(|cx| Terminal::new_serial(conn, cx));
+        let terminal = <gpui::App as gpui::AppContext>::new(cx, |cx| Terminal::new_serial(conn, cx));
         // 串口不传 stored_connection，避免创建文件管理器面板
         Self::new_with_terminal(terminal, connection_id, None, true, tab_index, window, cx)
     }
@@ -1063,7 +1063,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let blink_manager = cx.new(|_| BlinkCursor::new());
+        let blink_manager = <gpui::App as gpui::AppContext>::new(cx, |_| BlinkCursor::new());
 
         // 获取初始颜色
         let colors = terminal.read(cx).term().lock().colors().clone();
@@ -1073,7 +1073,7 @@ impl TerminalView {
         let ssh_session_manager = terminal.read(cx).ssh_session_manager().cloned();
 
         // 创建侧边栏（传递 StoredConnection 用于文件管理器）
-        let sidebar = cx.new(|cx| {
+        let sidebar = <gpui::App as gpui::AppContext>::new(cx, |cx| {
             TerminalSidebar::new(
                 connection_id,
                 stored_connection,
@@ -4197,7 +4197,7 @@ impl TerminalView {
                 view.resizing = Some(ResizingPanel::Sidebar);
                 cx.notify();
             });
-            cx.new(|_| info.deref().clone())
+            <gpui::App as gpui::AppContext>::new(cx, |_| info.deref().clone())
         })
     }
 
@@ -4253,7 +4253,7 @@ pub fn build_local_terminal(
         working_dir,
         ..Default::default()
     };
-    let view = cx.new(|cx| {
+    let view = <gpui::App as gpui::AppContext>::new(cx, |cx| {
         TerminalView::new_restored_local_with_index(
             config,
             local_terminal.clone(),
@@ -4341,7 +4341,7 @@ impl TabContent for TerminalView {
                 let terminal = self.terminal.read(cx);
                 let working_dir = terminal.latest_working_dir();
                 let buffer_content = trim_recovery_content_to_recent_chars(
-                    terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
+                    terminal.recovery_content(configured_recovery_scrollback_lines(cx), 0),
                     configured_recovery_max_chars(cx),
                 );
                 let ssh_terminal = (working_dir.is_some() || buffer_content.is_some()).then_some(
@@ -4380,7 +4380,7 @@ impl TabContent for TerminalView {
             TerminalConnectionKind::Local => {
                 let terminal = self.terminal.read(cx);
                 let buffer_content = trim_recovery_content_to_recent_chars(
-                    terminal.recovery_content(configured_recovery_scrollback_lines(cx)),
+                    terminal.recovery_content(configured_recovery_scrollback_lines(cx), 0),
                     configured_recovery_max_chars(cx),
                 );
                 let pty_session_id = terminal.local_pty_session_id().map(str::to_string);
@@ -5665,7 +5665,7 @@ mod tests {
 
         let window = cx.update(|cx| {
             cx.open_window(Default::default(), |window, cx| {
-                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+                <gpui::App as gpui::AppContext>::new(cx, |cx| TerminalView::new(LocalConfig::default(), window, cx))
             })
             .expect("应创建终端测试窗口")
         });
@@ -5728,7 +5728,7 @@ mod tests {
 
         let window = cx.update(|cx| {
             cx.open_window(Default::default(), |window, cx| {
-                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+                <gpui::App as gpui::AppContext>::new(cx, |cx| TerminalView::new(LocalConfig::default(), window, cx))
             })
             .expect("应创建终端测试窗口")
         });

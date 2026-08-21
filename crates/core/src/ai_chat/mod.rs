@@ -95,6 +95,9 @@ pub struct GlobalChatSettings {
     pub ai_auto_generate_session_title: bool,
     /// 是否在终端侧栏启用 Agent 调度模式（关闭时降级为纯聊天路径）
     pub ai_terminal_agent_enabled: bool,
+    /// 终端 Agent 在多轮工具调用后遇到 text-only 中间态的最大 reminder 续轮次数
+    /// （0 = 关闭 reminder，行为等价于 commit 0dddf152；默认 1）
+    pub ai_terminal_agent_mid_session_reminders: usize,
 }
 
 impl Default for GlobalChatSettings {
@@ -102,6 +105,7 @@ impl Default for GlobalChatSettings {
         Self {
             ai_auto_generate_session_title: false,
             ai_terminal_agent_enabled: true,
+            ai_terminal_agent_mid_session_reminders: 1,
         }
     }
 }

@@ -219,6 +219,12 @@ impl TerminalSidebar {
                 if let Some(handle) = crate::agent_bridge::operator_handle(cx) {
                     panel.set_agent_dispatch(true, cx);
                     panel.set_capability_value(crate::agent_bridge::CAP_TERMINAL, handle);
+                    // 桥接 settings 字段 → agent capability（reminder 配额）
+                    let max_reminders = cx
+                        .try_global::<GlobalChatSettings>()
+                        .map(|settings| settings.ai_terminal_agent_mid_session_reminders)
+                        .unwrap_or(1);
+                    panel.set_capability_value(crate::agents::CAP_MAX_REMINDERS, max_reminders);
                     panel.set_code_block_renderer(tool_card::render_omnihub_tool_block, cx);
                 } else {
                     // 桥接未就绪时静默降级为纯聊天路径，但留下日志便于排查

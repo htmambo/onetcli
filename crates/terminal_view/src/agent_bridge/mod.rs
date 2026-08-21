@@ -6,6 +6,8 @@
 
 mod pump;
 
+use std::sync::Arc;
+
 use anyhow::{Result, anyhow};
 use gpui::{App, Global};
 use tokio::sync::{mpsc, oneshot};
@@ -24,11 +26,20 @@ pub struct WriteOutcome {
     pub output: String,
     /// 是否因超时中断等待（命令可能仍在运行或进入交互模式）。
     pub timed_out: bool,
+    /// 写入命令前终端的总行数（含 history + screen）；用于 since_last_write 跟踪。
+    pub line_count_before_write: usize,
 }
 
 /// 桥接全局状态：持有命令通道发送端。
 struct TerminalBridge {
     tx: mpsc::Sender<TerminalOpRequest>,
+    last_write_lines: Arc<LastWriteLineMap>,
+}
+
+/// 共享状态：每个 terminal_id 上次 write_to_terminal 成功后的总行数（用于 since_last_write）。
+#[derive(Default)]
+struct LastWriteLineMap {
+    inner: std::sync::Mutex<std::collections::HashMap<u64, usize>>,
 }
 
 impl Global for TerminalBridge {}
@@ -43,17 +54,21 @@ pub fn init(cx: &mut App) {
         return;
     }
     let (tx, rx) = mpsc::channel(BRIDGE_CHANNEL_CAPACITY);
-    cx.set_global(TerminalBridge { tx });
+    cx.set_global(TerminalBridge {
+        tx,
+        last_write_lines: Arc::new(LastWriteLineMap::default()),
+    });
     cx.spawn(async move |cx| pump::pump_loop(cx, rx).await)
         .detach();
 }
 
 /// 获取注入 AgentContext 的操作句柄；桥接未初始化时返回 None。
 pub fn operator_handle(cx: &App) -> Option<TerminalOperatorHandle> {
-    cx.try_global::<TerminalBridge>()
-        .map(|bridge| TerminalOperatorHandle {
-            tx: bridge.tx.clone(),
-        })
+    let bridge = cx.try_global::<TerminalBridge>()?;
+    Some(TerminalOperatorHandle {
+        tx: bridge.tx.clone(),
+        last_write_lines: bridge.last_write_lines.clone(),
+    })
 }
 
 /// 桥接命令请求（每个变体携带 oneshot 回执）。
@@ -64,6 +79,7 @@ pub(crate) enum TerminalOpRequest {
     ReadOutput {
         terminal_id: u64,
         max_lines: usize,
+        from_line: usize,
         reply: oneshot::Sender<Result<String>>,
     },
     WriteCommand {
@@ -90,13 +106,42 @@ pub(crate) enum TerminalOpRequest {
 #[derive(Clone)]
 pub struct TerminalOperatorHandle {
     tx: mpsc::Sender<TerminalOpRequest>,
+    last_write_lines: Arc<LastWriteLineMap>,
+}
+
+impl LastWriteLineMap {
+    fn get(&self, terminal_id: u64) -> Option<usize> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&terminal_id).copied())
+    }
+    fn set(&self, terminal_id: u64, line_count: usize) {
+        if let Ok(mut m) = self.inner.lock() {
+            m.insert(terminal_id, line_count);
+        }
+    }
+}
+
+impl TerminalOperatorHandle {
+    /// 读取指定终端上次 write_to_terminal 成功时的总行数；首次 read 或从未 write 返回 None。
+    pub fn last_write_line_count(&self, terminal_id: u64) -> Option<usize> {
+        self.last_write_lines.get(terminal_id)
+    }
+    /// 写入命令成功后由 pump 调用，记录"当前总行数"作为下次 read 的起点。
+    pub(crate) fn record_last_write_line_count(&self, terminal_id: u64, line_count: usize) {
+        self.last_write_lines.set(terminal_id, line_count);
+    }
 }
 
 impl TerminalOperatorHandle {
     /// 测试构造：直接给定通道发送端。
     #[cfg(test)]
     pub(crate) fn from_sender(tx: mpsc::Sender<TerminalOpRequest>) -> Self {
-        Self { tx }
+        Self {
+            tx,
+            last_write_lines: Arc::new(LastWriteLineMap::default()),
+        }
     }
 
     /// 枚举当前存活终端。
@@ -106,10 +151,18 @@ impl TerminalOperatorHandle {
     }
 
     /// 读取终端屏幕与回滚内容（按行截断）。
-    pub async fn read_output(&self, terminal_id: u64, max_lines: usize) -> Result<String> {
+    /// `from_line` 表示"自绝对行号 N 开始读"（0 = 终端最早一行）；
+    /// 典型用法 `from_line = last_write_line_count` 实现"自上次 write 后的输出"。
+    pub async fn read_output(
+        &self,
+        terminal_id: u64,
+        max_lines: usize,
+        from_line: usize,
+    ) -> Result<String> {
         self.roundtrip(|reply| TerminalOpRequest::ReadOutput {
             terminal_id,
             max_lines,
+            from_line,
             reply,
         })
         .await?

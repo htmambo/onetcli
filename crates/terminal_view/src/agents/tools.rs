@@ -63,12 +63,13 @@ pub(crate) fn tool_definitions() -> Vec<Tool> {
         ),
         tool(
             "read_terminal_output",
-            "读取终端输出，返回最近的尾部内容（从底部向上最多 max_lines 行）",
+            "读取终端输出。默认 since_last_write=true，仅返回自上次 write_to_terminal 后的输出；设为 false 则读全终端尾部 max_lines 行。",
             serde_json::json!({
                 "type": "object",
                 "properties": {
                     "terminal_id": terminal_id(false),
-                    "max_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "description": "最大行数，默认 200，上限 2000" }
+                    "max_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "description": "最大行数，默认 200，上限 2000" },
+                    "since_last_write": { "type": "boolean", "default": true, "description": "true（默认）= 仅返回自上次 write_to_terminal 后的输出；false = 读全终端尾部" }
                 },
                 "additionalProperties": false
             }),
@@ -154,7 +155,17 @@ pub(crate) async fn execute_tool(
                 let max_lines = as_u64_lossy(&args["max_lines"])
                     .unwrap_or(DEFAULT_READ_LINES)
                     .clamp(1, MAX_READ_LINES);
-                match handle.read_output(id, max_lines as usize).await {
+                let since_last_write = args
+                    .get("since_last_write")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                // since_last_write=true 时取上次 write 时的总行数；缺失则退回全终端（from_line=0）
+                let from_line = if since_last_write {
+                    handle.last_write_line_count(id).unwrap_or(0)
+                } else {
+                    0
+                };
+                match handle.read_output(id, max_lines as usize, from_line).await {
                     Ok(output) => (true, truncate_output(output), ToolEffect::None),
                     Err(err) => (false, format!("读取终端输出失败: {err}"), ToolEffect::None),
                 }
