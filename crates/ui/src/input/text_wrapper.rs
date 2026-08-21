@@ -567,6 +567,33 @@ mod tests {
     use super::*;
     use gpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
 
+    // 临时探针：验证真实 LineWrapper 对 CJK 文本产生的 wrap 边界是否落在字符边界上
+    #[gpui::test]
+    fn probe_cjk_wrap_boundaries_are_char_aligned(cx: &mut gpui::TestAppContext) {
+        let font = gpui::Font {
+            family: "Menlo".into(),
+            weight: FontWeight::default(),
+            style: FontStyle::Normal,
+            features: FontFeatures::default(),
+            fallbacks: None,
+        };
+        let text = "前5的进程/应用的简介（包括但前5的进程/应用的简介（包括但前5的进程/应用的简介（包括但";
+        let mut wrapper = cx.text_system().line_wrapper(font.clone(), px(14.));
+        for width in [20.0f32, 33.3, 37.5, 53.0, 77.7, 100.0, 121.3, 200.0] {
+            let boundaries: Vec<_> = wrapper
+                .wrap_line(&[gpui::LineFragment::text(text)], px(width))
+                .collect();
+            for b in &boundaries {
+                assert!(
+                    text.is_char_boundary(b.ix),
+                    "boundary {} is not a char boundary (width {})",
+                    b.ix,
+                    width
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_update() {
         let font = gpui::Font {

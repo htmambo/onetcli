@@ -1810,6 +1810,129 @@ fn split_runs_by_bg_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{AppContext, Context, ParentElement, Render, Styled, div};
+
+    struct CjkWrapView {
+        input: Entity<InputState>,
+    }
+
+    impl Render for CjkWrapView {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            // 窄宽度强制软换行
+            div()
+                .w(px(100.))
+                .child(crate::input::Input::new(&self.input))
+        }
+    }
+
+    /// 端到端复现：多行中文 + 软换行 + 滚动视口内反复 Shift+Up/Down 扩选，
+    /// 不得触发 UTF-8 字符边界 panic（split_at / slice）。
+    #[gpui::test]
+    fn shift_select_vertical_with_wrapped_cjk_does_not_panic(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+
+        let long_line = "前5的进程/应用的简介（包括但".repeat(20);
+        let text = format!("{0}\n{0}\n{0}\n{0}", long_line);
+
+        let input_stash = Rc::new(std::cell::RefCell::new(None::<Entity<InputState>>));
+        let stash = input_stash.clone();
+        let (_root, visual_cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .multi_line(true)
+                    .auto_grow(1, 2)
+                    .default_value(text.clone())
+            });
+            *stash.borrow_mut() = Some(input.clone());
+            let view = cx.new(|cx| CjkWrapView { input });
+            crate::Root::new(view, window, cx)
+        });
+        let input = input_stash.borrow().clone().unwrap();
+
+        // 聚焦并把光标移到文末
+        visual_cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.focus(window, cx);
+                let end = state.text.len();
+                state.move_to(end, None, cx);
+            });
+        });
+
+        use crate::actions::{SelectDown, SelectUp};
+        for _ in 0..12 {
+            visual_cx.update(|window, cx| {
+                input.update(cx, |state, cx| state.select_up(&SelectUp, window, cx));
+            });
+        }
+        for _ in 0..24 {
+            visual_cx.update(|window, cx| {
+                input.update(cx, |state, cx| state.select_down(&SelectDown, window, cx));
+            });
+        }
+        for _ in 0..12 {
+            visual_cx.update(|window, cx| {
+                input.update(cx, |state, cx| state.select_up(&SelectUp, window, cx));
+            });
+        }
+    }
+
+    /// 回归测试：多行输入滚动后（visible_range.start > 0），纯文本/IME 分支的 runs
+    /// 按全文绝对坐标构建，必须先在 prepaint 重定基到可见范围，再交给 layout_lines
+    /// 用局部偏移切分；否则 run 边界错位落在 UTF-8 字符中间，
+    /// MacTextSystem::layout_line 的 split_at 会 panic：
+    /// `byte index 12 is not a char boundary; it is inside '程' (bytes 10..13)`。
+    #[test]
+    fn scrolled_input_runs_rebase_keeps_char_boundaries() {
+        let visible_line = "前5的进程/应用的简介（包括但";
+        let first_line = "占位第一行文本";
+        let full_text = format!("{first_line}\n{visible_line}");
+        // 第二行的绝对字节范围（即 visible_range.start = 1 时）
+        let visible_start = first_line.len() + 1;
+        let visible_end = full_text.len();
+
+        let base = TextRun {
+            len: 0,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        // 绝对坐标 runs：IME marked range 在绝对偏移 12 处切了一刀
+        let runs = vec![
+            TextRun {
+                len: 12,
+                ..base.clone()
+            },
+            TextRun {
+                len: full_text.len() - 12,
+                ..base.clone()
+            },
+        ];
+
+        // bug 版本流程：直接拿绝对坐标 runs 用局部偏移切分，
+        // 第一刀 len=12 落在 '程'(bytes 10..13) 中间
+        let buggy = runs_for_range(&runs, 0, &(0..visible_line.len()));
+        let mut acc = 0;
+        let buggy_boundary_misaligned = buggy.iter().any(|run| {
+            acc += run.len;
+            !visible_line.is_char_boundary(acc)
+        });
+        assert!(buggy_boundary_misaligned);
+
+        // 修复后流程：prepaint 先把 runs 裁剪重定基到可见范围
+        let rebased = runs_for_range(&runs, 0, &(visible_start..visible_end));
+        let line_runs = runs_for_range(&rebased, 0, &(0..visible_line.len()));
+        let mut acc = 0;
+        for run in &line_runs {
+            acc += run.len;
+            assert!(
+                visible_line.is_char_boundary(acc),
+                "run boundary {acc} is not a char boundary of {visible_line:?}"
+            );
+        }
+        assert_eq!(acc, visible_line.len(), "runs 必须完整覆盖可见行");
+    }
 
     #[test]
     fn test_runs_for_range() {
