@@ -155,6 +155,9 @@ pub struct AppSettings {
     /// 是否在终端侧栏启用 Agent 调度模式（关闭时降级为纯聊天）
     #[serde(default = "theme_utils::default_true")]
     pub ai_terminal_agent_enabled: bool,
+    /// 终端 Agent 多轮工具调用后 text-only 中间态的最大 reminder 续轮次数（0 = 关闭 reminder，行为等价于 commit 0dddf152）
+    #[serde(default = "default_ai_terminal_agent_mid_session_reminders")]
+    pub ai_terminal_agent_mid_session_reminders: usize,
     #[serde(default = "hotkey::default_system_hotkey_macos")]
     pub system_hotkey_macos: String,
     #[serde(default = "hotkey::default_system_hotkey_other")]
@@ -166,6 +169,10 @@ pub struct AppSettings {
 
 fn default_locale() -> String {
     locale::LOCALE_SYSTEM.to_string()
+}
+
+fn default_ai_terminal_agent_mid_session_reminders() -> usize {
+    1
 }
 
 impl Default for AppSettings {
@@ -225,6 +232,7 @@ impl Default for AppSettings {
             sql_query_max_rows: theme_utils::default_sql_query_max_rows(),
             ai_auto_generate_session_title: false,
             ai_terminal_agent_enabled: true,
+            ai_terminal_agent_mid_session_reminders: default_ai_terminal_agent_mid_session_reminders(),
             system_hotkey_macos: hotkey::default_system_hotkey_macos(),
             system_hotkey_other: hotkey::default_system_hotkey_other(),
             ssh_auto_accept_new_keys: false,
