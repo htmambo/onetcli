@@ -825,6 +825,12 @@ impl TextElement {
             let mut wrapped_lines = SmallVec::with_capacity(1);
 
             for range in &line_item.wrapped_lines {
+                // 防御 wrap range 落在 UTF-8 字符中间：clip 到字符边界
+                // （GPUI LineWrapper 按 byte 算 wrap，range 可能在 CJK 等多字节字符内；
+                // 不处理会触发 str::slice panic，如 '名' bytes 22..25 + range end 24）
+                let safe_start = floor_char_boundary(line, range.start);
+                let safe_end = ceil_char_boundary(line, range.end);
+                let range = safe_start..safe_end;
                 let line_runs = runs_for_range(runs, offset, &range);
                 let line_runs = if document_bg_segments.is_empty() {
                     line_runs
@@ -1901,5 +1907,92 @@ mod tests {
         assert_eq!(result[3].color, gpui::black());
         assert_eq!(result[4].color, gpui::black());
         assert_eq!(result[5].color, gpui::blue());
+    }
+}
+
+/// 把 byte offset 向下对齐到最近的字符边界（panic-safe 取 range.start）。
+/// 如果 offset 已在字符边界，原样返回；否则回退到前一个边界。
+/// 用于防御 GPUI LineWrapper 按 byte 算 wrap 范围时落在 CJK 等多字节字符中间。
+fn floor_char_boundary(s: &str, offset: usize) -> usize {
+    if offset >= s.len() {
+        return s.len();
+    }
+    if s.is_char_boundary(offset) {
+        return offset;
+    }
+    // 二分查找前一个字符边界
+    let mut lo = 0usize;
+    let mut hi = offset;
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if s.is_char_boundary(mid) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// 把 byte offset 向上对齐到最近的字符边界（panic-safe 取 range.end）。
+/// 如果 offset 已在字符边界，原样返回；否则前进到下一个边界。
+fn ceil_char_boundary(s: &str, offset: usize) -> usize {
+    if offset >= s.len() {
+        return s.len();
+    }
+    if s.is_char_boundary(offset) {
+        return offset;
+    }
+    // 二分查找后一个字符边界
+    let mut lo = offset;
+    let mut hi = s.len();
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if s.is_char_boundary(mid) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo
+}
+
+#[cfg(test)]
+mod char_boundary_tests {
+    use super::{ceil_char_boundary, floor_char_boundary};
+
+    #[test]
+    fn floor_aligns_to_previous_char_boundary() {
+        // '名' = UTF-8 bytes 22..25
+        // 0..24 中含 byte 24（落在 '名' 中间）
+        let s = "0123456789012345678901名rest";
+        // offset=24 应回退到 22（'名' 起点）
+        assert_eq!(floor_char_boundary(s, 24), 22);
+        // 已在边界
+        assert_eq!(floor_char_boundary(s, 22), 22);
+        // 超过长度
+        assert_eq!(floor_char_boundary(s, 1000), s.len());
+    }
+
+    #[test]
+    fn ceil_aligns_to_next_char_boundary() {
+        let s = "0123456789012345678901名rest";
+        // offset=24 应前进到 25（'名' 终点）
+        assert_eq!(ceil_char_boundary(s, 24), 25);
+        // 已在边界
+        assert_eq!(ceil_char_boundary(s, 22), 22);
+        assert_eq!(ceil_char_boundary(s, 25), 25);
+        // 超过长度
+        assert_eq!(ceil_char_boundary(s, 1000), s.len());
+    }
+
+    #[test]
+    fn handles_pure_ascii() {
+        let s = "hello world";
+        // 全部是字符边界
+        for i in 0..=s.len() {
+            assert_eq!(floor_char_boundary(s, i), i);
+            assert_eq!(ceil_char_boundary(s, i), i);
+        }
     }
 }
