@@ -44,11 +44,11 @@ pub(crate) enum ToolEffect {
 pub(crate) fn tool_definitions() -> Vec<Tool> {
     let terminal_id = |required: bool| {
         let desc = if required {
-            "终端 id（取自 get_terminal_list）"
+            "终端 id（取自 get_terminal_list.focused_id 或 terminals[].id）"
         } else {
-            "终端 id（取自 get_terminal_list），缺省为终端列表第一个"
+            "终端 id（取自 get_terminal_list）。缺省时（不传或传 null）自动采用当前聚焦终端（focused_id）。多轮对话中用户在两次调用之间可能切换激活终端，请勿复用之前轮次选中的 id：要么不传，要么先调 get_terminal_list 重新读取 focused_id 再传。"
         };
-        serde_json::json!({ "type": "integer", "minimum": 0, "description": desc })
+        serde_json::json!({ "type": ["integer", "null"], "minimum": 0, "description": desc })
     };
     vec![
         tool(
@@ -275,11 +275,10 @@ async fn resolve_terminal(
                 .list_terminals()
                 .await
                 .map_err(|err| format!("枚举终端失败: {err}"))?;
-            snapshot
-                .focused_id
-                .ok_or_else(|| {
-                    "当前没有任何终端获得焦点。请先在界面上点击你想操作的终端标签，再让 AI 操作。".to_string()
-                })
+            snapshot.focused_id.ok_or_else(|| {
+                "当前没有任何终端获得焦点。请先在界面上点击你想操作的终端标签，再让 AI 操作。"
+                    .to_string()
+            })
         }
     }
 }
@@ -642,7 +641,10 @@ mod tests {
         let id = resolve_terminal(&bridge.handle, &mock_args(None))
             .await
             .expect("应有聚焦终端");
-        assert_eq!(id, 2, "缺省 terminal_id 时应取聚焦 id=2，而非列表第一个 id=1");
+        assert_eq!(
+            id, 2,
+            "缺省 terminal_id 时应取聚焦 id=2，而非列表第一个 id=1"
+        );
     }
 
     #[tokio::test]
@@ -687,12 +689,38 @@ mod tests {
         )
         .await;
         assert!(ok);
-        let payload: serde_json::Value =
-            serde_json::from_str(&output).expect("JSON 应可解析");
+        let payload: serde_json::Value = serde_json::from_str(&output).expect("JSON 应可解析");
         assert_eq!(payload["focused_id"], serde_json::json!(2));
         let terms = payload["terminals"].as_array().expect("terminals 是数组");
         assert_eq!(terms.len(), 2);
         assert_eq!(terms[0]["is_focused"], serde_json::json!(false));
         assert_eq!(terms[1]["is_focused"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn resolve_terminal_follows_focus_change_between_calls() {
+        // 用户报告：切换激活终端后 AI 仍操作上一个终端。
+        // 修复点：`resolve_terminal` 不缓存，每次调用重新查 focused_id。
+        // 验证：第一次 resolve 取 focused=1；模拟切换到 2；第二次 resolve 取 2 而非 1。
+        let (bridge, focused) = crate::agents::tests::spawn_mock_bridge_with_switchable_focus();
+
+        let first = resolve_terminal(&bridge.handle, &mock_args(None))
+            .await
+            .expect("首次 resolve 应有焦点");
+        assert_eq!(first, 1, "初始聚焦 id=1");
+
+        // 模拟用户在两次工具调用之间切换到 id=2
+        *focused.lock().unwrap() = Some(2);
+
+        let second = resolve_terminal(&bridge.handle, &mock_args(None))
+            .await
+            .expect("切换后 resolve 应有焦点");
+        assert_eq!(second, 2, "切换焦点后缺省应取新焦点 id=2，而非复用上次的 1");
+
+        // 显式传 1 仍应优先于新焦点（验证显式覆盖语义未变）
+        let explicit = resolve_terminal(&bridge.handle, &mock_args(Some(1)))
+            .await
+            .expect("显式 id 应通过");
+        assert_eq!(explicit, 1, "显式 id=1 应覆盖新焦点 id=2");
     }
 }

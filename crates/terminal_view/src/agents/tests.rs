@@ -16,7 +16,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::terminal_operator::TerminalOperatorAgent;
 use crate::TerminalConnectionKind;
-use crate::agent_bridge::{TerminalListSnapshot, TerminalOpRequest, TerminalOperatorHandle, WriteOutcome};
+use crate::agent_bridge::{
+    TerminalListSnapshot, TerminalOpRequest, TerminalOperatorHandle, WriteOutcome,
+};
 use crate::registry::TerminalInfo;
 
 /// 脚本化 mock Provider：每次 chat_stream 弹出一段预设 chunk 序列。
@@ -281,6 +283,74 @@ pub(super) fn spawn_mock_bridge_no_focus() -> MockBridge {
         handle: TerminalOperatorHandle::from_sender(tx),
         written,
     }
+}
+
+/// 构造 mock bridge：持有可运行时切换的 `focused_id`。
+/// 用于验证"用户在两次工具调用之间切换激活终端，缺省 terminal_id 解析跟随新焦点"。
+///
+/// 返回 `(MockBridge, focused_id_setter)`：setter 接受新 focused_id 写入共享 cell，
+/// 下一次 `list_terminals()` 调用即可观察到。
+pub(super) fn spawn_mock_bridge_with_switchable_focus() -> (MockBridge, Arc<Mutex<Option<u64>>>) {
+    let (tx, mut rx) = mpsc::channel::<TerminalOpRequest>(16);
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let focused: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(Some(1)));
+    let written_clone = written.clone();
+    let focused_clone = focused.clone();
+    tokio::spawn(async move {
+        while let Some(request) = rx.recv().await {
+            match request {
+                TerminalOpRequest::ListTerminals { reply } => {
+                    let focused_id = *focused_clone.lock().unwrap();
+                    let terminals = vec![
+                        TerminalInfo {
+                            id: 1,
+                            title: "t1".to_string(),
+                            connection_kind: TerminalConnectionKind::Local,
+                            cwd: Some("/tmp".to_string()),
+                            is_focused: focused_id == Some(1),
+                        },
+                        TerminalInfo {
+                            id: 2,
+                            title: "t2".to_string(),
+                            connection_kind: TerminalConnectionKind::Local,
+                            cwd: Some("/tmp".to_string()),
+                            is_focused: focused_id == Some(2),
+                        },
+                    ];
+                    let _ = reply.send(TerminalListSnapshot {
+                        focused_id,
+                        terminals,
+                    });
+                }
+                TerminalOpRequest::ReadOutput { reply, .. } => {
+                    let _ = reply.send(Ok("ok".to_string()));
+                }
+                TerminalOpRequest::WriteCommand { reply, .. } => {
+                    let _ = reply.send(Ok(WriteOutcome {
+                        output: "ok".to_string(),
+                        timed_out: false,
+                        line_count_before_write: 0,
+                    }));
+                }
+                TerminalOpRequest::GetCwd { reply, .. } => {
+                    let _ = reply.send(Ok(Some("/tmp".to_string())));
+                }
+                TerminalOpRequest::GetSelection { reply, .. } => {
+                    let _ = reply.send(Ok(None));
+                }
+                TerminalOpRequest::Focus { reply, .. } => {
+                    let _ = reply.send(Ok(()));
+                }
+            }
+        }
+    });
+    (
+        MockBridge {
+            handle: TerminalOperatorHandle::from_sender(tx),
+            written,
+        },
+        focused,
+    )
 }
 
 /// 构造测试上下文（临时目录存储，不触碰真实数据库）。
