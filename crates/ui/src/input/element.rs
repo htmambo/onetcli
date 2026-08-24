@@ -824,18 +824,34 @@ impl TextElement {
 
             let mut wrapped_lines = SmallVec::with_capacity(1);
 
-            for range in &line_item.wrapped_lines {
-                // 防御 wrap range 落在 UTF-8 字符中间：clip 到字符边界
-                // （GPUI LineWrapper 按 byte 算 wrap，range 可能在 CJK 等多字节字符内；
-                // 不处理会触发 str::slice panic，如 '名' bytes 22..25 + range end 24）
-                let safe_start = floor_char_boundary(line, range.start);
-                let safe_end = ceil_char_boundary(line, range.end);
-                let range = safe_start..safe_end;
-                let line_runs = runs_for_range(runs, offset, &range);
+            // Wrap range 安全切：start 用 floor（防与上一行重复），end 用 ceil（防吞字符）。
+            // 例：'名' bytes 22..25，wrap 切在 byte 24：
+            //   start:  floor(0)=0
+            //   end:    ceil(24)=25  ← 包含完整 '名' 字符
+            // GPUI LineWrapper 按 byte 算 wrap 时 range 落在 CJK 字符中间会 panic，
+            // 因此两端必须 char-safe；这里 start=floor + end=ceil 是 char-safe 的同时
+            // 不丢字也不重复（start 是上一 wrap 行的 end floor→同一字符起点 floor→一致）。
+            let snapped: Vec<Range<usize>> = line_item
+                .wrapped_lines
+                .iter()
+                .map(|r| {
+                    let start = floor_char_boundary(line, r.start);
+                    let end = if r.end >= line.len() {
+                        line.len()
+                    } else {
+                        ceil_char_boundary(line, r.end)
+                    };
+                    start..end.max(start)
+                })
+                .collect();
+
+            for range in &snapped {
+                let line_runs = runs_for_range(line, runs, offset, range);
                 let line_runs = if document_bg_segments.is_empty() {
                     line_runs
                 } else {
                     split_runs_by_bg_segments(
+                        line,
                         visible_range_offset.start + offset,
                         &line_runs,
                         document_bg_segments,
@@ -845,13 +861,18 @@ impl TextElement {
                     line_runs
                 } else {
                     split_runs_by_bg_segments(
+                        line,
                         visible_range_offset.start + offset,
                         &line_runs,
                         selection_bg_segments,
                     )
                 };
 
+                // 同向 floor clip 已经把 range 钳到字符边界，直接切片安全
                 let sub_line: SharedString = line[range.clone()].to_string().into();
+                // 终末防御：累加每个 run.len，如果落在 sub_line 字符中间，向前 floor
+                // （之前所有 layer 都已 clip，这里是兜底，防止任何遗漏的 byte↔char 错位）
+                let line_runs = char_safe_runs(&sub_line, line_runs);
                 let shaped_line = window
                     .text_system()
                     .shape_line(sub_line, font_size, &line_runs, None);
@@ -1708,8 +1729,16 @@ impl Element for TextElement {
 
 /// Get the runs for the given range.
 ///
-/// The range is the byte range of the wrapped line.
+/// `line` 用于把每个 run.len 对齐到字符边界：tree-sitter / IME 的 run 边界
+/// 按 byte 计，可能落在 CJK 等多字节字符中间。GPUI 的 `shape_line` 内部
+/// 走 `str::split_at(run.len)`，要求 `run.len` 必须是 `line` 的字符边界，
+/// 否则 `end byte index N is not a char boundary` panic。
+///
+/// 切策略：start 用 floor（与上一 run 接续），end 用 ceil（避免吞完整 CJK 字符）。
+/// 副作用：相邻 run 可能在同一 CJK 字符中间各持一段，但下一 run 起点 floor
+/// 会与本 run 终点 ceil 重合在该字符起点 → 仍然 char-safe，且不丢字。
 pub(super) fn runs_for_range(
+    line: &str,
     runs: &[TextRun],
     line_offset: usize,
     range: &Range<usize>,
@@ -1717,6 +1746,9 @@ pub(super) fn runs_for_range(
     let mut result = vec![];
     let range = (line_offset + range.start)..(line_offset + range.end);
     let mut cursor = 0;
+    // 上一 run 在 line 内的 safe_end（绝对字节 = line_offset + 本地）。
+    // 用它保证下一 run 起点不越过上一 run 终点（避免重复画同一字符）。
+    let mut prev_local_end: Option<usize> = None;
 
     for run in runs {
         let run_start = cursor;
@@ -1731,12 +1763,26 @@ pub(super) fn runs_for_range(
             break;
         }
 
-        let start = range.start.max(run_start) - run_start;
-        let end = range.end.min(run_end) - run_start;
-        let len = end - start;
+        // 在 line 内的绝对字节偏移（line 起点 = line_offset）
+        let line_local_start = range.start - line_offset;
+        let line_local_end = range.end - line_offset;
+        let clipped_start = range.start.max(run_start) - line_offset;
+        let clipped_end = range.end.min(run_end) - line_offset;
+
+        // start 用 floor（防与上一 run 重叠），end 用 ceil（不吞完整字符）。
+        // 下一 run 起点必须 ≥ 上一 run 在 line 内的终点。
+        let floor_local_start = floor_char_boundary(line, clipped_start.min(line.len()));
+        let mut safe_start = floor_local_start.max(line_local_start);
+        if let Some(prev_end) = prev_local_end {
+            safe_start = safe_start.max(prev_end);
+        }
+        let safe_end_raw = ceil_char_boundary(line, clipped_end.min(line.len()));
+        let safe_end = safe_end_raw.max(safe_start).min(line_local_end);
+        let len = safe_end - safe_start;
 
         if len > 0 {
             result.push(TextRun { len, ..run.clone() });
+            prev_local_end = Some(safe_end);
         }
 
         cursor = run_end;
@@ -1745,7 +1791,26 @@ pub(super) fn runs_for_range(
     result
 }
 
+/// 终末防御：对每个 `TextRun.len` 累加向前 **ceil** clip 到 `sub_line` 的字符边界。
+/// GPUI 的 `shape_line` 内部走 `text.split_at(run.len)`，要求 `run.len` 必须是
+/// `sub_line` 的字符边界。前置 layer（wrap range / runs_for_range /
+/// split_runs_by_bg_segments）已分别 clip，但仍可能有遗漏的 byte↔char 错位
+/// （IME marked range、CJK wrap、tree-sitter highlight 边界等）。
+///
+/// ceil 而非 floor：让每个 run 延伸到字符尾，避免吞完整字符；
+/// 下一 run 起点（由 ceil 的累计值）仍是字符边界，char-safe。
+fn char_safe_runs(sub_line: &str, mut runs: Vec<TextRun>) -> Vec<TextRun> {
+    let mut acc = 0usize;
+    for r in &mut runs {
+        let new_acc = ceil_char_boundary(sub_line, acc + r.len);
+        r.len = new_acc.saturating_sub(acc);
+        acc = new_acc;
+    }
+    runs
+}
+
 fn split_runs_by_bg_segments(
+    line: &str,
     start_offset: usize,
     runs: &[TextRun],
     bg_segments: &[(Range<usize>, Hsla)],
@@ -1757,8 +1822,35 @@ fn split_runs_by_bg_segments(
         let mut run_start = cursor;
         let run_end = cursor + run.len;
 
-        for (bg_range, bg_color) in bg_segments {
-            if run_end <= bg_range.start || run_start >= bg_range.end {
+        // 把 run 内的 [run_start, run_end] 钳到 line 的字符边界：
+        // start 用 floor（与上一 run 接续），end 用 ceil（不吞完整 CJK 字符）
+        let run_local_start = floor_char_boundary(line, (run_start - start_offset).min(line.len()));
+        let run_local_end =
+            ceil_char_boundary(line, (run_end - start_offset).min(line.len())).max(run_local_start);
+        run_start = start_offset + run_local_start;
+        let run_end_safe = start_offset + run_local_end;
+
+        for (raw_bg_range, bg_color) in bg_segments {
+            // bg_range 是全文绝对字节偏移。钳到 line 字符边界：
+            // start 用 floor、end 用 ceil，避免把选区终点落在字符中间导致
+            // 该字符不被染色。
+            let bg_range = {
+                let local_start = (raw_bg_range.start.saturating_sub(start_offset)).min(line.len());
+                let local_end = (raw_bg_range.end.saturating_sub(start_offset)).min(line.len());
+                if local_end == 0 || local_start >= line.len() {
+                    continue;
+                }
+                let safe_local_start = floor_char_boundary(line, local_start);
+                let safe_local_end = ceil_char_boundary(line, local_end).max(safe_local_start);
+                if safe_local_start >= safe_local_end {
+                    continue;
+                }
+                let safe_start = start_offset + safe_local_start;
+                let safe_end = start_offset + safe_local_end;
+                safe_start..safe_end
+            };
+
+            if run_end_safe <= bg_range.start || run_start >= bg_range.end {
                 continue;
             }
 
@@ -1773,7 +1865,7 @@ fn split_runs_by_bg_segments(
 
             // Add the overlapping part with background color
             let overlap_start = run_start.max(bg_range.start);
-            let overlap_end = run_end.min(bg_range.end);
+            let overlap_end = run_end_safe.min(bg_range.end);
             let text_color = if bg_color.l >= 0.5 {
                 gpui::black()
             } else {
@@ -1793,10 +1885,10 @@ fn split_runs_by_bg_segments(
             }
         }
 
-        if run_end > cursor {
+        if run_end_safe > cursor {
             // Add the part after the background range
             result.push(TextRun {
-                len: run_end - cursor,
+                len: run_end_safe - cursor,
                 ..run.clone()
             });
         }
@@ -1844,7 +1936,7 @@ mod tests {
                     .default_value(text.clone())
             });
             *stash.borrow_mut() = Some(input.clone());
-            let view = cx.new(|cx| CjkWrapView { input });
+            let view = cx.new(|_cx| CjkWrapView { input });
             crate::Root::new(view, window, cx)
         });
         let input = input_stash.borrow().clone().unwrap();
@@ -1910,28 +2002,39 @@ mod tests {
             },
         ];
 
-        // bug 版本流程：直接拿绝对坐标 runs 用局部偏移切分，
-        // 第一刀 len=12 落在 '程'(bytes 10..13) 中间
-        let buggy = runs_for_range(&runs, 0, &(0..visible_line.len()));
+        // bug 版本流程：直接拿绝对坐标 runs 用局部偏移手工切分（绕过 runs_for_range
+        // 的 char-boundary 校准），模拟修复前行为：第一刀 len=12 落在 '程'(bytes 10..13) 中间
         let mut acc = 0;
-        let buggy_boundary_misaligned = buggy.iter().any(|run| {
+        let buggy_boundary_misaligned = runs.iter().any(|run| {
             acc += run.len;
             !visible_line.is_char_boundary(acc)
         });
         assert!(buggy_boundary_misaligned);
 
-        // 修复后流程：prepaint 先把 runs 裁剪重定基到可见范围
-        let rebased = runs_for_range(&runs, 0, &(visible_start..visible_end));
-        let line_runs = runs_for_range(&rebased, 0, &(0..visible_line.len()));
+        // 修复后流程：prepaint 先把 runs 裁剪重定基到可见范围，再交给 runs_for_range
+        // 用字符边界校准切出可见行的 runs（每个 run.len 必须落在 char boundary 上）
+        let rebased = runs_for_range(visible_line, &runs, 0, &(visible_start..visible_end));
+        let line_runs = runs_for_range(visible_line, &rebased, 0, &(0..visible_line.len()));
         let mut acc = 0;
+        let mut last_boundary = 0usize;
         for run in &line_runs {
             acc += run.len;
             assert!(
                 visible_line.is_char_boundary(acc),
                 "run boundary {acc} is not a char boundary of {visible_line:?}"
             );
+            last_boundary = acc;
         }
-        assert_eq!(acc, visible_line.len(), "runs 必须完整覆盖可见行");
+        // 校准到字符边界后，acc 只能小于等于 line 长度，且最后一个 run 必须把可见行
+        // 推到 line 末尾——否则 GPUI 在 shape_line 时按 run.len 切 sub_line 会剩尾巴未渲染
+        assert!(
+            last_boundary <= visible_line.len(),
+            "run boundary 越过 line 末尾: {last_boundary} > {}",
+            visible_line.len()
+        );
+        // 把 line_runs 拼起来长度必须等于 last_boundary（说明累加无误）
+        let total: usize = line_runs.iter().map(|r| r.len).sum();
+        assert_eq!(total, last_boundary, "runs 累加自身必须一致");
     }
 
     #[test]
@@ -1980,16 +2083,159 @@ mod tests {
             assert_eq!(left, expected);
         }
 
-        assert_runs(runs_for_range(&runs, 0, &(0..0)), &[]);
-        assert_runs(runs_for_range(&runs, 0, &(0..100)), &[3, 1, 5, 1, 12]);
+        let ascii_line = "use hello this-is-test";
+        assert_runs(runs_for_range(ascii_line, &runs, 0, &(0..0)), &[]);
+        assert_runs(
+            runs_for_range(ascii_line, &runs, 0, &(0..100)),
+            &[3, 1, 5, 1, 12],
+        );
 
-        assert_runs(runs_for_range(&runs, 0, &(0..6)), &[3, 1, 2]);
-        assert_runs(runs_for_range(&runs, 0, &(1..6)), &[2, 1, 2]);
-        assert_runs(runs_for_range(&runs, 0, &(3..10)), &[1, 5, 1]);
-        assert_runs(runs_for_range(&runs, 0, &(5..8)), &[3]);
-        assert_runs(runs_for_range(&runs, 3, &(0..3)), &[1, 2]);
-        assert_runs(runs_for_range(&runs, 3, &(2..10)), &[4, 1, 3]);
-        assert_runs(runs_for_range(&runs, 9, &(0..8)), &[1, 7]);
+        assert_runs(runs_for_range(ascii_line, &runs, 0, &(0..6)), &[3, 1, 2]);
+        assert_runs(runs_for_range(ascii_line, &runs, 0, &(1..6)), &[2, 1, 2]);
+        assert_runs(runs_for_range(ascii_line, &runs, 0, &(3..10)), &[1, 5, 1]);
+        assert_runs(runs_for_range(ascii_line, &runs, 0, &(5..8)), &[3]);
+        assert_runs(runs_for_range(ascii_line, &runs, 3, &(0..3)), &[1, 2]);
+        assert_runs(runs_for_range(ascii_line, &runs, 3, &(2..10)), &[4, 1, 3]);
+        assert_runs(runs_for_range(ascii_line, &runs, 9, &(0..8)), &[1, 7]);
+    }
+
+    #[test]
+    fn runs_for_range_clamps_byte_offsets_to_char_boundaries_for_cjk() {
+        // 模拟真实场景：tree-sitter highlight_styles 把 IME marked range
+        // 切在字符中间（byte offset 12 落在 '程' (10..13) 内）。GPUI 的
+        // MacTextSystem::layout_line 内部 text.split_at(run.len) 在 run.len
+        // 不是字符边界时 panic。修复后 runs_for_range 必须把每个 run.len
+        // floor 到 line 的字符边界，杜绝 panic。
+        let visible_line = "前5的进程/应用的简介（包括但"; // 41 bytes
+        // IME 在绝对 offset 12 处切了一刀（line_offset=0）
+        let base = TextRun {
+            len: 0,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let runs = vec![
+            TextRun {
+                len: 12, // 12 落在 '程' (10..13) 中间
+                ..base.clone()
+            },
+            TextRun {
+                len: visible_line.len() - 12,
+                ..base.clone()
+            },
+        ];
+
+        let line_runs = runs_for_range(visible_line, &runs, 0, &(0..visible_line.len()));
+        // 每个累加 acc 必须是 char boundary（这是 shape_line 不 panic 的充要条件）
+        let mut acc = 0usize;
+        for run in &line_runs {
+            acc += run.len;
+            assert!(
+                visible_line.is_char_boundary(acc),
+                "run boundary {acc} is not a char boundary of {visible_line:?}"
+            );
+        }
+        // 累加总和必须等于 line 长度（"不丢字"不变量）
+        assert_eq!(
+            acc,
+            visible_line.len(),
+            "runs 累加必须等于 line.len()（不丢字）"
+        );
+        // 每个 run.len 必须落在 [1, visible_line.len()] 之间（不能 0 也不能越界）
+        for run in &line_runs {
+            assert!(run.len > 0, "run.len must be > 0");
+            assert!(
+                run.len <= visible_line.len(),
+                "run.len={} > line len",
+                run.len
+            );
+        }
+    }
+
+    #[test]
+    fn split_runs_by_bg_segments_clamps_to_char_boundaries_for_cjk() {
+        // 用户实测 panic 路径：选区字节偏移跨字符中间。
+        // selection_bg_segments 给出 (raw_start..raw_end, color) 落在 CJK 字符内
+        // （如 '应' bytes 0..3 内），split_runs_by_bg_segments 必须把 bg_range
+        // 的 start/end 都钳到 line 的字符边界，下游 shape_line 才不 panic。
+        let run = TextRun {
+            len: 0,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        // line 字符边界：0..2="CPU", 2..8="占用前", 8..10="5的", 10..16="进程应"
+        let line = "CPU占用前5的进程应用";
+        // 假设选区起点 9 落在 '的' (8..10) 中间；终点 16 是 '用' 后边界
+        // raw bg_range: [9..16]，期望被钳到 [10..16]（'进' 起点）
+        let bg_segments = vec![(9..16usize, gpui::red())];
+        let runs = vec![TextRun {
+            len: line.len(),
+            ..run.clone()
+        }];
+
+        let result = split_runs_by_bg_segments(line, 0, &runs, &bg_segments);
+        // 累加每个 TextRun.len 必须落在 line 的字符边界上
+        let mut acc = 0usize;
+        for r in &result {
+            acc += r.len;
+            assert!(
+                line.is_char_boundary(acc),
+                "bg-clipped run boundary {acc} not a char boundary of {line:?}"
+            );
+        }
+        // bg_range 起点 floor 到 10（'进' 起点），所以染色段 len = 16 - 10 = 6，
+        // 染色段前面非染色段 len = 10 - 0 = 10；累加 10 + 6 = 16 == line.len()。
+        assert_eq!(acc, line.len(), "累加必须等于 line.len()（不丢字）");
+        assert!(
+            result.len() >= 2,
+            "应有 ≥2 个 run：未染色 + 染色，实际 {}",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn char_safe_runs_clamps_to_char_boundaries() {
+        // 终末防御：累加 byte 落在字符中间时，向前 floor clip。
+        // '程' bytes 22..25：累加 24 落在中间 → floor(24)=22 → run.len=3
+        let sub_line = "前5的进程/应用的简介";
+        let base = TextRun {
+            len: 0,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        // 故意造一个会触发 panic 的输入：
+        // run0.len=12 + run1.len=29 = 41，但 run0 累加 12 落在 '程' (10..13) 中间
+        let runs = vec![
+            TextRun {
+                len: 12,
+                ..base.clone()
+            },
+            TextRun {
+                len: 29,
+                ..base.clone()
+            },
+        ];
+        let safe = char_safe_runs(sub_line, runs);
+        // 每个累加 byte 必须落在 sub_line 的字符边界上
+        let mut acc = 0usize;
+        for r in &safe {
+            acc += r.len;
+            assert!(
+                sub_line.is_char_boundary(acc),
+                "run boundary {acc} not a char boundary of {sub_line:?}"
+            );
+        }
+        // 最终 acc 必须 ≤ sub_line.len()（多余字符归到末尾 run）
+        assert!(acc <= sub_line.len());
     }
 
     #[test]
@@ -2019,7 +2265,9 @@ mod tests {
         ];
 
         let bg_segments = vec![(8..12, gpui::red()), (12..18, gpui::blue())];
-        let result = split_runs_by_bg_segments(5, &runs, &bg_segments);
+        // ASCII 测试串：line 长度 36，floor clip 是 no-op，结果与之前相同
+        let ascii_line = "abcdefghijklmnopqrstuvwxyz0123456789ab";
+        let result = split_runs_by_bg_segments(ascii_line, 5, &runs, &bg_segments);
         assert_eq!(
             result.iter().map(|run| run.len).collect::<Vec<_>>(),
             vec![3, 2, 2, 5, 1, 23]
@@ -2047,7 +2295,7 @@ fn floor_char_boundary(s: &str, offset: usize) -> usize {
     let mut lo = 0usize;
     let mut hi = offset;
     while lo < hi {
-        let mid = (lo + hi + 1) / 2;
+        let mid = (lo + hi).div_ceil(2);
         if s.is_char_boundary(mid) {
             lo = mid;
         } else {
@@ -2116,6 +2364,56 @@ mod char_boundary_tests {
         for i in 0..=s.len() {
             assert_eq!(floor_char_boundary(s, i), i);
             assert_eq!(ceil_char_boundary(s, i), i);
+        }
+    }
+
+    #[test]
+    fn floor_handles_empty_and_overflow_and_emoji() {
+        // 空串
+        assert_eq!(floor_char_boundary("", 0), 0);
+        // offset > len → clamp
+        assert_eq!(floor_char_boundary("abc", 10), 3);
+        // 4 字节 emoji（U+1F600 😀 bytes 0..4）
+        let s = "😀rest";
+        assert_eq!(floor_char_boundary(s, 0), 0);
+        assert_eq!(floor_char_boundary(s, 1), 0);
+        assert_eq!(floor_char_boundary(s, 2), 0);
+        assert_eq!(floor_char_boundary(s, 3), 0);
+        assert_eq!(floor_char_boundary(s, 4), 4);
+    }
+
+    #[test]
+    fn same_direction_floor_clip_never_duplicates_or_drops_cjk() {
+        // s 字符边界（实测）：
+        //   0..22  = "0123456789012345678901"
+        //   22..25 = "名"
+        //   25..29 = "rest"
+        //   29..32 = "世"  ← 30 是 '世' 中间
+        //   32..35 = "界"
+        //   35..38 = "abc"
+        let s = "0123456789012345678901名rest世界abc";
+
+        // 模拟 GPUI LineWrapper 给出的相邻 wrap range，共享边界落在字符中间：
+        //   r0=[0..24]  尾 24 落在 '名' 内 → floor=22（只剩 22 个 ASCII）
+        //   r1=[24..30] 头 24 落在 '名' 内 → floor=22; 尾 30 落在 '世' 内 → floor=29
+        //   r2=[30..35] 头 30 落在 '世' 内 → floor=29; 尾 35 是 '界' 后边界
+        let raw_ranges = [0..24usize, 24..30, 30..35];
+        let clipped: Vec<std::ops::Range<usize>> = raw_ranges
+            .iter()
+            .map(|r| {
+                let start = floor_char_boundary(s, r.start.min(s.len()));
+                let end = floor_char_boundary(s, r.end.min(s.len())).max(start);
+                start..end
+            })
+            .filter(|r| r.end > r.start)
+            .collect();
+
+        // 拼接后必须等于 s[0..35] —— 既不丢字也不重字
+        let joined: String = clipped.iter().map(|r| &s[r.clone()]).collect();
+        assert_eq!(joined, &s[0..35]);
+        // 关键不变量：clipped 内的 range 之间首尾相接，没有重叠
+        for w in clipped.windows(2) {
+            assert_eq!(w[0].end, w[1].start, "adjacent slices must be contiguous");
         }
     }
 }
