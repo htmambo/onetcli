@@ -7,6 +7,7 @@
 ## 已完成任务 (Archive)
 
 ### 2026-08
+- ✅ [AI 终端操作员：多 AI 并发隔离、工具上下文持久化与当前终端语义修复](Archive/2026-08/AI_TERMINAL_OPERATOR_MULTI_AI_FIX.md) - 完成于 2026-08-25（3 commits：`dd6d0ea7` 修 tokio reactor panic + 持久化工具调用中间态；`f91afb66` db_view fmt；`a908ca6d` prompt/schema 改以 host_terminal_id 为当前终端缺省；用户实测三终端并发 + 各自侧栏 AI 助手回复/运行正常）
 - ✅ [AI 终端操作员假性终结修复 + read_terminal_output since_last_write](Archive/2026-08/PREMATURE_TERMINATION_DIAGNOSIS.md) - 完成于 2026-08-21（commit message 草稿：[Archive/2026-08/COMMIT_MESSAGE_REMINDER.md](COMMIT_MESSAGE_REMINDER.md)；用户截图复现"继续" 中断；方案 B+D 落地：13 行完成判定矩阵（Length 追加截断提示 / ContentFilter fail-fast / Null 归一化 / Unknown 兜底 + 6 结构化埋点）；effective_max_reminders 钳制；`since_last_write: bool` 参数默认 true（按 terminal_id 跟踪 last_write_lines）；39 单元测试通过；fmt/clippy clean）
 - ✅ [终端"自定义高亮"性能优化](Archive/2026-08/TERMINAL_CUSTOM_HIGHLIGHT_PERF_PLAN.md) - 完成于 2026-08-12（4 commits：`b145afce refactor` 抽离 decoration 数据通路与 damage 预解析；`18d54dc4 perf` 解除全量重建钳制，启用脏行增量渲染；`555cb89a perf` char_offset_map 替代 chars().count()；`f49bc012 test` doctest + 单测）
 
