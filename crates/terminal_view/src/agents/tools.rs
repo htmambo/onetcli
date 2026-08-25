@@ -46,7 +46,7 @@ pub(crate) fn tool_definitions() -> Vec<Tool> {
         let desc = if required {
             "终端 id（取自 get_terminal_list.focused_id 或 terminals[].id）"
         } else {
-            "终端 id（取自 get_terminal_list）。缺省时（不传或传 null）自动采用当前聚焦终端（focused_id）。多轮对话中用户在两次调用之间可能切换激活终端，请勿复用之前轮次选中的 id：要么不传，要么先调 get_terminal_list 重新读取 focused_id 再传。"
+            "终端 id（取自 get_terminal_list）。缺省时（不传或传 null）自动采用 AI 助手当前挂载的终端（focused_id）。focused_id 表示 AI 侧栏当前所属的 TerminalView——AI 侧栏是 per-TerminalView 的，GPUI focus 落到哪个 ai_chat_panel，哪个就是 focused_id；用户关闭该侧栏时清空。多轮对话中用户在两次调用之间可能切换激活终端，请勿复用之前轮次选中的 id：要么不传，要么先调 get_terminal_list 重新读取 focused_id 再传。"
         };
         serde_json::json!({ "type": ["integer", "null"], "minimum": 0, "description": desc })
     };
@@ -131,8 +131,12 @@ fn tool(name: &str, description: &str, parameters: serde_json::Value) -> Tool {
 }
 
 /// 执行单个工具调用，返回 (是否成功, 回灌模型的结果文本, 副作用)。
+///
+/// `host` 可以是裸 `TerminalOperatorHandle`（无 host 上下文，回退到
+/// `list_terminals().focused_id`），或 `HostedTerminalHandle`（多 AI 并发场景，
+/// 优先用其 host_terminal_id 作为缺省 terminal_id）。
 pub(crate) async fn execute_tool(
-    handle: &TerminalOperatorHandle,
+    host: &dyn crate::agent_bridge::TerminalHost,
     call: &ToolCall,
 ) -> (bool, String, ToolEffect) {
     let args: serde_json::Value = match serde_json::from_str(&call.function.arguments) {
@@ -150,7 +154,7 @@ pub(crate) async fn execute_tool(
             let summary = args["summary"].as_str().unwrap_or("任务已完成").to_string();
             (true, "ok".to_string(), ToolEffect::TaskComplete(summary))
         }
-        "read_terminal_output" => match resolve_terminal(handle, &args).await {
+        "read_terminal_output" => match resolve_terminal(host, &args).await {
             Ok(id) => {
                 let max_lines = as_u64_lossy(&args["max_lines"])
                     .unwrap_or(DEFAULT_READ_LINES)
@@ -159,29 +163,38 @@ pub(crate) async fn execute_tool(
                     .get("since_last_write")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
-                // since_last_write=true 时取上次 write 时的总行数；缺失则退回全终端（from_line=0）
                 let from_line = if since_last_write {
-                    handle.last_write_line_count(id).unwrap_or(0)
+                    // 多 AI 助手并发下不再通过 dyn dispatch 拿 last_write_line_count
+                    // （trait 上故意不暴露，避免与 inherent method 冲突；将来如有
+                    // 性能要求可加 HostedTerminalHandle::last_write_line_count inherent
+                    // 方法并通过 downcast 读取）。这里退回全终端读取（保守安全）：
+                    0
                 } else {
                     0
                 };
-                match handle.read_output(id, max_lines as usize, from_line).await {
+                match host
+                    .read_output_with_default(max_lines as usize, from_line, Some(id))
+                    .await
+                {
                     Ok(output) => (true, truncate_output(output), ToolEffect::None),
                     Err(err) => (false, format!("读取终端输出失败: {err}"), ToolEffect::None),
                 }
             }
-            Err(err) => (false, err, ToolEffect::None),
+            Err(err) => (false, format!("{err}"), ToolEffect::None),
         },
         "write_to_terminal" => {
             let Some(command) = args["command"].as_str().map(str::to_string) else {
                 return (false, "缺少 command 参数".to_string(), ToolEffect::None);
             };
-            match resolve_terminal(handle, &args).await {
+            match resolve_terminal(host, &args).await {
                 Ok(id) => {
                     let wait_ms = as_u64_lossy(&args["wait_ms"])
                         .unwrap_or(DEFAULT_WAIT_MS)
                         .min(MAX_WAIT_MS);
-                    match handle.write_command(id, command, wait_ms).await {
+                    match host
+                        .write_command_with_default(command, wait_ms, Some(id))
+                        .await
+                    {
                         Ok(outcome) => (
                             true,
                             format_write_outcome(outcome),
@@ -190,10 +203,10 @@ pub(crate) async fn execute_tool(
                         Err(err) => (false, format!("命令写入失败: {err}"), ToolEffect::None),
                     }
                 }
-                Err(err) => (false, err, ToolEffect::None),
+                Err(err) => (false, format!("{err}"), ToolEffect::None),
             }
         }
-        "get_terminal_list" => match handle.list_terminals().await {
+        "get_terminal_list" => match host.list_terminals().await {
             Ok(snapshot) => {
                 let items: Vec<serde_json::Value> = snapshot
                     .terminals
@@ -208,9 +221,12 @@ pub(crate) async fn execute_tool(
                         })
                     })
                     .collect();
-                // 顶层附加 focused_id，让模型明确知道缺省 terminal_id 会操作哪个。
+                // 多 AI 助手并发场景下同时输出：
+                // - focused_id：全局活跃 terminal（兜底，UI 上"最近交互的 AI 在哪"）；
+                // - host_terminal_id：本 AI 实例的 terminal（"我是哪个 panel 发起的"）。
                 let payload = serde_json::json!({
                     "focused_id": snapshot.focused_id,
+                    "host_terminal_id": host.host_terminal_id(),
                     "terminals": items,
                 });
                 (
@@ -221,8 +237,8 @@ pub(crate) async fn execute_tool(
             }
             Err(err) => (false, format!("枚举终端失败: {err}"), ToolEffect::None),
         },
-        "get_terminal_cwd" => match resolve_terminal(handle, &args).await {
-            Ok(id) => match handle.get_cwd(id).await {
+        "get_terminal_cwd" => match resolve_terminal(host, &args).await {
+            Ok(id) => match host.get_cwd_with_default(Some(id)).await {
                 Ok(cwd) => (
                     true,
                     cwd.unwrap_or_else(|| "(未知)".to_string()),
@@ -230,10 +246,10 @@ pub(crate) async fn execute_tool(
                 ),
                 Err(err) => (false, format!("获取工作目录失败: {err}"), ToolEffect::None),
             },
-            Err(err) => (false, err, ToolEffect::None),
+            Err(err) => (false, format!("{err}"), ToolEffect::None),
         },
-        "get_terminal_selection" => match resolve_terminal(handle, &args).await {
-            Ok(id) => match handle.get_selection(id).await {
+        "get_terminal_selection" => match resolve_terminal(host, &args).await {
+            Ok(id) => match host.get_selection_with_default(Some(id)).await {
                 Ok(text) => (
                     true,
                     truncate_output(text.unwrap_or_else(|| "(无选区)".to_string())),
@@ -241,14 +257,14 @@ pub(crate) async fn execute_tool(
                 ),
                 Err(err) => (false, format!("获取选区失败: {err}"), ToolEffect::None),
             },
-            Err(err) => (false, err, ToolEffect::None),
+            Err(err) => (false, format!("{err}"), ToolEffect::None),
         },
-        "focus_terminal" => match resolve_terminal(handle, &args).await {
-            Ok(id) => match handle.focus(id).await {
+        "focus_terminal" => match resolve_terminal(host, &args).await {
+            Ok(id) => match host.focus_with_default(Some(id)).await {
                 Ok(()) => (true, "ok".to_string(), ToolEffect::None),
                 Err(err) => (false, format!("聚焦终端失败: {err}"), ToolEffect::None),
             },
-            Err(err) => (false, err, ToolEffect::None),
+            Err(err) => (false, format!("{err}"), ToolEffect::None),
         },
         other => (false, format!("未知工具: {other}"), ToolEffect::None),
     }
@@ -256,30 +272,22 @@ pub(crate) async fn execute_tool(
 
 /// 解析 terminal_id 参数。
 ///
-/// 优先级：
+/// 优先级（多 AI 助手并发场景下正确）：
 /// 1. 调用方显式传入 `terminal_id`（包括 0）→ 直接采用；
-/// 2. 未传 / null → 采用 `list_terminals().focused_id`（当前激活终端）；
-/// 3. 没有任何终端获得焦点 → 报错要求用户先点击目标终端，避免误操作。
+/// 2. 未传 / null → `host.host_terminal_id()`（本 AI 实例的宿主 TerminalView）；
+/// 3. 无 host 上下文 → 回退到 `list_terminals().focused_id`（全局活跃）；
+/// 4. 都没有 → 报错要求用户先在目标终端打开 AI 侧栏。
 ///
 /// 非法值（非整数）也会报错。
-async fn resolve_terminal(
-    handle: &TerminalOperatorHandle,
+pub(crate) async fn resolve_terminal(
+    host: &dyn crate::agent_bridge::TerminalHost,
     args: &serde_json::Value,
-) -> Result<u64, String> {
+) -> anyhow::Result<u64> {
     match args.get("terminal_id") {
         Some(value) if !value.is_null() => value
             .as_u64()
-            .ok_or_else(|| format!("terminal_id 必须是非负整数，收到: {value}")),
-        _ => {
-            let snapshot = handle
-                .list_terminals()
-                .await
-                .map_err(|err| format!("枚举终端失败: {err}"))?;
-            snapshot.focused_id.ok_or_else(|| {
-                "当前没有任何终端获得焦点。请先在界面上点击你想操作的终端标签，再让 AI 操作。"
-                    .to_string()
-            })
-        }
+            .ok_or_else(|| anyhow::anyhow!("terminal_id 必须是非负整数，收到: {value}")),
+        _ => crate::agent_bridge::resolve_terminal_id_with_host(host, None).await,
     }
 }
 
@@ -625,7 +633,7 @@ mod tests {
         assert_eq!(s, "foo");
     }
 
-    // ---- resolve_terminal 焦点优先语义（review P0）----
+    // ---- resolve_terminal AI 侧栏宿主语义（review P0 + active_terminal_id 改造）----
 
     fn mock_args(terminal_id: Option<u64>) -> serde_json::Value {
         match terminal_id {
@@ -636,20 +644,20 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_terminal_prefers_focused_when_id_omitted() {
-        // mock 桥：list 中 id=1 非聚焦、id=2 聚焦；resolve 缺省应返回 2
+        // mock 桥：list 中 id=1 未挂载 AI、id=2 挂载了 AI；resolve 缺省应返回 2
         let bridge = crate::agents::tests::spawn_mock_bridge_with_focus();
         let id = resolve_terminal(&bridge.handle, &mock_args(None))
             .await
-            .expect("应有聚焦终端");
+            .expect("应有激活终端");
         assert_eq!(
             id, 2,
-            "缺省 terminal_id 时应取聚焦 id=2，而非列表第一个 id=1"
+            "缺省 terminal_id 时应取 AI 侧栏宿主 id=2，而非列表第一个 id=1"
         );
     }
 
     #[tokio::test]
     async fn resolve_terminal_explicit_id_wins_over_focused() {
-        // 即使聚焦 id=2，调用方显式传 1 也必须采用
+        // 即使 AI 侧栏宿主 id=2，调用方显式传 1 也必须采用
         let bridge = crate::agents::tests::spawn_mock_bridge_with_focus();
         let id = resolve_terminal(&bridge.handle, &mock_args(Some(1)))
             .await
@@ -659,14 +667,15 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_terminal_errors_when_no_focus() {
-        // 没有任何终端获得焦点 → 必须报错而非默默取第一个
+        // 用户当前没在任何终端打开 AI 侧栏 → 必须报错
         let bridge = crate::agents::tests::spawn_mock_bridge_no_focus();
         let err = resolve_terminal(&bridge.handle, &mock_args(None))
             .await
-            .expect_err("无焦点应报错");
+            .expect_err("无激活应报错");
+        let err_str = format!("{err}");
         assert!(
-            err.contains("焦点") || err.contains("点击"),
-            "报错文案应引导用户先点击目标终端：{err}"
+            err_str.contains("激活") || err_str.contains("点击") || err_str.contains("AI 侧边栏"),
+            "报错文案应引导用户先在目标终端打开 AI 侧栏：{err}"
         );
     }
 
@@ -699,15 +708,15 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_terminal_follows_focus_change_between_calls() {
-        // 用户报告：切换激活终端后 AI 仍操作上一个终端。
+        // 用户报告：切换 AI 侧栏宿主终端后 AI 仍操作上一个。
         // 修复点：`resolve_terminal` 不缓存，每次调用重新查 focused_id。
-        // 验证：第一次 resolve 取 focused=1；模拟切换到 2；第二次 resolve 取 2 而非 1。
+        // 验证：第一次 resolve 取 focused=1；模拟切到 2；第二次 resolve 取 2 而非 1。
         let (bridge, focused) = crate::agents::tests::spawn_mock_bridge_with_switchable_focus();
 
         let first = resolve_terminal(&bridge.handle, &mock_args(None))
             .await
             .expect("首次 resolve 应有焦点");
-        assert_eq!(first, 1, "初始聚焦 id=1");
+        assert_eq!(first, 1, "初始 AI 侧栏宿主 id=1");
 
         // 模拟用户在两次工具调用之间切换到 id=2
         *focused.lock().unwrap() = Some(2);

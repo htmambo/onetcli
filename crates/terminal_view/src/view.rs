@@ -1049,7 +1049,8 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Self {
         let connection_id = conn.id;
-        let terminal = <gpui::App as gpui::AppContext>::new(cx, |cx| Terminal::new_serial(conn, cx));
+        let terminal =
+            <gpui::App as gpui::AppContext>::new(cx, |cx| Terminal::new_serial(conn, cx));
         // 串口不传 stored_connection，避免创建文件管理器面板
         Self::new_with_terminal(terminal, connection_id, None, true, tab_index, window, cx)
     }
@@ -1220,6 +1221,19 @@ impl TerminalView {
                     });
                 } else {
                     window.focus(&self.focus_handle, cx);
+                }
+                // AI 助手侧栏是 per-TerminalView 的；其打开/关闭语义直接对应
+                // "AI 助手当前属于哪个 TerminalView"：
+                // - 打开 AiChat 面板 → 把本 terminal id 写入 active_terminal_id，
+                //   resolve_terminal 缺省时就会拿这个 id；
+                // - 关闭侧栏（panel == None）→ 清空 active_terminal_id，让 AI
+                //   助手在没有任何 terminal 挂载时报错引导用户先打开侧栏。
+                // 其他面板（Settings/QuickCommand/FileManager/ServerMonitor）
+                // 不写 active_terminal_id——它们不是 AI 助手宿主。
+                match panel {
+                    Some(SidebarPanel::AiChat) => self.register_active_terminal(cx),
+                    None => self.clear_active_terminal(cx),
+                    _ => {}
                 }
                 cx.notify();
             }
@@ -2086,6 +2100,41 @@ impl TerminalView {
         self.focus_terminal(window, cx);
     }
 
+    /// 把自己登记为"AI 助手当前挂载"的终端（写入全局 `TerminalViewRegistry.active_terminal_id`）。
+    ///
+    /// 调用方：`handle_sidebar_event` 中 `PanelChanged(Some(AiChat))` 分支，
+    /// 即用户在**这个 TerminalView** 打开了 AI 侧栏。AI 助手是 per-TerminalView
+    /// 的，多个 TerminalView 可同时各持一个 AI 面板；语义上"当前激活" =
+    /// "AI 助手面板当前挂在哪个 TerminalView 上"，不是 GPUI focus 当前所在。
+    ///
+    /// 注册表 `set_active` 内部会校验 id 是否仍存活，未注册时静默 no-op；
+    /// 因此这里即使 `agent_registry_id` 暂时为 None（首次渲染前）也不报错。
+    pub(crate) fn register_active_terminal(&self, cx: &mut Context<Self>) {
+        if !cx.has_global::<crate::registry::TerminalViewRegistry>() {
+            return;
+        }
+        let Some(id) = self.agent_registry_id else {
+            return;
+        };
+        cx.update_global::<crate::registry::TerminalViewRegistry, _>(|registry, _| {
+            registry.set_active(id);
+        });
+    }
+
+    /// 清空 active_terminal_id（AI 侧栏被关闭时调用，让"无 AI 挂载"的语义生效）。
+    ///
+    /// 关闭 AI 侧栏后，AI 助手理论上仍可能调工具——为了避免它在错误的 terminal
+    /// 上误操作，这里强制让 list_terminals 返回 focused_id=None，resolve_terminal
+    /// 进而报错要求用户先在目标终端上重新打开 AI 侧栏。
+    pub(crate) fn clear_active_terminal(&self, cx: &mut Context<Self>) {
+        if !cx.has_global::<crate::registry::TerminalViewRegistry>() {
+            return;
+        }
+        cx.update_global::<crate::registry::TerminalViewRegistry, _>(|registry, _| {
+            registry.clear_active();
+        });
+    }
+
     /// 向 AI 终端操作员注册表登记本终端（首次渲染注册，后续补登记窗口句柄）。
     fn register_agent_presence(&mut self, cx: &mut Context<Self>) {
         // 已注册且窗口句柄已就位时跳过，避免每次 render 都触发全局更新。
@@ -2104,6 +2153,20 @@ impl TerminalView {
             registry.register_or_refresh(&entity, window_handle, known_id)
         });
         self.agent_registry_id = Some(id);
+        // 多 AI 助手并发关键路径：
+        // 1) 让 sidebar 也能反查到自己的宿主 id（ai_chat_panel focus 事件用）；
+        // 2) 把 id 写入 HostedTerminalHandle 的 AtomicU64，让 ai_chat_panel 的
+        //    capability_map 内持有的 handle 之后调工具时知道宿主 terminal。
+        if known_id != Some(id) {
+            self.sidebar.update(cx, |sidebar, _cx| {
+                sidebar.set_host_terminal_id(id);
+                if let Some(hosted) = sidebar.hosted_terminal_handle() {
+                    hosted
+                        .host_terminal_id_cell
+                        .store(id, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
+        }
     }
 
     /// Get all available themes
@@ -4281,15 +4344,6 @@ impl Focusable for TerminalView {
     }
 }
 
-impl TerminalView {
-    /// 提供给 Agent 注册表读取的 FocusHandle 克隆（避免破坏 `focus_handle` 字段私有性）。
-    ///
-    /// 不可变借用：调用方仅用于与 `Window::focused` 返回值做相等比较。
-    pub(crate) fn focus_handle_for_agent(&self) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
 impl EventEmitter<TabContentEvent> for TerminalView {}
 
@@ -4338,6 +4392,10 @@ impl TabContent for TerminalView {
     }
 
     fn on_activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // dock tab 切换到本 TerminalView 时把 GPUI focus 拉进来（保留原语义）。
+        // **不**在此处写 active_terminal_id——active 语义是"AI 助手当前挂在哪个
+        // TerminalView 上"，由 TerminalSidebar 的 PanelChanged(Some(AiChat)) 显式
+        // 驱动；dock tab 切换不改变侧栏开关状态。
         window.focus(&self.focus_handle, cx);
     }
 
@@ -5674,7 +5732,9 @@ mod tests {
 
         let window = cx.update(|cx| {
             cx.open_window(Default::default(), |window, cx| {
-                <gpui::App as gpui::AppContext>::new(cx, |cx| TerminalView::new(LocalConfig::default(), window, cx))
+                <gpui::App as gpui::AppContext>::new(cx, |cx| {
+                    TerminalView::new(LocalConfig::default(), window, cx)
+                })
             })
             .expect("应创建终端测试窗口")
         });
@@ -5737,7 +5797,9 @@ mod tests {
 
         let window = cx.update(|cx| {
             cx.open_window(Default::default(), |window, cx| {
-                <gpui::App as gpui::AppContext>::new(cx, |cx| TerminalView::new(LocalConfig::default(), window, cx))
+                <gpui::App as gpui::AppContext>::new(cx, |cx| {
+                    TerminalView::new(LocalConfig::default(), window, cx)
+                })
             })
             .expect("应创建终端测试窗口")
         });

@@ -96,6 +96,12 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub created_at: i64,
+    /// role='tool' 时对应的 tool call id；普通消息为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// role='assistant' 且携带工具调用时，存 Vec<ToolCall> 的 JSON；普通消息为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls_json: Option<String>,
 }
 
 impl FromSqliteRow for ChatMessage {
@@ -106,6 +112,9 @@ impl FromSqliteRow for ChatMessage {
             role: row.get("role")?,
             content: row.get("content")?,
             created_at: row.get("created_at")?,
+            // 既有行（migration 前的数据）这两列为 NULL，get→Option 安全回落
+            tool_call_id: row.get("tool_call_id")?,
+            tool_calls_json: row.get("tool_calls_json")?,
         })
     }
 }
@@ -132,6 +141,8 @@ impl ChatMessage {
             role,
             content,
             created_at: now(),
+            tool_call_id: None,
+            tool_calls_json: None,
         }
     }
 
@@ -145,6 +156,33 @@ impl ChatMessage {
 
     pub fn system(session_id: i64, content: String) -> Self {
         Self::new(session_id, "system".to_string(), content)
+    }
+
+    /// assistant 携带工具调用的消息：content 为文本部分，tool_calls_json 为
+    /// `serde_json::to_string(&Vec<ToolCall>)` 的结果。
+    pub fn assistant_tool_calls(session_id: i64, content: String, tool_calls_json: String) -> Self {
+        Self {
+            id: 0,
+            session_id,
+            role: "assistant".to_string(),
+            content,
+            created_at: now(),
+            tool_call_id: None,
+            tool_calls_json: Some(tool_calls_json),
+        }
+    }
+
+    /// tool 结果消息：tool_call_id 对应 assistant 发起的 call id，content 为结果文本。
+    pub fn tool_result(session_id: i64, tool_call_id: String, content: String) -> Self {
+        Self {
+            id: 0,
+            session_id,
+            role: "tool".to_string(),
+            content,
+            created_at: now(),
+            tool_call_id: Some(tool_call_id),
+            tool_calls_json: None,
+        }
     }
 }
 
@@ -298,11 +336,13 @@ impl Repository for MessageRepository {
         let role = item.role.clone();
         let content = item.content.clone();
         let created_at = item.created_at;
+        let tool_call_id = item.tool_call_id.clone();
+        let tool_calls_json = item.tool_calls_json.clone();
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO chat_messages (session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![session_id, role, content, created_at],
+                "INSERT INTO chat_messages (session_id, role, content, created_at, tool_call_id, tool_calls_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![session_id, role, content, created_at, tool_call_id, tool_calls_json],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
@@ -316,11 +356,13 @@ impl Repository for MessageRepository {
         let session_id = item.session_id;
         let role = item.role.clone();
         let content = item.content.clone();
+        let tool_call_id = item.tool_call_id.clone();
+        let tool_calls_json = item.tool_calls_json.clone();
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE chat_messages SET session_id = ?1, role = ?2, content = ?3 WHERE id = ?4",
-                params![session_id, role, content, id],
+                "UPDATE chat_messages SET session_id = ?1, role = ?2, content = ?3, tool_call_id = ?4, tool_calls_json = ?5 WHERE id = ?6",
+                params![session_id, role, content, tool_call_id, tool_calls_json, id],
             )?;
             Ok(())
         })
@@ -336,7 +378,7 @@ impl Repository for MessageRepository {
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, session_id, role, content, created_at FROM chat_messages WHERE id = ?1",
+                "SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages WHERE id = ?1",
             )?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
@@ -349,7 +391,7 @@ impl Repository for MessageRepository {
 
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at FROM chat_messages ORDER BY created_at ASC")?;
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages ORDER BY created_at ASC")?;
             let rows = stmt.query_map([], |row| ChatMessage::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -382,7 +424,7 @@ impl Repository for MessageRepository {
 impl MessageRepository {
     pub fn list_by_session(&self, session_id: i64) -> Result<Vec<ChatMessage>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC")?;
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC")?;
             let rows = stmt.query_map(params![session_id], |row| ChatMessage::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -394,7 +436,7 @@ impl MessageRepository {
 
     pub fn list_recent(&self, limit: i32) -> Result<Vec<ChatMessage>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at FROM chat_messages ORDER BY created_at DESC LIMIT ?1")?;
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages ORDER BY created_at DESC LIMIT ?1")?;
             let rows = stmt.query_map(params![limit], |row| ChatMessage::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {

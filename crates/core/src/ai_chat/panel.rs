@@ -6,7 +6,7 @@ use crate::cloud_sync::GlobalCloudUser;
 use crate::gpui_tokio::Tokio;
 use crate::llm::chat_history::ChatMessage;
 use crate::llm::{
-    Message, ProviderConfig, Role,
+    Message, ProviderConfig, Role, ToolCall,
     chat_history::{MessageRepository, SessionRepository},
     manager::GlobalProviderState,
     storage::ProviderRepository,
@@ -925,13 +925,10 @@ impl AiChatPanel {
         self.engine.scroll_to_bottom();
         cx.notify();
 
-        // 获取 Tokio runtime handle
-        let tokio_handle = Tokio::handle(cx);
+        // ChatStreamProcessor::start 内部用 tokio::spawn 把流式请求派到
+        // tokio worker 线程（worker 自带 reactor 上下文），无需主线程 enter()。
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            // 进入 Tokio runtime 上下文
-            let _guard = tokio_handle.enter();
-
             if cancel_token.is_cancelled() {
                 return;
             }
@@ -1157,11 +1154,8 @@ impl AiChatPanel {
 
         let registry = cx.global::<AgentRegistry>().clone();
         let mut affinity = self.session_affinity.clone();
-        let tokio_handle = Tokio::handle(cx);
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let _guard = tokio_handle.enter();
-
             // 构建聊天历史（agent 自带系统提示词，不注入 system_instruction）
             let history = Self::build_agent_history_messages(
                 &storage_manager,
@@ -1177,7 +1171,8 @@ impl AiChatPanel {
                 global_provider_state,
                 storage_manager,
                 cancel_token,
-            );
+            )
+            .with_session_id(session_id);
 
             // 注入外部能力（如终端操作句柄）
             if let Some(entity) = this.upgrade() {
@@ -1190,7 +1185,49 @@ impl AiChatPanel {
                 });
             }
 
-            let mut rx = AgentDispatcher::dispatch(ctx_agent, &registry, &mut affinity).await;
+            // 关键：把 dispatch 整体放到 tokio worker 线程上执行。
+            //
+            // 背景：AgentDispatcher::dispatch → IntentRouter::route 会在调用线程上
+            // 同步 .await provider.chat()，最终走到 reqwest 的 tokio::time::sleep，
+            // 该调用要求"当前线程处于 tokio reactor 上下文"。GPUI 主线程（foreground
+            // executor）不在 tokio runtime 内，没有 reactor 上下文——直接在主线程
+            // await 会触发 "there is no reactor running" panic。
+            //
+            // 旧代码用 `tokio_handle.enter()` 在主线程伪注入 reactor 上下文来规避，
+            // 但 EnterGuard 是 thread-local 且要求 LIFO 释放；本 async block 内存在
+            // 嵌套的 cx.spawn 子任务（保存助手消息），子任务也在主线程 poll，会
+            // 破坏 EnterGuard 的释放顺序，触发 "dropped out of order" panic。
+            // 多 AI 助手并发时这一冲突尤其频繁。
+            //
+            // 正解：用 Tokio::spawn（通过全局 runtime Handle 提交，不依赖 current
+            // context）把 dispatch 派到 tokio multi-threaded runtime 的 worker 线程。
+            // worker 线程自带 reactor 上下文，reqwest 的 sleep 正常工作；dispatch
+            // 内部既有/后续的 tokio::spawn 也在 worker 上 Handle::current() 成功。
+            // registry / affinity / ctx_agent 均为 owned 且 Send，可安全跨线程 move。
+            // 返回的 mpsc::Receiver<AgentEvent> 是 Send，回传主线程消费即可。
+            let dispatch_task = Tokio::spawn(cx, async move {
+                let mut rx = AgentDispatcher::dispatch(ctx_agent, &registry, &mut affinity).await;
+                (rx, affinity)
+            });
+
+            let (mut rx, affinity) = match dispatch_task.await {
+                Ok((rx, affinity)) => (rx, affinity),
+                Err(join_err) => {
+                    if let Some(entity) = this.upgrade() {
+                        let msg_id = assistant_msg_id.clone();
+                        let error_msg = format!("Agent 调度任务失败: {join_err}");
+                        let _ = cx.update(|cx| {
+                            entity.update(cx, |this, cx| {
+                                this.engine.set_message_error(&msg_id, error_msg);
+                                this.engine.is_loading = false;
+                                this.engine.cancel_token = None;
+                                cx.notify();
+                            });
+                        });
+                    }
+                    return;
+                }
+            };
 
             // 回写亲和性状态
             if let Some(entity) = this.upgrade() {
@@ -1391,6 +1428,11 @@ impl AiChatPanel {
     }
 
     /// 构建发送给 Agent 的历史消息（从 DB 读取、按条数截断、去除末尾重复输入）
+    ///
+    /// 关键：还原结构化工具消息对。DB 中 role='assistant' 且 tool_calls_json 非空的消息
+    /// 重建为带 `tool_calls` 的 assistant 消息；role='tool' 的消息重建为带 `tool_call_id`
+    /// 的 tool 结果消息。这样下一轮 LLM 请求能拿到完整的工具调用上下文，避免多轮任务
+    /// 时模型丢失中间过程而重复执行或答非所问。
     fn build_agent_history_messages(
         storage_manager: &StorageManager,
         session_id: Option<i64>,
@@ -1400,18 +1442,7 @@ impl AiChatPanel {
         let mut messages: Vec<Message> = match session_id {
             Some(sid) => match storage_manager.get::<MessageRepository>() {
                 Some(repo) => match repo.list_by_session(sid) {
-                    Ok(rows) => rows
-                        .iter()
-                        .map(|msg| {
-                            let role = match msg.role.as_str() {
-                                "user" => Role::User,
-                                "assistant" => Role::Assistant,
-                                "system" => Role::System,
-                                _ => Role::User,
-                            };
-                            Message::text(role, &msg.content)
-                        })
-                        .collect(),
+                    Ok(rows) => rows.iter().map(chat_message_to_llm_message).collect(),
                     Err(_) => vec![Message::text(Role::User, content)],
                 },
                 None => vec![Message::text(Role::User, content)],
@@ -1762,6 +1793,41 @@ fn strip_tool_record_blocks(content: &str) -> String {
         out.push('\n');
     }
     out.trim_end().to_string()
+}
+
+/// 把持久化的 `ChatMessage` 还原为发送给 LLM 的 `Message`。
+///
+/// - role='assistant' 且 `tool_calls_json` 非空：重建带 `tool_calls` 的 assistant 消息
+///   （OpenAI 协议要求的 assistant tool_calls 消息）；
+/// - role='tool'：重建带 `tool_call_id` 的 tool 结果消息；
+/// - 其他：按 role 构造普通文本消息。
+///
+/// `tool_calls_json` 反序列化失败时降级为纯文本 assistant 消息（不丢消息，仅丢工具结构），
+/// 并记 warn 日志便于诊断。
+fn chat_message_to_llm_message(msg: &ChatMessage) -> Message {
+    let role = match msg.role.as_str() {
+        "user" => Role::User,
+        "assistant" => Role::Assistant,
+        "system" => Role::System,
+        "tool" => Role::Tool,
+        _ => Role::User,
+    };
+    let mut message = Message::text(role, &msg.content);
+    if let Some(json) = msg.tool_calls_json.as_deref() {
+        match serde_json::from_str::<Vec<ToolCall>>(json) {
+            Ok(tool_calls) if !tool_calls.is_empty() => {
+                message.tool_calls = Some(tool_calls);
+            }
+            Ok(_) => {} // 空数组，保持纯文本
+            Err(err) => {
+                tracing::warn!("反序列化 tool_calls_json 失败，降级为纯文本 assistant 消息: {err}");
+            }
+        }
+    }
+    if let Some(call_id) = msg.tool_call_id.as_deref() {
+        message.tool_call_id = Some(call_id.to_string());
+    }
+    message
 }
 
 #[cfg(test)]

@@ -269,6 +269,11 @@ fn clamp_wait(wait_ms: u64) -> Duration {
 }
 
 /// 聚焦终端：激活窗口并聚焦输入区。
+///
+/// 同时把 `terminal_id` 显式写入 `TerminalViewRegistry.active_terminal_id`，
+/// 协议层保证下次 `list_terminals().focused_id` 就是该 id——不再依赖
+/// `request_focus` 触发 `on_focus` 的 GPUI 副作用（侧栏 input 抢焦点时
+/// 这个副作用不稳定）。
 fn focus_terminal(cx: &mut AsyncApp, terminal_id: u64) -> Result<()> {
     let (weak, window_handle) = cx.update(|cx| {
         let registry = cx
@@ -282,8 +287,14 @@ fn focus_terminal(cx: &mut AsyncApp, terminal_id: u64) -> Result<()> {
         window_handle.ok_or_else(|| anyhow!("终端 #{terminal_id} 窗口句柄不可用"))?;
     cx.update_window(window_handle, |_, window, cx| {
         window.activate_window();
+        // 协议层写入：先于 request_focus 触发 GPUI on_focus 副作用，
+        // 即使后者因为侧栏抢焦点未生效，AI 助手的下一次 list_terminals
+        // 仍能看到正确的 focused_id。
         if let Some(view) = weak.upgrade() {
-            view.update(cx, |view, cx| view.request_focus(window, cx));
+            view.update(cx, |view, cx| {
+                view.register_active_terminal(cx);
+                view.request_focus(window, cx);
+            });
         }
     })?;
     Ok(())

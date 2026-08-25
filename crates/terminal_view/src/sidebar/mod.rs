@@ -24,8 +24,8 @@ use crate::{
 };
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
+    AnyElement, App, AppContext, BorrowAppContext, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{ActiveTheme, Icon, IconName, Sizable, Size, v_flex};
@@ -156,6 +156,13 @@ pub struct TerminalSidebar {
     focus_handle: FocusHandle,
     /// 终端主题配色（用于侧边栏工具栏）
     colors: TerminalColors,
+    /// 宿主 TerminalView 的 agent_registry_id（创建时由 TerminalView 注入）；
+    /// 用于在 ai_chat_panel 拿到 GPUI focus 时把 registry.active_terminal_id
+    /// 同步到本 TerminalView——这是多 AI 侧栏并发场景下唯一可靠的事件源。
+    host_terminal_id: Option<u64>,
+    /// 注入到 ai_chat_panel capability_map 的 HostedTerminalHandle 句柄，
+    /// TerminalView 完成 register_agent_presence 后通过它更新 host_terminal_id_cell。
+    hosted_terminal_handle: Option<crate::agent_bridge::HostedTerminalHandle>,
     /// 订阅句柄
     _subs: Vec<Subscription>,
 }
@@ -193,6 +200,25 @@ impl TerminalSidebar {
         let quick_command_panel = cx.new(|cx| QuickCommandPanel::new(connection_id, window, cx));
         let ai_chat_panel = cx.new(|cx| AiChatPanel::new(window, cx));
 
+        // 订阅 ai_chat_panel 的 focus。
+        // 当用户在 TerminalView 自己的 AI 侧栏里打字时，GPUI focus 会落到这个
+        // ai_chat_panel（而不是 TerminalView.focus_handle）——这是"AI 助手当前
+        // 属于哪个 TerminalView"的真实信号。on_focus 时把 self 的 host_terminal_id
+        // 写入 registry。
+        //
+        // 故意不订阅 on_blur：多 AI 侧栏并发切换时 blur/focus 顺序不保证，
+        // 让 blur 清空会出现"焦点在 #2 那一瞬间 active=None"。保持 last-writer-wins
+        // 由 on_focus 单向写，关闭侧栏的清空由 TerminalView.handle_sidebar_event
+        // 的 PanelChanged(None) 路径负责。
+        let ai_focus = ai_chat_panel.focus_handle(cx).clone();
+        let ai_focus_subscription = cx.on_focus(&ai_focus, window, move |this, _window, cx| {
+            if let Some(id) = this.host_terminal_id {
+                cx.update_global::<crate::registry::TerminalViewRegistry, _>(|r, _| {
+                    r.set_active(id);
+                });
+            }
+        });
+
         // 仅 SSH 终端（有 StoredConnection）时创建文件管理器面板
         let file_manager_panel = stored_connection
             .zip(ssh_session_manager.clone())
@@ -207,6 +233,9 @@ impl TerminalSidebar {
 
         // 注册 bash/sh 代码块操作，并注入终端专属提示词
         let sidebar_entity = cx.entity();
+        // 在闭包外先构造 HostedTerminalHandle，以便同时存到 self.hosted_terminal_handle
+        // 供 TerminalView::register_agent_presence 后续更新 host_terminal_id_cell。
+        let mut hosted_handle: Option<crate::agent_bridge::HostedTerminalHandle> = None;
         ai_chat_panel.update(cx, |panel, cx| {
             panel.set_system_instruction(Some(TERMINAL_AI_SYSTEM_INSTRUCTION.to_string()), cx);
             // Agent 调度模式：全局开关开启且桥接可用时启用，注入终端操作能力；
@@ -218,7 +247,19 @@ impl TerminalSidebar {
             if agent_enabled {
                 if let Some(handle) = crate::agent_bridge::operator_handle(cx) {
                     panel.set_agent_dispatch(true, cx);
-                    panel.set_capability_value(crate::agent_bridge::CAP_TERMINAL, handle);
+                    // 多 AI 助手并发：把裸 handle 包成 HostedTerminalHandle 注入，
+                    // 让每个 ai_chat_panel 拥有自己的 host_terminal_id。
+                    // host_terminal_id 由 TerminalView::register_agent_presence 在
+                    // 注册完成后写入 AtomicU64；此刻初始化为 0（host_terminal_id()
+                    // 看到 0 返回 None，回退到全局 focused_id 兜底）。
+                    let hosted = crate::agent_bridge::HostedTerminalHandle {
+                        inner: handle,
+                        host_terminal_id_cell: std::sync::Arc::new(
+                            std::sync::atomic::AtomicU64::new(0),
+                        ),
+                    };
+                    hosted_handle = Some(hosted.clone());
+                    panel.set_capability_value(crate::agent_bridge::CAP_TERMINAL, hosted);
                     // 桥接 settings 字段 → agent capability（reminder 配额）
                     let max_reminders = cx
                         .try_global::<GlobalChatSettings>()
@@ -337,7 +378,7 @@ impl TerminalSidebar {
             }
         });
 
-        let mut subs = vec![set_sub, quick_sub, ai_chat_sub];
+        let mut subs = vec![set_sub, quick_sub, ai_chat_sub, ai_focus_subscription];
 
         // 订阅文件管理器面板事件
         if let Some(ref fm_panel) = file_manager_panel {
@@ -381,8 +422,26 @@ impl TerminalSidebar {
             sync_path_enabled,
             focus_handle: cx.focus_handle(),
             colors,
+            host_terminal_id: None,
+            hosted_terminal_handle: hosted_handle,
             _subs: subs,
         }
+    }
+
+    /// 注入宿主 TerminalView 的 agent_registry_id。
+    ///
+    /// 由 `TerminalView::register_agent_presence` 在成功向全局注册表登记
+    /// 自己的 id 之后调用；这是 ai_chat_panel focus 事件能找到"自己属于哪个
+    /// TerminalView"的唯一途径。该字段 None 时 focus 事件静默 no-op，不影响
+    /// PanelChanged 路径（仍然能写/清 active_terminal_id）。
+    pub fn set_host_terminal_id(&mut self, id: u64) {
+        self.host_terminal_id = Some(id);
+    }
+
+    /// 取出已注入到 ai_chat_panel capability 的 HostedTerminalHandle 引用，
+    /// 用于 TerminalView::register_agent_presence 完成后更新 host_terminal_id_cell。
+    pub fn hosted_terminal_handle(&self) -> Option<&crate::agent_bridge::HostedTerminalHandle> {
+        self.hosted_terminal_handle.as_ref()
     }
 
     /// 获取当前激活的面板

@@ -55,6 +55,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260517000001",
         include_str!("../../migrations/20260517000001_llm_provider_sync.sql"),
     ),
+    (
+        "20260624000001",
+        include_str!("../../migrations/20260624000001_chat_message_tool_calls.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {

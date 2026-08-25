@@ -46,6 +46,9 @@ pub struct AgentContext {
     pub storage_manager: StorageManager,
     /// Cancellation token for cooperative cancellation.
     pub cancel_token: CancellationToken,
+    /// 当前会话 id；agent 据此持久化工具调用中间态（assistant tool_calls / tool 结果消息）。
+    /// None 表示无持久化会话（如临时调用），agent 应跳过中间态落库。
+    pub session_id: Option<i64>,
     /// Dynamic capabilities map — agents can check for domain-specific resources.
     capabilities: HashMap<String, Box<dyn Any + Send + Sync>>,
 }
@@ -66,8 +69,15 @@ impl AgentContext {
             provider_state,
             storage_manager,
             cancel_token,
+            session_id: None,
             capabilities: HashMap::new(),
         }
+    }
+
+    /// 设置会话 id（供 agent 持久化工具调用中间态）。传入 None 表示无持久化会话。
+    pub fn with_session_id(mut self, session_id: Option<i64>) -> Self {
+        self.session_id = session_id;
+        self
     }
 
     /// Insert a capability value keyed by name.

@@ -118,7 +118,9 @@ impl one_core::llm::LlmProvider for MockProvider {
 /// 脚本化桥接消费者：记录写入的命令与等待时长，其余请求返回固定值。
 pub(super) struct MockBridge {
     pub(super) handle: TerminalOperatorHandle,
-    pub(super) written: Arc<Mutex<Vec<(String, u64)>>>,
+    /// `(terminal_id, command, wait_ms)` 三元组；terminal_id 用于新加的
+    /// "切换激活终端后 AI 仍写对位置" 端到端回归测试。
+    pub(super) written: Arc<Mutex<Vec<(u64, String, u64)>>>,
 }
 
 fn spawn_mock_bridge() -> MockBridge {
@@ -149,7 +151,10 @@ fn spawn_mock_bridge() -> MockBridge {
                     reply,
                     ..
                 } => {
-                    written_clone.lock().unwrap().push((command, wait_ms));
+                    written_clone
+                        .lock()
+                        .unwrap()
+                        .push((terminal_id, command, wait_ms));
                     let _ = reply.send(Ok(WriteOutcome {
                         output: "total 2".to_string(),
                         timed_out: false,
@@ -174,8 +179,8 @@ fn spawn_mock_bridge() -> MockBridge {
     }
 }
 
-/// 构造一个 mock bridge：返回两个终端（id=1 未聚焦、id=2 已聚焦）。
-/// 用于验证 `resolve_terminal` 缺省时优先选聚焦终端而非第一个。
+/// 构造一个 mock bridge：返回两个终端（id=1 未挂载 AI、id=2 已挂载 AI）。
+/// 用于验证 `resolve_terminal` 缺省时优先选 AI 侧栏宿主而非第一个。
 pub(super) fn spawn_mock_bridge_with_focus() -> MockBridge {
     let (tx, mut rx) = mpsc::channel::<TerminalOpRequest>(16);
     let written = Arc::new(Mutex::new(Vec::new()));
@@ -208,12 +213,15 @@ pub(super) fn spawn_mock_bridge_with_focus() -> MockBridge {
                     let _ = reply.send(Ok("from-focused\n".to_string()));
                 }
                 TerminalOpRequest::WriteCommand {
+                    terminal_id,
                     command,
                     wait_ms,
                     reply,
-                    ..
                 } => {
-                    written_clone.lock().unwrap().push((command, wait_ms));
+                    written_clone
+                        .lock()
+                        .unwrap()
+                        .push((terminal_id, command, wait_ms));
                     let _ = reply.send(Ok(WriteOutcome {
                         output: "ok".to_string(),
                         timed_out: false,
@@ -238,7 +246,7 @@ pub(super) fn spawn_mock_bridge_with_focus() -> MockBridge {
     }
 }
 
-/// 构造一个 mock bridge：没有任何终端获得焦点（focused_id = None）。
+/// 构造一个 mock bridge：没有任何终端挂载 AI 侧栏（focused_id = None）。
 pub(super) fn spawn_mock_bridge_no_focus() -> MockBridge {
     let (tx, mut rx) = mpsc::channel::<TerminalOpRequest>(16);
     let written = Arc::new(Mutex::new(Vec::new()));
@@ -285,11 +293,12 @@ pub(super) fn spawn_mock_bridge_no_focus() -> MockBridge {
     }
 }
 
-/// 构造 mock bridge：持有可运行时切换的 `focused_id`。
-/// 用于验证"用户在两次工具调用之间切换激活终端，缺省 terminal_id 解析跟随新焦点"。
+/// 构造 mock bridge：持有可运行时切换的 `focused_id`（语义：AI 侧栏宿主 terminal id）。
+/// 用于验证"用户在两次工具调用之间把 AI 侧栏 host 从 #1 切到 #2，缺省 terminal_id
+/// 解析跟随新 host"。
 ///
 /// 返回 `(MockBridge, focused_id_setter)`：setter 接受新 focused_id 写入共享 cell，
-/// 下一次 `list_terminals()` 调用即可观察到。
+/// 下一次 `list_terminals()` 调用即可观察到。设置 `None` 模拟"用户关闭 AI 侧栏"。
 pub(super) fn spawn_mock_bridge_with_switchable_focus() -> (MockBridge, Arc<Mutex<Option<u64>>>) {
     let (tx, mut rx) = mpsc::channel::<TerminalOpRequest>(16);
     let written = Arc::new(Mutex::new(Vec::new()));
@@ -325,7 +334,13 @@ pub(super) fn spawn_mock_bridge_with_switchable_focus() -> (MockBridge, Arc<Mute
                 TerminalOpRequest::ReadOutput { reply, .. } => {
                     let _ = reply.send(Ok("ok".to_string()));
                 }
-                TerminalOpRequest::WriteCommand { reply, .. } => {
+                TerminalOpRequest::WriteCommand {
+                    terminal_id, reply, ..
+                } => {
+                    written_clone
+                        .lock()
+                        .unwrap()
+                        .push((terminal_id, String::new(), 0));
                     let _ = reply.send(Ok(WriteOutcome {
                         output: "ok".to_string(),
                         timed_out: false,
@@ -457,7 +472,7 @@ async fn write_tool_call_round_trip() {
     assert!(result.is_ok());
     assert_eq!(
         written.lock().unwrap().as_slice(),
-        [("ls -la".to_string(), 1500)]
+        [(1u64, "ls -la".to_string(), 1500u64)]
     );
     let started = events.iter().any(|event| {
         matches!(
@@ -583,7 +598,7 @@ async fn write_wait_ms_is_clamped() {
     assert!(result.is_ok());
     assert_eq!(
         written.lock().unwrap().as_slice(),
-        [("ls".to_string(), 30000)]
+        [(1u64, "ls".to_string(), 30000u64)]
     );
 }
 
@@ -1001,5 +1016,241 @@ async fn multi_terminal_last_write_tracked_independently() {
         written.lock().unwrap().len(),
         2,
         "两个 terminal_id 的 write 都应被记录"
+    );
+}
+
+// ===== Active Terminal 跟踪语义测试 =====
+//
+// 背景：用户报告"切换终端后 AI 仍操作上一个"，并进一步指出 AI 助手是 per-TerminalView
+// 的侧边栏，**不应该用 GPUI focus 来推断当前激活终端**。本次修复：
+// - registry 增加显式 `active_terminal_id` 字段；
+// - 写入时机：`TerminalSidebar` 在 ai_chat_panel 拿到 GPUI focus 时写入
+//   `host_terminal_id`（ai_chat_panel 是 AI 输入框的真实焦点持有者）；
+// - 兜底时机：`TerminalView.handle_sidebar_event` 的 PanelChanged(Some(AiChat))
+//   也写入，PanelChanged(None) 清空（用户主动开关 AI 侧栏）；
+// - `pump::focus_terminal` 工具调用也写入（协议层保证）。
+// 测试 fixture 是 ListTerminals 返回 focused_id，模拟产品写好的 active_terminal_id。
+
+/// 场景：AI 侧栏打开期间多次 resolve 都拿到同一个 id（验证不会因为"GPUI focus
+/// 在 ai_chat_panel 上"被错误清空）；关闭侧栏后必须报错（避免静默误操作）。
+#[tokio::test]
+async fn active_terminal_persists_when_ai_sidebar_input_takes_focus() {
+    // mock 桥：初始 focused=1，外部 setter 可中途切到 None（模拟"用户关闭 AI 侧栏"）
+    let (bridge, active) = spawn_mock_bridge_with_switchable_focus();
+
+    // 第一次 resolve：用户在 TerminalView #1 打开了 AI 侧栏，sidebar 写 active=1
+    let first = crate::agents::tools::resolve_terminal(&bridge.handle, &serde_json::json!({}))
+        .await
+        .expect("首次 resolve 应有激活终端");
+    assert_eq!(first, 1, "首次 resolve 拿到 1");
+
+    // 用户在 AI 输入框打字 → GPUI focus 跑到 #1 的 ai_chat_panel。
+    // 关键：**不应清空** active_terminal_id（mock 桥模拟的 active 字段不会因为
+    // 焦点跑到 input 而变成 None），所以二次 resolve 仍应拿到 1。
+    let second = crate::agents::tools::resolve_terminal(&bridge.handle, &serde_json::json!({}))
+        .await
+        .expect("AI 侧栏 input 拿 GPUI focus 后 resolve 仍应拿到 1");
+    assert_eq!(second, 1, "GPUI focus 在 ai_chat_panel 不应清空 active");
+
+    // 用户关闭 AI 侧栏（PanelChanged(None) → clear_active），active 变 None，
+    // resolve 必须报错引导用户先在目标终端打开 AI 侧栏。
+    *active.lock().unwrap() = None;
+    let third =
+        crate::agents::tools::resolve_terminal(&bridge.handle, &serde_json::json!({})).await;
+    assert!(
+        third.is_err(),
+        "AI 侧栏关闭后 resolve 必须报错（避免静默误操作）"
+    );
+}
+
+/// 场景：AI 助手在 TerminalView #1 的 AI 侧栏发起任务后，用户到 #2 打开 AI 侧栏，
+/// 下一轮不传 terminal_id 的写入必须落到 #2（"AI 侧栏 host 切换"语义）。
+#[tokio::test]
+async fn active_terminal_follows_ai_sidebar_rehost() {
+    let (bridge, active) = spawn_mock_bridge_with_switchable_focus();
+    let written = bridge.written.clone();
+
+    let provider = Arc::new(MockProvider::new(true));
+    provider.push_tool_round("call-1", "write_to_terminal", r#"{"command":"echo one"}"#);
+    provider.push_tool_round("call-d", "task_complete", r#"{"summary":"完成"}"#);
+
+    let (result, _events) =
+        run_collect_reminders(provider, &bridge.handle, CancellationToken::new(), 1).await;
+
+    assert!(result.is_ok());
+    assert_eq!(
+        written.lock().unwrap().as_slice(),
+        [(1u64, "echo one".to_string(), 1500u64)],
+        "初始 active=1 时写入应落到 1"
+    );
+
+    // 模拟用户到 #2 打开 AI 侧栏：PanelChanged(Some(AiChat)) 触发 #2.sidebar 写 active=2
+    *active.lock().unwrap() = Some(2);
+    let provider2 = Arc::new(MockProvider::new(true));
+    provider2.push_tool_round("call-2", "write_to_terminal", r#"{"command":"echo two"}"#);
+    provider2.push_tool_round("call-d", "task_complete", r#"{"summary":"完成"}"#);
+    let (result2, _events2) =
+        run_collect_reminders(provider2, &bridge.handle, CancellationToken::new(), 1).await;
+
+    assert!(result2.is_ok());
+    let all_written = written.lock().unwrap().clone();
+    assert_eq!(
+        all_written.last().unwrap().0,
+        2,
+        "切到 active=2 后写入应落到 id=2，actual={:?}",
+        all_written
+    );
+    assert_eq!(
+        all_written.last().unwrap().1,
+        "echo two",
+        "切到 active=2 后写入命令应是 echo two"
+    );
+}
+
+/// 场景：AI 助手调 focus_terminal 工具后，下一次 list_terminals 返回的
+/// focused_id 应等于刚才聚焦的 id（协议层保证，不再依赖 GPUI focus 副作用）。
+#[tokio::test]
+async fn focus_terminal_tool_call_makes_subsequent_list_report_new_id() {
+    use crate::agents::tools::execute_tool;
+    use one_core::llm::{FunctionCall, ToolCall};
+
+    let (bridge, active) = spawn_mock_bridge_with_switchable_focus();
+
+    let (_ok1, output1, _) = execute_tool(
+        &bridge.handle,
+        &ToolCall {
+            id: "list-1".into(),
+            call_type: "function".into(),
+            function: FunctionCall {
+                name: "get_terminal_list".into(),
+                arguments: "{}".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .await;
+    let payload1: serde_json::Value = serde_json::from_str(&output1).unwrap();
+    assert_eq!(payload1["focused_id"], serde_json::json!(1));
+
+    // 模拟 pump::focus_terminal(2) 写入 registry 的副作用。
+    *active.lock().unwrap() = Some(2);
+
+    let (_ok2, output2, _) = execute_tool(
+        &bridge.handle,
+        &ToolCall {
+            id: "list-2".into(),
+            call_type: "function".into(),
+            function: FunctionCall {
+                name: "get_terminal_list".into(),
+                arguments: "{}".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .await;
+    let payload2: serde_json::Value = serde_json::from_str(&output2).unwrap();
+    assert_eq!(
+        payload2["focused_id"],
+        serde_json::json!(2),
+        "focus_terminal 后 list_terminal_list 必须返回新 active"
+    );
+}
+
+// ===== 多 AI 助手并发支持测试 =====
+//
+// 背景：用户报告"每个终端都可以有自己的 AI 助手，可能会同时进行处理"。
+// 之前的修复用全局 active_terminal_id 单值字段，无法表达多 AI 并发。
+// 本次通过 HostedTerminalHandle 让每个 ai_chat_panel 拥有自己的 host_terminal_id，
+// 工具调用时优先用 host（不走全局 active_terminal_id）。
+
+/// 场景：HostedTerminalHandle 包装的 terminal_id=2 时，即使全局 active_terminal_id=1，
+/// resolve_terminal 仍然返回 2——这是多 AI 并发的核心正确性。
+#[tokio::test]
+async fn hosted_handle_overrides_global_focused_id() {
+    let (bridge, active) = spawn_mock_bridge_with_switchable_focus();
+    // 全局 active=1（fixture 初始值）。
+    *active.lock().unwrap() = Some(1);
+
+    let hosted = crate::agent_bridge::HostedTerminalHandle::for_test(bridge.handle.clone(), 2);
+    // resolve_terminal 不传 terminal_id → 用 host=2，不读全局。
+    let id = crate::agents::tools::resolve_terminal(&hosted, &serde_json::json!({}))
+        .await
+        .expect("hosted 路径应解析成功");
+    assert_eq!(
+        id, 2,
+        "host=2 时必须覆盖全局 active_terminal_id=1（多 AI 并发语义）"
+    );
+
+    // 即使全局切到 3，hosted 仍返回 host=2。
+    *active.lock().unwrap() = Some(3);
+    let id2 = crate::agents::tools::resolve_terminal(&hosted, &serde_json::json!({}))
+        .await
+        .expect("hosted 路径应解析成功");
+    assert_eq!(id2, 2, "hosted handle 的 host_terminal_id 是稳定的");
+}
+
+/// 场景：HostedTerminalHandle 显式传 terminal_id=3 时必须覆盖 host=2（用户意图优先）。
+#[tokio::test]
+async fn hosted_handle_explicit_id_wins_over_host() {
+    let (bridge, _active) = spawn_mock_bridge_with_switchable_focus();
+    let hosted = crate::agent_bridge::HostedTerminalHandle::for_test(bridge.handle.clone(), 2);
+    let id =
+        crate::agents::tools::resolve_terminal(&hosted, &serde_json::json!({"terminal_id": 3}))
+            .await
+            .expect("显式 id 应通过");
+    assert_eq!(id, 3, "显式 terminal_id 必须覆盖 host 默认值");
+}
+
+/// 场景：HostedTerminalHandle 的 host_terminal_id_cell 是 0（占位）时，
+/// 走全局 focused_id 兜底——这是 TerminalView 还没完成 register_agent_presence 时的过渡态。
+#[tokio::test]
+async fn hosted_handle_with_zero_host_falls_back_to_focused_id() {
+    let (bridge, active) = spawn_mock_bridge_with_switchable_focus();
+    *active.lock().unwrap() = Some(1);
+
+    // 用 for_test 构造 host=0（占位状态）——host_terminal_id() 应返回 None。
+    let hosted = crate::agent_bridge::HostedTerminalHandle::for_test(bridge.handle.clone(), 0);
+    let id = crate::agents::tools::resolve_terminal(&hosted, &serde_json::json!({}))
+        .await
+        .expect("host=0 时应回退到全局 focused_id");
+    assert_eq!(
+        id, 1,
+        "host=0 占位态应回退到全局 focused_id=1（TerminalView 未注册时的过渡）"
+    );
+}
+
+/// 场景：get_terminal_list 输出同时包含 focused_id 与 host_terminal_id 两个字段，
+/// 模型可以一眼分清"全局活跃"与"本 AI 实例宿主"。
+#[tokio::test]
+async fn get_terminal_list_payload_includes_both_ids() {
+    use crate::agents::tools::execute_tool;
+    use one_core::llm::{FunctionCall, ToolCall};
+
+    let (bridge, active) = spawn_mock_bridge_with_switchable_focus();
+    *active.lock().unwrap() = Some(1);
+
+    let hosted = crate::agent_bridge::HostedTerminalHandle::for_test(bridge.handle.clone(), 2);
+    let (_ok, output, _) = execute_tool(
+        &hosted,
+        &ToolCall {
+            id: "list".into(),
+            call_type: "function".into(),
+            function: FunctionCall {
+                name: "get_terminal_list".into(),
+                arguments: "{}".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .await;
+    let payload: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(payload["focused_id"], serde_json::json!(1));
+    assert_eq!(
+        payload["host_terminal_id"],
+        serde_json::json!(2),
+        "payload 必须携带 host_terminal_id=2 让模型明确自己属于哪个 TerminalView"
     );
 }

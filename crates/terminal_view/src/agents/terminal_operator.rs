@@ -16,6 +16,7 @@ use one_core::llm::{
     ChatRequest, ChatStream, LlmProvider, Message, Role, ToolCall, ToolChoice,
     assistant_tool_calls_message, extract_stream_text_parts, tool_message,
 };
+use one_core::storage::traits::Repository;
 
 use super::prompt::SYSTEM_PROMPT;
 use super::tools::{ToolEffect, action_summary, execute_tool, summarize_args, tool_definitions};
@@ -117,17 +118,38 @@ fn classify_finish_reason(fr: Option<&str>) -> FinishReasonKind {
 
 impl TerminalOperatorAgent {
     async fn run(&self, ctx: AgentContext, tx: &mpsc::Sender<AgentEvent>) -> Result<(), String> {
-        let handle = ctx
-            .get_capability::<TerminalOperatorHandle>(CAP_TERMINAL)
-            .ok_or_else(|| t!("TerminalAgent.capability_missing").to_string())?
-            .clone();
+        // 优先拿 HostedTerminalHandle（多 AI 助手并发时携带 host_terminal_id），
+        // 拿不到再回退到裸 TerminalOperatorHandle（无 host 上下文）。
+        let hosted: Option<crate::agent_bridge::HostedTerminalHandle> = ctx
+            .get_capability::<crate::agent_bridge::HostedTerminalHandle>(CAP_TERMINAL)
+            .cloned();
         let provider = ctx
             .provider_state
             .manager()
             .get_provider(&ctx.provider_config)
             .await
             .map_err(|err| t!("TerminalAgent.get_provider_failed", error = err).to_string())?;
-        self.run_loop(&ctx, provider, &handle, tx).await
+        if let Some(hosted) = hosted {
+            self.run_loop(
+                &ctx,
+                provider,
+                &hosted as &dyn crate::agent_bridge::TerminalHost,
+                tx,
+            )
+            .await
+        } else {
+            let handle = ctx
+                .get_capability::<TerminalOperatorHandle>(CAP_TERMINAL)
+                .ok_or_else(|| t!("TerminalAgent.capability_missing").to_string())?
+                .clone();
+            self.run_loop(
+                &ctx,
+                provider,
+                &handle as &dyn crate::agent_bridge::TerminalHost,
+                tx,
+            )
+            .await
+        }
     }
 
     /// Agent 主循环（pub(crate) 供测试注入 mock Provider）。
@@ -135,7 +157,7 @@ impl TerminalOperatorAgent {
         &self,
         ctx: &AgentContext,
         provider: Arc<dyn LlmProvider>,
-        handle: &TerminalOperatorHandle,
+        handle: &dyn crate::agent_bridge::TerminalHost,
         tx: &mpsc::Sender<AgentEvent>,
     ) -> Result<(), String> {
         if !provider.supports_tools() {
@@ -145,6 +167,53 @@ impl TerminalOperatorAgent {
         let mut messages = vec![Message::text(Role::System, SYSTEM_PROMPT)];
         messages.extend(ctx.chat_history.iter().cloned());
         messages.push(Message::text(Role::User, ctx.user_input.clone()));
+
+        // 解析持久化中间态所需的会话 id 与消息仓库。
+        // 仅当 session_id 存在且能拿到 MessageRepository 时才落库工具消息对；
+        // 否则跳过（测试场景或无持久化会话时 run_loop 仍正常跑，只是不落库）。
+        let session_id = ctx.session_id.filter(|&id| id > 0);
+        let message_repo = session_id.and_then(|_| {
+            ctx.storage_manager
+                .get::<one_core::llm::chat_history::MessageRepository>()
+        });
+        // 闭包：把 assistant(tool_calls) 消息或 tool(result) 消息持久化到 DB。
+        // 失败仅记日志，不中断 agent 循环（持久化是侧路，不应阻塞主流程）。
+        let persist_assistant_tool_calls =
+            |repo: &one_core::llm::chat_history::MessageRepository,
+             sid: i64,
+             text: &str,
+             tool_calls: &[ToolCall]| {
+                let tool_calls_json = match serde_json::to_string(tool_calls) {
+                    Ok(json) => json,
+                    Err(err) => {
+                        tracing::warn!(
+                            "[terminal_agent] 序列化 tool_calls 失败，跳过持久化: {err}"
+                        );
+                        return;
+                    }
+                };
+                let mut msg = one_core::llm::chat_history::ChatMessage::assistant_tool_calls(
+                    sid,
+                    text.to_string(),
+                    tool_calls_json,
+                );
+                if let Err(err) = repo.insert(&mut msg) {
+                    tracing::warn!("[terminal_agent] 持久化 assistant tool_calls 消息失败: {err}");
+                }
+            };
+        let persist_tool_result = |repo: &one_core::llm::chat_history::MessageRepository,
+                                   sid: i64,
+                                   call_id: &str,
+                                   result: &str| {
+            let mut msg = one_core::llm::chat_history::ChatMessage::tool_result(
+                sid,
+                call_id.to_string(),
+                result.to_string(),
+            );
+            if let Err(err) = repo.insert(&mut msg) {
+                tracing::warn!("[terminal_agent] 持久化 tool 结果消息失败: {err}");
+            }
+        };
 
         let mut full_text = String::new();
         let mut tool_records: Vec<serde_json::Value> = Vec::new();
@@ -328,6 +397,11 @@ impl TerminalOperatorAgent {
                 // 会拒绝 content 为 [] 的 assistant tool_calls 消息
                 Some(outcome.text.clone()),
             ));
+            // 持久化 assistant(tool_calls) 消息到会话历史，供下一轮用户输入时
+            // build_agent_history_messages 还原结构化工具调用上下文。
+            if let (Some(repo), Some(sid)) = (message_repo.as_ref(), session_id) {
+                persist_assistant_tool_calls(repo, sid, &outcome.text, &outcome.tool_calls);
+            }
 
             // 单轮内多个工具调用严格串行（共享同一终端，避免写入时序冲突）
             for call in &outcome.tool_calls {
@@ -409,6 +483,11 @@ impl TerminalOperatorAgent {
                 }));
                 if matches!(effect, ToolEffect::WroteTerminal) {
                     had_write = true;
+                }
+                // 持久化 tool(result) 消息，与上方 assistant(tool_calls) 配对，
+                // 下一轮历史回放时还原为 OpenAI 协议要求的工具消息对。
+                if let (Some(repo), Some(sid)) = (message_repo.as_ref(), session_id) {
+                    persist_tool_result(repo, sid, &call.id, &result_text);
                 }
                 messages.push(tool_message(result_text, call.id.clone()));
                 if let ToolEffect::TaskComplete(summary) = effect {

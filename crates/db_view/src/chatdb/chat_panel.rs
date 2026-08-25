@@ -908,7 +908,8 @@ impl ChatPanel {
                 global_provider_state,
                 storage_manager,
                 cancel_token,
-            );
+            )
+            .with_session_id(Some(session_db_id));
             ctx_agent.set_capability("session_id", session_db_id.to_string());
 
             if let Some(db_meta) = db_metadata {
@@ -1957,47 +1958,48 @@ impl ChatPanel {
                         )
                         .selectable(true)
                         .code_block_actions({
-                        let message_id = message_id.clone();
-                        move |code_block, _window, _cx| {
-                            let block = SqlCodeBlock::from_code_block(code_block, 0);
-                            let is_sql = block.is_sql;
-                            let code = code_block.code();
+                            let message_id = message_id.clone();
+                            move |code_block, _window, _cx| {
+                                let block = SqlCodeBlock::from_code_block(code_block, 0);
+                                let is_sql = block.is_sql;
+                                let code = code_block.code();
 
-                            h_flex()
-                                .gap_1()
-                                .child(Clipboard::new("copy").value(code.clone()))
-                                .when(is_sql, {
-                                    let panel = panel_for_actions.clone();
-                                    let message_id = message_id.clone();
-                                    let block_for_action = block.clone();
-                                    move |this| {
-                                        this.child(
-                                            Button::new("run-sql")
-                                                .icon(IconName::SquareTerminal)
-                                                .ghost()
-                                                .xsmall()
-                                                .tooltip(t!("ChatSqlBlock.run").to_string())
-                                                .on_click({
-                                                    let panel = panel.clone();
-                                                    let message_id = message_id.clone();
-                                                    let block_for_action = block_for_action.clone();
-                                                    move |_, window, cx| {
-                                                        panel.update(cx, |p, cx| {
-                                                            p.run_sql_block_with_guard(
-                                                                &message_id,
-                                                                &block_for_action,
-                                                                window,
-                                                                cx,
-                                                            );
-                                                        });
-                                                    }
-                                                }),
-                                        )
-                                    }
-                                })
-                                .into_any_element()
-                        }
-                    })
+                                h_flex()
+                                    .gap_1()
+                                    .child(Clipboard::new("copy").value(code.clone()))
+                                    .when(is_sql, {
+                                        let panel = panel_for_actions.clone();
+                                        let message_id = message_id.clone();
+                                        let block_for_action = block.clone();
+                                        move |this| {
+                                            this.child(
+                                                Button::new("run-sql")
+                                                    .icon(IconName::SquareTerminal)
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .tooltip(t!("ChatSqlBlock.run").to_string())
+                                                    .on_click({
+                                                        let panel = panel.clone();
+                                                        let message_id = message_id.clone();
+                                                        let block_for_action =
+                                                            block_for_action.clone();
+                                                        move |_, window, cx| {
+                                                            panel.update(cx, |p, cx| {
+                                                                p.run_sql_block_with_guard(
+                                                                    &message_id,
+                                                                    &block_for_action,
+                                                                    window,
+                                                                    cx,
+                                                                );
+                                                            });
+                                                        }
+                                                    }),
+                                            )
+                                        }
+                                    })
+                                    .into_any_element()
+                            }
+                        })
                         .code_block_renderer({
                             let message_id = message_id.clone();
                             let panel_for_collapse = panel_for_render.clone();
