@@ -306,7 +306,12 @@ impl DbConnectionSelector {
     ) {
         self.ensure_connections_loaded(cx);
 
-        let Some(connection) = self.connections.iter().find(|c| c.id == connection_id).cloned() else {
+        let Some(connection) = self
+            .connections
+            .iter()
+            .find(|c| c.id == connection_id)
+            .cloned()
+        else {
             return;
         };
 

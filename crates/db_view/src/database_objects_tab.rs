@@ -1,8 +1,8 @@
 use crate::database_view_plugin::{ToolbarButtonType, build_toolbar_buttons_for};
+use crate::db_tree_view::get_icon_for_node_type;
 use crate::search_shortcut::{
     DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
 };
-use crate::db_tree_view::get_icon_for_node_type;
 use db::{DbNode, DbNodeType, GlobalDbState, ObjectView};
 use gpui::prelude::FluentBuilder;
 use gpui::{

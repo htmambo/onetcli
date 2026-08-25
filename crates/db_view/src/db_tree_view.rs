@@ -850,11 +850,7 @@ impl DbTreeView {
             sync_selected_databases_for_connection(&mut self.selected_databases, connection);
 
             if let Some(node) = self.db_nodes.get_mut(&id) {
-                apply_connection_node_config(
-                    node,
-                    &config,
-                    external_driver_metadata(&config),
-                );
+                apply_connection_node_config(node, &config, external_driver_metadata(&config));
                 let mut global_db_state = cx.global_mut::<GlobalDbState>().clone();
                 let conn_id = id.clone();
                 if let Some(exist_config) = global_db_state.get_config(&id) {

@@ -4,8 +4,7 @@ use gpui::{
     Styled, Window, div, px,
 };
 use gpui_component::{
-    IconName,
-    ActiveTheme, Disableable, Sizable, StyledExt, TitleBar, app_style,
+    ActiveTheme, Disableable, IconName, Sizable, StyledExt, TitleBar, app_style,
     button::{Button, ButtonVariants as _},
     h_flex,
     scroll::ScrollableElement,
@@ -48,7 +47,6 @@ fn external_driver_id_from_connection(conn: Option<&StoredConnection>) -> Option
                 .cloned()
         })
 }
-
 
 fn external_driver_name_for_title(driver_id: Option<&str>) -> Option<String> {
     driver_id.and_then(|driver_id| {
@@ -317,12 +315,7 @@ mod tests {
     fn connection_title_uses_external_driver_name() {
         assert_eq!(
             "新建 Dameng DM 连接",
-            connection_title_for_locale(
-                "zh-CN",
-                false,
-                &DatabaseType::External,
-                Some("Dameng DM")
-            )
+            connection_title_for_locale("zh-CN", false, &DatabaseType::External, Some("Dameng DM"))
         );
     }
 

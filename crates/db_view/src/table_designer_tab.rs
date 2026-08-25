@@ -81,7 +81,6 @@ const COLUMN_EDITOR_MAX_WIDTHS: [Pixels; COLUMN_EDITOR_COLUMN_COUNT] = [
     px(140.0),
 ];
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum DesignerTab {
     Columns,
@@ -1481,7 +1480,6 @@ impl Render for DragColumn {
     }
 }
 
-
 #[derive(Clone)]
 struct ResizeColumnEditorColumn {
     entity_id: EntityId,
@@ -1623,7 +1621,6 @@ impl ColumnsEditor {
             .into_any_element()
     }
 
-
     pub fn new(
         database_type: DatabaseType,
         charsets: Vec<CharsetInfo>,
@@ -1755,7 +1752,6 @@ impl ColumnsEditor {
             ]
         }
     }
-
 
     fn ensure_loaded_type_option(data_types: &mut Vec<String>, base_type: &str) -> usize {
         if let Some(idx) = data_types
@@ -2616,32 +2612,46 @@ impl ColumnsEditor {
                     .child(Input::new(&row.scale_input).w_full().small()),
             )
             .child(
-                div().w(self.column_width(COLUMN_NULLABLE_COL)).flex().justify_center().child(
-                    Checkbox::new(("null", idx))
-                        .checked(row.nullable)
-                        .small()
-                        .on_click(
-                            cx.listener(move |this, _, _window, cx| this.toggle_nullable(idx, cx)),
-                        ),
-                ),
+                div()
+                    .w(self.column_width(COLUMN_NULLABLE_COL))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        Checkbox::new(("null", idx))
+                            .checked(row.nullable)
+                            .small()
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.toggle_nullable(idx, cx)
+                            })),
+                    ),
             )
             .child(
-                div().w(self.column_width(COLUMN_PRIMARY_KEY_COL)).flex().justify_center().child(
-                    Checkbox::new(("pk", idx))
-                        .checked(row.is_pk)
-                        .small()
-                        .on_click(cx.listener(move |this, _, _window, cx| this.toggle_pk(idx, cx))),
-                ),
+                div()
+                    .w(self.column_width(COLUMN_PRIMARY_KEY_COL))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        Checkbox::new(("pk", idx))
+                            .checked(row.is_pk)
+                            .small()
+                            .on_click(
+                                cx.listener(move |this, _, _window, cx| this.toggle_pk(idx, cx)),
+                            ),
+                    ),
             )
             .child(
-                div().w(self.column_width(COLUMN_AUTO_INCREMENT_COL)).flex().justify_center().child(
-                    Checkbox::new(("ai", idx))
-                        .checked(row.auto_increment)
-                        .small()
-                        .on_click(cx.listener(move |this, _, _window, cx| {
-                            this.toggle_auto_increment(idx, cx)
-                        })),
-                ),
+                div()
+                    .w(self.column_width(COLUMN_AUTO_INCREMENT_COL))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        Checkbox::new(("ai", idx))
+                            .checked(row.auto_increment)
+                            .small()
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.toggle_auto_increment(idx, cx)
+                            })),
+                    ),
             )
             .child(
                 div()
@@ -3650,7 +3660,6 @@ mod tests {
         let no_change = db::plugin::merge_alter_sql(String::new(), Vec::new());
         assert_eq!(no_change, "-- No changes detected");
     }
-
 
     #[test]
     fn test_loaded_column_type_missing_from_picker_is_preserved() {

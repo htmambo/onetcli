@@ -1418,7 +1418,7 @@ mod tests {
                 ("orders".to_string(), "订单表".to_string()),
             ],
             columns: vec![],
-                functions: vec![],
+            functions: vec![],
             columns_by_table,
         };
 
@@ -1563,7 +1563,7 @@ mod tests {
         let schema = SqlSchema {
             tables: vec![("Users".to_string(), "".to_string())],
             columns: vec![],
-                functions: vec![],
+            functions: vec![],
             columns_by_table,
         };
 

@@ -38,7 +38,6 @@ use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
 use rust_i18n::t;
 use uuid::Uuid;
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DatabaseTabIconSource {
     Asset(String),
@@ -702,11 +701,13 @@ impl TabContent for DatabaseTabView {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use db::ipc::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverEntry, IpcDriverManifest, IpcDriverRegistry, IpcDriverTransport, IpcDriverUi};
+    use db::ipc::{
+        EXTERNAL_DRIVER_ID_PARAM, IpcDriverEntry, IpcDriverManifest, IpcDriverRegistry,
+        IpcDriverTransport, IpcDriverUi,
+    };
     use one_core::storage::DatabaseType;
     use std::collections::HashMap;
 

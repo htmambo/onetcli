@@ -1293,7 +1293,6 @@ impl EditorTableDelegate {
             .map(|(ix, _)| ix)
             .collect();
 
-
         // 若无实际筛选效果且无搜索词，则清除过滤索引
         if filtered_indices.len() == self.rows.len() && self.row_search_query.is_empty() {
             self.filtered_row_indices = None;
@@ -1302,7 +1301,6 @@ impl EditorTableDelegate {
         }
     }
 }
-
 
 fn normalize_row_search_query(query: &str) -> String {
     query.trim().to_lowercase()
@@ -2748,8 +2746,8 @@ impl EditorTableDelegate {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_row_search_query, row_matches_search_query};
     use super::*;
+    use super::{normalize_row_search_query, row_matches_search_query};
     use one_ui::edit_table::ColumnSort;
 
     fn opt(value: &str) -> Option<String> {
@@ -3077,5 +3075,4 @@ mod tests {
         let row = vec![Some("1".to_string()), None];
         assert!(row_matches_search_query(&row, "null"));
     }
-
 }

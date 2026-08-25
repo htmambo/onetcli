@@ -17,25 +17,25 @@ use rust_xlsxwriter::Workbook;
 use tracing::{error, log::trace};
 
 use crate::import_export::table_export_view::DataExportView;
+use crate::search_shortcut::{DB_SEARCH_CONTEXT, FocusSearchInput, focus_search_input};
 use crate::settings::{LargeTextEditorOpenMode, current_settings as current_db_view_settings};
 use crate::sql_editor::SqlEditor;
 use crate::table_data::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
-use crate::search_shortcut::{DB_SEARCH_CONTEXT, FocusSearchInput, focus_search_input};
 use crate::table_data::filter_editor::{FilterEditorEvent, TableFilterEditor, TableSchema};
 use crate::table_data::results_delegate::{EditorTableDelegate, RowChange};
 use chrono::Local;
+use db::ipc::EXTERNAL_DRIVER_ID_PARAM;
 use db::{
     ColumnInfo, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult, TableCellChange,
     TableDataRequest, TableRowChange, TableSaveRequest,
 };
-use db::ipc::EXTERNAL_DRIVER_ID_PARAM;
 use gpui_component::button::ButtonVariants;
 use gpui_component::dialog::DialogButtonProps;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
-use one_core::tab_container::TabContainer;
 use one_core::storage::DatabaseType;
+use one_core::tab_container::TabContainer;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
 
@@ -501,7 +501,6 @@ impl DataGrid {
             focus_search_input(&self.search_input, window, cx);
         }
     }
-
 
     fn apply_column_visibility(&self, cx: &mut App) {
         self.table.update(cx, |state, cx| {
@@ -1762,8 +1761,7 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request =
-            self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
+        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
@@ -1787,8 +1785,7 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request =
-            self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
+        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
@@ -1843,8 +1840,7 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request =
-            self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
+        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state

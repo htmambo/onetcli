@@ -68,7 +68,6 @@ fn sql_text_for_run(editor_text: &str, selected_text: &str) -> String {
     }
 }
 
-
 fn should_render_schema_select(supports_schema: bool, uses_schema_as_database: bool) -> bool {
     supports_schema || uses_schema_as_database
 }
@@ -737,10 +736,7 @@ impl SqlEditorTab {
         let sql_result_tab_container = self.sql_result_tab_container.clone();
 
         let (current_database_value, current_schema_value) = if self.uses_schema_as_database {
-            (
-                None,
-                self.schema_select.read(cx).selected_value().cloned(),
-            )
+            (None, self.schema_select.read(cx).selected_value().cloned())
         } else {
             let selected_value = self.database_select.read(cx).selected_value().cloned();
             let schema = if self.supports_schema {
@@ -997,10 +993,7 @@ impl SqlEditorTab {
         }
 
         let (current_database_value, current_schema_value) = if self.uses_schema_as_database {
-            (
-                None,
-                self.schema_select.read(cx).selected_value().cloned(),
-            )
+            (None, self.schema_select.read(cx).selected_value().cloned())
         } else {
             let selected_value = self.database_select.read(cx).selected_value().cloned();
             let schema = if self.supports_schema {
@@ -1337,7 +1330,10 @@ impl Element for ResizeEventHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{RUN_QUERY_KEY_BINDINGS, initial_database_select_value, should_render_schema_select, sql_text_for_run};
+    use super::{
+        RUN_QUERY_KEY_BINDINGS, initial_database_select_value, should_render_schema_select,
+        sql_text_for_run,
+    };
     use db::DbManager;
     use one_core::storage::DatabaseType;
 
@@ -1393,7 +1389,6 @@ mod tests {
             )
         );
     }
-
 
     #[test]
     fn run_query_key_bindings_include_platform_shortcuts() {

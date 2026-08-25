@@ -2605,8 +2605,7 @@ impl DbConnectionForm {
                                         .gap_2()
                                         .child(
                                             Input::new(
-                                                &self.get_input_by_name("ssh_private_key")
-                                                    .unwrap(),
+                                                &self.get_input_by_name("ssh_private_key").unwrap(),
                                             )
                                             .flex_1()
                                             .h(px(80.))
