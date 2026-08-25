@@ -44,9 +44,9 @@ pub(crate) enum ToolEffect {
 pub(crate) fn tool_definitions() -> Vec<Tool> {
     let terminal_id = |required: bool| {
         let desc = if required {
-            "终端 id（取自 get_terminal_list.focused_id 或 terminals[].id）"
+            "终端 id（取自 get_terminal_list.terminals[].id）"
         } else {
-            "终端 id（取自 get_terminal_list）。缺省时（不传或传 null）自动采用 AI 助手当前挂载的终端（focused_id）。focused_id 表示 AI 侧栏当前所属的 TerminalView——AI 侧栏是 per-TerminalView 的，GPUI focus 落到哪个 ai_chat_panel，哪个就是 focused_id；用户关闭该侧栏时清空。多轮对话中用户在两次调用之间可能切换激活终端，请勿复用之前轮次选中的 id：要么不传，要么先调 get_terminal_list 重新读取 focused_id 再传。"
+            "终端 id（取自 get_terminal_list）。缺省时（不传或传 null）自动采用本 AI 助手当前挂载的终端（即输出里的 host_terminal_id）。多终端并存时 host_terminal_id 才是你的「当前终端」，focused_id 只是全局最近交互的终端、可能指向别的终端，不要用它作为缺省。仅在 host_terminal_id 缺失时才回退到 focused_id。如需操作其它终端，显式传该终端 id。"
         };
         serde_json::json!({ "type": ["integer", "null"], "minimum": 0, "description": desc })
     };
@@ -221,12 +221,13 @@ pub(crate) async fn execute_tool(
                         })
                     })
                     .collect();
-                // 多 AI 助手并发场景下同时输出：
-                // - focused_id：全局活跃 terminal（兜底，UI 上"最近交互的 AI 在哪"）；
-                // - host_terminal_id：本 AI 实例的 terminal（"我是哪个 panel 发起的"）。
+                // 多 AI 助手并发场景下同时输出两个 id：
+                // - host_terminal_id：本 AI 助手挂载的终端 = "当前终端"，缺省操作目标；
+                // - focused_id：全局最近交互的终端，仅作兜底（host_terminal_id 缺失时才用）。
+                //   多终端并存时 focused_id 可能指向别的终端，不可作为当前终端。
                 let payload = serde_json::json!({
-                    "focused_id": snapshot.focused_id,
                     "host_terminal_id": host.host_terminal_id(),
+                    "focused_id": snapshot.focused_id,
                     "terminals": items,
                 });
                 (
