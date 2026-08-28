@@ -2071,6 +2071,16 @@ impl DbConnectionForm {
         )
     }
 
+    /// TLS 校验被关闭时的中间人风险提示。
+    fn insecure_tls_hint(&self, cx: &App) -> gpui_component::form::Field {
+        field().child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().warning)
+                .child(t!("ConnectionForm.insecure_tls_warning").to_string()),
+        )
+    }
+
     fn toggle_ssl_enabled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let next_enabled = !self.is_ssl_enabled(cx);
         match self.config.db_type {
@@ -2636,6 +2646,21 @@ impl DbConnectionForm {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let ssl_enabled = self.is_ssl_enabled(cx);
+        // 关闭 TLS 校验类开关时提示中间人风险（覆盖 MySQL/PostgreSQL/MSSQL 三种形态）
+        let insecure_tls_warning = match self.config.db_type {
+            DatabaseType::MySQL => {
+                self.get_field_value("verify_ca", cx).as_deref() == Some("false")
+            }
+            DatabaseType::PostgreSQL => {
+                self.get_field_value("ssl_accept_invalid_certs", cx)
+                    .as_deref()
+                    == Some("true")
+            }
+            DatabaseType::MSSQL => {
+                self.get_field_value("trust_cert", cx).as_deref() == Some("true")
+            }
+            _ => false,
+        };
 
         v_form()
             .layout(Axis::Horizontal)
@@ -2659,6 +2684,9 @@ impl DbConnectionForm {
             .when(ssl_enabled, |form| match self.config.db_type {
                 DatabaseType::MySQL => form
                     .child(self.render_field_by_name("verify_ca", cx))
+                    .when(insecure_tls_warning, |form| {
+                        form.child(self.insecure_tls_hint(cx))
+                    })
                     .child(self.render_field_by_name("verify_identity", cx))
                     .child(self.render_field_by_name("ssl_root_cert_path", cx))
                     .child(self.render_field_by_name("tls_hostname_override", cx)),
@@ -2666,10 +2694,16 @@ impl DbConnectionForm {
                     .child(self.render_field_by_name("ssl_mode", cx))
                     .child(self.render_field_by_name("ssl_root_cert_path", cx))
                     .child(self.render_field_by_name("ssl_accept_invalid_certs", cx))
+                    .when(insecure_tls_warning, |form| {
+                        form.child(self.insecure_tls_hint(cx))
+                    })
                     .child(self.render_field_by_name("ssl_accept_invalid_hostnames", cx)),
                 DatabaseType::MSSQL => form
                     .child(self.render_field_by_name("encrypt", cx))
-                    .child(self.render_field_by_name("trust_cert", cx)),
+                    .child(self.render_field_by_name("trust_cert", cx))
+                    .when(insecure_tls_warning, |form| {
+                        form.child(self.insecure_tls_hint(cx))
+                    }),
                 _ => form,
             })
             .into_any_element()

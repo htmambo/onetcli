@@ -379,6 +379,10 @@ ConnectionForm:
     en: Verify CA
     zh-CN: 校验证书链
     zh-HK: 校驗憑證鏈
+  insecure_tls_warning:
+    en: "Certificate/hostname verification is disabled: the connection is vulnerable to man-in-the-middle attacks. Only recommended for trusted or test networks."
+    zh-CN: "已关闭证书/主机名校验，连接可能被中间人攻击，仅建议在可信或测试网络使用。"
+    zh-HK: "已關閉憑證/主機名校驗，連線可能被中間人攻擊，僅建議在可信或測試網絡使用。"
   verify_identity:
     en: Verify Hostname
     zh-CN: 校验主机名
