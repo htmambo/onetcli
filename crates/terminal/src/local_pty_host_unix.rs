@@ -6,9 +6,9 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
 
 use crate::local_pty_host::{
-    dispatch_request, mark_session_detached, subscribe_exit, subscribe_output, SessionRegistry,
+    SessionRegistry, dispatch_request, mark_session_detached, subscribe_exit, subscribe_output,
 };
-use crate::local_pty_protocol::{local_pty_endpoint, LocalPtyHostEvent, LocalPtyHostRequest};
+use crate::local_pty_protocol::{LocalPtyHostEvent, LocalPtyHostRequest, local_pty_endpoint};
 
 pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
     let endpoint = local_pty_endpoint();

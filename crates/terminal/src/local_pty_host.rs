@@ -6,16 +6,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use tokio::sync::{broadcast, mpsc, RwLock};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing;
 use uuid::Uuid;
 
 use crate::{
-    local_pty_protocol::{
-        local_pty_pid_file, LocalPtyHostEvent, LocalPtyHostRequest, LocalPtySessionId,
-    },
     TerminalCloseMode, TerminalSize,
+    local_pty_protocol::{
+        LocalPtyHostEvent, LocalPtyHostRequest, LocalPtySessionId, local_pty_pid_file,
+    },
 };
 
 const DETACH_TTL: Duration = Duration::from_secs(600);

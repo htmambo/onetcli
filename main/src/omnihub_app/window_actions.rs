@@ -54,7 +54,6 @@ pub fn toggle_fullscreen(cx: &mut App) {
     });
 }
 
-
 /// 窗口置顶状态（单窗口应用，使用静态原子量足够）。Windows / macOS 实现。
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) static ALWAYS_ON_TOP: AtomicBool = AtomicBool::new(false);

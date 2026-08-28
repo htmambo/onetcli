@@ -6,11 +6,14 @@ use gpui::AppContext;
 use gpui::{App, BorrowAppContext, Context, Entity, Window};
 use mongodb_view::MongoTabView;
 use one_core::connection_restore::{LocalTerminalRestoreState, SshTerminalRestoreState};
-use one_core::storage::{ConnectionType, RemoteDesktopProtocol as StorageRemoteDesktopProtocol, StoredConnection, Workspace};
-use remote_desktop::{RemoteDesktopConnectionOptions, RemoteDesktopProtocol};
-use remote_desktop_view::{RemoteDesktopView, RemoteDesktopViewConfig};
+use one_core::storage::{
+    ConnectionType, RemoteDesktopProtocol as StorageRemoteDesktopProtocol, StoredConnection,
+    Workspace,
+};
 use one_core::tab_container::TabItem;
 use redis_view::RedisTabView;
+use remote_desktop::{RemoteDesktopConnectionOptions, RemoteDesktopProtocol};
+use remote_desktop_view::{RemoteDesktopView, RemoteDesktopViewConfig};
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
 use terminal_view::{TerminalConnectionKind, TerminalView, TerminalViewEvent};
@@ -791,7 +794,6 @@ impl HomePage {
         });
     }
 
-
     pub(crate) fn open_sftp_view(
         &mut self,
         conn: StoredConnection,
@@ -1322,4 +1324,3 @@ fn remote_desktop_tab_kind(protocol: RemoteDesktopProtocol) -> &'static str {
         RemoteDesktopProtocol::Vnc => "vnc",
     }
 }
-

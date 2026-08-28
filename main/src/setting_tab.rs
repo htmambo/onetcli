@@ -1,27 +1,29 @@
-#[cfg(target_os = "linux")]
-use std::process::Command;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::process::Command;
 use std::sync::Arc;
 
 use db_view::set_db_view_settings;
 use gpui::{
     App, AppContext, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString, StyleRefinement, Styled,
-    PathPromptOptions, Window, WindowAppearance, div,
+    InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
+    StyleRefinement, Styled, Window, WindowAppearance, div,
 };
+use gpui_component::button::Button;
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;
-use gpui_component::button::Button;
 use gpui_component::{
     ActiveTheme, Icon, IconName, MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, Sizable, Size, Theme,
-    ThemeRegistry, WindowExt, WindowsSurfaceLayer, group_box::GroupBoxVariant, h_flex,
-    layered_level_surface_color,
+    ThemeRegistry, WindowExt, WindowsSurfaceLayer,
+    group_box::GroupBoxVariant,
+    h_flex, layered_level_surface_color,
     setting::{
         NumberFieldOptions, RenderOptions, SettingField, SettingGroup, SettingItem, SettingPage,
         Settings,
     },
-    tokens::Radius, v_flex,
+    tokens::Radius,
+    v_flex,
 };
 use one_core::ai_chat::GlobalChatSettings;
 use one_core::certificate_manager::CertificateManagerView;
@@ -223,7 +225,6 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
             .text_color(sync_server_theme::text()),
     )
 }
-
 
 fn monospace_font_options() -> Vec<(SharedString, SharedString)> {
     [
@@ -2497,7 +2498,9 @@ fn render_manual_update_check_item(cx: &mut App) -> gpui::AnyElement {
 
 #[cfg(test)]
 mod hotkey_migration_tests {
-    use crate::setting_tab::{AppSettings, DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
+    use crate::setting_tab::{
+        AppSettings, DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER,
+    };
 
     #[test]
     fn detects_legacy_ctrl_space_case_insensitive() {

@@ -8,8 +8,8 @@ pub fn init_theme_runtime(cx: &mut App) {
         tracing::warn!("Failed to copy bundled themes: {}", err);
     }
 
-    let themes_dir =
-        one_core::storage::get_runtime_themes_dir().unwrap_or_else(|_| std::path::PathBuf::from("./themes"));
+    let themes_dir = one_core::storage::get_runtime_themes_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("./themes"));
     if let Err(err) = gpui_component::ThemeRegistry::watch_dir(themes_dir, cx, |cx| {
         let settings = AppSettings::global(cx).clone();
         cx.defer(move |cx| {

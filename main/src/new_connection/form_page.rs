@@ -2,9 +2,11 @@ use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindow
 use gpui::{AnyView, AnyWindowHandle, AppContext, Context, Entity, Window};
 use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::storage::{ConnectionType, DatabaseType, RemoteDesktopProtocol};
-use redis_view::{RedisFormWindow, RedisFormWindowConfig};
 use port_forwarding_view::{PortForwardingFormWindow, PortForwardingFormWindowConfig};
-use remote_desktop_view::remote_desktop_form::{RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig};
+use redis_view::{RedisFormWindow, RedisFormWindowConfig};
+use remote_desktop_view::remote_desktop_form::{
+    RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig,
+};
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig, SshFormWindow, SshFormWindowConfig};
 
 use crate::home_tab::HomePage;
@@ -257,7 +259,6 @@ fn build_port_forwarding_form(
     )
 }
 
-
 fn build_remote_desktop_form(
     parent: Entity<HomePage>,
     protocol: RemoteDesktopProtocol,
@@ -290,4 +291,3 @@ fn build_remote_desktop_form(
             .into(),
     )
 }
-

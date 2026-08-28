@@ -35,6 +35,7 @@ use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, 
 use one_core::crypto;
 use one_core::key_storage;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
+use one_core::storage::RemoteDesktopProtocol;
 use one_core::storage::traits::Repository;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
@@ -47,9 +48,10 @@ use port_forwarding::{
     build_dynamic_forwarding_request, build_local_forwarding_request,
 };
 use port_forwarding_view::{PortForwardingFormWindow, PortForwardingFormWindowConfig};
-use remote_desktop_view::remote_desktop_form::{RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig};
-use one_core::storage::RemoteDesktopProtocol;
 use redis_view::{RedisFormWindow, RedisFormWindowConfig};
+use remote_desktop_view::remote_desktop_form::{
+    RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig,
+};
 use rust_i18n::t;
 use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
@@ -59,11 +61,11 @@ use crate::connection_restore::{
     ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
     open_connection_restore_dialog, resolve_restore_items,
 };
+use crate::external_driver_display::external_driver_icon_for_config;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
 use crate::new_connection::NewConnectionWindow;
-use crate::external_driver_display::external_driver_icon_for_config;
 use crate::setting_tab::{
     AppSettings, ConnectionListSortField, ConnectionListSortOrder, ConnectionListViewMode,
     GlobalCurrentUser,
@@ -369,7 +371,9 @@ impl HomePage {
             scroll_handle: ScrollHandle::new(),
             master_key_unlock_prompt_pending: false,
             master_key_dialog_open: false,
-            port_forwarding_runtime: std::sync::Arc::new(tokio::sync::Mutex::new(PortForwardingRuntime::new())),
+            port_forwarding_runtime: std::sync::Arc::new(tokio::sync::Mutex::new(
+                PortForwardingRuntime::new(),
+            )),
         };
 
         // 异步加载工作区
@@ -1395,7 +1399,11 @@ impl HomePage {
             let ids = all_ids.to_vec();
             Button::new(ElementId::Name(id_str.into()))
                 .label(label)
-                .with_variant(if all_set { ButtonVariant::Primary } else { ButtonVariant::Ghost })
+                .with_variant(if all_set {
+                    ButtonVariant::Primary
+                } else {
+                    ButtonVariant::Ghost
+                })
                 .xsmall()
                 .on_click(move |_, _, cx| {
                     strategies.update(cx, |s, cx| {
@@ -2040,12 +2048,15 @@ impl HomePage {
 
                 open_popup_window(
                     window,
-                    PopupWindowOptions::new(t!("PortForwarding.edit").to_string()).size(700.0, 520.0),
-                    move |window, cx| cx.new(|cx| PortForwardingFormWindow::new(config, window, cx)),
+                    PopupWindowOptions::new(t!("PortForwarding.edit").to_string())
+                        .size(700.0, 520.0),
+                    move |window, cx| {
+                        cx.new(|cx| PortForwardingFormWindow::new(config, window, cx))
+                    },
                     cx,
                 );
             }
-                        ConnectionType::Rdp => {
+            ConnectionType::Rdp => {
                 let config = RemoteDesktopFormWindowConfig {
                     protocol: RemoteDesktopProtocol::Rdp,
                     editing_connection: Some(connection),
@@ -2078,7 +2089,6 @@ impl HomePage {
                 );
             }
             _ => {}
-
         }
     }
 
@@ -2615,8 +2625,11 @@ impl HomePage {
         );
     }
 
-
-    pub(crate) fn show_port_forwarding_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn show_port_forwarding_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
         }
@@ -2654,7 +2667,6 @@ impl HomePage {
             cx,
         );
     }
-
 
     pub(crate) fn show_remote_desktop_form(
         &mut self,
@@ -4580,17 +4592,22 @@ impl HomePage {
                     "MongoDB".to_string()
                 }
             }),
-            ConnectionType::PortForwarding => conn.to_port_forwarding_params().ok().map(|params| {
-                match params.kind {
-                    one_core::storage::PortForwardingKind::Local => format!(
-                        "{}:{} -> {}:{}",
-                        params.bind_host, params.bind_port, params.target_host, params.target_port
-                    ),
-                    one_core::storage::PortForwardingKind::Dynamic => {
-                        format!("SOCKS {}:{}", params.bind_host, params.bind_port)
-                    }
-                }
-            }),
+            ConnectionType::PortForwarding => {
+                conn.to_port_forwarding_params()
+                    .ok()
+                    .map(|params| match params.kind {
+                        one_core::storage::PortForwardingKind::Local => format!(
+                            "{}:{} -> {}:{}",
+                            params.bind_host,
+                            params.bind_port,
+                            params.target_host,
+                            params.target_port
+                        ),
+                        one_core::storage::PortForwardingKind::Dynamic => {
+                            format!("SOCKS {}:{}", params.bind_host, params.bind_port)
+                        }
+                    })
+            }
             ConnectionType::Rdp | ConnectionType::Vnc => conn
                 .to_remote_desktop_params()
                 .ok()

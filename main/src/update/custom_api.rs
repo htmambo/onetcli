@@ -167,7 +167,10 @@ mod tests {
 
         assert_eq!(
             Some("https://github.test/windows.zip".to_string()),
-            select_fallback_download_url_for_keys(&response, &["x86_64-pc-windows-msvc", "windows"])
+            select_fallback_download_url_for_keys(
+                &response,
+                &["x86_64-pc-windows-msvc", "windows"]
+            )
         );
     }
 }

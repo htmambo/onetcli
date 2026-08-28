@@ -102,4 +102,3 @@ pub(super) const DEFAULT_SQL_QUERY_MAX_ROWS: u32 = 1000;
 pub(super) fn default_sql_query_max_rows() -> u32 {
     DEFAULT_SQL_QUERY_MAX_ROWS
 }
-

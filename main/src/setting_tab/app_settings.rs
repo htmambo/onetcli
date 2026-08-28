@@ -232,7 +232,8 @@ impl Default for AppSettings {
             sql_query_max_rows: theme_utils::default_sql_query_max_rows(),
             ai_auto_generate_session_title: false,
             ai_terminal_agent_enabled: true,
-            ai_terminal_agent_mid_session_reminders: default_ai_terminal_agent_mid_session_reminders(),
+            ai_terminal_agent_mid_session_reminders:
+                default_ai_terminal_agent_mid_session_reminders(),
             system_hotkey_macos: hotkey::default_system_hotkey_macos(),
             system_hotkey_other: hotkey::default_system_hotkey_other(),
             ssh_auto_accept_new_keys: false,
@@ -657,4 +658,3 @@ mod locale_default_tests {
         assert_eq!(locale::LOCALE_SYSTEM, settings.locale);
     }
 }
-

@@ -18,7 +18,7 @@ pub mod terminal;
 pub mod types;
 
 #[cfg(unix)]
-pub use local_pty_client::{kill_detached_sessions, LocalPtyClient};
+pub use local_pty_client::{LocalPtyClient, kill_detached_sessions};
 
 /// No-op on non-Unix platforms (Windows).
 #[cfg(not(unix))]

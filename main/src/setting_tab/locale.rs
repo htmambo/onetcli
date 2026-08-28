@@ -15,8 +15,10 @@ pub fn resolve_locale_setting(setting: &str, system_locale: Option<&str>) -> &'s
         LOCALE_EN => LOCALE_EN,
         LOCALE_ZH_CN => LOCALE_ZH_CN,
         LOCALE_ZH_HK => LOCALE_ZH_HK,
-        LOCALE_SYSTEM | "" => supported_locale_from_system_locale(system_locale.unwrap_or_default())
-            .unwrap_or(LOCALE_EN),
+        LOCALE_SYSTEM | "" => {
+            supported_locale_from_system_locale(system_locale.unwrap_or_default())
+                .unwrap_or(LOCALE_EN)
+        }
         _ => LOCALE_EN,
     }
 }
@@ -88,9 +90,6 @@ mod tests {
             resolve_locale_setting(LOCALE_SYSTEM, Some("zh-Hant-TW"))
         );
         assert_eq!("en", resolve_locale_setting("en", Some("zh-CN")));
-        assert_eq!(
-            "zh-CN",
-            resolve_locale_setting("", Some("zh_CN.UTF-8"))
-        );
+        assert_eq!("zh-CN", resolve_locale_setting("", Some("zh_CN.UTF-8")));
     }
 }

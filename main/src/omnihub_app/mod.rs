@@ -77,11 +77,11 @@ use close_guard::{create_close_guard_state, request_main_window_close};
 use logging::init_tracing;
 use system_monitor::{GlobalSystemMonitor, format_bytes, init_system_monitor};
 use tab_restore::load_startup_tabs_without_connection_restore;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use window_actions::toggle_always_on_top;
 use window_actions::{
     activate_tab_by_number, duplicate_tab, open_sftp_from_tab, quit_app, toggle_fullscreen,
 };
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-use window_actions::toggle_always_on_top;
 
 const APP_WINDOW_TITLE: &str = "OmniHub";
 const GLOBAL_STATUS_BAR_HEIGHT: f32 = 28.0;

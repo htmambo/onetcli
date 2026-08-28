@@ -7,8 +7,8 @@ mod auth;
 mod app_init;
 mod bootstrap;
 mod connection_restore;
-mod home;
 mod external_driver_display;
+mod home;
 mod home_tab;
 pub mod new_connection;
 mod omnihub_app;
@@ -83,9 +83,6 @@ fn maybe_show_hotkey_migration_toast(
     } else {
         setting_tab::DEFAULT_SYSTEM_HOTKEY_OTHER
     };
-    let message = t!(
-        "Settings.Migrations.ctrl_space_toast",
-        new_key = new_key
-    );
+    let message = t!("Settings.Migrations.ctrl_space_toast", new_key = new_key);
     window.push_notification(Notification::info(message).autohide(true), cx);
 }

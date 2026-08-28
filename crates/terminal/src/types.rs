@@ -114,11 +114,15 @@ mod tests {
     fn default_env_disables_apple_shell_sessions() {
         let env_vars = default_env();
 
-        assert!(env_vars
-            .iter()
-            .any(|(key, value)| key == "SHELL_SESSIONS_DISABLE" && value == "1"));
-        assert!(env_vars
-            .iter()
-            .any(|(key, value)| key == "TERM_SESSION_ID" && value.is_empty()));
+        assert!(
+            env_vars
+                .iter()
+                .any(|(key, value)| key == "SHELL_SESSIONS_DISABLE" && value == "1")
+        );
+        assert!(
+            env_vars
+                .iter()
+                .any(|(key, value)| key == "TERM_SESSION_ID" && value.is_empty())
+        );
     }
 }

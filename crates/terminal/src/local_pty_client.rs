@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::local_pty_protocol::{
-    local_pty_endpoint, LocalPtyHostEvent, LocalPtyHostRequest, LocalPtySessionId,
+    LocalPtyHostEvent, LocalPtyHostRequest, LocalPtySessionId, local_pty_endpoint,
 };
 use crate::{TerminalBackend, TerminalCloseMode, TerminalSize};
 
