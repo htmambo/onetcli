@@ -17,9 +17,11 @@ mod install;
 mod network;
 mod util;
 
-use custom_api::{fetch_update_info, select_download_url, select_fallback_download_url, select_sha256};
+use custom_api::{
+    fetch_update_info, select_download_url, select_fallback_download_url, select_sha256,
+};
 use dialog::show_update_dialog;
-use github_release::{fetch_github_release, github_release_to_dialog_info};
+use github_release::{fetch_github_release, fetch_github_sha256, github_release_to_dialog_info};
 use install::{apply_update_helper, cleanup_stale_update_backups};
 use network::check_network_connectivity;
 use util::parse_version;
@@ -262,7 +264,7 @@ async fn fetch_github_dialog_info(
     http_client: std::sync::Arc<dyn gpui::http_client::HttpClient>,
     current_version: &str,
 ) -> Result<Option<UpdateDialogInfo>, String> {
-    let release = fetch_github_release(http_client).await?;
+    let release = fetch_github_release(http_client.clone()).await?;
     let latest_version = parse_version(&release.tag_name)
         .ok_or_else(|| format!("版本号无法解析 {}", release.tag_name))?;
     let current_semver = parse_version(current_version)
@@ -272,9 +274,17 @@ async fn fetch_github_dialog_info(
         return Ok(None);
     }
 
-    github_release_to_dialog_info(&release, current_version)
-        .map(Some)
-        .map_err(|err| format!("转换 GitHub Release 失败: {}", err))
+    let mut info = github_release_to_dialog_info(&release, current_version)
+        .map_err(|err| format!("转换 GitHub Release 失败: {}", err))?;
+    // GitHub 渠道补充完整性校验：拉取 sha256sums.txt 匹配当前平台安装包哈希；
+    // 拉取失败降级为不校验（与旧行为一致），不阻断更新
+    match fetch_github_sha256(http_client, &release).await {
+        Some(hash) => info.expected_sha256 = Some(hash),
+        None => {
+            tracing::warn!("GitHub Release 未提供可用 sha256sums.txt，下载将跳过 SHA256 校验")
+        }
+    }
+    Ok(Some(info))
 }
 
 async fn fetch_custom_dialog_info(

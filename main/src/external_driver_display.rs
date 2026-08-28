@@ -57,6 +57,7 @@ mod tests {
             category: None,
             description: String::new(),
             version: String::new(),
+            protocol_version: None,
             entry: IpcDriverEntry {
                 command: "driver".to_string(),
                 args: Vec::new(),

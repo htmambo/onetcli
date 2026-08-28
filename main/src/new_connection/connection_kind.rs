@@ -129,7 +129,12 @@ impl NewConnectionKind {
 
     pub(super) fn category(&self) -> NewConnectionCategory {
         match self {
-            Self::Ssh | Self::Terminal | Self::Serial | Self::PortForwarding | Self::Rdp | Self::Vnc => NewConnectionCategory::Terminal,
+            Self::Ssh
+            | Self::Terminal
+            | Self::Serial
+            | Self::PortForwarding
+            | Self::Rdp
+            | Self::Vnc => NewConnectionCategory::Terminal,
             Self::Redis | Self::MongoDB => NewConnectionCategory::NoSql,
             Self::Database(_) => NewConnectionCategory::Database,
             Self::ExternalDatabase { category, .. } => {
@@ -157,9 +162,8 @@ impl NewConnectionKind {
             Self::Vnc => IconName::Vnc.color().with_size(px(40.0)),
             Self::Database(db_type) => db_type.as_icon().with_size(px(40.0)),
             Self::ExternalDatabase { driver_id, .. } => {
-                external_driver_icon_for_driver_id(driver_id, px(40.0)).unwrap_or_else(|| {
-                    IconName::Database.color().with_size(px(40.0))
-                })
+                external_driver_icon_for_driver_id(driver_id, px(40.0))
+                    .unwrap_or_else(|| IconName::Database.color().with_size(px(40.0)))
             }
         }
     }
@@ -172,26 +176,21 @@ fn is_domestic_database_category(category: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use db::ipc::{
-        IpcDriverEntry, IpcDriverManifest, IpcDriverRegistry, IpcDriverTransport,
-    };
+    use db::ipc::{IpcDriverEntry, IpcDriverManifest, IpcDriverRegistry, IpcDriverTransport};
     use std::path::PathBuf;
 
     fn manifest(id: &str, name: &str) -> IpcDriverManifest {
         manifest_with_category(id, name, None)
     }
 
-    fn manifest_with_category(
-        id: &str,
-        name: &str,
-        category: Option<&str>,
-    ) -> IpcDriverManifest {
+    fn manifest_with_category(id: &str, name: &str, category: Option<&str>) -> IpcDriverManifest {
         IpcDriverManifest {
             id: id.into(),
             name: name.into(),
             category: category.map(str::to_string),
             description: String::new(),
             version: String::new(),
+            protocol_version: None,
             entry: IpcDriverEntry {
                 command: "driver".into(),
                 args: Vec::new(),
