@@ -1880,4 +1880,81 @@ mod tests {
         );
         assert_eq!(strip_tool_record_blocks("纯文本"), "纯文本");
     }
+
+    /// 工具调用中间态往返回归：run_loop 持久化的 assistant(tool_calls) + tool(result)
+    /// 消息对，重建后必须还原为结构等价、顺序正确的消息序列。
+    /// 回归背景：created_at 为秒级精度，工具消息对几乎必然同秒落库，
+    /// 若排序缺少 id 平局裁决，tool 结果可能先于其 assistant 工具调用消息被重建。
+    #[test]
+    fn agent_history_roundtrips_structured_tool_messages() {
+        use crate::storage::traits::Repository;
+
+        let storage = temp_storage();
+        // 复刻 llm::storage::init 的注册；init 依赖 GPUI App 上下文，测试内直接注册等价仓库
+        storage.register(SessionRepository::new(storage.connection()));
+        storage.register(MessageRepository::new(storage.connection()));
+        // chat_messages 外键指向 chat_sessions，先创建会话再落消息
+        let session_repo = storage
+            .get::<SessionRepository>()
+            .expect("SessionRepository 应已注册");
+        let mut session = crate::llm::chat_history::ChatSession::new(
+            "工具消息对往返测试".to_string(),
+            "test-provider".to_string(),
+        );
+        let sid = session_repo.insert(&mut session).expect("创建会话失败");
+        let repo = storage
+            .get::<MessageRepository>()
+            .expect("MessageRepository 应已注册");
+
+        // 普通用户消息（tool_call_id / tool_calls_json 均为 NULL，覆盖旧行 NULL 回落）
+        let mut user_msg = ChatMessage::user(sid, "列出文件".to_string());
+        repo.insert(&mut user_msg).expect("插入用户消息失败");
+
+        // 模拟 run_loop 的持久化路径：assistant(tool_calls) → tool(result)
+        let tool_calls = vec![ToolCall {
+            id: "call-1".to_string(),
+            call_type: "function".to_string(),
+            function: llm_connector::types::FunctionCall {
+                name: "write_to_terminal".to_string(),
+                arguments: r#"{"command":"ls -la"}"#.to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+        let tool_calls_json = serde_json::to_string(&tool_calls).expect("序列化失败");
+        let mut assistant_msg =
+            ChatMessage::assistant_tool_calls(sid, "执行写入".to_string(), tool_calls_json);
+        repo.insert(&mut assistant_msg)
+            .expect("插入 assistant 消息失败");
+        let mut tool_msg =
+            ChatMessage::tool_result(sid, "call-1".to_string(), "total 2".to_string());
+        repo.insert(&mut tool_msg).expect("插入 tool 消息失败");
+
+        let history =
+            AiChatPanel::build_agent_history_messages(&storage, Some(sid), 10, "当前输入");
+
+        assert_eq!(
+            history.len(),
+            3,
+            "应重建出 user + assistant + tool 三条消息"
+        );
+
+        // 普通文本消息不受影响
+        assert_eq!(history[0].role, Role::User);
+        assert_eq!(history[0].content_as_text(), "列出文件");
+        assert!(history[0].tool_calls.is_none());
+
+        // assistant 消息还原出结构化 tool_calls
+        assert_eq!(history[1].role, Role::Assistant);
+        let calls = history[1].tool_calls.as_ref().expect("应还原 tool_calls");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(calls[0].function.name, "write_to_terminal");
+        assert_eq!(calls[0].function.arguments, r#"{"command":"ls -la"}"#);
+
+        // tool 结果消息还原 tool_call_id，且顺序在 assistant 之后
+        assert_eq!(history[2].role, Role::Tool);
+        assert_eq!(history[2].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(history[2].content_as_text(), "total 2");
+    }
 }

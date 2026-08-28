@@ -424,7 +424,7 @@ impl Repository for MessageRepository {
 impl MessageRepository {
     pub fn list_by_session(&self, session_id: i64) -> Result<Vec<ChatMessage>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC")?;
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC, id ASC")?;
             let rows = stmt.query_map(params![session_id], |row| ChatMessage::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -436,7 +436,7 @@ impl MessageRepository {
 
     pub fn list_recent(&self, limit: i32) -> Result<Vec<ChatMessage>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages ORDER BY created_at DESC LIMIT ?1")?;
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages ORDER BY created_at DESC, id DESC LIMIT ?1")?;
             let rows = stmt.query_map(params![limit], |row| ChatMessage::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
