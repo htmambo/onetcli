@@ -3,7 +3,7 @@
 //! `TerminalView` 首次渲染时注册（并持续刷新窗口句柄），
 //! 失活的弱引用在每次访问时惰性清扫。
 
-use gpui::{AnyWindowHandle, App, AppContext, Entity, Global, WeakEntity};
+use gpui::{AnyWindowHandle, App, Entity, Global, WeakEntity};
 use terminal::terminal::{Terminal, TerminalConnectionKind};
 
 use crate::view::TerminalView;

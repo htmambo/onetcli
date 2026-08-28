@@ -146,6 +146,7 @@ fn spawn_mock_bridge() -> MockBridge {
                     let _ = reply.send(Ok("file-a\nfile-b".to_string()));
                 }
                 TerminalOpRequest::WriteCommand {
+                    terminal_id,
                     command,
                     wait_ms,
                     reply,
@@ -335,12 +336,16 @@ pub(super) fn spawn_mock_bridge_with_switchable_focus() -> (MockBridge, Arc<Mute
                     let _ = reply.send(Ok("ok".to_string()));
                 }
                 TerminalOpRequest::WriteCommand {
-                    terminal_id, reply, ..
+                    terminal_id,
+                    command,
+                    wait_ms,
+                    reply,
+                    ..
                 } => {
                     written_clone
                         .lock()
                         .unwrap()
-                        .push((terminal_id, String::new(), 0));
+                        .push((terminal_id, command, wait_ms));
                     let _ = reply.send(Ok(WriteOutcome {
                         output: "ok".to_string(),
                         timed_out: false,
@@ -932,7 +937,7 @@ async fn write_then_read_returns_only_post_write_output() {
     let bridge = spawn_mock_bridge();
     let written = bridge.written.clone();
 
-    let (result, events) =
+    let (result, _events) =
         run_collect_reminders(provider, &bridge.handle, CancellationToken::new(), 1).await;
 
     assert!(result.is_ok());

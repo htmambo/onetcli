@@ -3,7 +3,7 @@
 use one_core::llm::{Tool, ToolCall};
 use rust_i18n::t;
 
-use crate::agent_bridge::{TerminalOperatorHandle, WriteOutcome};
+use crate::agent_bridge::WriteOutcome;
 
 /// 工具输出截断阈值（按字节计，约 2000 token）。
 const MAX_TOOL_OUTPUT_BYTES: usize = 8000;

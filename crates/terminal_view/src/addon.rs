@@ -1676,8 +1676,8 @@ mod tests {
         let line = "服务器 192.168.1.1 在线";
         let matches = addon.detect_matches_in_line(line, 0);
         assert_eq!(matches.len(), 1, "应匹配到一个 IPv4");
-        // '1' 在 CJK "服务器 "（4 字符）之后
-        assert_eq!(matches[0].col_range.start, 5);
+        // '1' 在 "服务器 "（3 个 CJK 字符 + 1 空格 = 4 字符）之后，即第 4 列（0 基）
+        assert_eq!(matches[0].col_range.start, 4);
         assert_eq!(matches[0].col_range.end, 15);
     }
 
