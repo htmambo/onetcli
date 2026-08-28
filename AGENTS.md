@@ -383,6 +383,27 @@
 - **验证方式**：`cargo test --doc test_only` 2 passed；包含 ASCII、CJK（"中a"）、emoji（"🦀x"）、空文本边界用例。
 - **适用范围**：所有终端/文本处理场景中 regex 字节偏移需换算为字符列/索引的代码；扩展到其他 alacritty 相关 crate 时复用同模式。
 
+- **标题**：改 `TerminalOpRequest` 等桥接枚举变体字段时，必须同步 `tests.rs` 里所有 mock 桥的解构，且验证必须跑全量 `cargo test -p terminal_view --lib`。
+- **触发信号**：agents 测试 E0425（引用未解构字段）；mock 记录出现占位值（如空命令）导致断言失败；"测试全绿"但同 crate 其他模块（addon 等）实际失败。
+- **根因 / 约束**：`agents/tests.rs` 有两个 mock 桥（`spawn_mock_bridge` 与 `spawn_mock_bridge_with_switchable_focus`），字段新增时容易只改一处或写入占位值；用 `--lib agents` 这类过滤跑测试会漏掉同 crate 其他模块的失败（addon 的 CJK 列号断言差一就是这样漏进主线的）。
+- **正确做法**：枚举变体增删字段后，用 `rg "VariantName \{"` 枚举全部构造/解构点逐一同步；验证一律不带过滤跑全量 `cargo test -p terminal_view --lib`（增量编译下约 1 分钟），提交前必跑。
+- **验证方式**：218 个测试全绿、零 warning、`cargo fmt --check` 干净。
+- **适用范围**：`crates/terminal_view`（`agent_bridge` 枚举与 mock 桥）；其他带 mock 桥的 crate 同理。
+
+- **标题**：`storage::now()` 是秒级时间戳，同表快速连续插入的查询必须加 `id` 平局裁决。
+- **触发信号**：同一会话内相邻两条记录（如 assistant tool_calls 与 tool result 消息对）同秒落库后 list 顺序不稳定；重建的 LLM 历史里 tool 结果可能先于其 assistant 工具调用消息，违反 OpenAI 协议。
+- **根因 / 约束**：`crates/core/src/storage/manager.rs` 的 `now()` 用 `as_secs()`；SQLite `ORDER BY created_at` 平局顺序未定义，不保证按 rowid。
+- **正确做法**：按 created_at 排序的 SQL 一律写成 `ORDER BY created_at ASC, id ASC`（DESC 对应）；为需要保序的持久化路径补"落库、重建、断言顺序与结构"的往返测试（参考 `panel.rs::agent_history_roundtrips_structured_tool_messages`）。
+- **验证方式**：`cargo test -p one-core --lib ai_chat` 全绿。
+- **适用范围**：`crates/core` 所有基于 `created_at` 排序的 repository 查询（已修 `MessageRepository::list_by_session` / `list_recent`）。
+
+- **标题**：工作区出现"成片回退已提交代码"的未提交改动时，优先怀疑文件级同步覆盖，用 reflog + mtime + `git diff <旧提交>` 取证。
+- **触发信号**：`git status` 大量删除且内容恰好等于某个旧提交；被"改"文件的 mtime 全部早于缺失提交的时间；reflog 显示 HEAD 由 checkout/pull 移动。
+- **根因 / 约束**：跨机文件同步（rsync 类、保留 mtime）发生在 git checkout/fast-forward 之后时，会用旧副本覆盖工作区并伪装成"未提交改动"；此时按 diff 直觉提交会抹掉真机上的修复。
+- **正确做法**：先 `git diff <疑似旧提交>` 定位工作区实际等价的提交，再核对 reflog 与 mtime 时间线；确认是同步覆盖后与提交产生机核对，然后 `git restore` 回 HEAD，并调整同步时序（单向、且在 git 操作之后）。
+- **验证方式**：`git status` 干净且 `git diff HEAD` 为空；关键修复点（如 `floor_char_boundary`、设置字段）grep 在场。
+- **适用范围**：所有跨机同步的仓库工作区。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
