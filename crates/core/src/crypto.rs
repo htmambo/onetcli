@@ -718,15 +718,59 @@ pub fn try_restore_master_key() -> bool {
     true
 }
 
+/// 测试专用：全局密钥状态的串行化锁（crypto 单测与 cloud_sync 单测共用）。
+#[cfg(test)]
+pub(crate) fn test_mutex() -> &'static std::sync::Mutex<()> {
+    static MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    MUTEX.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// 测试专用：内存密钥后端 + 全局主密钥管理。
+///
+/// `set_master_key` 会把主密钥写入 key_storage 后端；不覆写后端时会覆盖
+/// 真实用户配置目录下的 key_storage 文件，导致应用侧已存密码无法解密。
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::key_storage::{KeyStorage, set_key_storage};
+    use std::sync::{Arc, Mutex};
+
+    struct InMemoryKeyStorage(Mutex<Option<String>>);
+
+    impl KeyStorage for InMemoryKeyStorage {
+        fn name(&self) -> &'static str {
+            "in-memory-test"
+        }
+        fn save(&self, master_key: &str) -> Result<(), String> {
+            *self.0.lock().unwrap() = Some(master_key.to_string());
+            Ok(())
+        }
+        fn load(&self) -> Option<String> {
+            self.0.lock().unwrap().clone()
+        }
+        fn delete(&self) -> Result<(), String> {
+            *self.0.lock().unwrap() = None;
+            Ok(())
+        }
+        fn exists(&self) -> bool {
+            self.0.lock().unwrap().is_some()
+        }
+    }
+
+    /// 与 crypto 单测共用同一把锁，串行化全局密钥状态。
+    pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+        super::test_mutex().lock().unwrap()
+    }
+
+    /// 在内存后端上设置全局测试主密钥。
+    pub(crate) fn set_master_key(key: &str) {
+        set_key_storage(Arc::new(InMemoryKeyStorage(Mutex::new(None))));
+        super::set_master_key(key);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_mutex() -> &'static Mutex<()> {
-        static MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
-        MUTEX.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn test_encrypt_decrypt() {

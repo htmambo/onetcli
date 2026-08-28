@@ -703,6 +703,10 @@ mod tests {
             let cloud_client = Arc::new(MockCloudClient::default());
             let mut service = crate::cloud_sync::CloudSyncService::new();
             service.set_master_key_directly("test-master-key".to_string());
+            // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
+            // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
+            let _key_guard = crate::crypto::test_support::lock();
+            crate::crypto::test_support::set_master_key("test-master-key");
             service.set_logged_in("user-1".to_string());
 
             let engine = SyncEngine::new(
@@ -808,6 +812,10 @@ mod tests {
 
             let mut service = crate::cloud_sync::CloudSyncService::new();
             service.set_master_key_directly("test-master-key".to_string());
+            // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
+            // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
+            let _key_guard = crate::crypto::test_support::lock();
+            crate::crypto::test_support::set_master_key("test-master-key");
             service.set_logged_in("user-1".to_string());
 
             let engine = SyncEngine::new(
@@ -905,6 +913,10 @@ mod tests {
             let cloud_client = Arc::new(MockCloudClient::default());
             let mut service = crate::cloud_sync::CloudSyncService::new();
             service.set_master_key_directly("test-master-key".to_string());
+            // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
+            // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
+            let _key_guard = crate::crypto::test_support::lock();
+            crate::crypto::test_support::set_master_key("test-master-key");
             service.set_logged_in("user-1".to_string());
 
             let engine = SyncEngine::new(

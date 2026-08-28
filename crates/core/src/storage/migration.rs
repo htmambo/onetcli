@@ -56,6 +56,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../migrations/20260517000001_llm_provider_sync.sql"),
     ),
     (
+        "20260610000001",
+        include_str!("../../migrations/20260610000001_sftp_favorite_paths.sql"),
+    ),
+    (
         "20260624000001",
         include_str!("../../migrations/20260624000001_chat_message_tool_calls.sql"),
     ),
