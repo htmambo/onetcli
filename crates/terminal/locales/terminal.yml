@@ -5,3 +5,7 @@ SshSession:
     en: "SSH host key has changed. You can enable 'Auto-accept new SSH keys' in Settings > General > SSH Security, then reconnect."
     zh-CN: "SSH 服务器密钥已变更。您可以在 设置 > 通用 > SSH 安全 中开启\"自动接受新密钥\"，然后重新连接。"
     zh-HK: "SSH 伺服器密鑰已變更。您可以在 設定 > 一般 > SSH 安全 中開啟\"自動接受新密鑰\"，然後重新連接。"
+  key_change_fingerprints:
+    en: "Old fingerprint: %{old_fingerprint}\nNew fingerprint: %{new_fingerprint}\nVerify carefully before accepting the new key."
+    zh-CN: "旧指纹：%{old_fingerprint}\n新指纹：%{new_fingerprint}\n接受前请仔细核对。"
+    zh-HK: "舊指紋：%{old_fingerprint}\n新指紋：%{new_fingerprint}\n接受前請仔細核對。"

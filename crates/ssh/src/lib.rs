@@ -15,5 +15,5 @@ pub use ssh::{
     SshConnectConfig, SshConnectionStage, authenticate_session,
     authenticate_session_with_fallbacks, authenticate_with_strategy, build_client_config, defaults,
     expand_auto_publickey_auth, format_connection_progress_message, start_local_port_forward,
-    start_local_port_forward_with_config, verify_server_key,
+    start_local_port_forward_with_config, take_key_change_fingerprints, verify_server_key,
 };

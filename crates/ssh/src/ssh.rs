@@ -420,6 +420,24 @@ fn match_known_host(host: &str, pattern: &str) -> bool {
     false
 }
 
+/// 主机密钥变更时记录的新旧指纹（供连接错误文案展示，用户核对后再决定是否接受）。
+static KEY_CHANGE_FINGERPRINTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<(String, u16), (String, String)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// 取出并清除指定主机的密钥变更指纹记录。
+pub fn take_key_change_fingerprints(host: &str, port: u16) -> Option<(String, String)> {
+    KEY_CHANGE_FINGERPRINTS
+        .lock()
+        .ok()?
+        .remove(&(host.to_string(), port))
+}
+
+/// 计算 SSH 公钥的 SHA256 指纹（OpenSSH 兼容的 SHA256:base64 格式）。
+fn ssh_key_sha256_fingerprint(key: &PublicKey) -> String {
+    key.fingerprint(russh::keys::HashAlg::Sha256).to_string()
+}
+
 pub fn verify_server_key(
     host: &str,
     port: u16,
@@ -438,6 +456,30 @@ pub fn verify_server_key(
             Ok(true)
         }
         Err(russh::keys::Error::KeyChanged { line }) => {
+            // 记录新旧指纹：旧钥取自 known_hosts 变更行（必须在移除前读取）
+            let new_fingerprint = ssh_key_sha256_fingerprint(server_public_key);
+            let old_fingerprint = russh::keys::known_hosts::known_host_keys(host, port)
+                .ok()
+                .and_then(|keys| {
+                    keys.into_iter()
+                        .find(|(l, _)| *l == line)
+                        .map(|(_, key)| ssh_key_sha256_fingerprint(&key))
+                });
+            if let Some(old_fingerprint) = &old_fingerprint {
+                if let Ok(mut map) = KEY_CHANGE_FINGERPRINTS.lock() {
+                    map.insert(
+                        (host.to_string(), port),
+                        (old_fingerprint.clone(), new_fingerprint.clone()),
+                    );
+                }
+                tracing::warn!(
+                    "SSH 主机 {}:{} 指纹变更 old={} new={}",
+                    host,
+                    port,
+                    old_fingerprint,
+                    new_fingerprint
+                );
+            }
             if auto_accept_new_keys {
                 tracing::warn!(
                     "SSH 主机 {}:{} 的指纹发生变化，自动移除旧指纹并写入新指纹（known_hosts 第 {} 行）",
@@ -485,7 +527,12 @@ impl client::Handler for RusshHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        verify_server_key(&self.host, self.port, server_public_key, self.auto_accept_new_keys)
+        verify_server_key(
+            &self.host,
+            self.port,
+            server_public_key,
+            self.auto_accept_new_keys,
+        )
     }
 }
 

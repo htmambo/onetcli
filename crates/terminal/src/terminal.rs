@@ -20,11 +20,11 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
-use rust_i18n::t;
 use one_core::storage::ActiveConnections;
 use one_core::storage::models::{
     ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
 };
+use rust_i18n::t;
 use std::cell::Cell;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::collections::HashSet;
@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::time::interval;
 
@@ -68,7 +68,7 @@ use crate::{
 };
 use ssh::{
     ChannelEvent, KeyboardInteractiveRequest, KeyboardInteractiveResponder,
-    KeyboardInteractiveTarget, RusshClient, SshChannel, SshClient
+    KeyboardInteractiveTarget, RusshClient, SshChannel, SshClient, take_key_change_fingerprints,
 };
 pub use ssh::{
     JumpServerConnectConfig, ProxyConnectConfig, ProxyType, PtyConfig, SshAuth, SshConnectConfig,
@@ -2203,22 +2203,24 @@ impl Terminal {
 
     fn spawn_connection_status_tick(cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
-        cx.spawn(async move |_, cx| loop {
-            cx.background_executor().timer(Duration::from_secs(1)).await;
-            let keep_running = entity
-                .update(cx, |this, cx| {
-                    if matches!(this.connection_state, ConnectionState::Connecting)
-                        && this.connection_wait_started_at.is_some()
-                    {
-                        cx.emit(TerminalModelEvent::Wakeup);
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or(false);
-            if !keep_running {
-                break;
+        cx.spawn(async move |_, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let keep_running = entity
+                    .update(cx, |this, cx| {
+                        if matches!(this.connection_state, ConnectionState::Connecting)
+                            && this.connection_wait_started_at.is_some()
+                        {
+                            cx.emit(TerminalModelEvent::Wakeup);
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
             }
         })
         .detach();
@@ -2227,37 +2229,39 @@ impl Terminal {
     #[cfg(target_os = "macos")]
     fn spawn_local_process_tree_settler(cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
-        cx.spawn(async move |_, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(50))
-                .await;
+        cx.spawn(async move |_, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
 
-            let keep_running = entity
-                .update(cx, |this, _cx| {
-                    if this.connection_kind != TerminalConnectionKind::Local {
-                        return false;
-                    }
+                let keep_running = entity
+                    .update(cx, |this, _cx| {
+                        if this.connection_kind != TerminalConnectionKind::Local {
+                            return false;
+                        }
 
-                    if this.local_process_tree_settled.get() {
-                        return false;
-                    }
+                        if this.local_process_tree_settled.get() {
+                            return false;
+                        }
 
-                    let Some(pid) = this.local_shell_pid.map(resolve_local_shell_pid) else {
-                        this.local_process_tree_settled.set(true);
-                        return false;
-                    };
+                        let Some(pid) = this.local_shell_pid.map(resolve_local_shell_pid) else {
+                            this.local_process_tree_settled.set(true);
+                            return false;
+                        };
 
-                    if !has_live_descendant_process(pid) {
-                        this.local_process_tree_settled.set(true);
-                        return false;
-                    }
+                        if !has_live_descendant_process(pid) {
+                            this.local_process_tree_settled.set(true);
+                            return false;
+                        }
 
-                    true
-                })
-                .unwrap_or(false);
+                        true
+                    })
+                    .unwrap_or(false);
 
-            if !keep_running {
-                break;
+                if !keep_running {
+                    break;
+                }
             }
         })
         .detach();
@@ -2371,8 +2375,24 @@ impl Terminal {
                 self.backend = Some(Box::new(backend));
             }
             Ok(Err(e)) => {
+                let mut error_text = format_connection_error(&e);
+                // 密钥变更时补充新旧指纹，供用户核对后再决定是否接受新密钥
+                if let Some(cfg) = self.ssh_config.as_ref().map(|c| &c.ssh_config) {
+                    if let Some((old_fingerprint, new_fingerprint)) =
+                        take_key_change_fingerprints(&cfg.host, cfg.port)
+                    {
+                        error_text.push_str(&format!(
+                            "\n{}",
+                            t!(
+                                "SshSession.key_change_fingerprints",
+                                old_fingerprint = old_fingerprint,
+                                new_fingerprint = new_fingerprint
+                            )
+                        ));
+                    }
+                }
                 self.connection_state = ConnectionState::Disconnected {
-                    error: Some(format_connection_error(&e)),
+                    error: Some(error_text),
                 };
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
@@ -2720,7 +2740,12 @@ impl Terminal {
             if !self.ssh_detection_disabled.get()
                 && self.ssh_connection_established_at.is_some()
                 && !self.ssh_prompt_detected
-                && self.ssh_connection_established_at.unwrap().elapsed().as_secs() > SSH_DETECTION_TIMEOUT_SECS
+                && self
+                    .ssh_connection_established_at
+                    .unwrap()
+                    .elapsed()
+                    .as_secs()
+                    > SSH_DETECTION_TIMEOUT_SECS
             {
                 self.ssh_detection_disabled.set(true);
                 tracing::warn!(
@@ -3142,11 +3167,7 @@ impl Terminal {
 fn format_connection_error(err: &anyhow::Error) -> String {
     let msg = format!("{err:#}");
     if msg.contains("Key changed") {
-        return format!(
-            "{}\n{}",
-            msg,
-            t!("SshSession.key_changed_hint")
-        );
+        return format!("{}\n{}", msg, t!("SshSession.key_changed_hint"));
     }
     msg
 }
@@ -3156,13 +3177,12 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_term_escape_sequence, build_cd_command, build_ssh_base_init_commands,
-        build_ssh_init_commands, compose_ssh_init_commands, format_connection_error,
-        is_osc_palette_line,
-        keyboard_interactive_answers_for_terminal, resolve_default_windows_shell_from_env,
-        resolve_local_working_dir, sanitize_recovery_content, shell_escape_arg,
-        should_report_ssh_running_processes, ConnectionState, SshProcessState, Terminal,
-        TerminalConnectionKind, TerminalMfaPrompt, TerminalMfaRequest, TerminalMfaResponder,
+        ConnectionState, SshProcessState, Terminal, TerminalConnectionKind, TerminalMfaPrompt,
+        TerminalMfaRequest, TerminalMfaResponder, apply_term_escape_sequence, build_cd_command,
+        build_ssh_base_init_commands, build_ssh_init_commands, compose_ssh_init_commands,
+        format_connection_error, is_osc_palette_line, keyboard_interactive_answers_for_terminal,
+        resolve_default_windows_shell_from_env, resolve_local_working_dir,
+        sanitize_recovery_content, shell_escape_arg, should_report_ssh_running_processes,
     };
     use crate::TerminalEvent;
     use crate::history::{
@@ -3242,11 +3262,27 @@ mod tests {
     #[test]
     fn should_report_ssh_running_processes_requires_detected_prompt() {
         assert!(
-            should_report_ssh_running_processes(true, SshProcessState::Busy, true, false, false, None, false),
+            should_report_ssh_running_processes(
+                true,
+                SshProcessState::Busy,
+                true,
+                false,
+                false,
+                None,
+                false
+            ),
             "已连接且检测到 prompt 时，Busy 应阻止关闭"
         );
         assert!(
-            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, false, None, false),
+            !should_report_ssh_running_processes(
+                true,
+                SshProcessState::Busy,
+                false,
+                false,
+                false,
+                None,
+                false
+            ),
             "未检测到 prompt 的 Busy 不能作为可靠的阻止关闭信号"
         );
     }
@@ -3254,11 +3290,27 @@ mod tests {
     #[test]
     fn should_report_ssh_running_processes_supports_submitted_command_fallback() {
         assert!(
-            should_report_ssh_running_processes(true, SshProcessState::Busy, false, true, true, None, false),
+            should_report_ssh_running_processes(
+                true,
+                SshProcessState::Busy,
+                false,
+                true,
+                true,
+                None,
+                false
+            ),
             "未同步到 prompt 时，已提交命令应保守地阻止关闭"
         );
         assert!(
-            !should_report_ssh_running_processes(true, SshProcessState::Busy, false, false, true, None, false),
+            !should_report_ssh_running_processes(
+                true,
+                SshProcessState::Busy,
+                false,
+                false,
+                true,
+                None,
+                false
+            ),
             "无交互程序模式时，已提交命令不应单独阻止关闭"
         );
     }
