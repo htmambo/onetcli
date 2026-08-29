@@ -404,6 +404,13 @@
 - **验证方式**：`git status` 干净且 `git diff HEAD` 为空；关键修复点（如 `floor_char_boundary`、设置字段）grep 在场。
 - **适用范围**：所有跨机同步的仓库工作区。
 
+- **标题**：本机缺 libudev/X11 开发库时，`cargo check -p main` 与 `cargo test` 的链接阻塞有最小验证路径，不要直接判定"无法验证"。
+- **触发信号**：`cargo check -p main` 报 `libudev-sys` build script panic（pkg-config 找不到 `libudev.pc`）；`cargo test` 在最终链接阶段报 `rust-lld: unable to find library -lxcb / -lxkbcommon / -lxkbcommon-x11`；`cargo fmt` 报组件未安装。
+- **根因 / 约束**：本机只装了运行库（`libudev.so.1`、`libxcb.so.1`、`libxkbcommon.so.0` 等），没有 dev 符号链接与 `.pc` 文件；ldconfig 能看到运行库，pkg-config 却解析不到。
+- **正确做法**：不改系统包，全部走 `target/tmp`：(1) 写一个 shim `libudev.pc`（`Libs: -ludev`），用 `PKG_CONFIG_PATH=target/tmp/pkgconfig cargo check -p main` 通过依赖构建；(2) 在 `target/tmp/devlibs` 里 `ln -sf` 运行库造 `libxcb.so` 等符号链接，用 `cargo rustc -p one-core --lib --profile test -- -L target/tmp/devlibs` 只给最终测试二进制追加搜索路径（依赖缓存不失效），再直接运行 `target/debug/deps/one_core-*` 二进制执行测试；不要用 `RUSTFLAGS` 全局加 `-L`（会使全部依赖缓存失效，触发整仓重编）。`cargo fmt --check` 需先 `rustup component add rustfmt`。
+- **验证方式**：shim 下 `cargo check -p main` 到达 Finished；测试二进制直接运行输出 `test result: ok`；`cargo fmt --check` 无 diff。
+- **适用范围**：本机（缺 `-dev` 包的 Linux 桌面环境）上所有依赖 gpui / udev 原生库的 crate 的检查与测试验证。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
