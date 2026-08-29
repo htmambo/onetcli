@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use dashmap::DashMap;
-use gpui::Global;
+use gpui::{App, BorrowAppContext, Global};
 use parking_lot::RwLock;
 
 use super::connector::{LlmConnector, LlmProvider};
@@ -138,6 +138,34 @@ impl Default for GlobalProviderState {
 }
 
 impl Global for GlobalProviderState {}
+
+/// 供应商配置版本号（GPUI Global）
+///
+/// 每次 provider 表发生写入（设置页增删改、启停、切换默认）时递增，
+/// 用于让已创建的 AI 面板通过 `observe_global` 感知配置变化并重新加载。
+/// 面板本身不缓存版本语义，仅把版本号当作"需要重读 DB"的信号。
+#[derive(Debug, Default)]
+pub struct ProviderConfigRevision {
+    revision: u64,
+}
+
+impl Global for ProviderConfigRevision {}
+
+impl ProviderConfigRevision {
+    pub fn get(&self) -> u64 {
+        self.revision
+    }
+}
+
+/// 通知所有 AI 面板：供应商配置已变化，需要重新加载
+///
+/// 所有修改 provider 表的 UI 写入点（`main/src/settings/llm_providers_view.rs`）
+/// 在写入成功后都必须调用本函数，否则已打开的终端 AI 助手将沿用旧配置。
+pub fn notify_provider_configs_changed(cx: &mut App) {
+    cx.update_default_global::<ProviderConfigRevision, _>(|state, _| {
+        state.revision += 1;
+    });
+}
 
 #[cfg(test)]
 mod tests {

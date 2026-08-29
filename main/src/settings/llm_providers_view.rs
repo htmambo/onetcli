@@ -10,7 +10,9 @@ use gpui_component::{
     dialog::DialogButtonProps,
     h_flex, v_flex,
 };
-use one_core::llm::{storage::ProviderRepository, types::ProviderConfig};
+use one_core::llm::{
+    notify_provider_configs_changed, storage::ProviderRepository, types::ProviderConfig,
+};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window, request_popup_window_close};
 use one_core::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use rust_i18n::t;
@@ -111,6 +113,7 @@ impl LlmProvidersView {
                         cloud_id
                     );
                 }
+                notify_provider_configs_changed(cx);
                 self.load_providers(cx);
             }
             Err(e) => tracing::error!("Failed to delete provider: {}", e),
@@ -179,7 +182,10 @@ impl LlmProvidersView {
         updated.is_default = new_default;
 
         match repo.update(&updated) {
-            Ok(_) => self.load_providers(cx),
+            Ok(_) => {
+                notify_provider_configs_changed(cx);
+                self.load_providers(cx);
+            }
             Err(e) => tracing::error!("Failed to toggle default provider: {}", e),
         }
     }
@@ -194,7 +200,10 @@ impl LlmProvidersView {
             .expect("ProviderRepository not found");
 
         match repo.update(&updated) {
-            Ok(_) => self.load_providers(cx),
+            Ok(_) => {
+                notify_provider_configs_changed(cx);
+                self.load_providers(cx);
+            }
             Err(e) => tracing::error!("Failed to toggle provider: {}", e),
         }
     }
@@ -578,6 +587,8 @@ impl ProviderEditorView {
 
         match result {
             Ok(_) => {
+                // 通知已打开的 AI 面板（含终端侧栏）重新加载供应商配置
+                notify_provider_configs_changed(cx);
                 if let Some(view) = self.view.upgrade() {
                     let _ = view.update(cx, |view, cx| {
                         view.load_providers(cx);

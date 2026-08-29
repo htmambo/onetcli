@@ -6,16 +6,17 @@ use crate::cloud_sync::GlobalCloudUser;
 use crate::gpui_tokio::Tokio;
 use crate::llm::chat_history::ChatMessage;
 use crate::llm::{
-    Message, ProviderConfig, Role, ToolCall,
+    Message, ProviderConfig, ProviderConfigRevision, Role, ToolCall,
     chat_history::{MessageRepository, SessionRepository},
     manager::GlobalProviderState,
     storage::ProviderRepository,
 };
 use crate::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle,
-    Focusable, Hsla, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    AnyElement, AnyWindowHandle, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter,
+    FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, IconName, Sizable, Size, WindowExt as _,
@@ -332,6 +333,8 @@ pub struct AiChatPanel {
     session_affinity: SessionAffinity,
     /// 自定义代码块渲染器（如终端工具卡片重建）
     code_block_renderer: Option<Arc<CodeBlockRenderer>>,
+    /// 面板所在窗口句柄（异步刷新 provider 时需回到自己的窗口更新选择器）
+    window_handle: AnyWindowHandle,
 }
 
 impl AiChatPanel {
@@ -398,6 +401,13 @@ impl AiChatPanel {
             },
         ));
 
+        // 订阅供应商配置变更（设置页增删改 provider 后通知已打开的面板重新加载）
+        subscriptions.push(cx.observe_global::<ProviderConfigRevision>(|this, cx| {
+            this.load_providers(cx);
+        }));
+
+        let window_handle = window.window_handle();
+
         let mut panel = Self {
             focus_handle,
             engine,
@@ -416,6 +426,7 @@ impl AiChatPanel {
             capability_injectors: Vec::new(),
             session_affinity: SessionAffinity::new(),
             code_block_renderer: None,
+            window_handle,
         };
 
         // 加载 providers
@@ -428,6 +439,8 @@ impl AiChatPanel {
         let storage_manager = global_state.storage.clone();
         let is_logged_in = GlobalCloudUser::is_logged_in(cx);
         self.is_logged_in = is_logged_in;
+        // 必须回到面板自己的窗口更新选择器；激活窗口可能是设置弹窗等别的窗口
+        let window_handle = self.window_handle;
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let providers = {
@@ -452,23 +465,21 @@ impl AiChatPanel {
             };
 
             let _ = cx.update(|cx| {
-                if let Some(window_id) = cx.active_window() {
-                    let _ = cx.update_window(window_id, |_, window, cx| {
-                        if let Some(entity) = this.upgrade() {
-                            entity.update(cx, |panel, cx| {
-                                panel.engine.provider_configs = providers.clone();
-                                let items: Vec<_> =
-                                    providers.iter().map(ProviderItem::from_config).collect();
-                                panel.provider_select_state.set_providers(items, window, cx);
-                                panel.engine.provider_id =
-                                    panel.provider_select_state.selected_provider().cloned();
-                                panel.engine.selected_model =
-                                    panel.provider_select_state.selected_model().cloned();
-                                cx.notify();
-                            });
-                        }
-                    });
-                }
+                let _ = window_handle.update(cx, |_, window, cx| {
+                    if let Some(entity) = this.upgrade() {
+                        entity.update(cx, |panel, cx| {
+                            panel.engine.provider_configs = providers.clone();
+                            let items: Vec<_> =
+                                providers.iter().map(ProviderItem::from_config).collect();
+                            panel.provider_select_state.set_providers(items, window, cx);
+                            panel.engine.provider_id =
+                                panel.provider_select_state.selected_provider().cloned();
+                            panel.engine.selected_model =
+                                panel.provider_select_state.selected_model().cloned();
+                            cx.notify();
+                        });
+                    }
+                });
             });
         })
         .detach();

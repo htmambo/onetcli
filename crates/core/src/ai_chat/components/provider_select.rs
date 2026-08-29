@@ -321,6 +321,9 @@ impl ProviderSelectState {
     }
 
     /// 设置 Providers
+    ///
+    /// 刷新场景（如设置页修改供应商后重载）下优先保留当前选中的 provider
+    /// 与模型（若仍存在于新列表中），避免用户选择被重置回默认项。
     pub fn set_providers(
         &mut self,
         providers: Vec<ProviderItem>,
@@ -343,22 +346,23 @@ impl ProviderSelectState {
             return;
         }
 
-        // 找到默认 provider
-        let default_idx = providers.iter().position(|p| p.is_default).unwrap_or(0);
-        let default_provider = providers.get(default_idx).cloned();
+        let selected_idx =
+            resolve_selected_provider_index(&providers, self.selected_provider.as_deref());
+        let selected_provider = providers.get(selected_idx).cloned();
 
         self.providers = providers.clone();
         self.provider_select.update(cx, |state, cx| {
             state.set_items(providers, window, cx);
-            state.set_selected_index(Some(IndexPath::new(default_idx)), window, cx);
+            state.set_selected_index(Some(IndexPath::new(selected_idx)), window, cx);
         });
 
-        // 设置默认 provider 的模型
-        if let Some(provider) = default_provider {
+        // 设置选中 provider 的模型列表
+        if let Some(provider) = selected_provider {
             self.selected_provider = Some(provider.id.clone());
             let models = Self::build_model_list(&provider);
-            let default_model = Self::resolve_default_model(&provider, &models);
-            self.set_models(models, default_model, window, cx);
+            let model =
+                preserved_or_default_model(self.selected_model.as_deref(), &models, &provider);
+            self.set_models(models, model, window, cx);
         }
     }
 
@@ -841,4 +845,104 @@ struct SelectorColors {
     list_active: Hsla,
     list_active_border: Hsla,
     list_hover: Hsla,
+}
+
+/// 在刷新后的 provider 列表中确定应选中的下标
+///
+/// 优先保留当前选中的 provider（仍存在时），否则回落到默认标记的
+/// provider，再回落到第一个；创建面板时尚无选中项，因此回落行为
+/// 与旧版 `set_providers` 一致。
+fn resolve_selected_provider_index(providers: &[ProviderItem], current: Option<&str>) -> usize {
+    current
+        .and_then(|selected| providers.iter().position(|p| p.id == selected))
+        .or_else(|| providers.iter().position(|p| p.is_default))
+        .unwrap_or(0)
+}
+
+/// 刷新后确定应选中的模型
+///
+/// 当前选中的模型若仍在新模型列表中则保留，否则回落到 provider 的默认模型。
+fn preserved_or_default_model(
+    current: Option<&str>,
+    models: &[String],
+    provider: &ProviderItem,
+) -> Option<String> {
+    current
+        .filter(|model| models.iter().any(|candidate| candidate == model))
+        .map(|model| model.to_string())
+        .or_else(|| ProviderSelectState::resolve_default_model(provider, models))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(id: &str, model: &str, models: Vec<String>, is_default: bool) -> ProviderItem {
+        ProviderItem {
+            id: id.to_string(),
+            name: id.to_string(),
+            model: model.to_string(),
+            provider_type: "OpenAI".to_string(),
+            models,
+            is_default,
+            is_builtin: false,
+        }
+    }
+
+    #[test]
+    fn resolve_index_keeps_current_selection() {
+        let providers = vec![
+            provider("1", "m1", vec![], true),
+            provider("2", "m2", vec![], false),
+        ];
+
+        assert_eq!(resolve_selected_provider_index(&providers, Some("2")), 1);
+    }
+
+    #[test]
+    fn resolve_index_falls_back_to_default_then_first() {
+        let providers = vec![
+            provider("1", "m1", vec![], false),
+            provider("2", "m2", vec![], true),
+        ];
+
+        // 当前选中项已从列表消失时，回落到默认标记的 provider
+        assert_eq!(resolve_selected_provider_index(&providers, Some("9")), 1);
+
+        // 无任何默认标记时回落到第一个
+        let no_default = vec![
+            provider("1", "m1", vec![], false),
+            provider("2", "m2", vec![], false),
+        ];
+        assert_eq!(resolve_selected_provider_index(&no_default, None), 0);
+    }
+
+    #[test]
+    fn preserved_model_kept_when_still_available() {
+        let item = provider("1", "m1", vec!["m1".to_string(), "m2".to_string()], true);
+        let models = vec!["m1".to_string(), "m2".to_string()];
+
+        assert_eq!(
+            preserved_or_default_model(Some("m2"), &models, &item),
+            Some("m2".to_string())
+        );
+    }
+
+    #[test]
+    fn preserved_model_falls_back_when_removed() {
+        // 选中模型已被删除：回落 provider 默认模型
+        let item = provider("1", "m1", vec!["m1".to_string(), "m3".to_string()], true);
+        let models = vec!["m1".to_string(), "m3".to_string()];
+        assert_eq!(
+            preserved_or_default_model(Some("m2"), &models, &item),
+            Some("m1".to_string())
+        );
+
+        // 默认模型也不在列表中：回落第一个模型
+        let fallback = provider("1", "m9", vec![], true);
+        assert_eq!(
+            preserved_or_default_model(None, &models, &fallback),
+            Some("m1".to_string())
+        );
+    }
 }
