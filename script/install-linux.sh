@@ -19,12 +19,13 @@ DISTRO=$(detect_distro)
 echo "检测到发行版: $DISTRO"
 
 case "$DISTRO" in
-  ubuntu|debian|linuxmint|pop)
+  ubuntu|debian|linuxmint|pop|deepin|uos|pureos|kali|tails|raspbian|parrot|zorin|elementary|mx|neon)
     echo "安装 Ubuntu/Debian 依赖..."
     sudo apt update
     # Test on Ubuntu 24.04
     sudo apt install -y \
       libudev-dev \
+      libxcb1-dev libxkbcommon-dev \
       gcc g++ clang libfontconfig-dev libwayland-dev \
       libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev \
       libssl-dev libzstd-dev \
@@ -59,7 +60,7 @@ case "$DISTRO" in
     sudo zypper install -y \
       systemd-devel \
       gcc gcc-c++ clang fontconfig-devel wayland-devel \
-      libwebkit2gtk-4_1-0 libxkbcommon-x11-devel libxcb-devel \
+      libwebkit2gtk-4_1-0 libxkbcommon-x11-devel libxkbcommon-devel libxcb-devel \
       libopenssl-devel libzstd-devel \
       vulkan-validation-layers libvulkan1
     ;;
