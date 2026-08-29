@@ -717,7 +717,7 @@ impl X11Client {
                     continue;
                 };
                 let xim_connected_before = xim_handler.connected;
-                let xim_ic_id_before = xim_handler.ic_id;
+                let _xim_ic_id_before = xim_handler.ic_id;
                 drop(state);
 
                 let xim_filtered = ximc.filter_event(&event, &mut xim_handler);
