@@ -1,7 +1,8 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../plugins/auth.js";
 import { sendError } from "../../utils/http.js";
+import { createRateLimiter } from "../../utils/rateLimiter.js";
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -23,8 +24,19 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
+// 登录/注册是最常被暴力尝试的未鉴权端点，按客户端 IP 固定窗口限流
+const authRateLimiter = createRateLimiter({ max: 10, windowMs: 60_000 });
+
+async function authRateLimitPreHandler(request: FastifyRequest, reply: FastifyReply) {
+  const decision = authRateLimiter.check(request.ip);
+  if (!decision.allowed) {
+    reply.header("retry-after", decision.retryAfterSeconds);
+    return sendError(reply, 429, "请求过于频繁，请稍后再试");
+  }
+}
+
 export async function registerAuthRoutes(app: FastifyInstance) {
-  app.post("/api/v1/auth/register", async (request, reply) => {
+  app.post("/api/v1/auth/register", { preHandler: authRateLimitPreHandler }, async (request, reply) => {
     const parsed = registerSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(reply, 400, parsed.error.issues[0]?.message ?? "请求参数错误");
@@ -40,7 +52,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/api/v1/auth/login", async (request, reply) => {
+  app.post("/api/v1/auth/login", { preHandler: authRateLimitPreHandler }, async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
     if (!parsed.success) {
       return sendError(reply, 400, parsed.error.issues[0]?.message ?? "请求参数错误");

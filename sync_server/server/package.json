@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx/esm --test src/utils/rateLimiter.test.ts",
     "reset-password": "node --import tsx/esm src/scripts/reset-password.ts"
   },
   "dependencies": {
