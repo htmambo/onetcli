@@ -175,6 +175,34 @@ impl MongoConnectionImpl {
             || message.contains("code 18")
     }
 
+    /// 为连接串注入默认 serverSelectionTimeoutMS：坏地址时驱动默认等待 30s
+    /// 才报 server selection 失败，收敛到 8s；用户显式配置时不覆盖。
+    fn with_default_server_selection_timeout(connection_string: &str) -> String {
+        const DEFAULT_SERVER_SELECTION_TIMEOUT_MS: u64 = 8000;
+        if connection_string
+            .to_ascii_lowercase()
+            .contains("serverselectiontimeoutms")
+        {
+            return connection_string.to_string();
+        }
+        if connection_string.contains('?') {
+            if connection_string.ends_with('?') || connection_string.ends_with('&') {
+                return format!(
+                    "{}serverSelectionTimeoutMS={DEFAULT_SERVER_SELECTION_TIMEOUT_MS}",
+                    connection_string
+                );
+            }
+            return format!(
+                "{}&serverSelectionTimeoutMS={DEFAULT_SERVER_SELECTION_TIMEOUT_MS}",
+                connection_string
+            );
+        }
+        format!(
+            "{}?serverSelectionTimeoutMS={DEFAULT_SERVER_SELECTION_TIMEOUT_MS}",
+            connection_string
+        )
+    }
+
     fn append_admin_auth_source(connection_string: &str) -> String {
         if connection_string.contains('?') {
             if connection_string.ends_with('?') || connection_string.ends_with('&') {
@@ -311,7 +339,8 @@ impl MongoConnection for MongoConnectionImpl {
             return Ok(());
         }
 
-        let connection_string = self.config.connection_string.clone();
+        let connection_string =
+            Self::with_default_server_selection_timeout(&self.config.connection_string);
         let client = Client::with_uri_str(&connection_string)
             .await
             .map_err(|e| {
@@ -862,5 +891,53 @@ impl MongoConnection for MongoConnectionImpl {
                     e,
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn injects_default_server_selection_timeout() {
+        assert_eq!(
+            MongoConnectionImpl::with_default_server_selection_timeout("mongodb://host1:27017"),
+            "mongodb://host1:27017?serverSelectionTimeoutMS=8000"
+        );
+        assert_eq!(
+            MongoConnectionImpl::with_default_server_selection_timeout(
+                "mongodb://host1:27017/admin"
+            ),
+            "mongodb://host1:27017/admin?serverSelectionTimeoutMS=8000"
+        );
+    }
+
+    #[test]
+    fn appends_to_existing_query_string() {
+        assert_eq!(
+            MongoConnectionImpl::with_default_server_selection_timeout(
+                "mongodb://host1:27017?replicaSet=rs0"
+            ),
+            "mongodb://host1:27017?replicaSet=rs0&serverSelectionTimeoutMS=8000"
+        );
+        assert_eq!(
+            MongoConnectionImpl::with_default_server_selection_timeout("mongodb://host1:27017?"),
+            "mongodb://host1:27017?serverSelectionTimeoutMS=8000"
+        );
+    }
+
+    #[test]
+    fn respects_user_configured_timeout() {
+        let uri = "mongodb://host1:27017?serverSelectionTimeoutMS=3000";
+        assert_eq!(
+            MongoConnectionImpl::with_default_server_selection_timeout(uri),
+            uri
+        );
+        // mongodb URI 选项键大小写不敏感
+        let uri = "mongodb://host1:27017?ServerSelectionTimeoutMS=3000";
+        assert_eq!(
+            MongoConnectionImpl::with_default_server_selection_timeout(uri),
+            uri
+        );
     }
 }
