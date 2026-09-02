@@ -1227,7 +1227,10 @@ impl MongoTreeView {
                         .get_connection(&connection_id)
                         .ok_or_else(|| anyhow::anyhow!(t!("MongoTree.connection_missing")))?;
                     let guard = connection.read().await;
-                    guard.server_status().await.map_err(|e| anyhow::anyhow!("{}", e))
+                    guard
+                        .server_status()
+                        .await
+                        .map_err(|e| anyhow::anyhow!("{}", e))
                 }
             })
             .await;
@@ -1241,19 +1244,24 @@ impl MongoTreeView {
                         .get_connection(&connection_id)
                         .ok_or_else(|| anyhow::anyhow!(t!("MongoTree.connection_missing")))?;
                     let guard = connection.read().await;
-                    guard.db_stats(&database_name).await.map_err(|e| anyhow::anyhow!("{}", e))
+                    guard
+                        .db_stats(&database_name)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("{}", e))
                 }
             })
             .await;
 
             let server_json = match server_status_doc {
-                Ok(doc) => crate::types::document_to_pretty_json(&doc)
-                    .unwrap_or_else(|_| "{}".to_string()),
+                Ok(doc) => {
+                    crate::types::document_to_pretty_json(&doc).unwrap_or_else(|_| "{}".to_string())
+                }
                 Err(e) => format!("{{\"error\": \"{}\"}}", e),
             };
             let db_json = match db_stats_doc {
-                Ok(doc) => crate::types::document_to_pretty_json(&doc)
-                    .unwrap_or_else(|_| "{}".to_string()),
+                Ok(doc) => {
+                    crate::types::document_to_pretty_json(&doc).unwrap_or_else(|_| "{}".to_string())
+                }
                 Err(e) => format!("{{\"error\": \"{}\"}}", e),
             };
 
@@ -1292,11 +1300,15 @@ impl MongoTreeView {
                                             v_flex()
                                                 .gap_1()
                                                 .child(
-                                                    div()
-                                                        .text_sm()
-                                                        .child(t!("MongoTree.server_metrics_label")),
+                                                    div().text_sm().child(t!(
+                                                        "MongoTree.server_metrics_label"
+                                                    )),
                                                 )
-                                                .child(Input::new(&server_input).w_full().disabled(true)),
+                                                .child(
+                                                    Input::new(&server_input)
+                                                        .w_full()
+                                                        .disabled(true),
+                                                ),
                                         )
                                         .child(
                                             v_flex()
@@ -1306,7 +1318,9 @@ impl MongoTreeView {
                                                         .text_sm()
                                                         .child(t!("MongoTree.db_metrics_label")),
                                                 )
-                                                .child(Input::new(&db_input).w_full().disabled(true)),
+                                                .child(
+                                                    Input::new(&db_input).w_full().disabled(true),
+                                                ),
                                         ),
                                 )
                                 .button_props(
@@ -1649,13 +1663,11 @@ impl MongoTreeView {
                 let view_for_action = view.clone();
                 let node_id_for_action = node_id.to_string();
                 menu = menu.item(
-                    PopupMenuItem::new(t!("MongoTree.menu_open_collection").to_string())
-                        .on_click(window.listener_for(
-                            &view_for_action,
-                            move |view, _, _, cx| {
-                                view.open_collection(&node_id_for_action, cx);
-                            },
-                        )),
+                    PopupMenuItem::new(t!("MongoTree.menu_open_collection").to_string()).on_click(
+                        window.listener_for(&view_for_action, move |view, _, _, cx| {
+                            view.open_collection(&node_id_for_action, cx);
+                        }),
+                    ),
                 );
             }
         }

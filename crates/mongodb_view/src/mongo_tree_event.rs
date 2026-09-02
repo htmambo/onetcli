@@ -126,8 +126,16 @@ impl MongoEventHandler {
                         .database_collection_at(*row_ix)
                         .cloned();
                     let Some(item) = item else { return };
-                    let Some(connection_id) = collection_view.read(cx).current_connection_id().cloned() else { return };
-                    let Some(database_name) = collection_view.read(cx).current_database_name().cloned() else { return };
+                    let Some(connection_id) =
+                        collection_view.read(cx).current_connection_id().cloned()
+                    else {
+                        return;
+                    };
+                    let Some(database_name) =
+                        collection_view.read(cx).current_database_name().cloned()
+                    else {
+                        return;
+                    };
                     let collection_name = item.name;
                     let tab_id = format!(
                         "mongo-collection:{}:{}:{}",
@@ -144,9 +152,8 @@ impl MongoEventHandler {
                         container.activate_or_add_tab_lazy(
                             tab_id,
                             move |window, cx| {
-                                let view = cx.new(|cx| {
-                                    CollectionTabView::new(config_clone, window, cx)
-                                });
+                                let view =
+                                    cx.new(|cx| CollectionTabView::new(config_clone, window, cx));
                                 TabItem::new(tab_id_clone, "mongodb", view)
                             },
                             window,

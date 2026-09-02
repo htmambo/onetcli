@@ -9,18 +9,18 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, Size, StyledExt, WindowExt as _,
+    WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     dialog::DialogButtonProps,
     h_flex,
     input::{Input, InputEvent, InputState},
     label::Label,
+    layered_level_surface_color,
     notification::Notification,
     spinner::Spinner,
     tab::{Tab, TabBar},
     table::{Column, Table, TableDelegate, TableState},
     v_flex,
-    WindowsSurfaceLayer,
-    layered_level_surface_color,
 };
 use mongodb::bson::{Bson, Document};
 use mongodb::options::FindOptions;
@@ -3139,14 +3139,16 @@ impl CollectionView {
                             .text_sm()
                             .font_semibold()
                             .text_color(cx.theme().foreground)
-                            .child(t!("MongoCollection.collections_title", count = item_count).to_string()),
+                            .child(
+                                t!("MongoCollection.collections_title", count = item_count)
+                                    .to_string(),
+                            ),
                     ),
             )
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
-
                     .child(Table::new(&self.table).bordered(false).stripe(true)),
             )
             .into_any_element()
