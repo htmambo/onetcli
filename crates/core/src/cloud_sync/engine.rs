@@ -646,7 +646,7 @@ mod tests {
             .as_nanos();
         let temp_home = std::env::temp_dir().join(format!("one-core-engine-test-{unique}"));
 
-        crate::crypto::set_master_key("test-master-key");
+        crate::crypto::test_support::set_master_key("test-master-key");
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should be created");
         runtime.block_on(async {
             let storage = setup_test_storage(&temp_home);
@@ -749,7 +749,7 @@ mod tests {
             assert_eq!(sent[0].id, "cloud-connection-1");
         });
 
-        crate::crypto::clear_master_key();
+        crate::crypto::test_support::clear_master_key();
         let _ = std::fs::remove_dir_all(temp_home);
     }
 
@@ -765,7 +765,7 @@ mod tests {
             .as_nanos();
         let temp_home = std::env::temp_dir().join(format!("one-core-engine-test-{unique}"));
 
-        crate::crypto::set_master_key("test-master-key");
+        crate::crypto::test_support::set_master_key("test-master-key");
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should be created");
         runtime.block_on(async {
             let storage = setup_test_storage(&temp_home);
@@ -860,7 +860,7 @@ mod tests {
             assert!(sent_updates.is_empty(), "should create instead of update");
         });
 
-        crate::crypto::clear_master_key();
+        crate::crypto::test_support::clear_master_key();
         let _ = std::fs::remove_dir_all(temp_home);
     }
 
@@ -876,7 +876,7 @@ mod tests {
             .as_nanos();
         let temp_home = std::env::temp_dir().join(format!("one-core-engine-test-{unique}"));
 
-        crate::crypto::set_master_key("test-master-key");
+        crate::crypto::test_support::set_master_key("test-master-key");
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should be created");
         runtime.block_on(async {
             let storage = setup_test_storage(&temp_home);
@@ -946,7 +946,7 @@ mod tests {
             );
         });
 
-        crate::crypto::clear_master_key();
+        crate::crypto::test_support::clear_master_key();
         let _ = std::fs::remove_dir_all(temp_home);
     }
 }

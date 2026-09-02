@@ -88,8 +88,11 @@ static ENCRYPTION_KEY: RwLock<Option<[u8; 32]>> = RwLock::new(None);
 static RAW_MASTER_KEY: RwLock<Option<String>> = RwLock::new(None);
 
 /// 获取数据目录路径
+///
+/// 统一委托 key_storage::get_data_dir：包含 legacy 目录迁移逻辑，
+/// 且测试环境的重定向只在那一份实现里生效，避免双份路径分叉。
 fn get_data_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|p| p.join("omnihub"))
+    crate::key_storage::get_data_dir()
 }
 
 /// 获取密钥验证文件路径
@@ -719,10 +722,27 @@ pub fn try_restore_master_key() -> bool {
 }
 
 /// 测试专用：全局密钥状态的串行化锁（crypto 单测与 cloud_sync 单测共用）。
+/// 首次初始化时把密钥数据目录重定向到进程级临时目录，
+/// 保证任何测试路径（含默认 LocalFileStorage 后端的 save/delete）都不触碰真实用户数据。
 #[cfg(test)]
 pub(crate) fn test_mutex() -> &'static std::sync::Mutex<()> {
     static MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    MUTEX.get_or_init(|| std::sync::Mutex::new(()))
+    MUTEX.get_or_init(|| {
+        install_test_data_dir();
+        std::sync::Mutex::new(())
+    })
+}
+
+/// 幂等安装：把密钥/验证数据目录重定向到本进程专属临时目录。
+/// 不依赖调用方是否持锁，任何测试路径进入前都已生效。
+#[cfg(test)]
+fn install_test_data_dir() {
+    static INSTALLED: std::sync::Once = std::sync::Once::new();
+    INSTALLED.call_once(|| {
+        let dir = std::env::temp_dir().join(format!("omnihub-test-data-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        crate::key_storage::set_test_data_dir(dir);
+    });
 }
 
 /// 测试专用：内存密钥后端 + 全局主密钥管理。
@@ -763,8 +783,16 @@ pub(crate) mod test_support {
 
     /// 在内存后端上设置全局测试主密钥。
     pub(crate) fn set_master_key(key: &str) {
+        super::install_test_data_dir();
         set_key_storage(Arc::new(InMemoryKeyStorage(Mutex::new(None))));
         super::set_master_key(key);
+    }
+
+    /// 清除全局主密钥；先挂内存后端，避免 delete 落到真实用户目录。
+    pub(crate) fn clear_master_key() {
+        super::install_test_data_dir();
+        set_key_storage(Arc::new(InMemoryKeyStorage(Mutex::new(None))));
+        super::clear_master_key();
     }
 }
 
@@ -775,7 +803,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt() {
         let _guard = test_mutex().lock().unwrap();
-        set_master_key("test_key_123");
+        test_support::set_master_key("test_key_123");
 
         let original = "my_secret_password";
         let encrypted = encrypt_password(original);
@@ -815,7 +843,7 @@ mod tests {
     #[test]
     fn test_empty_password() {
         let _guard = test_mutex().lock().unwrap();
-        set_master_key("test_key");
+        test_support::set_master_key("test_key");
 
         let encrypted = encrypt_password("");
         assert_eq!(encrypted, "");
@@ -844,7 +872,7 @@ mod tests {
     #[test]
     fn test_already_encrypted() {
         let _guard = test_mutex().lock().unwrap();
-        set_master_key("test_key");
+        test_support::set_master_key("test_key");
 
         let original = "password";
         let encrypted = encrypt_password(original);
@@ -859,7 +887,7 @@ mod tests {
     #[test]
     fn test_v1_backward_compatibility() {
         let _guard = test_mutex().lock().unwrap();
-        set_master_key("test_key");
+        test_support::set_master_key("test_key");
 
         // 模拟旧 V1 格式：ENC: + base64(nonce + ciphertext)
         // 先用旧方式加密获取 V1 格式
@@ -885,7 +913,7 @@ mod tests {
     #[test]
     fn test_v2_format_verification() {
         let _guard = test_mutex().lock().unwrap();
-        set_master_key("test_key");
+        test_support::set_master_key("test_key");
 
         let encrypted = encrypt_password("secret");
         // V2 格式以 ENC:V2: 开头

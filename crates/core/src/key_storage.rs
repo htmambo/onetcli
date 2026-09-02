@@ -172,8 +172,30 @@ pub fn get_key_storage() -> Arc<dyn KeyStorage> {
 // 辅助函数
 // ============================================================================
 
+/// 测试专用：密钥/验证数据的读写重定向目录。
+/// 单测若触碰真实用户数据目录，会覆盖或删除 key_storage / key_verification，
+/// 导致应用侧主密钥无法恢复，因此测试环境必须显式重定向。
+#[cfg(test)]
+static TEST_DATA_DIR: std::sync::OnceLock<std::sync::RwLock<Option<PathBuf>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_test_data_dir(dir: PathBuf) {
+    let slot = TEST_DATA_DIR.get_or_init(|| std::sync::RwLock::new(None));
+    *slot.write().unwrap() = Some(dir);
+}
+
 /// 获取数据目录路径
-fn get_data_dir() -> Option<PathBuf> {
+pub(crate) fn get_data_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(dir) = TEST_DATA_DIR
+        .get_or_init(|| std::sync::RwLock::new(None))
+        .read()
+        .unwrap()
+        .clone()
+    {
+        return Some(dir);
+    }
     let parent = dirs::data_dir()?;
     let target = parent.join("omnihub");
     if !target.exists() {

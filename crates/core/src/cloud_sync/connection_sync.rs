@@ -1248,7 +1248,7 @@ mod tests {
     #[test]
     fn remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item() {
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should be created");
-        crate::crypto::set_master_key("test-master-key");
+        crate::crypto::test_support::set_master_key("test-master-key");
         runtime.block_on(async {
             let mut sync_service = crate::cloud_sync::CloudSyncService::new();
             sync_service.set_master_key_directly("test-master-key".to_string());
