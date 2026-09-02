@@ -61,6 +61,10 @@ Ssh:
     en: "HTTP proxy connection failed: %{response}"
     zh-CN: "HTTP代理连接失败: %{response}"
     zh-HK: "HTTP代理連線失敗: %{response}"
+  proxy_connect_timeout:
+    en: "Proxy connection timed out after %{secs}s"
+    zh-CN: "代理连接超时（%{secs} 秒）"
+    zh-HK: "代理連線超時（%{secs} 秒）"
 
 SshProgress:
   connecting_jump_server:

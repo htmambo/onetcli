@@ -23,6 +23,9 @@ pub mod defaults {
     pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
     /// 连续 N 次 keepalive 无响应才认为断开，总等待 = INTERVAL * MAX。
     pub const KEEPALIVE_MAX: usize = 6;
+    /// 代理握手（TCP 连接 + SOCKS5/HTTP CONNECT）总超时；
+    /// 无超时时代理不可达会挂起至 OS 默认 TCP 超时（可达 2 分钟）。
+    pub const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 }
 
 /// 远端 shell integration 安装后采集的"会话信息"。
@@ -1283,6 +1286,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connect_via_proxy_fails_fast_on_refused_connection() {
+        // 127.0.0.1:1 无监听，连接立即被拒；验证错误快速返回而非挂满超时窗口
+        let proxy = ProxyConnectConfig {
+            proxy_type: ProxyType::Http,
+            host: "127.0.0.1".to_string(),
+            port: 1,
+            username: None,
+            password: None,
+        };
+        let start = std::time::Instant::now();
+        let result = connect_via_proxy(&proxy, "example.com", 22).await;
+        assert!(result.is_err(), "连接被拒应返回错误");
+        assert!(
+            start.elapsed() < defaults::PROXY_CONNECT_TIMEOUT,
+            "被拒连接应快速失败，实际耗时 {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test]
     async fn keyboard_interactive_responder_receives_prompts() {
         #[derive(Default)]
         struct RecordingResponder {
@@ -1322,7 +1345,32 @@ mod tests {
 }
 
 /// 通过代理建立TCP连接
+///
+/// 整个代理握手（TCP 连接 + SOCKS5/HTTP CONNECT）收敛在
+/// [`defaults::PROXY_CONNECT_TIMEOUT`] 内：代理地址不可达时若无超时，
+/// 会挂起至 OS 默认 TCP 超时（可达 2 分钟），UI 侧表现为长时间无响应。
 async fn connect_via_proxy(
+    proxy: &ProxyConnectConfig,
+    target_host: &str,
+    target_port: u16,
+) -> Result<TcpStream> {
+    tokio::time::timeout(
+        defaults::PROXY_CONNECT_TIMEOUT,
+        connect_via_proxy_inner(proxy, target_host, target_port),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            t!(
+                "Ssh.proxy_connect_timeout",
+                secs = defaults::PROXY_CONNECT_TIMEOUT.as_secs()
+            )
+            .to_string()
+        )
+    })?
+}
+
+async fn connect_via_proxy_inner(
     proxy: &ProxyConnectConfig,
     target_host: &str,
     target_port: u16,
