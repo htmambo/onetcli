@@ -135,17 +135,17 @@ impl LocalPtyClient {
     }
 
     /// 将 client 拆分为请求发送端和事件接收端，用于后续异步处理。
+    ///
+    /// 直接移交内部 channel 两端：读线程持有的事件 sender 与返回的 receiver
+    /// 必须是同一 channel，否则 split 之后的 host 事件会发进已被丢弃的旧
+    /// receiver（历史实现新建 channel 导致 split 后全部事件丢失）。
     pub fn split(
-        mut self,
+        self,
     ) -> (
         mpsc::UnboundedSender<LocalPtyHostRequest>,
         mpsc::UnboundedReceiver<LocalPtyHostEvent>,
     ) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        while let Ok(event) = self.event_rx.try_recv() {
-            let _ = tx.send(event);
-        }
-        (self.request_tx, rx)
+        (self.request_tx, self.event_rx)
     }
 }
 
@@ -253,8 +253,18 @@ impl LocalPtyClientBackend {
 mod tests {
     use super::*;
 
+    /// 三个 host 测试共用真实 endpoint 文件，必须串行执行：
+    /// 并行 remove_file/bind 会互踩对方的 socket 连接。
+    fn pty_host_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn client_spawn_returns_session_id() {
+        let _host_guard = pty_host_test_lock();
         let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());
         let host = tokio::spawn(async {
             let _ = crate::run_local_pty_host().await;
@@ -282,6 +292,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn client_spawn_split_receives_output_from_spawned_session() {
+        let _host_guard = pty_host_test_lock();
         let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());
         let host = tokio::spawn(async {
             let _ = crate::run_local_pty_host().await;
@@ -327,6 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_attach_missing_session_fails() {
+        let _host_guard = pty_host_test_lock();
         let _ = std::fs::remove_file(crate::local_pty_protocol::local_pty_endpoint());
         let host = tokio::spawn(async {
             let _ = crate::run_local_pty_host().await;

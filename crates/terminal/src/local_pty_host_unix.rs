@@ -8,10 +8,16 @@ use tokio::sync::broadcast;
 use crate::local_pty_host::{
     SessionRegistry, dispatch_request, mark_session_detached, subscribe_exit, subscribe_output,
 };
-use crate::local_pty_protocol::{LocalPtyHostEvent, LocalPtyHostRequest, local_pty_endpoint};
+use crate::local_pty_protocol::{
+    LocalPtyHostEvent, LocalPtyHostRequest, ensure_private_runtime_dir,
+};
 
 pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
-    let endpoint = local_pty_endpoint();
+    // fail-closed：运行时目录必须归当前用户所有且为 0700，否则拒绝启动
+    // （socket 无应用层鉴权，目录权限是唯一安全边界）
+    let endpoint_dir = ensure_private_runtime_dir()
+        .with_context(|| "local-pty 运行时目录加固失败（拒绝启动，防止越权访问）")?;
+    let endpoint = endpoint_dir.join("local-pty.sock");
     if endpoint.exists() {
         // 尝试连接现有 endpoint 以确认是否存活
         if UnixStream::connect(&endpoint).await.is_ok() {
@@ -22,6 +28,11 @@ pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
 
     let listener = UnixListener::bind(&endpoint)
         .with_context(|| format!("绑定 Unix Domain Socket 失败: {}", endpoint.display()))?;
+    // socket 文件收敛为 0600：连接 Unix socket 需要写权限；目录 0700 之外的又一层保险
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(0o600));
+    }
     tracing::info!(endpoint = %endpoint.display(), "local-pty-host Unix listener 已启动");
 
     loop {

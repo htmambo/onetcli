@@ -70,9 +70,13 @@ pub enum LocalPtyHostEvent {
 pub fn local_pty_endpoint() -> PathBuf {
     #[cfg(unix)]
     {
-        let dir = runtime_dir();
-        let _ = std::fs::create_dir_all(&dir);
-        dir.join("local-pty.sock")
+        match ensure_private_runtime_dir() {
+            Ok(dir) => dir.join("local-pty.sock"),
+            Err(err) => {
+                tracing::warn!("运行时目录加固失败，按默认路径继续（连接将自然失败）: {err}");
+                runtime_dir().join("local-pty.sock")
+            }
+        }
     }
     #[cfg(not(unix))]
     {
@@ -83,9 +87,63 @@ pub fn local_pty_endpoint() -> PathBuf {
 
 /// 返回本地 PTY host 进程的 lock/pid 文件路径，用于探活与重拉。
 pub fn local_pty_pid_file() -> PathBuf {
+    match ensure_private_runtime_dir() {
+        Ok(dir) => dir.join("local-pty.pid"),
+        Err(err) => {
+            tracing::warn!("运行时目录加固失败，按默认路径继续: {err}");
+            runtime_dir().join("local-pty.pid")
+        }
+    }
+}
+
+/// 创建（并加固）运行时目录，返回目录路径。
+///
+/// Unix 下该目录是 PTY host Unix socket 的唯一安全边界（socket 无应用层鉴权），
+/// 因此强制收敛为 0700 且必须归当前用户所有：
+/// - 防止 `/tmp/omnihub-<uid>` 这类可预测路径被其他用户预先创建（planting）；
+/// - 收敛宽松的存量目录权限。
+/// host 启动路径必须 fail-closed，client 侧可降级为仅告警。
+pub fn ensure_private_runtime_dir() -> Result<PathBuf, std::io::Error> {
     let dir = runtime_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join("local-pty.pid")
+    #[cfg(unix)]
+    harden_runtime_dir(&dir)?;
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn harden_runtime_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    if !dir.exists() {
+        std::fs::create_dir_all(dir)?;
+    } else {
+        // 用 symlink_metadata 显式拒绝符号链接，避免指向他属主/敏感位置
+        let meta = std::fs::symlink_metadata(dir)?;
+        if meta.file_type().is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "runtime dir is a symlink, refusing: {}",
+                dir.display()
+            )));
+        }
+    }
+
+    let uid = unsafe { libc::getuid() };
+    let meta = std::fs::symlink_metadata(dir)?;
+    if meta.uid() != uid {
+        return Err(std::io::Error::other(format!(
+            "runtime dir owned by uid {}, expected {uid} (possible planting): {}",
+            meta.uid(),
+            dir.display()
+        )));
+    }
+
+    let mode = meta.permissions().mode() & 0o777;
+    if mode != 0o700 {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 
 fn runtime_dir() -> PathBuf {
@@ -183,5 +241,60 @@ mod tests {
     fn pid_file_resolves() {
         let path = local_pty_pid_file();
         assert!(path.to_string_lossy().contains("local-pty.pid"));
+    }
+
+    #[cfg(unix)]
+    mod unix_hardening {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn unique_test_dir() -> PathBuf {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            std::env::temp_dir().join(format!(
+                "omnihub-pty-hardening-{}-{unique}",
+                std::process::id()
+            ))
+        }
+
+        fn dir_mode(dir: &std::path::Path) -> u32 {
+            std::fs::metadata(dir).unwrap().permissions().mode() & 0o777
+        }
+
+        #[test]
+        fn harden_creates_missing_dir_with_private_mode() {
+            let dir = unique_test_dir();
+            let _ = std::fs::remove_dir_all(&dir);
+            harden_runtime_dir(&dir).unwrap();
+            assert_eq!(dir_mode(&dir), 0o700);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn harden_converges_loose_existing_dir() {
+            let dir = unique_test_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            harden_runtime_dir(&dir).unwrap();
+            assert_eq!(dir_mode(&dir), 0o700);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn harden_rejects_symlinked_dir() {
+            let base = unique_test_dir();
+            let real = base.join("real");
+            std::fs::create_dir_all(&real).unwrap();
+            let link = base.join("link");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            let err = harden_runtime_dir(&link).unwrap_err();
+            assert!(err.to_string().contains("symlink"), "{err}");
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        // 他属主目录（planting 场景）在非 root 测试环境无法模拟，属主校验分支
+        // 不进 CI；错误文案含 "owned by uid" 供人工验证。
     }
 }
