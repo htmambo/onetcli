@@ -1780,7 +1780,6 @@ impl AiChatPanel {
         if state.ime_marked_range().is_some() {
             return;
         }
-        drop(state);
         if !self.history.is_browsing() {
             cx.propagate();
             return;

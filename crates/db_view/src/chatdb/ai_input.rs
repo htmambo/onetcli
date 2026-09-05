@@ -748,7 +748,6 @@ impl AIInput {
         if editor.is_ime_composing(cx) {
             return;
         }
-        drop(editor);
         if !self.history.is_browsing() {
             cx.propagate();
             return;
