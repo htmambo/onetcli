@@ -12,6 +12,7 @@ use crate::llm::{
     storage::ProviderRepository,
 };
 use crate::storage::{GlobalStorageState, StorageManager, traits::Repository};
+use gpui::KeyBinding;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter,
     FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement, ParentElement, Render,
@@ -23,7 +24,10 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{
+        HistoryAction, HistoryNext, HistoryPrev, HistorySearch, Input, InputEvent, InputHistory,
+        InputState, is_at_first_line_top, is_at_last_line_bottom,
+    },
     list::{List, ListState},
     popover::Popover,
     text::{CodeBlock, CodeBlockRenderOptions, CodeBlockRenderer},
@@ -311,6 +315,8 @@ pub struct AiChatPanel {
     engine: ChatEngine,
 
     ai_input_state: Entity<InputState>,
+    /// 上下箭头历史记录（M1-M6 公共组件）
+    history: InputHistory,
     provider_select_state: ProviderSelectState,
 
     _subscriptions: Vec<Subscription>,
@@ -352,6 +358,34 @@ impl AiChatPanel {
                 .auto_grow(2, 6)
                 .default_value("")
         });
+
+        // 历史记录键位（仅在 AiChatPanel focus context 内生效）
+        cx.bind_keys([
+            KeyBinding::new("up", HistoryPrev, Some("AiChatPanel")),
+            KeyBinding::new("down", HistoryNext, Some("AiChatPanel")),
+            KeyBinding::new("ctrl-r", HistorySearch, Some("AiChatPanel")),
+        ]);
+        cx.on_action(
+            std::any::TypeId::of::<HistoryPrev>(),
+            window,
+            |this, _, _phase, window, cx| {
+                this.handle_recall_previous(window, cx);
+            },
+        );
+        cx.on_action(
+            std::any::TypeId::of::<HistoryNext>(),
+            window,
+            |this, _, _phase, window, cx| {
+                this.handle_recall_next(window, cx);
+            },
+        );
+        cx.on_action(
+            std::any::TypeId::of::<HistorySearch>(),
+            window,
+            |this, _, _phase, window, cx| {
+                this.history.enter_search();
+            },
+        );
 
         // Provider/Model 选择器（回调直接接收 &mut Self，避免重复借用）
         let provider_select_state =
@@ -412,6 +446,7 @@ impl AiChatPanel {
             focus_handle,
             engine,
             ai_input_state: agent_input_state,
+            history: InputHistory::new(),
             provider_select_state,
             _subscriptions: subscriptions,
             connection_name: None,
@@ -1632,10 +1667,88 @@ impl AiChatPanel {
         if content.trim().is_empty() {
             return;
         }
+        self.history.push_local(content.clone());
         self.send_message(content, cx);
         self.ai_input_state.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });
+    }
+
+    /// AiChatPanel 的 HistoryPrev 处理器（与 AIInput 类似但用 InputState 直读）。
+    fn handle_recall_previous(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Ctrl-R 搜索模式下：↑/↓ 在 matches 中导航（M8）
+        if self.history.is_searching() {
+            let action = self.history.search_prev();
+            self.apply_history_action_ai_chat(action, window, cx);
+            return;
+        }
+        let state = self.ai_input_state.read(cx);
+        if state.ime_marked_range().is_some() {
+            return;
+        }
+        let sel = state.selection();
+        if !sel.is_empty() {
+            cx.propagate();
+            return;
+        }
+        let text = state.text().to_string();
+        let offset = sel.start;
+        if !is_at_first_line_top(&text, offset) {
+            cx.propagate();
+            return;
+        }
+        drop(state);
+        let action = self.history.recall_previous(&text);
+        self.apply_history_action_ai_chat(action, window, cx);
+    }
+
+    /// AiChatPanel 的 HistoryNext 处理器。
+    fn handle_recall_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Ctrl-R 搜索模式下：↑/↓ 在 matches 中导航（M8）
+        if self.history.is_searching() {
+            let action = self.history.search_next();
+            self.apply_history_action_ai_chat(action, window, cx);
+            return;
+        }
+        let state = self.ai_input_state.read(cx);
+        if state.ime_marked_range().is_some() {
+            return;
+        }
+        let sel = state.selection();
+        if !sel.is_empty() {
+            cx.propagate();
+            return;
+        }
+        let text = state.text().to_string();
+        let offset = sel.start;
+        if !is_at_last_line_bottom(&text, offset) {
+            cx.propagate();
+            return;
+        }
+        drop(state);
+        let action = self.history.recall_next();
+        self.apply_history_action_ai_chat(action, window, cx);
+    }
+
+    fn apply_history_action_ai_chat(
+        &mut self,
+        action: HistoryAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            HistoryAction::SetValue(v)
+            | HistoryAction::RestoreDraft(v)
+            | HistoryAction::ApplyMatch(v) => {
+                self.ai_input_state.update(cx, |s, cx| {
+                    s.set_value(v, window, cx);
+                });
+            }
+            HistoryAction::Noop => {
+                cx.propagate();
+            }
+        }
+        cx.notify();
     }
 
     fn render_input(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1643,7 +1756,7 @@ impl AiChatPanel {
         let bg = self.background(cx);
         let muted = self.muted(cx);
 
-        v_flex()
+        let mut container = v_flex()
             .flex_shrink_0()
             .w_full()
             .px_1()
@@ -1651,7 +1764,21 @@ impl AiChatPanel {
             .gap_1()
             .border_t_1()
             .border_color(border)
-            .bg(bg)
+            .bg(bg);
+
+        // 浏览态：上方显示 inline 灰色预览（M7；§4.3.6 超长截断由 InputHistory::preview_text 处理）
+        if let Some(preview) = self.history.preview_text() {
+            container = container.child(
+                div()
+                    .px_2()
+                    .pb_1()
+                    .text_color(cx.theme().muted_foreground)
+                    .opacity(0.5)
+                    .child(preview),
+            );
+        }
+
+        container
             // 输入框
             .child(
                 Input::new(&self.ai_input_state)

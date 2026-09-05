@@ -1511,6 +1511,22 @@ impl SqlEditor {
     pub fn get_selected_text(&self, cx: &App) -> String {
         self.editor.read(cx).selected_text_string()
     }
+
+    /// 当前光标 byte offset（与 `InputState::selection().start` 同一语义）。
+    /// 用于 AI 输入框历史记录判断"光标是否在首/末行最顶/最底"。
+    pub fn get_cursor_offset(&self, cx: &App) -> usize {
+        self.editor.read(cx).selection().start
+    }
+
+    /// 当前选区是否为空（start == end）。
+    pub fn selection_is_empty(&self, cx: &App) -> bool {
+        self.editor.read(cx).selection().is_empty()
+    }
+
+    /// IME composition 标记范围是否活跃（即正在输入拼音/候选字）。
+    pub fn is_ime_composing(&self, cx: &App) -> bool {
+        self.editor.read(cx).ime_marked_range().is_some()
+    }
 }
 
 impl Render for SqlEditor {

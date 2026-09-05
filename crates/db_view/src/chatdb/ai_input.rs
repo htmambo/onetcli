@@ -2,6 +2,7 @@
 
 use db::GlobalDbState;
 use db::plugin::SqlCompletionInfo;
+use gpui::KeyBinding;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle,
@@ -9,8 +10,15 @@ use gpui::{
 };
 use gpui_component::button::ButtonVariants;
 use gpui_component::{
-    ActiveTheme, IconName, Sizable, Size, button::Button, h_flex, input::InputEvent,
-    popover::Popover, v_flex,
+    ActiveTheme, IconName, Sizable, Size,
+    button::Button,
+    h_flex,
+    input::{
+        HistoryAction, HistoryNext, HistoryPrev, HistorySearch, InputEvent, InputHistory,
+        is_at_first_line_top, is_at_last_line_bottom,
+    },
+    popover::Popover,
+    v_flex,
 };
 use rust_i18n::t;
 use std::rc::Rc;
@@ -103,6 +111,9 @@ pub struct AIInput {
 
     // 模式状态
     mode: InputMode,
+
+    // 上下箭头历史记录（M1-M3）
+    history: InputHistory,
 
     // SQL/Agent 共用编辑器
     sql_editor: Entity<SqlEditor>,
@@ -244,10 +255,41 @@ impl AIInput {
             },
         ));
 
+        // 历史记录键位（仅在 AIInput focus context 内生效）
+        cx.bind_keys([
+            KeyBinding::new("up", HistoryPrev, Some("AIInput")),
+            KeyBinding::new("down", HistoryNext, Some("AIInput")),
+            KeyBinding::new("ctrl-r", HistorySearch, Some("AIInput")),
+        ]);
+
+        // 历史记录 action handlers
+        cx.on_action(
+            std::any::TypeId::of::<HistoryPrev>(),
+            window,
+            |this, _, _phase, window, cx| {
+                this.handle_recall_previous(window, cx);
+            },
+        );
+        cx.on_action(
+            std::any::TypeId::of::<HistoryNext>(),
+            window,
+            |this, _, _phase, window, cx| {
+                this.handle_recall_next(window, cx);
+            },
+        );
+        cx.on_action(
+            std::any::TypeId::of::<HistorySearch>(),
+            window,
+            |this, _, _phase, window, cx| {
+                this.handle_recall_search(window, cx);
+            },
+        );
+
         let mut instance = Self {
             focus_handle,
             is_sidebar_mode,
             mode: InputMode::Agent,
+            history: InputHistory::new(),
             sql_editor,
             provider_select_state,
             db_selector,
@@ -597,7 +639,10 @@ impl AIInput {
                 if content.trim().is_empty() {
                     return;
                 }
-                cx.emit(AIInputEvent::Submit { content });
+                cx.emit(AIInputEvent::Submit {
+                    content: content.clone(),
+                });
+                self.history.push_local(content);
                 self.sql_editor.update(cx, |editor, cx| {
                     editor.set_value(String::new(), window, cx);
                 });
@@ -611,16 +656,124 @@ impl AIInput {
                     return;
                 };
                 cx.emit(AIInputEvent::ExecuteSql {
-                    sql,
+                    sql: sql.clone(),
                     connection_id,
                     database,
                     schema,
                 });
+                self.history.push_local(sql);
                 self.sql_editor.update(cx, |editor, cx| {
                     editor.set_value(String::new(), window, cx);
                 });
             }
         }
+    }
+
+    // ========================================================================
+    // 历史记录（上下箭头）处理器
+    // ========================================================================
+
+    /// 公共：让 ChatPanel 在切换会话时喂入历史。
+    pub fn reset_history_session(&mut self, local_msgs: impl IntoIterator<Item = String>) {
+        self.history.reset_session(local_msgs);
+    }
+
+    /// 公共：让 ChatPanel 注入全局最近 N 条。
+    pub fn extend_history_global(&mut self, msgs: impl IntoIterator<Item = String>) {
+        self.history.extend_global(msgs);
+    }
+
+    /// 公共：当前是否处于浏览态（用于 UI 决定是否显示 inline 预览）。
+    pub fn history_is_browsing(&self) -> bool {
+        self.history.is_browsing()
+    }
+
+    /// 公共：浏览态预览文本（None = 不显示）。
+    pub fn history_preview_text(&self) -> Option<String> {
+        self.history.preview_text()
+    }
+
+    fn handle_recall_previous(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Ctrl-R 搜索模式下：↑/↓ 在 matches 中导航（M8）
+        if self.history.is_searching() {
+            let action = self.history.search_prev();
+            self.apply_history_action(action, window, cx);
+            return;
+        }
+        let editor = self.sql_editor.read(cx);
+        if editor.is_ime_composing(cx) {
+            return;
+        }
+        if !editor.selection_is_empty(cx) {
+            cx.propagate();
+            return;
+        }
+        let text = editor.get_text(cx);
+        let offset = editor.get_cursor_offset(cx);
+        if !is_at_first_line_top(&text, offset) {
+            cx.propagate();
+            return;
+        }
+        drop(editor);
+        let action = self.history.recall_previous(&text);
+        self.apply_history_action(action, window, cx);
+    }
+
+    fn handle_recall_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Ctrl-R 搜索模式下：↑/↓ 在 matches 中导航（M8）
+        if self.history.is_searching() {
+            let action = self.history.search_next();
+            self.apply_history_action(action, window, cx);
+            return;
+        }
+        let editor = self.sql_editor.read(cx);
+        if editor.is_ime_composing(cx) {
+            return;
+        }
+        if !editor.selection_is_empty(cx) {
+            cx.propagate();
+            return;
+        }
+        let text = editor.get_text(cx);
+        let offset = editor.get_cursor_offset(cx);
+        if !is_at_last_line_bottom(&text, offset) {
+            cx.propagate();
+            return;
+        }
+        drop(editor);
+        let action = self.history.recall_next();
+        self.apply_history_action(action, window, cx);
+    }
+
+    fn handle_recall_search(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        // Ctrl-R 模式：标记进入；具体输入/接受/退出由后续 keymap 接管
+        // 此处只触发 state change，UI 由 render 同步刷新。
+        // M8 完整实现搜索循环（M7 + M8 联合落地）。
+        self.history.enter_search();
+    }
+
+    fn apply_history_action(
+        &mut self,
+        action: HistoryAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            HistoryAction::SetValue(v) | HistoryAction::RestoreDraft(v) => {
+                self.sql_editor.update(cx, |editor, cx| {
+                    editor.set_value(v, window, cx);
+                });
+            }
+            HistoryAction::ApplyMatch(v) => {
+                self.sql_editor.update(cx, |editor, cx| {
+                    editor.set_value(v, window, cx);
+                });
+            }
+            HistoryAction::Noop => {
+                cx.propagate();
+            }
+        }
+        cx.notify();
     }
 
     // ========================================================================
@@ -640,24 +793,38 @@ impl AIInput {
     }
 
     fn render_input_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let mut container = div()
             .w_full()
             .min_w_0()
             .px_3()
             .pt_2()
             .pb_2()
-            .min_h(px(80.0))
-            .child(
+            .min_h(px(80.0));
+
+        // 浏览态：上方显示 inline 灰色预览（M7；§4.3.6 超长截断由 InputHistory::preview_text 处理）
+        if let Some(preview) = self.history_preview_text() {
+            container = container.child(
                 div()
-                    .w_full()
-                    .min_w_0()
-                    .h(px(120.0))
-                    .rounded(cx.theme().radius)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .overflow_hidden()
-                    .child(self.sql_editor.clone()),
-            )
+                    .px_2()
+                    .pb_1()
+                    .text_color(cx.theme().muted_foreground)
+                    .opacity(0.5)
+                    .font_family(crate::settings::current_sql_editor_font_family(cx))
+                    .child(preview),
+            );
+        }
+
+        container.child(
+            div()
+                .w_full()
+                .min_w_0()
+                .h(px(120.0))
+                .rounded(cx.theme().radius)
+                .border_1()
+                .border_color(cx.theme().border)
+                .overflow_hidden()
+                .child(self.sql_editor.clone()),
+        )
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {

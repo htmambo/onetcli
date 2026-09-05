@@ -1026,6 +1026,17 @@ impl InputState {
         &self.text
     }
 
+    /// 当前选区（byte offsets）。用于 AI 输入框历史记录判定光标位置。
+    pub fn selection(&self) -> Selection {
+        self.selected_range
+    }
+
+    /// 当前 IME composition 标记范围（None 表示无 composition）。
+    /// 用于历史记录处理器在中文/IME 输入态时让 IME 接管方向键。
+    pub fn ime_marked_range(&self) -> Option<Selection> {
+        self.ime_marked_range.clone()
+    }
+
     /// Get the currently selected text as a String.
     /// Returns an empty string if no text is selected.
     pub fn selected_text_string(&self) -> String {

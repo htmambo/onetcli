@@ -264,6 +264,7 @@ impl ChatPanel {
 
         instance.load_providers(window, cx);
         instance.load_history_sessions(cx);
+        instance.load_global_input_history(cx);
         instance
     }
 
@@ -352,6 +353,10 @@ impl ChatPanel {
         self.latest_ai_message_id = None;
         self.render_limit = MESSAGE_RENDER_LIMIT;
         self.session_affinity.reset();
+        // 清空 AI 输入框历史（保留全局视图）
+        self.ai_input.update(cx, |input, _cx| {
+            input.reset_history_session(Vec::<String>::new());
+        });
         cx.notify();
     }
 
@@ -396,6 +401,39 @@ impl ChatPanel {
                             entity.update(cx, |this, cx| {
                                 this.history_sessions = sessions;
                                 this.update_session_list(window, cx);
+                                cx.notify();
+                            });
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// 异步加载全局最近 50 条 user 消息（跨会话），喂入 AIInput 历史（D1 + M5）。
+    fn load_global_input_history(&mut self, cx: &mut Context<Self>) {
+        let storage_manager = self.storage_manager.clone();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let message_repo = match storage_manager.get::<MessageRepository>() {
+                Some(r) => r,
+                None => return,
+            };
+            let messages = match message_repo.list_recent_user(50, None) {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+            let contents: Vec<String> = messages.into_iter().map(|m| m.content).collect();
+
+            if let Some(entity) = this.upgrade() {
+                let _ = cx.update(|cx| {
+                    if let Some(window_id) = cx.active_window() {
+                        let _ = cx.update_window(window_id, |_, window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.ai_input.update(cx, |input, _cx| {
+                                    input.extend_history_global(contents);
+                                });
                                 cx.notify();
                             });
                         });
@@ -566,6 +604,16 @@ impl ChatPanel {
                                         Message::text(role, msg.content.clone())
                                     })
                                     .collect();
+                                // 喂入 AI 输入框历史（仅 user 消息，按时间倒序）
+                                let user_msgs: Vec<String> = messages
+                                    .iter()
+                                    .filter(|m| m.role == "user")
+                                    .map(|m| m.content.clone())
+                                    .rev()
+                                    .collect();
+                                this.ai_input.update(cx, |input, _cx| {
+                                    input.reset_history_session(user_msgs);
+                                });
                                 this.sql_result_views.clear();
                                 this.sql_block_results.clear();
                                 this.latest_ai_message_id = None;

@@ -446,6 +446,35 @@ impl MessageRepository {
         })
     }
 
+    /// 按时间倒序拉取最近 N 条 user 消息，可选排除指定会话。
+    ///
+    /// 用法：AI 输入框历史记录跨会话视图（排除当前会话避免与本地视图重复）。
+    /// 排序 tiebreaker: `(created_at DESC, id DESC)`，保证稳定。
+    pub fn list_recent_user(
+        &self,
+        limit: i32,
+        exclude_session_id: Option<i64>,
+    ) -> Result<Vec<ChatMessage>> {
+        self.conn.with_connection(|conn| {
+            // 始终用 ?2：`(?2 IS NULL OR session_id != ?2)` 让 exclude_session_id 为 NULL 时不过滤。
+            let sql = "SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json \
+                       FROM chat_messages \
+                       WHERE role = 'user' AND content != '' AND (?2 IS NULL OR session_id != ?2) \
+                       ORDER BY created_at DESC, id DESC \
+                       LIMIT ?1";
+            let mut stmt = conn.prepare(sql)?;
+            let rows = stmt.query_map(
+                params![limit, exclude_session_id],
+                |row| ChatMessage::from_row(row),
+            )?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?);
+            }
+            Ok(results)
+        })
+    }
+
     pub fn delete_by_session(&self, session_id: i64) -> Result<()> {
         self.conn.with_connection(|conn| {
             conn.execute(
