@@ -261,6 +261,18 @@ AiChat:
     en: "Thinking..."
     zh-CN: "思考中..."
     zh-HK: "思考中..."
+  thinking_title:
+    en: "Thinking process"
+    zh-CN: "思考过程"
+    zh-HK: "思考過程"
+  thinking_expand:
+    en: "Expand thinking"
+    zh-CN: "展开思考"
+    zh-HK: "展開思考"
+  thinking_collapse:
+    en: "Collapse thinking"
+    zh-CN: "折叠思考"
+    zh-HK: "摺疊思考"
   reasoning_title:
     en: "Thought process"
     zh-CN: "思考过程"
