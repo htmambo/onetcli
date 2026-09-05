@@ -1,5 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
+use crate::ai_chat::thinking::split_thinking_blocks;
 use crate::llm::{ChatRequest, LlmProvider, Message, ProviderConfig, Role};
 
 use super::types::DynAgent;
@@ -172,7 +173,7 @@ impl IntentRouter {
 
         Err(RouterError::ParseFailed(format!(
             "Could not extract agent_id from response: {}",
-            trimmed
+            truncate_for_log(trimmed, 120)
         )))
     }
 }
@@ -211,5 +212,44 @@ mod tests {
         let ids = vec!["general_chat", "sql_agent"];
         let result = IntentRouter::parse_response("no idea", &ids);
         assert!(result.is_err());
+    }
+}
+
+/// 剥离 `` 块后截取前 N 字符，避免路由失败日志被长文本/推理内容刷屏。
+fn truncate_for_log(text: &str, max_chars: usize) -> String {
+    let stripped = split_thinking_blocks(text).body;
+    let truncated: String = stripped.chars().take(max_chars).collect();
+    if stripped.chars().count() > max_chars {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+#[cfg(test)]
+mod truncate_tests {
+    use super::truncate_for_log;
+
+    #[test]
+    fn strips_thinking_block() {
+        let result = truncate_for_log(
+            "<think>internal reasoning</think>actual content",
+            100,
+        );
+        assert_eq!(result, "actual content");
+        assert!(!result.contains("internal reasoning"));
+    }
+
+    #[test]
+    fn truncates_long_text() {
+        let long = "a".repeat(500);
+        let result = truncate_for_log(&long, 50);
+        assert_eq!(result.chars().count(), 51); // 50 chars + …
+    }
+
+    #[test]
+    fn keeps_short_text_unchanged() {
+        let result = truncate_for_log("short", 100);
+        assert_eq!(result, "short");
     }
 }
