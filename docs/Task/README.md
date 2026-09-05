@@ -9,6 +9,7 @@
 ### 2026-09
 - ✅ [AI 输入框上下箭头历史记录](Archive/2026-09/INPUT_HISTORY_PLAN.md) - 完成于 2026-09-05（提交 `09e8f125` + `d45361fe`：InputHistory 公共状态机 + 三宿主接入；36/36 单测通过；SSH 终端启动 panic 在修复 `cx.on_action` 误用后解决）
 - ✅ [AI 输入框历史记录方向 + 浏览语义重构](Archive/2026-09/INPUT_HISTORY_DIRECTION_REWORK_PLAN.md) - 完成于 2026-09-05（按用户需求 ↑/↓ 方向反转；新增 apply_pending_edit 临时副本落定 + can_submit_in_browse 空提交拦截 + escape ESC 复位 + 异步全局历史加载（AiChatPanel 路径）；外部评审 Round 2/4 反馈的 P1-1 ESC 三重守卫已修复；36/36 单测通过；用户实测 SSH terminal AI 助手跨会话历史可见）
+- ✅ [AI 助手 Thinking 可折叠面板](Archive/2026-09/THINKING_PANEL_PLAN.md) - 完成于 2026-09-05（新增 crates/core/src/ai_chat/thinking.rs：split_thinking_blocks 解析函数 + ThinkingPanel 可折叠组件；折叠态 60px + flex column + justify_end 让最新思考贴底；集成到 render_assistant_content；markdown.rs 把 cfg!(debug_assertions) warn 降级为 trace；10/10 thinking 单测通过；External Review MCP Round 5 verdict=APPROVED；解决日志中持续刷屏的 `unsupported inline html tag` 警告）
 
 ### 2026-08
 - ✅ [script/install-linux.sh 适配 Deepin 25 + 补齐 X11 dev 库](Archive/2026-08/INSTALL_LINUX_SH_DEEPIN_DEV_FIX_PLAN.md) - 完成于 2026-08-29（单文件 3 处改动：apt 分支扩为 `ubuntu|debian|linuxmint|pop|deepin|uos|pureos|kali|tails|raspbian|parrot|zorin|elementary|mx|neon`；apt 列表新增 `libxcb1-dev libxkbcommon-dev`；openSUSE 列表新增 `libxkbcommon-devel`；外部评审 Round 2/5 verdict=APPROVED；用户授权 commit 后归档）

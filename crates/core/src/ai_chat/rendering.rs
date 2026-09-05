@@ -5,6 +5,7 @@
 
 use crate::ai_chat::panel::CodeBlockActionRegistry;
 use crate::ai_chat::reasoning;
+use crate::ai_chat::thinking::{split_thinking_blocks, ThinkingPanel};
 use crate::ai_chat::types::{
     ChatMessageUIGeneric, ChatRole, MessageExtension, MessageVariant, ToolCallStatus,
 };
@@ -282,13 +283,26 @@ impl ChatMessageRenderer {
         code_block_renderer: Option<Arc<CodeBlockRenderer>>,
     ) -> AnyElement {
         let view_id = SharedString::from(format!("ai-msg-{}", msg.id));
+        // 从 msg.content 提取 `` 块（兼容 provider 把 `` 写入 content 字段的场景）
+        let parsed = split_thinking_blocks(&msg.content);
+        let body_content = parsed.body.clone();
+        let thinking_content = parsed.thinking.clone();
+
+        let container = v_flex().w_full().gap_1();
+        let container = if let Some(thinking) = thinking_content {
+            container.child(
+                ThinkingPanel::new(thinking)
+                    .with_state_key(SharedString::from(format!("{}-thinking", view_id))),
+            )
+        } else {
+            container
+        };
 
         if code_block_actions.is_empty() {
             // 无代码块操作，简单渲染
-            div()
-                .w_full()
+            container
                 .child(
-                    TextView::markdown(view_id, msg.content.clone())
+                    TextView::markdown(view_id, body_content)
                         .p_3()
                         .selectable(true)
                         .when_some(code_block_renderer, |view, renderer| {
@@ -303,10 +317,9 @@ impl ChatMessageRenderer {
         } else {
             // 有代码块操作，使用 code_block_actions
             let registry = code_block_actions.clone();
-            div()
-                .w_full()
+            container
                 .child(
-                    TextView::markdown(view_id, msg.content.clone())
+                    TextView::markdown(view_id, body_content)
                         .code_block_actions(move |code_block, _window, _cx| {
                             let code = code_block.code();
                             let lang = code_block.lang();

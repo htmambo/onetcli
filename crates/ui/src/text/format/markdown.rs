@@ -168,9 +168,9 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
                     text = "\n".to_owned();
                     paragraph.push(InlineNode::new(&text));
                 } else {
-                    if cfg!(debug_assertions) {
-                        tracing::warn!("unsupported inline html tag: {:#?}", el);
-                    }
+                    // inline html 标签不支持（如 ``、`` 等）—— UI 层 (thinking.rs)
+                    // 已前置 split，理论上不应触发；debug 时降级为 trace 便于诊断
+                    tracing::trace!("unsupported inline html tag: {:#?}", el);
                 }
             }
             Err(err) => {

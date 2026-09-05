@@ -59,6 +59,7 @@ mod reasoning;
 pub mod rendering;
 pub mod services;
 pub mod stream;
+pub mod thinking;
 mod types;
 
 // 导出面板相关
