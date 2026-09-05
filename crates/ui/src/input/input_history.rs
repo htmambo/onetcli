@@ -11,6 +11,8 @@
 //! 与 IME composition、Enter 提交、Esc 退出等交互细节由宿主侧处理，
 //! 本组件只输出 [`HistoryAction`] 指令。
 
+use std::collections::VecDeque;
+
 use gpui::{Action, actions};
 
 actions!(input_history, [HistoryPrev, HistoryNext, HistorySearch]);
@@ -37,7 +39,8 @@ pub enum HistoryAction {
 /// 草稿仅在编辑态 → 浏览态切换时压栈，回到 `None` 时恢复。
 #[derive(Debug, Default)]
 pub struct InputHistory {
-    history: Vec<String>,
+    /// 用 VecDeque 是因为 push_local 在头部插入 O(1)（Vec::insert(0) 是 O(n)）。
+    history: VecDeque<String>,
     /// `[0, local_len)` 范围为当前会话本地历史。
     local_len: usize,
     cursor: Option<usize>,
@@ -61,10 +64,10 @@ impl InputHistory {
         if trimmed.is_empty() {
             return;
         }
-        if self.history.first().map(|s| s == &msg).unwrap_or(false) {
+        if self.history.front().map(|s| s == &msg).unwrap_or(false) {
             return;
         }
-        self.history.insert(0, msg);
+        self.history.push_front(msg);
         self.local_len += 1;
     }
 
@@ -77,10 +80,12 @@ impl InputHistory {
             if msg.trim().is_empty() {
                 continue;
             }
-            if self.history[..self.local_len].contains(&msg) {
+            // VecDeque 不支持 Range 切片，用迭代器 take 避免分配。
+            let already_in_local = self.history.iter().take(self.local_len).any(|s| s == &msg);
+            if already_in_local {
                 continue;
             }
-            self.history.push(msg);
+            self.history.push_back(msg);
         }
     }
 
@@ -279,8 +284,14 @@ fn truncate_preview_lines(text: &str, max_lines: usize) -> String {
 /// 条件：offset 之前不含 `\n` 且（offset == 0 或前缀全是空白字符）。
 /// `is_whitespace()` 同时覆盖 `\n\t ` 等；显式排除 `\n` 是为了避免
 /// 第二行行首（前面只有空白）被误判为顶。
+///
+/// 非 UTF-8 char boundary 时返回 false（防御性；正常路径下
+/// `InputState::selection().start` 总是 char boundary）。
 pub fn is_at_first_line_top(text: &str, offset: usize) -> bool {
     debug_assert!(offset <= text.len());
+    if !text.is_char_boundary(offset) {
+        return false;
+    }
     let prefix = &text[..offset];
     !prefix.contains('\n') && (offset == 0 || prefix.chars().all(|c| c.is_whitespace()))
 }
@@ -288,6 +299,9 @@ pub fn is_at_first_line_top(text: &str, offset: usize) -> bool {
 /// 光标是否在最后一行最底。
 pub fn is_at_last_line_bottom(text: &str, offset: usize) -> bool {
     debug_assert!(offset <= text.len());
+    if !text.is_char_boundary(offset) {
+        return false;
+    }
     let suffix = &text[offset..];
     !suffix.contains('\n') && (offset == text.len() || suffix.chars().all(|c| c.is_whitespace()))
 }
