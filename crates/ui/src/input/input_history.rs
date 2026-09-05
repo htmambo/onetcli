@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 
 use gpui::{Action, actions};
 
-actions!(input_history, [HistoryPrev, HistoryNext, HistorySearch]);
+actions!(input_history, [HistoryPrev, HistoryNext, HistorySearch, HistoryEscape]);
 
 /// 宿主执行动作的指令。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +59,11 @@ impl InputHistory {
     /// 当前会话提交后写入（D8）。
     ///
     /// 跳过空消息（前后空白裁剪后为空视为空）；与最新一条相邻重复时跳过。
+    ///
+    /// **提交语义**：push_local 是"提交"动作的副作用，调用后强制清空所有交互态
+    ///（cursor / draft / search_mode / search_query / search_matches），
+    /// 避免 push_front 引入的索引偏移残留导致浏览态错位。索引同步（如 cursor += 1）
+    /// 在此设计下已无必要——状态已全部归零。
     pub fn push_local(&mut self, msg: String) {
         let trimmed = msg.trim();
         if trimmed.is_empty() {
@@ -69,20 +74,27 @@ impl InputHistory {
         }
         self.history.push_front(msg);
         self.local_len += 1;
+        // 强制退出浏览 + 搜索态（防御性清理；宿主无需单独调用 reset）
+        self.cursor = None;
+        self.draft = None;
+        self.search_mode = false;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_index = 0;
     }
 
     /// 全局视图喂入（D1）。
     ///
-    /// 调用方按时间倒序传入；本地已有（按内容匹配）的不重复；
-    /// 不刷新 `local_len`——全局追加在 `[local_len..)` 之后。
+    /// 调用方按时间倒序传入；与现有 history（含 local + 已有 global）按内容去重，
+    /// 重复的跳过；不刷新 `local_len`——全局追加在 `[local_len..)` 之后。
+    ///
+    /// 全量去重可避免多次加载或 SQL 返回重复时累积相同条目。
     pub fn extend_global(&mut self, msgs: impl IntoIterator<Item = String>) {
         for msg in msgs {
             if msg.trim().is_empty() {
                 continue;
             }
-            // VecDeque 不支持 Range 切片，用迭代器 take 避免分配。
-            let already_in_local = self.history.iter().take(self.local_len).any(|s| s == &msg);
-            if already_in_local {
+            if self.history.iter().any(|s| s == &msg) {
                 continue;
             }
             self.history.push_back(msg);
@@ -112,6 +124,26 @@ impl InputHistory {
         self.cursor.is_some()
     }
 
+    /// history 是否为空（仅用于诊断 / 日志）。
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty()
+    }
+
+    /// 历史总条数（仅用于诊断 / 日志）。
+    pub fn total_len(&self) -> usize {
+        self.history.len()
+    }
+
+    /// 本地段条数（仅用于诊断 / 日志）。
+    pub fn local_len(&self) -> usize {
+        self.local_len
+    }
+
+    /// 当前 cursor（仅用于诊断 / 日志）。
+    pub fn cursor_debug(&self) -> Option<usize> {
+        self.cursor
+    }
+
     /// 浏览态下要预览的内容（首 2 行截断）。
     pub fn preview_text(&self) -> Option<String> {
         let i = self.cursor?;
@@ -119,8 +151,9 @@ impl InputHistory {
         Some(truncate_preview_lines(text, 2))
     }
 
-    /// 按 ↑：编辑态→浏览第一条；浏览态→上一条；已在第一条→Noop。
+    /// 按 ↑：编辑态→浏览第一条；浏览态→下一条（更旧）；已在最旧→Noop。
     ///
+    /// **方向**: cursor 增大方向，从最新（history[0]）→ 最旧（history[len-1]）。
     /// `current_text` 是宿主当前输入框文本，用于压栈草稿。
     pub fn recall_previous(&mut self, current_text: &str) -> HistoryAction {
         if self.history.is_empty() {
@@ -128,36 +161,85 @@ impl InputHistory {
         }
         match self.cursor {
             None => {
-                // 编辑态 → 浏览态：压栈草稿（仅当非空），切到第一条
+                // 编辑态 → 浏览态：压栈草稿（仅当非空），切到第一条（最新）
                 if !current_text.is_empty() {
                     self.draft = Some(current_text.to_string());
                 }
                 self.cursor = Some(0);
                 HistoryAction::SetValue(self.history[0].clone())
             }
-            Some(0) => HistoryAction::Noop,
-            Some(i) => {
-                self.cursor = Some(i - 1);
-                HistoryAction::SetValue(self.history[i - 1].clone())
+            Some(i) if i + 1 < self.history.len() => {
+                // 浏览态 → 下一条（更旧）：cursor 增大
+                self.cursor = Some(i + 1);
+                HistoryAction::SetValue(self.history[i + 1].clone())
             }
+            Some(_) => HistoryAction::Noop, // 已在最旧
         }
     }
 
-    /// 按 ↓：浏览态→下一条；最后一条之后→恢复草稿或清空。
+    /// 按 ↓：浏览态→上一条（更新）；从最新（cursor=0）之后→恢复草稿或清空。
+    ///
+    /// **方向**: cursor 减小方向，从最旧（history[len-1]）→ 最新（history[0]）→ 退出浏览。
+    /// **不**自动 apply_pending_edit——由宿主在调用前手动调用 `apply_pending_edit` 落定临时副本。
     pub fn recall_next(&mut self) -> HistoryAction {
         let Some(i) = self.cursor else {
             return HistoryAction::Noop;
         };
-        if i + 1 < self.history.len() {
-            self.cursor = Some(i + 1);
-            HistoryAction::SetValue(self.history[i + 1].clone())
+        if i > 0 {
+            // 浏览态 → 上一条（更新）：cursor 减小
+            self.cursor = Some(i - 1);
+            HistoryAction::SetValue(self.history[i - 1].clone())
         } else {
+            // 从最新条 (cursor=0) 退出浏览：恢复草稿或清空
             self.cursor = None;
             match self.draft.take() {
                 Some(d) => HistoryAction::RestoreDraft(d),
                 None => HistoryAction::SetValue(String::new()),
             }
         }
+    }
+
+    /// 应用临时副本：浏览中编辑后，切换或退出浏览前调用。
+    ///
+    /// **语义**（按用户澄清）:
+    /// - 临时副本 == history[cursor]: 不动（未编辑）
+    /// - 临时副本 != history[cursor] 且非空: **覆盖 history[cursor]**（更新原位置，长度不变）
+    /// - 临时副本为空: **不动 history[cursor]**（清空仅清显示，不影响 history）
+    ///
+    /// **调用方必须**: 切换 history 前（recall_next/previous 之前）调用。
+    pub fn apply_pending_edit(&mut self, current_text: &str) {
+        let Some(i) = self.cursor else { return; };
+        if current_text.is_empty() {
+            // 清空态：不动 history[i]
+            return;
+        }
+        if let Some(existing) = self.history.get(i) {
+            if existing == current_text {
+                // 未编辑
+                return;
+            }
+        }
+        // 覆盖更新
+        if let Some(slot) = self.history.get_mut(i) {
+            *slot = current_text.to_string();
+        }
+    }
+
+    /// 浏览态下当前输入框内容是否允许提交。
+    ///
+    /// **语义**（按用户澄清 B）: 浏览中清空输入框后**不允许**提交；
+    /// 编辑态（cursor=None）或浏览态非空均可提交。
+    pub fn can_submit_in_browse(&self, current_text: &str) -> bool {
+        match self.cursor {
+            Some(_) => !current_text.is_empty(),
+            None => true,
+        }
+    }
+
+    /// ESC 复位：清空草稿与浏览态，光标归零。history 本身不变。
+    pub fn escape(&mut self) {
+        self.cursor = None;
+        self.draft = None;
     }
 
     /// 用户开始编辑字符：宿主应调用以退出浏览态、清预览、清草稿。
@@ -293,7 +375,9 @@ pub fn is_at_first_line_top(text: &str, offset: usize) -> bool {
         return false;
     }
     let prefix = &text[..offset];
-    !prefix.contains('\n') && (offset == 0 || prefix.chars().all(|c| c.is_whitespace()))
+    // offset == 0 或 prefix 含非空白字符 → 在首行最顶。
+    // 全空白 prefix（如纯空格/Tab/全角空格）→ false，避免误触发历史召回覆盖用户草稿。
+    !prefix.contains('\n') && (offset == 0 || prefix.chars().any(|c| !c.is_whitespace()))
 }
 
 /// 光标是否在最后一行最底。
@@ -331,40 +415,73 @@ mod tests {
     }
 
     #[test]
-    fn recall_previous_at_top_is_noop() {
+    fn recall_previous_at_oldest_is_noop() {
+        // 新方向：↑ cursor 增大。cursor == len-1 (最旧) 时 Noop。
         let mut h = InputHistory::new();
-        h.push_local("first".to_string());
-        h.recall_previous("d"); // cursor = Some(0)
+        h.push_local("a".to_string());
+        h.push_local("b".to_string()); // history=[b, a]
+        h.recall_previous("d"); // cursor=Some(0)
+        h.recall_previous("d"); // cursor=Some(1) — 最旧
+        assert_eq!(h.cursor, Some(1));
         assert_eq!(h.recall_previous("d"), HistoryAction::Noop);
     }
 
     #[test]
-    fn recall_previous_walks_backwards() {
+    fn recall_previous_walks_to_older() {
+        // 新方向：↑ cursor 0 → 1 → 2（从最新 → 次新 → 最旧）
         let mut h = InputHistory::new();
         h.push_local("a".to_string()); // history=[a]
         h.push_local("b".to_string()); // history=[b,a]
         h.push_local("c".to_string()); // history=[c,b,a]
-        // 进入浏览 → cursor=0, value=c（最新）
+        // ↑ 第一次：cursor=0, value=c（最新）
         assert_eq!(
             h.recall_previous("d"),
             HistoryAction::SetValue("c".to_string())
         );
-        // 已在第一条 → Noop
+        // ↑ 第二次：cursor=1, value=b
+        assert_eq!(h.recall_previous("d"), HistoryAction::SetValue("b".to_string()));
+        // ↑ 第三次：cursor=2, value=a
+        assert_eq!(h.recall_previous("d"), HistoryAction::SetValue("a".to_string()));
+        // ↑ 第四次：已在最旧 → Noop
         assert_eq!(h.recall_previous("d"), HistoryAction::Noop);
     }
 
     #[test]
-    fn recall_next_walks_forward() {
+    fn recall_next_walks_to_newer() {
+        // 新方向：↓ cursor 2 → 1 → 0 → 恢复草稿
         let mut h = InputHistory::new();
         h.push_local("a".to_string());
         h.push_local("b".to_string());
         h.push_local("c".to_string()); // history=[c,b,a]
+        // 先 ↑ 到最旧
         h.recall_previous("d"); // cursor=0
-        // ↓ 一次：cursor=1, value=b
+        h.recall_previous("d"); // cursor=1
+        h.recall_previous("d"); // cursor=2
+        assert_eq!(h.cursor, Some(2));
+        // ↓ 第一次：cursor=1, value=b
         assert_eq!(h.recall_next(), HistoryAction::SetValue("b".to_string()));
-        // ↓ 再次：cursor=2, value=a
-        assert_eq!(h.recall_next(), HistoryAction::SetValue("a".to_string()));
-        // ↓ 最后一次之后：恢复草稿
+        // ↓ 第二次：cursor=0, value=c
+        assert_eq!(h.recall_next(), HistoryAction::SetValue("c".to_string()));
+        // ↓ 第三次：cursor=None, 恢复草稿
+        assert_eq!(
+            h.recall_next(),
+            HistoryAction::RestoreDraft("d".to_string())
+        );
+        assert_eq!(h.cursor, None);
+        assert_eq!(h.draft, None);
+    }
+
+    #[test]
+    fn recall_next_from_oldest_skips_to_newer() {
+        // 从最旧 (cursor=len-1) 按 ↓：cursor 一直减小到 0 后恢复草稿
+        let mut h = InputHistory::new();
+        h.push_local("a".to_string());
+        h.push_local("b".to_string()); // history=[b, a]
+        h.recall_previous("d"); // cursor=0
+        h.recall_previous("d"); // cursor=1 (最旧)
+        // ↓ 一次：cursor=0, value=b
+        assert_eq!(h.recall_next(), HistoryAction::SetValue("b".to_string()));
+        // ↓ 二次：cursor=None, 恢复草稿
         assert_eq!(
             h.recall_next(),
             HistoryAction::RestoreDraft("d".to_string())
@@ -372,30 +489,84 @@ mod tests {
     }
 
     #[test]
-    fn recall_next_past_end_restores_draft() {
-        let mut h = InputHistory::new();
-        h.push_local("only".to_string());
-        h.recall_previous("DRAFT"); // 进入浏览，draft=DRAFT
-        let action = h.recall_next();
-        assert_eq!(action, HistoryAction::RestoreDraft("DRAFT".to_string()));
-        assert_eq!(h.cursor, None);
-        assert_eq!(h.draft, None);
-    }
-
-    #[test]
-    fn recall_next_without_draft_clears() {
-        let mut h = InputHistory::new();
-        h.push_local("only".to_string());
-        h.recall_previous(""); // 空草稿不压栈
-        let action = h.recall_next();
-        assert_eq!(action, HistoryAction::SetValue(String::new()));
-    }
-
-    #[test]
     fn recall_next_from_edit_is_noop() {
+        // 编辑态 (cursor=None) 按 ↓：Noop
         let mut h = InputHistory::new();
         h.push_local("a".to_string());
         assert_eq!(h.recall_next(), HistoryAction::Noop);
+    }
+
+    #[test]
+    fn apply_pending_edit_overwrites_when_changed() {
+        // 浏览中编辑后切换：history[cursor] 被覆盖
+        let mut h = InputHistory::new();
+        h.push_local("original".to_string());
+        h.push_local("other".to_string()); // history=[other, original]
+        h.recall_previous("d"); // cursor=0, showing "other"
+        // 用户在输入框编辑成 "modified"
+        h.apply_pending_edit("modified");
+        // history[0] 应该是 "modified"
+        assert_eq!(h.history.get(0), Some(&"modified".to_string()));
+        assert_eq!(h.history.get(1), Some(&"original".to_string()));
+    }
+
+    #[test]
+    fn apply_pending_edit_keeps_when_unchanged() {
+        // 未编辑切换：history 不变
+        let mut h = InputHistory::new();
+        h.push_local("original".to_string());
+        h.recall_previous("d"); // cursor=0, showing "original"
+        h.apply_pending_edit("original"); // 相同
+        assert_eq!(h.history.get(0), Some(&"original".to_string()));
+    }
+
+    #[test]
+    fn apply_pending_edit_empty_keeps_history() {
+        // 浏览中清空：history[i] 不变（按用户澄清 A）
+        let mut h = InputHistory::new();
+        h.push_local("original".to_string());
+        h.push_local("other".to_string()); // history=[other, original]
+        h.recall_previous("d"); // cursor=0, showing "other"
+        h.apply_pending_edit(""); // 清空态
+        // history 不动
+        assert_eq!(h.history.get(0), Some(&"other".to_string()));
+        assert_eq!(h.history.get(1), Some(&"original".to_string()));
+        // cursor 仍指 0（不动）
+        assert_eq!(h.cursor, Some(0));
+    }
+
+    #[test]
+    fn apply_pending_edit_from_edit_is_noop() {
+        // 编辑态调用 apply_pending_edit：Noop
+        let mut h = InputHistory::new();
+        h.push_local("a".to_string());
+        h.apply_pending_edit("whatever"); // cursor=None, 不动
+        assert_eq!(h.history.get(0), Some(&"a".to_string()));
+    }
+
+    #[test]
+    fn can_submit_in_browse_blocks_when_empty() {
+        let mut h = InputHistory::new();
+        h.push_local("original".to_string());
+        h.recall_previous("d"); // cursor=0, 浏览中
+        // 浏览态 + 输入框为空 → 禁止提交
+        assert!(!h.can_submit_in_browse(""));
+        // 浏览态 + 输入框非空 → 允许提交
+        assert!(h.can_submit_in_browse("modified"));
+        // 编辑态 → 都允许
+        h.escape();
+        assert!(h.can_submit_in_browse(""));
+        assert!(h.can_submit_in_browse("anything"));
+    }
+
+    #[test]
+    fn escape_resets_cursor_and_draft() {
+        let mut h = InputHistory::new();
+        h.push_local("a".to_string());
+        h.recall_previous("draft"); // cursor=Some(0), draft=Some("draft")
+        h.escape();
+        assert_eq!(h.cursor, None);
+        assert_eq!(h.draft, None);
     }
 
     #[test]
@@ -404,6 +575,44 @@ mod tests {
         h.push_local("foo".to_string());
         h.push_local("foo".to_string()); // 重复应跳过
         assert_eq!(h.history.len(), 1);
+    }
+
+    #[test]
+    fn push_local_clears_browse_and_search_state() {
+        // 提交语义：push_local 强制退出浏览 + 搜索态，避免索引错位残留。
+        let mut h = InputHistory::new();
+        h.push_local("a".to_string());
+        h.recall_previous("d"); // cursor=Some(0), draft=Some("d")
+        h.enter_search();
+        h.search_push_char('a'); // query="a", matches=[0]
+
+        h.push_local("b".to_string());
+
+        // 历史栈更新正确
+        assert_eq!(h.history.len(), 2);
+        assert_eq!(h.local_len, 2);
+        // 交互态全部清空（这是修复后的强制语义）
+        assert_eq!(h.cursor, None);
+        assert_eq!(h.draft, None);
+        assert!(!h.is_searching());
+        assert_eq!(h.search_query, "");
+        assert_eq!(h.search_matches, Vec::<usize>::new());
+        assert_eq!(h.search_index, 0);
+    }
+
+    #[test]
+    fn extend_global_dedups_against_previous_global() {
+        // 全量去重（local + global 段），多次调用或 SQL 返回重复时不应累积。
+        let mut h = InputHistory::new();
+        h.extend_global(vec!["g1".to_string(), "g2".to_string()]);
+        // history=[g1, g2], local_len=0
+        h.extend_global(vec!["g2".to_string(), "g3".to_string()]);
+        // g2 已存在 → skip; g3 新增
+        assert_eq!(
+            h.history,
+            vec!["g1".to_string(), "g2".to_string(), "g3".to_string()]
+        );
+        assert_eq!(h.local_len, 0);
     }
 
     #[test]
@@ -600,25 +809,27 @@ mod tests {
     fn is_at_first_line_top_basic() {
         assert!(is_at_first_line_top("", 0));
         assert!(is_at_first_line_top("hello", 0));
-        assert!(is_at_first_line_top("   ", 3)); // 全空白
-        // 光标在第一行末尾但前面有非空白字符 → 不是"最顶"
-        assert!(!is_at_first_line_top("hello", 5));
+        // 全空白 prefix 误判修复：offset>0 且 prefix 全空白 → 不判为"最顶"
+        assert!(!is_at_first_line_top("   ", 3));
+        // offset>0 且 prefix 含非空白 → 在首行（任意位置可触发历史）
+        assert!(is_at_first_line_top("hello", 5));
         // 多行场景
-        assert!(!is_at_first_line_top("hello\nworld", 5)); // offset 在 \n 前，prefix="hello"，不在第一行（不在首行）— 但实际是首行，但 prefix 不全空白 → false
-        assert!(!is_at_first_line_top("hello\nworld", 6)); // prefix 含 \n → false
+        assert!(is_at_first_line_top("hello\nworld", 5)); // prefix="hello" 含非空白
+        assert!(!is_at_first_line_top("hello\nworld", 6)); // prefix 含 \n → 不在第一行
         assert!(!is_at_first_line_top("hello\nworld", 11)); // 末行
     }
 
     #[test]
     fn is_at_first_line_top_unicode_whitespace() {
         // 全角空格 U+3000 也是 whitespace
-        assert!(is_at_first_line_top("\u{3000}\u{3000}", 6)); // 2 全角空格
+        // 修复后：offset>0 且全空白 → 不判为"最顶"
+        assert!(!is_at_first_line_top("\u{3000}\u{3000}", 6));
     }
 
     #[test]
     fn is_at_first_line_top_trailing_newline() {
-        // text="  \nhello", offset=2 (光标在第一行末尾) → 全空白 → 在首行最顶
-        assert!(is_at_first_line_top("  \nhello", 2));
+        // text="  \nhello", offset=2 (光标在第一行末尾) → 全空白 → 不判为"最顶"（修复后）
+        assert!(!is_at_first_line_top("  \nhello", 2));
         // 但若 offset=3（在 \n 之后），前缀 = "  \n"，含 \n → 不在第一行
         assert!(!is_at_first_line_top("  \nhello", 3));
     }

@@ -25,8 +25,8 @@ pub use cursor::*;
 pub use indent::TabSize;
 pub use input::*;
 pub use input_history::{
-    HistoryAction, HistoryNext, HistoryPrev, HistorySearch, InputHistory, is_at_first_line_top,
-    is_at_last_line_bottom,
+    HistoryAction, HistoryEscape, HistoryNext, HistoryPrev, HistorySearch, InputHistory,
+    is_at_first_line_top, is_at_last_line_bottom,
 };
 pub use lsp::*;
 pub use mask_pattern::MaskPattern;

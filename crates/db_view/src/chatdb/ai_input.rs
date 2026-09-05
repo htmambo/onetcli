@@ -6,7 +6,8 @@ use gpui::KeyBinding;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Context, Corner, Entity, EventEmitter, FocusHandle,
-    Focusable, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, px,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Render, Styled, Subscription,
+    Window, div, px,
 };
 use gpui_component::button::ButtonVariants;
 use gpui_component::{
@@ -14,8 +15,8 @@ use gpui_component::{
     button::Button,
     h_flex,
     input::{
-        HistoryAction, HistoryNext, HistoryPrev, HistorySearch, InputEvent, InputHistory,
-        is_at_first_line_top, is_at_last_line_bottom,
+        HistoryAction, HistoryEscape, HistoryNext, HistoryPrev, HistorySearch, InputEvent,
+        InputHistory, is_at_first_line_top, is_at_last_line_bottom,
     },
     popover::Popover,
     v_flex,
@@ -255,35 +256,16 @@ impl AIInput {
             },
         ));
 
-        // 历史记录键位（仅在 AIInput focus context 内生效）
+        // 历史记录键位：用 None predicate 让 binding depth = contexts.len()（最大），
+        // 优先于 InputState 内部 up→MoveUp / down→MoveDown (Some("Input"), depth_of = stack.len()-1)。
+        // cx.bind_keys 是全局注册，但 listener 在 element dispatch_path 中（focus_handle 祖先链），
+        // 仅当当前 focus 在本 panel 的 input 上时 listener 才接收。
         cx.bind_keys([
-            KeyBinding::new("up", HistoryPrev, Some("AIInput")),
-            KeyBinding::new("down", HistoryNext, Some("AIInput")),
-            KeyBinding::new("ctrl-r", HistorySearch, Some("AIInput")),
+            KeyBinding::new("up", HistoryPrev, None),
+            KeyBinding::new("down", HistoryNext, None),
+            KeyBinding::new("ctrl-r", HistorySearch, None),
+            KeyBinding::new("escape", HistoryEscape, None),
         ]);
-
-        // 历史记录 action handlers
-        cx.on_action(
-            std::any::TypeId::of::<HistoryPrev>(),
-            window,
-            |this, _, _phase, window, cx| {
-                this.handle_recall_previous(window, cx);
-            },
-        );
-        cx.on_action(
-            std::any::TypeId::of::<HistoryNext>(),
-            window,
-            |this, _, _phase, window, cx| {
-                this.handle_recall_next(window, cx);
-            },
-        );
-        cx.on_action(
-            std::any::TypeId::of::<HistorySearch>(),
-            window,
-            |this, _, _phase, window, cx| {
-                this.handle_recall_search(window, cx);
-            },
-        );
 
         let mut instance = Self {
             focus_handle,
@@ -639,6 +621,11 @@ impl AIInput {
                 if content.trim().is_empty() {
                     return;
                 }
+                // 浏览中清空后禁止提交（按用户澄清 B）—— defense-in-depth，
+                // 当前由上方 trim 检查覆盖，保留作为状态机级兜底
+                if !self.history.can_submit_in_browse(&content) {
+                    return;
+                }
                 cx.emit(AIInputEvent::Submit {
                     content: content.clone(),
                 });
@@ -650,6 +637,10 @@ impl AIInput {
             InputMode::Sql => {
                 let sql = self.sql_editor.read(cx).get_text(cx);
                 if sql.trim().is_empty() {
+                    return;
+                }
+                // 浏览中清空后禁止提交（按用户澄清 B）
+                if !self.history.can_submit_in_browse(&sql) {
                     return;
                 }
                 let Some((connection_id, database, schema)) = self.get_connection_info() else {
@@ -714,7 +705,8 @@ impl AIInput {
             cx.propagate();
             return;
         }
-        drop(editor);
+        // 切换前先落定临时副本到当前 history[cursor]
+        self.history.apply_pending_edit(&text);
         let action = self.history.recall_previous(&text);
         self.apply_history_action(action, window, cx);
     }
@@ -740,9 +732,33 @@ impl AIInput {
             cx.propagate();
             return;
         }
-        drop(editor);
+        // 切换前先落定临时副本到当前 history[cursor]
+        self.history.apply_pending_edit(&text);
         let action = self.history.recall_next();
         self.apply_history_action(action, window, cx);
+    }
+
+    fn handle_recall_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 三重守卫：搜索态 / IME 组合 / 非浏览态都 propagate 不接管（Round 4 P1-1 修复）
+        if self.history.is_searching() {
+            cx.propagate();
+            return;
+        }
+        let editor = self.sql_editor.read(cx);
+        if editor.is_ime_composing(cx) {
+            return;
+        }
+        drop(editor);
+        if !self.history.is_browsing() {
+            cx.propagate();
+            return;
+        }
+        // 仅在浏览态下接管：清空输入框 + 复位 cursor/draft（history 不变）
+        self.history.escape();
+        self.sql_editor.update(cx, |editor, cx| {
+            editor.set_value(String::new(), window, cx);
+        });
+        cx.notify();
     }
 
     fn handle_recall_search(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -799,7 +815,23 @@ impl AIInput {
             .px_3()
             .pt_2()
             .pb_2()
-            .min_h(px(80.0));
+            .min_h(px(80.0))
+            // 注册 key context 以匹配 bind_keys 中声明的 "AIInput" focus context
+            .key_context("AIInput")
+            // 历史记录 action listener（必须在 Render 阶段注册，
+            // 见 AIInput::new 中关于 paint phase 的注释）
+            .on_action(cx.listener(|this: &mut Self, _: &HistoryPrev, window, cx| {
+                this.handle_recall_previous(window, cx);
+            }))
+            .on_action(cx.listener(|this: &mut Self, _: &HistoryNext, window, cx| {
+                this.handle_recall_next(window, cx);
+            }))
+            .on_action(cx.listener(|this: &mut Self, _: &HistorySearch, window, cx| {
+                this.handle_recall_search(window, cx);
+            }))
+            .on_action(cx.listener(|this: &mut Self, _: &HistoryEscape, window, cx| {
+                this.handle_recall_escape(window, cx);
+            }));
 
         // 浏览态：上方显示 inline 灰色预览（M7；§4.3.6 超长截断由 InputHistory::preview_text 处理）
         if let Some(preview) = self.history_preview_text() {

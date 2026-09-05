@@ -412,24 +412,39 @@ impl ChatPanel {
     }
 
     /// 异步加载全局最近 50 条 user 消息（跨会话），喂入 AIInput 历史（D1 + M5）。
+    ///
+    /// 同步 DB 调用 `list_recent_user` 经 `smol::unblock` 包装，避免阻塞 async executor。
+    /// 错误路径以 `tracing::warn` 兜底，避免静默失败造成不可诊断。
     fn load_global_input_history(&mut self, cx: &mut Context<Self>) {
         let storage_manager = self.storage_manager.clone();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let message_repo = match storage_manager.get::<MessageRepository>() {
                 Some(r) => r,
-                None => return,
+                None => {
+                    tracing::warn!("load_global_input_history: MessageRepository not registered");
+                    return;
+                }
             };
-            let messages = match message_repo.list_recent_user(50, None) {
-                Ok(m) => m,
-                Err(_) => return,
+            // smol::unblock: 将同步 SQLite 查询移出 executor 线程，避免阻塞。
+            let contents: Vec<String> = match smol::unblock(move || {
+                message_repo
+                    .list_recent_user(50, None)
+                    .map(|msgs| msgs.into_iter().map(|m| m.content).collect::<Vec<_>>())
+            })
+            .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = ?e, "load_global_input_history: list_recent_user failed");
+                    return;
+                }
             };
-            let contents: Vec<String> = messages.into_iter().map(|m| m.content).collect();
 
             if let Some(entity) = this.upgrade() {
                 let _ = cx.update(|cx| {
                     if let Some(window_id) = cx.active_window() {
-                        let _ = cx.update_window(window_id, |_, window, cx| {
+                        let _ = cx.update_window(window_id, |_, _window, cx| {
                             entity.update(cx, |this, cx| {
                                 this.ai_input.update(cx, |input, _cx| {
                                     input.extend_history_global(contents);

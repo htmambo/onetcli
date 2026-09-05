@@ -450,13 +450,24 @@ impl MessageRepository {
     ///
     /// 用法：AI 输入框历史记录跨会话视图（排除当前会话避免与本地视图重复）。
     /// 排序 tiebreaker: `(created_at DESC, id DESC)`，保证稳定。
+    ///
+    /// **同步阻塞**：`conn.with_connection` 在当前线程上执行 SQLite I/O，
+    /// async 调用方必须经 `smol::unblock` 或等价的 spawn_blocking 包装，
+    /// 否则会占住 executor 线程。
+    ///
+    /// **limit 边界**：clamp 到 `[1, 200]`——SQLite 中 `LIMIT 0` 返回空集、
+    /// `LIMIT -1` 等价于无上限（返回全表），均不报错；故此处显式防御。
     pub fn list_recent_user(
         &self,
         limit: i32,
         exclude_session_id: Option<i64>,
     ) -> Result<Vec<ChatMessage>> {
+        const MIN_RECENT_USER: i32 = 1;
+        const MAX_RECENT_USER: i32 = 200;
+        let limit = limit.clamp(MIN_RECENT_USER, MAX_RECENT_USER);
         self.conn.with_connection(|conn| {
             // 始终用 ?2：`(?2 IS NULL OR session_id != ?2)` 让 exclude_session_id 为 NULL 时不过滤。
+            // content != '' 同时过滤 NULL（SQL 中 NULL != '' 为 NULL，WHERE 视为 false）。
             let sql = "SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json \
                        FROM chat_messages \
                        WHERE role = 'user' AND content != '' AND (?2 IS NULL OR session_id != ?2) \

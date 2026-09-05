@@ -25,7 +25,7 @@ use gpui_component::{
     dialog::DialogButtonProps,
     h_flex,
     input::{
-        HistoryAction, HistoryNext, HistoryPrev, HistorySearch, Input, InputEvent, InputHistory,
+        HistoryAction, HistoryEscape, HistoryNext, HistoryPrev, HistorySearch, Input, InputEvent, InputHistory,
         InputState, is_at_first_line_top, is_at_last_line_bottom,
     },
     list::{List, ListState},
@@ -359,33 +359,17 @@ impl AiChatPanel {
                 .default_value("")
         });
 
-        // 历史记录键位（仅在 AiChatPanel focus context 内生效）
+        // 历史记录键位：用 None predicate 让 binding depth = contexts.len()（最大），
+        // 优先于 InputState 内部 up→MoveUp / down→MoveDown (Some("Input"), depth_of = stack.len()-1)。
+        // keymap sort: depth_b.cmp(depth_a).then(ix_b.cmp(ix_a)) — 我们的 binding 总是胜出。
+        // cx.bind_keys 是全局注册，但 listener 在 element dispatch_path 中（focus_handle 祖先链），
+        // 仅当当前 focus 在本 panel 的 input 上时 listener 才接收。
         cx.bind_keys([
-            KeyBinding::new("up", HistoryPrev, Some("AiChatPanel")),
-            KeyBinding::new("down", HistoryNext, Some("AiChatPanel")),
-            KeyBinding::new("ctrl-r", HistorySearch, Some("AiChatPanel")),
+            KeyBinding::new("up", HistoryPrev, None),
+            KeyBinding::new("down", HistoryNext, None),
+            KeyBinding::new("ctrl-r", HistorySearch, None),
+            KeyBinding::new("escape", HistoryEscape, None),
         ]);
-        cx.on_action(
-            std::any::TypeId::of::<HistoryPrev>(),
-            window,
-            |this, _, _phase, window, cx| {
-                this.handle_recall_previous(window, cx);
-            },
-        );
-        cx.on_action(
-            std::any::TypeId::of::<HistoryNext>(),
-            window,
-            |this, _, _phase, window, cx| {
-                this.handle_recall_next(window, cx);
-            },
-        );
-        cx.on_action(
-            std::any::TypeId::of::<HistorySearch>(),
-            window,
-            |this, _, _phase, window, cx| {
-                this.history.enter_search();
-            },
-        );
 
         // Provider/Model 选择器（回调直接接收 &mut Self，避免重复借用）
         let provider_select_state =
@@ -466,6 +450,8 @@ impl AiChatPanel {
 
         // 加载 providers
         panel.load_providers(cx);
+        // 异步加载全局最近 50 条 user 消息喂入 history（M11 跨会话历史；与 ChatPanel 同模式）
+        panel.load_global_input_history(cx);
         panel
     }
 
@@ -754,6 +740,51 @@ impl AiChatPanel {
         .detach();
     }
 
+    /// 异步加载全局最近 50 条 user 消息喂入 history（与 ChatPanel 同样模式，跨会话视图）。
+    ///
+    /// 之前缺失：SSH terminal 路径的 AiChatPanel 从未调用，导致用户只能在当前会话本地历史
+    /// 选择，无法跨会话召回（M11 修复）。
+    fn load_global_input_history(&mut self, cx: &mut Context<Self>) {
+        let storage_manager = cx.global::<GlobalStorageState>().storage.clone();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let message_repo = match storage_manager.get::<MessageRepository>() {
+                Some(r) => r,
+                None => {
+                    tracing::warn!("load_global_input_history: MessageRepository not registered");
+                    return;
+                }
+            };
+            let contents: Vec<String> = match smol::unblock(move || {
+                message_repo
+                    .list_recent_user(50, None)
+                    .map(|msgs| msgs.into_iter().map(|m| m.content).collect::<Vec<_>>())
+            })
+            .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = ?e, "load_global_input_history: list_recent_user failed");
+                    return;
+                }
+            };
+
+            if let Some(entity) = this.upgrade() {
+                let _ = cx.update(|cx| {
+                    if let Some(window_id) = cx.active_window() {
+                        let _ = cx.update_window(window_id, |_, _window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.history.extend_global(contents);
+                                cx.notify();
+                            });
+                        });
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     fn delete_session(&mut self, session_id: i64, cx: &mut Context<Self>) {
         let global_state = cx.global::<GlobalStorageState>();
         let storage_manager = global_state.storage.clone();
@@ -907,6 +938,10 @@ impl AiChatPanel {
 
     fn send_message(&mut self, content: String, cx: &mut Context<Self>) {
         if content.trim().is_empty() || self.engine.is_loading {
+            return;
+        }
+        // 浏览中清空后禁止提交（按用户澄清 B）
+        if !self.history.can_submit_in_browse(&content) {
             return;
         }
 
@@ -1697,7 +1732,8 @@ impl AiChatPanel {
             cx.propagate();
             return;
         }
-        drop(state);
+        // 切换前先落定临时副本到当前 history[cursor]
+        self.history.apply_pending_edit(&text);
         let action = self.history.recall_previous(&text);
         self.apply_history_action_ai_chat(action, window, cx);
     }
@@ -1725,9 +1761,35 @@ impl AiChatPanel {
             cx.propagate();
             return;
         }
-        drop(state);
+        // 切换前先落定临时副本到当前 history[cursor]
+        self.history.apply_pending_edit(&text);
         let action = self.history.recall_next();
         self.apply_history_action_ai_chat(action, window, cx);
+    }
+
+    /// AiChatPanel 的 ESC 处理器：清空输入框 + 复位（history 不变）。
+    ///
+    /// **三重守卫**（Round 4 P1-1 修复）：搜索态 / IME 组合 / 非浏览态都 propagate 不接管，
+    /// 避免误触丢失用户正在编辑的内容。
+    fn handle_recall_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.is_searching() {
+            cx.propagate();
+            return;
+        }
+        let state = self.ai_input_state.read(cx);
+        if state.ime_marked_range().is_some() {
+            return;
+        }
+        drop(state);
+        if !self.history.is_browsing() {
+            cx.propagate();
+            return;
+        }
+        self.history.escape();
+        self.ai_input_state.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+        });
+        cx.notify();
     }
 
     fn apply_history_action_ai_chat(
@@ -1756,6 +1818,22 @@ impl AiChatPanel {
         let bg = self.background(cx);
         let muted = self.muted(cx);
 
+        // 历史记录 listener 注册到 Render 阶段的 div 容器上（cx.listener 闭包在
+        // element.interactivity 注册，paint phase 转移到 DispatchNode，dispatch_key
+        // 时按 dispatch_path 调用）。
+        let prev_listener = cx.listener(|this: &mut Self, _: &HistoryPrev, window, cx| {
+            this.handle_recall_previous(window, cx);
+        });
+        let next_listener = cx.listener(|this: &mut Self, _: &HistoryNext, window, cx| {
+            this.handle_recall_next(window, cx);
+        });
+        let search_listener = cx.listener(|this: &mut Self, _: &HistorySearch, _window, _cx| {
+            this.history.enter_search();
+        });
+        let escape_listener = cx.listener(|this: &mut Self, _: &HistoryEscape, window, cx| {
+            this.handle_recall_escape(window, cx);
+        });
+
         let mut container = v_flex()
             .flex_shrink_0()
             .w_full()
@@ -1764,7 +1842,14 @@ impl AiChatPanel {
             .gap_1()
             .border_t_1()
             .border_color(border)
-            .bg(bg);
+            .bg(bg)
+            // 注册 key context 以匹配 bind_keys 中声明的 "AiChatPanel" focus context
+            .key_context("AiChatPanel")
+            // 历史记录 listener：dispatch_path 中该 container 在 focus_handle 祖父位置
+            .on_action(prev_listener)
+            .on_action(next_listener)
+            .on_action(search_listener)
+            .on_action(escape_listener);
 
         // 浏览态：上方显示 inline 灰色预览（M7；§4.3.6 超长截断由 InputHistory::preview_text 处理）
         if let Some(preview) = self.history.preview_text() {
