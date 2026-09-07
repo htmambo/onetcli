@@ -56,6 +56,7 @@ pub(crate) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> 
     let mut values: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_quote = false;
+    let mut value_completed = false;
     let mut chars = body.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
@@ -70,9 +71,12 @@ pub(crate) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> 
                     Some(_) => {
                         // 闭合引号
                         in_quote = false;
+                        value_completed = true;
                     }
                     None => {
+                        // 字符串末尾的闭合引号
                         in_quote = false;
+                        value_completed = true;
                     }
                 }
             }
@@ -88,6 +92,7 @@ pub(crate) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> 
             }
             ',' if !in_quote => {
                 values.push(std::mem::take(&mut current));
+                value_completed = false;
             }
             _ if in_quote => {
                 current.push(ch);
@@ -99,8 +104,10 @@ pub(crate) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> 
         }
     }
 
-    // 末尾未闭合：把已收集内容当作一个值保留
-    if !current.is_empty() {
+    // 末尾处理：
+    // - 若刚闭合过引号，把已收集内容当作一个值保留（即使为空，如 `set('')`）；
+    // - 若 current 非空（罕见，如末尾引号外残留字符），也保留。
+    if value_completed || !current.is_empty() {
         values.push(current);
     }
 
@@ -3916,5 +3923,33 @@ mod tests {
         let parsed =
             parse_mysql_enum_values("enum('','a')").expect("enum with empty element should parse");
         assert_eq!(parsed, vec!["", "a"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_set_multiple() {
+        let parsed = parse_mysql_enum_values("set('a','b','c')")
+            .expect("set with multiple values should parse");
+        assert_eq!(parsed, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_set_with_comma_in_value() {
+        // MySQL 允许 ENUM/SET 值含字面逗号，存储在 COLUMN_TYPE 时仍以引号包裹。
+        let parsed = parse_mysql_enum_values("set('a,b','c')")
+            .expect("set with comma inside value should parse");
+        assert_eq!(parsed, vec!["a,b", "c"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_set_empty_quoted_only() {
+        let parsed = parse_mysql_enum_values("set('')").expect("set with empty element should parse");
+        assert_eq!(parsed, vec![""]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_leading_whitespace() {
+        let parsed = parse_mysql_enum_values("  enum('a','b')")
+            .expect("leading whitespace should be tolerated");
+        assert_eq!(parsed, vec!["a", "b"]);
     }
 }
