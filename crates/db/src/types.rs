@@ -236,6 +236,17 @@ pub struct ColumnInfo {
     /// 列级排序规则（如 MySQL 的 COLLATION_NAME）
     #[serde(default)]
     pub collation: Option<String>,
+    /// ENUM/SET 类型的可选值列表（来自 INFORMATION_SCHEMA / pg_enum）
+    #[serde(default)]
+    pub enum_values: Option<Vec<String>>,
+}
+
+impl ColumnInfo {
+    /// 为 ENUM/SET 列附加可选值列表
+    pub fn with_enum_values(mut self, values: impl Into<Vec<String>>) -> Self {
+        self.enum_values = Some(values.into());
+        self
+    }
 }
 
 /// Index information
@@ -478,7 +489,7 @@ pub struct ObjectView {
 // === Table Data Query Types ===
 
 /// Abstract data type for UI rendering
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldType {
     /// Integer numbers (INT, BIGINT, SMALLINT, etc.)
     Integer,
@@ -500,8 +511,182 @@ pub enum FieldType {
     Binary,
     /// JSON data
     Json,
+    /// ENUM/SET 类型，携带可选值列表
+    Enum {
+        /// 数据库元数据中解析出的可选值
+        values: Vec<String>,
+    },
     /// Unknown or unsupported type
     Unknown,
+}
+
+impl FieldType {
+    /// 推断 ENUM 类型（带可选值列表）
+    ///
+    /// - 当 `values` 非空且 db_type 以 ENUM/SET 开头，返回 `Enum { values }`；
+    /// - 当 `values` 为空但 db_type 看上去像 ENUM/SET 字符串（例如 `enum('a','b')`），
+    ///   兜底用 MySQL 规则解析括号内可选值；
+    /// - 其他情况返回 `from_db_type` 的结果。
+    pub fn from_db_type_with_values(db_type: &str, values: Vec<String>) -> Self {
+        let upper = db_type.trim_start().to_uppercase();
+        let base_end = upper
+            .find(|c: char| c == '(' || c.is_whitespace())
+            .unwrap_or(upper.len());
+        let base = &upper[..base_end];
+        if base != "ENUM" && base != "SET" {
+            return Self::from_db_type(db_type);
+        }
+        if values.is_empty() {
+            // 兜底：从 db_type 字符串中解析可选值（仅覆盖 MySQL 引号转义规则）
+            if let Some(parsed) = parse_inline_enum_values(db_type) {
+                if !parsed.is_empty() {
+                    return Self::Enum { values: parsed };
+                }
+            }
+        } else {
+            return Self::Enum { values };
+        }
+        Self::from_db_type(db_type)
+    }
+}
+
+/// 从 `enum('a','b')` / `set('x','y')` 字符串中提取可选值列表（与 MySQL 解析规则一致）。
+fn parse_inline_enum_values(db_type: &str) -> Option<Vec<String>> {
+    let trimmed = db_type.trim_start();
+    let open = trimmed.find('(')?;
+    let close = trimmed.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let body = &trimmed[open + 1..close];
+
+    let mut values: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut chars = body.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' => {
+                if matches!(chars.peek(), Some('\'')) {
+                    current.push('\'');
+                    chars.next();
+                } else {
+                    values.push(std::mem::take(&mut current));
+                }
+            }
+            '\\' => {
+                let Some(next) = chars.next() else {
+                    current.push('\\');
+                    break;
+                };
+                match next {
+                    'n' => current.push('\n'),
+                    'r' => current.push('\r'),
+                    't' => current.push('\t'),
+                    'b' => current.push('\u{08}'),
+                    '0' => current.push('\0'),
+                    'Z' => current.push('\u{1A}'),
+                    '\\' | '\'' | '"' => current.push(next),
+                    other => {
+                        current.push('\\');
+                        current.push(other);
+                    }
+                }
+            }
+            ',' => {
+                if !current.is_empty() {
+                    values.push(std::mem::take(&mut current));
+                }
+            }
+            other => current.push(other),
+        }
+    }
+    if !current.is_empty() {
+        values.push(current);
+    }
+    Some(values)
+}
+
+impl serde::Serialize for FieldType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        match self {
+            FieldType::Integer => serializer.serialize_unit_variant("FieldType", 0, "Integer"),
+            FieldType::Decimal => serializer.serialize_unit_variant("FieldType", 1, "Decimal"),
+            FieldType::Text => serializer.serialize_unit_variant("FieldType", 2, "Text"),
+            FieldType::LongText => serializer.serialize_unit_variant("FieldType", 3, "LongText"),
+            FieldType::Boolean => serializer.serialize_unit_variant("FieldType", 4, "Boolean"),
+            FieldType::Date => serializer.serialize_unit_variant("FieldType", 5, "Date"),
+            FieldType::Time => serializer.serialize_unit_variant("FieldType", 6, "Time"),
+            FieldType::DateTime => serializer.serialize_unit_variant("FieldType", 7, "DateTime"),
+            FieldType::Binary => serializer.serialize_unit_variant("FieldType", 8, "Binary"),
+            FieldType::Json => serializer.serialize_unit_variant("FieldType", 9, "Json"),
+            FieldType::Unknown => serializer.serialize_unit_variant("FieldType", 10, "Unknown"),
+            FieldType::Enum { values } => {
+                let mut seq = serializer.serialize_seq(Some(2))?;
+                seq.serialize_element("Enum")?;
+                seq.serialize_element(values)?;
+                seq.end()
+            }
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FieldType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, SeqAccess, Visitor};
+
+        struct FieldTypeVisitor;
+
+        impl<'de> Visitor<'de> for FieldTypeVisitor {
+            type Value = FieldType;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a FieldType")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<FieldType, E> {
+                Ok(match value {
+                    "Integer" => FieldType::Integer,
+                    "Decimal" => FieldType::Decimal,
+                    "Text" => FieldType::Text,
+                    "LongText" => FieldType::LongText,
+                    "Boolean" => FieldType::Boolean,
+                    "Date" => FieldType::Date,
+                    "Time" => FieldType::Time,
+                    "DateTime" => FieldType::DateTime,
+                    "Binary" => FieldType::Binary,
+                    "Json" => FieldType::Json,
+                    "Unknown" => FieldType::Unknown,
+                    _ => {
+                        return Err(de::Error::unknown_variant(
+                            value,
+                            &[
+                                "Integer", "Decimal", "Text", "LongText", "Boolean", "Date",
+                                "Time", "DateTime", "Binary", "Json", "Unknown", "Enum",
+                            ],
+                        ));
+                    }
+                })
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<FieldType, A::Error> {
+                let kind: String = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                if kind != "Enum" {
+                    return Err(de::Error::custom(format!(
+                        "unknown FieldType variant tag: {kind}"
+                    )));
+                }
+                let values: Vec<String> = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                Ok(FieldType::Enum { values })
+            }
+        }
+
+        deserializer.deserialize_any(FieldTypeVisitor)
+    }
 }
 
 impl FieldType {

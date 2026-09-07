@@ -756,6 +756,7 @@ mod tests {
             },
             connection: Default::default(),
             manifest_dir: PathBuf::from("/drivers/demo"),
+            protocol_version: None,
         }
     }
 

@@ -22,6 +22,105 @@ use crate::plugin_manifest::{
 };
 use crate::types::*;
 
+/// 解析 MySQL ENUM/SET 列的可选值列表
+///
+/// 输入来自 `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE`，例如
+/// `enum('a','b','c')` / `set('x','y')` / `ENUM('','a',NULL)`。
+///
+/// 返回 `None` 表示输入不是 ENUM/SET 类型；
+/// 返回 `Some(vec)` 表示已成功切分（包含空元素，如 `ENUM('','a')` → `Some(vec!["".into(), "a".into()])`）。
+///
+/// MySQL 转义规则：
+/// - `''` 表示字面量单引号
+/// - `\\` 表示字面量反斜杠
+/// - `\n`/`\r`/`\t`/`\0`/`\Z`/`\b` 为控制字符转义
+/// - `\"`、`\'` 与 `''` 等价
+pub(crate) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> {
+    let trimmed_start = column_type.trim_start();
+    let upper = trimmed_start.to_uppercase();
+    let base_end = upper
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(upper.len());
+    let base = &upper[..base_end];
+    if base != "ENUM" && base != "SET" {
+        return None;
+    }
+
+    let open = trimmed_start.find('(')?;
+    let close = trimmed_start.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let body = &trimmed_start[open + 1..close];
+
+    let mut values: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut chars = body.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if in_quote => {
+                // 处于引号内：下一个字符决定行为
+                match chars.peek().copied() {
+                    Some('\'') => {
+                        // '' 是字面量单引号
+                        current.push('\'');
+                        chars.next();
+                    }
+                    Some(_) => {
+                        // 闭合引号
+                        in_quote = false;
+                    }
+                    None => {
+                        in_quote = false;
+                    }
+                }
+            }
+            '\'' => {
+                // 不在引号内：开始一个新引号段
+                in_quote = true;
+            }
+            '\\' if in_quote => {
+                // 引号内反斜杠转义：消费下一字符
+                if let Some(next) = chars.next() {
+                    current.push(decode_mysql_backslash(next));
+                }
+            }
+            ',' if !in_quote => {
+                values.push(std::mem::take(&mut current));
+            }
+            _ if in_quote => {
+                current.push(ch);
+            }
+            _ => {
+                // 引号外的字符（理论不应出现）：按字面量保留
+                current.push(ch);
+            }
+        }
+    }
+
+    // 末尾未闭合：把已收集内容当作一个值保留
+    if !current.is_empty() {
+        values.push(current);
+    }
+
+    Some(values)
+}
+
+/// 解码 MySQL 字符串内的反斜杠转义（仅在引号内有效）
+fn decode_mysql_backslash(next: char) -> char {
+    match next {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        'b' => '\u{08}',
+        '0' => '\0',
+        'Z' => '\u{1A}',
+        '\\' | '\'' | '"' => next,
+        other => other,
+    }
+}
+
 /// MySQL data types (name, description)
 pub const MYSQL_DATA_TYPES: &[(&str, &str)] = &[
     ("TINYINT", "Very small integer (-128 to 127)"),
@@ -393,12 +492,9 @@ fn mysql_connection_form() -> DatabaseFormManifest {
                         "Enter SSH password",
                     )
                     .with_visibility(ssh_auth_rules("password")),
-                    ssh_field(
-                        "ssh_private_key",
-                        "ConnectionForm.ssh_private_key",
-                    )
-                    .with_placeholder("~/.ssh/id_rsa")
-                    .with_visibility(ssh_auth_rules("private_key")),
+                    ssh_field("ssh_private_key", "ConnectionForm.ssh_private_key")
+                        .with_placeholder("~/.ssh/id_rsa")
+                        .with_visibility(ssh_auth_rules("private_key")),
                     ssh_password_field(
                         "ssh_private_key_passphrase",
                         "ConnectionForm.ssh_private_key_passphrase",
@@ -1277,23 +1373,28 @@ impl DatabasePlugin for MySqlPlugin {
             Ok(query_result
                 .rows
                 .iter()
-                .map(|row| ColumnInfo {
-                    name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
-                    data_type: row.get(1).and_then(|v| v.clone()).unwrap_or_default(),
-                    is_nullable: row
-                        .get(2)
-                        .and_then(|v| v.clone())
-                        .map(|v| v == "YES")
-                        .unwrap_or(true),
-                    is_primary_key: row
-                        .get(3)
-                        .and_then(|v| v.clone())
-                        .map(|v| v == "PRI")
-                        .unwrap_or(false),
-                    default_value: row.get(4).and_then(|v| v.clone()),
-                    comment: row.get(5).and_then(|v| v.clone()),
-                    charset: row.get(6).and_then(|v| v.clone()),
-                    collation: row.get(7).and_then(|v| v.clone()),
+                .map(|row| {
+                    let data_type = row.get(1).and_then(|v| v.clone()).unwrap_or_default();
+                    let enum_values = parse_mysql_enum_values(&data_type);
+                    ColumnInfo {
+                        name: row.first().and_then(|v| v.clone()).unwrap_or_default(),
+                        data_type,
+                        is_nullable: row
+                            .get(2)
+                            .and_then(|v| v.clone())
+                            .map(|v| v == "YES")
+                            .unwrap_or(true),
+                        is_primary_key: row
+                            .get(3)
+                            .and_then(|v| v.clone())
+                            .map(|v| v == "PRI")
+                            .unwrap_or(false),
+                        default_value: row.get(4).and_then(|v| v.clone()),
+                        comment: row.get(5).and_then(|v| v.clone()),
+                        charset: row.get(6).and_then(|v| v.clone()),
+                        collation: row.get(7).and_then(|v| v.clone()),
+                        enum_values,
+                    }
                 })
                 .collect())
         } else {
@@ -3754,5 +3855,66 @@ mod tests {
                 .any(|(f, _)| f.starts_with("GROUP_CONCAT"))
         );
         assert!(info.operators.iter().any(|(o, _)| *o == "REGEXP"));
+    }
+
+    // ==================== parse_mysql_enum_values Tests ====================
+
+    #[test]
+    fn parse_mysql_enum_values_simple() {
+        let parsed = parse_mysql_enum_values("enum('a','b','c')").expect("enum type should parse");
+        assert_eq!(parsed, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_uppercase_keyword() {
+        let parsed =
+            parse_mysql_enum_values("ENUM('Draft','Active')").expect("uppercase enum should parse");
+        assert_eq!(parsed, vec!["Draft", "Active"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_with_escaped_quote() {
+        let parsed =
+            parse_mysql_enum_values("enum('a''b','c')").expect("escaped quote should parse");
+        assert_eq!(parsed, vec!["a'b", "c"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_set() {
+        let parsed = parse_mysql_enum_values("set('x','y')").expect("set type should parse");
+        assert_eq!(parsed, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_non_enum_returns_none() {
+        assert_eq!(parse_mysql_enum_values("varchar(10)"), None);
+        assert_eq!(parse_mysql_enum_values("int"), None);
+        assert_eq!(parse_mysql_enum_values("datetime(6)"), None);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_empty_list() {
+        let parsed =
+            parse_mysql_enum_values("enum()").expect("empty enum body still returns Some(vec![])");
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_with_escapes() {
+        let parsed = parse_mysql_enum_values("enum('a\\nb','c')").expect("\\n escape should parse");
+        assert_eq!(parsed, vec!["a\nb", "c"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_backslash_quote() {
+        let parsed = parse_mysql_enum_values("enum('a\\\\b')").expect("\\\\ escape should parse");
+        assert_eq!(parsed, vec!["a\\b"]);
+    }
+
+    #[test]
+    fn parse_mysql_enum_values_with_empty_element() {
+        let parsed =
+            parse_mysql_enum_values("enum('','a')").expect("enum with empty element should parse");
+        assert_eq!(parsed, vec!["", "a"]);
     }
 }

@@ -232,12 +232,9 @@ fn mssql_connection_form() -> DatabaseFormManifest {
                         "Enter SSH password",
                     )
                     .with_visibility(ssh_auth_rules("password")),
-                    ssh_field(
-                        "ssh_private_key",
-                        "ConnectionForm.ssh_private_key",
-                    )
-                    .with_placeholder("~/.ssh/id_rsa")
-                    .with_visibility(ssh_auth_rules("private_key")),
+                    ssh_field("ssh_private_key", "ConnectionForm.ssh_private_key")
+                        .with_placeholder("~/.ssh/id_rsa")
+                        .with_visibility(ssh_auth_rules("private_key")),
                     ssh_password_field(
                         "ssh_private_key_passphrase",
                         "ConnectionForm.ssh_private_key_passphrase",
@@ -1211,6 +1208,7 @@ impl DatabasePlugin for MsSqlPlugin {
                         comment: row.get(5).and_then(|v| v.clone()),
                         charset: None,
                         collation: None,
+                        enum_values: None,
                     }
                 })
                 .collect())

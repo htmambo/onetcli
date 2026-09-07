@@ -4591,6 +4591,7 @@ mod tests {
             comment: Some("会话ID".to_string()),
             charset: Some("utf8mb4".to_string()),
             collation: Some("utf8mb4_general_ci".to_string()),
+            enum_values: None,
         };
         let parsed = MySqlPlugin::new().parse_column_type(&column.data_type);
 
@@ -4614,6 +4615,7 @@ mod tests {
             comment: None,
             charset: None,
             collation: None,
+            enum_values: None,
         };
         let enum_col = ColumnInfo {
             name: "status".to_string(),
@@ -4624,6 +4626,7 @@ mod tests {
             comment: None,
             charset: Some("utf8mb4".to_string()),
             collation: Some("utf8mb4_bin".to_string()),
+            enum_values: None,
         };
 
         let numeric_definition = column_info_to_definition(

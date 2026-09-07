@@ -8,11 +8,13 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
+use gpui_component::IndexPath;
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
 use gpui_component::datetime_picker::{DateTimePickerEvent, DateTimePickerState};
 use gpui_component::input::{InputEvent, InputState, MaskPattern};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use gpui_component::select::{SelectEvent, SelectState};
 use gpui_component::time_picker::{TimePickerEvent, TimePickerState};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, WindowExt, h_flex};
@@ -632,15 +634,36 @@ impl EditorTableDelegate {
         self.column_meta
             .get(col_ix)
             .map(|m| {
-                let field_type = FieldType::from_db_type(&*m.data_type);
+                let base = FieldType::from_db_type(&*m.data_type);
                 // Oracle DATE contains both date and time
-                if field_type == FieldType::Date && self.database_type == DatabaseType::Oracle {
-                    FieldType::DateTime
-                } else {
-                    field_type
+                if base == FieldType::Date && self.database_type == DatabaseType::Oracle {
+                    return FieldType::DateTime;
                 }
+                if let Some(values) = self.enum_values_for(col_ix) {
+                    return FieldType::Enum { values };
+                }
+                base
             })
             .unwrap_or(FieldType::Unknown)
+    }
+
+    /// 解析 ENUM/SET 列的可选值列表
+    ///
+    /// 优先使用元数据中已经填好的 `enum_values`；
+    /// 若没有但 `data_type` 看上去像 ENUM/SET（例如 sql_result_tab 路径没有完整 meta），
+    /// 兜底用 `FieldType::from_db_type_with_values` 再次解析。
+    fn enum_values_for(&self, col_ix: usize) -> Option<Vec<String>> {
+        let meta = self.column_meta.get(col_ix)?;
+        if let Some(values) = meta.enum_values.as_ref() {
+            if !values.is_empty() {
+                return Some(values.clone());
+            }
+        }
+        let parsed = FieldType::from_db_type_with_values(&meta.data_type, Vec::new());
+        match parsed {
+            FieldType::Enum { values } => Some(values),
+            _ => None,
+        }
     }
 
     fn values_equal_for_column(
@@ -2288,6 +2311,33 @@ impl EditTableDelegate for EditorTableDelegate {
                     CellEditor::TimePickerInput { input, picker },
                     vec![input_subscription, picker_subscription],
                 ))
+            }
+            FieldType::Enum { values } => {
+                // 把 NULL 视作空串，方便 Select 找到匹配项（SelectItem::String
+                // 会在选中值与单元格内容一致时回显）。
+                let items: Vec<String> = values.clone();
+                let initial_index = if edit_value.is_empty() {
+                    None
+                } else {
+                    items
+                        .iter()
+                        .position(|item| item == &edit_value)
+                        .map(IndexPath::new)
+                };
+                let state = cx.new(|cx| SelectState::new(items, initial_index, window, cx));
+                let state_for_event = state.clone();
+                let sub = cx.subscribe_in(
+                    &state,
+                    window,
+                    move |table, _, evt: &SelectEvent<Vec<String>>, window, cx| {
+                        if matches!(evt, SelectEvent::Confirm(_)) {
+                            table.commit_cell_edit(window, cx);
+                        }
+                    },
+                );
+                // 让订阅也持有 state 以避免提前 drop
+                let _ = state_for_event;
+                Some((CellEditor::Select(state), vec![sub]))
             }
             _ => {
                 let input = cx.new(|cx| {

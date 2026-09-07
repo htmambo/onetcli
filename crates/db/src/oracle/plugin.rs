@@ -581,12 +581,9 @@ fn oracle_connection_form() -> DatabaseFormManifest {
                         "Enter SSH password",
                     )
                     .with_visibility(ssh_auth_rules("password")),
-                    ssh_field(
-                        "ssh_private_key",
-                        "ConnectionForm.ssh_private_key",
-                    )
-                    .with_placeholder("~/.ssh/id_rsa")
-                    .with_visibility(ssh_auth_rules("private_key")),
+                    ssh_field("ssh_private_key", "ConnectionForm.ssh_private_key")
+                        .with_placeholder("~/.ssh/id_rsa")
+                        .with_visibility(ssh_auth_rules("private_key")),
                     ssh_password_field(
                         "ssh_private_key_passphrase",
                         "ConnectionForm.ssh_private_key_passphrase",
@@ -920,7 +917,6 @@ impl DatabasePlugin for OraclePlugin {
         }
     }
 
-
     fn generate_table_changes_sql(&self, request: &TableSaveRequest) -> String {
         let mut sql_statements = Vec::new();
 
@@ -933,9 +929,11 @@ impl DatabasePlugin for OraclePlugin {
         if sql_statements.is_empty() {
             t!("Error.no_changes").to_string()
         } else {
-            sql_statements.join(";
+            sql_statements.join(
+                ";
 
-") + ";"
+",
+            ) + ";"
         }
     }
 
@@ -1491,6 +1489,7 @@ impl DatabasePlugin for OraclePlugin {
                         comment: row.get(5).and_then(|v| v.clone()),
                         charset: None,
                         collation: None,
+                        enum_values: None,
                     }
                 })
                 .collect())
@@ -2569,6 +2568,7 @@ mod tests {
             comment: None,
             charset: None,
             collation: None,
+            enum_values: None,
         }
     }
 
@@ -3265,5 +3265,4 @@ mod tests {
 
         assert_eq!("TO_CLOB('a''b')", expr);
     }
-
 }

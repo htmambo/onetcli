@@ -777,7 +777,10 @@ impl DatabasePlugin for DuckDbPlugin {
         info
     }
 
-    fn connection_lifecycle(&self, config: &DbConnectionConfig) -> crate::plugin::ConnectionLifecycle {
+    fn connection_lifecycle(
+        &self,
+        config: &DbConnectionConfig,
+    ) -> crate::plugin::ConnectionLifecycle {
         crate::plugin::ConnectionLifecycle::single_file("duckdb", config, &[])
     }
 
@@ -982,6 +985,7 @@ impl DatabasePlugin for DuckDbPlugin {
                 comment: None,
                 charset: None,
                 collation: None,
+                enum_values: None,
             })
             .collect())
     }

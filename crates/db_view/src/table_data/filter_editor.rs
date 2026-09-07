@@ -2246,6 +2246,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
                 ColumnInfo {
                     name: "age".into(),
@@ -2256,6 +2257,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
                 ColumnInfo {
                     name: "created_at".into(),
@@ -2266,6 +2268,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
             ],
         }
