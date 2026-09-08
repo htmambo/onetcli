@@ -70,3 +70,35 @@ jobs:
         run: |
           cargo test --all
           cargo test -p gpui-component --doc
+
+  security-audit:
+    # S6：依赖安全审计（RustSec advisory + license 检查）
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install --locked cargo-audit
+          cargo install --locked cargo-deny
+      - name: cargo audit (RustSec)
+        run: cargo audit --deny warnings
+      - name: cargo deny (license + advisory + ban)
+        run: cargo deny check
+
+  experiences-ci:
+    # S9：把 AGENTS.md 中"已验证经验"沉淀的若干检查 CI 化。
+    # 当前覆盖：单文件行数软门禁（防止新增/退化 ≥ 4000 行巨文件）。
+    name: Experiences CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check file lines (soft limit 4000, plus per-file overrides)
+        run: |
+          bash scripts/check-file-lines.sh
+        env:
+          # 已有 ≥ 4000 行巨文件允许通过；新增 / 修改若超过 soft limit 仍应报错。
+          MAX_FILE_LIMIT: "main/src/home_tab.rs=9000:crates/terminal_view/src/view.rs=7000:crates/terminal_view/src/sidebar/file_manager_panel.rs=5000:crates/sftp_view/src/lib.rs=5000:crates/db_view/src/table_designer_tab.rs=5000"

@@ -1,3 +1,7 @@
+// S4：本文件为 test-only；env::set_var / remove_var 在新版 Rust 标记 unsafe，
+// 仅用于把测试临时 HOME 重定向到独立目录以隔离污染。
+#![allow(unsafe_code)]
+
 use super::StorageManager;
 use crate::storage::{get_config_dir, get_db_path, get_queries_dir, get_themes_dir};
 use std::ffi::OsString;

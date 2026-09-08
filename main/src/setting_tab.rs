@@ -57,6 +57,15 @@ mod shortcuts;
 mod theme_utils;
 mod types;
 
+// S8：从 setting_tab.rs 抽出字体相关函数（防御性预防单文件继续膨胀）。
+// 用 `#[path]` 直接指向子目录文件，绕过同名 setting_tab.rs / mod.rs 冲突。
+#[path = "setting_tab/_fonts.rs"]
+mod _fonts;
+use _fonts::{
+    import_custom_font_paths, is_supported_font_file, load_custom_font_path, load_custom_fonts,
+    mono_font_options_with_custom, monospace_font_options,
+};
+
 use about::render_about_section;
 pub(crate) use app_settings::AppSettings;
 use auth_form::{render_auth_form_sync, render_logged_in_user_sync};
@@ -226,108 +235,9 @@ fn themed_setting_page(page: SettingPage, cx: &App) -> SettingPage {
     )
 }
 
-fn monospace_font_options() -> Vec<(SharedString, SharedString)> {
-    [
-        "Menlo",
-        "Consolas",
-        "JetBrains Mono",
-        "Fira Code",
-        "Cascadia Mono",
-        "DejaVu Sans Mono",
-        "Source Code Pro",
-        "Noto Sans Mono CJK SC",
-        "Source Han Mono SC",
-        "Microsoft YaHei",
-        "PingFang SC",
-        "Courier New",
-    ]
-    .into_iter()
-    .map(|font| (font.into(), font.into()))
-    .collect()
-}
-
-fn mono_font_options_with_custom(custom_paths: &[String]) -> Vec<(SharedString, SharedString)> {
-    let mut options = monospace_font_options();
-    for path in custom_paths {
-        // 必须拥有字符串，避免 SharedString 从临时 &str 泄漏借用。
-        let name = Path::new(path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(path.as_str())
-            .to_string();
-        let label: SharedString = name.into();
-        if !options.iter().any(|(value, _)| value == &label) {
-            options.push((label.clone(), label));
-        }
-    }
-    options
-}
-
-const FONT_FILE_EXTENSIONS: &[&str] = &["ttf", "otf", "ttc", "otc"];
-
-fn is_supported_font_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            FONT_FILE_EXTENSIONS
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
-}
-
-fn load_custom_font_path(path: &Path, cx: &mut App) -> Result<(), String> {
-    if !is_supported_font_file(path) {
-        return Err(t!("Settings.General.Font.unsupported_font_file").to_string());
-    }
-    let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
-    cx.text_system()
-        .add_fonts(vec![Cow::Owned(bytes)])
-        .map_err(|err| err.to_string())
-}
-
-fn load_custom_fonts(paths: &[String], cx: &mut App) -> usize {
-    paths
-        .iter()
-        .filter(|path| load_custom_font_path(Path::new(path), cx).is_ok())
-        .count()
-}
-
-fn import_custom_font_paths(paths: Vec<PathBuf>, cx: &mut App) -> String {
-    // 先加载字体，再写入设置，避免 AppSettings 可变借用与 text_system 冲突。
-    let mut loaded_paths = Vec::new();
-    for path in paths {
-        if load_custom_font_path(&path, cx).is_err() {
-            continue;
-        }
-        loaded_paths.push(path.to_string_lossy().to_string());
-    }
-
-    if loaded_paths.is_empty() {
-        return t!("Settings.General.Font.custom_fonts_import_empty").to_string();
-    }
-
-    let loaded = loaded_paths.len();
-    {
-        let settings = AppSettings::global_mut(cx);
-        for path in loaded_paths {
-            if !settings
-                .custom_font_paths
-                .iter()
-                .any(|existing| existing == &path)
-            {
-                settings.custom_font_paths.push(path);
-            }
-        }
-        settings.save();
-    }
-    let settings = AppSettings::global(cx).clone();
-    settings.sync_db_view_settings(cx);
-    t!(
-        "Settings.General.Font.custom_fonts_import_success",
-        count = loaded
-    )
-    .to_string()
-}
+// S8：monospace_font_options / mono_font_options_with_custom / is_supported_font_file /
+// load_custom_font_path / load_custom_fonts / import_custom_font_paths 已抽到
+// `setting_tab/_fonts.rs`（通过 `#[path = ...] mod _fonts;` 注册，文件顶部 use 已引入）。
 
 pub fn init_settings(cx: &mut App) -> HotkeyMigration {
     init_settings_with(cx, None)

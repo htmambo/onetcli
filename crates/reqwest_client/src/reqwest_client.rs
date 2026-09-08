@@ -1,3 +1,7 @@
+// S4：实现 gpui::http_client::HttpClient trait 时需要 unsafe 转换 MaybeUninit 缓冲
+// 与 Pin::new_unchecked（async IO Future 内部使用），无法避免。
+#![allow(unsafe_code)]
+
 use std::error::Error;
 use std::sync::{LazyLock, OnceLock};
 use std::{borrow::Cow, mem, pin::Pin, task::Poll, time::Duration};

@@ -1,3 +1,6 @@
+// S4：PTY / 进程信息等平台调用（libc::getuid、proc_listchildpids 等）必须 unsafe。
+#![allow(unsafe_code)]
+
 rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod history;

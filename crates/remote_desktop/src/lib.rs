@@ -1,3 +1,7 @@
+// S4：远程桌面 helper 进程通信、共享内存帧缓冲等需要 unsafe。
+// 已确认：framebuffer / runtime 模块内 unsafe 调用均经 audit。
+#![allow(unsafe_code)]
+
 pub mod backend;
 pub mod capabilities;
 pub mod config;

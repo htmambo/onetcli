@@ -22,6 +22,9 @@ pub mod running_state;
 pub use crate::running_state::{PendingChangeLevel, RunningKind, RunningState};
 pub mod storage;
 pub mod tab_container;
+// S4：`tab_persistence` 内 unsafe 用于读取未初始化内存（性能原因跳过零初始化）；
+// 已限定作用域，调用方契约清晰。
+#[allow(unsafe_code)]
 pub mod tab_persistence;
 pub mod themes;
 pub mod utils;

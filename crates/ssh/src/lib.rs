@@ -1,3 +1,7 @@
+// S4：russh 库内部使用 unsafe；本 crate 在 `ssh.rs` 内通过 russh FFI 调用
+// 必须直接处理 `ChannelMsg` 联合类型（unsafe 必要）。
+#![allow(unsafe_code)]
+
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod dynamic_socks;

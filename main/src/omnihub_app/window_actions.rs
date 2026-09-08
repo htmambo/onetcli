@@ -98,6 +98,8 @@ fn set_window_always_on_top(window: &Window, always_on_top: bool) -> anyhow::Res
 }
 
 #[cfg(target_os = "macos")]
+// S4：调用 macOS Objective-C runtime（objc_msg_send）必须 unsafe。
+#[allow(unsafe_code)]
 fn set_macos_always_on_top(
     ns_view: *mut std::ffi::c_void,
     always_on_top: bool,
@@ -141,6 +143,8 @@ fn set_macos_always_on_top(
 }
 
 #[cfg(target_os = "windows")]
+// S4：调用 Windows SetWindowPos FFI 必须 unsafe。
+#[allow(unsafe_code)]
 fn set_windows_always_on_top(hwnd: isize, always_on_top: bool) -> anyhow::Result<()> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{

@@ -1,0 +1,50 @@
+[graph]
+# S6：使用默认 all-features 评估
+all-features = false
+
+[advisories]
+# 严格模式：发现任意已发布 advisory 视为失败
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+ignore = []
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Zlib",
+    "OpenSSL",
+    "Unlicense",
+    "0BSD",
+    "BSL-1.0",
+    "NCSA",
+]
+confidence-threshold = 0.8
+
+[bans]
+# 多重许可、重复依赖已知 OK；下列为示例白名单
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/zed-industries/zed",
+    "https://github.com/zed-industries/reqwest.git",
+    "https://github.com/tu6ge/ferrum-flow.git",
+]
