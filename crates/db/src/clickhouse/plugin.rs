@@ -836,6 +836,7 @@ impl DatabasePlugin for ClickHousePlugin {
                         comment,
                         charset: None,
                         collation: None,
+                        enum_values: None,
                     });
                 }
             }

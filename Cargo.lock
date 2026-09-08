@@ -6119,6 +6119,7 @@ dependencies = [
  "tracing-subscriber",
  "windows 0.62.2",
  "winresource",
+ "zeroize",
  "zip 2.4.2",
 ]
 
@@ -7185,6 +7186,7 @@ dependencies = [
  "urlencoding",
  "util 0.1.0 (git+https://github.com/zed-industries/zed?rev=8b5328ca)",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

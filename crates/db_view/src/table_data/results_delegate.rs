@@ -8,11 +8,13 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
+use gpui_component::IndexPath;
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
 use gpui_component::datetime_picker::{DateTimePickerEvent, DateTimePickerState};
 use gpui_component::input::{InputEvent, InputState, MaskPattern};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use gpui_component::select::{SelectEvent, SelectState};
 use gpui_component::time_picker::{TimePickerEvent, TimePickerState};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, WindowExt, h_flex};
@@ -26,6 +28,17 @@ use rust_i18n::t;
 use uuid::Uuid;
 
 const NEW_ROW_ID_BASE: usize = 1_000_000;
+
+/// 判断 `data_type` 字符串是否以 `SET` 开头（大小写不敏感，允许前导空白）。
+///
+/// 专用于区分 MySQL SET（多值）与 ENUM（单值），避免把 SET 列误路由到单选下拉。
+fn is_set_type_data_type(data_type: &str) -> bool {
+    let upper = data_type.trim_start().to_uppercase();
+    let base_end = upper
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(upper.len());
+    &upper[..base_end] == "SET"
+}
 type CellChangeSnapshot = (Option<String>, Option<String>);
 
 /// Represents a single cell change with old and new values
@@ -632,15 +645,43 @@ impl EditorTableDelegate {
         self.column_meta
             .get(col_ix)
             .map(|m| {
-                let field_type = FieldType::from_db_type(&*m.data_type);
+                let base = FieldType::from_db_type(&*m.data_type);
                 // Oracle DATE contains both date and time
-                if field_type == FieldType::Date && self.database_type == DatabaseType::Oracle {
-                    FieldType::DateTime
-                } else {
-                    field_type
+                if base == FieldType::Date && self.database_type == DatabaseType::Oracle {
+                    return FieldType::DateTime;
                 }
+                if let Some(values) = self.enum_values_for(col_ix) {
+                    return FieldType::Enum { values };
+                }
+                base
             })
             .unwrap_or(FieldType::Unknown)
+    }
+
+    /// 解析 ENUM/SET 列的可选值列表
+    ///
+    /// 优先使用元数据中已经填好的 `enum_values`；
+    /// 若没有但 `data_type` 看上去像 ENUM/SET（例如 sql_result_tab 路径没有完整 meta），
+    /// 兜底用 `FieldType::from_db_type_with_values` 再次解析。
+    ///
+    /// SET 列存的是逗号分隔多值（`a,b,c`），与单选下拉不兼容：initial_index
+    /// 永远匹配不到，保存时会被截断为单项。遇到 SET 直接返回 `None`，
+    /// 让上层回落为默认文本输入，保留多值编辑语义。
+    fn enum_values_for(&self, col_ix: usize) -> Option<Vec<String>> {
+        let meta = self.column_meta.get(col_ix)?;
+        if is_set_type_data_type(&meta.data_type) {
+            return None;
+        }
+        if let Some(values) = meta.enum_values.as_ref() {
+            if !values.is_empty() {
+                return Some(values.clone());
+            }
+        }
+        let parsed = FieldType::from_db_type_with_values(&meta.data_type, Vec::new());
+        match parsed {
+            FieldType::Enum { values } => Some(values),
+            _ => None,
+        }
     }
 
     fn values_equal_for_column(
@@ -2289,39 +2330,40 @@ impl EditTableDelegate for EditorTableDelegate {
                     vec![input_subscription, picker_subscription],
                 ))
             }
-            _ => {
-                let input = cx.new(|cx| {
-                    let mut state = match field_type {
-                        FieldType::Integer | FieldType::Decimal => {
-                            InputState::new(window, cx).mask_pattern(MaskPattern::number(None))
-                        }
-                        _ => InputState::new(window, cx).multi_line(true).rows(1),
-                    };
-                    state.set_value(edit_value, window, cx);
-                    state.focus(window, cx);
-                    state
-                });
-
-                let input_subscription = cx.subscribe_in(
-                    &input,
+            FieldType::Enum { values } => {
+                // SET 列存的是逗号分隔的多值字符串（`a,b,c`），与单选 Select
+                // 不兼容：initial_index 永远匹配不到、保存会被截断为单项。
+                // 遇到 SET 直接回落为默认文本输入，保持多值编辑语义。
+                if let Some(meta) = self.column_meta.get(actual_col) {
+                    if is_set_type_data_type(&meta.data_type) {
+                        return self.build_text_input(actual_col, edit_value, window, cx);
+                    }
+                }
+                // 把 NULL 视作空串，方便 Select 找到匹配项（SelectItem::String
+                // 会在选中值与单元格内容一致时回显）。
+                let items: Vec<String> = values.clone();
+                let initial_index = if edit_value.is_empty() {
+                    None
+                } else {
+                    items
+                        .iter()
+                        .position(|item| item == &edit_value)
+                        .map(IndexPath::new)
+                };
+                let state = cx.new(|cx| SelectState::new(items, initial_index, window, cx));
+                let sub = cx.subscribe_in(
+                    &state,
                     window,
-                    move |table, _, evt: &InputEvent, window, cx| match evt {
-                        InputEvent::Blur => {
-                            tracing::debug!("Input blur event received, committing cell edit");
+                    move |table, _, evt: &SelectEvent<Vec<String>>, window, cx| {
+                        if matches!(evt, SelectEvent::Confirm(_)) {
                             table.commit_cell_edit(window, cx);
                         }
-                        InputEvent::PressEnter { .. } => {
-                            table.commit_cell_edit(window, cx);
-                        }
-                        _ => {}
                     },
                 );
-
-                let editor = match field_type {
-                    FieldType::Integer | FieldType::Decimal => CellEditor::NumberInput(input),
-                    _ => CellEditor::Input(input),
-                };
-                Some((editor, vec![input_subscription]))
+                Some((CellEditor::Select(state), vec![sub]))
+            }
+            _ => {
+                return self.build_text_input(actual_col, edit_value, window, cx);
             }
         }
     }
@@ -2591,6 +2633,51 @@ impl EditTableDelegate for EditorTableDelegate {
 }
 
 impl EditorTableDelegate {
+    /// 为非下拉场景构造默认文本输入编辑器（与 `build_input` 默认分支语义一致）。
+    ///
+    /// 提取出来的目的是让 SET 列在 `FieldType::Enum` 分支里也能复用同一段逻辑。
+    pub fn build_text_input(
+        &self,
+        actual_col: usize,
+        edit_value: String,
+        window: &mut Window,
+        cx: &mut Context<EditTableState<Self>>,
+    ) -> Option<(CellEditor, Vec<Subscription>)> {
+        let field_type = self.get_field_type(actual_col);
+        let input = cx.new(|cx| {
+            let mut state = match field_type {
+                FieldType::Integer | FieldType::Decimal => {
+                    InputState::new(window, cx).mask_pattern(MaskPattern::number(None))
+                }
+                _ => InputState::new(window, cx).multi_line(true).rows(1),
+            };
+            state.set_value(edit_value, window, cx);
+            state.focus(window, cx);
+            state
+        });
+
+        let input_subscription = cx.subscribe_in(
+            &input,
+            window,
+            move |table, _, evt: &InputEvent, window, cx| match evt {
+                InputEvent::Blur => {
+                    tracing::debug!("Input blur event received, committing cell edit");
+                    table.commit_cell_edit(window, cx);
+                }
+                InputEvent::PressEnter { .. } => {
+                    table.commit_cell_edit(window, cx);
+                }
+                _ => {}
+            },
+        );
+
+        let editor = match field_type {
+            FieldType::Integer | FieldType::Decimal => CellEditor::NumberInput(input),
+            _ => CellEditor::Input(input),
+        };
+        Some((editor, vec![input_subscription]))
+    }
+
     /// 获取表格元数据（用于生成 SQL 语句）
     pub fn get_table_metadata(&self) -> TableMetadata {
         TableMetadata {

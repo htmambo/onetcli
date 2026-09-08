@@ -1258,6 +1258,7 @@ impl DatabasePlugin for PostgresPlugin {
                         comment: None,
                         charset: None,
                         collation: None,
+                        enum_values: None,
                     }
                 })
                 .collect())
@@ -2323,7 +2324,6 @@ mod tests {
         assert!(sql.contains("\"users\""));
     }
 
-
     #[test]
     fn test_truncate_table_with_schema() {
         let plugin = create_plugin();
@@ -2771,6 +2771,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
                 ColumnInfo {
                     name: "name".to_string(),
@@ -2781,6 +2782,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
             ],
             index_infos: vec![],

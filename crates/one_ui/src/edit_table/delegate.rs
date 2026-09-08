@@ -9,6 +9,7 @@ use gpui::{
 };
 use gpui_component::date_picker::{DatePicker, DatePickerState};
 use gpui_component::datetime_picker::{DateTimePicker, DateTimePickerState};
+use gpui_component::select::SelectState;
 use gpui_component::time_picker::{TimePicker, TimePickerState};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Size, h_flex,
@@ -34,6 +35,8 @@ pub enum CellEditor {
         input: Entity<InputState>,
         picker: Entity<TimePickerState>,
     },
+    /// ENUM/SET 类型专用下拉编辑器
+    Select(Entity<SelectState<Vec<String>>>),
 }
 
 impl CellEditor {
@@ -245,6 +248,11 @@ impl CellEditor {
                     )
                     .into_any_element()
             }
+            CellEditor::Select(state) => gpui_component::select::Select::new(state)
+                .appearance(false)
+                .cleanable(false)
+                .w_full()
+                .into_any_element(),
         }
     }
 
@@ -271,6 +279,9 @@ impl CellEditor {
             CellEditor::DatePickerInput { input, .. } => input.read(cx).text().to_string(),
             CellEditor::DateTimePickerInput { input, .. } => input.read(cx).text().to_string(),
             CellEditor::TimePickerInput { input, .. } => input.read(cx).text().to_string(),
+            CellEditor::Select(state) => {
+                state.read(cx).selected_value().cloned().unwrap_or_default()
+            }
         }
     }
 }

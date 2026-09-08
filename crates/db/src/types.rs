@@ -236,6 +236,17 @@ pub struct ColumnInfo {
     /// 列级排序规则（如 MySQL 的 COLLATION_NAME）
     #[serde(default)]
     pub collation: Option<String>,
+    /// ENUM/SET 类型的可选值列表（来自 INFORMATION_SCHEMA / pg_enum）
+    #[serde(default)]
+    pub enum_values: Option<Vec<String>>,
+}
+
+impl ColumnInfo {
+    /// 为 ENUM/SET 列附加可选值列表
+    pub fn with_enum_values(mut self, values: impl Into<Vec<String>>) -> Self {
+        self.enum_values = Some(values.into());
+        self
+    }
 }
 
 /// Index information
@@ -478,7 +489,16 @@ pub struct ObjectView {
 // === Table Data Query Types ===
 
 /// Abstract data type for UI rendering
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// 使用 `#[serde(tag = "type")]` 派生 Serde：
+/// - 单位变体序列化为 `{"type":"Integer"}` 形式；
+/// - `Enum { values }` 变体序列化为 `{"type":"Enum","values":[...]}`。
+///
+/// 派生实现与任何自描述格式（JSON / YAML / TOML 等）天然兼容，
+/// 不依赖 `deserialize_any`，因此也兼容 bincode / postcard 等二进制格式
+/// （前提是上层不把 `FieldType` 喂给非自描述流）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
 pub enum FieldType {
     /// Integer numbers (INT, BIGINT, SMALLINT, etc.)
     Integer,
@@ -500,8 +520,44 @@ pub enum FieldType {
     Binary,
     /// JSON data
     Json,
+    /// ENUM/SET 类型，携带可选值列表
+    Enum {
+        /// 数据库元数据中解析出的可选值
+        values: Vec<String>,
+    },
     /// Unknown or unsupported type
     Unknown,
+}
+
+impl FieldType {
+    /// 推断 ENUM 类型（带可选值列表）
+    ///
+    /// - 当 `values` 非空且 db_type 以 ENUM/SET 开头，返回 `Enum { values }`；
+    /// - 当 `values` 为空但 db_type 看上去像 ENUM/SET 字符串（例如 `enum('a','b')`），
+    ///   兜底用 MySQL 规则解析括号内可选值；
+    /// - 其他情况返回 `from_db_type` 的结果。
+    ///
+    /// 注意：解析逻辑统一委托给 `parse_mysql_enum_values`，避免与 `types.rs` 里
+    /// 重复实现导致的转义规则漂移。
+    pub fn from_db_type_with_values(db_type: &str, values: Vec<String>) -> Self {
+        let upper = db_type.trim_start().to_uppercase();
+        let base_end = upper
+            .find(|c: char| c == '(' || c.is_whitespace())
+            .unwrap_or(upper.len());
+        let base = &upper[..base_end];
+        if base != "ENUM" && base != "SET" {
+            return Self::from_db_type(db_type);
+        }
+        if !values.is_empty() {
+            return Self::Enum { values };
+        }
+        if let Some(parsed) = crate::mysql::plugin::parse_mysql_enum_values(db_type) {
+            if !parsed.is_empty() {
+                return Self::Enum { values: parsed };
+            }
+        }
+        Self::from_db_type(db_type)
+    }
 }
 
 impl FieldType {
@@ -1039,5 +1095,85 @@ impl ParsedColumnType {
     pub fn with_auto_increment(mut self, auto_increment: bool) -> Self {
         self.is_auto_increment = auto_increment;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_db_type_with_values_uses_provided_values() {
+        let parsed = FieldType::from_db_type_with_values(
+            "enum('a','b')",
+            vec!["x".to_string(), "y".to_string()],
+        );
+        assert_eq!(
+            parsed,
+            FieldType::Enum {
+                values: vec!["x".to_string(), "y".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn from_db_type_with_values_falls_back_to_inline_parse() {
+        // values 为空，兜底走 parse_mysql_enum_values 解析 db_type。
+        let parsed = FieldType::from_db_type_with_values("set('a','b')", Vec::new());
+        assert_eq!(
+            parsed,
+            FieldType::Enum {
+                values: vec!["a".to_string(), "b".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn from_db_type_with_values_non_enum_returns_from_db_type() {
+        // 非 ENUM/SET 类型不应被误判为 Enum。
+        let parsed =
+            FieldType::from_db_type_with_values("varchar(10)", vec!["x".to_string()]);
+        assert_eq!(parsed, FieldType::Text);
+    }
+
+    #[test]
+    fn from_db_type_with_values_empty_enum_falls_through() {
+        // ENUM 但解析出空列表时，回落到 from_db_type（此时为 Text），避免渲染空下拉。
+        let parsed = FieldType::from_db_type_with_values("enum()", Vec::new());
+        assert_eq!(parsed, FieldType::Text);
+    }
+
+    #[test]
+    fn field_type_serde_unit_variant_roundtrip() {
+        let value = FieldType::Integer;
+        let json = serde_json::to_string(&value).expect("serialize");
+        assert_eq!(json, r#"{"type":"Integer"}"#);
+        let back: FieldType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, value);
+    }
+
+    #[test]
+    fn field_type_serde_enum_variant_roundtrip() {
+        let value = FieldType::Enum {
+            values: vec!["a".to_string(), "b'b".to_string()],
+        };
+        let json = serde_json::to_string(&value).expect("serialize");
+        assert_eq!(json, r#"{"type":"Enum","values":["a","b'b"]}"#);
+        let back: FieldType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, value);
+    }
+
+    #[test]
+    fn column_info_enum_values_default_serde_compat() {
+        // 缺省 enum_values 字段的旧 payload 仍能反序列化。
+        let json = r#"{
+            "name": "status",
+            "data_type": "enum('a','b')",
+            "is_nullable": true,
+            "is_primary_key": false
+        }"#;
+        let info: ColumnInfo = serde_json::from_str(json).expect("deserialize old column info");
+        assert_eq!(info.name, "status");
+        assert!(info.enum_values.is_none());
     }
 }

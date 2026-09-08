@@ -1491,6 +1491,7 @@ impl DatabasePlugin for OraclePlugin {
                         comment: row.get(5).and_then(|v| v.clone()),
                         charset: None,
                         collation: None,
+                        enum_values: None,
                     }
                 })
                 .collect())
@@ -2569,6 +2570,7 @@ mod tests {
             comment: None,
             charset: None,
             collation: None,
+            enum_values: None,
         }
     }
 

@@ -1,6 +1,6 @@
 use crate::table_data::filter_types::{
     ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, LogicOperator,
-    OperatorCategory, operators_for_column, uuid_simple,
+    OperatorCategory, enum_values_for_column, is_enum_column, operators_for_column, uuid_simple,
 };
 #[cfg(test)]
 use crate::table_data::filter_types::{is_datetime_type, is_numeric_type, is_string_type};
@@ -821,6 +821,8 @@ pub struct VisualFilterBuilder {
     value_start_inputs: std::collections::HashMap<String, Entity<InputState>>,
     /// 范围结束值输入框实体，按行 ID 索引（BETWEEN 时使用）
     value_end_inputs: std::collections::HashMap<String, Entity<InputState>>,
+    /// ENUM/SET 列的值下拉框实体，按行 ID 索引
+    value_selects: std::collections::HashMap<String, Entity<SelectState<Vec<String>>>>,
     /// 输入框订阅，按行 ID 索引（避免被 drop）
     value_subscriptions: std::collections::HashMap<String, gpui::Subscription>,
 }
@@ -944,6 +946,97 @@ fn update_condition_operator_in_items(
         }
     }
     false
+}
+
+/// 决定条件行使用哪种值控件（Select 下拉 vs Input 文本）
+///
+/// ENUM/SET 列且操作符为 `=` / `!=` 时使用 Select；其他场景保留文本输入。
+/// IS NULL/IS NOT NULL 不需要值控件；IN/NOT IN 维持逗号分隔文本。
+fn use_select_for_value(column: Option<&ColumnInfo>, operator: FilterOperator) -> bool {
+    matches!(operator, FilterOperator::Equal | FilterOperator::NotEqual)
+        && column.is_some_and(is_enum_column)
+}
+
+/// 取列的可选值（None 表示列不存在或非枚举列）
+fn enum_values_for(column: Option<&ColumnInfo>) -> Option<Vec<String>> {
+    let col = column?;
+    if !is_enum_column(col) {
+        return None;
+    }
+    let values = enum_values_for_column(col);
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+/// 构建条件行的"单值"控件，ENUM 列 + = / != 操作符返回 Select，否则返回 Input。
+///
+/// 返回 `(控件 entity 索引, 初始订阅 key, value_text 当前值)`。
+/// 调用方需要把 entity 存入对应的 HashMap，并注册订阅。
+fn build_value_widget_kind(
+    column: Option<&ColumnInfo>,
+    operator: FilterOperator,
+    initial_text: &str,
+    window: &mut Window,
+    cx: &mut Context<'_, VisualFilterBuilder>,
+) -> ValueWidgetKind {
+    if use_select_for_value(column, operator) {
+        let items = enum_values_for(column).unwrap_or_default();
+        let initial_index = items.iter().position(|item| item == initial_text);
+        let state =
+            cx.new(|cx| SelectState::new(items, initial_index.map(IndexPath::new), window, cx));
+        ValueWidgetKind::Select(state)
+    } else {
+        let placeholder = t!("Filter.placeholder_value").into_owned();
+        let state = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        if !initial_text.is_empty() {
+            state.update(cx, |s, cx| {
+                s.set_value(initial_text.to_string(), window, cx)
+            });
+        }
+        ValueWidgetKind::Input(state)
+    }
+}
+
+/// 单值控件（Select 或 Input），用于筛选行的值区域。
+enum ValueWidgetKind {
+    Input(Entity<InputState>),
+    Select(Entity<SelectState<Vec<String>>>),
+}
+
+/// 递归查找条件所在列名
+fn find_condition_column(items: &[FilterItem], id: &str) -> Option<String> {
+    for item in items {
+        match item {
+            FilterItem::Condition(row) if row.id == id => return Some(row.column.clone()),
+            FilterItem::Group(group) => {
+                if let Some(col) = find_condition_column(&group.children, id) {
+                    return Some(col);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 递归查找条件当前的 value_text
+fn find_condition_value_text(items: &[FilterItem], id: &str) -> String {
+    for item in items {
+        match item {
+            FilterItem::Condition(row) if row.id == id => return row.value_text.clone(),
+            FilterItem::Group(group) => {
+                let found = find_condition_value_text(&group.children, id);
+                if !found.is_empty() {
+                    return found;
+                }
+            }
+            _ => {}
+        }
+    }
+    String::new()
 }
 
 /// 递归查找并更新条件值
@@ -1115,6 +1208,7 @@ impl VisualFilterBuilder {
             value_inputs: std::collections::HashMap::new(),
             value_start_inputs: std::collections::HashMap::new(),
             value_end_inputs: std::collections::HashMap::new(),
+            value_selects: std::collections::HashMap::new(),
             value_subscriptions: std::collections::HashMap::new(),
         }
     }
@@ -1292,40 +1386,69 @@ impl VisualFilterBuilder {
 
         // 订阅操作符选择事件
         let row_id_clone_for_op = row_id.clone();
-        cx.subscribe(
+        cx.subscribe_in(
             &operator_select_entity,
+            window,
             move |this,
                   _,
                   event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>,
-                  _cx| {
+                  window,
+                  cx| {
                 let SelectEvent::Confirm(value) = event;
                 if let Some(op) = value {
-                    this.update_condition_operator(&row_id_clone_for_op, *op);
+                    this.update_condition_operator(&row_id_clone_for_op, *op, window, cx);
                 }
             },
         )
         .detach();
 
-        // 创建值输入框
-        let value_input_entity = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(t!("Filter.placeholder_value").into_owned())
-        });
-
-        // 观察值输入变化
-        let row_id_clone_for_val = row_id.clone();
-        let value_input_clone = value_input_entity.clone();
-        let val_sub = cx.observe(&value_input_entity, move |this, _, cx| {
-            let text = value_input_clone.read(cx).text().to_string();
-            this.update_condition_value(&row_id_clone_for_val, text);
-            cx.notify();
-        });
+        // 创建值控件（ENUM 列 + = / != 用 Select，其他用 Input）
+        let column_info = schema
+            .as_ref()
+            .and_then(|s| s.columns.iter().find(|c| c.name == first_col));
+        let value_kind = build_value_widget_kind(column_info, first_op, "", window, cx);
+        let val_sub = match &value_kind {
+            ValueWidgetKind::Input(input) => {
+                let row_id_clone_for_val = row_id.clone();
+                let value_input_clone = input.clone();
+                cx.observe(input, move |this, _, cx| {
+                    let text = value_input_clone.read(cx).text().to_string();
+                    this.update_condition_value(&row_id_clone_for_val, text);
+                    cx.notify();
+                })
+            }
+            ValueWidgetKind::Select(state) => {
+                let row_id_clone_for_val = row_id.clone();
+                let state_for_event = state.clone();
+                cx.subscribe_in(
+                    state,
+                    window,
+                    move |this, _, event: &SelectEvent<Vec<String>>, window, cx| {
+                        if let SelectEvent::Confirm(value) = event {
+                            let text = value.clone().unwrap_or_default();
+                            let _ = state_for_event.read(cx).selected_value();
+                            this.update_condition_value(&row_id_clone_for_val, text);
+                            cx.notify();
+                            let _ = window; // 保持订阅签名与上游一致
+                        }
+                    },
+                )
+            }
+        };
 
         self.root_items.push(FilterItem::Condition(row));
         self.column_selects
             .insert(row_id.clone(), column_select_entity);
         self.operator_selects
             .insert(row_id.clone(), operator_select_entity);
-        self.value_inputs.insert(row_id.clone(), value_input_entity);
+        match value_kind {
+            ValueWidgetKind::Input(input) => {
+                self.value_inputs.insert(row_id.clone(), input);
+            }
+            ValueWidgetKind::Select(select) => {
+                self.value_selects.insert(row_id.clone(), select);
+            }
+        }
         self.value_start_inputs
             .insert(row_id.clone(), value_start_input_entity);
         self.value_end_inputs
@@ -1355,12 +1478,14 @@ impl VisualFilterBuilder {
             .map(operators_for_column)
             .unwrap_or_else(default_filter_operators);
 
-        if let Some(selected_operator) = update_condition_column_in_items(
+        let new_operator = update_condition_column_in_items(
             &mut self.root_items,
             id,
             column.clone(),
             &valid_operators,
-        ) {
+        );
+
+        if let Some(selected_operator) = new_operator {
             if let Some(select) = self.operator_selects.get(id) {
                 let operator_groups = operator_groups_for_column(self.schema.as_ref(), &column);
                 select.update(cx, |state, cx| {
@@ -1369,15 +1494,88 @@ impl VisualFilterBuilder {
                     cx.notify();
                 });
             }
+            // 列变化可能影响值控件类型（ENUM 切非 ENUM / 反之 / 操作符裁剪）
+            self.rebuild_value_widget_for_row(id, &column, selected_operator, window, cx);
         }
         self.sync_filter_state();
         cx.notify();
     }
 
     /// 在所有分组中递归查找并更新条件操作符
-    fn update_condition_operator(&mut self, id: &str, operator: FilterOperator) {
-        if update_condition_operator_in_items(&mut self.root_items, id, operator) {
-            self.sync_filter_state();
+    fn update_condition_operator(
+        &mut self,
+        id: &str,
+        operator: FilterOperator,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !update_condition_operator_in_items(&mut self.root_items, id, operator) {
+            return;
+        }
+        // 取当前行所在列名以判断值控件类型
+        let column_name = find_condition_column(&self.root_items, id).unwrap_or_default();
+        self.rebuild_value_widget_for_row(id, &column_name, operator, window, cx);
+        self.sync_filter_state();
+    }
+
+    /// 根据当前列类型与操作符重建值控件（Select / Input），保留已有 value_text。
+    fn rebuild_value_widget_for_row(
+        &mut self,
+        id: &str,
+        column: &str,
+        operator: FilterOperator,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let column_info = self
+            .schema
+            .as_ref()
+            .and_then(|s| s.columns.iter().find(|c| c.name == column));
+        let current_value = find_condition_value_text(&self.root_items, id);
+
+        // 移除旧控件
+        self.value_inputs.remove(id);
+        self.value_selects.remove(id);
+        self.value_subscriptions.remove(id);
+
+        if !operator.needs_value() || operator.needs_two_values() {
+            // BETWEEN 不走单值控件；IS NULL/IS NOT NULL 不需要控件。
+            return;
+        }
+
+        let value_kind = build_value_widget_kind(column_info, operator, &current_value, window, cx);
+        let sub = match &value_kind {
+            ValueWidgetKind::Input(input) => {
+                let row_id = id.to_string();
+                let value_input_clone = input.clone();
+                cx.observe(input, move |this, _, cx| {
+                    let text = value_input_clone.read(cx).text().to_string();
+                    this.update_condition_value(&row_id, text);
+                    cx.notify();
+                })
+            }
+            ValueWidgetKind::Select(state) => {
+                let row_id = id.to_string();
+                cx.subscribe_in(
+                    state,
+                    window,
+                    move |this, _, event: &SelectEvent<Vec<String>>, _window, cx| {
+                        if let SelectEvent::Confirm(value) = event {
+                            this.update_condition_value(&row_id, value.clone().unwrap_or_default());
+                            cx.notify();
+                        }
+                    },
+                )
+            }
+        };
+        self.value_subscriptions.insert(id.to_string(), sub);
+        match value_kind {
+            ValueWidgetKind::Input(input) => {
+                self.value_inputs.insert(id.to_string(), input);
+            }
+            ValueWidgetKind::Select(select) => {
+                self.value_selects.insert(id.to_string(), select);
+            }
         }
     }
 
@@ -1397,6 +1595,7 @@ impl VisualFilterBuilder {
         self.value_inputs.clear();
         self.value_start_inputs.clear();
         self.value_end_inputs.clear();
+        self.value_selects.clear();
         self.value_subscriptions.clear();
         self.filter_state = FilterState::new();
         cx.notify();
@@ -1519,39 +1718,68 @@ impl VisualFilterBuilder {
 
             // 订阅操作符选择事件
             let row_id_clone_op = row_id.clone();
-            cx.subscribe(
+            cx.subscribe_in(
                 &operator_select_entity,
+                window,
                 move |this,
                       _,
                       event: &SelectEvent<SearchableVec<SelectGroup<FilterOperatorItem>>>,
-                      _cx| {
+                      window,
+                      cx| {
                     let SelectEvent::Confirm(value) = event;
                     if let Some(op) = value {
-                        this.update_condition_operator(&row_id_clone_op, *op);
+                        this.update_condition_operator(&row_id_clone_op, *op, window, cx);
                     }
                 },
             )
             .detach();
 
-            // 创建值输入框
-            let value_input_entity =
-                cx.new(|cx| InputState::new(window, cx).placeholder("输入值...".to_string()));
-
-            // 观察值输入变化
-            let row_id_clone_val = row_id.clone();
-            let value_input_clone = value_input_entity.clone();
-            let val_sub = cx.observe(&value_input_entity, move |this, _, cx| {
-                let text = value_input_clone.read(cx).text().to_string();
-                this.update_condition_value(&row_id_clone_val, text);
-                cx.notify();
-            });
+            // 创建值控件（ENUM 列 + = / != 用 Select，其他用 Input）
+            let column_info = schema
+                .as_ref()
+                .and_then(|s| s.columns.iter().find(|c| c.name == first_col));
+            let value_kind = build_value_widget_kind(column_info, first_op, "", window, cx);
+            let val_sub = match &value_kind {
+                ValueWidgetKind::Input(input) => {
+                    let row_id_clone_val = row_id.clone();
+                    let value_input_clone = input.clone();
+                    cx.observe(input, move |this, _, cx| {
+                        let text = value_input_clone.read(cx).text().to_string();
+                        this.update_condition_value(&row_id_clone_val, text);
+                        cx.notify();
+                    })
+                }
+                ValueWidgetKind::Select(state) => {
+                    let row_id_clone_val = row_id.clone();
+                    cx.subscribe_in(
+                        state,
+                        window,
+                        move |this, _, event: &SelectEvent<Vec<String>>, _window, cx| {
+                            if let SelectEvent::Confirm(value) = event {
+                                this.update_condition_value(
+                                    &row_id_clone_val,
+                                    value.clone().unwrap_or_default(),
+                                );
+                                cx.notify();
+                            }
+                        },
+                    )
+                }
+            };
 
             parent.children.push(FilterItem::Condition(row));
             self.column_selects
                 .insert(row_id.clone(), column_select_entity);
             self.operator_selects
                 .insert(row_id.clone(), operator_select_entity);
-            self.value_inputs.insert(row_id.clone(), value_input_entity);
+            match value_kind {
+                ValueWidgetKind::Input(input) => {
+                    self.value_inputs.insert(row_id.clone(), input);
+                }
+                ValueWidgetKind::Select(select) => {
+                    self.value_selects.insert(row_id.clone(), select);
+                }
+            }
             self.value_start_inputs
                 .insert(row_id.clone(), value_start_input_entity);
             self.value_end_inputs
@@ -1582,8 +1810,10 @@ impl VisualFilterBuilder {
         self.column_selects.remove(id);
         self.operator_selects.remove(id);
         self.value_inputs.remove(id);
+        self.value_selects.remove(id);
         self.value_start_inputs.remove(id);
         self.value_end_inputs.remove(id);
+        self.value_subscriptions.remove(id);
         self.sync_filter_state();
         cx.notify();
     }
@@ -1595,8 +1825,10 @@ impl VisualFilterBuilder {
             self.column_selects.remove(row_id);
             self.operator_selects.remove(row_id);
             self.value_inputs.remove(row_id);
+            self.value_selects.remove(row_id);
             self.value_start_inputs.remove(row_id);
             self.value_end_inputs.remove(row_id);
+            self.value_subscriptions.remove(row_id);
         }
         delete_group_from_items(&mut self.root_items, id);
         self.collapsed_groups.remove(id);
@@ -1735,9 +1967,16 @@ impl VisualFilterBuilder {
         let column_select = self.column_selects.get(&row.id);
         let operator_select = self.operator_selects.get(&row.id);
         let value_input = self.value_inputs.get(&row.id);
+        let value_select = self.value_selects.get(&row.id);
         let value_start_input = self.value_start_inputs.get(&row.id);
         let value_end_input = self.value_end_inputs.get(&row.id);
         let logic_is_and = matches!(row.logic_operator, LogicOperator::And);
+
+        // 解析列元数据，决定值控件类型
+        let column_info = self
+            .schema
+            .as_ref()
+            .and_then(|s| s.columns.iter().find(|c| c.name == row.column));
 
         const LOGIC_TOGGLE_WIDTH: gpui::Pixels = px(48.);
 
@@ -1800,10 +2039,20 @@ impl VisualFilterBuilder {
                         }),
                 )
         } else if row.operator.needs_value() {
-            gpui::div()
-                .flex_1()
-                .h_7()
-                .when_some(value_input, |el, input| el.child(Input::new(input).small()))
+            // ENUM/SET 列 + =/!= 走 Select 下拉，其他走 Input
+            if use_select_for_value(column_info, row.operator) {
+                gpui::div()
+                    .flex_1()
+                    .h_7()
+                    .when_some(value_select, |el, select| {
+                        el.child(Select::new(select).small())
+                    })
+            } else {
+                gpui::div()
+                    .flex_1()
+                    .h_7()
+                    .when_some(value_input, |el, input| el.child(Input::new(input).small()))
+            }
         } else {
             gpui::div().flex_1()
         };
@@ -2246,6 +2495,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
                 ColumnInfo {
                     name: "age".into(),
@@ -2256,6 +2506,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
                 ColumnInfo {
                     name: "created_at".into(),
@@ -2266,6 +2517,7 @@ mod tests {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 },
             ],
         }

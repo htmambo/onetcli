@@ -528,10 +528,53 @@ pub fn is_datetime_type(data_type: &str) -> bool {
         || dt.contains("DATETIME")
 }
 
+/// 检测是否为 ENUM 类型（带可选值列表）
+///
+/// 优先用 `ColumnInfo.enum_values` 字段判断；缺失时回退到 `data_type` 字符串前缀。
+pub fn is_enum_column(column: &ColumnInfo) -> bool {
+    if column
+        .enum_values
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let dt = column.data_type.trim_start().to_uppercase();
+    let base_end = dt
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(dt.len());
+    matches!(&dt[..base_end], "ENUM" | "SET")
+}
+
+/// 取列的可选值（解析 `ColumnInfo.enum_values`；缺失时回退到解析 data_type）
+pub fn enum_values_for_column(column: &ColumnInfo) -> Vec<String> {
+    if let Some(values) = column.enum_values.as_ref() {
+        if !values.is_empty() {
+            return values.clone();
+        }
+    }
+    match db::FieldType::from_db_type_with_values(&column.data_type, Vec::new()) {
+        db::FieldType::Enum { values } => values,
+        _ => Vec::new(),
+    }
+}
+
 /// 根据列类型返回适合的操作符
 pub fn operators_for_column(column: &ColumnInfo) -> Vec<FilterOperator> {
     let data_type = column.data_type.as_str();
-    if is_string_type(data_type) {
+    if is_enum_column(column) {
+        // ENUM/SET 列：只暴露相等性、IN 列表与 NULL 判定，
+        // 隐藏范围/模糊匹配类操作符。
+        vec![
+            FilterOperator::Equal,
+            FilterOperator::NotEqual,
+            FilterOperator::In,
+            FilterOperator::NotIn,
+            FilterOperator::IsNull,
+            FilterOperator::IsNotNull,
+        ]
+    } else if is_string_type(data_type) {
         vec![
             FilterOperator::Equal,
             FilterOperator::NotEqual,
@@ -827,5 +870,81 @@ mod tests {
             logic_operator: LogicOperator::And,
         };
         assert_eq!(cond.to_sql(), Some("name = 'O''Brien'".to_string()));
+    }
+
+    fn enum_column(values: &[&str]) -> ColumnInfo {
+        ColumnInfo {
+            name: "status".to_string(),
+            data_type: format!("enum('{}')", values.join("','")),
+            is_nullable: true,
+            is_primary_key: false,
+            default_value: None,
+            comment: None,
+            charset: None,
+            collation: None,
+            enum_values: Some(values.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn is_enum_column_detects_with_meta() {
+        let col = enum_column(&["draft", "active"]);
+        assert!(is_enum_column(&col));
+        assert_eq!(
+            enum_values_for_column(&col),
+            vec!["draft".to_string(), "active".to_string()]
+        );
+    }
+
+    #[test]
+    fn is_enum_column_falls_back_to_data_type() {
+        let col = ColumnInfo {
+            name: "status".to_string(),
+            data_type: "enum('a','b','c')".to_string(),
+            is_nullable: true,
+            is_primary_key: false,
+            default_value: None,
+            comment: None,
+            charset: None,
+            collation: None,
+            enum_values: None,
+        };
+        assert!(is_enum_column(&col));
+        assert_eq!(
+            enum_values_for_column(&col),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn is_enum_column_returns_false_for_non_enum() {
+        let col = ColumnInfo {
+            name: "name".to_string(),
+            data_type: "varchar(50)".to_string(),
+            is_nullable: true,
+            is_primary_key: false,
+            default_value: None,
+            comment: None,
+            charset: None,
+            collation: None,
+            enum_values: None,
+        };
+        assert!(!is_enum_column(&col));
+        assert!(enum_values_for_column(&col).is_empty());
+    }
+
+    #[test]
+    fn operators_for_enum_hides_range_and_pattern() {
+        let col = enum_column(&["draft", "active"]);
+        let ops = operators_for_column(&col);
+        assert!(ops.contains(&FilterOperator::Equal));
+        assert!(ops.contains(&FilterOperator::NotEqual));
+        assert!(ops.contains(&FilterOperator::In));
+        assert!(ops.contains(&FilterOperator::NotIn));
+        assert!(ops.contains(&FilterOperator::IsNull));
+        assert!(ops.contains(&FilterOperator::IsNotNull));
+        assert!(!ops.contains(&FilterOperator::Like));
+        assert!(!ops.contains(&FilterOperator::Between));
+        assert!(!ops.contains(&FilterOperator::GreaterThan));
     }
 }

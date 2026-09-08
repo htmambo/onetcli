@@ -1447,6 +1447,7 @@ mod oracle_table_save_tests {
             comment: None,
             charset: None,
             collation: None,
+            enum_values: None,
         }
     }
 

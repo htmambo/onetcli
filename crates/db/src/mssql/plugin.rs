@@ -1211,6 +1211,7 @@ impl DatabasePlugin for MsSqlPlugin {
                         comment: row.get(5).and_then(|v| v.clone()),
                         charset: None,
                         collation: None,
+                        enum_values: None,
                     }
                 })
                 .collect())

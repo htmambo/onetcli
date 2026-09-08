@@ -982,6 +982,7 @@ impl DatabasePlugin for DuckDbPlugin {
                 comment: None,
                 charset: None,
                 collation: None,
+                enum_values: None,
             })
             .collect())
     }
