@@ -30,6 +30,7 @@ mod llm_provider_sync;
 mod models;
 pub mod oauth;
 pub(crate) mod queue;
+pub mod remote_guard;
 mod service;
 pub mod sync_backend;
 pub mod sync_server;
