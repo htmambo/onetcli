@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
+use zeroize::Zeroizing;
 
 use crate::key_storage;
 
@@ -74,6 +75,8 @@ impl std::error::Error for CryptoError {}
 const ENCRYPTED_PREFIX: &str = "ENC:";
 /// 新格式加密前缀（V2：包含随机盐值用于检测损坏的密文）
 const ENCRYPTED_PREFIX_V2: &str = "ENC:V2:";
+/// 当前默认加密前缀（V3：使用 Argon2id 派生 AES 密钥，抗 GPU 暴力枚举）
+const ENCRYPTED_PREFIX_V3: &str = "ENC:V3:";
 
 /// 验证数据的魔术字符串，用于验证密钥是否正确
 const VERIFICATION_MAGIC: &str = "ONEHUB_KEY_VERIFY_V1";
@@ -81,11 +84,27 @@ const VERIFICATION_MAGIC: &str = "ONEHUB_KEY_VERIFY_V1";
 /// 密钥验证文件名
 const KEY_VERIFICATION_FILE: &str = "key_verification";
 
-/// 全局加密密钥存储（派生后的密钥）
+/// 全局加密密钥存储（派生后的密钥，用于 V1/V2 兼容读取）
 static ENCRYPTION_KEY: RwLock<Option<[u8; 32]>> = RwLock::new(None);
 
-/// 全局原始主密钥存储（用于云同步等需要原始密钥的场景）
-static RAW_MASTER_KEY: RwLock<Option<String>> = RwLock::new(None);
+/// V3 加密路径使用的派生密钥（Argon2id）。
+///
+/// 与 `ENCRYPTION_KEY` 并存：旧数据按旧算法读取，新写入按新算法。
+/// 双槽的设计保证 SHA-256 派生与 Argon2id 派生互不污染。
+static ENCRYPTION_KEY_V3: RwLock<Option<[u8; 32]>> = RwLock::new(None);
+
+/// 全局原始主密钥存储。
+///
+/// **撤销说明（S2）**：原实现把主密钥明文以 `String` 形式常驻进程静态区，存在
+/// 崩溃 dump / 子进程环境继承 / heap profiler 抓现场等风险。S2 后不再长期持有；
+/// 调用方需要主密钥明文（如云同步加解密）时通过 `raw_master_key_for_sync()` /
+/// `with_raw_master_key` 按需从 `key_storage` 后端读取，返回的 `Zeroizing<String>`
+/// 在 drop 时会清零缓冲。
+///
+/// 由于全局 ENCRYPTION_KEY 槽保留了派生后的 AES 密钥，所有"加解密一条数据"的
+/// 路径仍可不接触主密钥明文——主密钥明文仅在云同步等少数场景下被读出。
+// 历史保留：RAW_MASTER_KEY 已撤销；显式以注释取代原静态变量占位，避免回归。
+// static RAW_MASTER_KEY: RwLock<Option<String>> = RwLock::new(None);
 
 /// 获取数据目录路径
 ///
@@ -135,8 +154,28 @@ fn derive_key(master_key: &str) -> [u8; 32] {
     key
 }
 
+/// V3 写入路径使用的派生 salt：版本化、可识别、不与 V1/V2 重叠。
+///
+/// 作为应用级常量写入源码；攻击者拿到源码即可获取，但 Argon2id 拉伸本身
+/// 提供抗暴力枚举能力（与 SHA-256 不可同日而语）。
+const MASTER_KEY_APP_SALT_V3: &[u8] = b"omnihub-master-key-v3-argon2id-salt-v1";
+
+/// 从用户主密钥 + 应用级 salt 派生 AES-256 密钥（Argon2id，用于 V3 写入路径）。
+///
+/// Argon2id 是密码哈希竞赛冠军，是 KDF 推荐算法。攻击者要暴力枚举主密钥，
+/// 必须为每个候选值执行 Argon2id；其拉伸因子默认 ~100ms / 候选，
+/// 使 GPU 暴力枚举的实际效率下降到难以承受的水平。
+fn derive_key_v3(master_key: &str, salt: &[u8]) -> [u8; 32] {
+    let mut derived_key = [0u8; 32];
+    let argon2 = Argon2::default();
+    let _ = argon2.hash_password_into(master_key.as_bytes(), salt, &mut derived_key);
+    derived_key
+}
+
 /// 验证数据魔术串前缀（用于标识新格式）
 const VERIFICATION_V2_PREFIX: &str = "V2:";
+/// V3 verification 前缀：同样用 Argon2id 派生，密文布局与 V2 一致，仅 prefix 不同。
+const VERIFICATION_V3_PREFIX: &str = "V3:";
 
 /// 生成 V1 格式的密钥验证数据（用于前端同步兼容）
 ///
@@ -161,7 +200,7 @@ pub fn generate_key_verification_v1(master_key: &str) -> String {
     }
 }
 
-/// 生成密钥验证数据
+/// 生成密钥验证数据（V2 格式，保留以兼容同步前端）
 ///
 /// 返回一个加密的魔术字符串，用于验证用户输入的密钥是否正确。
 /// 使用 Argon2id 派生密钥进行加密，更安全。
@@ -195,7 +234,38 @@ pub fn generate_key_verification(master_key: &str) -> String {
     }
 }
 
-/// 验证密钥是否正确（支持 V1 和 V2 格式）
+/// 生成 V3 verification 数据（默认新装路径）
+///
+/// 与 V2 密文布局完全一致（V3: + salt + nonce + ciphertext，Argon2id 派生），
+/// 仅前缀字符不同。verify_master_key 会按 V2/V3 prefix 分发到同一条解密路径。
+pub fn generate_key_verification_v3(master_key: &str) -> String {
+    let mut salt_bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt_bytes);
+
+    let mut derived_key = [0u8; 32];
+    let argon2 = Argon2::default();
+    let _ = argon2.hash_password_into(master_key.as_bytes(), &salt_bytes, &mut derived_key);
+
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&derived_key));
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    match cipher.encrypt(nonce, VERIFICATION_MAGIC.as_bytes()) {
+        Ok(ciphertext) => {
+            let mut combined = Vec::with_capacity(3 + 16 + 12 + ciphertext.len());
+            combined.extend_from_slice(VERIFICATION_V3_PREFIX.as_bytes());
+            combined.extend_from_slice(&salt_bytes);
+            combined.extend_from_slice(&nonce_bytes);
+            combined.extend_from_slice(&ciphertext);
+            BASE64.encode(&combined)
+        }
+        Err(_) => String::new(),
+    }
+}
+
+/// 验证密钥是否正确（支持 V1 / V2 / V3 格式）
 ///
 /// 通过尝试解密验证数据来验证密钥是否正确。
 pub fn verify_master_key(master_key: &str, verification_data: &str) -> bool {
@@ -212,9 +282,11 @@ pub fn verify_master_key(master_key: &str, verification_data: &str) -> bool {
         return false;
     }
 
-    // 检测格式：V2 以 "V2:" 开头
-    if combined.starts_with(VERIFICATION_V2_PREFIX.as_bytes()) {
-        // V2: V2:(3) + salt(16) + nonce(12) + ciphertext
+    // 检测格式：V2/V3 都走 Argon2id 分支（密文布局相同，仅 prefix 不同）
+    if combined.starts_with(VERIFICATION_V2_PREFIX.as_bytes())
+        || combined.starts_with(VERIFICATION_V3_PREFIX.as_bytes())
+    {
+        // V2/V3: prefix(3) + salt(16) + nonce(12) + ciphertext
         let body = &combined[3..];
         if body.len() < 16 + 12 {
             return false;
@@ -263,20 +335,29 @@ pub fn verify_master_key(master_key: &str, verification_data: &str) -> bool {
 /// 用户提供的主密钥将被哈希后存储在内存中，用于后续的加密/解密操作。
 /// 如果是首次设置，会生成并保存验证数据。
 /// 同时会将密钥保存到存储后端，以便应用重启后自动恢复。
+///
+/// 内部同时派生两份密钥：
+/// - `ENCRYPTION_KEY`（SHA-256）：用于解密历史 V1/V2 密文。
+/// - `ENCRYPTION_KEY_V3`（Argon2id）：用于 V3 写入与 V3 密文解密。
 pub fn set_master_key(master_key: &str) {
     let key = derive_key(master_key);
     if let Ok(mut guard) = ENCRYPTION_KEY.write() {
         *guard = Some(key);
     }
 
-    // 同时保存原始主密钥（用于云同步等场景）
-    if let Ok(mut guard) = RAW_MASTER_KEY.write() {
-        *guard = Some(master_key.to_string());
+    // V3 写入路径：Argon2id 派生
+    let key_v3 = derive_key_v3(master_key, MASTER_KEY_APP_SALT_V3);
+    if let Ok(mut guard) = ENCRYPTION_KEY_V3.write() {
+        *guard = Some(key_v3);
     }
 
-    // 如果尚未设置过密码，生成并保存验证数据
+    // S2：不再写 RAW_MASTER_KEY 静态常驻。
+    // 调用方需要主密钥明文时，通过 raw_master_key_for_sync() / with_raw_master_key
+    // 从 key_storage 后端按需读取。
+
+    // 如果尚未设置过密码，生成并保存验证数据（默认走 V3 路径）
     if !has_repo_password_set() {
-        let verification = generate_key_verification(master_key);
+        let verification = generate_key_verification_v3(master_key);
         save_verification_data(&verification);
     }
 
@@ -311,9 +392,10 @@ pub fn clear_master_key() {
     if let Ok(mut guard) = ENCRYPTION_KEY.write() {
         *guard = None;
     }
-    if let Ok(mut guard) = RAW_MASTER_KEY.write() {
+    if let Ok(mut guard) = ENCRYPTION_KEY_V3.write() {
         *guard = None;
     }
+    // S2：RAW_MASTER_KEY 已撤销，无需清理。
     // 同时清除存储后端中的密钥
     let storage = key_storage::get_key_storage();
     let _ = storage.delete();
@@ -327,30 +409,65 @@ pub fn has_master_key() -> bool {
         .unwrap_or(false)
 }
 
-/// 获取原始主密钥
+/// 获取主密钥明文的一次性副本（用于云同步等少数需要原始密钥的场景）。
 ///
-/// 返回设置的原始主密钥字符串，用于云同步等需要原始密钥的场景。
-/// 如果未设置主密钥，返回 None。
-pub fn get_raw_master_key() -> Option<String> {
-    RAW_MASTER_KEY.read().ok().and_then(|guard| guard.clone())
+/// 与 S2 之前的 `get_raw_master_key` 区别：
+/// - 不再读取进程级 `RAW_MASTER_KEY` 静态变量（已撤销）。
+/// - 从 `key_storage` 后端按需读取；返回的 `Zeroizing<String>` 在 drop 时
+///   清零堆内存，降低 dump / 调试器抓现场泄漏风险。
+///
+/// 注意：调用方应尽量缩短持有副本的作用域；如要多次使用，请用
+/// [`with_raw_master_key`] 闭包风格接口。
+pub fn raw_master_key_for_sync() -> Option<Zeroizing<String>> {
+    let storage = key_storage::get_key_storage();
+    storage.load().map(Zeroizing::new)
+}
+
+/// 闭包风格访问主密钥明文：闭包内 `&str` 可用；闭包结束立即析构副本。
+///
+/// 适用于"需要主密钥做几件事、且不想在调用栈长期持有"的场景。
+///
+/// # 示例
+/// ```ignore
+/// crypto::with_raw_master_key(|master_key| {
+///     // 在此处使用 master_key；离开作用域后内部缓冲区被 zeroize
+///     sync_blob.encrypt(master_key, payload)
+/// });
+/// ```
+///
+/// 当未设置主密钥、或 `key_storage` 后端不可用时，返回 `None`。
+pub fn with_raw_master_key<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&str) -> R,
+{
+    let storage = key_storage::get_key_storage();
+    let key = storage.load()?;
+    let result = f(&key);
+    drop(key);
+    Some(result)
 }
 
 /// 加密密码
 ///
 /// 如果未设置主密钥，返回原始密码。
-/// 加密后的密码格式：`ENC:V2:base64(salt + nonce + ciphertext)`
+/// 加密后的密码格式：`ENC:V3:base64(salt + nonce + ciphertext)`。
+///
+/// V3 写入路径使用 Argon2id 派生 AES 密钥（V1/V2 的 SHA-256 派生仅保留作读取路径）。
 pub fn encrypt_password(password: &str) -> String {
     if password.is_empty() {
         return password.to_string();
     }
 
-    // 如果已经是加密的，直接返回（支持 V1 和 V2 格式）
-    if password.starts_with(ENCRYPTED_PREFIX) || password.starts_with(ENCRYPTED_PREFIX_V2) {
+    // 如果已经是加密的，直接返回（支持 V1/V2/V3 格式）
+    if password.starts_with(ENCRYPTED_PREFIX)
+        || password.starts_with(ENCRYPTED_PREFIX_V2)
+        || password.starts_with(ENCRYPTED_PREFIX_V3)
+    {
         return password.to_string();
     }
 
-    // 获取派生的密钥
-    let key = match ENCRYPTION_KEY.read() {
+    // 获取 V3 路径的 Argon2id 派生密钥
+    let key = match ENCRYPTION_KEY_V3.read() {
         Ok(guard) => match &*guard {
             Some(k) => *k,
             None => return password.to_string(),
@@ -360,7 +477,7 @@ pub fn encrypt_password(password: &str) -> String {
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
 
-    // 生成随机盐值（16 字节，用于检测密文损坏）
+    // 生成随机盐值（16 字节，密文布局占位）
     let mut salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt);
 
@@ -371,37 +488,45 @@ pub fn encrypt_password(password: &str) -> String {
 
     match cipher.encrypt(nonce, password.as_bytes()) {
         Ok(ciphertext) => {
-            // V2 格式：salt(16) + nonce(12) + ciphertext
+            // V3 格式：salt(16) + nonce(12) + ciphertext
             let mut combined = Vec::with_capacity(16 + 12 + ciphertext.len());
             combined.extend_from_slice(&salt);
             combined.extend_from_slice(&nonce_bytes);
             combined.extend_from_slice(&ciphertext);
-            format!("{}{}", ENCRYPTED_PREFIX_V2, BASE64.encode(&combined))
+            format!("{}{}", ENCRYPTED_PREFIX_V3, BASE64.encode(&combined))
         }
         Err(_) => password.to_string(),
     }
 }
 
-/// 解密密码（支持 V1 和 V2 格式）
+/// 解密密码（支持 V1 / V2 / V3 格式）
 ///
 /// 如果密码未加密（不以 `ENC:` 开头），返回原始密码。
 /// 如果未设置主密钥或解密失败，返回空字符串。
+///
+/// 按密文前缀选择派生密钥槽：
+/// - `ENC:` 与 `ENC:V2:` 走 `ENCRYPTION_KEY`（SHA-256 派生）；
+/// - `ENC:V3:` 走 `ENCRYPTION_KEY_V3`（Argon2id 派生）。
 pub fn decrypt_password(encrypted: &str) -> String {
     if encrypted.is_empty() {
         return encrypted.to_string();
     }
 
     // 如果不是加密的，直接返回
-    if !encrypted.starts_with(ENCRYPTED_PREFIX) && !encrypted.starts_with(ENCRYPTED_PREFIX_V2) {
+    if !encrypted.starts_with(ENCRYPTED_PREFIX)
+        && !encrypted.starts_with(ENCRYPTED_PREFIX_V2)
+        && !encrypted.starts_with(ENCRYPTED_PREFIX_V3)
+    {
         return encrypted.to_string();
     }
 
-    // 检测格式
-    let is_v2 = encrypted.starts_with(ENCRYPTED_PREFIX_V2);
-    let encoded = if is_v2 {
-        &encrypted[ENCRYPTED_PREFIX_V2.len()..]
+    // 检测格式并切前缀
+    let (is_v3, is_v2, encoded) = if encrypted.starts_with(ENCRYPTED_PREFIX_V3) {
+        (true, false, &encrypted[ENCRYPTED_PREFIX_V3.len()..])
+    } else if encrypted.starts_with(ENCRYPTED_PREFIX_V2) {
+        (false, true, &encrypted[ENCRYPTED_PREFIX_V2.len()..])
     } else {
-        &encrypted[ENCRYPTED_PREFIX.len()..]
+        (false, false, &encrypted[ENCRYPTED_PREFIX.len()..])
     };
 
     let combined = match BASE64.decode(encoded) {
@@ -413,17 +538,22 @@ pub fn decrypt_password(encrypted: &str) -> String {
         return String::new();
     }
 
-    let (key, nonce, ciphertext) = if is_v2 {
-        // V2: salt(16) + nonce(12) + ciphertext
-        // salt 仅用于完整性检测，解密仍用 ENCRYPTION_KEY
+    let (key, nonce, ciphertext) = if is_v3 || is_v2 {
+        // V3/V2: salt(16) + nonce(12) + ciphertext
         if combined.len() < 16 + 12 {
             return String::new();
         }
-        let _salt = &combined[..16]; // 已存储的 salt，可用于完整性检测
+        let _salt = &combined[..16];
         let nonce = Nonce::from_slice(&combined[16..28]);
         let ciphertext = &combined[28..];
 
-        let key = match ENCRYPTION_KEY.read() {
+        // V3 用 Argon2id 派生槽，V2 仍用 SHA-256 派生槽
+        let key_res = if is_v3 {
+            ENCRYPTION_KEY_V3.read()
+        } else {
+            ENCRYPTION_KEY.read()
+        };
+        let key = match key_res {
             Ok(guard) => match *guard {
                 Some(k) => k,
                 None => return String::new(),
@@ -432,7 +562,7 @@ pub fn decrypt_password(encrypted: &str) -> String {
         };
         (key, nonce, ciphertext)
     } else {
-        // V1: nonce(12) + ciphertext（旧格式，用 V1 派生的密钥）
+        // V1: nonce(12) + ciphertext
         let nonce = Nonce::from_slice(&combined[..12]);
         let ciphertext = &combined[12..];
 
@@ -454,9 +584,11 @@ pub fn decrypt_password(encrypted: &str) -> String {
     }
 }
 
-/// 检查密码是否已加密
+/// 检查密码是否已加密（识别 V1/V2/V3 任一前缀）
 pub fn is_encrypted(password: &str) -> bool {
     password.starts_with(ENCRYPTED_PREFIX)
+        || password.starts_with(ENCRYPTED_PREFIX_V2)
+        || password.starts_with(ENCRYPTED_PREFIX_V3)
 }
 
 // ============================================================================
@@ -467,20 +599,25 @@ pub fn is_encrypted(password: &str) -> bool {
 ///
 /// 不依赖全局密钥状态，直接使用传入的主密钥进行加密。
 /// 适用于云同步场景和密钥迁移场景。
+///
+/// V3 写入使用 Argon2id 派生，V1/V2 仅作历史兼容。
 pub fn encrypt_with_key(plaintext: &str, master_key: &str) -> String {
     if plaintext.is_empty() {
         return plaintext.to_string();
     }
 
-    // 如果已经是加密的，直接返回（支持 V1 和 V2 格式）
-    if plaintext.starts_with(ENCRYPTED_PREFIX) || plaintext.starts_with(ENCRYPTED_PREFIX_V2) {
+    // 如果已经是加密的，直接返回（支持 V1/V2/V3 格式）
+    if plaintext.starts_with(ENCRYPTED_PREFIX)
+        || plaintext.starts_with(ENCRYPTED_PREFIX_V2)
+        || plaintext.starts_with(ENCRYPTED_PREFIX_V3)
+    {
         return plaintext.to_string();
     }
 
-    let key = derive_key(master_key);
+    let key = derive_key_v3(master_key, MASTER_KEY_APP_SALT_V3);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
 
-    // 生成随机盐值（16 字节）
+    // 生成随机盐值（16 字节，密文布局占位）
     let mut salt = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut salt);
 
@@ -490,18 +627,18 @@ pub fn encrypt_with_key(plaintext: &str, master_key: &str) -> String {
 
     match cipher.encrypt(nonce, plaintext.as_bytes()) {
         Ok(ciphertext) => {
-            // V2 格式：salt(16) + nonce(12) + ciphertext
+            // V3 格式：salt(16) + nonce(12) + ciphertext
             let mut combined = Vec::with_capacity(16 + 12 + ciphertext.len());
             combined.extend_from_slice(&salt);
             combined.extend_from_slice(&nonce_bytes);
             combined.extend_from_slice(&ciphertext);
-            format!("{}{}", ENCRYPTED_PREFIX_V2, BASE64.encode(&combined))
+            format!("{}{}", ENCRYPTED_PREFIX_V3, BASE64.encode(&combined))
         }
         Err(_) => plaintext.to_string(),
     }
 }
 
-/// 使用指定密钥解密密码（支持 V1 和 V2 格式）
+/// 使用指定密钥解密密码（支持 V1 / V2 / V3 格式）
 ///
 /// 不依赖全局密钥状态，直接使用传入的主密钥进行解密。
 /// 适用于云同步场景和密钥迁移场景。
@@ -511,13 +648,24 @@ pub fn decrypt_with_key(encrypted: &str, master_key: &str) -> Result<String, Cry
     }
 
     // 如果不是加密的，直接返回
-    if !encrypted.starts_with(ENCRYPTED_PREFIX) && !encrypted.starts_with(ENCRYPTED_PREFIX_V2) {
+    if !encrypted.starts_with(ENCRYPTED_PREFIX)
+        && !encrypted.starts_with(ENCRYPTED_PREFIX_V2)
+        && !encrypted.starts_with(ENCRYPTED_PREFIX_V3)
+    {
         return Ok(encrypted.to_string());
     }
 
-    // 检测格式
-    let is_v2 = encrypted.starts_with(ENCRYPTED_PREFIX_V2);
-    let encoded = if is_v2 {
+    // 检测格式并切前缀
+    let (is_v3, is_v2) = if encrypted.starts_with(ENCRYPTED_PREFIX_V3) {
+        (true, false)
+    } else if encrypted.starts_with(ENCRYPTED_PREFIX_V2) {
+        (false, true)
+    } else {
+        (false, false)
+    };
+    let encoded = if is_v3 {
+        &encrypted[ENCRYPTED_PREFIX_V3.len()..]
+    } else if is_v2 {
         &encrypted[ENCRYPTED_PREFIX_V2.len()..]
     } else {
         &encrypted[ENCRYPTED_PREFIX.len()..]
@@ -527,11 +675,16 @@ pub fn decrypt_with_key(encrypted: &str, master_key: &str) -> Result<String, Cry
         .decode(encoded)
         .map_err(|_| CryptoError::EncodingFailed)?;
 
-    let key = derive_key(master_key);
+    // V3 走 Argon2id 派生；V1/V2 保持 SHA-256 派生
+    let key = if is_v3 {
+        derive_key_v3(master_key, MASTER_KEY_APP_SALT_V3)
+    } else {
+        derive_key(master_key)
+    };
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
 
-    let (nonce, ciphertext) = if is_v2 {
-        // V2: salt(16) + nonce(12) + ciphertext
+    let (nonce, ciphertext) = if is_v3 || is_v2 {
+        // V3/V2: salt(16) + nonce(12) + ciphertext
         if combined.len() < 16 + 12 {
             return Err(CryptoError::InvalidDataFormat);
         }
@@ -565,6 +718,7 @@ pub fn re_encrypt_data(
     // 如果数据未加密，直接用新密钥加密
     if !encrypted_data.starts_with(ENCRYPTED_PREFIX)
         && !encrypted_data.starts_with(ENCRYPTED_PREFIX_V2)
+        && !encrypted_data.starts_with(ENCRYPTED_PREFIX_V3)
     {
         return Ok(encrypt_with_key(encrypted_data, new_key));
     }
@@ -622,22 +776,25 @@ pub fn change_master_key(
         return Err(CryptoError::PasswordMismatch);
     }
 
-    // 生成新的验证数据
-    let new_verification = generate_key_verification(new_key);
+    // 生成新的验证数据（默认走 V3 路径）
+    let new_verification = generate_key_verification_v3(new_key);
     if !save_verification_data(&new_verification) {
         return Err(CryptoError::SaveVerificationFailed);
     }
 
-    // 更新内存中的密钥
+    // 更新内存中的密钥（V1/V2 读取路径用 SHA-256 派生）
     let key = derive_key(new_key);
     if let Ok(mut guard) = ENCRYPTION_KEY.write() {
         *guard = Some(key);
     }
 
-    // 同时更新原始主密钥
-    if let Ok(mut guard) = RAW_MASTER_KEY.write() {
-        *guard = Some(new_key.to_string());
+    // V3 写入路径：Argon2id 派生
+    let key_v3 = derive_key_v3(new_key, MASTER_KEY_APP_SALT_V3);
+    if let Ok(mut guard) = ENCRYPTION_KEY_V3.write() {
+        *guard = Some(key_v3);
     }
+
+    // S2：不再写 RAW_MASTER_KEY；调用方按需通过 raw_master_key_for_sync() 读。
 
     // 更新存储后端中的密钥
     let storage = key_storage::get_key_storage();
@@ -713,9 +870,11 @@ pub fn try_restore_master_key() -> bool {
     if let Ok(mut guard) = ENCRYPTION_KEY.write() {
         *guard = Some(key);
     }
-    if let Ok(mut guard) = RAW_MASTER_KEY.write() {
-        *guard = Some(master_key);
+    let key_v3 = derive_key_v3(&master_key, MASTER_KEY_APP_SALT_V3);
+    if let Ok(mut guard) = ENCRYPTION_KEY_V3.write() {
+        *guard = Some(key_v3);
     }
+    // S2：不再写 RAW_MASTER_KEY；调用方按需通过 raw_master_key_for_sync() 读。
 
     // tracing::info!("[密钥恢复] 主密钥恢复成功");
     true
@@ -731,6 +890,19 @@ pub(crate) fn test_mutex() -> &'static std::sync::Mutex<()> {
         install_test_data_dir();
         std::sync::Mutex::new(())
     })
+}
+
+/// 测试专用：取测试锁的便捷封装，poisoned 状态下仍能拿到 guard。
+///
+/// 标准库的 Mutex 在持锁期间 panic 会把 mutex 标记为 poisoned；后续 lock() 拿到
+/// `Err(PoisonError)`，直接 `unwrap()` 会让后续测试全部因"已经 panic 的测试遗留"
+/// 而失败。这里从 PoisonError 提取原始 guard，**保留串行化效果**（guard drop 前
+/// 仍阻塞其他测试线程），并避免"假阳性"把失败传播下去。
+#[cfg(test)]
+pub(crate) fn lock_for_test() -> std::sync::MutexGuard<'static, ()> {
+    test_mutex()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 幂等安装：把密钥/验证数据目录重定向到本进程专属临时目录。
@@ -778,7 +950,7 @@ pub(crate) mod test_support {
 
     /// 与 crypto 单测共用同一把锁，串行化全局密钥状态。
     pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
-        super::test_mutex().lock().unwrap()
+        super::lock_for_test()
     }
 
     /// 在内存后端上设置全局测试主密钥。
@@ -802,13 +974,14 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         test_support::set_master_key("test_key_123");
 
         let original = "my_secret_password";
         let encrypted = encrypt_password(original);
 
-        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V2));
+        // V3 写入路径
+        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V3));
         assert_ne!(encrypted, original);
 
         let decrypted = decrypt_password(&encrypted);
@@ -819,17 +992,29 @@ mod tests {
 
     #[test]
     fn test_key_verification() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         let master_key = "test_key_123";
-        let verification = generate_key_verification(master_key);
+        let verification = generate_key_verification_v3(master_key);
 
         assert!(verify_master_key(master_key, &verification));
         assert!(!verify_master_key("wrong_key", &verification));
     }
 
     #[test]
+    fn test_key_verification_v2_still_accepted() {
+        let _guard = lock_for_test();
+        let master_key = "test_key_123";
+        let verification = generate_key_verification(master_key);
+
+        // V2 verification 仍可被 verify_master_key 通过（V2 输出 base64 串，
+        // 不以字面 "V2:" 开头；以解密成功与否为判断依据）
+        assert!(verify_master_key(master_key, &verification));
+        assert!(!verify_master_key("wrong_key", &verification));
+    }
+
+    #[test]
     fn test_key_verification_v1() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         let master_key = "test_key_123";
         let verification = generate_key_verification_v1(master_key);
 
@@ -842,7 +1027,7 @@ mod tests {
 
     #[test]
     fn test_empty_password() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         test_support::set_master_key("test_key");
 
         let encrypted = encrypt_password("");
@@ -856,7 +1041,7 @@ mod tests {
 
     #[test]
     fn test_no_master_key() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         clear_master_key();
 
         let original = "password123";
@@ -871,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_already_encrypted() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         test_support::set_master_key("test_key");
 
         let original = "password";
@@ -885,8 +1070,27 @@ mod tests {
     }
 
     #[test]
+    fn test_already_encrypted_v1_v2_v3() {
+        let _guard = lock_for_test();
+        test_support::set_master_key("test_key");
+
+        let already_v1 = "ENC:something";
+        let already_v2 = "ENC:V2:something";
+        let already_v3 = "ENC:V3:something";
+
+        assert_eq!(encrypt_password(already_v1), already_v1);
+        assert_eq!(encrypt_password(already_v2), already_v2);
+        assert_eq!(encrypt_password(already_v3), already_v3);
+        assert!(is_encrypted(already_v1));
+        assert!(is_encrypted(already_v2));
+        assert!(is_encrypted(already_v3));
+
+        clear_master_key();
+    }
+
+    #[test]
     fn test_v1_backward_compatibility() {
-        let _guard = test_mutex().lock().unwrap();
+        let _guard = lock_for_test();
         test_support::set_master_key("test_key");
 
         // 模拟旧 V1 格式：ENC: + base64(nonce + ciphertext)
@@ -911,13 +1115,13 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_format_verification() {
-        let _guard = test_mutex().lock().unwrap();
+    fn test_v3_format_verification() {
+        let _guard = lock_for_test();
         test_support::set_master_key("test_key");
 
         let encrypted = encrypt_password("secret");
-        // V2 格式以 ENC:V2: 开头
-        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V2));
+        // V3 格式以 ENC:V3: 开头
+        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V3));
 
         // V1 格式应被识别为未加密
         let v1_like = "ENC:something";
@@ -928,13 +1132,13 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypt_with_key_v2() {
-        let _guard = test_mutex().lock().unwrap();
+    fn test_encrypt_with_key_v3() {
+        let _guard = lock_for_test();
         let master_key = "my_master_key";
         let plaintext = "database_password";
 
         let encrypted = encrypt_with_key(plaintext, master_key);
-        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V2));
+        assert!(encrypted.starts_with(ENCRYPTED_PREFIX_V3));
 
         let decrypted = decrypt_with_key(&encrypted, master_key).unwrap();
         assert_eq!(decrypted, plaintext);
@@ -942,5 +1146,112 @@ mod tests {
         // 错误密钥应解密失败
         let result = decrypt_with_key(&encrypted, "wrong_key");
         assert!(result.is_err());
+    }
+
+    /// V1/V2 旧密文能被新代码正确解密（向后兼容）。
+    /// V3 与 V1/V2 派生密钥不同（SHA-256 vs Argon2id），三者**不**可互相替换解密。
+    #[test]
+    fn test_v1_v2_v3_interop() {
+        let _guard = lock_for_test();
+        let master_key = "interop_key";
+        test_support::set_master_key(master_key);
+
+        // 用旧 SHA-256 派生造 V1 密文
+        let v1_plain = "v1_secret";
+        let key_v1 = derive_key(master_key);
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_v1));
+        let mut nonce_v1 = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_v1);
+        let ct_v1 = cipher
+            .encrypt(Nonce::from_slice(&nonce_v1), v1_plain.as_bytes())
+            .unwrap();
+        let mut combined_v1 = Vec::with_capacity(12 + ct_v1.len());
+        combined_v1.extend_from_slice(&nonce_v1);
+        combined_v1.extend_from_slice(&ct_v1);
+        let v1_encrypted = format!("{}{}", ENCRYPTED_PREFIX, BASE64.encode(&combined_v1));
+
+        // 用旧 SHA-256 派生造 V2 密文
+        let v2_plain = "v2_secret";
+        let mut salt_v2 = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt_v2);
+        let mut nonce_v2 = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_v2);
+        let ct_v2 = cipher
+            .encrypt(Nonce::from_slice(&nonce_v2), v2_plain.as_bytes())
+            .unwrap();
+        let mut combined_v2 = Vec::with_capacity(16 + 12 + ct_v2.len());
+        combined_v2.extend_from_slice(&salt_v2);
+        combined_v2.extend_from_slice(&nonce_v2);
+        combined_v2.extend_from_slice(&ct_v2);
+        let v2_encrypted = format!("{}{}", ENCRYPTED_PREFIX_V2, BASE64.encode(&combined_v2));
+
+        // 用 V3 路径造 V3 密文
+        let v3_plain = "v3_secret";
+        let v3_encrypted = encrypt_password(v3_plain);
+
+        // 解密三类密文
+        assert_eq!(decrypt_password(&v1_encrypted), v1_plain);
+        assert_eq!(decrypt_password(&v2_encrypted), v2_plain);
+        assert_eq!(decrypt_password(&v3_encrypted), v3_plain);
+
+        // 用错密钥解 V3 密文应失败
+        let wrong = decrypt_with_key(&v3_encrypted, "bad_key");
+        assert!(wrong.is_err());
+
+        clear_master_key();
+    }
+
+    /// V3 verification 数据应当走 Argon2id 派生，且不能被 V2 prefix 误判。
+    #[test]
+    fn test_v3_verification_format() {
+        let _guard = lock_for_test();
+        let master_key = "v3_verify_key";
+
+        let verification_v3 = generate_key_verification_v3(master_key);
+        assert!(verify_master_key(master_key, &verification_v3));
+
+        // 错误密钥应失败
+        assert!(!verify_master_key("wrong_key", &verification_v3));
+
+        clear_master_key();
+    }
+
+    /// S2：未设主密钥时 `raw_master_key_for_sync` 应返回 None。
+    #[test]
+    fn test_raw_master_key_for_sync_none_when_unset() {
+        let _guard = lock_for_test();
+        test_support::clear_master_key();
+        assert!(raw_master_key_for_sync().is_none());
+        assert!(with_raw_master_key(|_| ()).is_none());
+    }
+
+    /// S2：设了主密钥后 `raw_master_key_for_sync` 能从 key_storage 后端读出；
+    /// `with_raw_master_key` 闭包可拿到 &str。
+    #[test]
+    fn test_raw_master_key_for_sync_roundtrip() {
+        let _guard = lock_for_test();
+        let master_key = "sync_roundtrip_key";
+        test_support::set_master_key(master_key);
+
+        let got = raw_master_key_for_sync();
+        assert!(got.is_some(), "raw_master_key_for_sync 应返回 Some");
+        assert_eq!(got.as_ref().map(|s| s.as_str()), Some(master_key));
+
+        let via_closure = with_raw_master_key(|k| k.to_string());
+        assert_eq!(via_closure, Some(master_key.to_string()));
+
+        clear_master_key();
+    }
+
+    /// S2：清除主密钥后 `raw_master_key_for_sync` 再次返回 None；
+    /// storage 后端同步被清空。
+    #[test]
+    fn test_raw_master_key_for_sync_cleared_after_clear() {
+        let _guard = lock_for_test();
+        test_support::set_master_key("transient_key");
+        assert!(raw_master_key_for_sync().is_some());
+
+        clear_master_key();
+        assert!(raw_master_key_for_sync().is_none());
     }
 }

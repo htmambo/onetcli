@@ -43,6 +43,7 @@ reqwest_client.workspace = true
 db.workspace = true
 global-hotkey.workspace = true
 sha2 = { workspace = true }
+zeroize = { workspace = true }
 flate2 = "1"
 tar = "0.4"
 sysinfo = "0.32"

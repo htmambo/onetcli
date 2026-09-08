@@ -29,6 +29,7 @@ rand.workspace = true
 base64.workspace = true
 sha2.workspace = true
 argon2.workspace = true
+zeroize.workspace = true
 parking_lot.workspace = true
 util.workspace = true
 rust-i18n.workspace = true

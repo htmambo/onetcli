@@ -27,6 +27,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use zeroize::Zeroizing;
 
 pub type SyncFuture<'a> = Pin<Box<dyn Future<Output = Result<SyncResult, SyncError>> + Send + 'a>>;
 
@@ -127,7 +128,7 @@ impl SyncEngine {
     pub(crate) fn ensure_unlocked(&self) -> Result<(), SyncError> {
         // 如果本地 crypto 模块已解锁但同步服务未解锁，同步密钥状态
         if crypto::has_master_key() {
-            if let Some(raw_key) = crypto::get_raw_master_key() {
+            if let Some(raw_key) = crypto::raw_master_key_for_sync() {
                 let mut service_write = self
                     .crypto_service
                     .write()
@@ -155,7 +156,7 @@ impl SyncEngine {
     ///
     /// 首次同步时自动创建 `user_config`，后续同步则从云端恢复正确的 `key_version`。
     pub(crate) async fn ensure_personal_key_config(&self) -> Result<(), SyncError> {
-        let raw_key = crypto::get_raw_master_key().ok_or(SyncError::NotUnlocked)?;
+        let raw_key = crypto::raw_master_key_for_sync().ok_or(SyncError::NotUnlocked)?;
         let cloud_config = self
             .cloud_client
             .get_user_config()
@@ -612,7 +613,9 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
-    fn setup_test_storage(temp_home: &PathBuf) -> crate::storage::StorageManager {
+    // S4：env::set_var / env::remove_var 在新版本 Rust 标记 unsafe；仅测试用。
+#[allow(unsafe_code)]
+fn setup_test_storage(temp_home: &PathBuf) -> crate::storage::StorageManager {
         let previous_home = std::env::var_os("HOME");
         unsafe {
             std::env::set_var("HOME", temp_home);
@@ -702,7 +705,7 @@ mod tests {
 
             let cloud_client = Arc::new(MockCloudClient::default());
             let mut service = crate::cloud_sync::CloudSyncService::new();
-            service.set_master_key_directly("test-master-key".to_string());
+            service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
             // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
             let _key_guard = crate::crypto::test_support::lock();
@@ -811,7 +814,7 @@ mod tests {
             });
 
             let mut service = crate::cloud_sync::CloudSyncService::new();
-            service.set_master_key_directly("test-master-key".to_string());
+            service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
             // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
             let _key_guard = crate::crypto::test_support::lock();
@@ -912,7 +915,7 @@ mod tests {
 
             let cloud_client = Arc::new(MockCloudClient::default());
             let mut service = crate::cloud_sync::CloudSyncService::new();
-            service.set_master_key_directly("test-master-key".to_string());
+            service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
             // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
             let _key_guard = crate::crypto::test_support::lock();

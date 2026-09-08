@@ -2866,10 +2866,9 @@ impl HomePage {
         let has_key_in_memory = crypto::has_master_key();
         let is_first_setup = !has_password_set;
         let is_change_mode = has_password_set && has_key_in_memory;
-        let initial_master_key = crypto::get_raw_master_key().or_else(|| {
-            let storage = key_storage::get_key_storage();
-            storage.load()
-        });
+        // S2 后：主密钥不再长期驻留静态变量；raw_master_key_for_sync 内部已 fallback
+// 到 key_storage 后端读取，无需在调用方再做二次回退。
+let initial_master_key = crypto::raw_master_key_for_sync();
 
         let key_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
@@ -2877,7 +2876,10 @@ impl HomePage {
                 .masked(true);
 
             if let Some(ref value) = initial_master_key {
-                state = state.default_value(value);
+                // 预填到 UI：转成 SharedString 避免生命周期问题。
+                // 注意：这里会有一次 String 副本（S2 接受，因为仅 UI 预填路径，
+                // 不参与加解密数据通路）。
+                state = state.default_value(SharedString::new(value.to_string()));
             }
 
             state
@@ -2924,8 +2926,8 @@ impl HomePage {
                     }
 
                     if is_change_mode {
-                        let old_key = match crypto::get_raw_master_key() {
-                            Some(key) if !key.is_empty() => key,
+                        let old_key = match crypto::raw_master_key_for_sync() {
+                            Some(key) if !key.is_empty() => key.to_string(),
                             _ => {
                                 error_msg_ok.update(cx, |msg, cx| {
                                     *msg = Some(t!("Encryption.password_incorrect").to_string());

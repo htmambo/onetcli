@@ -10,6 +10,7 @@ use crate::storage::{
     ConnectionRepository, PendingCloudDeletionRepository, StoredConnection, WorkspaceRepository,
 };
 use std::collections::{HashMap, HashSet};
+use zeroize::Zeroizing;
 
 const CONNECTION_QUEUE_KEY: &str = "connection";
 
@@ -1251,7 +1252,7 @@ mod tests {
         crate::crypto::test_support::set_master_key("test-master-key");
         runtime.block_on(async {
             let mut sync_service = crate::cloud_sync::CloudSyncService::new();
-            sync_service.set_master_key_directly("test-master-key".to_string());
+            sync_service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             let (storage, _temp_dir) = create_test_storage();
             let repo = storage
                 .get::<ConnectionRepository>()

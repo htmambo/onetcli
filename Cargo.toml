@@ -154,6 +154,7 @@ aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
+zeroize = { version = "1.7", features = ["derive"] }
 
 # Terminal emulation
 alacritty_terminal = "0.26"
@@ -185,6 +186,7 @@ version = "0.61.0"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 almost_complete_range = "allow"
@@ -201,6 +203,11 @@ single_range_in_vec_init = "allow"
 style = { level = "allow", priority = -1 }
 todo = "deny"
 type_complexity = "allow"
+# S4：显式收紧错误处理风格
+unwrap_used = "warn"
+expect_used = "warn"
+panic_in_result_fn = "warn"
+missing_errors_doc = "allow"
 
 
 [profile.dev]
@@ -256,3 +263,20 @@ xml5ever = { opt-level = 3 }
 # P0-C 优化：dev 模式下也启用较高优化级别
 alacritty_terminal = { opt-level = 3 }
 mongodb = { opt-level = 3 }
+# S5：dev profile 补充重依赖 opt-level=3，缩短冷启动 + 提升调试时单步响应
+duckdb = { opt-level = 3 }
+tiberius = { opt-level = 3 }
+oracle = { opt-level = 3 }
+mysql_async = { opt-level = 3 }
+clickhouse = { opt-level = 3 }
+redis_client = { opt-level = 3 }
+tokio-postgres = { opt-level = 3 }
+tokio-postgres-rustls = { opt-level = 3 }
+serde_json = { opt-level = 3 }
+smallvec = { opt-level = 3 }
+parking_lot = { opt-level = 3 }
+tokio = { opt-level = 3 }
+tokio-util = { opt-level = 3 }
+dashmap = { opt-level = 3 }
+moka = { opt-level = 3 }
+bytes = { opt-level = 3 }

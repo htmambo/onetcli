@@ -215,7 +215,7 @@ impl SyncEngine {
                 .map(|conn| {
                     let mut conn = conn.clone();
                     if let (Some(key), Some(params_str)) =
-                        (key.as_ref(), conn.get("params").and_then(|v| v.as_str()))
+                        (key.as_deref(), conn.get("params").and_then(|v| v.as_str()))
                     {
                         if let Ok(json) = crate::crypto::decrypt_with_key(params_str, key) {
                             if let Ok(params) = serde_json::from_str::<serde_json::Value>(&json) {
@@ -244,7 +244,7 @@ impl SyncEngine {
                 .map(|cert| {
                     let mut cert = cert.clone();
                     if let (Some(key), Some(params_str)) =
-                        (key.as_ref(), cert.get("params").and_then(|v| v.as_str()))
+                        (key.as_deref(), cert.get("params").and_then(|v| v.as_str()))
                     {
                         if let Ok(json) = crate::crypto::decrypt_with_key(params_str, key) {
                             if let Ok(params) = serde_json::from_str::<serde_json::Value>(&json) {

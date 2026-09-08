@@ -7,6 +7,7 @@ use crate::storage::{Certificate, CertificateKind, ConnectionType, StoredConnect
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use zeroize::Zeroizing;
 
 /// 云同步错误类型
 #[derive(Debug)]
@@ -66,7 +67,7 @@ fn current_timestamp() -> i64 {
 /// 云同步服务
 pub struct CloudSyncService {
     /// 主密钥（解锁后存储）
-    master_key: Option<String>,
+    master_key: Option<Zeroizing<String>>,
     /// 当前密钥版本
     key_version: u32,
     /// 是否已登录
@@ -142,7 +143,10 @@ impl CloudSyncService {
     ///
     /// 用于从本地 crypto 模块同步密钥状态，跳过云端验证。
     /// 调用者需确保密钥已通过本地验证。
-    pub(crate) fn set_master_key_directly(&mut self, master_key: String) {
+    ///
+    /// S2 后接受 `Zeroizing<String>`：调用方传 `Zeroizing::new(s)`，内部不再长期
+    /// 持有普通 `String` 副本，drop 时 zeroize 缓冲区。
+    pub(crate) fn set_master_key_directly(&mut self, master_key: Zeroizing<String>) {
         self.master_key = Some(master_key);
         // key_version 保持默认或之前的值，实际同步时会从云端更新
     }
@@ -160,7 +164,7 @@ impl CloudSyncService {
             return Err(SyncError::InvalidMasterKey);
         }
 
-        self.master_key = Some(master_key.to_string());
+        self.master_key = Some(Zeroizing::new(master_key.to_string()));
         self.key_version = cloud_config.key_version;
         Ok(())
     }
@@ -186,7 +190,7 @@ impl CloudSyncService {
             updated_at: current_timestamp(),
         };
 
-        self.master_key = Some(master_key.to_string());
+        self.master_key = Some(Zeroizing::new(master_key.to_string()));
         self.key_version = 1;
 
         Ok(config)
@@ -198,11 +202,14 @@ impl CloudSyncService {
 
     /// 选择加密密钥
     pub(crate) fn select_encrypt_key(&self) -> Result<&str, SyncError> {
-        self.master_key.as_deref().ok_or(SyncError::NotUnlocked)
+        self.master_key
+            .as_deref()
+            .map(|s| s.as_str())
+            .ok_or(SyncError::NotUnlocked)
     }
 
-    /// 选择解密密钥
-    pub(crate) fn select_decrypt_key(&self) -> Result<String, SyncError> {
+    /// 选择解密密钥（S2：返回 `Zeroizing<String>`，调用方短期持有，drop 时清零）
+    pub(crate) fn select_decrypt_key(&self) -> Result<Zeroizing<String>, SyncError> {
         self.master_key.clone().ok_or(SyncError::NotUnlocked)
     }
 
@@ -401,7 +408,7 @@ impl CloudSyncService {
 
         // 解密 params
         let key = self.select_decrypt_key()?;
-        let params_json = crypto::decrypt_with_key(&plain_data.params, &key)
+        let params_json = crypto::decrypt_with_key(&plain_data.params, key.as_ref())
             .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
         let params: serde_json::Value = serde_json::from_str(&params_json)
             .map_err(|e| SyncError::DataFormatError(e.to_string()))?;
@@ -514,7 +521,7 @@ mod tests {
     #[test]
     fn test_blob_encrypt_decrypt() {
         let mut service = CloudSyncService::new();
-        service.set_master_key_directly("test_blob_key".to_string());
+        service.set_master_key_directly(Zeroizing::new("test_blob_key".to_string()));
 
         let plaintext = r#"{"name":"test","params":{"host":"localhost","password":"secret"}}"#;
         let encrypted = service.encrypt_blob(plaintext).unwrap();
@@ -539,7 +546,7 @@ mod tests {
     #[test]
     fn test_prepare_connection_sync_data_preserves_workspace_cloud_id() {
         let mut service = CloudSyncService::new();
-        service.set_master_key_directly("test_workspace_key".to_string());
+        service.set_master_key_directly(Zeroizing::new("test_workspace_key".to_string()));
 
         let connection = StoredConnection::new_redis(
             "测试连接".to_string(),
