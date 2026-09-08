@@ -815,6 +815,7 @@ impl DatabasePlugin for SqlitePlugin {
                     comment: None,
                     charset: None,
                     collation: None,
+                    enum_values: None,
                 })
                 .collect())
         } else {

@@ -1,4 +1,4 @@
 mod connection;
-mod plugin;
+pub(crate) mod plugin;
 
 pub use plugin::MySqlPlugin;
