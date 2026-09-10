@@ -318,6 +318,7 @@ struct SelectOptions {
     menu_width: Length,
     disabled: bool,
     appearance: bool,
+    outline: bool,
 }
 
 impl Default for SelectOptions {
@@ -333,6 +334,7 @@ impl Default for SelectOptions {
             menu_width: Length::Auto,
             disabled: false,
             appearance: true,
+            outline: true,
             search_placeholder: None,
         }
     }
@@ -827,7 +829,9 @@ where
                     .input_size(self.options.size)
                     .input_text_size(self.options.size)
                     .refine_style(&self.options.style)
-                    .when(outline_visible, |this| this.focused_border(cx))
+                    .when(outline_visible && self.options.outline, |this| {
+                        this.focused_border(cx)
+                    })
                     .when(allow_open, |this| {
                         this.on_click(cx.listener(Self::toggle_menu))
                     })
@@ -981,6 +985,12 @@ where
     /// Set the appearance of the select, if false the select input will no border, background.
     pub fn appearance(mut self, appearance: bool) -> Self {
         self.options.appearance = appearance;
+        self
+    }
+
+    /// Set whether to show the focus ring border when the select is open or focused, default is true.
+    pub fn outline(mut self, outline: bool) -> Self {
+        self.options.outline = outline;
         self
     }
 }

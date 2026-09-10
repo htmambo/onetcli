@@ -2141,6 +2141,10 @@ where
         // 编辑模式：嵌入轻量编辑器（无自带样式，由容器控制布局）
         if is_editing {
             if let Some(editor) = &self.editing_input {
+                // Select 编辑器填满整个单元格，去掉容器上下留白
+                if matches!(editor, CellEditor::Select(_)) {
+                    cell = cell.pt(px(0.)).pb(px(0.));
+                }
                 cell = cell.child(editor.render(window, cx));
             }
         }

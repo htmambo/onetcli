@@ -250,8 +250,15 @@ impl CellEditor {
             }
             CellEditor::Select(state) => gpui_component::select::Select::new(state)
                 .appearance(false)
+                .outline(false)
                 .cleanable(false)
                 .w_full()
+                .h_full()
+                .px_0()
+                .py_0()
+                .pt(px(1.))
+                .border_0()
+                .text_base()
                 .into_any_element(),
         }
     }
