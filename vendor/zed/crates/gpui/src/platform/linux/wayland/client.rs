@@ -403,6 +403,31 @@ impl WaylandClientStatePtr {
             state.keyboard_focused_window = Some(window);
         }
     }
+
+    /// 尝试同步从窗口表移除；客户端状态正被借用（重入场景）时返回 false，
+    /// 调用方应退回异步清理。窗口平台层销毁期间滞后的 Wayland 事件
+    /// （frame 回调、pointer/keyboard leave、xdg configure 等）依赖本表
+    /// 拦截，同步移除可避免事件派发到已开始销毁的 zombie 窗口。
+    pub fn try_drop_window(&self, surface_id: &ObjectId) -> bool {
+        let client = self.get_client();
+        let Ok(mut state) = client.try_borrow_mut() else {
+            return false;
+        };
+        let Some(closed_window) = state.windows.remove(surface_id) else {
+            return true;
+        };
+        if let Some(window) = state.mouse_focused_window.take()
+            && !window.ptr_eq(&closed_window)
+        {
+            state.mouse_focused_window = Some(window);
+        }
+        if let Some(window) = state.keyboard_focused_window.take()
+            && !window.ptr_eq(&closed_window)
+        {
+            state.keyboard_focused_window = Some(window);
+        }
+        true
+    }
 }
 
 #[derive(Clone)]

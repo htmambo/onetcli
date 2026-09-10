@@ -411,6 +411,13 @@
 - **验证方式**：shim 下 `cargo check -p main` 到达 Finished；测试二进制直接运行输出 `test result: ok`；`cargo fmt --check` 无 diff。
 - **适用范围**：本机（缺 `-dev` 包的 Linux 桌面环境）上所有依赖 gpui / udev 原生库的 crate 的检查与测试验证。
 
+- **标题**：Wayland 下"弹窗销毁 + 同事件周期主窗口重活"导致 Intel Vulkan 驱动段错误时，检查滞留 frame 回调是否打到 zombie 窗口。
+- **触发信号**：启动恢复连接必崩（`段错误 (核心已转储)`，exit 139），但绕过弹窗直接恢复、或弹窗秒关都不崩；日志末尾固定出现两条 `ERROR gpui::window: window not found`（弹窗的滞留 frame 回调打到已移除的 gpui Window），随后日志戛然而止（SIGSEGV 无 panic 信息）。
+- **根因 / 约束**：`WaylandWindow::drop`（`vendor/zed/crates/gpui/src/platform/linux/wayland/window.rs`）先同步销毁 wl_surface 与 Vulkan swapchain，却用 `spawn` 异步执行 `drop_window` 清理 `state.windows` 映射与 mouse/keyboard 焦点引用；在此期间到达的滞留事件（frame 回调、wl_surface Leave、xdg configure、pointer/keyboard 事件等）仍能找到该 zombie 窗口并调用其处理器，在已销毁的 surface/renderer 上再次操作（如 `surface.frame()` 注册回调、rescale 触发 renderer 重配置），把 Mesa ANV (libvulkan_intel) 的 WSI 状态打乱，主窗口下一次 present 时驱动 UAF 段错误。弹窗必须存活足够久（有在途事件）才触发，所以秒关不崩、用户等几秒再点恢复必崩；仅给 `frame()` 加守卫不够（pointer/键盘等事件路径仍会打到 zombie）。
+- **正确做法**：双管齐下——(1) `WaylandClientStatePtr` 新增 `try_drop_window`（`client.rs`），`WaylandWindow::drop` 开头先**同步**把窗口从 `state.windows` 映射和焦点引用中移除（RefCell 正被借用的重入场景用 `try_borrow_mut` 失败兜底，退回原异步 spawn 清理），使所有滞留事件在 `get_window` 处直接返回 None；(2) `WaylandWindowState` 加 `destroyed` 标志，`frame()` 检查到置位直接返回，兜住重入兜底路径。排查手段：复现时给恢复弹窗加"延迟 N 秒自动触发"的诊断补丁区分时序因素；无 gdb 时可 `ulimit -c unlimited` 拿 core，用 Python 解析 ELF NT_PRSTATUS/NT_SIGINFO/NT_FILE + addr2line 定位崩溃线程 RIP 所属 .so。
+- **验证方式**：带延迟自动恢复补丁复跑 `cargo run -p main`，恢复完成后进程存活、`window not found` 错误归零、应用可继续正常使用即为修复。
+- **适用范围**：所有 Wayland（尤其 Treeland/ANV 核显）下 popup_window 销毁后立刻进行重渲染的场景。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。

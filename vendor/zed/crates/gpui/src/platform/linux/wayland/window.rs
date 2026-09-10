@@ -120,6 +120,9 @@ pub struct WaylandWindowState {
     in_progress_window_controls: Option<WindowControls>,
     window_controls: WindowControls,
     client_inset: Option<Edges<Pixels>>,
+    // 窗口平台层已开始销毁（Drop）后置位，滞留的 frame 回调据此直接忽略，
+    // 避免在已销毁的 wl_surface 上重复注册 frame callback 导致 Vulkan WSI 崩溃。
+    destroyed: bool,
 }
 
 pub enum WaylandSurfaceState {
@@ -382,6 +385,7 @@ impl WaylandWindowState {
             in_progress_window_controls: None,
             window_controls: WindowControls::default(),
             client_inset: None,
+            destroyed: false,
         })
     }
 
@@ -426,12 +430,19 @@ pub enum ImeInput {
 impl Drop for WaylandWindow {
     fn drop(&mut self) {
         let mut state = self.0.state.borrow_mut();
+        state.destroyed = true;
         let surface_id = state.surface.id();
         if let Some(parent) = state.parent.as_ref() {
             parent.state.borrow_mut().children.remove(&surface_id);
         }
 
         let client = state.client.clone();
+
+        // 先同步从客户端窗口表移除本窗口：销毁期间到达的滞留事件
+        // （frame 回调、pointer/keyboard leave、xdg configure 等）据此直接忽略，
+        // 不再派发到已开始销毁的 zombie 窗口。仅在客户端状态正被借用
+        // （重入场景）时退回原来的异步清理。
+        let dropped_now = client.try_drop_window(&surface_id);
 
         state.renderer.destroy();
 
@@ -465,7 +476,9 @@ impl Drop for WaylandWindow {
             .executor
             .spawn(async move {
                 state_ptr.close();
-                client.drop_window(&surface_id)
+                if !dropped_now {
+                    client.drop_window(&surface_id)
+                }
             })
             .detach();
         drop(state);
@@ -554,6 +567,11 @@ impl WaylandWindowStatePtr {
 
     pub fn frame(&self) {
         let mut state = self.state.borrow_mut();
+        if state.destroyed {
+            // 窗口已进入销毁流程（滞留的 frame 回调）：不要触碰已销毁的
+            // wl_surface，也不再触发 gpui 层的 request_frame。
+            return;
+        }
         state.surface.frame(&state.globals.qh, state.surface.id());
         state.resize_throttle = false;
         drop(state);
