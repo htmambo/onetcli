@@ -188,6 +188,11 @@ impl DatabaseEventHandler {
                             Self::handle_export_data(node, global_state, window, cx);
                         }
                     }
+                    DbTreeViewEvent::DataTransfer { node_id } => {
+                        if let Some(node) = get_node(&node_id, cx) {
+                            Self::handle_data_transfer(node, global_state, window, cx);
+                        }
+                    }
                     DbTreeViewEvent::CloseConnection { node_id } => {
                         if let Some(node) = get_node(&node_id, cx) {
                             Self::handle_close_connection(
@@ -1045,6 +1050,19 @@ impl DatabaseEventHandler {
             move |_window, _cx| export_view.clone(),
             cx,
         );
+    }
+
+    /// 处理数据传输事件：以当前连接与库作为源预选打开向导
+    fn handle_data_transfer(
+        node: DbNode,
+        global_state: GlobalDbState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let preset = global_state
+            .get_config(&node.connection_id)
+            .map(|config| (config, node.get_database_name().unwrap_or_default()));
+        crate::data_transfer::open_data_transfer_window(window, cx, preset);
     }
 
     /// 处理关闭连接事件

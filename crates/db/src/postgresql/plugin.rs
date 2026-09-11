@@ -596,6 +596,12 @@ fn postgresql_action_manifest() -> DatabaseActionManifest {
                 vec![DbNodeType::Table],
                 DatabaseActionPlacement::ContextMenu,
             ),
+            action(
+                DatabaseActionId::DataTransfer,
+                "ImportExport.data_transfer",
+                vec![DbNodeType::Database, DbNodeType::Table],
+                DatabaseActionPlacement::ContextMenu,
+            ),
             action_with_scope(
                 DatabaseActionId::OpenViewData,
                 "View.view_data",

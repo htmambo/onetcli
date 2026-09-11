@@ -417,6 +417,12 @@ fn clickhouse_action_manifest() -> DatabaseActionManifest {
                 DatabaseActionPlacement::ContextMenu,
             ),
             action(
+                DatabaseActionId::DataTransfer,
+                "ImportExport.data_transfer",
+                vec![DbNodeType::Database, DbNodeType::Table],
+                DatabaseActionPlacement::ContextMenu,
+            ),
+            action(
                 DatabaseActionId::TruncateTable,
                 "Table.truncate_table",
                 vec![DbNodeType::Table],

@@ -198,6 +198,7 @@ pub enum DatabaseActionId {
     RunSqlFile,
     ImportData,
     ExportData,
+    DataTransfer,
     DumpSqlStructure,
     DumpSqlData,
     DumpSqlStructureAndData,

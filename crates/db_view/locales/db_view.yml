@@ -1597,6 +1597,10 @@ ImportExport:
     en: Exporting...
     zh-CN: 导出中...
     zh-HK: 匯出中...
+  data_transfer:
+    en: Data Transfer
+    zh-CN: 数据传输
+    zh-HK: 資料傳輸
 
   # SQL 文件运行
   run_sql_file:
@@ -3077,3 +3081,182 @@ ErDiagram:
     en: Loading ER diagram...
     zh-CN: 正在加载 ER 图...
     zh-HK: 正在載入 ER 圖...
+
+# 数据传输向导
+DataTransfer:
+  title:
+    en: Data Transfer
+    zh-CN: 数据传输
+    zh-HK: 資料傳輸
+  step_endpoints:
+    en: Endpoints
+    zh-CN: 选择连接
+    zh-HK: 選擇連線
+  step_objects:
+    en: Objects
+    zh-CN: 选择对象
+    zh-HK: 選擇對象
+  step_summary:
+    en: Summary
+    zh-CN: 摘要确认
+    zh-HK: 摘要確認
+  step_execute:
+    en: Execute
+    zh-CN: 执行传输
+    zh-HK: 執行傳輸
+  source:
+    en: Source
+    zh-CN: 源
+    zh-HK: 來源
+  target:
+    en: Target
+    zh-CN: 目标
+    zh-HK: 目標
+  connection:
+    en: Connection
+    zh-CN: 连接
+    zh-HK: 連線
+  database:
+    en: Database
+    zh-CN: 数据库
+    zh-HK: 資料庫
+  select_connection:
+    en: Select connection
+    zh-CN: 请选择连接
+    zh-HK: 請選擇連線
+  select_database:
+    en: Select database
+    zh-CN: 请选择数据库
+    zh-HK: 請選擇資料庫
+  info_type:
+    en: Type
+    zh-CN: 类型
+    zh-HK: 類型
+  info_name:
+    en: Name
+    zh-CN: 名称
+    zh-HK: 名稱
+  info_host:
+    en: Host
+    zh-CN: 主机
+    zh-HK: 主機
+  info_port:
+    en: Port
+    zh-CN: 端口
+    zh-HK: 埠
+  loading_databases:
+    en: Loading databases...
+    zh-CN: 正在加载数据库列表...
+    zh-HK: 正在載入資料庫列表...
+  load_databases_failed:
+    en: "Failed to load databases: %{error}"
+    zh-CN: "加载数据库列表失败: %{error}"
+    zh-HK: "載入資料庫列表失敗: %{error}"
+  same_endpoint_warning:
+    en: Source and target cannot be the same database on the same connection.
+    zh-CN: 源与目标不能是同一连接下的同一个数据库。
+    zh-HK: 來源與目標不能是同一連線下的同一個資料庫。
+  tables_group:
+    en: "Tables (%{count})"
+    zh-CN: "表 (%{count})"
+    zh-HK: "表 (%{count})"
+  views_group:
+    en: "Views (%{count})"
+    zh-CN: "视图 (%{count})"
+    zh-HK: "視圖 (%{count})"
+  search_placeholder:
+    en: Search objects
+    zh-CN: 搜索对象
+    zh-HK: 搜尋對象
+  objects_loading:
+    en: Loading objects...
+    zh-CN: 正在加载对象列表...
+    zh-HK: 正在載入對象列表...
+  objects_load_failed:
+    en: "Failed to load objects: %{error}"
+    zh-CN: "加载对象列表失败: %{error}"
+    zh-HK: "載入對象列表失敗: %{error}"
+  summary_hint:
+    en: Please confirm the objects to transfer and the transfer options.
+    zh-CN: 请确认要传输的对象与传输选项。
+    zh-HK: 請確認要傳輸的對象與傳輸選項。
+  summary_source:
+    en: Source Object
+    zh-CN: 源对象
+    zh-HK: 來源對象
+  summary_target:
+    en: Target Object
+    zh-CN: 目标对象
+    zh-HK: 目標對象
+  summary_mode:
+    en: Mode
+    zh-CN: 模式
+    zh-HK: 模式
+  mode_table:
+    en: Structure + Data
+    zh-CN: 结构 + 数据
+    zh-HK: 結構 + 資料
+  mode_view:
+    en: Structure
+    zh-CN: 结构
+    zh-HK: 結構
+  continue_on_error:
+    en: Continue on error
+    zh-CN: 遇到错误时继续
+    zh-HK: 遇到錯誤時繼續
+  drop_target_first:
+    en: Drop target objects before create
+    zh-CN: 创建前删除目标对象
+    zh-HK: 建立前刪除目標對象
+  start_transfer:
+    en: Start Transfer
+    zh-CN: 开始传输
+    zh-HK: 開始傳輸
+  cancelling:
+    en: Cancelling...
+    zh-CN: 正在取消...
+    zh-HK: 正在取消...
+  current_object:
+    en: Current
+    zh-CN: 当前对象
+    zh-HK: 目前對象
+  endpoints_incomplete:
+    en: Source or target endpoint is incomplete.
+    zh-CN: 源或目标端点信息不完整。
+    zh-HK: 來源或目標端點資訊不完整。
+  summary_stats:
+    en: "Tables: %{tables_ok} succeeded, %{tables_failed} failed; Views: %{views_ok} succeeded, %{views_failed} failed; Rows copied: %{rows}"
+    zh-CN: "表：成功 %{tables_ok}，失败 %{tables_failed}；视图：成功 %{views_ok}，失败 %{views_failed}；复制行数：%{rows}"
+    zh-HK: "表：成功 %{tables_ok}，失敗 %{tables_failed}；視圖：成功 %{views_ok}，失敗 %{views_failed}；複製行數：%{rows}"
+  log_table_start:
+    en: "Start table %{name} (%{current}/%{total})"
+    zh-CN: "开始表 %{name} (%{current}/%{total})"
+    zh-HK: "開始表 %{name} (%{current}/%{total})"
+  log_table_progress:
+    en: "Table %{name}: %{rows} rows copied"
+    zh-CN: "表 %{name}：已复制 %{rows} 行"
+    zh-HK: "表 %{name}：已複製 %{rows} 行"
+  log_table_done:
+    en: "Table %{name} done (%{rows} rows)"
+    zh-CN: "表 %{name} 完成（%{rows} 行）"
+    zh-HK: "表 %{name} 完成（%{rows} 行）"
+  log_table_failed:
+    en: "Table %{name} failed: %{error}"
+    zh-CN: "表 %{name} 失败: %{error}"
+    zh-HK: "表 %{name} 失敗: %{error}"
+  log_view_done:
+    en: "View %{name} done"
+    zh-CN: "视图 %{name} 完成"
+    zh-HK: "視圖 %{name} 完成"
+  log_view_failed:
+    en: "View %{name} failed: %{error}"
+    zh-CN: "视图 %{name} 失败: %{error}"
+    zh-HK: "視圖 %{name} 失敗: %{error}"
+  transfer_cancelled:
+    en: Transfer cancelled
+    zh-CN: 传输已取消
+    zh-HK: 傳輸已取消
+  transfer_failed:
+    en: "Transfer failed: %{error}"
+    zh-CN: "传输失败: %{error}"
+    zh-HK: "傳輸失敗: %{error}"

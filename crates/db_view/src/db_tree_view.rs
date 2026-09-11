@@ -400,6 +400,8 @@ pub enum DbTreeViewEvent {
     ImportData { node_id: String },
     /// 导出数据
     ExportData { node_id: String },
+    /// 数据传输
+    DataTransfer { node_id: String },
     /// 关闭连接
     CloseConnection { node_id: String },
     /// 删除连接

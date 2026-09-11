@@ -448,6 +448,7 @@ fn context_menu_rank(node_type: DbNodeType, action_id: DatabaseActionId) -> usiz
             DatabaseActionId::DumpSqlStructure => 40,
             DatabaseActionId::DumpSqlData => 41,
             DatabaseActionId::DumpSqlStructureAndData => 42,
+            DatabaseActionId::DataTransfer => 45,
             DatabaseActionId::EditDatabase => 50,
             DatabaseActionId::CreateSchema => 60,
             DatabaseActionId::CloseDatabase => 70,
@@ -476,6 +477,7 @@ fn context_menu_rank(node_type: DbNodeType, action_id: DatabaseActionId) -> usiz
             DatabaseActionId::DumpSqlStructureAndData => 72,
             DatabaseActionId::ImportData => 80,
             DatabaseActionId::ExportData => 90,
+            DatabaseActionId::DataTransfer => 100,
             _ => 900,
         },
         DbNodeType::View => match action_id {
@@ -517,7 +519,8 @@ fn context_menu_group(node_type: DbNodeType, action: &DatabaseActionDescriptor) 
                 DatabaseActionId::RunSqlFile
                 | DatabaseActionId::DumpSqlStructure
                 | DatabaseActionId::DumpSqlData
-                | DatabaseActionId::DumpSqlStructureAndData => Some("sql"),
+                | DatabaseActionId::DumpSqlStructureAndData
+                | DatabaseActionId::DataTransfer => Some("sql"),
                 DatabaseActionId::EditDatabase
                 | DatabaseActionId::CreateSchema
                 | DatabaseActionId::CloseDatabase
@@ -542,7 +545,9 @@ fn context_menu_group(node_type: DbNodeType, action: &DatabaseActionDescriptor) 
                 DatabaseActionId::DumpSqlStructure
                 | DatabaseActionId::DumpSqlData
                 | DatabaseActionId::DumpSqlStructureAndData => Some("dump"),
-                DatabaseActionId::ImportData | DatabaseActionId::ExportData => Some("io"),
+                DatabaseActionId::ImportData
+                | DatabaseActionId::ExportData
+                | DatabaseActionId::DataTransfer => Some("io"),
                 _ => None,
             },
             DbNodeType::View => match action.id {
@@ -777,6 +782,7 @@ fn map_tree_event(action_id: DatabaseActionId, node_id: &str) -> Option<DbTreeVi
         DatabaseActionId::RunSqlFile => DbTreeViewEvent::RunSqlFile { node_id },
         DatabaseActionId::ImportData => DbTreeViewEvent::ImportData { node_id },
         DatabaseActionId::ExportData => DbTreeViewEvent::ExportData { node_id },
+        DatabaseActionId::DataTransfer => DbTreeViewEvent::DataTransfer { node_id },
         DatabaseActionId::DumpSqlStructure => DbTreeViewEvent::DumpSqlFile {
             node_id,
             mode: SqlDumpMode::StructureOnly,
@@ -833,6 +839,7 @@ fn map_objects_event(
         | DatabaseActionId::RunSqlFile
         | DatabaseActionId::ImportData
         | DatabaseActionId::ExportData
+        | DatabaseActionId::DataTransfer
         | DatabaseActionId::DumpSqlStructure
         | DatabaseActionId::DumpSqlData
         | DatabaseActionId::DumpSqlStructureAndData => None,
@@ -897,6 +904,7 @@ fn action_id(action: &DatabaseActionDescriptor) -> &'static str {
         DatabaseActionId::RunSqlFile => "run-sql-file",
         DatabaseActionId::ImportData => "import-data",
         DatabaseActionId::ExportData => "export-data",
+        DatabaseActionId::DataTransfer => "data-transfer",
         DatabaseActionId::DumpSqlStructure => "dump-sql-structure",
         DatabaseActionId::DumpSqlData => "dump-sql-data",
         DatabaseActionId::DumpSqlStructureAndData => "dump-sql-structure-and-data",
@@ -983,6 +991,7 @@ mod tests {
             "---".to_string(),
             translate("ImportExport.run_sql_file"),
             format!("submenu:{}", translate("ImportExport.dump_sql_file")),
+            translate("ImportExport.data_transfer"),
             "---".to_string(),
             translate("Database.edit_database"),
             translate("Database.close_database"),
