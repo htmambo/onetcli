@@ -18,6 +18,36 @@ use super::view::DataTransferWindow;
 
 const LOG_LINE_HEIGHT: f32 = 20.0;
 const LOG_TAG: &str = "[TRS]";
+/// 单行显示宽度预算：ASCII 计 1 单位，其余计 2（日志区约 850px，text_xs 下足够容纳）
+const LOG_WRAP_UNITS: usize = 110;
+
+fn display_units(text: &str) -> usize {
+    text.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+}
+
+/// 把一条日志折成多行：先按换行符拆分，再按显示宽度贪心折行，保证长错误信息完整可见
+fn wrap_log_lines(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for segment in text.split('\n') {
+        let mut current = String::new();
+        let mut units = 0;
+        for ch in segment.chars() {
+            let w = if ch.is_ascii() { 1 } else { 2 };
+            if units + w > LOG_WRAP_UNITS && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+                units = 0;
+            }
+            current.push(ch);
+            units += w;
+        }
+        lines.push(current);
+    }
+    lines
+}
+
+fn log_text(entry: &TransferLogEntry) -> String {
+    format!("{} {}", LOG_TAG, entry.message)
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransferLogEntry {
@@ -124,20 +154,21 @@ impl DataTransferWindow {
 }
 
 fn log_row(entry: &TransferLogEntry, idx: usize, cx: &App) -> impl IntoElement + use<> {
-    let text = format!("{} {}", LOG_TAG, entry.message);
-    div()
+    let color = if entry.is_error {
+        cx.theme().danger
+    } else {
+        cx.theme().foreground
+    };
+    v_flex()
         .id(("log-entry", idx))
         .w_full()
         .text_xs()
-        .h(px(LOG_LINE_HEIGHT))
-        .text_ellipsis()
-        .overflow_hidden()
-        .text_color(if entry.is_error {
-            cx.theme().danger
-        } else {
-            cx.theme().foreground
-        })
-        .child(text)
+        .text_color(color)
+        .children(
+            wrap_log_lines(&log_text(entry))
+                .into_iter()
+                .map(|line| div().h(px(LOG_LINE_HEIGHT)).child(line)),
+        )
 }
 
 fn progress_bar(progress: f32, cx: &App) -> impl IntoElement {
@@ -160,7 +191,10 @@ impl DataTransferWindow {
         let logs = self.exec.logs.read(cx).clone();
         let item_sizes = Rc::new(
             logs.iter()
-                .map(|_| gpui::size(px(0.), px(LOG_LINE_HEIGHT)))
+                .map(|entry| {
+                    let lines = wrap_log_lines(&log_text(entry)).len() as f32;
+                    gpui::size(px(0.), px(LOG_LINE_HEIGHT * lines))
+                })
                 .collect::<Vec<_>>(),
         );
         div()
@@ -232,5 +266,38 @@ impl DataTransferWindow {
             })
             .child(self.render_log_list(cx))
             .child(progress_bar(progress, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_log_lines_keeps_short_text_single_line() {
+        assert_eq!(wrap_log_lines("short message"), vec!["short message"]);
+    }
+
+    #[test]
+    fn wrap_log_lines_splits_on_newline() {
+        assert_eq!(wrap_log_lines("a\nb"), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn wrap_log_lines_wraps_long_ascii() {
+        let text = "x".repeat(LOG_WRAP_UNITS + 10);
+        let lines = wrap_log_lines(&text);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(display_units(&lines[0]), LOG_WRAP_UNITS);
+        assert_eq!(lines[1], "x".repeat(10));
+    }
+
+    #[test]
+    fn wrap_log_lines_cjk_counts_double_width() {
+        let text = "中".repeat(60);
+        let lines = wrap_log_lines(&text);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(display_units(&lines[0]), LOG_WRAP_UNITS);
+        assert!(display_units(&lines[1]) <= LOG_WRAP_UNITS);
     }
 }

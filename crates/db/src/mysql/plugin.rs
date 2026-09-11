@@ -35,6 +35,38 @@ use crate::types::*;
 /// - `\\` 表示字面量反斜杠
 /// - `\n`/`\r`/`\t`/`\0`/`\Z`/`\b` 为控制字符转义
 /// - `\"`、`\'` 与 `''` 等价
+/// 格式化列默认值：information_schema 返回的字符串/枚举默认值是裸字面量，
+/// 需要补单引号；数字、表达式（含括号或白名单关键字）与已加引号的原样输出
+pub(crate) fn format_column_default(column: &ColumnInfo, default: &str) -> String {
+    let trimmed = default.trim();
+    let lower = trimmed.to_lowercase();
+    let already_quoted = trimmed.starts_with('\'')
+        || trimmed.starts_with('"')
+        || lower.starts_with("b'")
+        || lower.starts_with("x'");
+    let is_expression = trimmed.contains('(')
+        || matches!(
+            lower.as_str(),
+            "null"
+                | "true"
+                | "false"
+                | "current_timestamp"
+                | "current_date"
+                | "current_time"
+                | "localtime"
+                | "localtimestamp"
+                | "current_user"
+                | "now"
+        );
+    if already_quoted || is_expression || trimmed.parse::<f64>().is_ok() {
+        return trimmed.to_string();
+    }
+    match FieldType::from_db_type(&column.data_type) {
+        FieldType::Integer | FieldType::Decimal | FieldType::Boolean => trimmed.to_string(),
+        _ => format!("'{}'", trimmed.replace('\'', "''")),
+    }
+}
+
 pub(crate) fn parse_mysql_enum_values(column_type: &str) -> Option<Vec<String>> {
     let trimmed_start = column_type.trim_start();
     let upper = trimmed_start.to_uppercase();
@@ -1950,7 +1982,10 @@ impl DatabasePlugin for MySqlPlugin {
         }
 
         if let Some(default) = &column.default_value {
-            def.push_str(&format!(" DEFAULT {}", default));
+            def.push_str(&format!(
+                " DEFAULT {}",
+                format_column_default(column, default)
+            ));
         }
 
         if column.is_primary_key {
@@ -3960,5 +3995,60 @@ mod tests {
         let parsed = parse_mysql_enum_values("  enum('a','b')")
             .expect("leading whitespace should be tolerated");
         assert_eq!(parsed, vec!["a", "b"]);
+    }
+
+    fn default_test_column(data_type: &str) -> ColumnInfo {
+        ColumnInfo {
+            name: "col".to_string(),
+            data_type: data_type.to_string(),
+            is_nullable: true,
+            is_primary_key: false,
+            default_value: None,
+            comment: None,
+            charset: None,
+            collation: None,
+            enum_values: None,
+        }
+    }
+
+    #[test]
+    fn format_column_default_quotes_enum_literal() {
+        let column = default_test_column("enum('api','manual')");
+        assert_eq!(format_column_default(&column, "manual"), "'manual'");
+    }
+
+    #[test]
+    fn format_column_default_quotes_string_and_escapes() {
+        let column = default_test_column("varchar(32)");
+        assert_eq!(format_column_default(&column, "it's"), "'it''s'");
+    }
+
+    #[test]
+    fn format_column_default_keeps_numeric() {
+        let column = default_test_column("int");
+        assert_eq!(format_column_default(&column, "42"), "42");
+        let column = default_test_column("decimal(12,2)");
+        assert_eq!(format_column_default(&column, "-1.5"), "-1.5");
+    }
+
+    #[test]
+    fn format_column_default_keeps_expressions() {
+        let column = default_test_column("datetime");
+        assert_eq!(
+            format_column_default(&column, "CURRENT_TIMESTAMP"),
+            "CURRENT_TIMESTAMP"
+        );
+        assert_eq!(format_column_default(&column, "now()"), "now()");
+        assert_eq!(format_column_default(&column, "(uuid())"), "(uuid())");
+    }
+
+    #[test]
+    fn format_column_default_keeps_quoted_and_bit_hex() {
+        let column = default_test_column("varchar(8)");
+        assert_eq!(format_column_default(&column, "'abc'"), "'abc'");
+        let bit = default_test_column("bit(1)");
+        assert_eq!(format_column_default(&bit, "b'1'"), "b'1'");
+        let hex = default_test_column("binary(2)");
+        assert_eq!(format_column_default(&hex, "x'0A'"), "x'0A'");
     }
 }

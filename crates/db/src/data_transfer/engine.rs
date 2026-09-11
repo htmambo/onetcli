@@ -179,17 +179,43 @@ async fn transfer_one_table(
         let drop_sql = sql::build_drop_table_sql(ctx.target_plugin, table);
         execute_target(ctx, &drop_sql).await?;
     }
-    let columns = ctx
-        .source_plugin
-        .list_columns(ctx.source, &ctx.config.source_db, None, table)
-        .await
-        .map_err(failed)?;
-    if columns.is_empty() {
-        return Err(failed(format!("table {} has no columns", table)));
-    }
-    let create_sql = sql::build_create_table_sql(ctx.target_plugin, table, &columns);
+    let create_sql = match native_create_ddl(ctx, table).await? {
+        Some(ddl) => ddl,
+        None => {
+            let columns = ctx
+                .source_plugin
+                .list_columns(ctx.source, &ctx.config.source_db, None, table)
+                .await
+                .map_err(failed)?;
+            if columns.is_empty() {
+                return Err(failed(format!("table {} has no columns", table)));
+            }
+            sql::build_create_table_sql(ctx.target_plugin, table, &columns)
+        }
+    };
     execute_target(ctx, &create_sql).await?;
     copy_table_data(ctx, table).await
+}
+
+/// 同库种传输优先取源库原生 DDL（如 MySQL SHOW CREATE TABLE），保留索引、
+/// 字符集、AUTO_INCREMENT 等完整定义；跨库种或取不到时返回 None 走列元数据拼接
+async fn native_create_ddl(
+    ctx: &TransferCtx<'_>,
+    table: &str,
+) -> std::result::Result<Option<String>, StepError> {
+    if ctx.config.source_config.database_type != ctx.config.target_config.database_type {
+        return Ok(None);
+    }
+    let ddl = ctx
+        .source_plugin
+        .export_table_create_sql(ctx.source, &ctx.config.source_db, None, table)
+        .await
+        .map_err(failed)?;
+    let trimmed = ddl.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(format!("{};", trimmed)))
 }
 
 async fn copy_table_data(
