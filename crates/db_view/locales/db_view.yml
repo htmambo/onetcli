@@ -3260,3 +3260,23 @@ DataTransfer:
     en: "Transfer failed: %{error}"
     zh-CN: "传输失败: %{error}"
     zh-HK: "傳輸失敗: %{error}"
+  footer_from:
+    en: "From [%{endpoint}]"
+    zh-CN: "从[%{endpoint}]"
+    zh-HK: "從[%{endpoint}]"
+  footer_to:
+    en: " to [%{endpoint}]"
+    zh-CN: "迁移到[%{endpoint}]"
+    zh-HK: "遷移到[%{endpoint}]"
+  footer_objects:
+    en: " (%{parts})"
+    zh-CN: "（%{parts}）"
+    zh-HK: "（%{parts}）"
+  footer_tables:
+    en: "%{count} tables"
+    zh-CN: "%{count}个表"
+    zh-HK: "%{count}個資料表"
+  footer_views:
+    en: "%{count} views"
+    zh-CN: "%{count}个视图"
+    zh-HK: "%{count}個檢視"
