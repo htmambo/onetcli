@@ -11,7 +11,8 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Window, px,
 };
 use gpui_component::input::{Input, InputState};
-use gpui_component::{ActiveTheme, IconName, Sizable, checkbox::Checkbox};
+use gpui_component::menu::{DropdownMenu, PopupMenuItem};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable, checkbox::Checkbox, h_flex};
 use gpui_component::{
     IndexPath,
     button::{Button, ButtonVariants as _},
@@ -715,6 +716,9 @@ struct ConditionRow {
     value_end: String,
     /// 连接到此条件的逻辑操作符（用于显示在条件前的 AND/OR）
     logic_operator: LogicOperator,
+    /// 操作符是否由多选联动自动切换而来（IN/NOT IN ↔ =/!=）；
+    /// 手动选择的 IN/NOT IN 不参与自动回切
+    op_auto_switched: bool,
 }
 
 impl ConditionRow {
@@ -728,6 +732,7 @@ impl ConditionRow {
             value_start: String::new(),
             value_end: String::new(),
             logic_operator: logic_op,
+            op_auto_switched: false,
         }
     }
 
@@ -821,8 +826,6 @@ pub struct VisualFilterBuilder {
     value_start_inputs: std::collections::HashMap<String, Entity<InputState>>,
     /// 范围结束值输入框实体，按行 ID 索引（BETWEEN 时使用）
     value_end_inputs: std::collections::HashMap<String, Entity<InputState>>,
-    /// ENUM/SET 列的值下拉框实体，按行 ID 索引
-    value_selects: std::collections::HashMap<String, Entity<SelectState<Vec<String>>>>,
     /// 输入框订阅，按行 ID 索引（避免被 drop）
     value_subscriptions: std::collections::HashMap<String, gpui::Subscription>,
 }
@@ -948,13 +951,66 @@ fn update_condition_operator_in_items(
     false
 }
 
-/// 决定条件行使用哪种值控件（Select 下拉 vs Input 文本）
+/// 决定条件行使用哪种值控件（多选下拉 vs Input 文本）
 ///
-/// ENUM/SET 列且操作符为 `=` / `!=` 时使用 Select；其他场景保留文本输入。
-/// IS NULL/IS NOT NULL 不需要值控件；IN/NOT IN 维持逗号分隔文本。
-fn use_select_for_value(column: Option<&ColumnInfo>, operator: FilterOperator) -> bool {
-    matches!(operator, FilterOperator::Equal | FilterOperator::NotEqual)
-        && column.is_some_and(is_enum_column)
+/// ENUM/SET 列且操作符为 `=` / `!=` / `IN` / `NOT IN` 时使用多选下拉；
+/// 其他场景保留文本输入。IS NULL/IS NOT NULL 不需要值控件。
+fn use_multi_select_for_value(column: Option<&ColumnInfo>, operator: FilterOperator) -> bool {
+    matches!(
+        operator,
+        FilterOperator::Equal
+            | FilterOperator::NotEqual
+            | FilterOperator::In
+            | FilterOperator::NotIn
+    ) && column.is_some_and(is_enum_column)
+}
+
+/// 解析多选值文本（逗号分隔）为值列表
+fn parse_multi_values(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// 把多选值列表拼接回逗号分隔文本
+fn join_multi_values(values: &[String]) -> String {
+    values.join(", ")
+}
+
+/// ENUM 多选后的操作符联动决策：
+/// - 选中 ≥ 2 个且当前为 `=` / `!=` → 切换为 `IN` / `NOT IN`（保持极性），标记为自动切换
+/// - 减少到 ≤ 1 个且当前 `IN` / `NOT IN` 是自动切换来的 → 回切 `=` / `!=`
+/// - 其他情况返回 None（不变），手动选择的 IN/NOT IN 不会被自动回切
+fn operator_after_multi_select(
+    current: FilterOperator,
+    selected_count: usize,
+    auto_switched: bool,
+) -> Option<(FilterOperator, bool)> {
+    match (selected_count >= 2, current, auto_switched) {
+        (true, FilterOperator::Equal, _) => Some((FilterOperator::In, true)),
+        (true, FilterOperator::NotEqual, _) => Some((FilterOperator::NotIn, true)),
+        (false, FilterOperator::In, true) => Some((FilterOperator::Equal, false)),
+        (false, FilterOperator::NotIn, true) => Some((FilterOperator::NotEqual, false)),
+        _ => None,
+    }
+}
+
+/// 手动切回单值操作符（`=` / `!=`）时的值归一化：
+/// 多选值只保留第一个，避免生成 `col = 'a, b'` 这样的错误 SQL；无需调整时返回 None
+fn normalize_value_for_single_operator(
+    operator: FilterOperator,
+    value_text: &str,
+) -> Option<String> {
+    if !matches!(operator, FilterOperator::Equal | FilterOperator::NotEqual) {
+        return None;
+    }
+    let values = parse_multi_values(value_text);
+    if values.len() > 1 {
+        Some(values[0].clone())
+    } else {
+        None
+    }
 }
 
 /// 取列的可选值（None 表示列不存在或非枚举列）
@@ -971,7 +1027,7 @@ fn enum_values_for(column: Option<&ColumnInfo>) -> Option<Vec<String>> {
     }
 }
 
-/// 构建条件行的"单值"控件，ENUM 列 + = / != 操作符返回 Select，否则返回 Input。
+/// 构建条件行的"单值"控件，ENUM 列 + = / != / IN / NOT IN 返回多选下拉标记，否则返回 Input。
 ///
 /// 返回 `(控件 entity 索引, 初始订阅 key, value_text 当前值)`。
 /// 调用方需要把 entity 存入对应的 HashMap，并注册订阅。
@@ -982,28 +1038,25 @@ fn build_value_widget_kind(
     window: &mut Window,
     cx: &mut Context<'_, VisualFilterBuilder>,
 ) -> ValueWidgetKind {
-    if use_select_for_value(column, operator) {
-        let items = enum_values_for(column).unwrap_or_default();
-        let initial_index = items.iter().position(|item| item == initial_text);
-        let state =
-            cx.new(|cx| SelectState::new(items, initial_index.map(IndexPath::new), window, cx));
-        ValueWidgetKind::Select(state)
-    } else {
-        let placeholder = t!("Filter.placeholder_value").into_owned();
-        let state = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
-        if !initial_text.is_empty() {
-            state.update(cx, |s, cx| {
-                s.set_value(initial_text.to_string(), window, cx)
-            });
-        }
-        ValueWidgetKind::Input(state)
+    if use_multi_select_for_value(column, operator) {
+        // 多选下拉无持久 entity，选中状态直接以 ConditionRow.value_text 为唯一数据源
+        return ValueWidgetKind::MultiSelect;
     }
+    let placeholder = t!("Filter.placeholder_value").into_owned();
+    let state = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+    if !initial_text.is_empty() {
+        state.update(cx, |s, cx| {
+            s.set_value(initial_text.to_string(), window, cx)
+        });
+    }
+    ValueWidgetKind::Input(state)
 }
 
-/// 单值控件（Select 或 Input），用于筛选行的值区域。
+/// 单值控件（Input 或 ENUM 多选下拉标记），用于筛选行的值区域。
 enum ValueWidgetKind {
     Input(Entity<InputState>),
-    Select(Entity<SelectState<Vec<String>>>),
+    /// ENUM/SET 多选下拉（无持久 entity，状态存于 ConditionRow.value_text）
+    MultiSelect,
 }
 
 /// 递归查找条件所在列名
@@ -1049,6 +1102,73 @@ fn update_condition_value_in_items(items: &mut Vec<FilterItem>, id: &str, value:
             }
             FilterItem::Group(group) => {
                 if update_condition_value_in_items(&mut group.children, id, value) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// 递归查找条件并切换某个枚举值的选中状态；
+/// 返回操作符联动结果（需要切换时为 Some(新操作符, 自动切换标记)）
+fn toggle_enum_value_in_items(
+    items: &mut Vec<FilterItem>,
+    id: &str,
+    value: &str,
+) -> Option<Option<(FilterOperator, bool)>> {
+    for item in items.iter_mut() {
+        match item {
+            FilterItem::Condition(row) if row.id == id => {
+                let mut values = parse_multi_values(&row.value_text);
+                if let Some(pos) = values.iter().position(|v| v == value) {
+                    values.remove(pos);
+                } else {
+                    values.push(value.to_string());
+                }
+                row.value_text = join_multi_values(&values);
+                let decision =
+                    operator_after_multi_select(row.operator, values.len(), row.op_auto_switched);
+                if let Some((new_op, auto)) = decision {
+                    row.operator = new_op;
+                    row.op_auto_switched = auto;
+                }
+                return Some(decision);
+            }
+            FilterItem::Group(group) => {
+                if let Some(found) = toggle_enum_value_in_items(&mut group.children, id, value) {
+                    return Some(found);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 手动切换操作符后的归一化：清除自动切换标记；
+/// ENUM 列切回 `=` / `!=` 时多选值只保留第一个
+fn normalize_after_manual_operator_in_items(
+    items: &mut Vec<FilterItem>,
+    id: &str,
+    is_enum: bool,
+) -> bool {
+    for item in items.iter_mut() {
+        match item {
+            FilterItem::Condition(row) if row.id == id => {
+                row.op_auto_switched = false;
+                if is_enum {
+                    if let Some(normalized) =
+                        normalize_value_for_single_operator(row.operator, &row.value_text)
+                    {
+                        row.value_text = normalized;
+                    }
+                }
+                return true;
+            }
+            FilterItem::Group(group) => {
+                if normalize_after_manual_operator_in_items(&mut group.children, id, is_enum) {
                     return true;
                 }
             }
@@ -1208,7 +1328,6 @@ impl VisualFilterBuilder {
             value_inputs: std::collections::HashMap::new(),
             value_start_inputs: std::collections::HashMap::new(),
             value_end_inputs: std::collections::HashMap::new(),
-            value_selects: std::collections::HashMap::new(),
             value_subscriptions: std::collections::HashMap::new(),
         }
     }
@@ -1402,7 +1521,7 @@ impl VisualFilterBuilder {
         )
         .detach();
 
-        // 创建值控件（ENUM 列 + = / != 用 Select，其他用 Input）
+        // 创建值控件（ENUM 列 + = / != / IN / NOT IN 用多选下拉，其他用 Input）
         let column_info = schema
             .as_ref()
             .and_then(|s| s.columns.iter().find(|c| c.name == first_col));
@@ -1411,29 +1530,13 @@ impl VisualFilterBuilder {
             ValueWidgetKind::Input(input) => {
                 let row_id_clone_for_val = row_id.clone();
                 let value_input_clone = input.clone();
-                cx.observe(input, move |this, _, cx| {
+                Some(cx.observe(input, move |this, _, cx| {
                     let text = value_input_clone.read(cx).text().to_string();
                     this.update_condition_value(&row_id_clone_for_val, text);
                     cx.notify();
-                })
+                }))
             }
-            ValueWidgetKind::Select(state) => {
-                let row_id_clone_for_val = row_id.clone();
-                let state_for_event = state.clone();
-                cx.subscribe_in(
-                    state,
-                    window,
-                    move |this, _, event: &SelectEvent<Vec<String>>, window, cx| {
-                        if let SelectEvent::Confirm(value) = event {
-                            let text = value.clone().unwrap_or_default();
-                            let _ = state_for_event.read(cx).selected_value();
-                            this.update_condition_value(&row_id_clone_for_val, text);
-                            cx.notify();
-                            let _ = window; // 保持订阅签名与上游一致
-                        }
-                    },
-                )
-            }
+            ValueWidgetKind::MultiSelect => None,
         };
 
         self.root_items.push(FilterItem::Condition(row));
@@ -1441,20 +1544,17 @@ impl VisualFilterBuilder {
             .insert(row_id.clone(), column_select_entity);
         self.operator_selects
             .insert(row_id.clone(), operator_select_entity);
-        match value_kind {
-            ValueWidgetKind::Input(input) => {
-                self.value_inputs.insert(row_id.clone(), input);
-            }
-            ValueWidgetKind::Select(select) => {
-                self.value_selects.insert(row_id.clone(), select);
-            }
+        if let ValueWidgetKind::Input(input) = value_kind {
+            self.value_inputs.insert(row_id.clone(), input);
         }
         self.value_start_inputs
             .insert(row_id.clone(), value_start_input_entity);
         self.value_end_inputs
             .insert(row_id.clone(), value_end_input_entity);
         // 存储订阅，防止被 drop
-        self.value_subscriptions.insert(row_id.clone(), val_sub);
+        if let Some(sub) = val_sub {
+            self.value_subscriptions.insert(row_id.clone(), sub);
+        }
         self.value_subscriptions
             .insert(format!("{}_start", row_id), val_start_sub);
         self.value_subscriptions
@@ -1514,11 +1614,45 @@ impl VisualFilterBuilder {
         }
         // 取当前行所在列名以判断值控件类型
         let column_name = find_condition_column(&self.root_items, id).unwrap_or_default();
+        // 手动切换操作符：清除自动切换标记；ENUM 列切回单值操作符时只保留第一个选中值
+        let is_enum = self
+            .schema
+            .as_ref()
+            .and_then(|s| s.columns.iter().find(|c| c.name == column_name))
+            .map(is_enum_column)
+            .unwrap_or(false);
+        normalize_after_manual_operator_in_items(&mut self.root_items, id, is_enum);
         self.rebuild_value_widget_for_row(id, &column_name, operator, window, cx);
         self.sync_filter_state();
     }
 
-    /// 根据当前列类型与操作符重建值控件（Select / Input），保留已有 value_text。
+    /// 切换 ENUM 多选值，并按选中数量联动操作符（= / != 与 IN / NOT IN 互转）。
+    ///
+    /// 注意：这里直接更新 operator 并同步操作符下拉显示，不走
+    /// `update_condition_operator` 的重建路径，避免销毁正在交互的多选菜单。
+    fn toggle_enum_value(
+        &mut self,
+        id: &str,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(decision) = toggle_enum_value_in_items(&mut self.root_items, id, value) else {
+            return;
+        };
+        if let Some((new_op, _)) = decision {
+            if let Some(select) = self.operator_selects.get(id) {
+                select.update(cx, |state, cx| {
+                    state.set_selected_value(&new_op, window, cx);
+                    cx.notify();
+                });
+            }
+        }
+        self.sync_filter_state();
+        cx.notify();
+    }
+
+    /// 根据当前列类型与操作符重建值控件（多选下拉 / Input），保留已有 value_text。
     fn rebuild_value_widget_for_row(
         &mut self,
         id: &str,
@@ -1535,7 +1669,6 @@ impl VisualFilterBuilder {
 
         // 移除旧控件
         self.value_inputs.remove(id);
-        self.value_selects.remove(id);
         self.value_subscriptions.remove(id);
 
         if !operator.needs_value() || operator.needs_two_values() {
@@ -1544,38 +1677,18 @@ impl VisualFilterBuilder {
         }
 
         let value_kind = build_value_widget_kind(column_info, operator, &current_value, window, cx);
-        let sub = match &value_kind {
-            ValueWidgetKind::Input(input) => {
-                let row_id = id.to_string();
-                let value_input_clone = input.clone();
-                cx.observe(input, move |this, _, cx| {
-                    let text = value_input_clone.read(cx).text().to_string();
-                    this.update_condition_value(&row_id, text);
-                    cx.notify();
-                })
-            }
-            ValueWidgetKind::Select(state) => {
-                let row_id = id.to_string();
-                cx.subscribe_in(
-                    state,
-                    window,
-                    move |this, _, event: &SelectEvent<Vec<String>>, _window, cx| {
-                        if let SelectEvent::Confirm(value) = event {
-                            this.update_condition_value(&row_id, value.clone().unwrap_or_default());
-                            cx.notify();
-                        }
-                    },
-                )
-            }
-        };
-        self.value_subscriptions.insert(id.to_string(), sub);
-        match value_kind {
-            ValueWidgetKind::Input(input) => {
-                self.value_inputs.insert(id.to_string(), input);
-            }
-            ValueWidgetKind::Select(select) => {
-                self.value_selects.insert(id.to_string(), select);
-            }
+        if let ValueWidgetKind::Input(input) = &value_kind {
+            let row_id = id.to_string();
+            let value_input_clone = input.clone();
+            let sub = cx.observe(input, move |this, _, cx| {
+                let text = value_input_clone.read(cx).text().to_string();
+                this.update_condition_value(&row_id, text);
+                cx.notify();
+            });
+            self.value_subscriptions.insert(id.to_string(), sub);
+        }
+        if let ValueWidgetKind::Input(input) = value_kind {
+            self.value_inputs.insert(id.to_string(), input);
         }
     }
 
@@ -1595,7 +1708,6 @@ impl VisualFilterBuilder {
         self.value_inputs.clear();
         self.value_start_inputs.clear();
         self.value_end_inputs.clear();
-        self.value_selects.clear();
         self.value_subscriptions.clear();
         self.filter_state = FilterState::new();
         cx.notify();
@@ -1734,7 +1846,7 @@ impl VisualFilterBuilder {
             )
             .detach();
 
-            // 创建值控件（ENUM 列 + = / != 用 Select，其他用 Input）
+            // 创建值控件（ENUM 列 + = / != / IN / NOT IN 用多选下拉，其他用 Input）
             let column_info = schema
                 .as_ref()
                 .and_then(|s| s.columns.iter().find(|c| c.name == first_col));
@@ -1743,28 +1855,13 @@ impl VisualFilterBuilder {
                 ValueWidgetKind::Input(input) => {
                     let row_id_clone_val = row_id.clone();
                     let value_input_clone = input.clone();
-                    cx.observe(input, move |this, _, cx| {
+                    Some(cx.observe(input, move |this, _, cx| {
                         let text = value_input_clone.read(cx).text().to_string();
                         this.update_condition_value(&row_id_clone_val, text);
                         cx.notify();
-                    })
+                    }))
                 }
-                ValueWidgetKind::Select(state) => {
-                    let row_id_clone_val = row_id.clone();
-                    cx.subscribe_in(
-                        state,
-                        window,
-                        move |this, _, event: &SelectEvent<Vec<String>>, _window, cx| {
-                            if let SelectEvent::Confirm(value) = event {
-                                this.update_condition_value(
-                                    &row_id_clone_val,
-                                    value.clone().unwrap_or_default(),
-                                );
-                                cx.notify();
-                            }
-                        },
-                    )
-                }
+                ValueWidgetKind::MultiSelect => None,
             };
 
             parent.children.push(FilterItem::Condition(row));
@@ -1772,19 +1869,16 @@ impl VisualFilterBuilder {
                 .insert(row_id.clone(), column_select_entity);
             self.operator_selects
                 .insert(row_id.clone(), operator_select_entity);
-            match value_kind {
-                ValueWidgetKind::Input(input) => {
-                    self.value_inputs.insert(row_id.clone(), input);
-                }
-                ValueWidgetKind::Select(select) => {
-                    self.value_selects.insert(row_id.clone(), select);
-                }
+            if let ValueWidgetKind::Input(input) = value_kind {
+                self.value_inputs.insert(row_id.clone(), input);
             }
             self.value_start_inputs
                 .insert(row_id.clone(), value_start_input_entity);
             self.value_end_inputs
                 .insert(row_id.clone(), value_end_input_entity);
-            self.value_subscriptions.insert(row_id.clone(), val_sub);
+            if let Some(sub) = val_sub {
+                self.value_subscriptions.insert(row_id.clone(), sub);
+            }
             self.value_subscriptions
                 .insert(format!("{}_start", row_id), val_start_sub);
             self.value_subscriptions
@@ -1810,7 +1904,6 @@ impl VisualFilterBuilder {
         self.column_selects.remove(id);
         self.operator_selects.remove(id);
         self.value_inputs.remove(id);
-        self.value_selects.remove(id);
         self.value_start_inputs.remove(id);
         self.value_end_inputs.remove(id);
         self.value_subscriptions.remove(id);
@@ -1825,7 +1918,6 @@ impl VisualFilterBuilder {
             self.column_selects.remove(row_id);
             self.operator_selects.remove(row_id);
             self.value_inputs.remove(row_id);
-            self.value_selects.remove(row_id);
             self.value_start_inputs.remove(row_id);
             self.value_end_inputs.remove(row_id);
             self.value_subscriptions.remove(row_id);
@@ -1957,7 +2049,7 @@ impl VisualFilterBuilder {
         cr: &RenderConditionRow,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = cx.theme();
+        let theme = cx.theme().clone();
         let row = &cr.row;
         let row_id = row.id.clone();
         let row_id_for_click = row.id.clone();
@@ -1967,7 +2059,6 @@ impl VisualFilterBuilder {
         let column_select = self.column_selects.get(&row.id);
         let operator_select = self.operator_selects.get(&row.id);
         let value_input = self.value_inputs.get(&row.id);
-        let value_select = self.value_selects.get(&row.id);
         let value_start_input = self.value_start_inputs.get(&row.id);
         let value_end_input = self.value_end_inputs.get(&row.id);
         let logic_is_and = matches!(row.logic_operator, LogicOperator::And);
@@ -2039,14 +2130,13 @@ impl VisualFilterBuilder {
                         }),
                 )
         } else if row.operator.needs_value() {
-            // ENUM/SET 列 + =/!= 走 Select 下拉，其他走 Input
-            if use_select_for_value(column_info, row.operator) {
+            // ENUM/SET 列 + =/!=/IN/NOT IN 走多选下拉，其他走 Input
+            if use_multi_select_for_value(column_info, row.operator) {
                 gpui::div()
                     .flex_1()
                     .h_7()
-                    .when_some(value_select, |el, select| {
-                        el.child(Select::new(select).small())
-                    })
+                    .overflow_hidden()
+                    .child(self.render_enum_multi_select(&row.id, column_info, cx))
             } else {
                 gpui::div()
                     .flex_1()
@@ -2105,6 +2195,84 @@ impl VisualFilterBuilder {
                         this.delete_condition(&row_id_for_delete, cx);
                     })),
             )
+    }
+
+    /// 渲染 ENUM/SET 多选值下拉：勾选即生效，菜单保持打开（同列可见性菜单的模式）。
+    ///
+    /// 选中状态以 `ConditionRow.value_text`（逗号分隔）为唯一数据源，
+    /// 菜单条目在重建时实时读取，勾选变化通过 `toggle_enum_value` 写回并联动操作符。
+    fn render_enum_multi_select(
+        &self,
+        row_id: &str,
+        column_info: Option<&ColumnInfo>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let items = enum_values_for(column_info).unwrap_or_default();
+        let current_text = find_condition_value_text(&self.root_items, row_id);
+        let label = if current_text.trim().is_empty() {
+            t!("Filter.placeholder_value").into_owned()
+        } else {
+            current_text
+        };
+        let this_weak = cx.entity().downgrade();
+        let row_id_owned = row_id.to_string();
+
+        Button::new(SharedString::from(format!("enum-multi-{}", row_id)))
+            .small()
+            .w_full()
+            .label(label)
+            .dropdown_menu(move |menu, _window, _cx| {
+                items
+                    .iter()
+                    .fold(menu, |menu, value| {
+                        let value = value.clone();
+                        let value_for_click = value.clone();
+                        let weak_for_check = this_weak.clone();
+                        let weak_for_click = this_weak.clone();
+                        let rid_for_check = row_id_owned.clone();
+                        let rid_for_click = row_id_owned.clone();
+                        menu.item(
+                            PopupMenuItem::element(move |_window, cx| {
+                                let checked = weak_for_check
+                                    .upgrade()
+                                    .map(|this| {
+                                        let text = find_condition_value_text(
+                                            &this.read(cx).root_items,
+                                            &rid_for_check,
+                                        );
+                                        parse_multi_values(&text).iter().any(|v| v == &value)
+                                    })
+                                    .unwrap_or(false);
+                                let check_icon = if checked {
+                                    Icon::new(IconName::Check)
+                                        .xsmall()
+                                        .text_color(cx.theme().success_foreground)
+                                } else {
+                                    Icon::empty().xsmall()
+                                };
+                                h_flex()
+                                    .w_full()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(check_icon)
+                                    .child(gpui::div().flex_1().child(value.clone()))
+                            })
+                            .on_click(move |_, window, cx| {
+                                if let Some(this) = weak_for_click.upgrade() {
+                                    this.update(cx, |this, cx| {
+                                        this.toggle_enum_value(
+                                            &rid_for_click,
+                                            &value_for_click,
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                        )
+                    })
+                    .keep_open(true)
+            })
     }
 
     /// 渲染分组（包含标题和子项）
@@ -2573,5 +2741,134 @@ mod tests {
     fn suggests_between_end_value_after_and() {
         let labels = labels_for("age BETWEEN 1 AND ", "");
         assert_eq!(labels.first().map(String::as_str), Some("0"));
+    }
+
+    fn condition_row(value_text: &str) -> FilterItem {
+        FilterItem::Condition(ConditionRow {
+            id: "r1".into(),
+            enabled: true,
+            column: "department".into(),
+            operator: FilterOperator::Equal,
+            value_text: value_text.into(),
+            value_start: String::new(),
+            value_end: String::new(),
+            logic_operator: LogicOperator::And,
+            op_auto_switched: false,
+        })
+    }
+
+    #[test]
+    fn multi_values_parse_and_join_roundtrip() {
+        assert_eq!(parse_multi_values(""), Vec::<String>::new());
+        assert_eq!(parse_multi_values("技术"), vec!["技术".to_string()]);
+        assert_eq!(
+            parse_multi_values("投放, 财务, ,行政"),
+            vec!["投放".to_string(), "财务".to_string(), "行政".to_string()]
+        );
+        assert_eq!(
+            join_multi_values(&["投放".to_string(), "财务".to_string()]),
+            "投放, 财务"
+        );
+    }
+
+    #[test]
+    fn multi_select_auto_switches_equal_to_in() {
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::Equal, 2, false),
+            Some((FilterOperator::In, true))
+        );
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::NotEqual, 3, false),
+            Some((FilterOperator::NotIn, true))
+        );
+    }
+
+    #[test]
+    fn multi_select_auto_reverts_only_when_auto_switched() {
+        // 自动切换来的 IN，减少到 1 个值时回切 =
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::In, 1, true),
+            Some((FilterOperator::Equal, false))
+        );
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::NotIn, 0, true),
+            Some((FilterOperator::NotEqual, false))
+        );
+        // 手动选择的 IN 不自动回切
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::In, 1, false),
+            None
+        );
+        // 单值操作符保持单值不变
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::Equal, 1, false),
+            None
+        );
+        assert_eq!(
+            operator_after_multi_select(FilterOperator::In, 2, true),
+            None
+        );
+    }
+
+    #[test]
+    fn toggle_enum_value_updates_text_and_operator() {
+        let mut items = vec![condition_row("")];
+
+        // 勾选第一个值：保持 =，不切换
+        let decision = toggle_enum_value_in_items(&mut items, "r1", "技术").unwrap();
+        assert_eq!(decision, None);
+        let FilterItem::Condition(row) = &items[0] else {
+            panic!("expected condition");
+        };
+        assert_eq!(row.value_text, "技术");
+        assert_eq!(row.operator, FilterOperator::Equal);
+
+        // 勾选第二个值：自动切换为 IN
+        let decision = toggle_enum_value_in_items(&mut items, "r1", "投放").unwrap();
+        assert_eq!(decision, Some((FilterOperator::In, true)));
+        let FilterItem::Condition(row) = &items[0] else {
+            panic!("expected condition");
+        };
+        assert_eq!(row.value_text, "技术, 投放");
+        assert_eq!(row.operator, FilterOperator::In);
+        assert!(row.op_auto_switched);
+
+        // 取消勾选回到 1 个值：自动回切 =
+        let decision = toggle_enum_value_in_items(&mut items, "r1", "投放").unwrap();
+        assert_eq!(decision, Some((FilterOperator::Equal, false)));
+        let FilterItem::Condition(row) = &items[0] else {
+            panic!("expected condition");
+        };
+        assert_eq!(row.value_text, "技术");
+        assert_eq!(row.operator, FilterOperator::Equal);
+        assert!(!row.op_auto_switched);
+    }
+
+    #[test]
+    fn toggle_enum_value_supports_nested_groups() {
+        let mut group = GroupRow::new(LogicOperator::And);
+        group.children.push(condition_row("财务"));
+        let mut items = vec![FilterItem::Group(group)];
+
+        let decision = toggle_enum_value_in_items(&mut items, "r1", "行政").unwrap();
+        assert_eq!(decision, Some((FilterOperator::In, true)));
+    }
+
+    #[test]
+    fn manual_single_operator_keeps_only_first_value() {
+        assert_eq!(
+            normalize_value_for_single_operator(FilterOperator::Equal, "技术, 投放"),
+            Some("技术".to_string())
+        );
+        // 单值无需调整
+        assert_eq!(
+            normalize_value_for_single_operator(FilterOperator::Equal, "技术"),
+            None
+        );
+        // 列表操作符不截断
+        assert_eq!(
+            normalize_value_for_single_operator(FilterOperator::In, "技术, 投放"),
+            None
+        );
     }
 }
