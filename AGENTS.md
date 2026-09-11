@@ -418,6 +418,13 @@
 - **验证方式**：带延迟自动恢复补丁复跑 `cargo run -p main`，恢复完成后进程存活、`window not found` 错误归零、应用可继续正常使用即为修复。
 - **适用范围**：所有 Wayland（尤其 Treeland/ANV 核显）下 popup_window 销毁后立刻进行重渲染的场景。
 
+- **标题**：`overflow_y_scrollbar()` 滚动区底部被裁切时，不要在被包装元素上加 `flex_1`/`min_h_0`，要加在外层普通容器上。
+- **触发信号**：v_flex 里 `div().flex_1().overflow_y_scrollbar()` 的滚动列表滚到底仍有内容看不到、滚动条部分隐藏在可见区外；给该 div 补 `min_h_0()` 后现象变成滚动条整个消失、显示更少。
+- **根因 / 约束**：`crates/ui/src/scroll/scrollable.rs` 的 `Scrollable` 包装器渲染时只继承内层元素的 `style.size`（`:122`），flex 属性与 `min_size`/`max_size` 全部丢弃，包装器自身固定 `size_full()`（高度 = 父容器内容高度的 100%）；加上同级兄弟节点后总高度超出父容器，超出部分被外层 `overflow_hidden` 裁掉。
+- **正确做法**：结构写成 `div().flex_1().min_h_0().child(div().size_full().overflow_y_scrollbar().child(内容))`，由外层普通 div 在 flex 布局中取得有界高度，`Scrollable` 在其中按 100% 解析；不要试图把 flex/min_h 样式穿透 `Scrollable`。`v_virtual_list`/`List` 不经过该包装器，`flex_1().min_h_0()` 直接加在其容器上即可。
+- **验证方式**：编译后手工复测对应弹窗/面板，滚动条完整可见且能滚到最后一行（本次在数据传输向导第 2/3 步复测通过）。
+- **适用范围**：所有使用 gpui-component `ScrollableElement::overflow_*_scrollbar()` 且滚动区与兄弟节点共存于 flex 容器的场景。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。

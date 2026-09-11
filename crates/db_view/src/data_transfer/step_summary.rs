@@ -67,10 +67,13 @@ impl DataTransferWindow {
             )
             .collect::<Vec<_>>();
 
-        div().flex_1().min_h_0().overflow_y_scrollbar().child(
-            v_flex().child(header).children(
-                rows.into_iter()
-                    .map(|(source, target, mode)| summary_row(source, target, mode, cx)),
+        // Scrollable 包装器只继承 size，flex_1/min_h_0 须加在外层普通容器上
+        div().flex_1().min_h_0().child(
+            div().size_full().overflow_y_scrollbar().child(
+                v_flex().child(header).children(
+                    rows.into_iter()
+                        .map(|(source, target, mode)| summary_row(source, target, mode, cx)),
+                ),
             ),
         )
     }

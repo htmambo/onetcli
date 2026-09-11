@@ -276,21 +276,24 @@ impl DataTransferWindow {
                 !self.objects.loading && self.objects.error.is_none(),
                 |this| {
                     this.child(
-                        div().flex_1().min_h_0().overflow_y_scrollbar().child(
-                            v_flex()
-                                .gap_3()
-                                .child(self.render_object_group(
-                                    true,
-                                    filtered_tables,
-                                    total_tables,
-                                    cx,
-                                ))
-                                .child(self.render_object_group(
-                                    false,
-                                    filtered_views,
-                                    total_views,
-                                    cx,
-                                )),
+                        // Scrollable 包装器只继承 size，flex_1/min_h_0 须加在外层普通容器上
+                        div().flex_1().min_h_0().child(
+                            div().size_full().overflow_y_scrollbar().child(
+                                v_flex()
+                                    .gap_3()
+                                    .child(self.render_object_group(
+                                        true,
+                                        filtered_tables,
+                                        total_tables,
+                                        cx,
+                                    ))
+                                    .child(self.render_object_group(
+                                        false,
+                                        filtered_views,
+                                        total_views,
+                                        cx,
+                                    )),
+                            ),
                         ),
                     )
                 },
