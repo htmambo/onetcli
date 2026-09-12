@@ -327,6 +327,13 @@
 
 ### 已验证经验
 
+- **标题**：排查 i18n 遗漏 key 时，用 `t!()` 提取脚本 + 编译期验证双保险，不要手写完整 YAML 解析。
+- **触发信号**：界面上出现形如 `Settings.General.Sync.account_auth` 的裸 key 文案；或新功能合入后怀疑有文案漏配。
+- **根因 / 约束**：各 crate 通过 `rust_i18n::i18n!("locales")` 只加载自己的 `locales/*.yml`，key 缺失或路径写错（父级大小写、少层级，如 `Settings.proxy.*` vs 实际 `Settings.General.Proxy.*`）时 `t!` 静默回显 key 本身，不报编译错。locales yml 中大量多行双引号字符串与重复键（如 main.yml 中重复的 `Log:`）是 rust-i18n 容忍的写法，严格 YAML 解析器（pyyaml、node yaml）会直接报错，手写行解析器会被多行字符串中的 `Error message:` 之类内容破坏父子栈，两者都产生大量假阳性/假阴性。
+- **正确做法**：(1) 用脚本提取全部 `t!("key")` 引用，与 yml key 集合比对得到候选清单（node `yaml` 包解析通过的 crate 结果可直接采信；解析失败的 crate 用 grep 逐个核对候选 key 的"存在性 + 父级路径"）；(2) 修复优先改代码里的错误 key 路径而不是复制新增 key；(3) 最终以 `cargo check -p <受影响 crate>` 为权威验证——rust-i18n 宏在编译期解析 yml，语法错误会编译失败。
+- **验证方式**：`node <检查脚本>` 输出 missing=0（或仅剩已知假阳性）；`cargo check -p main -p terminal_view -p sftp_view -p db_view -p redis_view` Finished。
+- **适用范围**：所有使用 rust-i18n 的 crate（`main` 与 `crates/*` 下含 `locales/` 目录者）；`one_ui` 共享 `crates/ui/locales`。
+
 - **标题**：Wayland 下 `popup_window` 圆角背景外溢时，优先检查内容层背景，不要先猜协议层。
 - **触发信号**：KDE Wayland / KWin 下 popup 四角出现背景溢出；仅给 `PopupWindowView` 增加 `.rounded(...).overflow_hidden()`、调整 `window_background`、切换 modal / titlebar 策略后仍无效。
 - **根因 / 约束**：GPUI 当前 `overflow_hidden` 只支持矩形 content mask，不能把子视图裁成圆角；因此父级 popup 壳层即使是圆角，子内容最外层的 `size_full().bg(...)`、标题栏背景、footer 背景仍可能直接把四角画满。

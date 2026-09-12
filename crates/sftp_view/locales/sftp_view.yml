@@ -97,6 +97,14 @@ File:
     en: Show/Hide Hidden Files
     zh-CN: 显示/隐藏隐藏文件
     zh-HK: 顯示/隱藏隱藏文件
+  extract:
+    en: Extract
+    zh-CN: 解压
+    zh-HK: 解壓
+  items_count:
+    en: "%{count} items"
+    zh-CN: "%{count} 个项目"
+    zh-HK: "%{count} 個項目"
 
 # 占位符
 Placeholder:

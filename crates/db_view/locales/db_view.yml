@@ -134,6 +134,10 @@ Common:
     en: This action cannot be undone.
     zh-CN: 此操作不可恢复。
     zh-HK: 此操作不可恢復。
+  preview:
+    en: Preview
+    zh-CN: 预览
+    zh-HK: 預覽
 
 # 连接操作
 Connection:

@@ -52,6 +52,10 @@ Redis:
     en: "New Redis Connection"
     zh-CN: "新建 Redis 连接"
     zh-HK: "新建 Redis 連線"
+  save_connection_failed:
+    en: "Failed to save Redis connection: %{error}"
+    zh-CN: "保存 Redis 连接失败：%{error}"
+    zh-HK: "保存 Redis 連線失敗：%{error}"
   edit:
     en: "Edit Redis Connection"
     zh-CN: "编辑 Redis 连接"

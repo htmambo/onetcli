@@ -77,6 +77,10 @@ Common:
     en: Edit
     zh-CN: 编辑
     zh-HK: 編輯
+  save:
+    en: Save
+    zh-CN: 保存
+    zh-HK: 保存
 
 # 连接
 Connection:
@@ -407,6 +411,10 @@ Settings:
     en: Settings
     zh-CN: 设置
     zh-HK: 設定
+  select_theme_placeholder:
+    en: Select theme
+    zh-CN: 选择主题
+    zh-HK: 選擇主題
   search:
     en: Search
     zh-CN: 搜索
@@ -760,6 +768,10 @@ TerminalAddon:
     zh-HK: "無法打開本地路徑: %{error}"
 
 TerminalView:
+  connecting:
+    en: Connecting...
+    zh-CN: 连接中...
+    zh-HK: 連接中...
   terminal_size_changed:
     en: "Terminal size changed: %{old} -> %{new}, cell_width=%{cell_width}, line_height=%{line_height}, bounds=%{bounds}"
     zh-CN: "终端尺寸变化: %{old} -> %{new}, cell_width=%{cell_width}, line_height=%{line_height}, bounds=%{bounds}"
@@ -1604,3 +1616,26 @@ TerminalAgent:
     en: "Focus terminal (%{id})"
     zh-CN: "聚焦终端（%{id}）"
     zh-HK: "聚焦終端（%{id}）"
+
+# AI 工具调用卡片
+AiChat:
+  tool_call_detail_tool:
+    en: "Tool:"
+    zh-CN: "工具："
+    zh-HK: "工具："
+  tool_call_detail_args:
+    en: "Arguments:"
+    zh-CN: "参数："
+    zh-HK: "參數："
+  tool_call_detail_output:
+    en: "Output:"
+    zh-CN: "输出："
+    zh-HK: "輸出："
+  tool_call_expand:
+    en: Expand
+    zh-CN: 展开
+    zh-HK: 展開
+  tool_call_collapse:
+    en: Collapse
+    zh-CN: 收起
+    zh-HK: 收起

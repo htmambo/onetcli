@@ -70,6 +70,10 @@ Common:
     en: Next
     zh-CN: 下一步
     zh-HK: 下一步
+  error_info:
+    en: Error Info
+    zh-CN: 错误信息
+    zh-HK: 錯誤信息
 
 # 首页
 Home:
@@ -919,6 +923,10 @@ Settings:
         en: Sync
         zh-CN: 同步
         zh-HK: 同步
+      account_auth:
+        en: Account Authentication
+        zh-CN: 账号认证
+        zh-HK: 賬號認證
       server_name:
         en: Sync Server
         zh-CN: 同步服务
