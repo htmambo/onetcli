@@ -734,8 +734,8 @@ impl SessionGuard {
     }
 
     /// Err 路径写回策略计算：**纯函数**。给定 `intent` + 原始 `stored_action`，
-    /// 返回 Err 后应当写回的降级后 action（被 `perform_release` Err 分支与
-    /// [`write_back_session_slot`](Self::write_back_session_slot) 共用）。
+    /// 返回 Err 后应当写回的降级后 action（被 `perform_release` Err 分支
+    /// 直接 in-place 写入调用，Round 23 起不再依赖 `write_back_session_slot`）。
     ///
     /// **提取动机**（Round 18 接线测试）：
     /// - `perform_release` Err 分支的写回值计算此前分散在两处（warn 日志 +
@@ -774,23 +774,24 @@ impl SessionGuard {
         Self::downgrade_action_on_failure(resolved)
     }
 
-    /// Err 路径兜底：把 `(id, action)` 写回 session 字段，让 Drop 兜底 / 重试
-    /// 可以拿到更新后的 action。
+    /// Slot 写入 helper：**测试专用 + 未来调用方保留**。
+    ///
+    /// **Round 23 起**：perform_release 不再使用本函数——改用 in-place mutation
+    /// (`*current_action = downgraded`) 保留 cancel-safe 语义。本 helper 现仅供：
+    /// - 测试（`write_back_session_slot_semantics` / `_rejects_double_write_in_debug`）
+    /// - 未来需要"清空后重新写入"的调用方
     ///
     /// **语义**：仅做 slot 写入，不做降级。降级由调用方通过
     /// [`compute_writeback_action`](Self::compute_writeback_action) 完成
     /// 后传入本函数。
     ///
-    /// **可测试**：纯函数（无 IO），独立于 `release_session` 是否真正返回 Err。
-    /// 生产代码中 `release_session` 通过 NotFound→Ok 转换把 Err 路径基本吞没，
-    /// 但本 helper 仍作为**防御性契约**保留：未来若 release_session 真的返回
-    /// 非 NotFound 错误（例如 close_on_release 路径 disconnect 抛错），本函数
-    /// 保证 session 不会被静默清空。
+    /// **不变量**：调用前 `session` 必须为 None；函数后 `session` 必须为
+    /// `Some((id, action))`。**双层保护**：debug_assert 在 dev/test 立即失败；
+    /// error! 在 release 构建下生产可观测——避免静默覆盖已存在的另一会话记录
+    /// （资源泄漏风险）。
     ///
-    /// **不变量**：调用前 `session` 必须为 None（perform_release 已 take）；
-    /// 函数后 `session` 必须为 `Some((id, action))`。**双层保护**：debug_assert
-    /// 在 dev/test 立即失败；error! 在 release 构建下生产可观测——避免静默覆盖
-    /// 已存在的另一会话记录（资源泄漏风险）。
+    /// **可测试**：纯函数（无 IO）。
+    #[allow(dead_code)] // perform_release 不再使用，保留供测试 + 未来调用方
     pub(crate) fn write_back_session_slot(
         session: &mut Option<(String, SessionReleaseAction)>,
         id: String,
