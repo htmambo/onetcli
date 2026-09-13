@@ -214,4 +214,28 @@ pub trait DbConnection: Sync + Send {
         options: ExecOptions,
         sender: mpsc::Sender<StreamingProgress>,
     ) -> Result<(), DbError>;
+
+    /// Best-effort rollback of any active transaction.
+    ///
+    /// 默认实现：对连接执行 `ROLLBACK` 语句。MySQL/PostgreSQL/SQLite/Oracle
+    /// 均支持 ROLLBACK；非事务上下文下通常无副作用或仅发 warning。
+    ///
+    /// **用途**：在 release_session / close_session 前调用，防止未提交事务
+    /// 状态泄漏到下一个使用者（脏连接复用）。
+    ///
+    /// **错误处理**：失败仅记录 warn，不阻塞 release 流程（连接可能本身已
+    /// 损坏或不支持 ROLLBACK）。
+    async fn rollback_if_active(&self) -> Result<(), DbError> {
+        match self.query("ROLLBACK").await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    target: "db::connection",
+                    error = ?e,
+                    "rollback_if_active failed — proceeding with release anyway"
+                );
+                Err(e)
+            }
+        }
+    }
 }

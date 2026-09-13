@@ -319,6 +319,14 @@ impl ConnectionSession {
         if self.state == SessionState::Closed {
             return;
         }
+        // Phase 3: best-effort rollback 防止未提交事务状态泄漏到池/下一个使用者。
+        // 失败仅 warn（连接可能已损坏），不阻塞 disconnect。
+        if let Err(e) = self.connection.rollback_if_active().await {
+            warn!(
+                "Best-effort rollback failed for session {}: {} — proceeding with disconnect",
+                self.session_id, e
+            );
+        }
         if let Err(e) = self.connection.disconnect().await {
             error!("Failed to disconnect session {}: {}", self.session_id, e);
         } else {
@@ -391,7 +399,7 @@ impl ConnectionManager {
     }
 
     /// Create a new connection session
-    pub async fn create_session(
+    pub(crate) async fn create_session(
         &self,
         config: DbConnectionConfig,
         db_manager: &DbManager,
@@ -443,7 +451,7 @@ impl ConnectionManager {
     ///
     /// Clones the session `Arc` under a read lock, drops the lock, then locks
     /// the per-session mutex. Rejects if the session is not `Active`.
-    pub async fn get_session_connection(
+    pub(crate) async fn get_session_connection(
         &self,
         session_id: &str,
     ) -> Result<SessionConnectionGuard, DbError> {
@@ -1001,7 +1009,7 @@ impl ConnectionManager {
         Some(guard.connection.config().clone())
     }
 
-    pub async fn release_session(&self, session_id: &str) -> Result<(), DbError> {
+    pub(crate) async fn release_session(&self, session_id: &str) -> Result<(), DbError> {
         self.release_session_internal(session_id, true).await
     }
 
@@ -1136,6 +1144,15 @@ impl ConnectionManager {
             }
         }
         let mut guard = arc.lock().await;
+        // Phase 3: best-effort rollback before returning session to pool.
+        // 防止未提交事务状态泄漏到下一个使用者（脏连接复用）。
+        // 失败仅 warn，不阻塞 release（连接可能已损坏或不支持 ROLLBACK）。
+        if let Err(e) = guard.connection.rollback_if_active().await {
+            warn!(
+                "Best-effort rollback failed for session {}: {} — releasing anyway",
+                session_id, e
+            );
+        }
         guard.state = SessionState::Active;
         guard.release();
         debug!("Session {} released", session_id);
@@ -1143,7 +1160,7 @@ impl ConnectionManager {
     }
 
     /// Close a specific session
-    pub async fn close_session(&self, session_id: &str) -> Result<(), DbError> {
+    pub(crate) async fn close_session(&self, session_id: &str) -> Result<(), DbError> {
         // Phase 1: locate the Arc and mark Closing under the global write lock.
         let (arc, config_id) = {
             let mut sessions = self.sessions.write().await;
@@ -4387,5 +4404,179 @@ mod tests {
             1,
             "Drop 降级后 Close action 必须触发连接断开"
         );
+    }
+
+    /// Phase 6: 多线程并发 release 竞态测试
+    ///
+    /// 场景：多个 task 并发调用 `release_session_for_reuse` 同一 session，
+    /// 验证 release_session_internal 的 Arc 锁 + 状态检查机制无死锁/双重释放。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_release_session_for_reuse_no_double_release() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-concurrent-release");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-concurrent-release:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        // 10 个 task 并发 release；helper 把 NotFound 映射为 Ok，
+        // 所以所有任务最终都返回 Ok（幂等）。同时验证无死锁。
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let mgr = manager.clone();
+            let sid = "mysql-concurrent-release:session:1".to_string();
+            handles.push(tokio::spawn(async move {
+                // 通过 helper（顶层 release_session 不存在，直接调用 release_session_for_reuse
+                // + 局部 NotFound 处理）
+                match mgr.release_session_for_reuse(&sid).await {
+                    Ok(()) => Ok(()),
+                    Err(crate::connection::DbError::Internal(ref msg))
+                        if msg.starts_with(SESSION_NOT_FOUND_PREFIX) =>
+                    {
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            }));
+        }
+        for h in handles {
+            let r = h.await.expect("task join");
+            assert!(
+                r.is_ok(),
+                "concurrent release should be Ok (helper maps NotFound→Ok)"
+            );
+        }
+
+        // 关键不变量：session 仍在池中（被 ReleaseForReuse 复用进池），
+        // disconnect_count == 0（ReleaseForReuse 不关闭连接）。
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            0,
+            "ReleaseForReuse 不应关闭连接；多次并发 release 不应导致多重关闭"
+        );
+        let acquired = manager
+            .get_session_connection("mysql-concurrent-release:session:1")
+            .await;
+        assert!(
+            acquired.is_ok(),
+            "ReleaseForReuse 后 session 应在池中可复用"
+        );
+    }
+
+    /// Phase 6: rollback_if_active 在 ReleaseForReuse 路径被调用
+    /// （防止未提交事务状态泄漏到下一个使用者）
+    #[tokio::test]
+    async fn release_session_for_reuse_calls_rollback_if_active() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-reuse-rollback");
+
+        // 计数器：跟踪 ROLLBACK 调用次数
+        let rollback_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnectionWithRollback {
+                config: config.clone(),
+                rollback_count: Arc::clone(&rollback_count),
+            }),
+            "mysql-reuse-rollback:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        // ReleaseForReuse 路径：rollback_if_active 应被调用 1 次
+        manager
+            .release_session_for_reuse("mysql-reuse-rollback:session:1")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            rollback_count.load(Ordering::SeqCst),
+            1,
+            "ReleaseForReuse 路径必须调用 rollback_if_active"
+        );
+    }
+
+    /// 测试用 MockConnection 子类：跟踪 ROLLBACK 调用次数
+    struct MockConnectionWithRollback {
+        config: DbConnectionConfig,
+        rollback_count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl DbConnection for MockConnectionWithRollback {
+        fn config(&self) -> &DbConnectionConfig {
+            &self.config
+        }
+
+        fn set_config_database(&mut self, database: Option<String>) {
+            self.config.database = database;
+        }
+
+        async fn connect(&mut self) -> Result<(), DbError> {
+            Ok(())
+        }
+
+        async fn disconnect(&mut self) -> Result<(), DbError> {
+            Ok(())
+        }
+
+        async fn execute(
+            &self,
+            _plugin: &dyn DatabasePlugin,
+            _script: &str,
+            _options: ExecOptions,
+        ) -> Result<Vec<SqlResult>, DbError> {
+            Ok(Vec::new())
+        }
+
+        async fn query(&self, query: &str) -> Result<SqlResult, DbError> {
+            if query == "ROLLBACK" {
+                self.rollback_count.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(SqlResult::Exec(ExecResult {
+                sql: query.to_string(),
+                rows_affected: 0,
+                elapsed_ms: 0,
+                message: None,
+            }))
+        }
+
+        async fn current_database(&self) -> Result<Option<String>, DbError> {
+            Ok(self.config.database.clone())
+        }
+
+        async fn switch_database(&self, _database: &str) -> Result<(), DbError> {
+            Ok(())
+        }
+
+        async fn execute_streaming(
+            &self,
+            _plugin: &dyn DatabasePlugin,
+            _source: SqlSource,
+            _options: ExecOptions,
+            _sender: mpsc::Sender<StreamingProgress>,
+        ) -> Result<(), DbError> {
+            Ok(())
+        }
     }
 }

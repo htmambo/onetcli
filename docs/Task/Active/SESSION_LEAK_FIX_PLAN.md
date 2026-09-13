@@ -1,12 +1,53 @@
 # 数据库 import/export session 生命周期泄漏修复（评审 P1-2）
 
-**Status**: ✅ Phase 1 评审 APPROVED（Round 6，2026-09-13）；Phase 2-7 待开始
+**Status**: ✅ Phase 1 + Phase 2 评审 APPROVED；Phase 3-7 待开始
 **创建时间**: 2026-09-13
 **实施时间**: 2026-09-13
 **前置依赖**: 无
 **关联评审**: Round 1 of commit 4b345b5f + 8e1de28c（SessionId `798c41e0-e9ea-4400-b67c-49b956b03031`）；
 Round 1 of session_leak_fix（SessionId `3558b938-17a9-47d7-b52c-516c6883824f`，2026-09-13）；
-Phase 1 Round 2-6 of session_leak_fix（SessionId `3ec048af...` / `f2418b44...` / `a385d924...`，2026-09-13）
+Phase 1 Round 2-6 of session_leak_fix（SessionId `3ec048af...` / `f2418b44...` / `a385d924...`，2026-09-13）；
+Phase 2 Round 7-11 of session_leak_fix（SessionId `302a04dd...` / `ff8581ca...` / `e99bf0d3...`
+/ `e93964c9...` / `34af3599...`，2026-09-13）
+
+## Phase 2 Round 11 评审结果（2026-09-13）—— APPROVED ✅
+
+**Verdict**: APPROVED（SessionId `34af3599-e1b5-4d70-99ed-443a1ecbfb65`）
+
+### Phase 2 最终交付
+- **SessionGuard 接入 import/export 4 个函数 + 2 个 macros + 4 个 read 函数**：
+  消除原 release_session 直接调用的 5 条 session 泄漏路径
+- **`set_action` + `finish` 两步可变状态机 → `finish_with(action)` 合一 API**
+- **`SessionGuard::action_for<T,E>` 单点决策函数**：10 处重复收敛为 1 处
+- **sync-wrapper + `impl Future` 模式**：规避 rust#87441（#[track_caller] 不传播）
+- **二次 finish_with hard no-op + error 级别 + debug_assert**：
+  防止 Close-after-Reuse 协议违规
+- **(None, None) 不可达分支防御**：error + debug_assert 双层
+- **`last_release_id` 字段**：二次调用时携带 session_id 定位
+- **Drop 命名澄清**：`original_action` / `release_action` 分离（避免 Round 7 shadowing 误会）
+- **测试时钟域统一**：`tokio::time::Instant` + `tokio::time::sleep`（避免 paused-time 失效）
+
+### 5 类生命周期测试（覆盖声称修复的全部 5 类问题）
+1. `finish_with_business_failure_closes_session` — 业务失败 → Close → 连接断开
+2. `finish_with_business_success_releases_for_reuse` — 业务成功 → ReleaseForReuse → 留在池中
+3. `future_cancellation_releases_session_via_drop_fallback` — timeout 取消 → Drop 兜底
+4. `panic_in_business_closure_releases_session_via_drop` — panic → Drop 兜底
+5. `finish_with_then_drop_is_noop` — finish_with 后 Drop no-op（防双重释放）
+
+### 测试统计
+- 27/27 manager 测试通过（含 6 个新增 + 1 个 should_panic）
+- 454/454 db crate 测试通过（debug build）
+- 1/1 release build 测试通过（finish_with_called_twice_is_idempotent_in_release）
+- cargo fmt clean
+- 0 新增 clippy 警告
+
+### Commits
+- Phase 1: `51ba141f` fix(db): SessionGuard + Drop 兜底修复 import/export session 生命周期泄漏
+- Phase 2: `fc465b69` fix(db): SessionGuard 接入 import/export 调用点（Phase 2）
+
+### Phase 2 已完成的功能（来自原计划）
+- ✅ Phase 5: 幂等保护（Option::take + finish_with）
+- ✅ Phase 7 (部分): Commit 拆分（Phase 1 + Phase 2 各自独立 commit）
 
 ## Phase 1 Round 6 评审结果（2026-09-13）—— APPROVED ✅
 
@@ -22,23 +63,6 @@ Phase 1 Round 2-6 of session_leak_fix（SessionId `3ec048af...` / `f2418b44...` 
 - **`SESSION_NOT_FOUND_PREFIX` + `is_session_not_found` 纯函数**（P1-4）：
   producer/consumer 共享常量、分类集中可测
 - **MockConnection 错误注入**：支持 verify 失败 + disconnect_count 观测
-
-### 测试统计
-- 20/20 manager 测试通过（含 4 个 Round 5/6 新增）
-- 447/447 db crate 测试通过
-- cargo fmt clean
-- 0 新增 clippy 警告
-
-### 落实的非阻塞建议（Round 6 polish）
-- ✅ P2#2: Drop 兜底与 finish 共享 `downgrade_action_on_failure`（覆盖"finish 完全未调用 +
-  ReleaseForReuse"场景）
-- ✅ P3#4: Test A 加 post-Drop 断言，直接证明 Drop-after-finish 为 no-op
-- ✅ P3#5: 旧测试 `session_guard_drop_preserves_release_for_reuse_action` 重命名为
-  `session_guard_drop_downgrades_release_for_reuse_to_close`，反映新的安全属性
-
-### 待办（不影响 Phase 1 合并）
-- P2#1: verify 失败缺 metric（仅 `warn!`）—— 跟进 issue
-- P2#3: 长期方案 `DbError::SessionNotFound` 变体——结构性根治，跨 crate 影响
 
 ## Round 1 评审结果（2026-09-13）
 
