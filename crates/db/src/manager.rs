@@ -676,21 +676,39 @@ const _ASSERT_NOT_CLONE: fn() = || {
     // 编译期断言 SessionGuard: !Clone —— 故意调用时编译失败
 };
 
-/// Release 路径标识（编译期穷尽匹配 + 日志前缀）。
+/// Release 意图：合并"哪个入口"与"是否覆盖"两个独立维度为单一参数，
+/// 让非法状态（如 `Finish` + override action、`FinishWith` + 无 action）
+/// **编译期不可表达**。
 ///
-/// 用于 `perform_release` 的 `path` 参数，避免字符串拼写错误静默污染
-/// 日志来源。`as_str()` 提供稳定的日志前缀文本。
+/// - `Finish`：使用 `session` 字段内存储的 action（`SessionGuard::finish`）
+/// - `FinishWith(action)`：调用方一次性 override（`SessionGuard::finish_with`）
+///
+/// **设计选择**：Err 路径写回时使用**本次生效的 action**（override 或 stored），
+/// 即把 override 视为"最新意图"——若本次 override 失败，降级值将作为 session
+/// 持久 action，Drop 兜底 / 重试时使用降级后的值（不是原始 stored）。
+/// 这是原 Round 15 之前的行为，本重构保留。
 #[derive(Clone, Copy, Debug)]
-enum ReleasePath {
-    FinishWith,
+enum ReleaseIntent {
+    /// `finish()`：使用 session 存储的 action
     Finish,
+    /// `finish_with(action)`：调用方 override
+    FinishWith(SessionReleaseAction),
 }
 
-impl ReleasePath {
+impl ReleaseIntent {
+    /// 日志前缀 + 调试用短标签（与 ReleasePath 兼容）
     const fn as_str(self) -> &'static str {
         match self {
-            Self::FinishWith => "finish_with",
             Self::Finish => "finish",
+            Self::FinishWith(_) => "finish_with",
+        }
+    }
+
+    /// 本次生效的 action（override 优先，否则为 stored）
+    const fn resolved_action(self, stored: SessionReleaseAction) -> SessionReleaseAction {
+        match self {
+            Self::Finish => stored,
+            Self::FinishWith(action) => action,
         }
     }
 }
@@ -807,8 +825,7 @@ impl SessionGuard {
                 &self.manager,
                 &mut self.session,
                 &mut self.last_release_id,
-                Some(action), // finish_with: 调用方 override
-                ReleasePath::FinishWith,
+                ReleaseIntent::FinishWith(action),
             )
             .await;
         }
@@ -862,8 +879,7 @@ impl SessionGuard {
             &self.manager,
             &mut self.session,
             &mut self.last_release_id,
-            None,
-            ReleasePath::Finish,
+            ReleaseIntent::Finish,
         )
         .await;
     }
@@ -874,8 +890,9 @@ impl SessionGuard {
     /// # 契约
     ///
     /// - **Ok 路径**：清空 `session` + 保存 `last_release_id`
-    /// - **Err 路径**：**保留** `session`，把 action 降级（`Close`）写回，
-    ///   让 Drop 兜底 / 重试可以拿到更新后的 action
+    /// - **Err 路径**：**保留** `session`，把本次生效的 action 降级后写回
+    ///   （不是原始 stored，是 override 或 stored 的解析值）——让 Drop 兜底 /
+    ///   重试可以拿到更新后的 action
     /// - 调用方必须在调用前确保 `session` 是 `Some`（None 路径由调用方处理）
     ///
     /// # 不变量
@@ -883,17 +900,19 @@ impl SessionGuard {
     /// - release 调用成功与清空 session 之间不得再插入任何 `.await`
     /// - Err 路径写回 session 是 Drop 兜底能 retry 的关键，不能漏
     ///
-    /// # Action 参数二义性消除
+    /// # Err 写回语义（方案 B：override 视为最新意图）
     ///
-    /// `action_override: Option<>` ：None 表示使用 `session` 内存储的 action
-    /// （`finish` 行为），Some 表示调用方 override（`finish_with` 行为）。
-    /// 编译期类型消除误用风险。
+    /// 失败的 override 会成为该 session 的持久 action。即：
+    /// `stored=Release`、`finish_with(Close)` 失败 → 写回 `(id, Close)`，
+    /// Drop 兜底将用 Close 重试而非原始 Release。
+    ///
+    /// 这是 Round 15 重构前原有行为的延续（finish_with Err 分支对 override
+    /// 降级），非语义漂移。doc 显式说明防止后续误读。
     async fn perform_release(
         manager: &ConnectionManager,
         session: &mut Option<(String, SessionReleaseAction)>,
         last_release_id: &mut Option<String>,
-        action_override: Option<SessionReleaseAction>,
-        path: ReleasePath,
+        intent: ReleaseIntent,
     ) {
         // take 而非 clone：Ok 路径无须再写 None（已 take）；Err 路径
         // 必须写回降级 action，否则 Drop 兜底会拿到已 None 的 session。
@@ -902,23 +921,24 @@ impl SessionGuard {
             // release 路径不应用 error!（避免污染 finish 静默契约）。
             debug_assert!(
                 false,
-                "perform_release 契约违约：调用方应在 None 路径前置处理（{path:?}）"
+                "perform_release 契约违约：调用方应在 None 路径前置处理（{intent:?}）"
             );
             return;
         };
-        let action = action_override.unwrap_or(stored_action);
+        let action = intent.resolved_action(stored_action);
         match release_session(manager, &id, action).await {
             Ok(()) => {
                 // 不变量：release 调用成功与 last_release_id 保存之间不得再插入 .await
                 *last_release_id = Some(id);
             }
             Err(e) => {
-                // 关键：写回降级 action 让 Drop 兜底 / 重试可以拿到更新后的 action
+                // 关键：写回降级后的本次生效 action（方案 B：override 即最新意图）
                 warn!(
-                    "{}: failed to release session {}: {}, downgrading action",
-                    path.as_str(),
+                    "{}: failed to release session {}: {}, downgrading action to {:?}",
+                    intent.as_str(),
                     id,
                     e,
+                    SessionGuard::downgrade_action_on_failure(action),
                 );
                 Self::restore_session_with_downgraded_action(session, id, action);
             }
@@ -3894,6 +3914,42 @@ mod tests {
             SessionGuard::downgrade_action_on_failure(SessionReleaseAction::Release),
             SessionReleaseAction::Release,
             "Release 失败时不变（避免无端 close_on_release 行为变化）"
+        );
+    }
+
+    /// `ReleaseIntent::resolved_action` 单测：钉死 P2-2 类型安全收尾的核心契约。
+    ///
+    /// **Finish 变体**：必须返回 stored，调用方 override 不存在场景
+    /// **FinishWith 变体**：必须返回 override，**忽略** stored
+    /// （即 stored 被静默丢弃——这是方案 B 的语义，与 Round 15 重构前行为一致）
+    ///
+    /// 与 `restore_session_with_downgraded_action_writes_back_downgraded` 一起
+    /// 覆盖 perform_release Err 路径的全部解析逻辑：
+    /// - resolved_action 决定本次生效值
+    /// - downgrade_action_on_failure 决定降级映射
+    /// - restore_session_with_downgraded_action 决定写回 slot
+    #[test]
+    fn release_intent_resolves_stored_or_override() {
+        let stored = SessionReleaseAction::ReleaseForReuse;
+        // Finish: 必须返回 stored
+        assert_eq!(
+            ReleaseIntent::Finish.resolved_action(stored),
+            SessionReleaseAction::ReleaseForReuse,
+            "Finish 变体应返回 stored action"
+        );
+        // FinishWith: 必须返回 override，忽略 stored
+        assert_eq!(
+            ReleaseIntent::FinishWith(SessionReleaseAction::Close).resolved_action(stored),
+            SessionReleaseAction::Close,
+            "FinishWith 变体应返回 override action（忽略 stored）"
+        );
+        // FinishWith(Release) on stored=ReleaseForReuse: 返回 Release，不是 Close
+        // 验证 override 真正覆盖 stored（即使 override 与降级映射反向）
+        assert_eq!(
+            ReleaseIntent::FinishWith(SessionReleaseAction::Release)
+                .resolved_action(SessionReleaseAction::ReleaseForReuse),
+            SessionReleaseAction::Release,
+            "FinishWith 变体的 override 必须严格生效，不受 stored 影响"
         );
     }
 
