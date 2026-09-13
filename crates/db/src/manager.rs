@@ -77,22 +77,27 @@ macro_rules! with_plugin_session {
                 .await?;
             info!("with_plugin_session: session created: {}", session_id);
 
+            // SessionGuard 保护 session（默认保守 Close）；覆盖 panic/cancel/get_session 失败
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await?;
-                let $conn = guard
+                let $conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 $body.map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            // 单源决策：业务成功 → ReleaseForReuse；失败 → Close（防脏复用）
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -124,23 +129,26 @@ macro_rules! with_plugin_session_db {
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
 
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
-                let $conn = guard
+                let $conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 $body.map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -660,6 +668,10 @@ pub enum SessionReleaseAction {
 pub struct SessionGuard {
     manager: ConnectionManager,
     session: Option<(String, SessionReleaseAction)>,
+    /// 上次成功释放的 session_id，用于二次 finish_with 时定位
+    /// Close-after-Reuse 冲突（首次 Reuse 已成功 → 二次 Close 已被静默忽略）。
+    /// Drop 时无意义（连同 self 一起销毁）。
+    last_release_id: Option<String>,
 }
 
 // 禁止 Clone：两个 guard 各自 Drop 会导致 double release
@@ -687,6 +699,7 @@ impl SessionGuard {
         Self {
             manager,
             session: Some((session_id, action)),
+            last_release_id: None,
         }
     }
 
@@ -709,6 +722,120 @@ impl SessionGuard {
         }
     }
 
+    /// 覆盖 release action。
+    ///
+    /// 用途：业务闭包完成后，根据业务结果**事后决策**释放策略：
+    /// - 业务成功 → ReleaseForReuse（乐观，允许复用）
+    /// - 业务失败 → Close（保守，禁止脏复用）
+    ///
+    /// 若 guard 已被 finish 清空或 Drop 已触发（session 字段为 None），
+    /// 该方法为 no-op。
+    pub fn set_action(&mut self, action: SessionReleaseAction) {
+        if let Some((_, ref mut act)) = self.session.as_mut() {
+            *act = action;
+        }
+    }
+
+    /// 业务完成后显式结束 guard；action 由调用方根据业务结果决定。
+    ///
+    /// **API 设计**：消除 `set_action + finish` 两步可变状态，决策与释放
+    /// 合一。`finish_with` 与 `finish` 互斥——后者使用 guard 创建时的初始
+    /// action（保留向后兼容，主要用于 Drop 路径）。
+    ///
+    /// **取消安全**：与 `finish` 相同——不先 take，仅 release 成功后清空。
+    /// cancel 中途 Drop 兜底使用降级 action 重试。
+    ///
+    /// **失败保守降级**：release 返回 Err 时 action 由
+    /// `downgrade_action_on_failure` 降级后保留在 self.session，
+    /// Drop 兜底继续处理。
+    ///
+    /// **幂等性**：第二次调用为 no-op（self.session 已被 take 清空）。
+    /// 这种 no-op 是**显式可观测**的（debug 日志记录 caller 位置 +
+    /// requested_action），便于排查"双重 release"类 bug，包括
+    /// Close-after-Reuse 冲突检测（首次 Reuse 已成功 → 二次 Close 应被
+    /// 记录为 warn）。
+    ///
+    /// **注**：`#[track_caller]` 在 `async fn` 上不会传入 caller 位置
+    /// （rust-lang/rust#87441）。这里用 sync-wrapper + `impl Future` 模式
+    /// 在同步序言内固化 caller 位置，使 async body 内可读到真实调用位置。
+    #[track_caller]
+    pub fn finish_with(
+        &mut self,
+        action: SessionReleaseAction,
+    ) -> impl std::future::Future<Output = ()> + '_ {
+        let caller = std::panic::Location::caller();
+        async move {
+            // 检查是否二次调用：clone 出旧值若 session 已 None
+            let stored = self.session.clone();
+            let Some((id, _stored_action)) = stored else {
+                // 二次 finish_with：协议违规 + 可能的脏复用风险。
+                // **二次调用 hard no-op**：此处 `return` 跳过所有 release
+                // 逻辑，不会触碰池中 session，避免误销毁已被其他使用者租走的
+                // session。日志用 `error!` 级别（不是 warn）+ debug_assert，
+                // 触发告警体系 + 测试构建立即失败。
+                if self.last_release_id.is_some() {
+                    error!(
+                        target: "db::session",
+                        session_id = ?self.last_release_id,
+                        requested_action = ?action,
+                        caller = ?caller,
+                        "finish_with called after successful release — second call is hard no-op, \
+                         requested action NOT applied"
+                    );
+                    debug_assert!(
+                        false,
+                        "finish_with called twice (session_id={:?}, caller={:?})",
+                        self.last_release_id, caller
+                    );
+                } else {
+                    // (session=None, last_release_id=None) 不可达分支防御：
+                    // 正常路径不应到达此处（除非 guard 构造异常或中途被 Drop 析构）。
+                    // 升级为 error + debug_assert 防止静默掩盖真实 bug。
+                    error!(
+                        target: "db::session",
+                        caller = ?caller,
+                        requested_action = ?action,
+                        "finish_with on guard with no session and no release record — invariant violated"
+                    );
+                    debug_assert!(
+                        false,
+                        "finish_with on (None, None) guard — should be unreachable (caller={caller:?})"
+                    );
+                }
+                return; // hard no-op（不触发任何 release 逻辑）
+            };
+            match release_session(&self.manager, &id, action).await {
+                Ok(()) => {
+                    // 不变量：release 调用成功与清空 session 之间不得再插入任何 .await
+                    self.session = None;
+                    self.last_release_id = Some(id);
+                }
+                Err(e) => {
+                    warn!("Failed to release session {}: {}", id, e);
+                    // session 保留 → Drop 兜底使用降级 action 重试
+                    let downgraded = Self::downgrade_action_on_failure(action);
+                    if let Some((_, ref mut act)) = self.session.as_mut() {
+                        *act = downgraded;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 根据业务结果计算 release action 的单点决策函数。
+    ///
+    /// 收敛于一处：业务成功 → `ReleaseForReuse`（允许复用）；
+    /// 业务失败 → `Close`（保守关闭，防止脏复用）。
+    /// 调用点统一调用 `guard.finish_with(action_for(&result)).await`。
+    #[inline]
+    pub fn action_for<T, E>(result: &Result<T, E>) -> SessionReleaseAction {
+        if result.is_ok() {
+            SessionReleaseAction::ReleaseForReuse
+        } else {
+            SessionReleaseAction::Close
+        }
+    }
+
     /// 释放 session；重复调用是 no-op（幂等）。
     ///
     /// **取消安全**：仅 release 成功后清空 session；cancel 时 session
@@ -721,6 +848,12 @@ impl SessionGuard {
     /// 自动降级为 `Close` —— 状态未知的会话不应被复用进池（避免下次使用者
     /// 拿到有未决事务/临时表/SESSION 变量的脏连接）。`Close`/`Release`
     /// 失败时 action 不变（已经是最保守策略）。
+    ///
+    /// **注**：`#[track_caller]` 在 `async fn` 上不会传播（rust#87441）。
+    /// 这里 `finish` 是 sync-wrapper 模式不可行的（async 复杂度更高），但
+    /// `finish` 主要给 Drop 路径 + 旧测试用，**生产路径请用 `finish_with`**——
+    /// `finish_with` 才有完整的 sync-wrapper + caller 传播 + last_release_id
+    /// 协议违规检测。
     pub async fn finish(&mut self) {
         let Some((id, action)) = self.session.clone() else {
             return; // 已 finish 或已被 Drop 兜底，幂等 no-op
@@ -729,6 +862,7 @@ impl SessionGuard {
             Ok(()) => {
                 // 不变量：release 调用成功与清空 session 之间不得再插入任何 .await
                 self.session = None;
+                self.last_release_id = Some(id);
             }
             Err(e) => {
                 warn!("Failed to release session {}: {}", id, e);
@@ -746,49 +880,46 @@ impl SessionGuard {
 impl Drop for SessionGuard {
     fn drop(&mut self) {
         // 仅在 finish 未被调用 / 未成功完成时（panic / future drop / cancel / finish Err）兜底
-        let Some((id, action)) = self.session.take() else {
+        let Some((id, original_action)) = self.session.take() else {
             return;
         };
         // 与 `finish` 共享同一降级函数：覆盖"finish 完全未调用 + ReleaseForReuse"
         // 场景——业务未跑完就 panic/cancel，session 状态不可信，禁止复用进池。
         // finish 已降级过的 action（Close）再次调用为 no-op（idempotent）。
-        let downgraded_action = SessionGuard::downgrade_action_on_failure(action);
+        // 命名上避免 shadowing（Round 7 误会的根因）：明确区分
+        // `original_action`（guard 创建时或 finish 降级后的当前 action）
+        // 与 `release_action`（即将传给 release_session 的最终 action）。
+        let release_action = SessionGuard::downgrade_action_on_failure(original_action);
         warn!(
             target: "db::session",
             session_id = %id,
-            original_action = ?action,
-            release_action = ?downgraded_action,
+            original_action = ?original_action,
+            release_action = ?release_action,
             "SessionGuard dropped without finish() — spawning best-effort release"
         );
-        let action = downgraded_action;
         let manager = self.manager.clone();
-        let id_for_log = id.clone();
-        let release = move || async move {
-            match release_session(&manager, &id, action).await {
-                Ok(()) => {}
-                Err(e) => {
-                    warn!(
-                        target: "db::session",
-                        session_id = %id,
-                        "Best-effort release in Drop failed: {e}"
-                    );
-                }
-            }
-        };
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
                 // spawn 返回 JoinHandle 不返回 Result；drop JoinHandle 让
                 // task 继续运行到完成。runtime shutdown 期 task 可能被丢弃，
                 // 但 best-effort 接受 —— 服务端 idle timeout 是最终兜底
                 // （见类型 rustdoc 注释）
-                handle.spawn(release());
+                handle.spawn(async move {
+                    if let Err(e) = release_session(&manager, &id, release_action).await {
+                        warn!(
+                            target: "db::session",
+                            session_id = %id,
+                            "Best-effort release in Drop failed: {e}"
+                        );
+                    }
+                });
             }
             Err(_) => {
                 // 不在 tokio runtime 内（如同步析构）：泄漏不可避免，
                 // 但至少错误日志让操作者知道这件事发生了
                 warn!(
                     target: "db::session",
-                    session_id = %id_for_log,
+                    session_id = %id,
                     "SessionGuard dropped outside tokio runtime — session will leak until idle timeout"
                 );
             }
@@ -1945,12 +2076,18 @@ impl GlobalDbState {
                 .create_session(config.clone(), &clone_self.db_manager)
                 .await?;
 
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await?;
-                let conn = guard
+                let conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 plugin
@@ -1959,13 +2096,8 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            if let Err(e) = clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-            {
-                warn!("Failed to release session {}: {}", session_id, e);
-            }
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             // 如果加载成功，缓存结果
             if let Ok(ref children) = result {
@@ -2529,6 +2661,13 @@ impl GlobalDbState {
                 .create_session(config.clone(), &clone_self.db_manager)
                 .await?;
 
+            // SessionGuard 保护：默认保守 Close，业务成功后切到 ReleaseForReuse
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
                 let mut guard = clone_self
                     .connection_manager
@@ -2586,13 +2725,8 @@ impl GlobalDbState {
                 Ok::<_, anyhow::Error>(view)
             };
 
-            if let Err(e) = clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-            {
-                warn!("Failed to release session {}: {}", session_id, e);
-            }
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -2647,12 +2781,20 @@ impl GlobalDbState {
                 .create_session(db_config.clone(), &clone_self.db_manager)
                 .await?;
 
+            // SessionGuard 保护：默认保守 Close，业务成功后切到 ReleaseForReuse。
+            // 覆盖 panic / future cancel / get_session_connection 失败 / 业务失败 四条泄漏路径
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await?;
-                let conn = guard
+                let conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 plugin
@@ -2661,11 +2803,9 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            // 单点决策：业务成功 → ReleaseForReuse；失败 → Close（防脏复用）
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -2697,12 +2837,18 @@ impl GlobalDbState {
                 .create_session(db_config.clone(), &clone_self.db_manager)
                 .await?;
 
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await?;
-                let conn = guard
+                let conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 plugin
@@ -2711,11 +2857,8 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -2743,12 +2886,18 @@ impl GlobalDbState {
 
             let plugin = clone_self.get_plugin(&db_config.database_type)?;
 
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await?;
-                let conn = guard
+                let conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 plugin
@@ -2757,11 +2906,8 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -2791,12 +2937,18 @@ impl GlobalDbState {
                 .create_session(db_config.clone(), &clone_self.db_manager)
                 .await?;
 
+            let mut guard = SessionGuard::new(
+                clone_self.connection_manager.clone(),
+                session_id.clone(),
+                SessionReleaseAction::Close,
+            );
+
             let result = {
-                let mut guard = clone_self
+                let mut conn_guard = clone_self
                     .connection_manager
                     .get_session_connection(&session_id)
                     .await?;
-                let conn = guard
+                let conn = conn_guard
                     .connection()
                     .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
                 plugin
@@ -2805,11 +2957,8 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("{}", e))
             };
 
-            clone_self
-                .connection_manager
-                .release_session(&session_id)
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let action = SessionGuard::action_for(&result);
+            guard.finish_with(action).await;
 
             result
         })
@@ -2836,12 +2985,18 @@ impl GlobalDbState {
             .create_session(config, &self.db_manager)
             .await?;
 
+        let mut guard = SessionGuard::new(
+            self.connection_manager.clone(),
+            session_id.clone(),
+            SessionReleaseAction::Close,
+        );
+
         let result = {
-            let mut guard = self
+            let mut conn_guard = self
                 .connection_manager
                 .get_session_connection(&session_id)
                 .await?;
-            let conn = guard
+            let conn = conn_guard
                 .connection()
                 .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
             plugin
@@ -2850,10 +3005,8 @@ impl GlobalDbState {
                 .map_err(|e| anyhow::anyhow!("{}", e))
         };
 
-        self.connection_manager
-            .release_session(&session_id)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let action = SessionGuard::action_for(&result);
+        guard.finish_with(action).await;
 
         result
     }
@@ -2879,12 +3032,18 @@ impl GlobalDbState {
             .create_session(config, &self.db_manager)
             .await?;
 
+        let mut guard = SessionGuard::new(
+            self.connection_manager.clone(),
+            session_id.clone(),
+            SessionReleaseAction::Close,
+        );
+
         let result = {
-            let mut guard = self
+            let mut conn_guard = self
                 .connection_manager
                 .get_session_connection(&session_id)
                 .await?;
-            let conn = guard
+            let conn = conn_guard
                 .connection()
                 .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
             plugin
@@ -2893,10 +3052,8 @@ impl GlobalDbState {
                 .map_err(|e| anyhow::anyhow!("{}", e))
         };
 
-        self.connection_manager
-            .release_session(&session_id)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let action = SessionGuard::action_for(&result);
+        guard.finish_with(action).await;
 
         result
     }
@@ -3819,5 +3976,416 @@ mod tests {
         // 不直接验证日志（避免引入 tracing_test 依赖），
         // 仅断言 drop 完成且 session 状态无变化（无 release 发生）
         // —— 由 ConnectionManager::list_sessions("no-config") 验证
+    }
+
+    // ===== Round 7 P0-1: Phase 2 wiring 5 类生命周期测试 =====
+
+    /// 业务失败 → finish_with(Close) → session 应被关闭（非复用）
+    #[tokio::test]
+    async fn finish_with_business_failure_closes_session() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-fail-close");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-fail-close:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-fail-close:session:1".to_string(),
+            SessionReleaseAction::Close,
+        );
+
+        // 模拟业务结果：失败 → Close
+        let business_result: Result<(), ()> = Err(());
+        let action = if business_result.is_ok() {
+            SessionReleaseAction::ReleaseForReuse
+        } else {
+            SessionReleaseAction::Close
+        };
+        guard.finish_with(action).await;
+
+        // session 应被 close（连接断开 + 池中移除）
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "Close action 必须触发连接断开"
+        );
+        assert!(
+            manager.list_sessions(&config.id).await.is_empty(),
+            "Close action 必须从池中移除 session"
+        );
+        assert!(
+            guard.current_action().is_none(),
+            "finish_with 成功路径应清空 session"
+        );
+    }
+
+    /// 业务成功 → finish_with(ReleaseForReuse) → session 应在池中可复用
+    #[tokio::test]
+    async fn finish_with_business_success_releases_for_reuse() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-success-reuse");
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::new(config.clone(), true)),
+            "mysql-success-reuse:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-success-reuse:session:1".to_string(),
+            SessionReleaseAction::Close, // 初始保守
+        );
+
+        // 模拟业务结果：成功 → 切到 ReleaseForReuse
+        let business_result: Result<(), ()> = Ok(());
+        let action = if business_result.is_ok() {
+            SessionReleaseAction::ReleaseForReuse
+        } else {
+            SessionReleaseAction::Close
+        };
+        guard.finish_with(action).await;
+
+        // session 应在池中（可再次获取）
+        let acquired = manager
+            .get_session_connection("mysql-success-reuse:session:1")
+            .await;
+        assert!(
+            acquired.is_ok(),
+            "ReleaseForReuse action 应保留 session 在池中"
+        );
+        // 清理
+        let _ = manager.close_session("mysql-success-reuse:session:1").await;
+    }
+
+    /// future 中途取消 → guard 被 drop → Drop 兜底 best-effort release
+    #[tokio::test]
+    async fn future_cancellation_releases_session_via_drop_fallback() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-cancel");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-cancel:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        // 启动一个 future 持有 guard，让它 hang 后被 timeout 取消
+        let manager_for_future = manager.clone();
+        let fut = async move {
+            let _guard = SessionGuard::new(
+                manager_for_future.clone(),
+                "mysql-cancel:session:1".to_string(),
+                SessionReleaseAction::ReleaseForReuse,
+            );
+            // 模拟一个会 hang 的业务 future
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        };
+
+        // 用 timeout 取消 future，guard 会被 drop
+        let _ = tokio::time::timeout(Duration::from_millis(50), fut).await;
+
+        // 给 Drop spawn 的 release 一点时间执行
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Drop 兜底：ReleaseForReuse 应降级为 Close（防脏复用），
+        // session 应被关闭（不在池中）
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "cancel 路径 Drop 兜底应触发连接断开"
+        );
+        assert!(
+            manager.list_sessions(&config.id).await.is_empty(),
+            "cancel 路径 Drop 兜底应从池中移除 session"
+        );
+    }
+
+    /// panic 在业务闭包 → guard 被 drop → Drop 兜底 best-effort release
+    #[tokio::test]
+    async fn panic_in_business_closure_releases_session_via_drop() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-panic");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-panic:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        // 用 tokio::spawn 在独立 task 中跑 panic 业务闭包，
+        // JoinHandle::await 返回 Err(JoinError) 表示 panic
+        let manager_for_panic = manager.clone();
+        let handle = tokio::spawn(async move {
+            let _guard = SessionGuard::new(
+                manager_for_panic.clone(),
+                "mysql-panic:session:1".to_string(),
+                SessionReleaseAction::ReleaseForReuse,
+            );
+            // 模拟业务 panic
+            panic!("simulated business panic");
+        });
+        let _ = handle.await; // Err 表示 panic 已被 tokio::spawn 捕获
+
+        // 给 Drop spawn 的 release 一点时间执行
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // panic 路径：Drop 兜底 → ReleaseForReuse 降级 Close → session 关闭
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "panic 路径 Drop 兜底应触发连接断开"
+        );
+        assert!(
+            manager.list_sessions(&config.id).await.is_empty(),
+            "panic 路径 Drop 兜底应从池中移除 session"
+        );
+    }
+
+    /// finish_with 后再调用 finish_with 在 release build 应为 no-op（幂等），
+    /// 在 debug build 触发 debug_assert（协议违规立即失败）。
+    ///
+    /// 此测试在 release build 中验证幂等行为；在 debug build 中跳过
+    /// （避免触发 debug_assert panic 让测试无法完成断言）。
+    #[cfg(not(debug_assertions))]
+    #[tokio::test]
+    async fn finish_with_called_twice_is_idempotent_in_release() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-idempotent");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-idempotent:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-idempotent:session:1".to_string(),
+            SessionReleaseAction::Close,
+        );
+
+        // 第一次 finish_with
+        guard.finish_with(SessionReleaseAction::Close).await;
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "第一次 finish_with 应执行 release"
+        );
+
+        // 第二次 finish_with 应为 no-op（session 已 None，hard no-op 不触发 release）
+        guard.finish_with(SessionReleaseAction::Close).await;
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "第二次 finish_with 应为 no-op（幂等），不得重复断开"
+        );
+    }
+
+    /// debug build 中二次 finish_with 触发 debug_assert panic（协议违规）。
+    /// 配合 `#[should_panic(expected = ...)]` 真正验证断言生效。
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    #[should_panic(expected = "finish_with called twice")]
+    async fn finish_with_called_twice_panics_in_debug() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-debug-double-finish");
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::new(config.clone(), true)),
+            "mysql-debug-double-finish:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-debug-double-finish:session:1".to_string(),
+            SessionReleaseAction::Close,
+        );
+        guard.finish_with(SessionReleaseAction::Close).await;
+        // 第二次调用：debug_assert! 触发 panic（被 #[should_panic] 捕获）
+        guard.finish_with(SessionReleaseAction::Close).await;
+    }
+
+    /// finish_with 后 Drop 应为 no-op（不会二次释放）
+    #[tokio::test]
+    async fn finish_with_then_drop_is_noop() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-finish-then-drop");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-finish-then-drop:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        {
+            let mut guard = SessionGuard::new(
+                manager.clone(),
+                "mysql-finish-then-drop:session:1".to_string(),
+                SessionReleaseAction::Close,
+            );
+            guard.finish_with(SessionReleaseAction::Close).await;
+            // guard 在 scope 结束时 drop；Drop 应为 no-op
+        }
+
+        // 给可能的 Drop spawn 一点时间
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // 关键断言：disconnect_count 必须 == 1（无二次关闭）
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "finish_with 后 Drop 必须为 no-op，不得二次关闭连接"
+        );
+    }
+
+    /// Drop 兜底对 ReleaseForReuse 的降级路径（Round 7 P1-1 修复验证）
+    ///
+    /// 场景：guard 持有 ReleaseForReuse 复用意图，但 panic/cancel 导致
+    /// finish 完全未调用 → Drop 必须将 action 降级为 Close，**禁止脏会话
+    /// 复用进池**。
+    #[tokio::test]
+    async fn drop_without_finish_with_reuse_intent_downgrades_to_close() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-drop-reuse-downgrade");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-drop-reuse-downgrade:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        {
+            let _guard = SessionGuard::new(
+                manager.clone(),
+                "mysql-drop-reuse-downgrade:session:1".to_string(),
+                SessionReleaseAction::ReleaseForReuse, // 复用意图
+            );
+            // 故意不调 finish；Drop 必须降级为 Close
+        }
+
+        // 轮询**最终可观测状态本身**（disconnect_count + list_sessions），
+        // 避免轮询中间信号后再断言终态的顺序竞态。
+        // 超时 5s（CI 慢机负载下 2s 偏紧）。
+        // **统一时钟域**：用 `tokio::time::Instant` 与 `tokio::time::sleep`
+        // 保持一致，避免 std::time 与 tokio::time 混用导致的不可预期行为
+        // （paused-time 下 tokio mock 时钟被冻结，std 真实时钟继续推进，
+        // deadline 判据可能虚假失效）。
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let count = disconnect_count.load(Ordering::SeqCst);
+            let list_empty = manager.list_sessions(&config.id).await.is_empty();
+            if count >= 1 && list_empty {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!(
+                    "release task did not settle within 5s (count={count}, list_empty={list_empty})"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        // Drop 降级生效：session 不应留在池中（无脏复用）
+        assert!(
+            manager.list_sessions(&config.id).await.is_empty(),
+            "Drop 兜底必须将 ReleaseForReuse 降级为 Close，session 不应留在池中"
+        );
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "Drop 降级后 Close action 必须触发连接断开"
+        );
     }
 }
