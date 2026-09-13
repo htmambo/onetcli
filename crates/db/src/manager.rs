@@ -20,6 +20,7 @@ use one_core::gpui_tokio::Tokio;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::RwLock;
@@ -341,6 +342,14 @@ pub struct ConnectionManager {
     max_lifetime: Duration,
     /// Session counter for generating unique IDs
     session_counter: Arc<tokio::sync::Mutex<u64>>,
+    /// **可观测性**（Round 28）：verify 失败累计计数。
+    /// 释放流程（`release_session_internal` Phase 3）的 verify_and_sync_database
+    /// 失败时递增。可通过 [`verify_failure_count`](Self::verify_failure_count)
+    /// 读取——用于生产环境监控/告警 + 测试断言。
+    ///
+    /// **为什么 AtomicU64**：失败计数跨多线程 release 调用，单调递增，
+    /// 不需要锁。Relaxed 内存序即可（计数仅供监控，不参与控制流决策）。
+    verify_failure_count: Arc<AtomicU64>,
 }
 
 impl ConnectionManager {
@@ -351,6 +360,7 @@ impl ConnectionManager {
             idle_timeout: Duration::from_secs(300), // 5 minutes
             max_lifetime: Duration::from_secs(1800), // 30 minutes
             session_counter: Arc::new(tokio::sync::Mutex::new(0)),
+            verify_failure_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -361,7 +371,16 @@ impl ConnectionManager {
             idle_timeout,
             max_lifetime,
             session_counter: Arc::new(tokio::sync::Mutex::new(0)),
+            verify_failure_count: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// 读取 verify 失败累计计数（Round 28）。
+    ///
+    /// 用法：生产环境定期采样 + 告警（如 >10/min 触发严重告警），
+    /// 或测试断言 verify 失败路径被走到。
+    pub fn verify_failure_count(&self) -> u64 {
+        self.verify_failure_count.load(Ordering::Relaxed)
     }
 
     async fn acquire_physical_open_lock(
@@ -1350,7 +1369,11 @@ impl ConnectionManager {
 
         // Phase 3: decide close vs reuse, update the map.
         if let Err(e) = verify_result {
+            // 可观测性：递增 verify 失败计数（Round 28）
+            let prev_count = self.verify_failure_count.fetch_add(1, Ordering::Relaxed);
             warn!(
+                session_id = %session_id,
+                verify_failure_count = prev_count + 1,
                 "Session {} database check failed, closing connection: {e}",
                 session_id
             );
@@ -1637,6 +1660,7 @@ impl Clone for ConnectionManager {
             idle_timeout: self.idle_timeout,
             max_lifetime: self.max_lifetime,
             session_counter: Arc::clone(&self.session_counter),
+            verify_failure_count: Arc::clone(&self.verify_failure_count),
         }
     }
 }
@@ -4070,6 +4094,58 @@ mod tests {
             1,
             "finish 之后的 Drop 兜底必须是 no-op，不得二次关闭"
         );
+    }
+
+    /// `verify_failure_count` metric 测试（Round 28）：
+    /// 验证 verify 失败时计数器递增，并支持多线程累加。
+    #[tokio::test]
+    async fn verify_failure_count_increments_on_verify_error() {
+        use std::sync::atomic::Ordering;
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-verify-metric");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        // 用 with_disconnect_count_and_verify_error：verify 失败 + 记录 disconnect
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count_and_verify_error(
+                config.clone(),
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-verify-metric:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        // 初始计数应为 0
+        assert_eq!(
+            manager.verify_failure_count(),
+            0,
+            "新建 manager verify 失败计数应为 0"
+        );
+
+        // 触发 verify 失败（finish_with → release_session_for_reuse → verify_and_sync_database 失败）
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-verify-metric:session:1".to_string(),
+            SessionReleaseAction::ReleaseForReuse,
+        );
+        guard.finish().await;
+
+        // 计数应递增到 1
+        assert_eq!(
+            manager.verify_failure_count(),
+            1,
+            "verify 失败后计数应 == 1"
+        );
+
+        // 清理：session 已被 verify 失败路径清理
+        let _ = manager.close_session("mysql-verify-metric:session:1").await;
     }
 
     /// 降级映射单测：直接调用生产函数 `SessionGuard::downgrade_action_on_failure`。
