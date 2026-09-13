@@ -683,10 +683,8 @@ const _ASSERT_NOT_CLONE: fn() = || {
 /// - `Finish`：使用 `session` 字段内存储的 action（`SessionGuard::finish`）
 /// - `FinishWith(action)`：调用方一次性 override（`SessionGuard::finish_with`）
 ///
-/// **设计选择**：Err 路径写回时使用**本次生效的 action**（override 或 stored），
-/// 即把 override 视为"最新意图"——若本次 override 失败，降级值将作为 session
-/// 持久 action，Drop 兜底 / 重试时使用降级后的值（不是原始 stored）。
-/// 这是原 Round 15 之前的行为，本重构保留。
+/// Err 写回语义（方案 B：override 视为最新意图）详见
+/// [`SessionGuard::perform_release`] 处的权威 doc，本 enum 不重复定义。
 #[derive(Clone, Copy, Debug)]
 enum ReleaseIntent {
     /// `finish()`：使用 session 存储的 action
@@ -719,6 +717,25 @@ impl SessionGuard {
         self.session.as_ref().map(|(_, a)| *a)
     }
 
+    /// Err 路径写回策略计算：**纯函数**。给定 `intent` + 原始 `stored_action`，
+    /// 返回 Err 后应当写回的降级后 action（被 `perform_release` Err 分支与
+    /// `restore_session_with_downgraded_action` 共用）。
+    ///
+    /// **提取动机**（Round 18 接线测试）：
+    /// - `perform_release` Err 分支的写回值计算此前分散在两处（warn 日志 +
+    ///   `restore_session_with_downgraded_action` 内部），有重复且不易测试
+    /// - 抽出本纯函数后，12 种 intent × stored 组合可表驱动穷举测试钉死
+    ///   "override 视为最新意图"（方案 B）的全部边界
+    ///
+    /// **方案 B 语义**（详见 `perform_release` doc）：override 优先，再降级。
+    pub(crate) fn compute_writeback_action(
+        intent: ReleaseIntent,
+        stored_action: SessionReleaseAction,
+    ) -> SessionReleaseAction {
+        let resolved = intent.resolved_action(stored_action);
+        Self::downgrade_action_on_failure(resolved)
+    }
+
     /// Err 路径兜底：把 `(id, downgraded_action)` 写回 session 字段，
     /// 让 Drop 兜底 / 重试可以拿到更新后的 action。
     ///
@@ -733,9 +750,13 @@ impl SessionGuard {
     pub(crate) fn restore_session_with_downgraded_action(
         session: &mut Option<(String, SessionReleaseAction)>,
         id: String,
-        action: SessionReleaseAction,
+        downgraded: SessionReleaseAction,
     ) {
-        let downgraded = Self::downgrade_action_on_failure(action);
+        // 防御：调用方应传入 None 的 slot；非空覆写是逻辑错误
+        debug_assert!(
+            session.is_none(),
+            "restore_session_with_downgraded_action: slot must be None before write-back"
+        );
         *session = Some((id, downgraded));
     }
 }
@@ -900,14 +921,26 @@ impl SessionGuard {
     /// - release 调用成功与清空 session 之间不得再插入任何 `.await`
     /// - Err 路径写回 session 是 Drop 兜底能 retry 的关键，不能漏
     ///
-    /// # Err 写回语义（方案 B：override 视为最新意图）
+    /// # Err 写回语义（方案 B：override 视为最新意图）—— 权威定义
     ///
     /// 失败的 override 会成为该 session 的持久 action。即：
     /// `stored=Release`、`finish_with(Close)` 失败 → 写回 `(id, Close)`，
     /// Drop 兜底将用 Close 重试而非原始 Release。
     ///
-    /// 这是 Round 15 重构前原有行为的延续（finish_with Err 分支对 override
-    /// 降级），非语义漂移。doc 显式说明防止后续误读。
+    /// **钉死依据**（避免后续重新翻案为方案 A）：
+    /// - 这是 Round 15 重构前原有行为的延续（finish_with Err 分支对 override
+    ///   降级），非语义漂移
+    /// - **否决方案 A（失败回退 stored）**：Drop 兜底将执行一个调用方刚明确
+    ///   否决的动作（override=Close 失败却回退到 Release，可能把处于失败/未知
+    ///   状态的资源按旧意图归还复用），违反"调用方最新意图优先"原则
+    /// - 降级阶梯（ReleaseForReuse→Close→Close/Release→Release）保证重试逐级
+    ///   减弱，不会原地打转
+    ///
+    /// # 接线契约（Round 18 P1-1 钉死）
+    ///
+    /// Err 分支的写回值由 [`compute_writeback_action`](Self::compute_writeback_action)
+    /// 单一计算点产出，禁止在分支内重复 `downgrade_action_on_failure` 调用，
+    /// 否则日志与 slot 写回可能分叉。
     async fn perform_release(
         manager: &ConnectionManager,
         session: &mut Option<(String, SessionReleaseAction)>,
@@ -918,7 +951,14 @@ impl SessionGuard {
         // 必须写回降级 action，否则 Drop 兜底会拿到已 None 的 session。
         let Some((id, stored_action)) = session.take() else {
             // 调用方漏检契约违约：debug_assert 让 dev/test 立即失败。
-            // release 路径不应用 error!（避免污染 finish 静默契约）。
+            // release 路径仍输出 warn（生产可观测）：assert 在 release 构建下
+            // 被静默跳过，无 warn 的话契约违约将无任何痕迹。
+            warn!(
+                target: "db::session",
+                intent = ?intent,
+                "perform_release 契约违约：调用方应在 None 路径前置处理 \
+                 (release 构建下 debug_assert 被跳过，必须依赖此 warn 排查)"
+            );
             debug_assert!(
                 false,
                 "perform_release 契约违约：调用方应在 None 路径前置处理（{intent:?}）"
@@ -932,15 +972,19 @@ impl SessionGuard {
                 *last_release_id = Some(id);
             }
             Err(e) => {
-                // 关键：写回降级后的本次生效 action（方案 B：override 即最新意图）
+                // 关键：写回降级后的本次生效 action（方案 B：override 即最新意图）。
+                // 单一计算点：compute_writeback_action 是纯函数，避免分散在多处。
+                let downgraded = Self::compute_writeback_action(intent, stored_action);
                 warn!(
-                    "{}: failed to release session {}: {}, downgrading action to {:?}",
+                    "{}: failed to release session {}: {}, \
+                     action {:?} -> downgraded to {:?}",
                     intent.as_str(),
                     id,
                     e,
-                    SessionGuard::downgrade_action_on_failure(action),
+                    action,
+                    downgraded,
                 );
-                Self::restore_session_with_downgraded_action(session, id, action);
+                Self::restore_session_with_downgraded_action(session, id, downgraded);
             }
         }
     }
@@ -3953,63 +3997,68 @@ mod tests {
         );
     }
 
-    /// `restore_session_with_downgraded_action` 单测：直接覆盖 perform_release
-    /// Err 路径的 session 写回契约。
+    /// `compute_writeback_action` 矩阵穷举测试（Round 18 P1-1 + P2-1）：
+    /// 钉死 perform_release Err 分支的全部接线契约。
     ///
-    /// **背景**：`release_session` 通过 NotFound→Ok 转换把 Err 路径几乎全部吞没
-    /// （参见 release_session 包装函数），使得 `perform_release` Err 分支在生产
-    /// 中几乎不可达。但该分支仍是**防御性契约**——若未来 release_session 真的
-    /// 返回非 NotFound 错误（例如 close_on_release 路径 disconnect 抛错），本函数
-    /// 保证 session 不会被静默清空（否则 Drop 兜底 / Drop 重试都拿不到 session_id）。
+    /// **测试矩阵**：3 stored × (1 Finish + 3 FinishWith) = 12 个组合。
     ///
-    /// **契约**：
-    /// - 调用前：session = None（perform_release 已 take）
-    /// - 调用后：session = Some((id, downgraded_action))
-    /// - downgraded 由 `SessionGuard::downgrade_action_on_failure` 决定（已有专测）
-    ///
-    /// 三种输入 action 的写回结果：
-    /// - ReleaseForReuse → Some((id, Close))，防止脏复用
-    /// - Close → Some((id, Close))，已是保守策略，幂等
-    /// - Release → Some((id, Release))，保守策略不变
+    /// 验证：
+    /// - Finish 列等价于 `downgrade_action_on_failure(stored)`（沿用 stored）
+    /// - FinishWith 列等价于 `downgrade_action_on_failure(override)`（override 即最新意图）
+    /// - 方案 B 钉死的关键用例：FinishWith(Close) × stored=Release → Close
+    ///   （stored=Release 被否决，失败时仍以 Close 重试，而非回到 Release）
     #[test]
-    fn restore_session_with_downgraded_action_writes_back_downgraded() {
-        // ReleaseForReuse → Close
-        let mut session: Option<(String, SessionReleaseAction)> = None;
-        SessionGuard::restore_session_with_downgraded_action(
-            &mut session,
-            "test-reuse".to_string(),
-            SessionReleaseAction::ReleaseForReuse,
-        );
-        assert_eq!(
-            session,
-            Some(("test-reuse".to_string(), SessionReleaseAction::Close)),
-            "ReleaseForReuse 应写回 Close"
-        );
+    fn compute_writeback_action_matrix() {
+        use SessionReleaseAction::*;
+        let downgrade = SessionGuard::downgrade_action_on_failure;
+        for stored in [Close, Release, ReleaseForReuse] {
+            // Finish 列：downgrade(stored)
+            assert_eq!(
+                SessionGuard::compute_writeback_action(ReleaseIntent::Finish, stored),
+                downgrade(stored),
+                "Finish × {stored:?} 应等于 downgrade({stored:?})"
+            );
+            // FinishWith 列：downgrade(override)
+            for over in [Close, Release, ReleaseForReuse] {
+                assert_eq!(
+                    SessionGuard::compute_writeback_action(ReleaseIntent::FinishWith(over), stored),
+                    downgrade(over),
+                    "FinishWith({over:?}) × {stored:?} 应等于 downgrade({over:?})"
+                );
+            }
+        }
+    }
 
-        // Close → Close（幂等）
+    /// `restore_session_with_downgraded_action` 写回不变量单测：
+    /// 验证 slot 操作语义——传入什么存什么（不做降级，降级由调用方完成）。
+    /// 调用方通常从 [`compute_writeback_action`](SessionGuard::compute_writeback_action)
+    /// 拿到降级后的值再传入本函数。
+    #[test]
+    fn restore_session_with_downgraded_action_slot_write_semantics() {
+        // 正向：None → Some（直接写入降级后的值）
         let mut session: Option<(String, SessionReleaseAction)> = None;
         SessionGuard::restore_session_with_downgraded_action(
             &mut session,
-            "test-close".to_string(),
+            "id-1".to_string(),
             SessionReleaseAction::Close,
         );
         assert_eq!(
             session,
-            Some(("test-close".to_string(), SessionReleaseAction::Close)),
-            "Close 写回 Close（幂等）"
+            Some(("id-1".to_string(), SessionReleaseAction::Close)),
+            "None slot 应被覆写为传入的 (id, action)"
         );
 
-        // Release → Release（保守策略不变）
+        // 不同降级值均按原样写入（不二次降级）
         let mut session: Option<(String, SessionReleaseAction)> = None;
         SessionGuard::restore_session_with_downgraded_action(
             &mut session,
-            "test-release".to_string(),
+            "id-2".to_string(),
             SessionReleaseAction::Release,
         );
         assert_eq!(
             session,
-            Some(("test-release".to_string(), SessionReleaseAction::Release)),
-            "Release 写回 Release（保守策略不变）"
+            Some(("id-2".to_string(), SessionReleaseAction::Release)),
+            "Release 值原样写入（不做 close/Release 决策）"
         );
     }
 
