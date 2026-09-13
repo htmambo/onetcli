@@ -729,18 +729,27 @@ impl SessionGuard {
     ///
     /// **方案 B 语义**（详见 `perform_release` doc）：override 优先，再降级。
     ///
-    /// # 输出域不变量（Round 20 P2-A 文档化）
+    /// # 输出域不变量（Round 20 P2-A 文档化 + Round 21 P2-1 定式收紧）
     ///
     /// **`ReleaseForReuse` 永久塌缩为 `Close`**——本函数的输出域 ⊆ {Close, Release}，
     /// 永远不会输出 `ReleaseForReuse`。**这是有意的安全策略，不是 bug**：
     ///
-    /// - 设计依据：`ReleaseForReuse` 语义是"业务成功、连接状态可信、允许复用进池"；
-    ///   失败重试时连接状态已不可信（未决事务 / 临时表 / SESSION 变量 / verify 失败），
-    ///   复用进池会把脏连接交给下一次使用者
-    /// - 因此：无论 stored 是 RfR 还是 override=RfR，经过 downgrade 都会塌缩为 Close
-    /// - `FinishWith(ReleaseForReuse)` 行与 `FinishWith(Close)` 行**完全等价**——
-    ///   调用方显式请求 reuse，失败后回写时一律给 Close（不允许兑现复用标记）
-    /// - 与 [`downgrade_action_on_failure`](Self::downgrade_action_on_failure) 决策表一致
+    /// **统一原则**：本函数是降级/回写路径，**无法提供"连接干净"的正面证明**，
+    /// 而 `ReleaseForReuse` 的兑现恰恰需要正面证明（业务成功 + 连接状态可信 +
+    /// 池侧卫生流程），因此**一律不兑现**——同时覆盖：
+    /// - 失败重试（连接状态已不可信：未决事务 / 临时表 / SESSION 变量 / verify 失败）
+    /// - 隐式 Drop（作用域退出时业务可能未跑完，状态未确认）
+    ///
+    /// **权衡**：宁可错杀（多付一次建连成本），不可放过（脏连接进池污染后续使用者）。
+    ///
+    /// **塌缩目标是 Close 而非 Release**：
+    /// - `Release` 仍允许连接进池（仅靠池侧卫生流程兜底）
+    /// - `Close` 强制断连，从源头杜绝污染——降级路径无调用方背书、无卫生流程，
+    ///   必须选最严格策略
+    ///
+    /// 因此：无论 stored 是 RfR 还是 override=RfR，经过 downgrade 都会塌缩为 Close；
+    /// `FinishWith(ReleaseForReuse)` 行与 `FinishWith(Close)` 行**完全等价**——
+    /// 调用方显式请求 reuse，失败后回写时一律给 Close（不允许兑现复用标记）。
     pub(crate) fn compute_writeback_action(
         intent: ReleaseIntent,
         stored_action: SessionReleaseAction,
@@ -4056,8 +4065,11 @@ mod tests {
     /// RfR 语义要求连接可信，失败时状态不可信，禁止兑现复用标记。
     /// 详见 [`compute_writeback_action`] doc "输出域不变量"。
     ///
-    /// **完备性守卫**（P3-B）：测试运行前先校验 12 格全部覆盖，新增变体时
-    /// 运行期报错强制补表。
+    /// **完备性守卫**（P3-B + Round 21 P2-3 加固）：
+    /// - 行为穷尽性：`compute_writeback_action` 的内部 match 链（`resolved_action` +
+    ///   `downgrade_action_on_failure`）无 `_` 通配臂，由编译器保证——新增变体时
+    ///   编译期报错
+    /// - 期望值覆盖：本测试运行期校验 12 格**恰好各 1 行**（既防漏又防重复/冲突）
     #[test]
     fn compute_writeback_action_literal_spec() {
         use SessionReleaseAction::*;
@@ -4130,7 +4142,7 @@ mod tests {
                 "FinishWith(ReleaseForReuse) × ReleaseForReuse ⚠️⚠️",
             ),
         ];
-        // 完备性守卫：12 格必须全部覆盖；新增变体时运行期强制补表
+        // 完备性守卫：每格恰好 1 行（既防漏又防重复/冲突）
         let all_stored = [Close, Release, ReleaseForReuse];
         let all_intents = [
             ReleaseIntent::Finish,
@@ -4140,11 +4152,13 @@ mod tests {
         ];
         for intent in &all_intents {
             for stored in &all_stored {
-                assert!(
-                    cases
-                        .iter()
-                        .any(|&(i, s, _, _)| i == *intent && s == *stored),
-                    "规格表缺少 {intent:?} × {stored:?}（完备性守卫：新增变体时强制补表）"
+                let count = cases
+                    .iter()
+                    .filter(|&&(i, s, _, _)| i == *intent && s == *stored)
+                    .count();
+                assert_eq!(
+                    count, 1,
+                    "{intent:?} × {stored:?} 应恰好 1 行规格，实际 {count} 行（缺失/重复/冲突）"
                 );
             }
         }
@@ -4225,6 +4239,33 @@ mod tests {
             Some(("id-2".to_string(), SessionReleaseAction::Release)),
             "Release 值原样写入（不做 close/Release 决策）"
         );
+    }
+
+    /// `compute_writeback_action` 输出域不变量测试（Round 21 P3-3）：
+    /// 直接在测试输出中可见——本函数永不输出 `ReleaseForReuse`。
+    ///
+    /// 设计依据见 [`compute_writeback_action`] doc "输出域不变量"。
+    /// 本测试独立于字面量矩阵，单独钉死"输出 ⊆ {Close, Release}"这一**最关键**
+    /// 安全不变量——任何回归（即使表内某行期望值误写）也会失败。
+    #[test]
+    fn compute_writeback_action_output_domain_excludes_release_for_reuse() {
+        use SessionReleaseAction::*;
+        let all_intents = [
+            ReleaseIntent::Finish,
+            ReleaseIntent::FinishWith(Close),
+            ReleaseIntent::FinishWith(Release),
+            ReleaseIntent::FinishWith(ReleaseForReuse),
+        ];
+        for intent in &all_intents {
+            for stored in [Close, Release, ReleaseForReuse] {
+                let result = SessionGuard::compute_writeback_action(*intent, stored);
+                assert_ne!(
+                    result, ReleaseForReuse,
+                    "{intent:?} × {stored:?} 不应输出 ReleaseForReuse，实际 = {result:?} \
+                     （违反 Round 21 P2-1 统一原则）"
+                );
+            }
+        }
     }
 
     /// `write_back_session_slot` 违约测试（Round 20 P3-D）：
