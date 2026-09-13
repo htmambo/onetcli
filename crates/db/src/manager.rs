@@ -685,7 +685,7 @@ const _ASSERT_NOT_CLONE: fn() = || {
 ///
 /// Err 写回语义（方案 B：override 视为最新意图）详见
 /// [`SessionGuard::perform_release`] 处的权威 doc，本 enum 不重复定义。
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReleaseIntent {
     /// `finish()`：使用 session 存储的 action
     Finish,
@@ -728,6 +728,19 @@ impl SessionGuard {
     ///   "override 视为最新意图"（方案 B）的全部边界
     ///
     /// **方案 B 语义**（详见 `perform_release` doc）：override 优先，再降级。
+    ///
+    /// # 输出域不变量（Round 20 P2-A 文档化）
+    ///
+    /// **`ReleaseForReuse` 永久塌缩为 `Close`**——本函数的输出域 ⊆ {Close, Release}，
+    /// 永远不会输出 `ReleaseForReuse`。**这是有意的安全策略，不是 bug**：
+    ///
+    /// - 设计依据：`ReleaseForReuse` 语义是"业务成功、连接状态可信、允许复用进池"；
+    ///   失败重试时连接状态已不可信（未决事务 / 临时表 / SESSION 变量 / verify 失败），
+    ///   复用进池会把脏连接交给下一次使用者
+    /// - 因此：无论 stored 是 RfR 还是 override=RfR，经过 downgrade 都会塌缩为 Close
+    /// - `FinishWith(ReleaseForReuse)` 行与 `FinishWith(Close)` 行**完全等价**——
+    ///   调用方显式请求 reuse，失败后回写时一律给 Close（不允许兑现复用标记）
+    /// - 与 [`downgrade_action_on_failure`](Self::downgrade_action_on_failure) 决策表一致
     pub(crate) fn compute_writeback_action(
         intent: ReleaseIntent,
         stored_action: SessionReleaseAction,
@@ -1050,20 +1063,22 @@ impl SessionGuard {
 impl Drop for SessionGuard {
     fn drop(&mut self) {
         // 仅在 finish 未被调用 / 未成功完成时（panic / future drop / cancel / finish Err）兜底
-        let Some((id, original_action)) = self.session.take() else {
+        let Some((id, stored_action)) = self.session.take() else {
             return;
         };
-        // 与 `finish` 共享同一降级函数：覆盖"finish 完全未调用 + ReleaseForReuse"
-        // 场景——业务未跑完就 panic/cancel，session 状态不可信，禁止复用进池。
-        // finish 已降级过的 action（Close）再次调用为 no-op（idempotent）。
+        // 统一入口（Round 20 P3-A 防语义分叉）：Drop 没有 caller intent，
+        // 按契约等价于 `ReleaseIntent::Finish`——使用 `compute_writeback_action`
+        // 保证与 finish/finish_with Err 路径走完全相同的降级逻辑。
+        // 若未来 Finish 语义演化（如增加日志、调整格），Drop 自动同步。
         // 命名上避免 shadowing（Round 7 误会的根因）：明确区分
-        // `original_action`（guard 创建时或 finish 降级后的当前 action）
+        // `stored_action`（guard 创建时或 finish 降级后的当前 action）
         // 与 `release_action`（即将传给 release_session 的最终 action）。
-        let release_action = SessionGuard::downgrade_action_on_failure(original_action);
+        let release_action =
+            SessionGuard::compute_writeback_action(ReleaseIntent::Finish, stored_action);
         warn!(
             target: "db::session",
             session_id = %id,
-            original_action = ?original_action,
+            stored_action = ?stored_action,
             release_action = ?release_action,
             "SessionGuard dropped without finish() — spawning best-effort release"
         );
@@ -4020,20 +4035,29 @@ mod tests {
         );
     }
 
-    /// `compute_writeback_action` 字面量矩阵测试（Round 19 P2-2）：
+    /// `compute_writeback_action` 字面量矩阵测试（Round 19 P2-2 + Round 20 P2-A + P3-B）：
     /// **钉死规格**——预期值直接以字面量写出，而非引用 `downgrade_action_on_failure`。
     /// 即使降级函数本身回归，本测试仍能捕捉到 writeback 计算的异常。
     ///
-    /// **12 格完整规格表**：
+    /// **12 格完整规格表**（P2-A 文档化的不变量）：
     ///
-    /// | stored ↓ \ intent → | Finish         | FinishWith(Close) | FinishWith(Release) | FinishWith(ReleaseForReuse) |
-    /// |---------------------|----------------|-------------------|---------------------|-----------------------------|
-    /// | Close               | Close          | Close             | Release             | Close                        |
-    /// | Release             | Release        | Close ⚠️          | Release             | Close                        |
-    /// | ReleaseForReuse     | Close          | Close             | Release             | Close                        |
+    /// | stored ↓ \ intent → | Finish | FinishWith(Close) | FinishWith(Release) | FinishWith(ReleaseForReuse) |
+    /// |---------------------|--------|--------------------|----------------------|------------------------------|
+    /// | Close               | Close  | Close              | Release              | Close                         |
+    /// | Release             | Release| Close ⚠️           | Release              | Close                         |
+    /// | ReleaseForReuse     | Close ⚠️⚠️ | Close ⚠️⚠️    | Release ⚠️⚠️        | Close ⚠️⚠️                    |
     ///
-    /// ⚠️ 关键断言：FinishWith(Close) × stored=Release → Close
-    /// （否决 stored=Release，钉死方案 B 语义——见 perform_release doc）
+    /// ⚠️ 方案 B 关键用例（stored=Release 被否决）：
+    /// `FinishWith(Close) × Release → Close`——stored=Release 被显式 override 为
+    /// Close，失败时按 override 降级为 Close，不是回到 Release。
+    ///
+    /// ⚠️⚠️ ReleaseForReuse 永久塌缩（P2-A 核心断言）：
+    /// **stored=ReleaseForReuse 整行 expected 均为 Close**——设计依据：
+    /// RfR 语义要求连接可信，失败时状态不可信，禁止兑现复用标记。
+    /// 详见 [`compute_writeback_action`] doc "输出域不变量"。
+    ///
+    /// **完备性守卫**（P3-B）：测试运行前先校验 12 格全部覆盖，新增变体时
+    /// 运行期报错强制补表。
     #[test]
     fn compute_writeback_action_literal_spec() {
         use SessionReleaseAction::*;
@@ -4043,16 +4067,14 @@ mod tests {
             SessionReleaseAction,
             &str,
         )] = &[
-            // Finish 列（用 stored）：downgrade(stored)
             (ReleaseIntent::Finish, Close, Close, "Finish × Close"),
             (ReleaseIntent::Finish, Release, Release, "Finish × Release"),
             (
                 ReleaseIntent::Finish,
                 ReleaseForReuse,
                 Close,
-                "Finish × ReleaseForReuse",
+                "Finish × ReleaseForReuse ⚠️⚠️",
             ),
-            // FinishWith(Close) 列：Close 已是保守值，downgrade(Close)=Close
             (
                 ReleaseIntent::FinishWith(Close),
                 Close,
@@ -4069,9 +4091,8 @@ mod tests {
                 ReleaseIntent::FinishWith(Close),
                 ReleaseForReuse,
                 Close,
-                "FinishWith(Close) × ReleaseForReuse",
+                "FinishWith(Close) × ReleaseForReuse ⚠️⚠️",
             ),
-            // FinishWith(Release) 列：Release 保守策略不变
             (
                 ReleaseIntent::FinishWith(Release),
                 Close,
@@ -4088,9 +4109,8 @@ mod tests {
                 ReleaseIntent::FinishWith(Release),
                 ReleaseForReuse,
                 Release,
-                "FinishWith(Release) × ReleaseForReuse",
+                "FinishWith(Release) × ReleaseForReuse ⚠️⚠️",
             ),
-            // FinishWith(ReleaseForReuse) 列：降级为 Close
             (
                 ReleaseIntent::FinishWith(ReleaseForReuse),
                 Close,
@@ -4107,9 +4127,27 @@ mod tests {
                 ReleaseIntent::FinishWith(ReleaseForReuse),
                 ReleaseForReuse,
                 Close,
-                "FinishWith(ReleaseForReuse) × ReleaseForReuse",
+                "FinishWith(ReleaseForReuse) × ReleaseForReuse ⚠️⚠️",
             ),
         ];
+        // 完备性守卫：12 格必须全部覆盖；新增变体时运行期强制补表
+        let all_stored = [Close, Release, ReleaseForReuse];
+        let all_intents = [
+            ReleaseIntent::Finish,
+            ReleaseIntent::FinishWith(Close),
+            ReleaseIntent::FinishWith(Release),
+            ReleaseIntent::FinishWith(ReleaseForReuse),
+        ];
+        for intent in &all_intents {
+            for stored in &all_stored {
+                assert!(
+                    cases
+                        .iter()
+                        .any(|&(i, s, _, _)| i == *intent && s == *stored),
+                    "规格表缺少 {intent:?} × {stored:?}（完备性守卫：新增变体时强制补表）"
+                );
+            }
+        }
         for &(intent, stored, expected, label) in cases {
             assert_eq!(
                 SessionGuard::compute_writeback_action(intent, stored),
@@ -4186,6 +4224,25 @@ mod tests {
             session,
             Some(("id-2".to_string(), SessionReleaseAction::Release)),
             "Release 值原样写入（不做 close/Release 决策）"
+        );
+    }
+
+    /// `write_back_session_slot` 违约测试（Round 20 P3-D）：
+    /// 验证非空 slot 调用会触发 `debug_assert!` panic——双层保护中
+    /// debug 层必须在 dev/test 下立即失败。
+    ///
+    /// release 构建下 debug_assert 被跳过：error! 仍记录但继续覆盖旧值
+    /// （设计选择：覆盖 vs 保留旧值都是泄漏风险，当前选 + 留痕）。
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "slot must be None")]
+    fn write_back_session_slot_rejects_double_write_in_debug() {
+        let mut session: Option<(String, SessionReleaseAction)> =
+            Some(("id-prev".to_string(), SessionReleaseAction::Release));
+        SessionGuard::write_back_session_slot(
+            &mut session,
+            "id-new".to_string(),
+            SessionReleaseAction::Close,
         );
     }
 
