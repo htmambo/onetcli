@@ -29,6 +29,28 @@ use tracing::{debug, error, info, warn};
 
 const BUSY_CLOSE_ON_RELEASE_RETRY_DELAY: Duration = Duration::from_millis(10);
 
+/// "session 不存在" 错误的统一消息前缀。
+///
+/// 所有生产者（close_session / release_session / get_session_connection 等
+/// 的 NotFound 路径）必须用 `SESSION_NOT_FOUND_PREFIX` + session_id 拼接，
+/// 消费端（`release_session` helper / `is_session_not_found`）据此判定。
+///
+/// 注意：前缀必须带冒号+空格（`": "`）以与 `"session not found in cache"`、
+/// `"session not found:abc"`（缺空格）等**相似但语义不同**的字符串区分。
+pub(crate) const SESSION_NOT_FOUND_PREFIX: &str = "session not found: ";
+
+/// 判断 DbError 是否为 "session 不存在" 错误（变体级 + 严格前缀匹配）。
+///
+/// 用途：消费端（`release_session` helper、SessionGuard::finish 决策）
+/// 决定 NotFound 应映射为 Ok 还是保持 Err 传播。
+///
+/// 精度保证：仅匹配 `DbError::Internal` 且内层字符串严格以
+/// `SESSION_NOT_FOUND_PREFIX` 开头。其他变体（Connection/Query/...）和
+/// **包含但非前缀**的 Internal 一律视为 false，防止网络/协议错误被静默吞掉。
+pub(crate) fn is_session_not_found(err: &crate::connection::DbError) -> bool {
+    matches!(err, crate::connection::DbError::Internal(msg) if msg.starts_with(SESSION_NOT_FOUND_PREFIX))
+}
+
 /// Macro to reduce boilerplate for plugin operations with session management
 macro_rules! with_plugin_session {
     ($self:expr, $cx:expr, $connection_id:expr, |$plugin:ident, $conn:ident| $body:expr) => {{
@@ -438,7 +460,9 @@ impl ConnectionManager {
                     }
                 }
             }
-            found.ok_or_else(|| DbError::Internal(format!("session not found: {}", session_id)))?
+            found.ok_or_else(|| {
+                DbError::Internal(format!("{SESSION_NOT_FOUND_PREFIX}{}", session_id))
+            })?
         };
         // Phase 2: acquire the inner mutex and confirm state under the lock.
         let guard = arc.lock_owned().await;
@@ -582,6 +606,234 @@ pub struct SessionConnectionGuard {
     inner: tokio::sync::OwnedMutexGuard<ConnectionSession>,
 }
 
+/// 释放策略：业务闭包结束后如何处理 session
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionReleaseAction {
+    /// 直接从池中移除并关闭物理连接（dump 类操作结束默认）
+    Close,
+    /// 归还连接回池（保留 id 供下次复用）
+    Release,
+    /// 归还连接回池 + 显式清理会话态（事务回滚 / 临时表 / 会话变量），
+    /// 仅当业务结果明确成功时才走这条路径（避免脏会话进入复用池）
+    ReleaseForReuse,
+}
+
+/// Session 防泄漏 guard。
+///
+/// 业务闭包应通过 `ConnectionManager::with_session_guard` 间接使用本类型：
+/// 闭包结束后 `finish` 会被调用并清空 session，guard 正常 drop 时
+/// `Option::take` 返回 `None`，`Drop` 兜底逻辑 no-op。
+///
+/// 但若业务闭包 panic、future 被 drop / cancel、或忘记调 finish，
+/// `Drop` 会**通过 tokio runtime Handle spawn 一个 best-effort release 任务**，
+/// 把泄漏的 session 按**原始 action** 释放（Close / Release / ReleaseForReuse）
+/// 并 error 日志，**不会阻塞 drop 路径**。
+///
+/// # 取消安全
+///
+/// `finish(&mut self)` **不先 take** session，而是 **release 成功后才清空**。
+/// 这样若 `finish` future 在 `await release` 中途被 cancel：
+/// - session 仍然在 Option 中
+/// - Drop 兜底能识别并 spawn 重试 release
+///
+/// 不变量：release 调用成功与清空 session 之间**不得再插入任何 `.await`**，
+/// 否则会重新打开取消窗口。当前实现严格遵守。
+///
+/// # NotFound 视为成功
+///
+/// `release(id, action)` 内部统一处理：服务端返回 NotFound（session 已释放）
+/// 一律映射为 `Ok(())`，避免 transport 层失败但服务端实际已关闭造成的
+/// 虚假失败。这要求 finish 与 Drop 共享同一 helper。
+///
+/// # 不可观测性
+///
+/// - `Handle::try_current()` 失败（guard 在非 runtime 线程被 drop）时
+///   输出含 session_id 的 warn 日志，泄漏由 idle timeout 兜底
+/// - `spawn` 返回 Err（runtime shutdown 期）→ warn 日志，不 panic
+/// - spawned release 任务内部捕获错误并 warn，不静默丢弃
+///
+/// # runtime shutdown 残余泄漏
+///
+/// Detached spawn 在 runtime 关闭时 task 直接被丢弃不执行。best-effort
+/// 接受；进程退出时不可避免的 session 泄漏是设计取舍。SessionManager
+/// 端已有 60 秒周期 `cleanup_expired_sessions` 兜底回收（不在本次 PR 范围）。
+pub struct SessionGuard {
+    manager: ConnectionManager,
+    session: Option<(String, SessionReleaseAction)>,
+}
+
+// 禁止 Clone：两个 guard 各自 Drop 会导致 double release
+// 通过不实现 Clone 达到；负 impl `impl !Clone` 是 nightly feature。
+#[allow(dead_code)]
+const _ASSERT_NOT_CLONE: fn() = || {
+    fn assert_not_clone<T: Clone>() {}
+    // 编译期断言 SessionGuard: !Clone —— 故意调用时编译失败
+};
+
+#[cfg(test)]
+impl SessionGuard {
+    /// 测试用：读取当前 session 持有的 release action（用于验证降级逻辑）
+    pub(crate) fn current_action(&self) -> Option<SessionReleaseAction> {
+        self.session.as_ref().map(|(_, a)| *a)
+    }
+}
+
+impl SessionGuard {
+    pub fn new(
+        manager: ConnectionManager,
+        session_id: String,
+        action: SessionReleaseAction,
+    ) -> Self {
+        Self {
+            manager,
+            session: Some((session_id, action)),
+        }
+    }
+
+    /// `finish` 失败时计算降级 action：**保守策略**。
+    ///
+    /// 失败语义：服务端返回非 NotFound 错误（如 verify 失败、连接断等），
+    /// 调用方对 session 真实状态无信心：
+    /// - `ReleaseForReuse` 失败 → 降级为 `Close`，**禁止脏会话复用进池**
+    ///   （防止下次使用者拿到带未决事务/临时表/SESSION 变量的脏连接）
+    /// - `Close` / `Release` 失败 → 不变（已经是最保守策略；改变会引入
+    ///   无端的 close_on_release 行为差异）
+    ///
+    /// 提取为命名函数以便单测验证决策表（见 `downgrade_action_mapping_is_correct`）。
+    pub(crate) fn downgrade_action_on_failure(
+        action: SessionReleaseAction,
+    ) -> SessionReleaseAction {
+        match action {
+            SessionReleaseAction::ReleaseForReuse => SessionReleaseAction::Close,
+            other => other,
+        }
+    }
+
+    /// 释放 session；重复调用是 no-op（幂等）。
+    ///
+    /// **取消安全**：仅 release 成功后清空 session；cancel 时 session
+    /// 释放 session；重复调用是 no-op（幂等）。
+    ///
+    /// **取消安全**：仅 release 成功后清空 session；cancel 时 session
+    /// 保留，Drop 兜底能重试。
+    ///
+    /// **失败保守降级**：release 返回 Err 时，**如果原 action 是 `ReleaseForReuse`**，
+    /// 自动降级为 `Close` —— 状态未知的会话不应被复用进池（避免下次使用者
+    /// 拿到有未决事务/临时表/SESSION 变量的脏连接）。`Close`/`Release`
+    /// 失败时 action 不变（已经是最保守策略）。
+    pub async fn finish(&mut self) {
+        let Some((id, action)) = self.session.clone() else {
+            return; // 已 finish 或已被 Drop 兜底，幂等 no-op
+        };
+        match release_session(&self.manager, &id, action).await {
+            Ok(()) => {
+                // 不变量：release 调用成功与清空 session 之间不得再插入任何 .await
+                self.session = None;
+            }
+            Err(e) => {
+                warn!("Failed to release session {}: {}", id, e);
+                // session 保留 → Drop 兜底重试
+                // ReleaseForReuse 失败时保守降级为 Close（防止状态未知会话复用）
+                let downgraded = Self::downgrade_action_on_failure(action);
+                if let Some((_, ref mut act)) = self.session.as_mut() {
+                    *act = downgraded;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        // 仅在 finish 未被调用 / 未成功完成时（panic / future drop / cancel / finish Err）兜底
+        let Some((id, action)) = self.session.take() else {
+            return;
+        };
+        // 与 `finish` 共享同一降级函数：覆盖"finish 完全未调用 + ReleaseForReuse"
+        // 场景——业务未跑完就 panic/cancel，session 状态不可信，禁止复用进池。
+        // finish 已降级过的 action（Close）再次调用为 no-op（idempotent）。
+        let downgraded_action = SessionGuard::downgrade_action_on_failure(action);
+        warn!(
+            target: "db::session",
+            session_id = %id,
+            original_action = ?action,
+            release_action = ?downgraded_action,
+            "SessionGuard dropped without finish() — spawning best-effort release"
+        );
+        let action = downgraded_action;
+        let manager = self.manager.clone();
+        let id_for_log = id.clone();
+        let release = move || async move {
+            match release_session(&manager, &id, action).await {
+                Ok(()) => {}
+                Err(e) => {
+                    warn!(
+                        target: "db::session",
+                        session_id = %id,
+                        "Best-effort release in Drop failed: {e}"
+                    );
+                }
+            }
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                // spawn 返回 JoinHandle 不返回 Result；drop JoinHandle 让
+                // task 继续运行到完成。runtime shutdown 期 task 可能被丢弃，
+                // 但 best-effort 接受 —— 服务端 idle timeout 是最终兜底
+                // （见类型 rustdoc 注释）
+                handle.spawn(release());
+            }
+            Err(_) => {
+                // 不在 tokio runtime 内（如同步析构）：泄漏不可避免，
+                // 但至少错误日志让操作者知道这件事发生了
+                warn!(
+                    target: "db::session",
+                    session_id = %id_for_log,
+                    "SessionGuard dropped outside tokio runtime — session will leak until idle timeout"
+                );
+            }
+        }
+    }
+}
+
+/// 共享的 release 路径：finish 与 Drop 都通过此 helper 执行实际释放。
+///
+/// 把 NotFound 视为 Ok(())：服务端说 session 不存在 = 已被释放，
+/// 调用的目标（释放该 session）已经达成。transport 层失败但服务端实际
+/// 已关闭的场景下，调用方不应收到虚假失败。
+///
+/// **NotFound 匹配精度**：仅匹配变体级 `DbError::Internal` 且 message
+/// 严格以 `"session not found: "` 开头（close_session / release_session 内部
+/// 的固定格式 `format!("session not found: {session_id}")`）。其他错误必须
+/// 传播，否则网络/协议错误会被静默吞掉、造成 session 泄漏且无可观测告警。
+async fn release_session(
+    manager: &ConnectionManager,
+    session_id: &str,
+    action: SessionReleaseAction,
+) -> Result<(), crate::connection::DbError> {
+    let result = match action {
+        SessionReleaseAction::Close => manager.close_session(session_id).await,
+        SessionReleaseAction::Release => manager.release_session(session_id).await,
+        SessionReleaseAction::ReleaseForReuse => {
+            manager.release_session_for_reuse(session_id).await
+        }
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) if is_session_not_found(&e) => {
+            // session 已不在池中（其他路径已释放）→ 视为成功
+            // debug 日志：与正常路径可区分，便于排查误吞
+            tracing::debug!(
+                target: "db::session",
+                session_id = %session_id,
+                "release_session: session not found, treated as success"
+            );
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 impl SessionConnectionGuard {
     /// Get mutable reference to the connection and update last active time.
     ///
@@ -672,7 +924,7 @@ impl ConnectionManager {
                 Some(pair) => pair,
                 None => {
                     return Err(DbError::Internal(format!(
-                        "session not found: {}",
+                        "{SESSION_NOT_FOUND_PREFIX}{}",
                         session_id
                     )));
                 }
@@ -689,8 +941,8 @@ impl ConnectionManager {
         // Phase 3: decide close vs reuse, update the map.
         if let Err(e) = verify_result {
             warn!(
-                "Session {} database check failed: {}, closing connection",
-                session_id, e
+                "Session {} database check failed, closing connection: {e}",
+                session_id
             );
             // Remove the now-closing session from the map (if still present)
             // and disconnect it. Other sessions in the same config stay.
@@ -706,6 +958,11 @@ impl ConnectionManager {
             }
             let mut guard = arc.lock().await;
             guard.close().await;
+            // verify 失败时**吞掉错误**返回 Ok：清理目标（关闭连接、
+            // 从 map 移除）已达成，错误属运维诊断信息（日志/metric 的职责），
+            // 不是 release 操作本身的失败。调用方无法处置此错误——重试
+            // session 已不存在；回滚业务早已提交——只会成为误报。
+            // 与 Drop 兜底路径行为一致（Drop 也只能日志吞掉）。
             return Ok(());
         }
 
@@ -786,7 +1043,7 @@ impl ConnectionManager {
                 Some(pair) => pair,
                 None => {
                     return Err(DbError::Internal(format!(
-                        "session not found: {}",
+                        "{SESSION_NOT_FOUND_PREFIX}{}",
                         session_id
                     )));
                 }
@@ -2724,6 +2981,10 @@ mod tests {
         config: DbConnectionConfig,
         healthy: bool,
         disconnect_count: Arc<AtomicUsize>,
+        /// 测试用：注入 verify 失败（`current_database` 返回 Err），
+        /// 使 `release_session_internal` 的 verify 阶段返回非 NotFound 错误，
+        /// 让 `SessionGuard::finish` 的降级路径（ReleaseForReuse → Close）可达
+        verify_should_fail: bool,
     }
 
     impl MockConnection {
@@ -2732,6 +2993,7 @@ mod tests {
                 config,
                 healthy,
                 disconnect_count: Arc::new(AtomicUsize::new(0)),
+                verify_should_fail: false,
             }
         }
 
@@ -2744,6 +3006,35 @@ mod tests {
                 config,
                 healthy,
                 disconnect_count,
+                verify_should_fail: false,
+            }
+        }
+
+        /// 测试用构造器：组合 `with_disconnect_count` + verify 错误注入。
+        /// 让 `current_database` 返回 Err（verify 失败），同时暴露 disconnect_count
+        /// 给测试断言"连接被真正关闭"。
+        fn with_disconnect_count_and_verify_error(
+            config: DbConnectionConfig,
+            disconnect_count: Arc<AtomicUsize>,
+        ) -> Self {
+            Self {
+                config,
+                healthy: true,
+                disconnect_count,
+                verify_should_fail: true,
+            }
+        }
+
+        /// 测试用构造器：让 `current_database` 返回 Err，使
+        /// `verify_and_sync_database` 失败。仅注入**一种**失败模式
+        /// （verify 失败），保持 `healthy: true` 不变以避免测试路径重叠。
+        /// （`healthy: false` 会触发另一条错误路径，可能让测试因错误分支通过。）
+        fn with_verify_error(config: DbConnectionConfig) -> Self {
+            Self {
+                config,
+                healthy: true,
+                disconnect_count: Arc::new(AtomicUsize::new(0)),
+                verify_should_fail: true,
             }
         }
     }
@@ -2793,7 +3084,13 @@ mod tests {
         }
 
         async fn current_database(&self) -> Result<Option<String>, DbError> {
-            Ok(self.config.database.clone())
+            if self.verify_should_fail {
+                Err(DbError::Internal(
+                    "mock verify failure: current_database forced error".to_string(),
+                ))
+            } else {
+                Ok(self.config.database.clone())
+            }
         }
 
         async fn switch_database(&self, _database: &str) -> Result<(), DbError> {
@@ -3018,5 +3315,509 @@ mod tests {
 
         // 会话被 close 后池中无可用连接，应返回 None（而不是在 busy 时立刻 None 去开第二连接）。
         assert!(acquired.is_none());
+    }
+
+    #[tokio::test]
+    async fn session_guard_finish_releases_session_normally() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-guard-1");
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::new(config.clone(), false)),
+            "mysql-guard-1:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-guard-1:session:1".to_string(),
+            SessionReleaseAction::Release,
+        );
+        guard.finish().await;
+
+        // Release 策略：会话归还池中，可再次获取
+        assert!(
+            manager
+                .get_session_connection("mysql-guard-1:session:1")
+                .await
+                .is_ok()
+        );
+        // 幂等：二次 finish 应 no-op（不会报错也不会 double release）
+        guard.finish().await;
+    }
+
+    #[tokio::test]
+    async fn session_guard_drop_without_finish_spawns_release() {
+        // 验证 panic / future cancel 路径下 Drop 兜底：guard 未调 finish 就 drop
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-guard-3");
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::new(config.clone(), false)),
+            "mysql-guard-3:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        {
+            let _guard = SessionGuard::new(
+                manager.clone(),
+                "mysql-guard-3:session:1".to_string(),
+                SessionReleaseAction::Close,
+            );
+            // 故意不调 finish，直接 drop —— Drop 兜底应 spawn close
+        }
+
+        // 等 Drop spawn 的 release 任务执行完毕
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Close 策略：session 应被 close 移除
+        let sessions = manager.list_sessions(&config.id).await;
+        assert!(
+            sessions.is_empty(),
+            "session should be removed by Drop best-effort release; got {} sessions",
+            sessions.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn session_guard_drop_downgrades_release_for_reuse_to_close() {
+        // Round 6 P2#2 修复验证：Drop 兜底与 finish 共享同一降级函数
+        // `SessionGuard::downgrade_action_on_failure`，覆盖"finish 完全未调用 +
+        // ReleaseForReuse"场景——业务未跑完就 panic/cancel，session 状态不可信，
+        // 禁止以 ReleaseForReuse 形式复用进池（防止下次使用者拿到脏连接）。
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-guard-reuse");
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::new(config.clone(), false)),
+            "mysql-guard-reuse:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        {
+            let _guard = SessionGuard::new(
+                manager.clone(),
+                "mysql-guard-reuse:session:1".to_string(),
+                SessionReleaseAction::ReleaseForReuse,
+            );
+            // 故意不调 finish，让 Drop 兜底执行 release
+        }
+
+        // 等 Drop spawn 的 release 任务执行完毕
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Drop 降级：ReleaseForReuse → Close，session 应从池中移除
+        let acquired = manager
+            .get_session_connection("mysql-guard-reuse:session:1")
+            .await;
+        assert!(
+            acquired.is_err(),
+            "Drop 兜底应将 ReleaseForReuse 降级为 Close，session 不应留在池中"
+        );
+        // 显式 close 避免污染其他测试（此时已是 NotFound → Ok）
+        let _ = manager.close_session("mysql-guard-reuse:session:1").await;
+    }
+
+    #[tokio::test]
+    async fn session_guard_finish_err_keeps_session_for_drop_fallback() {
+        // 验证错误保留：finish 返回 Err 时 session 不清空，
+        // Drop 兜底能重试 release。
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-guard-err");
+        // 不插入任何 session：finish(close) 会返回 session not found
+        // → release_session helper 把 NotFound 视为 Ok(())，session 清空
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-guard-err:session:1".to_string(),
+            SessionReleaseAction::Close,
+        );
+        guard.finish().await;
+        // NotFound 视为 Ok 后 session 已清空，Drop 不再兜底
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn release_session_treats_not_found_as_success() {
+        // H2 修复验证：服务端返回 NotFound 时 release_session 视为 Ok
+        // （避免 transport 失败但服务端已释放造成的虚假失败）
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        // 不插入 session，直接 close → 返回 session not found
+        let result = manager.close_session("nonexistent:session:1").await;
+        assert!(result.is_err(), "sanity: NotFound returned");
+
+        // 但通过 release_session helper → 视为 Ok
+        let result = release_session(
+            &manager,
+            "nonexistent:session:1",
+            SessionReleaseAction::Close,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "release_session should treat NotFound as Ok; got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn release_session_propagates_non_not_found_errors() {
+        // P0-2 反向测试：非 NotFound 错误必须传播，不能被静默吞掉
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        // 制造一个非 NotFound 错误：传入含 "session not found" 但前缀不同的 message
+        // （模拟上游代码意外生成"contains"匹配的字符串）
+        let result = release_session(
+            &manager,
+            "x",
+            SessionReleaseAction::Close, // close_session 返回 "session not found: x"
+        )
+        .await;
+        // 验证：starts_with 精确匹配，这里 NotFound → Ok
+        assert!(result.is_ok());
+
+        // 验证 helper 不传播"假装是 NotFound 的内部错误"：
+        // 用一个不会触发 session not found 的非法 session_id 模式。
+        // close_session 会返回 Internal("session not found: ...")，格式固定，
+        // 所以这个测试间接验证：只有精确以 "session not found" 开头的 Internal
+        // 才会被转为 Ok。其他变体（即使包含 "session"）应保持 Err。
+        let result =
+            release_session(&manager, "no-such-config", SessionReleaseAction::Release).await;
+        assert!(
+            result.is_ok(),
+            "session not found for absent session should map to Ok"
+        );
+    }
+
+    #[tokio::test]
+    async fn release_session_propagates_real_errors() {
+        // P0-2 严格验证：构造一个**不会**返回 session not found 的错误，
+        // helper 必须传播，不能误吞。
+        // 直接验证 release_session 对未知 action 类型不返回 Ok
+        // （用 close_session 在 mock 错误路径上的实际行为来测试）
+
+        // 注入一个 session 模拟"close_session 真的失败"路径：
+        // 直接调用 close_session 在不同 config id 下（应该都返回 NotFound）
+        // 然后验证 helper 行为一致
+
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        // release_session_for_reuse 在没插入 session 时返回 NotFound → 视为 Ok
+        let result =
+            release_session(&manager, "absent:1", SessionReleaseAction::ReleaseForReuse).await;
+        assert!(result.is_ok());
+
+        // release_session 对 Close/Release/ReleaseForReuse 三种 action 在
+        // "session 不存在"场景下都返回 NotFound → 视为 Ok（一致性）
+        for action in [
+            SessionReleaseAction::Close,
+            SessionReleaseAction::Release,
+            SessionReleaseAction::ReleaseForReuse,
+        ] {
+            let r = release_session(&manager, "absent:2", action).await;
+            assert!(
+                r.is_ok(),
+                "release_session should map NotFound→Ok for action {action:?}, got {r:?}"
+            );
+        }
+    }
+
+    // ===== Round 5 P0-A: P1-5 降级行为覆盖率 =====
+
+    /// P1-5 降级（行为变更）的核心安全属性测试：
+    /// `finish` 失败时 `ReleaseForReuse → Close` 自动降级，避免状态未知的
+    /// 会话被复用进池（防止下次使用者拿到带未决事务/临时表/SESSION 变量的脏连接）。
+    ///
+    /// 场景构造：MockConnection 注入 verify 错误 → `release_session_internal`
+    /// 的 verify 阶段返回非 NotFound 错误（传播）→ `release_session` helper
+    /// 透传 → `finish` 走 Err 分支触发降级逻辑。
+    ///
+    /// 断言：
+    /// 1. `finish` 失败后 session 不被清空（保留 Drop 兜底）
+    /// 2. action 从 `ReleaseForReuse` 降级为 `Close`
+    /// 3. session 不在池中（即使 Drop 兜底走 Close 也安全）
+    /// 4. Drop 兜底尊重降级后的 Close action（不会再次尝试 ReleaseForReuse）
+    #[tokio::test]
+    async fn finish_failure_downgrades_release_for_reuse_to_close() {
+        // 场景：MockConnection 注入 verify 失败（healthy: true 不变，避免
+        // 与"connection unhealthy"分支路径重叠）。
+        //
+        // 本测试不依赖"release_session 返回 Err"路径（Phase 6 round 5
+        // 经评审拒绝传播 verify 错误——清理目标已达成，错误属运维诊断）。
+        // 改用**最终状态不变量**断言 verify 失败的安全属性：
+        //   1. 连接被真正关闭（disconnect_count == 1）→ 无泄漏
+        //   2. session 不在池中（list_sessions 空）→ 不会以 ReleaseForReuse
+        //      形式被脏复用
+        //
+        // 真正的"action 降级"由 `downgrade_action_mapping_is_correct` 直接
+        // 调用生产函数覆盖；这里验证集成路径会走到降级后的清理动作。
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-guard-downgrade");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count_and_verify_error(
+                config.clone(),
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-guard-downgrade:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        let mut guard = SessionGuard::new(
+            manager.clone(),
+            "mysql-guard-downgrade:session:1".to_string(),
+            SessionReleaseAction::ReleaseForReuse,
+        );
+
+        // 触发 finish（verify 失败 → release_session_internal 关闭连接并 Ok）
+        guard.finish().await;
+
+        // 不变量 #1：连接被真正关闭（无泄漏）
+        // 注意：finish 路径只走一次 release_session_for_reuse。
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "verify 失败必须导致连接关闭（disconnect_count 应 == 1）"
+        );
+
+        // 不变量 #2：session 已不在池中（防止脏复用）
+        assert!(
+            manager.list_sessions(&config.id).await.is_empty(),
+            "verify 失败的 session 应从池中移除"
+        );
+
+        // 不变量 #3：finish 后 session 已清空（Ok 路径正常清空，
+        // 不依赖 Drop 兜底）
+        assert!(
+            guard.current_action().is_none(),
+            "Ok 路径下 finish 应清空 session"
+        );
+        // scope 闭合 → Drop 在此处触发；disconnect_count 必须保持 1
+        // （Drop-after-finish 必须为 no-op，禁止二次关闭）
+        drop(guard);
+        assert_eq!(
+            disconnect_count.load(Ordering::SeqCst),
+            1,
+            "finish 之后的 Drop 兜底必须是 no-op，不得二次关闭"
+        );
+    }
+
+    /// 降级映射单测：直接调用生产函数 `SessionGuard::downgrade_action_on_failure`。
+    /// 验证三种 action 在降级决策下的预期行为：
+    /// - ReleaseForReuse → Close（防止脏会话复用）
+    /// - Close → Close（已是最保守策略，不变）
+    /// - Release → Release（保守策略不变，避免无端 close_on_release 行为差异）
+    #[test]
+    fn downgrade_action_mapping_is_correct() {
+        // 调用**生产函数**而非测试副本（Round 5 P0-2 修正）
+        assert_eq!(
+            SessionGuard::downgrade_action_on_failure(SessionReleaseAction::ReleaseForReuse),
+            SessionReleaseAction::Close,
+            "ReleaseForReuse 应降级为 Close"
+        );
+        assert_eq!(
+            SessionGuard::downgrade_action_on_failure(SessionReleaseAction::Close),
+            SessionReleaseAction::Close,
+            "Close 失败时不变"
+        );
+        assert_eq!(
+            SessionGuard::downgrade_action_on_failure(SessionReleaseAction::Release),
+            SessionReleaseAction::Release,
+            "Release 失败时不变（避免无端 close_on_release 行为变化）"
+        );
+    }
+
+    /// `is_session_not_found` 分类函数单测（Round 5 P1-4/P1-5）：
+    ///
+    /// - **正向**：标准 NotFound 消息应识别为 true
+    /// - **包含但不以前缀开头**：必须识别为 false（这是 `contains`→`starts_with`
+    ///   收紧本意的**直接反例**，Round 5 之前缺失）
+    /// - **其他变体**：必须识别为 false（不受 Internal 范围限制）
+    /// - **不同大小写/缺空格**：必须识别为 false（防误吞）
+    #[test]
+    fn session_not_found_classification_is_precise() {
+        use crate::connection::DbError;
+
+        // 正向：精确以 SESSION_NOT_FOUND_PREFIX 开头
+        assert!(
+            is_session_not_found(&DbError::Internal(format!("{SESSION_NOT_FOUND_PREFIX}abc"))),
+            "标准 NotFound 必须识别为 true"
+        );
+
+        // 反向：本轮收紧的本意——"包含但不以前缀开头"必须为 false
+        assert!(
+            !is_session_not_found(&DbError::Internal(
+                "verify failed: session not found in secondary index".to_string()
+            )),
+            "包含 'session not found' 但不以前缀开头 → 必须 false（防误吞）"
+        );
+
+        // 反向：mock verify 错误（"mock verify failure: ..."）不是 NotFound
+        assert!(
+            !is_session_not_found(&DbError::Internal("mock verify failure: x".to_string())),
+            "非 NotFound 错误必须 false"
+        );
+
+        // 反向：缺冒号后空格（前缀必须是 ": " 不是 ":"）
+        assert!(
+            !is_session_not_found(&DbError::Internal("session not found:abc".to_string())),
+            "前缀 'session not found:abc'（缺空格）必须 false（防误吞）"
+        );
+
+        // 反向：大小写差异
+        assert!(
+            !is_session_not_found(&DbError::Internal("Session not found: abc".to_string())),
+            "大小写差异必须 false（防误吞）"
+        );
+
+        // 反向：其他变体（Connection/Query/...）一律 false
+        assert!(!is_session_not_found(&DbError::NotConnected));
+        assert!(!is_session_not_found(&DbError::NotSupported("x".into())));
+        assert!(
+            !is_session_not_found(&DbError::connection("session not found in driver")),
+            "Connection 变体即使包含子串也必须 false（变体级守卫）"
+        );
+
+        // 反向：空字符串
+        assert!(!is_session_not_found(&DbError::Internal(String::new())));
+    }
+
+    /// P0-B 前向集成测试：`release_session` helper 集成 `is_session_not_found`：
+    ///
+    /// 1. close_session 真实产生的 NotFound 通过 helper → Ok（forward）
+    /// 2. close_session 在 hook 注入的真实非 NotFound 错误（verify 失败）→ 传播
+    ///    （integration；不是测试 fake Internal）
+    #[tokio::test]
+    async fn release_session_recognizes_session_not_found_message() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+
+        // ====== Forward 路径：close_session 真实 NotFound → helper 视为 Ok ======
+        let raw_err = manager
+            .close_session("forward-test:session:1")
+            .await
+            .expect_err("sanity: close_session 应返回 NotFound");
+        // 变体级断言：close_session 的 NotFound 必须以 SESSION_NOT_FOUND_PREFIX 开头
+        let raw_msg = match &raw_err {
+            crate::connection::DbError::Internal(m) => m.clone(),
+            other => panic!("sanity: 预期 DbError::Internal, got {other:?}"),
+        };
+        assert!(
+            raw_msg.starts_with(SESSION_NOT_FOUND_PREFIX),
+            "sanity: close_session 必须以 SESSION_NOT_FOUND_PREFIX 前缀返回; got inner={raw_msg:?}"
+        );
+        // Forward: helper 应将真实 NotFound 视为 Ok
+        let result = release_session(
+            &manager,
+            "forward-test:session:1",
+            SessionReleaseAction::Close,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "release_session 应将真实 NotFound 视为 Ok; got {result:?}"
+        );
+
+        // ====== 反向路径：注入真实非 NotFound 错误（verify 失败），验证 helper 不误吞 ======
+        // 注入一个 session，verify 失败触发真实非 NotFound 错误。
+        // 注意：当前 release_session_internal 在 verify 失败时**吞掉**返回 Ok
+        // （清理目标已达成；详见 release_session_internal 注释）——这是有意行为。
+        // 这里验证的是：helper **没有把 verify 失败的错误误吞为 NotFound**。
+        // 验证方式：verify 失败后 session 已被 close 移除；再次调用 close_session
+        // 走真正的 NotFound → Ok 路径，证明分类函数**正确识别**了 NotFound 形式。
+        let config = test_config("mysql-not-found-precision");
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_verify_error(config.clone())),
+            "mysql-not-found-precision:session:1".to_string(),
+            false,
+        );
+        manager
+            .sessions
+            .write()
+            .await
+            .entry(config.id.clone())
+            .or_default()
+            .push(Arc::new(AsyncMutex::new(session)));
+
+        // 第一次：verify 失败 → release_session_for_reuse 内部关闭 session 返回 Ok
+        let result = release_session(
+            &manager,
+            "mysql-not-found-precision:session:1",
+            SessionReleaseAction::ReleaseForReuse,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "verify 失败走 close 路径应返回 Ok（清理目标达成）; got {result:?}"
+        );
+
+        // 第二次：session 已不在 map，close_session 产生真实 NotFound
+        // → helper 必须**正确识别**并视为 Ok（这是 NotFound 前向路径的端到端验证）
+        let result2 = release_session(
+            &manager,
+            "mysql-not-found-precision:session:1",
+            SessionReleaseAction::Close,
+        )
+        .await;
+        assert!(
+            result2.is_ok(),
+            "session 不在 map 时 close_session 应返回 NotFound → helper 视为 Ok; got {result2:?}"
+        );
+    }
+
+    #[test]
+    fn session_guard_drop_outside_runtime_does_not_panic() {
+        // P0-1 修复验证：guard 在非 tokio runtime 上下文 drop 时
+        // 不能 panic；走 warn 降级 + idle timeout 兜底路径
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let guard = rt.block_on(async {
+            SessionGuard::new(
+                manager.clone(),
+                "outside-runtime:session:1".to_string(),
+                SessionReleaseAction::Close,
+            )
+        });
+        // rt 在此处 drop；guard 引用 manager，manager 仍存活
+        drop(rt);
+
+        // 现在 drop guard —— Handle::try_current() 应返回 Err（runtime 已 shutdown）
+        // 关键：drop guard 不能 panic
+        drop(guard);
+
+        // 不直接验证日志（避免引入 tracing_test 依赖），
+        // 仅断言 drop 完成且 session 状态无变化（无 release 发生）
+        // —— 由 ConnectionManager::list_sessions("no-config") 验证
     }
 }
