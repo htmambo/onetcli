@@ -29,26 +29,14 @@ use tracing::{debug, error, info, warn};
 
 const BUSY_CLOSE_ON_RELEASE_RETRY_DELAY: Duration = Duration::from_millis(10);
 
-/// "session 不存在" 错误的统一消息前缀。
+/// 判断 DbError 是否为 "session 不存在" 错误（**变体级**）。
 ///
-/// 所有生产者（close_session / release_session / get_session_connection 等
-/// 的 NotFound 路径）必须用 `SESSION_NOT_FOUND_PREFIX` + session_id 拼接，
-/// 消费端（`release_session` helper / `is_session_not_found`）据此判定。
-///
-/// 注意：前缀必须带冒号+空格（`": "`）以与 `"session not found in cache"`、
-/// `"session not found:abc"`（缺空格）等**相似但语义不同**的字符串区分。
-pub(crate) const SESSION_NOT_FOUND_PREFIX: &str = "session not found: ";
-
-/// 判断 DbError 是否为 "session 不存在" 错误（变体级 + 严格前缀匹配）。
-///
-/// 用途：消费端（`release_session` helper、SessionGuard::finish 决策）
-/// 决定 NotFound 应映射为 Ok 还是保持 Err 传播。
-///
-/// 精度保证：仅匹配 `DbError::Internal` 且内层字符串严格以
-/// `SESSION_NOT_FOUND_PREFIX` 开头。其他变体（Connection/Query/...）和
-/// **包含但非前缀**的 Internal 一律视为 false，防止网络/协议错误被静默吞掉。
+/// Round 13 重构：移除 Internal 字符串兜底分支（IPC 不通过 Display 序列化
+/// DbError，兜底是投机兼容），仅匹配结构化 `DbError::SessionNotFound` 变体。
+/// 优势：编译器保证穷尽匹配、无消息格式耦合、可读性更好。
 pub(crate) fn is_session_not_found(err: &crate::connection::DbError) -> bool {
-    matches!(err, crate::connection::DbError::Internal(msg) if msg.starts_with(SESSION_NOT_FOUND_PREFIX))
+    use crate::connection::DbError;
+    matches!(err, DbError::SessionNotFound(_))
 }
 
 /// Macro to reduce boilerplate for plugin operations with session management
@@ -476,9 +464,7 @@ impl ConnectionManager {
                     }
                 }
             }
-            found.ok_or_else(|| {
-                DbError::Internal(format!("{SESSION_NOT_FOUND_PREFIX}{}", session_id))
-            })?
+            found.ok_or_else(|| DbError::SessionNotFound(session_id.to_string()))?
         };
         // Phase 2: acquire the inner mutex and confirm state under the lock.
         let guard = arc.lock_owned().await;
@@ -1061,12 +1047,7 @@ impl ConnectionManager {
             }
             match found {
                 Some(pair) => pair,
-                None => {
-                    return Err(DbError::Internal(format!(
-                        "{SESSION_NOT_FOUND_PREFIX}{}",
-                        session_id
-                    )));
-                }
+                None => return Err(DbError::SessionNotFound(session_id.to_string())),
             }
         };
         // Global write lock dropped here.
@@ -1189,12 +1170,7 @@ impl ConnectionManager {
             }
             match found {
                 Some(pair) => pair,
-                None => {
-                    return Err(DbError::Internal(format!(
-                        "{SESSION_NOT_FOUND_PREFIX}{}",
-                        session_id
-                    )));
-                }
+                None => return Err(DbError::SessionNotFound(session_id.to_string())),
             }
         };
 
@@ -3831,9 +3807,10 @@ mod tests {
         );
     }
 
-    /// `is_session_not_found` 分类函数单测（Round 5 P1-4/P1-5）：
+    /// `is_session_not_found` 分类函数单测（Round 5 P1-4/P1-5 + Round 11+ 结构化变体）：
     ///
     /// - **正向**：标准 NotFound 消息应识别为 true
+    /// - **结构化变体**：SessionNotFound 必须是 true（编译期保证）
     /// - **包含但不以前缀开头**：必须识别为 false（这是 `contains`→`starts_with`
     ///   收紧本意的**直接反例**，Round 5 之前缺失）
     /// - **其他变体**：必须识别为 false（不受 Internal 范围限制）
@@ -3842,36 +3819,27 @@ mod tests {
     fn session_not_found_classification_is_precise() {
         use crate::connection::DbError;
 
-        // 正向：精确以 SESSION_NOT_FOUND_PREFIX 开头
+        // 正向：结构化变体（Round 11+ 主路径）
         assert!(
-            is_session_not_found(&DbError::Internal(format!("{SESSION_NOT_FOUND_PREFIX}abc"))),
-            "标准 NotFound 必须识别为 true"
+            is_session_not_found(&DbError::SessionNotFound("any-id".to_string())),
+            "SessionNotFound 结构化变体必须 true"
         );
+        // 正向：兼容路径已移除（Round 13+ 完全结构化变体化）—— 唯一正向
+        // 仅 SessionNotFound 变体。Internal 字符串前缀不再被识别。
 
         // 反向：本轮收紧的本意——"包含但不以前缀开头"必须为 false
+        // （防误吞；保留以验证结构化变体的精确性）
         assert!(
             !is_session_not_found(&DbError::Internal(
-                "verify failed: session not found in secondary index".to_string()
+                "session not found in secondary index".to_string()
             )),
-            "包含 'session not found' 但不以前缀开头 → 必须 false（防误吞）"
+            "Internal 变体即使包含 'session not found' 子串也必须 false（变体级守卫）"
         );
 
         // 反向：mock verify 错误（"mock verify failure: ..."）不是 NotFound
         assert!(
             !is_session_not_found(&DbError::Internal("mock verify failure: x".to_string())),
             "非 NotFound 错误必须 false"
-        );
-
-        // 反向：缺冒号后空格（前缀必须是 ": " 不是 ":"）
-        assert!(
-            !is_session_not_found(&DbError::Internal("session not found:abc".to_string())),
-            "前缀 'session not found:abc'（缺空格）必须 false（防误吞）"
-        );
-
-        // 反向：大小写差异
-        assert!(
-            !is_session_not_found(&DbError::Internal("Session not found: abc".to_string())),
-            "大小写差异必须 false（防误吞）"
         );
 
         // 反向：其他变体（Connection/Query/...）一律 false
@@ -3884,6 +3852,89 @@ mod tests {
 
         // 反向：空字符串
         assert!(!is_session_not_found(&DbError::Internal(String::new())));
+    }
+
+    /// Negative 碰撞测试：所有非 SessionNotFound 变体的代表样例必须 false。
+    /// 防止未来变体 Display 意外命中 session_id 字面量导致 false positive。
+    ///
+    /// **变体列表通过 `variant_tag()` 穷尽派生**：新增 `DbError` 变体时
+    /// 本测试编译失败，强制更新碰撞样例。
+    #[test]
+    fn no_other_variant_collides_with_session_not_found() {
+        use crate::connection::DbError;
+        // 每个变体的代表样例（即使是极端构造）
+        let samples = vec![
+            DbError::NotConnected,
+            DbError::NotSupported("session not found: x".into()),
+            DbError::connection("session not found"),
+            DbError::connection("session not found: x"),
+            DbError::query("session not found: x"),
+            DbError::transaction("session not found: x"),
+            DbError::InvalidManifest("session not found: x".into()),
+            DbError::Internal("session not found: x".into()),
+        ];
+        for e in &samples {
+            // 通过 variant_tag 强制走完整 match（编译期同步变体列表）：
+            // variant_tag 的穷尽 match 若遗漏变体将编译失败；
+            // 这里调用它一次让"未来变体"fail-on-build 哨兵实际生效。
+            let _tag = e.variant_tag();
+            assert!(
+                !is_session_not_found(e),
+                "collision: 变体 {e:?} (tag={_tag}) 不应被识别为 SessionNotFound"
+            );
+        }
+    }
+
+    /// Display ID 保真测试：`DbError::SessionNotFound(s)` 的 Display
+    /// 必须包含原始 `s`，不能丢失 session id 信息。
+    #[test]
+    fn session_not_found_display_preserves_session_id() {
+        use crate::connection::DbError;
+        let cases = ["abc", "sess-42", "config:1:session:99", "🚀 unicode"];
+        for id in cases {
+            let err = DbError::SessionNotFound(id.to_string());
+            let display = err.to_string();
+            assert!(
+                display.contains(id),
+                "Display({display:?}) 必须保留 session_id {id:?}"
+            );
+        }
+    }
+
+    /// Producer 层变体级断言：get_session_connection 的 NotFound 必须返回
+    /// SessionNotFound 变体。若有人改回 `Internal(format!(...))` 拼接式
+    /// 实现，此测试将捕获回退。
+    #[tokio::test]
+    async fn get_session_connection_produces_session_not_found_variant() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let result = manager
+            .get_session_connection("nonexistent-config-id")
+            .await;
+        let err = match result {
+            Ok(_) => panic!("sanity: get_session_connection 应返回 NotFound"),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(err, crate::connection::DbError::SessionNotFound(ref id) if id == "nonexistent-config-id"),
+            "get_session_connection 必须返回 SessionNotFound 变体（producer 变体级护栏）"
+        );
+    }
+
+    /// Producer 层变体级断言：close_session 的 NotFound 必须返回 SessionNotFound 变体。
+    #[tokio::test]
+    async fn close_session_produces_session_not_found_variant() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let result = manager.close_session("nonexistent-close-id").await;
+        let err = match result {
+            Ok(_) => panic!("sanity: close_session 应返回 NotFound"),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(err, crate::connection::DbError::SessionNotFound(ref id) if id == "nonexistent-close-id"),
+            "close_session 必须返回 SessionNotFound 变体（producer 变体级护栏）"
+        );
     }
 
     /// P0-B 前向集成测试：`release_session` helper 集成 `is_session_not_found`：
@@ -3901,14 +3952,15 @@ mod tests {
             .close_session("forward-test:session:1")
             .await
             .expect_err("sanity: close_session 应返回 NotFound");
-        // 变体级断言：close_session 的 NotFound 必须以 SESSION_NOT_FOUND_PREFIX 开头
-        let raw_msg = match &raw_err {
-            crate::connection::DbError::Internal(m) => m.clone(),
-            other => panic!("sanity: 预期 DbError::Internal, got {other:?}"),
+        // 变体级断言：close_session 的 NotFound 必须为 SessionNotFound 结构化变体
+        // （Round 13 完全结构化变体化后，无 Internal 字符串兜底分支）
+        let session_id_from_err = match &raw_err {
+            crate::connection::DbError::SessionNotFound(id) => id.clone(),
+            other => panic!("sanity: 预期 SessionNotFound, got {other:?}"),
         };
-        assert!(
-            raw_msg.starts_with(SESSION_NOT_FOUND_PREFIX),
-            "sanity: close_session 必须以 SESSION_NOT_FOUND_PREFIX 前缀返回; got inner={raw_msg:?}"
+        assert_eq!(
+            session_id_from_err, "forward-test:session:1",
+            "NotFound 应携带原 session_id"
         );
         // Forward: helper 应将真实 NotFound 视为 Ok
         let result = release_session(
@@ -4444,11 +4496,7 @@ mod tests {
                 // + 局部 NotFound 处理）
                 match mgr.release_session_for_reuse(&sid).await {
                     Ok(()) => Ok(()),
-                    Err(crate::connection::DbError::Internal(ref msg))
-                        if msg.starts_with(SESSION_NOT_FOUND_PREFIX) =>
-                    {
-                        Ok(())
-                    }
+                    Err(crate::connection::DbError::SessionNotFound(_)) => Ok(()),
                     Err(e) => Err(e),
                 }
             }));

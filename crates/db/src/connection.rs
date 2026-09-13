@@ -39,8 +39,47 @@ pub enum DbError {
     #[error("invalid driver manifest: {0}")]
     InvalidManifest(String),
 
+    /// session 不存在（结构性错误，**单一事实来源**）
+    ///
+    /// 与 `Internal` 区分：这是**结构性**区分，编译器保证穷尽匹配，
+    /// 无需关心消息格式。生产者是 ConnectionManager 的三个 NotFound 路径
+    /// （get_session_connection / release_session_internal / close_session）。
+    /// 消费端通过 `is_session_not_found(&err)` 判定，**取代字符串前缀匹配**。
+    ///
+    /// 单一事实来源：本变体的 Display 与分类器共享同一字符串字面量
+    /// `"session not found: "`，避免双源漂移。
+    #[error("session not found: {0}")]
+    SessionNotFound(String),
+
+    /// **Deprecated 用法**：`DbError::Internal(String)` **禁止**用于表达
+    /// "session 不存在"（必须使用 `DbError::SessionNotFound(String)` 变体）。
+    /// 否则 `is_session_not_found` 分类器无法识别，NotFound 错误会泄露到调用方。
+    ///
+    /// 历史背景：Round 14 前 IPC 路径假设会通过 Display 序列化产生
+    /// `Internal("session not found: ...")`，现已删除该兜底分支。
+    /// 如未来需重新支持字符串序列化，应通过序列化层显式转换 + 新增 typed error code。
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl DbError {
+    /// 编译期强制同步所有变体的穷尽枚举（无 `_ =>` 通配）。
+    ///
+    /// 用途：`no_other_variant_collides_with_session_not_found` 等变体级
+    /// 分类测试通过调用本函数**强制列出**每个变体；新增 `DbError` 变体时
+    /// 编译失败提醒开发者同步更新碰撞测试，避免未来变体静默失覆盖。
+    pub fn variant_tag(&self) -> &'static str {
+        match self {
+            DbError::Connection { .. } => "Connection",
+            DbError::Query { .. } => "Query",
+            DbError::Transaction { .. } => "Transaction",
+            DbError::NotConnected => "NotConnected",
+            DbError::NotSupported(_) => "NotSupported",
+            DbError::InvalidManifest(_) => "InvalidManifest",
+            DbError::SessionNotFound(_) => "SessionNotFound",
+            DbError::Internal(_) => "Internal",
+        }
+    }
 }
 
 impl DbError {
