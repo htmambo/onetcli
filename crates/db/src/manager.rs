@@ -676,11 +676,49 @@ const _ASSERT_NOT_CLONE: fn() = || {
     // 编译期断言 SessionGuard: !Clone —— 故意调用时编译失败
 };
 
-#[cfg(test)]
+/// Release 路径标识（编译期穷尽匹配 + 日志前缀）。
+///
+/// 用于 `perform_release` 的 `path` 参数，避免字符串拼写错误静默污染
+/// 日志来源。`as_str()` 提供稳定的日志前缀文本。
+#[derive(Clone, Copy, Debug)]
+enum ReleasePath {
+    FinishWith,
+    Finish,
+}
+
+impl ReleasePath {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::FinishWith => "finish_with",
+            Self::Finish => "finish",
+        }
+    }
+}
+
 impl SessionGuard {
     /// 测试用：读取当前 session 持有的 release action（用于验证降级逻辑）
     pub(crate) fn current_action(&self) -> Option<SessionReleaseAction> {
         self.session.as_ref().map(|(_, a)| *a)
+    }
+
+    /// Err 路径兜底：把 `(id, downgraded_action)` 写回 session 字段，
+    /// 让 Drop 兜底 / 重试可以拿到更新后的 action。
+    ///
+    /// **可测试**：纯函数（无 IO），独立于 `release_session` 是否真正返回 Err。
+    /// 生产代码中 `release_session` 通过 NotFound→Ok 转换把 Err 路径基本吞没，
+    /// 但本 helper 仍作为**防御性契约**保留：未来若 release_session 真的返回
+    /// 非 NotFound 错误（例如 close_on_release 路径 disconnect 抛错），本函数
+    /// 保证 session 不会被静默清空。
+    ///
+    /// **不变量**：调用前 `session` 必须为 None（perform_release 已 take）；
+    /// 函数后 `session` 必须为 `Some((id, downgraded))`。
+    pub(crate) fn restore_session_with_downgraded_action(
+        session: &mut Option<(String, SessionReleaseAction)>,
+        id: String,
+        action: SessionReleaseAction,
+    ) {
+        let downgraded = Self::downgrade_action_on_failure(action);
+        *session = Some((id, downgraded));
     }
 }
 
@@ -759,60 +797,20 @@ impl SessionGuard {
     ) -> impl std::future::Future<Output = ()> + '_ {
         let caller = std::panic::Location::caller();
         async move {
-            // 检查是否二次调用：clone 出旧值若 session 已 None
-            let stored = self.session.clone();
-            let Some((id, _stored_action)) = stored else {
-                // 二次 finish_with：协议违规 + 可能的脏复用风险。
-                // **二次调用 hard no-op**：此处 `return` 跳过所有 release
-                // 逻辑，不会触碰池中 session，避免误销毁已被其他使用者租走的
-                // session。日志用 `error!` 级别（不是 warn）+ debug_assert，
-                // 触发告警体系 + 测试构建立即失败。
-                if self.last_release_id.is_some() {
-                    error!(
-                        target: "db::session",
-                        session_id = ?self.last_release_id,
-                        requested_action = ?action,
-                        caller = ?caller,
-                        "finish_with called after successful release — second call is hard no-op, \
-                         requested action NOT applied"
-                    );
-                    debug_assert!(
-                        false,
-                        "finish_with called twice (session_id={:?}, caller={:?})",
-                        self.last_release_id, caller
-                    );
-                } else {
-                    // (session=None, last_release_id=None) 不可达分支防御：
-                    // 正常路径不应到达此处（除非 guard 构造异常或中途被 Drop 析构）。
-                    // 升级为 error + debug_assert 防止静默掩盖真实 bug。
-                    error!(
-                        target: "db::session",
-                        caller = ?caller,
-                        requested_action = ?action,
-                        "finish_with on guard with no session and no release record — invariant violated"
-                    );
-                    debug_assert!(
-                        false,
-                        "finish_with on (None, None) guard — should be unreachable (caller={caller:?})"
-                    );
-                }
-                return; // hard no-op（不触发任何 release 逻辑）
-            };
-            match release_session(&self.manager, &id, action).await {
-                Ok(()) => {
-                    // 不变量：release 调用成功与清空 session 之间不得再插入任何 .await
-                    self.session = None;
-                    self.last_release_id = Some(id);
-                }
-                Err(e) => {
-                    warn!("Failed to release session {}: {}", id, e);
-                    // session 保留 → Drop 兜底使用降级 action 重试
-                    let downgraded = Self::downgrade_action_on_failure(action);
-                    if let Some((_, ref mut act)) = self.session.as_mut() {
-                        *act = downgraded;
-                    }
-                }
+            // None 路径由调用方处理协议违规检测；
+            // 这里 None 直接 hard no-op。
+            if self.session.is_none() {
+                Self::handle_double_finish_with(action, caller, self.last_release_id.as_ref());
+                return;
             }
+            Self::perform_release(
+                &self.manager,
+                &mut self.session,
+                &mut self.last_release_id,
+                Some(action), // finish_with: 调用方 override
+                ReleasePath::FinishWith,
+            )
+            .await;
         }
     }
 
@@ -849,24 +847,116 @@ impl SessionGuard {
     /// `finish_with` 才有完整的 sync-wrapper + caller 传播 + last_release_id
     /// 协议违规检测。
     pub async fn finish(&mut self) {
-        let Some((id, action)) = self.session.clone() else {
-            return; // 已 finish 或已被 Drop 兜底，幂等 no-op
+        // None 路径：与 finish_with 不同，**静默** no-op
+        // （保留向后兼容，主要给 Drop 路径 + 旧测试用）
+        if self.session.is_none() {
+            debug!(
+                "SessionGuard::finish on already-finished guard — no-op \
+                 (last_release_id={:?})",
+                self.last_release_id
+            );
+            return;
+        }
+        // None 表示使用 session 内存储的 action（区别于 finish_with 的 override）
+        Self::perform_release(
+            &self.manager,
+            &mut self.session,
+            &mut self.last_release_id,
+            None,
+            ReleasePath::Finish,
+        )
+        .await;
+    }
+
+    /// 共享 release 路径：take session → `release_session` → 处理结果。
+    /// 由 `finish_with` 与 `finish` 调用，消除两处重复实现。
+    ///
+    /// # 契约
+    ///
+    /// - **Ok 路径**：清空 `session` + 保存 `last_release_id`
+    /// - **Err 路径**：**保留** `session`，把 action 降级（`Close`）写回，
+    ///   让 Drop 兜底 / 重试可以拿到更新后的 action
+    /// - 调用方必须在调用前确保 `session` 是 `Some`（None 路径由调用方处理）
+    ///
+    /// # 不变量
+    ///
+    /// - release 调用成功与清空 session 之间不得再插入任何 `.await`
+    /// - Err 路径写回 session 是 Drop 兜底能 retry 的关键，不能漏
+    ///
+    /// # Action 参数二义性消除
+    ///
+    /// `action_override: Option<>` ：None 表示使用 `session` 内存储的 action
+    /// （`finish` 行为），Some 表示调用方 override（`finish_with` 行为）。
+    /// 编译期类型消除误用风险。
+    async fn perform_release(
+        manager: &ConnectionManager,
+        session: &mut Option<(String, SessionReleaseAction)>,
+        last_release_id: &mut Option<String>,
+        action_override: Option<SessionReleaseAction>,
+        path: ReleasePath,
+    ) {
+        // take 而非 clone：Ok 路径无须再写 None（已 take）；Err 路径
+        // 必须写回降级 action，否则 Drop 兜底会拿到已 None 的 session。
+        let Some((id, stored_action)) = session.take() else {
+            // 调用方漏检契约违约：debug_assert 让 dev/test 立即失败。
+            // release 路径不应用 error!（避免污染 finish 静默契约）。
+            debug_assert!(
+                false,
+                "perform_release 契约违约：调用方应在 None 路径前置处理（{path:?}）"
+            );
+            return;
         };
-        match release_session(&self.manager, &id, action).await {
+        let action = action_override.unwrap_or(stored_action);
+        match release_session(manager, &id, action).await {
             Ok(()) => {
-                // 不变量：release 调用成功与清空 session 之间不得再插入任何 .await
-                self.session = None;
-                self.last_release_id = Some(id);
+                // 不变量：release 调用成功与 last_release_id 保存之间不得再插入 .await
+                *last_release_id = Some(id);
             }
             Err(e) => {
-                warn!("Failed to release session {}: {}", id, e);
-                // session 保留 → Drop 兜底重试
-                // ReleaseForReuse 失败时保守降级为 Close（防止状态未知会话复用）
-                let downgraded = Self::downgrade_action_on_failure(action);
-                if let Some((_, ref mut act)) = self.session.as_mut() {
-                    *act = downgraded;
-                }
+                // 关键：写回降级 action 让 Drop 兜底 / 重试可以拿到更新后的 action
+                warn!(
+                    "{}: failed to release session {}: {}, downgrading action",
+                    path.as_str(),
+                    id,
+                    e,
+                );
+                Self::restore_session_with_downgraded_action(session, id, action);
             }
+        }
+    }
+
+    /// 处理 finish_with 二次调用 / 不可达分支（**hard no-op + error 日志 + debug_assert**）。
+    ///
+    /// **公共错误处理**：单一来源避免 `finish_with` 内部错误日志分散。
+    fn handle_double_finish_with(
+        action: SessionReleaseAction,
+        caller: &std::panic::Location<'static>,
+        last_release_id: Option<&String>,
+    ) {
+        if let Some(session_id) = last_release_id {
+            error!(
+                target: "db::session",
+                session_id = %session_id,
+                requested_action = ?action,
+                caller = ?caller,
+                "finish_with called after successful release — second call is hard no-op, \
+                 requested action NOT applied"
+            );
+            debug_assert!(
+                false,
+                "finish_with called twice (session_id={session_id}, caller={caller:?})"
+            );
+        } else {
+            error!(
+                target: "db::session",
+                caller = ?caller,
+                requested_action = ?action,
+                "finish_with on guard with no session and no release record — invariant violated"
+            );
+            debug_assert!(
+                false,
+                "finish_with on (None, None) guard — should be unreachable (caller={caller:?})"
+            );
         }
     }
 }
@@ -3804,6 +3894,66 @@ mod tests {
             SessionGuard::downgrade_action_on_failure(SessionReleaseAction::Release),
             SessionReleaseAction::Release,
             "Release 失败时不变（避免无端 close_on_release 行为变化）"
+        );
+    }
+
+    /// `restore_session_with_downgraded_action` 单测：直接覆盖 perform_release
+    /// Err 路径的 session 写回契约。
+    ///
+    /// **背景**：`release_session` 通过 NotFound→Ok 转换把 Err 路径几乎全部吞没
+    /// （参见 release_session 包装函数），使得 `perform_release` Err 分支在生产
+    /// 中几乎不可达。但该分支仍是**防御性契约**——若未来 release_session 真的
+    /// 返回非 NotFound 错误（例如 close_on_release 路径 disconnect 抛错），本函数
+    /// 保证 session 不会被静默清空（否则 Drop 兜底 / Drop 重试都拿不到 session_id）。
+    ///
+    /// **契约**：
+    /// - 调用前：session = None（perform_release 已 take）
+    /// - 调用后：session = Some((id, downgraded_action))
+    /// - downgraded 由 `SessionGuard::downgrade_action_on_failure` 决定（已有专测）
+    ///
+    /// 三种输入 action 的写回结果：
+    /// - ReleaseForReuse → Some((id, Close))，防止脏复用
+    /// - Close → Some((id, Close))，已是保守策略，幂等
+    /// - Release → Some((id, Release))，保守策略不变
+    #[test]
+    fn restore_session_with_downgraded_action_writes_back_downgraded() {
+        // ReleaseForReuse → Close
+        let mut session: Option<(String, SessionReleaseAction)> = None;
+        SessionGuard::restore_session_with_downgraded_action(
+            &mut session,
+            "test-reuse".to_string(),
+            SessionReleaseAction::ReleaseForReuse,
+        );
+        assert_eq!(
+            session,
+            Some(("test-reuse".to_string(), SessionReleaseAction::Close)),
+            "ReleaseForReuse 应写回 Close"
+        );
+
+        // Close → Close（幂等）
+        let mut session: Option<(String, SessionReleaseAction)> = None;
+        SessionGuard::restore_session_with_downgraded_action(
+            &mut session,
+            "test-close".to_string(),
+            SessionReleaseAction::Close,
+        );
+        assert_eq!(
+            session,
+            Some(("test-close".to_string(), SessionReleaseAction::Close)),
+            "Close 写回 Close（幂等）"
+        );
+
+        // Release → Release（保守策略不变）
+        let mut session: Option<(String, SessionReleaseAction)> = None;
+        SessionGuard::restore_session_with_downgraded_action(
+            &mut session,
+            "test-release".to_string(),
+            SessionReleaseAction::Release,
+        );
+        assert_eq!(
+            session,
+            Some(("test-release".to_string(), SessionReleaseAction::Release)),
+            "Release 写回 Release（保守策略不变）"
         );
     }
 
