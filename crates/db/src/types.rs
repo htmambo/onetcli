@@ -1131,8 +1131,7 @@ mod tests {
     #[test]
     fn from_db_type_with_values_non_enum_returns_from_db_type() {
         // 非 ENUM/SET 类型不应被误判为 Enum。
-        let parsed =
-            FieldType::from_db_type_with_values("varchar(10)", vec!["x".to_string()]);
+        let parsed = FieldType::from_db_type_with_values("varchar(10)", vec!["x".to_string()]);
         assert_eq!(parsed, FieldType::Text);
     }
 

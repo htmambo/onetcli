@@ -25,8 +25,8 @@ pub(super) fn format_import_table_reference(
 mod tests {
     use super::format_import_table_reference;
     use crate::import_export::ImportConfig;
-    use crate::mssql::MsSqlPlugin;
     use crate::mysql::MySqlPlugin;
+    use crate::postgresql::PostgresPlugin;
 
     #[test]
     fn test_format_import_table_reference_uses_database_for_mysql() {
@@ -43,8 +43,8 @@ mod tests {
     }
 
     #[test]
-    fn test_format_import_table_reference_uses_schema_for_mssql() {
-        let plugin = MsSqlPlugin::new();
+    fn test_format_import_table_reference_uses_schema_for_postgresql() {
+        let plugin = PostgresPlugin::new();
         let config = ImportConfig {
             database: "warehouse".to_string(),
             schema: Some("sales".to_string()),
@@ -54,6 +54,6 @@ mod tests {
 
         let table_ref = format_import_table_reference(&plugin, &config, "orders");
 
-        assert_eq!(table_ref, "[warehouse].[sales].[orders]");
+        assert_eq!(table_ref, "\"sales\".\"orders\"");
     }
 }

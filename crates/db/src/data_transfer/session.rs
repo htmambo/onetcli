@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use one_core::storage::{DatabaseType, DbConnectionConfig};
+use one_core::storage::DbConnectionConfig;
 
 use crate::manager::{GlobalDbState, SessionConnectionGuard};
 use crate::plugin::DatabasePlugin;
@@ -45,16 +45,14 @@ pub(crate) async fn open_endpoints(
     })
 }
 
-/// 建会话前把配置指向目标库（Oracle 走 sid/service_name，与 manager 现有约定一致）
+/// 建会话前把配置指向目标库
 async fn open_session(
     state: &GlobalDbState,
     base_config: &DbConnectionConfig,
     database: &str,
 ) -> Result<String> {
     let mut cfg = base_config.clone();
-    if cfg.database_type != DatabaseType::Oracle {
-        cfg.database = Some(database.to_string());
-    }
+    cfg.database = Some(database.to_string());
     state
         .connection_manager
         .create_session(cfg, &state.db_manager)

@@ -326,19 +326,6 @@ impl StreamingSqlParser {
             }
         }
 
-        if self.db_type == DatabaseType::MSSQL && ch == '\n' {
-            if let Some(last_line) = self.buffer.lines().next_back() {
-                if last_line.trim().eq_ignore_ascii_case("GO") {
-                    let stmt = self.take_buffer_without_last_line();
-                    self.last_checked_len = 0;
-                    if !stmt.is_empty() {
-                        return Some(stmt);
-                    }
-                    return None;
-                }
-            }
-        }
-
         if self.paren_depth == 0 && self.begin_depth == 0 {
             let trimmed_current = self.buffer.trim_end();
             if trimmed_current.ends_with(&self.delimiter) {
@@ -348,24 +335,6 @@ impl StreamingSqlParser {
                     .trim();
 
                 if let Some(result) = self.finalize_statement(stmt) {
-                    self.buffer.clear();
-                    self.last_checked_len = 0;
-                    return Some(result);
-                }
-                self.buffer.clear();
-                self.last_checked_len = 0;
-            } else if self.db_type == DatabaseType::Oracle
-                && self.buffer.trim().ends_with('\n')
-                && self.buffer.trim_end().ends_with('/')
-            {
-                let stmt = self
-                    .buffer
-                    .trim()
-                    .strip_suffix('/')
-                    .unwrap_or(&self.buffer)
-                    .trim();
-                if !stmt.is_empty() {
-                    let result = stmt.to_string();
                     self.buffer.clear();
                     self.last_checked_len = 0;
                     return Some(result);
@@ -488,9 +457,7 @@ impl StreamingSqlParser {
         if let Some(last_line) = self.buffer.lines().next_back() {
             let trimmed = last_line.trim_start();
             // 大小写不敏感前缀匹配：仅检查前 9 字节
-            if trimmed.len() > 9
-                && trimmed.as_bytes()[..9].eq_ignore_ascii_case(b"DELIMITER")
-            {
+            if trimmed.len() > 9 && trimmed.as_bytes()[..9].eq_ignore_ascii_case(b"DELIMITER") {
                 // 取 DELIMITER 后第一个非空白 token（等价于 split_whitespace().nth(1)）
                 let after = trimmed[9..].trim_start();
                 if !after.is_empty() {
@@ -504,27 +471,16 @@ impl StreamingSqlParser {
     /// 从 buffer 移除最后一行（用于 MySQL DELIMITER 处理）。
     /// 正确处理尾部换行：先 trim_end 找到最后逻辑行起点，再 truncate。
     fn drop_last_line_from_buffer(&mut self) {
-        let trimmed_end = self.buffer.trim_end_matches(|c| c == '\n' || c == '\r').len();
+        let trimmed_end = self
+            .buffer
+            .trim_end_matches(|c| c == '\n' || c == '\r')
+            .len();
         if let Some(last_nl) = self.buffer[..trimmed_end].rfind('\n') {
             self.buffer.truncate(last_nl);
         } else {
             self.buffer.clear();
         }
         self.last_checked_len = 0;
-    }
-
-    /// 取 buffer 中除最后一行之外的所有内容，并清空 buffer。用于 MSSQL GO 处理。
-    /// 返回值 = 移除最后一行（包括其换行）后的剩余内容（已 trim）。
-    fn take_buffer_without_last_line(&mut self) -> String {
-        let trimmed_end = self.buffer.trim_end_matches(|c| c == '\n' || c == '\r').len();
-        let stmt = if let Some(last_nl) = self.buffer[..trimmed_end].rfind('\n') {
-            self.buffer[..last_nl].trim().to_string()
-        } else {
-            // 最后一行是 buffer 唯一内容
-            self.buffer.trim().to_string()
-        };
-        self.buffer.clear();
-        stmt
     }
 
     /// 检查字符串是否为纯注释（只包含注释和空白字符）
@@ -783,26 +739,6 @@ mod test {
         assert_eq!(statements.len(), 2);
         assert!(statements[0].contains("$body$"));
         assert!(statements[0].contains("semicolon"));
-    }
-
-    #[test]
-    fn test_mssql_go_separator() {
-        let sql = "CREATE TABLE t (id INT);\nGO\nINSERT INTO t VALUES (1);\nGO\nSELECT * FROM t;";
-        let statements = parse_all(SqlSource::Script(sql.to_string()), DatabaseType::MSSQL);
-
-        assert_eq!(statements.len(), 3);
-        assert!(statements[0].contains("CREATE TABLE"));
-        assert!(statements[1].contains("INSERT"));
-        assert!(statements[2].contains("SELECT"));
-    }
-
-    #[test]
-    fn test_oracle_slash_separator() {
-        let sql = "CREATE TABLE t (id NUMBER);\n/\nINSERT INTO t VALUES (1);\n/\nSELECT * FROM t;";
-        let statements = parse_all(SqlSource::Script(sql.to_string()), DatabaseType::Oracle);
-
-        assert!(statements.len() >= 2);
-        assert!(statements[0].contains("CREATE TABLE"));
     }
 
     #[test]

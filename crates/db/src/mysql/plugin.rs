@@ -531,12 +531,9 @@ fn mysql_connection_form() -> DatabaseFormManifest {
                         "Enter SSH password",
                     )
                     .with_visibility(ssh_auth_rules("password")),
-                    ssh_field(
-                        "ssh_private_key",
-                        "ConnectionForm.ssh_private_key",
-                    )
-                    .with_placeholder("~/.ssh/id_rsa")
-                    .with_visibility(ssh_auth_rules("private_key")),
+                    ssh_field("ssh_private_key", "ConnectionForm.ssh_private_key")
+                        .with_placeholder("~/.ssh/id_rsa")
+                        .with_visibility(ssh_auth_rules("private_key")),
                     ssh_password_field(
                         "ssh_private_key_passphrase",
                         "ConnectionForm.ssh_private_key_passphrase",
@@ -3986,7 +3983,8 @@ mod tests {
 
     #[test]
     fn parse_mysql_enum_values_set_empty_quoted_only() {
-        let parsed = parse_mysql_enum_values("set('')").expect("set with empty element should parse");
+        let parsed =
+            parse_mysql_enum_values("set('')").expect("set with empty element should parse");
         assert_eq!(parsed, vec![""]);
     }
 

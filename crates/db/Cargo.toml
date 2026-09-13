@@ -10,7 +10,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_ignored.workspace = true
 rusqlite.workspace = true
-duckdb.workspace = true
 tokio = { workspace = true, features = ["process", "io-util"] }
 interprocess.workspace = true
 tracing.workspace = true
@@ -24,10 +23,7 @@ tokio-postgres-rustls.workspace = true
 rustls.workspace = true
 rustls-native-certs.workspace = true
 rustls-pemfile.workspace = true
-tiberius.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
-oracle.workspace = true
-clickhouse.workspace = true
 one-core.workspace = true
 ssh.workspace = true
 sqlformat.workspace = true

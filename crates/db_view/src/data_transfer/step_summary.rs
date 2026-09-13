@@ -1,5 +1,6 @@
 //! 数据传输向导第三步：对象清单确认与传输选项
 
+use db::PrecheckSeverity;
 use gpui::{App, Context, IntoElement, ParentElement, Styled, div};
 use gpui_component::{ActiveTheme, checkbox::Checkbox, h_flex, scroll::ScrollableElement, v_flex};
 use rust_i18n::t;
@@ -13,6 +14,15 @@ fn summary_cell(text: String) -> impl IntoElement {
         .text_ellipsis()
         .overflow_hidden()
         .child(text)
+}
+
+/// 预检条目严重级别对应的显示颜色
+fn severity_color(severity: &PrecheckSeverity, cx: &App) -> gpui::Hsla {
+    match severity {
+        PrecheckSeverity::Error => cx.theme().danger,
+        PrecheckSeverity::Warning => cx.theme().warning,
+        PrecheckSeverity::Info => cx.theme().muted_foreground,
+    }
 }
 
 fn summary_row(source: String, target: String, mode: String, cx: &App) -> impl IntoElement {
@@ -78,6 +88,81 @@ impl DataTransferWindow {
         )
     }
 
+    /// 渲染预检测区块：标题、两端版本、逐条问题与阻塞提示
+    fn render_precheck_section(&self, cx: &App) -> impl IntoElement {
+        let mut section = v_flex()
+            .gap_1()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .pt_3()
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(t!("DataTransfer.precheck_section_title").to_string()),
+            );
+
+        if *self.precheck_loading.read(cx) {
+            return section.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t!("DataTransfer.precheck_running").to_string()),
+            );
+        }
+
+        let Some(report) = self.precheck_report.read(cx).as_ref() else {
+            return section;
+        };
+
+        if let (Some(source), Some(target)) = (&report.source_version, &report.target_version) {
+            section = section.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        t!(
+                            "DataTransfer.precheck_versions_label",
+                            source = source.clone(),
+                            target = target.clone()
+                        )
+                        .to_string(),
+                    ),
+            );
+        }
+
+        for issue in &report.issues {
+            let color = severity_color(&issue.severity, cx);
+            section = section.child(
+                v_flex()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(color)
+                            .child(issue.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(issue.detail.clone()),
+                    ),
+            );
+        }
+
+        if report.has_blocking_errors() {
+            section = section.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().danger)
+                    .child(t!("DataTransfer.precheck_blocking_hint").to_string()),
+            );
+        }
+        section
+    }
+
     /// 渲染第三步：传输清单 + 选项
     pub(crate) fn render_summary_step(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
@@ -109,5 +194,6 @@ impl DataTransferWindow {
                         cx.notify();
                     })),
             )
+            .child(self.render_precheck_section(cx))
     }
 }

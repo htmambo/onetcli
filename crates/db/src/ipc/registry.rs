@@ -201,7 +201,12 @@ impl IpcDriverDialect {
         (left, right)
     }
 
-    pub fn format_table_reference(&self, database: &str, schema: Option<&str>, table: &str) -> String {
+    pub fn format_table_reference(
+        &self,
+        database: &str,
+        schema: Option<&str>,
+        table: &str,
+    ) -> String {
         let prefer_schema = matches!(
             self.table_reference_schema_mode,
             TableReferenceSchemaMode::PreferSchema
@@ -452,9 +457,7 @@ fn push_driver_if_loadable(drivers: &mut Vec<IpcDriverManifest>, driver_dir: &Pa
 /// 注意：未知字段检测以反序列化成功为前提。若拼错的是必填字段（无 `serde(default)`），
 /// serde 会先以 `missing field` 报错，此时不会进入未知字段收集分支——这是符合预期的
 /// 行为，两类错误由 serde 的原生诊断消息各自负责。
-fn parse_manifest_with_unknown(
-    content: &str,
-) -> Result<(IpcDriverManifest, Vec<String>), DbError> {
+fn parse_manifest_with_unknown(content: &str) -> Result<(IpcDriverManifest, Vec<String>), DbError> {
     let mut unknown_fields: Vec<String> = Vec::new();
     let mut deserializer = serde_json::Deserializer::from_str(content);
     let manifest: IpcDriverManifest =
@@ -590,7 +593,6 @@ mod tests {
         assert_eq!(registry.drivers().len(), 1);
         assert_eq!(registry.find("demo").unwrap().name, "Demo");
     }
-
 
     #[test]
     fn parses_connection_lifecycle_from_manifest() {

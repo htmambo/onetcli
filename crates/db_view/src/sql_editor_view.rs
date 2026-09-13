@@ -1413,33 +1413,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_explain_sql_duckdb() {
-        assert_eq!(
-            build_explain_sql(DatabaseType::DuckDB, "select * from users"),
-            Some("EXPLAIN select * from users".to_string())
-        );
-    }
-
-    #[test]
-    fn test_build_explain_sql_mssql() {
-        assert_eq!(
-            build_explain_sql(DatabaseType::MSSQL, "select * from users"),
-            Some("SET SHOWPLAN_TEXT ON;\nselect * from users\nSET SHOWPLAN_TEXT OFF;".to_string())
-        );
-    }
-
-    #[test]
-    fn test_build_explain_sql_oracle() {
-        assert_eq!(
-            build_explain_sql(DatabaseType::Oracle, "select * from users"),
-            Some(
-                "EXPLAIN PLAN FOR select * from users;\nSELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
     fn test_build_explain_sql_mysql_multiple_statements() {
         assert_eq!(
             build_explain_sql(
@@ -1455,17 +1428,6 @@ mod tests {
         assert_eq!(
             build_explain_sql(DatabaseType::MySQL, "select ';' as semi; select 2 as id;"),
             Some("EXPLAIN select ';' as semi;\nEXPLAIN select 2 as id".to_string())
-        );
-    }
-
-    #[test]
-    fn test_build_explain_sql_oracle_multiple_statements() {
-        assert_eq!(
-            build_explain_sql(DatabaseType::Oracle, "select * from users; select * from posts;"),
-            Some(
-                "EXPLAIN PLAN FOR select * from users;\nSELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY());\nEXPLAIN PLAN FOR select * from posts;\nSELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())"
-                    .to_string()
-            )
         );
     }
 
@@ -1521,17 +1483,6 @@ mod tests {
                 "EXPLAIN select * from users; select * from posts;"
             ),
             Some("EXPLAIN select * from users;\nEXPLAIN select * from posts".to_string())
-        );
-    }
-
-    #[test]
-    fn test_build_explain_sql_keeps_existing_mssql_showplan_script() {
-        assert_eq!(
-            build_explain_sql(
-                DatabaseType::MSSQL,
-                "SET SHOWPLAN_TEXT ON;\nselect * from users\nSET SHOWPLAN_TEXT OFF;"
-            ),
-            Some("SET SHOWPLAN_TEXT ON;\nselect * from users\nSET SHOWPLAN_TEXT OFF;".to_string())
         );
     }
 }

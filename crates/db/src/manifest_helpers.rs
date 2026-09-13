@@ -159,14 +159,6 @@ impl ManifestFieldBuilder {
         self
     }
 
-    pub(crate) fn with_options_source(
-        mut self,
-        options_source: crate::plugin_manifest::ReferenceDataKind,
-    ) -> Self {
-        self.field.options_source = Some(options_source);
-        self
-    }
-
     pub(crate) fn with_visibility(mut self, visible_when: Vec<FormVisibilityRule>) -> Self {
         self.field.visible_when = visible_when;
         self

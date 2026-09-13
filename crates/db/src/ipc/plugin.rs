@@ -4,21 +4,19 @@ use crate::import_export::{
     ExportConfig, ExportProgressSender, ExportResult, ImportConfig, ImportProgressSender,
     ImportResult,
 };
-use crate::ipc::client::JsonRpcClient;
 use crate::ipc::connection::ExternalDbConnection;
-use crate::ipc::protocol::{
-    BuildDdlResult, CreateDatabaseParams, DDL_BUILD, database_metadata_params,
-    table_metadata_params,
+use crate::ipc::protocol::{database_metadata_params, table_metadata_params};
+use crate::ipc::registry::{
+    EXTERNAL_DRIVER_ID_PARAM, IpcDriverDialect, IpcDriverManifest, IpcDriverRegistry,
+    TableReferenceSchemaMode,
 };
-use crate::ipc::registry::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverDialect, IpcDriverManifest, IpcDriverRegistry, TableReferenceSchemaMode};
-use crate::oracle::OraclePlugin;
 use crate::plugin::{ConnectionLifecycle, DatabasePlugin, SqlCompletionInfo};
 use crate::plugin_manifest::{DatabaseCapabilities, DatabaseUiCapabilities, DatabaseUiManifest};
 use crate::types::*;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use one_core::storage::{DatabaseType, DbConnectionConfig};
 use gpui::{TextAlign, px};
+use one_core::storage::{DatabaseType, DbConnectionConfig};
 use sqlparser::dialect::{Dialect, GenericDialect};
 
 #[derive(Clone)]
@@ -47,13 +45,8 @@ impl ExternalDatabasePlugin {
     }
 
     fn is_oracle_compatible_driver(driver: &IpcDriverManifest) -> bool {
-        matches!(
-            driver.dialect.compatible_database_type,
-            Some(DatabaseType::Oracle)
-        ) || {
-            let id = driver.id.to_ascii_lowercase();
-            id.contains("oracle") || id == "dm" || id.contains("dameng")
-        }
+        let id = driver.id.to_ascii_lowercase();
+        id.contains("oracle") || id == "dm" || id.contains("dameng")
     }
 
     fn oracle_table_save_request(
@@ -74,15 +67,14 @@ impl ExternalDatabasePlugin {
 
     fn with_oracle_copy_sql<F>(&self, request: &CopySqlRequest, f: F) -> Option<String>
     where
-        F: FnOnce(&OraclePlugin, &CopySqlRequest) -> String,
+        F: FnOnce(&CopySqlRequest) -> String,
     {
         let driver_id = request.driver_id.as_deref()?;
         let driver = self.driver_for_id(driver_id)?;
         if !Self::is_oracle_compatible_driver(&driver) {
             return None;
         }
-        let oracle_plugin = OraclePlugin::new();
-        Some(f(&oracle_plugin, request))
+        Some(f(request))
     }
 
     fn generate_default_table_changes_sql(&self, request: &TableSaveRequest) -> String {
@@ -97,34 +89,6 @@ impl ExternalDatabasePlugin {
         } else {
             sql_statements.join(";\n\n") + ";"
         }
-    }
-
-    /// 经 connectionless JSON-RPC 调 external driver 构建 DDL（如 CreateDatabase）。
-    ///
-    /// 不支持时直接报错，不 fallback 到本地 SQL（本地不了解 external driver 的方言）。
-    ///
-    /// 状态：机制层 MVP。当前无消费方接入（trait async 改造与 UI 集成待真实
-    /// driver 支持 DDL_BUILD 后再做）。若长期无 driver 接入，可移除以避免死代码。
-    async fn connectionless_ddl_build(
-        &self,
-        driver: &IpcDriverManifest,
-        params: CreateDatabaseParams,
-    ) -> Result<BuildDdlResult> {
-        if !driver
-            .effective_capabilities()
-            .supports_ddl_build_database
-        {
-            return Err(anyhow!(
-                "external driver '{}' does not support DDL build",
-                driver.id
-            ));
-        }
-        let client = JsonRpcClient::start(driver).await?;
-        let result = client
-            .request::<BuildDdlResult>(DDL_BUILD, serde_json::to_value(&params)?)
-            .await;
-        client.shutdown().await;
-        result.map_err(Into::into)
     }
 
     async fn custom_object_view(
@@ -244,12 +208,8 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         let close_on_release = driver.connection.close_on_release;
         let physical_open_lock_key =
             if driver.connection.single_file && driver.connection.single_connection {
-                ConnectionLifecycle::single_file(
-                    &driver.id,
-                    config,
-                    &driver.connection.path_fields,
-                )
-                .physical_open_lock_key
+                ConnectionLifecycle::single_file(&driver.id, config, &driver.connection.path_fields)
+                    .physical_open_lock_key
             } else {
                 None
             };
@@ -995,8 +955,7 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         if let Some(driver_id) = request.driver_id.as_deref() {
             if let Some(driver) = self.driver_for_id(driver_id) {
                 if Self::is_oracle_compatible_driver(&driver) {
-                    let oracle_plugin = OraclePlugin::new();
-                    return oracle_plugin.generate_table_changes_sql(
+                    return crate::oracle_dialect::generate_table_changes_sql(
                         &Self::oracle_table_save_request(&driver, request),
                     );
                 }
@@ -1006,17 +965,17 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     }
 
     fn generate_copy_insert_sql(&self, request: &CopySqlRequest) -> String {
-        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
-            plugin.generate_copy_insert_sql(req)
-        }) {
+        if let Some(sql) =
+            self.with_oracle_copy_sql(request, |req| crate::oracle_dialect::copy_insert_sql(req))
+        {
             return sql;
         }
         crate::plugin::default_generate_copy_insert_sql(self, request)
     }
 
     fn generate_copy_insert_with_comments_sql(&self, request: &CopySqlRequest) -> String {
-        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
-            plugin.generate_copy_insert_with_comments_sql(req)
+        if let Some(sql) = self.with_oracle_copy_sql(request, |req| {
+            crate::oracle_dialect::copy_insert_with_comments_sql(req)
         }) {
             return sql;
         }
@@ -1024,18 +983,18 @@ impl DatabasePlugin for ExternalDatabasePlugin {
     }
 
     fn generate_copy_update_sql(&self, request: &CopySqlRequest) -> String {
-        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
-            plugin.generate_copy_update_sql(req)
-        }) {
+        if let Some(sql) =
+            self.with_oracle_copy_sql(request, |req| crate::oracle_dialect::copy_update_sql(req))
+        {
             return sql;
         }
         crate::plugin::default_generate_copy_update_sql(self, request)
     }
 
     fn generate_copy_delete_sql(&self, request: &CopySqlRequest) -> String {
-        if let Some(sql) = self.with_oracle_copy_sql(request, |plugin, req| {
-            plugin.generate_copy_delete_sql(req)
-        }) {
+        if let Some(sql) =
+            self.with_oracle_copy_sql(request, |req| crate::oracle_dialect::copy_delete_sql(req))
+        {
             return sql;
         }
         crate::plugin::default_generate_copy_delete_sql(self, request)
@@ -1101,7 +1060,6 @@ impl DatabasePlugin for ExternalDatabasePlugin {
         Err(anyhow!("external database export is not supported yet"))
     }
 }
-
 
 /// 驱动省略 table_name 时，用请求中的表名回填。
 fn fill_trigger_table_names(triggers: Vec<TriggerInfo>, fallback_table: &str) -> Vec<TriggerInfo> {
@@ -1190,7 +1148,6 @@ fn merge_capabilities(
             merged
         })
 }
-
 
 const MIN_CUSTOM_COLUMN_WIDTH_PX: f32 = 1.0;
 
@@ -1376,8 +1333,6 @@ mod tests {
     }
 }
 
-
-
 #[cfg(test)]
 mod object_view_tests {
     use super::*;
@@ -1477,7 +1432,7 @@ mod oracle_table_save_tests {
             connection: Default::default(),
             manifest_dir: PathBuf::from("."),
         };
-        driver.dialect.compatible_database_type = Some(DatabaseType::Oracle);
+        driver.dialect.compatible_database_type = None;
         driver.dialect.uses_schema_as_database = true;
         driver.dialect.table_reference_schema_mode = TableReferenceSchemaMode::PreferSchema;
         driver.dialect.limit_style = LimitStyle::OffsetFetch;
@@ -1629,7 +1584,6 @@ mod oracle_table_save_tests {
     }
 }
 
-
 #[cfg(test)]
 mod connection_lifecycle_tests {
     use super::*;
@@ -1666,43 +1620,6 @@ mod connection_lifecycle_tests {
         }
     }
 
-    #[tokio::test]
-    async fn connectionless_ddl_build_rejects_unsupported_driver() {
-        let plugin = ExternalDatabasePlugin {
-            registry: IpcDriverRegistry::empty(),
-        };
-        let driver = base_driver("ddl-test");
-        let params = CreateDatabaseParams {
-            database_name: "test_db".to_string(),
-            field_values: std::collections::HashMap::new(),
-        };
-        let result = plugin.connectionless_ddl_build(&driver, params).await;
-        assert!(result.is_err());
-        let message = result.unwrap_err().to_string();
-        assert!(
-            message.contains("does not support DDL build"),
-            "unexpected error: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn connectionless_ddl_build_rejects_when_capability_explicitly_disabled() {
-        let plugin = ExternalDatabasePlugin {
-            registry: IpcDriverRegistry::empty(),
-        };
-        let mut driver = base_driver("ddl-disabled");
-        driver.capabilities = Some(DatabaseUiCapabilities {
-            supports_ddl_build_database: false,
-            ..Default::default()
-        });
-        let params = CreateDatabaseParams {
-            database_name: "test_db".to_string(),
-            field_values: std::collections::HashMap::new(),
-        };
-        let result = plugin.connectionless_ddl_build(&driver, params).await;
-        assert!(result.is_err());
-    }
-
     fn external_config(driver_id: &str, host: &str) -> DbConnectionConfig {
         let mut extra_params = std::collections::HashMap::new();
         extra_params.insert(EXTERNAL_DRIVER_ID_PARAM.to_string(), driver_id.to_string());
@@ -1737,10 +1654,8 @@ mod connection_lifecycle_tests {
             registry: IpcDriverRegistry::from_drivers(vec![driver]),
         };
 
-        let lifecycle = plugin.connection_lifecycle(&external_config(
-            "sqlite-go",
-            "file:/tmp/shared.db",
-        ));
+        let lifecycle =
+            plugin.connection_lifecycle(&external_config("sqlite-go", "file:/tmp/shared.db"));
         assert!(lifecycle.close_on_release);
         assert_eq!(
             Some("sqlite-go:/tmp/shared.db".to_string()),

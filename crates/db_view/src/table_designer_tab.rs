@@ -31,8 +31,6 @@ use crate::database_view_plugin::{
     get_table_designer_capabilities_for,
 };
 use db::GlobalDbState;
-#[cfg(test)]
-use db::duckdb::DuckDbPlugin;
 use db::plugin::DatabasePlugin;
 use db::types::{
     CharsetInfo, CollationInfo, ColumnDefinition, ColumnInfo, IndexDefinition, IndexInfo,
@@ -3429,8 +3427,8 @@ mod tests {
     }
     use super::*;
     use db::{
-        clickhouse::ClickHousePlugin, mssql::MsSqlPlugin, mysql::MySqlPlugin, oracle::OraclePlugin,
-        plugin::DatabasePlugin, postgresql::PostgresPlugin, sqlite::SqlitePlugin,
+        mysql::MySqlPlugin, plugin::DatabasePlugin, postgresql::PostgresPlugin,
+        sqlite::SqlitePlugin,
     };
 
     fn build_col(name: &str) -> ColumnDefinition {
@@ -3474,10 +3472,6 @@ mod tests {
             DatabaseType::MySQL => Box::new(MySqlPlugin::new()),
             DatabaseType::PostgreSQL => Box::new(PostgresPlugin::new()),
             DatabaseType::SQLite => Box::new(SqlitePlugin::new()),
-            DatabaseType::DuckDB => Box::new(DuckDbPlugin::new()),
-            DatabaseType::MSSQL => Box::new(MsSqlPlugin::new()),
-            DatabaseType::Oracle => Box::new(OraclePlugin::new()),
-            DatabaseType::ClickHouse => Box::new(ClickHousePlugin::new()),
             DatabaseType::External => Box::new(MySqlPlugin::new()),
         }
     }
@@ -3512,28 +3506,10 @@ mod tests {
                     "PostgreSQL 应使用 RENAME COLUMN: {sql}"
                 );
             }
-            DatabaseType::SQLite | DatabaseType::DuckDB => {
+            DatabaseType::SQLite => {
                 assert!(
                     sql.contains("RENAME COLUMN \"b\" TO \"a\""),
-                    "SQLite/DuckDB 应使用 RENAME COLUMN: {sql}"
-                );
-            }
-            DatabaseType::MSSQL => {
-                assert!(
-                    sql.contains("EXEC sp_rename '[users].[b]', 'a', 'COLUMN';"),
-                    "MSSQL 应使用 sp_rename COLUMN: {sql}"
-                );
-            }
-            DatabaseType::Oracle => {
-                assert!(
-                    sql.contains("RENAME COLUMN \"b\" TO \"a\""),
-                    "Oracle 应使用 RENAME COLUMN: {sql}"
-                );
-            }
-            DatabaseType::ClickHouse => {
-                assert!(
-                    sql.contains("RENAME COLUMN `b` TO `a`"),
-                    "ClickHouse 应使用 RENAME COLUMN: {sql}"
+                    "SQLite 应使用 RENAME COLUMN: {sql}"
                 );
             }
             _ => {}
@@ -3724,27 +3700,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mssql_rename_sql_uses_sp_rename_column() {
-        let plugin = MsSqlPlugin::new();
-        let sql = plugin.build_column_rename_sql("users", "b", "a", None);
-        assert_eq!(sql, "EXEC sp_rename '[users].[b]', 'a', 'COLUMN';");
-    }
-
-    #[test]
-    fn test_oracle_rename_sql_uses_rename_column() {
-        let plugin = OraclePlugin::new();
-        let sql = plugin.build_column_rename_sql("users", "b", "a", None);
-        assert!(sql.contains("RENAME COLUMN \"b\" TO \"a\""));
-    }
-
-    #[test]
-    fn test_clickhouse_rename_sql_uses_rename_column() {
-        let plugin = ClickHousePlugin::new();
-        let sql = plugin.build_column_rename_sql("users", "b", "a", None);
-        assert!(sql.contains("RENAME COLUMN `b` TO `a`"));
-    }
-
-    #[test]
     fn test_mysql_change_column_keeps_new_definition() {
         let plugin = MySqlPlugin::new();
         let mut renamed_col = build_col("a");
@@ -3820,7 +3775,7 @@ mod tests {
             let add_b2 = format!("ADD COLUMN {}", plugin.quote_identifier("b2"));
             // MySQL ADD COLUMN 可能不包含引号后的完整格式，用更宽松的匹配
             let add_keyword = "ADD COLUMN";
-            if !matches!(database_type, DatabaseType::SQLite | DatabaseType::DuckDB) {
+            if !matches!(database_type, DatabaseType::SQLite) {
                 assert!(
                     !sql.contains(&add_b2)
                         && (!sql.contains(add_keyword) || sql.contains("RENAME")),
@@ -3955,7 +3910,7 @@ mod tests {
             let plugin = build_plugin(database_type);
             let sql = plugin.build_alter_table_sql(&original, &current);
             // SQLite 使用 table recreation 方式，不包含 DROP COLUMN 关键词
-            if !matches!(database_type, DatabaseType::SQLite | DatabaseType::DuckDB) {
+            if !matches!(database_type, DatabaseType::SQLite) {
                 assert!(
                     sql.contains("DROP COLUMN"),
                     "[{:?}] 删除列应包含 DROP COLUMN: {sql}",
@@ -4072,7 +4027,7 @@ mod tests {
                 database_type
             );
             // SQLite 使用 table recreation，不直接包含 DROP COLUMN
-            if !matches!(database_type, DatabaseType::SQLite | DatabaseType::DuckDB) {
+            if !matches!(database_type, DatabaseType::SQLite) {
                 // 应 DROP 被删除的列 c
                 let drop_c = format!("DROP COLUMN {}", plugin.quote_identifier("c"));
                 assert!(
@@ -4406,16 +4361,6 @@ mod tests {
             sql.contains("AUTO_INCREMENT"),
             "应保留 AUTO_INCREMENT: {sql}"
         );
-    }
-
-    /// MSSQL sp_rename 正确处理包含单引号的列名
-    #[test]
-    fn test_mssql_rename_escapes_single_quotes() {
-        let plugin = MsSqlPlugin::new();
-        let sql = plugin.build_column_rename_sql("users", "col'a", "col'b", None);
-        // 单引号应被转义
-        assert!(sql.contains("col''a"), "旧列名中的单引号应被转义: {sql}");
-        assert!(sql.contains("col''b"), "新列名中的单引号应被转义: {sql}");
     }
 
     /// build_alter_table_sql_with_renames 传入空设计（无列、无索引）

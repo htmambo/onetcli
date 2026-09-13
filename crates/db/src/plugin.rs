@@ -169,7 +169,6 @@ impl SqlCompletionInfo {
     }
 }
 
-
 pub(crate) fn default_generate_copy_insert_sql<P: DatabasePlugin + ?Sized>(
     plugin: &P,
     request: &CopySqlRequest,
@@ -202,8 +201,10 @@ pub(crate) fn default_generate_copy_insert_sql<P: DatabasePlugin + ?Sized>(
             table_name, columns_str, values_str
         ));
     }
-    statements.join("
-")
+    statements.join(
+        "
+",
+    )
 }
 
 pub(crate) fn default_generate_copy_insert_with_comments_sql<P: DatabasePlugin + ?Sized>(
@@ -249,8 +250,10 @@ pub(crate) fn default_generate_copy_insert_with_comments_sql<P: DatabasePlugin +
             table_name, columns_str, values_str
         ));
     }
-    statements.join("
-")
+    statements.join(
+        "
+",
+    )
 }
 
 pub(crate) fn default_generate_copy_update_sql<P: DatabasePlugin + ?Sized>(
@@ -289,8 +292,10 @@ pub(crate) fn default_generate_copy_update_sql<P: DatabasePlugin + ?Sized>(
             table_name, set_str, where_str
         ));
     }
-    statements.join("
-")
+    statements.join(
+        "
+",
+    )
 }
 
 pub(crate) fn default_generate_copy_delete_sql<P: DatabasePlugin + ?Sized>(
@@ -307,8 +312,10 @@ pub(crate) fn default_generate_copy_delete_sql<P: DatabasePlugin + ?Sized>(
         let where_str = plugin.generate_copy_where_clause(request, row);
         statements.push(format!("DELETE FROM {} WHERE {};", table_name, where_str));
     }
-    statements.join("
-")
+    statements.join(
+        "
+",
+    )
 }
 
 /// Database plugin trait for supporting multiple database types
@@ -409,21 +416,8 @@ pub trait DatabasePlugin: Send + Sync {
     fn build_explain_statement(&self, sql: &str) -> String {
         let sql = sql.trim();
         match self.name() {
-            DatabaseType::MySQL
-            | DatabaseType::PostgreSQL
-            | DatabaseType::DuckDB
-            | DatabaseType::ClickHouse => {
-                format!("EXPLAIN {sql}")
-            }
+            DatabaseType::MySQL | DatabaseType::PostgreSQL => format!("EXPLAIN {sql}"),
             DatabaseType::SQLite => format!("EXPLAIN QUERY PLAN {sql}"),
-            DatabaseType::MSSQL => {
-                format!("SET SHOWPLAN_TEXT ON;\n{sql}\nSET SHOWPLAN_TEXT OFF;")
-            }
-            DatabaseType::Oracle => {
-                format!(
-                    "EXPLAIN PLAN FOR {sql};\nSELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())"
-                )
-            }
             _ => "".to_string(),
         }
     }
@@ -433,10 +427,7 @@ pub trait DatabasePlugin: Send + Sync {
         let trimmed = sql.trim_start();
         let upper = trimmed.to_ascii_uppercase();
 
-        match self.name() {
-            DatabaseType::MSSQL => upper.starts_with("SET SHOWPLAN_TEXT ON"),
-            _ => upper.starts_with("EXPLAIN"),
-        }
+        upper.starts_with("EXPLAIN")
     }
 
     /// Build EXPLAIN SQL for all query statements in a SQL script.
@@ -446,15 +437,7 @@ pub trait DatabasePlugin: Send + Sync {
             return None;
         }
 
-        if matches!(self.name(), DatabaseType::MSSQL) && self.is_explain_statement(trimmed) {
-            return Some(trimmed.to_string());
-        }
-
-        let separator = if matches!(self.name(), DatabaseType::MSSQL) {
-            "\n"
-        } else {
-            ";\n"
-        };
+        let separator = ";\n";
 
         let explain_statements = self
             .split_sql_statements(trimmed)
@@ -2891,7 +2874,7 @@ mod tests {
     fn lifecycle_config(id: &str, host: &str, database: Option<&str>) -> DbConnectionConfig {
         DbConnectionConfig {
             id: id.to_string(),
-            database_type: DatabaseType::DuckDB,
+            database_type: DatabaseType::External,
             name: "test".to_string(),
             host: host.to_string(),
             port: 0,
@@ -2914,11 +2897,8 @@ mod tests {
             .extra_params
             .insert("path".to_string(), "file:/data/shared.db".to_string());
 
-        let lifecycle = ConnectionLifecycle::single_file(
-            "duckdb",
-            &config,
-            &["extra_params.path".to_string()],
-        );
+        let lifecycle =
+            ConnectionLifecycle::single_file("duckdb", &config, &["extra_params.path".to_string()]);
 
         assert!(lifecycle.close_on_release);
         assert_eq!(

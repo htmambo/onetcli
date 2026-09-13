@@ -825,12 +825,16 @@ impl AIInput {
             .on_action(cx.listener(|this: &mut Self, _: &HistoryNext, window, cx| {
                 this.handle_recall_next(window, cx);
             }))
-            .on_action(cx.listener(|this: &mut Self, _: &HistorySearch, window, cx| {
-                this.handle_recall_search(window, cx);
-            }))
-            .on_action(cx.listener(|this: &mut Self, _: &HistoryEscape, window, cx| {
-                this.handle_recall_escape(window, cx);
-            }));
+            .on_action(
+                cx.listener(|this: &mut Self, _: &HistorySearch, window, cx| {
+                    this.handle_recall_search(window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this: &mut Self, _: &HistoryEscape, window, cx| {
+                    this.handle_recall_escape(window, cx);
+                }),
+            );
 
         // 浏览态：上方显示 inline 灰色预览（M7；§4.3.6 超长截断由 InputHistory::preview_text 处理）
         if let Some(preview) = self.history_preview_text() {

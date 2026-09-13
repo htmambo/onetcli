@@ -264,3 +264,122 @@ ConnectionForm:
     en: HTTPS
     zh-CN: HTTPS
     zh-HK: HTTPS
+
+# 数据传输预检测（供 crates/db/src/data_transfer/precheck.rs 使用）
+DataTransfer:
+  precheck_conflict_unknown:
+    en: "Could not list target tables to check for conflicts"
+    zh-CN: "无法读取目标库表列表，冲突检查未完成"
+    zh-HK: "無法讀取目標庫表清單，衝突檢查未完成"
+  precheck_connect_failed:
+    en: "Cannot connect to source or target database; further checks skipped"
+    zh-CN: "无法连接源或目标数据库，已跳过后续检查"
+    zh-HK: "無法連線來源或目標資料庫，已跳過後續檢查"
+  precheck_version_unknown:
+    en: "Database version detection failed"
+    zh-CN: "数据库版本探测失败"
+    zh-HK: "資料庫版本探測失敗"
+  precheck_version_unknown_detail:
+    en: "Could not get the %{side} server version; version-related hints may be incomplete"
+    zh-CN: "未能获取 %{side} 库服务器版本，版本相关能力提示可能不完整"
+    zh-HK: "未能取得 %{side} 庫伺服器版本，版本相關能力提示可能不完整"
+  precheck_target_version_low:
+    en: "Target server version is outdated"
+    zh-CN: "目标库版本较低"
+    zh-HK: "目標庫版本較低"
+  precheck_target_mysql_lt8_detail:
+    en: "Target MySQL is below 8.0; JSON functions and CHECK constraints have limited support and related structures may degrade or fail"
+    zh-CN: "目标 MySQL 低于 8.0，JSON 函数与 CHECK 约束支持有限，相关结构可能降级或失败"
+    zh-HK: "目標 MySQL 低於 8.0，JSON 函數與 CHECK 約束支援有限，相關結構可能降級或失敗"
+  precheck_cross_engine:
+    en: "Cross-engine transfer"
+    zh-CN: "跨库种传输"
+    zh-HK: "跨庫種傳輸"
+  precheck_cross_engine_detail:
+    en: "Source is %{source}, target is %{target}. Types are mapped approximately to the target dialect; spot-check the data after transfer"
+    zh-CN: "源为 %{source}，目标为 %{target}，类型按目标方言近似映射，建议执行后抽查数据"
+    zh-HK: "來源為 %{source}，目標為 %{target}，類型按目標方言近似映射，建議執行後抽查資料"
+  precheck_no_conflict:
+    en: "No name conflicts in target"
+    zh-CN: "目标库无同名冲突"
+    zh-HK: "目標庫無同名衝突"
+  precheck_no_conflict_detail:
+    en: "None of the %{count} selected objects exist in the target; tables will be created directly"
+    zh-CN: "待传输的 %{count} 个对象在目标库均不存在，将直接建表"
+    zh-HK: "待傳輸的 %{count} 個物件在目標庫均不存在，將直接建表"
+  precheck_conflict_will_drop:
+    en: "%{count} existing tables will be dropped and recreated"
+    zh-CN: "将删除并重建 %{count} 张已存在的表"
+    zh-HK: "將刪除並重建 %{count} 張已存在的表"
+  precheck_conflict_will_drop_detail:
+    en: "\"Drop target tables first\" is enabled; the following tables will be overwritten: %{tables}. Please back up first"
+    zh-CN: "已启用“先删除目标表”，以下同名表会被覆盖：%{tables}，请注意备份"
+    zh-HK: "已啟用「先刪除目標表」，以下同名表會被覆蓋：%{tables}，請注意備份"
+  precheck_conflict_exists:
+    en: "%{count} tables with the same name already exist in target"
+    zh-CN: "目标库已存在 %{count} 张同名表"
+    zh-HK: "目標庫已存在 %{count} 張同名表"
+  precheck_conflict_exists_detail:
+    en: "The following tables will conflict with CREATE/INSERT: %{tables}. Suggestion: enable \"Drop target tables first\" to overwrite, or deselect these tables"
+    zh-CN: "以下同名表将导致建表/写入冲突：%{tables}。建议：启用“先删除目标表”覆盖，或取消勾选这些表"
+    zh-HK: "以下同名表將導致建表/寫入衝突：%{tables}。建議：啟用「先刪除目標表」覆蓋，或取消勾選這些表"
+  precheck_types_unsupported:
+    en: "%{count} column type(s) unsupported by the target database"
+    zh-CN: "目标库不支持的列类型 %{count} 处"
+    zh-HK: "目標庫不支援的欄位類型 %{count} 處"
+  precheck_types_lossy:
+    en: "%{count} column type(s) may lose precision or semantics"
+    zh-CN: "可能损失精度或语义的列类型 %{count} 处"
+    zh-HK: "可能損失精度或語義的欄位類型 %{count} 處"
+  precheck_permission_hint:
+    en: "Please confirm target account privileges"
+    zh-CN: "请确认目标账号权限"
+    zh-HK: "請確認目標帳號權限"
+  precheck_permission_hint_detail:
+    en: "CREATE/INSERT privileges cannot be probed read-only (DROP is also needed in overwrite mode); please confirm the target account has them"
+    zh-CN: "建表与写入权限无法只读探测，请确认目标账号具备 CREATE/INSERT（覆盖模式还需 DROP）权限"
+    zh-HK: "建表與寫入權限無法唯讀探測，請確認目標帳號具備 CREATE/INSERT（覆蓋模式還需 DROP）權限"
+  precheck_columns_unavailable:
+    en: "Column metadata unavailable for some tables; type check incomplete"
+    zh-CN: "部分表的列信息获取失败，类型检查不完整"
+    zh-HK: "部分表的列信息獲取失敗，類型檢查不完整"
+  precheck_config_missing:
+    en: "Failed to build transfer config; go back and check endpoints"
+    zh-CN: "无法构建传输配置，请返回检查源/目标设置"
+    zh-HK: "無法構建傳輸配置，請返回檢查源/目標設置"
+  precheck_unsigned_lossy:
+    en: "Unsigned semantics carried by a wider signed integer; values above its range will overflow"
+    zh-CN: "无符号语义由更宽的有符号整型承载，超出范围会溢出"
+    zh-HK: "無符號語意由更寬的有符號整型承載，超出範圍會溢位"
+  precheck_array_unsupported:
+    en: "Target database has no native array type; consider JSON/TEXT"
+    zh-CN: "目标库无原生数组，建议改 JSON/TEXT"
+    zh-HK: "目標庫無原生陣列，建議改 JSON/TEXT"
+  precheck_uuid_lossy:
+    en: "Target has no native UUID; stored as text"
+    zh-CN: "目标无原生 UUID，存为文本"
+    zh-HK: "目標無原生 UUID，存為文字"
+  precheck_boolean_mysql:
+    en: "Boolean carried by tinyint(1)"
+    zh-CN: "布尔以 tinyint(1) 承载"
+    zh-HK: "布林以 tinyint(1) 承載"
+  precheck_json_sqlite:
+    en: "JSON stored as TEXT"
+    zh-CN: "JSON 存为 TEXT"
+    zh-HK: "JSON 存為 TEXT"
+  precheck_tstz_mysql:
+    en: "MySQL datetime has no time zone"
+    zh-CN: "MySQL datetime 不带时区"
+    zh-HK: "MySQL datetime 不帶時區"
+  precheck_tstz_sqlite:
+    en: "Stored as TEXT; time zone info is weakened"
+    zh-CN: "存为 TEXT，时区信息弱化"
+    zh-HK: "存為 TEXT，時區資訊弱化"
+  precheck_decimal_precision_fallback:
+    en: "Source precision unspecified; falling back to decimal(65,30) (max 35 integer digits), which may not match the source precision"
+    zh-CN: "源端未指定精度，已按 decimal(65,30) 兜底（整数位上限 35 位），可能与源端实际精度不匹配"
+    zh-HK: "源端未指定精度，已按 decimal(65,30) 兜底（整數位上限 35 位），可能與源端實際精度不匹配"
+  precheck_other_unsupported:
+    en: "Target dialect has no such type; passed through as-is, table creation may fail"
+    zh-CN: "目标方言无此类型，按原样透传，可能建表失败"
+    zh-HK: "目標方言無此類型，按原樣透傳，可能建表失敗"

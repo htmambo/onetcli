@@ -2867,8 +2867,8 @@ impl HomePage {
         let is_first_setup = !has_password_set;
         let is_change_mode = has_password_set && has_key_in_memory;
         // S2 后：主密钥不再长期驻留静态变量；raw_master_key_for_sync 内部已 fallback
-// 到 key_storage 后端读取，无需在调用方再做二次回退。
-let initial_master_key = crypto::raw_master_key_for_sync();
+        // 到 key_storage 后端读取，无需在调用方再做二次回退。
+        let initial_master_key = crypto::raw_master_key_for_sync();
 
         let key_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx)
@@ -4540,10 +4540,7 @@ let initial_master_key = crypto::raw_master_key_for_sync();
     fn connection_subtitle(&self, conn: &StoredConnection) -> Option<String> {
         match conn.connection_type {
             ConnectionType::Database => conn.to_db_connection().ok().map(|params| {
-                if matches!(
-                    params.database_type,
-                    DatabaseType::SQLite | DatabaseType::DuckDB
-                ) {
+                if matches!(params.database_type, DatabaseType::SQLite) {
                     params.host
                 } else {
                     let database = match params.database {

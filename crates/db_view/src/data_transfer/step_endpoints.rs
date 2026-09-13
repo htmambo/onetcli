@@ -5,14 +5,17 @@ use gpui::{
     Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
-    ActiveTheme, IndexPath, h_flex,
+    ActiveTheme, IndexPath, Sizable,
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    input::{Input, InputState},
     select::{SearchableVec, Select, SelectItem, SelectState},
     v_flex,
 };
 use rust_i18n::t;
 
-use db::GlobalDbState;
-use one_core::storage::DbConnectionConfig;
+use db::{DatabaseOperationRequest, GlobalDbState, SqlResult};
+use one_core::storage::{DatabaseType, DbConnectionConfig};
 
 use super::view::DataTransferWindow;
 
@@ -46,6 +49,8 @@ pub(crate) struct EndpointState {
     pub error: Option<String>,
     /// 打开弹窗时待预选的数据库（仅源侧使用）
     pub pending_db: Option<String>,
+    /// 目标侧"新建数据库"行内输入框（None = 未展开）
+    pub creating_db: Option<Entity<InputState>>,
 }
 
 impl EndpointState {
@@ -72,6 +77,7 @@ impl EndpointState {
             loading: false,
             error: None,
             pending_db: None,
+            creating_db: None,
         }
     }
 
@@ -115,8 +121,24 @@ impl EndpointState {
             .child(info_row(t!("DataTransfer.info_port").to_string(), port, cx))
     }
 
+    /// 是否支持在向导内新建数据库（仅 MySQL / PostgreSQL）
+    pub fn supports_create_database(&self, cx: &App) -> bool {
+        matches!(
+            self.selected_config(cx).map(|c| c.database_type),
+            Some(DatabaseType::MySQL) | Some(DatabaseType::PostgreSQL)
+        )
+    }
+
     /// 渲染一侧端点的选择列
-    pub fn render(&self, title: String, cx: &App) -> impl IntoElement {
+    pub fn render(
+        &self,
+        title: String,
+        is_target: bool,
+        view: &Entity<DataTransferWindow>,
+        window: &mut Window,
+        cx: &App,
+    ) -> impl IntoElement {
+        let show_create = is_target && self.supports_create_database(cx);
         v_flex()
             .flex_1()
             .gap_2()
@@ -138,6 +160,56 @@ impl EndpointState {
                     .w_full()
                     .placeholder(t!("DataTransfer.select_database")),
             )
+            .when(show_create && self.creating_db.is_none(), |this| {
+                this.child(
+                    Button::new("create-database")
+                        .small()
+                        .label(t!("DataTransfer.create_database").to_string())
+                        .on_click(window.listener_for(view, |view, _, window, cx| {
+                            view.toggle_create_database(window, cx);
+                        })),
+                )
+            })
+            .when_some(self.creating_db.clone(), |this, input| {
+                this.child(
+                    v_flex().gap_2().child(
+                        v_flex()
+                            .gap_1()
+                            .child(field_label(
+                                t!("DataTransfer.new_database_name").to_string(),
+                                cx,
+                            ))
+                            .child(Input::new(&input).w_full().small())
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("confirm-create-database")
+                                            .small()
+                                            .primary()
+                                            .label(t!("Common.save").to_string())
+                                            .on_click(window.listener_for(
+                                                view,
+                                                |view, _, _, cx| {
+                                                    view.confirm_create_database(cx);
+                                                },
+                                            )),
+                                    )
+                                    .child(
+                                        Button::new("cancel-create-database")
+                                            .small()
+                                            .label(t!("Common.cancel").to_string())
+                                            .on_click(window.listener_for(
+                                                view,
+                                                |view, _, _, cx| {
+                                                    view.cancel_create_database(cx);
+                                                },
+                                            )),
+                                    ),
+                            ),
+                    ),
+                )
+            })
             .when(self.loading, |this| {
                 this.child(
                     div()
@@ -179,6 +251,25 @@ fn info_row(label: String, value: String, cx: &App) -> impl IntoElement {
         )
 }
 
+/// 数据库名校验：覆盖 MySQL(64B)/PostgreSQL(63B) 长度、保留字与注入面
+///
+/// 实际 SQL 注入由 plugin 内部 quote_identifier 兜底；这里前置校验用于
+/// 避免拼出语法合法但语义非法的标识符（如保留字、过短）。
+pub(crate) fn is_valid_database_name(name: &str) -> bool {
+    let len = name.len();
+    if len == 0 || len > 63 {
+        return false;
+    }
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// 把异步加载到的数据库列表写回下拉框（需要 Window，走 active_window 惯例）
 fn apply_database_items(
     select: &Entity<SelectState<SearchableVec<String>>>,
@@ -205,10 +296,114 @@ impl DataTransferWindow {
     fn clear_databases(endpoint: &mut EndpointState, window: &mut Window, cx: &mut Context<Self>) {
         endpoint.loading = false;
         endpoint.error = None;
+        endpoint.creating_db = None;
         endpoint.database_select.update(cx, |state, cx| {
             state.set_items(SearchableVec::new(vec![]), window, cx);
             state.set_selected_index(None, window, cx);
         });
+    }
+
+    /// 展开/收起目标侧"新建数据库"行内输入
+    pub(crate) fn toggle_create_database(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let creating = if self.target.creating_db.is_some() {
+            None
+        } else {
+            Some(cx.new(|cx| {
+                InputState::new(window, cx).placeholder(t!("DataTransfer.new_database_name"))
+            }))
+        };
+        self.target.creating_db = creating;
+        cx.notify();
+    }
+
+    /// 收起新建数据库输入
+    pub(crate) fn cancel_create_database(&mut self, cx: &mut Context<Self>) {
+        self.target.creating_db = None;
+        cx.notify();
+    }
+
+    /// 在目标服务器上创建新数据库并选中它
+    pub(crate) fn confirm_create_database(&mut self, cx: &mut Context<Self>) {
+        // 防重入：loading 期间双击会触发两次 CREATE DATABASE，第二次会因「database already exists」报错并覆盖提示
+        if self.target.loading {
+            return;
+        }
+        let Some(input) = self.target.creating_db.clone() else {
+            return;
+        };
+        let name = input.read(cx).value().trim().to_string();
+        if name.is_empty() {
+            self.target.error = Some(t!("DataTransfer.create_database_name_empty").to_string());
+            cx.notify();
+            return;
+        }
+        if !is_valid_database_name(&name) {
+            self.target.error = Some(t!("DataTransfer.create_database_name_invalid").to_string());
+            cx.notify();
+            return;
+        }
+        let Some(config) = self.target.selected_config(cx).cloned() else {
+            return;
+        };
+        let global_state = cx.global::<GlobalDbState>().clone();
+        let Ok(plugin) = global_state.db_manager.get_plugin(&config.database_type) else {
+            return;
+        };
+        let sql = plugin.build_create_database_sql(&DatabaseOperationRequest {
+            database_name: name.clone(),
+            field_values: Default::default(),
+        });
+        let connection_id = config.id.clone();
+        let database_select = self.target.database_select.clone();
+        // 提交后清空输入框；失败时由回调恢复，以便用户改名重试
+        self.target.creating_db = None;
+        self.target.loading = true;
+        self.target.error = None;
+        cx.notify();
+
+        cx.spawn(async move |this, cx: &mut AsyncApp| {
+            let exec = global_state
+                .execute_single(cx, connection_id.clone(), sql, None, None)
+                .await;
+            let exec_error = match exec {
+                Ok(SqlResult::Exec(_)) | Ok(SqlResult::Query(_)) => None,
+                Ok(SqlResult::Error(e)) => Some(e.message),
+                Err(e) => Some(e.to_string()),
+            };
+            // 建库成功才重载列表（CREATE DATABASE 属 DDL，缓存会被失效）并选中新库
+            let mut databases = global_state
+                .list_databases(cx, connection_id.clone())
+                .await
+                .ok();
+            if exec_error.is_none() {
+                if let Some(list) = &mut databases {
+                    if !list.iter().any(|db| db == &name) {
+                        list.push(name.clone());
+                    }
+                }
+            }
+            let success = exec_error.is_none();
+            let error = exec_error
+                .map(|e| t!("DataTransfer.create_database_failed", error = e).to_string());
+            // 失败时不把失败库名传为 preferred，避免 apply_database_items 选中一个不存在的库
+            apply_database_items(
+                &database_select,
+                databases,
+                if success { Some(name) } else { None },
+                cx,
+            );
+            let _ = this.update(cx, |view, cx| {
+                let endpoint = &mut view.target;
+                endpoint.loading = false;
+                endpoint.error = error;
+                // 失败时把输入框还给用户，便于改名重试（input 已 clone 保留）
+                if !success {
+                    endpoint.creating_db = Some(input);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// 连接下拉变更：注册连接并异步加载数据库列表
@@ -263,7 +458,11 @@ impl DataTransferWindow {
     }
 
     /// 渲染第一步：源/目标两栏 + 同库警告
-    pub(crate) fn render_endpoints_step(&self, cx: &App) -> impl IntoElement {
+    pub(crate) fn render_endpoints_step(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         v_flex()
             .size_full()
             .gap_3()
@@ -272,15 +471,21 @@ impl DataTransferWindow {
                 h_flex()
                     .flex_1()
                     .gap_4()
-                    .child(
-                        self.source
-                            .render(t!("DataTransfer.source").to_string(), cx),
-                    )
+                    .child(self.source.render(
+                        t!("DataTransfer.source").to_string(),
+                        false,
+                        &cx.entity(),
+                        window,
+                        cx,
+                    ))
                     .child(div().w_px().bg(cx.theme().border))
-                    .child(
-                        self.target
-                            .render(t!("DataTransfer.target").to_string(), cx),
-                    ),
+                    .child(self.target.render(
+                        t!("DataTransfer.target").to_string(),
+                        true,
+                        &cx.entity(),
+                        window,
+                        cx,
+                    )),
             )
             .when(self.same_endpoint(cx), |this| {
                 this.child(

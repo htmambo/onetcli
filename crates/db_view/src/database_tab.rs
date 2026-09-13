@@ -762,12 +762,14 @@ mod tests {
 
     #[test]
     fn external_database_tab_icon_uses_builtin_driver_asset_icon() {
-        let registry = IpcDriverRegistry::from_drivers(vec![driver_manifest("DuckDB")]);
+        let registry = IpcDriverRegistry::from_drivers(vec![driver_manifest("MySQL")]);
         let source =
             external_driver_tab_icon_source_from_registry(&external_config("demo"), &registry);
 
         assert_eq!(
-            Some(DatabaseTabIconSource::Asset("icons/duckdb.svg".to_string())),
+            Some(DatabaseTabIconSource::Asset(
+                "icons/mysql_color.svg".to_string()
+            )),
             source
         );
     }
@@ -788,7 +790,7 @@ mod tests {
 
     #[test]
     fn builtin_database_tab_icon_does_not_use_external_driver_source() {
-        let registry = IpcDriverRegistry::from_drivers(vec![driver_manifest("DuckDB")]);
+        let registry = IpcDriverRegistry::from_drivers(vec![driver_manifest("MySQL")]);
         let mut config = external_config("demo");
         config.database_type = DatabaseType::MySQL;
 

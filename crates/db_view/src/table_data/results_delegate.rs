@@ -646,10 +646,6 @@ impl EditorTableDelegate {
             .get(col_ix)
             .map(|m| {
                 let base = FieldType::from_db_type(&*m.data_type);
-                // Oracle DATE contains both date and time
-                if base == FieldType::Date && self.database_type == DatabaseType::Oracle {
-                    return FieldType::DateTime;
-                }
                 if let Some(values) = self.enum_values_for(col_ix) {
                     return FieldType::Enum { values };
                 }
@@ -968,10 +964,7 @@ impl EditorTableDelegate {
             .get(col_ix)
             .map(|meta| {
                 let db_type = meta.data_type.to_uppercase();
-                let is_oracle_date =
-                    db_type == "DATE" && self.database_type == DatabaseType::Oracle;
-
-                if is_oracle_date || db_type.contains("TIMESTAMP") || db_type.contains("DATETIME") {
+                if db_type.contains("TIMESTAMP") || db_type.contains("DATETIME") {
                     220
                 } else if db_type.contains("DATE") {
                     120

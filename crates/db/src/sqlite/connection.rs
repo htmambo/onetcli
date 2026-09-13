@@ -468,12 +468,12 @@ impl DbConnection for SqliteDbConnection {
                     debug!("[SQLite] Streaming TX statement {}", current);
                     let start = Instant::now();
                     let sql_owned = apply_query_max_rows(
-                plugin.name(),
-                &sql,
-                options.max_rows,
-                plugin.is_query_statement(&sql),
-            )
-            .into_owned();
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let connection = Arc::clone(&self.connection);
 
                     let result = spawn_blocking(move || {
@@ -550,12 +550,12 @@ impl DbConnection for SqliteDbConnection {
                     debug!("[SQLite] Streaming statement {}", current);
                     let start = Instant::now();
                     let sql_owned = apply_query_max_rows(
-                plugin.name(),
-                &sql,
-                options.max_rows,
-                plugin.is_query_statement(&sql),
-            )
-            .into_owned();
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let connection = Arc::clone(&self.connection);
 
                     let result = spawn_blocking(move || {
@@ -616,12 +616,12 @@ impl DbConnection for SqliteDbConnection {
                     debug!("[SQLite] Streaming TX statement {}/{}", current, total);
                     let start = Instant::now();
                     let sql_owned = apply_query_max_rows(
-                plugin.name(),
-                &sql,
-                options.max_rows,
-                plugin.is_query_statement(&sql),
-            )
-            .into_owned();
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let connection = Arc::clone(&self.connection);
 
                     let result = spawn_blocking(move || {
@@ -674,12 +674,12 @@ impl DbConnection for SqliteDbConnection {
                     debug!("[SQLite] Streaming statement {}/{}", current, total);
                     let start = Instant::now();
                     let sql_owned = apply_query_max_rows(
-                plugin.name(),
-                &sql,
-                options.max_rows,
-                plugin.is_query_statement(&sql),
-            )
-            .into_owned();
+                        plugin.name(),
+                        &sql,
+                        options.max_rows,
+                        plugin.is_query_statement(&sql),
+                    )
+                    .into_owned();
                     let connection = Arc::clone(&self.connection);
 
                     let result = spawn_blocking(move || {

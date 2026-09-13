@@ -1,15 +1,11 @@
 use crate::cache::CacheContext;
 use crate::cache_manager::GlobalNodeCache;
-use crate::clickhouse::ClickHousePlugin;
 use crate::connection::{DbConnection, DbError, StreamingProgress};
-use crate::duckdb::DuckDbPlugin;
 use crate::import_export::{
     ExportConfig, ExportProgressSender, ExportResult, ImportConfig, ImportResult,
 };
 use crate::ipc::ExternalDatabasePlugin;
-use crate::mssql::MsSqlPlugin;
 use crate::mysql::MySqlPlugin;
-use crate::oracle::OraclePlugin;
 use crate::plugin::DatabasePlugin;
 use crate::plugin_manifest::DatabaseCapabilities;
 use crate::postgresql::PostgresPlugin;
@@ -156,10 +152,6 @@ pub struct DbManager {
     mysql: Arc<dyn DatabasePlugin>,
     postgresql: Arc<dyn DatabasePlugin>,
     sqlite: Arc<dyn DatabasePlugin>,
-    duckdb: Arc<dyn DatabasePlugin>,
-    clickhouse: Arc<dyn DatabasePlugin>,
-    mssql: Arc<dyn DatabasePlugin>,
-    oracle: Arc<dyn DatabasePlugin>,
     external: Arc<dyn DatabasePlugin>,
 }
 
@@ -169,10 +161,6 @@ impl DbManager {
             mysql: Arc::new(MySqlPlugin::new()),
             postgresql: Arc::new(PostgresPlugin::new()),
             sqlite: Arc::new(SqlitePlugin::new()),
-            duckdb: Arc::new(DuckDbPlugin::new()),
-            clickhouse: Arc::new(ClickHousePlugin::new()),
-            mssql: Arc::new(MsSqlPlugin::new()),
-            oracle: Arc::new(OraclePlugin::new()),
             external: Arc::new(ExternalDatabasePlugin::new()),
         }
     }
@@ -182,10 +170,6 @@ impl DbManager {
             DatabaseType::MySQL => Ok(Arc::clone(&self.mysql)),
             DatabaseType::PostgreSQL => Ok(Arc::clone(&self.postgresql)),
             DatabaseType::SQLite => Ok(Arc::clone(&self.sqlite)),
-            DatabaseType::DuckDB => Ok(Arc::clone(&self.duckdb)),
-            DatabaseType::ClickHouse => Ok(Arc::clone(&self.clickhouse)),
-            DatabaseType::MSSQL => Ok(Arc::clone(&self.mssql)),
-            DatabaseType::Oracle => Ok(Arc::clone(&self.oracle)),
             DatabaseType::External => Ok(Arc::clone(&self.external)),
         }
     }
@@ -203,10 +187,6 @@ impl Clone for DbManager {
             mysql: Arc::clone(&self.mysql),
             postgresql: Arc::clone(&self.postgresql),
             sqlite: Arc::clone(&self.sqlite),
-            duckdb: Arc::clone(&self.duckdb),
-            clickhouse: Arc::clone(&self.clickhouse),
-            mssql: Arc::clone(&self.mssql),
-            oracle: Arc::clone(&self.oracle),
             external: Arc::clone(&self.external),
         }
     }
@@ -415,11 +395,8 @@ impl ConnectionManager {
         );
 
         // Store session under a brief global write lock
-        let mut session = ConnectionSession::new(
-            connection,
-            session_id.clone(),
-            lifecycle.close_on_release,
-        );
+        let mut session =
+            ConnectionSession::new(connection, session_id.clone(), lifecycle.close_on_release);
         session.mark_in_use();
         let new_arc = Arc::new(AsyncMutex::new(session));
 
@@ -461,9 +438,7 @@ impl ConnectionManager {
                     }
                 }
             }
-            found.ok_or_else(|| {
-                DbError::Internal(format!("session not found: {}", session_id))
-            })?
+            found.ok_or_else(|| DbError::Internal(format!("session not found: {}", session_id)))?
         };
         // Phase 2: acquire the inner mutex and confirm state under the lock.
         let guard = arc.lock_owned().await;
@@ -477,13 +452,7 @@ impl ConnectionManager {
     }
 
     fn db_equals(db1: &DbConnectionConfig, db2: &DbConnectionConfig) -> bool {
-        match db1.database_type {
-            DatabaseType::Oracle => {
-                (db1.sid.is_some() && db1.sid == db2.sid)
-                    || (db1.service_name.is_some() && db1.service_name == db2.service_name)
-            }
-            _ => db1.database.is_some() && db1.database == db2.database,
-        }
+        db1.database.is_some() && db1.database == db2.database
     }
 
     /// Try to acquire an existing idle session with matching database.
@@ -634,17 +603,15 @@ impl ConnectionManager {
         // Phase 1: find Arc under read lock.
         let arc = {
             let sessions = self.sessions.read().await;
-            sessions
-                .values()
-                .find_map(|list| {
-                    list.iter()
-                        .find(|s| {
-                            s.try_lock()
-                                .map(|g| g.session_id == session_id)
-                                .unwrap_or(false)
-                        })
-                        .cloned()
-                })
+            sessions.values().find_map(|list| {
+                list.iter()
+                    .find(|s| {
+                        s.try_lock()
+                            .map(|g| g.session_id == session_id)
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+            })
         }?;
         // Phase 2: read config under inner lock.
         let guard = arc.lock().await;
@@ -670,11 +637,7 @@ impl ConnectionManager {
         // before verify_and_sync_database has run.
         let (arc, config_id, should_close) = {
             let mut sessions = self.sessions.write().await;
-            let mut found: Option<(
-                Arc<AsyncMutex<ConnectionSession>>,
-                String,
-                bool,
-            )> = None;
+            let mut found: Option<(Arc<AsyncMutex<ConnectionSession>>, String, bool)> = None;
 
             for (config_id, list) in sessions.iter_mut() {
                 let Some(pos) = list.iter().position(|s| {
@@ -855,11 +818,7 @@ impl ConnectionManager {
         if arcs.is_empty() {
             return;
         }
-        info!(
-            "Closing {} sessions for config: {}",
-            arcs.len(),
-            config_id
-        );
+        info!("Closing {} sessions for config: {}", arcs.len(), config_id);
         // Phase 2: mark each as Closing, then close outside the global lock.
         for arc in &arcs {
             if let Ok(mut g) = arc.try_lock() {
@@ -888,7 +847,8 @@ impl ConnectionManager {
                 while i < list.len() {
                     let expired = {
                         if let Ok(guard) = list[i].try_lock() {
-                            guard.is_expired(idle_timeout) || guard.is_lifetime_expired(max_lifetime)
+                            guard.is_expired(idle_timeout)
+                                || guard.is_lifetime_expired(max_lifetime)
                         } else {
                             false
                         }
@@ -1147,10 +1107,7 @@ impl GlobalDbState {
         let plugin = self.get_plugin(&config.database_type)?;
         let sql = plugin.drop_table(&database, schema.as_deref(), &table_name);
 
-        // For non-Oracle databases, modify config.database to switch database
-        if config.database_type != DatabaseType::Oracle {
-            config.database = Some(database);
-        }
+        config.database = Some(database);
 
         // Pass schema to switch before executing
         let result = self
@@ -1187,9 +1144,7 @@ impl GlobalDbState {
         let plugin = self.get_plugin(&config.database_type)?;
         let sql = plugin.truncate_table_with_schema(&database, schema.as_deref(), &table_name);
 
-        if config.database_type != DatabaseType::Oracle {
-            config.database = Some(database);
-        }
+        config.database = Some(database);
 
         let result = self
             .execute_with_session_internal(cx, config, sql, None, schema)
@@ -1331,11 +1286,8 @@ impl GlobalDbState {
         // Schema to switch before executing
         let schema_to_switch = schema;
 
-        // For non-Oracle databases, modify config.database to switch database
-        if config.database_type != DatabaseType::Oracle {
-            if let Some(db) = database {
-                config.database = Some(db);
-            }
+        if let Some(db) = database {
+            config.database = Some(db);
         }
 
         self.execute_with_session_internal(cx, config, script, opts, schema_to_switch)
@@ -1494,10 +1446,8 @@ impl GlobalDbState {
 
         let schema_to_switch = schema;
 
-        if config.database_type != DatabaseType::Oracle {
-            if let Some(db) = database {
-                config.database = Some(db);
-            }
+        if let Some(db) = database {
+            config.database = Some(db);
         }
 
         let mut opts = opts.unwrap_or_default();
@@ -2691,11 +2641,9 @@ impl GlobalDbState {
             .ok_or_else(|| anyhow::anyhow!("Connection not found: {}", connection_id))?
             .clone();
 
-        // For non-Oracle databases, switch database through config override.
-        if config.database_type != DatabaseType::Oracle {
-            if let Some(db) = database {
-                config.database = Some(db);
-            }
+        // Switch database through config override.
+        if let Some(db) = database {
+            config.database = Some(db);
         }
 
         let plugin = self.get_plugin(&config.database_type)?;
@@ -2865,12 +2813,12 @@ mod tests {
     }
 
     #[test]
-    fn test_db_manager_registers_duckdb_plugin() {
+    fn test_db_manager_registers_mysql_plugin() {
         let plugin = DbManager::default()
-            .get_plugin(&DatabaseType::DuckDB)
-            .expect("DuckDB plugin should be registered");
+            .get_plugin(&DatabaseType::MySQL)
+            .expect("MySQL plugin should be registered");
 
-        assert_eq!(plugin.name(), DatabaseType::DuckDB);
+        assert_eq!(plugin.name(), DatabaseType::MySQL);
     }
 
     #[test]
@@ -2934,11 +2882,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn release_session_closes_duckdb_sessions_instead_of_idling() {
+    async fn release_session_closes_marked_sessions_instead_of_idling() {
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
-        let mut config = test_config("duckdb-conn");
-        config.database_type = DatabaseType::DuckDB;
+        let mut config = test_config("mysql-conn");
+        config.database_type = DatabaseType::MySQL;
         let disconnect_count = Arc::new(AtomicUsize::new(0));
         let mut session = ConnectionSession::new(
             Box::new(MockConnection::with_disconnect_count(
@@ -2946,7 +2894,7 @@ mod tests {
                 true,
                 Arc::clone(&disconnect_count),
             )),
-            "duckdb-conn:session:1".to_string(),
+            "mysql-conn:session:1".to_string(),
             true,
         );
         session.mark_in_use();
@@ -2960,7 +2908,7 @@ mod tests {
             .push(Arc::new(AsyncMutex::new(session)));
 
         manager
-            .release_session("duckdb-conn:session:1")
+            .release_session("mysql-conn:session:1")
             .await
             .unwrap();
 
@@ -2969,11 +2917,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn release_session_for_reuse_keeps_duckdb_transaction_session_idle() {
+    async fn release_session_for_reuse_keeps_transaction_session_idle() {
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
-        let mut config = test_config("duckdb-transaction");
-        config.database_type = DatabaseType::DuckDB;
+        let mut config = test_config("mysql-transaction");
+        config.database_type = DatabaseType::MySQL;
         let disconnect_count = Arc::new(AtomicUsize::new(0));
         let mut session = ConnectionSession::new(
             Box::new(MockConnection::with_disconnect_count(
@@ -2981,7 +2929,7 @@ mod tests {
                 true,
                 Arc::clone(&disconnect_count),
             )),
-            "duckdb-transaction:session:1".to_string(),
+            "mysql-transaction:session:1".to_string(),
             true,
         );
         session.mark_in_use();
@@ -2995,7 +2943,7 @@ mod tests {
             .push(Arc::new(AsyncMutex::new(session)));
 
         manager
-            .release_session_for_reuse("duckdb-transaction:session:1")
+            .release_session_for_reuse("mysql-transaction:session:1")
             .await
             .unwrap();
 
@@ -3009,11 +2957,11 @@ mod tests {
     async fn try_acquire_session_waits_for_busy_close_on_release_session_before_returning_none() {
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
-        let mut config = test_config("duckdb-busy");
-        config.database_type = DatabaseType::DuckDB;
+        let mut config = test_config("mysql-busy");
+        config.database_type = DatabaseType::MySQL;
         let mut session = ConnectionSession::new(
             Box::new(MockConnection::new(config.clone(), true)),
-            "duckdb-busy:session:1".to_string(),
+            "mysql-busy:session:1".to_string(),
             true,
         );
         session.mark_in_use();
@@ -3031,7 +2979,7 @@ mod tests {
         tokio::spawn(async move {
             release_rx.await.unwrap();
             release_manager
-                .close_session("duckdb-busy:session:1")
+                .close_session("mysql-busy:session:1")
                 .await
                 .unwrap();
         });

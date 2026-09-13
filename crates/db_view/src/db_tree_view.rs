@@ -2584,10 +2584,8 @@ impl DbTreeView {
 
         // 数据库筛选计数
         let db_count = if node_type == Some(DbNodeType::Connection)
-            && !matches!(
-                database_type,
-                Some(DatabaseType::SQLite | DatabaseType::DuckDB)
-            ) {
+            && !matches!(database_type, Some(DatabaseType::SQLite))
+        {
             Some(self.get_selected_database_count(&node_id))
         } else {
             None
@@ -3205,7 +3203,7 @@ mod tests {
             dialect: Default::default(),
             capabilities: None,
             ui: db::ipc::IpcDriverUi {
-                icon: "DuckDB".to_string(),
+                icon: "MySQL".to_string(),
                 default_port: None,
                 form: None,
             },
@@ -3228,7 +3226,7 @@ mod tests {
             metadata.get(EXTERNAL_DRIVER_NAME_METADATA)
         );
         assert_eq!(
-            Some(&"icons/duckdb.svg".to_string()),
+            Some(&"icons/mysql_color.svg".to_string()),
             metadata.get(EXTERNAL_DRIVER_ICON_METADATA)
         );
     }

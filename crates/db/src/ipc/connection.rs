@@ -72,7 +72,6 @@ impl ExternalDbConnection {
     }
 }
 
-
 #[derive(Clone, Copy)]
 enum SchemaSwitchDialect {
     PostgreSql,
@@ -105,8 +104,6 @@ fn schema_switch_sql_for_driver(driver: &IpcDriverManifest, schema: &str) -> Opt
 fn schema_switch_dialect(driver: &IpcDriverManifest) -> Option<SchemaSwitchDialect> {
     match driver.dialect.compatible_database_type.as_ref() {
         Some(DatabaseType::PostgreSQL) => Some(SchemaSwitchDialect::PostgreSql),
-        Some(DatabaseType::Oracle) => Some(SchemaSwitchDialect::Oracle),
-        Some(DatabaseType::DuckDB) => Some(SchemaSwitchDialect::DuckDb),
         _ => schema_switch_dialect_from_driver_id(&driver.id),
     }
 }
@@ -250,9 +247,8 @@ impl DbConnection for ExternalDbConnection {
     }
 
     async fn switch_schema(&self, schema: &str) -> Result<(), DbError> {
-        let switch_result: Result<serde_json::Value, DbError> = self
-            .request("switch_schema", schema_params(schema))
-            .await;
+        let switch_result: Result<serde_json::Value, DbError> =
+            self.request("switch_schema", schema_params(schema)).await;
         let fallback_sql = schema_switch_sql_for_driver(&self.driver, schema);
 
         match (switch_result, fallback_sql.as_deref()) {
@@ -438,7 +434,7 @@ mod schema_switch_tests {
 
     #[test]
     fn schema_switch_sql_uses_oracle_current_schema_for_compatible_driver() {
-        let driver = test_driver("custom", Some(DatabaseType::Oracle));
+        let driver = test_driver("oracle-go", None);
         let sql = schema_switch_sql_for_driver(&driver, "APP");
         assert_eq!(
             sql.as_deref(),
@@ -458,7 +454,7 @@ mod schema_switch_tests {
 
     #[test]
     fn schema_switch_sql_uses_duckdb_schema_setting() {
-        let driver = test_driver("duckdb", Some(DatabaseType::DuckDB));
+        let driver = test_driver("duckdb", None);
         let sql = schema_switch_sql_for_driver(&driver, "tenant'a");
         assert_eq!(sql.as_deref(), Some("SET schema 'tenant''a'"));
     }
@@ -472,7 +468,9 @@ mod schema_switch_tests {
 
     #[test]
     fn is_method_not_found_matches_not_supported() {
-        assert!(is_method_not_found(&DbError::NotSupported("missing".into())));
+        assert!(is_method_not_found(&DbError::NotSupported(
+            "missing".into()
+        )));
         assert!(!is_method_not_found(&DbError::query("boom")));
     }
 

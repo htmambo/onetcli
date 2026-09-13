@@ -82,8 +82,6 @@ impl IpcDriverRegistry {
 fn builtin_icon_asset_path(icon: &str) -> Option<String> {
     let icon_name = match icon {
         "Database" => IconName::Database,
-        "DuckDB" => IconName::DuckDB,
-        "ClickHouse" | "ClickHouseColor" => IconName::ClickHouseColor,
         "MongoDB" => IconName::MongoDB,
         "MySQL" | "MySQLColor" => IconName::MySQLColor,
         "PostgreSQL" | "PostgreSQLColor" => IconName::PostgreSQLColor,
@@ -109,7 +107,7 @@ fn icon_extension(icon: &str) -> String {
 mod tests {
     use super::*;
     use crate::ipc::registry::{
-        IpcDriverEntry, IpcDriverTransport, IpcDriverUi, EXTERNAL_DRIVER_ID_PARAM,
+        EXTERNAL_DRIVER_ID_PARAM, IpcDriverEntry, IpcDriverTransport, IpcDriverUi,
     };
     use std::collections::HashMap;
 
@@ -164,16 +162,22 @@ mod tests {
 
     #[test]
     fn display_prefers_builtin_asset_for_named_icons() {
-        let registry = IpcDriverRegistry::from_drivers(vec![manifest("demo", "DuckDB", "/d")]);
+        let registry = IpcDriverRegistry::from_drivers(vec![manifest("demo", "MySQL", "/d")]);
         let display = registry.display_for_driver_id("demo").unwrap();
-        assert_eq!(display.icon_asset_path.as_deref(), Some("icons/duckdb.svg"));
+        assert_eq!(
+            display.icon_asset_path.as_deref(),
+            Some("icons/mysql_color.svg")
+        );
         assert_eq!(display.icon_file_path, None);
     }
 
     #[test]
     fn display_uses_file_path_for_custom_icons() {
-        let registry =
-            IpcDriverRegistry::from_drivers(vec![manifest("demo", "icons/demo.svg", "/drivers/demo")]);
+        let registry = IpcDriverRegistry::from_drivers(vec![manifest(
+            "demo",
+            "icons/demo.svg",
+            "/drivers/demo",
+        )]);
         let display = registry.display_for_driver_id("demo").unwrap();
         assert_eq!(
             display.icon_file_path,
@@ -184,8 +188,12 @@ mod tests {
 
     #[test]
     fn display_for_config_requires_external_type_and_driver_id() {
-        let registry = IpcDriverRegistry::from_drivers(vec![manifest("demo", "DuckDB", "/d")]);
-        assert!(registry.display_for_config(&external_config("demo")).is_some());
+        let registry = IpcDriverRegistry::from_drivers(vec![manifest("demo", "MySQL", "/d")]);
+        assert!(
+            registry
+                .display_for_config(&external_config("demo"))
+                .is_some()
+        );
 
         let mut mysql = external_config("demo");
         mysql.database_type = DatabaseType::MySQL;

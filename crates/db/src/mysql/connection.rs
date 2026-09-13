@@ -12,7 +12,7 @@ use tracing::{debug, error, info};
 
 use crate::connection::{DbConnection, DbError, StreamingProgress};
 use crate::executor::{
-    ExecOptions, ExecResult, QueryColumnMeta, QueryResult, SqlResult, SqlErrorInfo, SqlSource,
+    ExecOptions, ExecResult, QueryColumnMeta, QueryResult, SqlErrorInfo, SqlResult, SqlSource,
     apply_query_max_rows,
 };
 use crate::rustls_provider::ensure_rustls_crypto_provider;
@@ -710,7 +710,18 @@ impl DbConnection for MysqlDbConnection {
                     debug!("[MySQL] Streaming TX statement {}", current);
                     let start = Instant::now();
 
-                    let result = match tx.query_iter(apply_query_max_rows(plugin.name(), &sql, options.max_rows, plugin.is_query_statement(&sql)).as_ref()).await {
+                    let result = match tx
+                        .query_iter(
+                            apply_query_max_rows(
+                                plugin.name(),
+                                &sql,
+                                options.max_rows,
+                                plugin.is_query_statement(&sql),
+                            )
+                            .as_ref(),
+                        )
+                        .await
+                    {
                         Ok(query_result) => {
                             let elapsed_ms = start.elapsed().as_millis();
                             match Self::process_query_result(query_result, sql.clone(), elapsed_ms)
@@ -790,7 +801,18 @@ impl DbConnection for MysqlDbConnection {
                     current += 1;
                     debug!("[MySQL] Streaming statement {}", current);
 
-                    let result = match Self::execute_single(conn, apply_query_max_rows(plugin.name(), &sql, options.max_rows, plugin.is_query_statement(&sql)).as_ref()).await {
+                    let result = match Self::execute_single(
+                        conn,
+                        apply_query_max_rows(
+                            plugin.name(),
+                            &sql,
+                            options.max_rows,
+                            plugin.is_query_statement(&sql),
+                        )
+                        .as_ref(),
+                    )
+                    .await
+                    {
                         Ok(r) => r,
                         Err(e) => {
                             let sql_preview = if sql.len() > 200 {
@@ -858,7 +880,18 @@ impl DbConnection for MysqlDbConnection {
                     debug!("[MySQL] Streaming TX statement {}/{}", current, total);
                     let start = Instant::now();
 
-                    let result = match tx.query_iter(apply_query_max_rows(plugin.name(), &sql, options.max_rows, plugin.is_query_statement(&sql)).as_ref()).await {
+                    let result = match tx
+                        .query_iter(
+                            apply_query_max_rows(
+                                plugin.name(),
+                                &sql,
+                                options.max_rows,
+                                plugin.is_query_statement(&sql),
+                            )
+                            .as_ref(),
+                        )
+                        .await
+                    {
                         Ok(query_result) => {
                             let elapsed_ms = start.elapsed().as_millis();
                             match Self::process_query_result(query_result, sql.clone(), elapsed_ms)
@@ -914,7 +947,18 @@ impl DbConnection for MysqlDbConnection {
                     let current = index + 1;
                     debug!("[MySQL] Streaming statement {}/{}", current, total);
 
-                    let result = match Self::execute_single(conn, apply_query_max_rows(plugin.name(), &sql, options.max_rows, plugin.is_query_statement(&sql)).as_ref()).await {
+                    let result = match Self::execute_single(
+                        conn,
+                        apply_query_max_rows(
+                            plugin.name(),
+                            &sql,
+                            options.max_rows,
+                            plugin.is_query_statement(&sql),
+                        )
+                        .as_ref(),
+                    )
+                    .await
+                    {
                         Ok(r) => r,
                         Err(e) => {
                             let sql_preview = if sql.len() > 200 {

@@ -190,6 +190,12 @@ async fn transfer_one_table(
             if columns.is_empty() {
                 return Err(failed(format!("table {} has no columns", table)));
             }
+            // 跨库种时把列类型/默认值翻译成目标方言可接受的形态
+            let columns = super::ddl_compat::translate_columns_for_target(
+                columns,
+                ctx.config.source_config.database_type,
+                ctx.config.target_config.database_type,
+            );
             sql::build_create_table_sql(ctx.target_plugin, table, &columns)
         }
     };

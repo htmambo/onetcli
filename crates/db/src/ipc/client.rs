@@ -1,6 +1,5 @@
 use crate::connection::DbError;
 use crate::ipc::registry::IpcDriverManifest;
-use one_core::storage::DbConnectionConfig;
 use interprocess::local_socket::{
     GenericNamespaced,
     tokio::{Stream as LocalSocketStream, prelude::*},
@@ -9,6 +8,7 @@ use ipc::{
     IpcErrorCode, IpcRequest, IpcResponse,
     framing::{recv_msg_async, send_msg_async},
 };
+use one_core::storage::DbConnectionConfig;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -515,7 +515,9 @@ impl RateLimiter {
             self.emitted = 1;
             self.suppressed = 0;
             return if flushed > 0 {
-                Admission::EmitWithFlush { suppressed: flushed }
+                Admission::EmitWithFlush {
+                    suppressed: flushed,
+                }
             } else {
                 Admission::Emit
             };
@@ -686,7 +688,6 @@ mod tests {
         assert!(second.ends_with(".sock"));
     }
 
-
     #[test]
     fn resolve_command_program_joins_relative_path_to_cwd() {
         let cwd = std::path::PathBuf::from("/tmp/omnihub-test");
@@ -833,12 +834,9 @@ mod tests {
         }
         limiter.admit();
         limiter.admit(); // suppressed = 2
-                       // 手动把窗口起点拨回过去，触发滚动。
+        // 手动把窗口起点拨回过去，触发滚动。
         limiter.window_start = Instant::now() - STDERR_RATE_WINDOW - Duration::from_millis(1);
-        assert_eq!(
-            Admission::EmitWithFlush { suppressed: 2 },
-            limiter.admit()
-        );
+        assert_eq!(Admission::EmitWithFlush { suppressed: 2 }, limiter.admit());
         // 滚动后无累计抑制 → 普通 Emit。
         assert_eq!(Admission::Emit, limiter.admit());
     }
@@ -1043,5 +1041,4 @@ mod lifecycle_tests {
             "child pid={pid} should be killed within 2s after Child handle drops"
         );
     }
-
 }

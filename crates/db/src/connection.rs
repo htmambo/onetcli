@@ -1,7 +1,7 @@
 use crate::DatabasePlugin;
 use crate::executor::{ExecOptions, SqlResult, SqlSource};
 use async_trait::async_trait;
-use one_core::storage::{DatabaseType, DbConnectionConfig};
+use one_core::storage::DbConnectionConfig;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -164,10 +164,9 @@ pub trait DbConnection: Sync + Send {
 
     /// Whether an idle release should close the physical connection.
     ///
-    /// File-backed engines such as DuckDB hold exclusive file handles, so keeping
-    /// them idle in the shared session pool can block a later open of the file.
+    /// 默认对所有内置驱动复用连接池。
     fn close_on_release(&self) -> bool {
-        self.config().database_type == DatabaseType::DuckDB
+        false
     }
 
     async fn connect(&mut self) -> Result<(), DbError>;

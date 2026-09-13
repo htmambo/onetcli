@@ -1,11 +1,8 @@
 use crate::types::FieldType;
 use one_core::storage::DatabaseType;
 use serde::{Deserialize, Serialize};
-use sqlparser::dialect::{
-    ClickHouseDialect, DuckDbDialect, GenericDialect, MsSqlDialect, MySqlDialect, OracleDialect,
-    PostgreSqlDialect, SQLiteDialect,
-};
-use sqlparser::tokenizer::{Location, Token, Tokenizer};
+use sqlparser::dialect::{GenericDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+use sqlparser::tokenizer::{Token, Tokenizer};
 use std::borrow::Cow;
 use std::path::PathBuf;
 
@@ -59,7 +56,9 @@ impl Default for ExecOptions {
 impl ExecOptions {
     /// 对查询结果集应用 max_rows 截断，避免 UI 层持有过多数据
     pub fn truncate_results(&self, results: &mut Vec<SqlResult>) {
-        let Some(max_rows) = self.max_rows else { return };
+        let Some(max_rows) = self.max_rows else {
+            return;
+        };
         for result in results.iter_mut() {
             if let SqlResult::Query(ref mut query) = result {
                 if query.rows.len() > max_rows {
@@ -91,25 +90,8 @@ pub(crate) fn apply_query_max_rows(
         return Cow::Borrowed(sql);
     }
 
-    match db_type {
-        DatabaseType::MSSQL => apply_mssql_top(sql, max_rows, &tokens),
-        DatabaseType::Oracle => {
-            append_query_clause(sql, &format!("FETCH FIRST {max_rows} ROWS ONLY"))
-        }
-        _ => append_query_clause(sql, &format!("LIMIT {max_rows}")),
-    }
-}
-
-fn apply_mssql_top<'a>(sql: &'a str, max_rows: usize, tokens: &[SqlToken]) -> Cow<'a, str> {
-    let Some(index) = mssql_top_insert_index(tokens) else {
-        return Cow::Borrowed(sql);
-    };
-
-    let mut rewritten = String::with_capacity(sql.len() + 16);
-    rewritten.push_str(&sql[..index]);
-    rewritten.push_str(&format!(" TOP ({max_rows})"));
-    rewritten.push_str(&sql[index..]);
-    Cow::Owned(rewritten)
+    let _ = db_type;
+    append_query_clause(sql, &format!("LIMIT {max_rows}"))
 }
 
 fn append_query_clause<'a>(sql: &'a str, clause: &str) -> Cow<'a, str> {
@@ -141,29 +123,10 @@ fn has_existing_row_limit(tokens: &[SqlToken]) -> bool {
     })
 }
 
-fn mssql_top_insert_index(tokens: &[SqlToken]) -> Option<usize> {
-    let select = tokens
-        .iter()
-        .position(|token| token.depth == 0 && word_eq(&token.token, "SELECT"))?;
-    let mut insert_after = select;
-    let next = tokens.get(select + 1);
-    if next.is_some_and(|token| word_eq(&token.token, "ALL") || word_eq(&token.token, "DISTINCT")) {
-        insert_after = select + 1;
-    }
-    if tokens
-        .get(insert_after + 1)
-        .is_some_and(|token| word_eq(&token.token, "TOP"))
-    {
-        return None;
-    }
-    Some(tokens[insert_after].end)
-}
-
 #[derive(Debug)]
 struct SqlToken {
     token: Token,
     depth: usize,
-    end: usize,
 }
 
 fn significant_tokens(db_type: &DatabaseType, sql: &str) -> Option<Vec<SqlToken>> {
@@ -177,11 +140,7 @@ fn significant_tokens(db_type: &DatabaseType, sql: &str) -> Option<Vec<SqlToken>
             Token::Whitespace(_) | Token::EOF => {}
             Token::LParen => depth += 1,
             Token::RParen => depth = depth.saturating_sub(1),
-            token => output.push(SqlToken {
-                end: byte_index_for_location(sql, token_with_span.span.end),
-                token,
-                depth,
-            }),
+            token => output.push(SqlToken { token, depth }),
         }
     }
     Some(output)
@@ -192,10 +151,6 @@ fn tokenizer_dialect(db_type: &DatabaseType) -> Box<dyn sqlparser::dialect::Dial
         DatabaseType::MySQL => Box::new(MySqlDialect {}),
         DatabaseType::PostgreSQL => Box::new(PostgreSqlDialect {}),
         DatabaseType::SQLite => Box::new(SQLiteDialect {}),
-        DatabaseType::DuckDB => Box::new(DuckDbDialect {}),
-        DatabaseType::MSSQL => Box::new(MsSqlDialect {}),
-        DatabaseType::Oracle => Box::new(OracleDialect {}),
-        DatabaseType::ClickHouse => Box::new(ClickHouseDialect {}),
         DatabaseType::External => Box::new(GenericDialect {}),
     }
 }
@@ -206,22 +161,6 @@ fn word_eq(token: &Token, expected: &str) -> bool {
         Token::Word(word)
             if word.quote_style.is_none() && word.value.eq_ignore_ascii_case(expected)
     )
-}
-
-fn byte_index_for_location(sql: &str, location: Location) -> usize {
-    let (mut line, mut column) = (1u64, 1u64);
-    for (index, ch) in sql.char_indices() {
-        if line == location.line && column == location.column {
-            return index;
-        }
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    sql.len()
 }
 
 /// Result of a single SQL statement execution
@@ -409,24 +348,6 @@ mod query_max_rows_tests {
     }
 
     #[test]
-    fn query_max_rows_adds_mssql_top() {
-        let sql = apply_query_max_rows(
-            DatabaseType::MSSQL,
-            "select distinct id from users",
-            Some(25),
-            true,
-        );
-        assert_eq!("select distinct TOP (25) id from users", sql);
-    }
-
-    #[test]
-    fn query_max_rows_adds_oracle_fetch() {
-        let sql =
-            apply_query_max_rows(DatabaseType::Oracle, "select * from users;", Some(25), true);
-        assert_eq!("select * from users FETCH FIRST 25 ROWS ONLY;", sql);
-    }
-
-    #[test]
     fn query_max_rows_ignores_non_queries_and_unbounded_options() {
         assert_eq!(
             "update users set name = 'a'",
@@ -458,4 +379,3 @@ mod query_max_rows_tests {
         assert_eq!("select 'limit 1' as text from users LIMIT 25", sql);
     }
 }
-

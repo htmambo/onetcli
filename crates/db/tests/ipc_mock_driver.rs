@@ -44,7 +44,7 @@ async fn external_connection_uses_mock_local_socket_driver() {
         ui: Default::default(),
         transport: IpcDriverTransport::local_socket(socket_name),
         connection: Default::default(),
-            manifest_dir: PathBuf::new(),
+        manifest_dir: PathBuf::new(),
     };
     let config = DbConnectionConfig {
         id: "mock".into(),

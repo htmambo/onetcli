@@ -19,7 +19,6 @@ members = [
     "crates/db",
     "crates/db_view",
     "crates/ipc",
-    "crates/duckdb_driver",
     "crates/er_flow",
     "crates/terminal",
     "crates/terminal_view",
@@ -117,8 +116,6 @@ dirs = "6.0"
 chrono = {version = "0.4.23", features = ["serde"]}
 rust_decimal = { version = "1.19.0" }
 hex = "0.4"
-tiberius = { version = "0.12.3", default-features = false, features = ["chrono", "rustls", "tds73", "winauth"] }
-oracle = {version = "0.6.3", features = ["chrono"]}
 once_cell = "1.21"
 proptest = "1.4"
 mysql_async = { version = "0.36.1", features = ["rustls-tls"] }
@@ -127,8 +124,6 @@ tokio-postgres-rustls = "0.13.0"
 rustls-native-certs = "0.8.1"
 rustls-pemfile = "2.2.0"
 rusqlite = { version = "0.38", features = ["bundled", "column_decltype"] }
-duckdb = { version = "1.10501.0", features = ["bundled"] }
-clickhouse = { version = "0.14.1", features = ["rustls-tls-native-roots"] }
 sqlformat = "0.5.0"
 sqlparser = "0.60.0"
 uuid = { version = "1.23.0", features = ["v4", "serde"] }
@@ -264,11 +259,7 @@ xml5ever = { opt-level = 3 }
 alacritty_terminal = { opt-level = 3 }
 mongodb = { opt-level = 3 }
 # S5：dev profile 补充重依赖 opt-level=3，缩短冷启动 + 提升调试时单步响应
-duckdb = { opt-level = 3 }
-tiberius = { opt-level = 3 }
-oracle = { opt-level = 3 }
 mysql_async = { opt-level = 3 }
-clickhouse = { opt-level = 3 }
 redis_client = { opt-level = 3 }
 tokio-postgres = { opt-level = 3 }
 tokio-postgres-rustls = { opt-level = 3 }

@@ -1,7 +1,7 @@
 use anyhow::Error;
 use std::collections::HashMap;
 
-use db::{GlobalDbState, oracle};
+use db::GlobalDbState;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AsyncApp, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
@@ -9,7 +9,7 @@ use gpui::{
     prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, StyledExt, app_style,
+    ActiveTheme, Disableable, IconName, IndexPath, Sizable, Size, StyledExt, app_style,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -418,61 +418,6 @@ impl DbFormConfig {
         ])
     }
 
-    fn mssql_ssl_tab_group() -> TabGroup {
-        TabGroup::new("ssl", t!("ConnectionForm.ssl")).fields(vec![
-            FormField::new(
-                "encrypt",
-                t!("ConnectionForm.encrypt"),
-                FormFieldType::Select,
-            )
-            .optional()
-            .default("off")
-            .options(vec![
-                (
-                    "off".to_string(),
-                    t!("ConnectionForm.encrypt_off").to_string(),
-                ),
-                (
-                    "on".to_string(),
-                    t!("ConnectionForm.encrypt_on").to_string(),
-                ),
-                (
-                    "required".to_string(),
-                    t!("ConnectionForm.encrypt_strict").to_string(),
-                ),
-            ]),
-            FormField::new(
-                "trust_cert",
-                t!("ConnectionForm.trust_certificate"),
-                FormFieldType::Select,
-            )
-            .optional()
-            .default("true")
-            .options(vec![
-                ("true".to_string(), t!("Common.yes").to_string()),
-                ("false".to_string(), t!("Common.no").to_string()),
-            ]),
-        ])
-    }
-
-    fn clickhouse_ssl_tab_group() -> TabGroup {
-        TabGroup::new("ssl", t!("ConnectionForm.ssl")).fields(vec![
-            FormField::new("schema", t!("ConnectionForm.schema"), FormFieldType::Select)
-                .optional()
-                .default("http")
-                .options(vec![
-                    (
-                        "http".to_string(),
-                        t!("ConnectionForm.schema_http").to_string(),
-                    ),
-                    (
-                        "https".to_string(),
-                        t!("ConnectionForm.schema_https").to_string(),
-                    ),
-                ]),
-        ])
-    }
-
     /// MySQL form configuration
     pub fn mysql() -> Self {
         Self {
@@ -628,232 +573,6 @@ impl DbFormConfig {
         }
     }
 
-    /// MSSQL (SQL Server) form configuration
-    pub fn mssql() -> Self {
-        Self {
-            db_type: DatabaseType::MSSQL,
-            title: format!("{} (SQL Server)", t!("Common.new")),
-            hidden_params: HashMap::new(),
-            tab_groups: vec![
-                TabGroup::new("general", t!("ConnectionForm.general")).fields(vec![
-                    FormField::new(
-                        "name",
-                        t!("ConnectionForm.connection_name"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("My SQL Server Database")
-                    .default("Local SQL Server"),
-                    FormField::new("host", t!("ConnectionForm.host"), FormFieldType::Text)
-                        .placeholder("localhost")
-                        .default("localhost"),
-                    FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
-                        .placeholder("1433")
-                        .default("1433"),
-                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
-                    FormField::new(
-                        "username",
-                        t!("ConnectionForm.username"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("sa")
-                    .default("sa"),
-                    FormField::new(
-                        "password",
-                        t!("ConnectionForm.password"),
-                        FormFieldType::Password,
-                    )
-                    .placeholder("Enter password"),
-                    FormField::new(
-                        "database",
-                        t!("ConnectionForm.database"),
-                        FormFieldType::Text,
-                    )
-                    .optional()
-                    .placeholder("database name (optional)"),
-                ]),
-                TabGroup::new("advanced", t!("ConnectionForm.advanced")).fields(vec![
-                    FormField::new(
-                        "connect_timeout",
-                        t!("ConnectionForm.connect_timeout"),
-                        FormFieldType::Number,
-                    )
-                    .optional()
-                    .placeholder("30")
-                    .default("30"),
-                    FormField::new(
-                        "application_name",
-                        t!("ConnectionForm.application_name"),
-                        FormFieldType::Text,
-                    )
-                    .optional()
-                    .placeholder("Application Name"),
-                ]),
-                Self::mssql_ssl_tab_group(),
-                Self::ssh_tab_group(),
-                TabGroup::new("notes", t!("ConnectionForm.notes")).fields(vec![
-                    FormField::new(
-                        "remark",
-                        t!("ConnectionForm.remark"),
-                        FormFieldType::TextArea,
-                    )
-                    .rows(14)
-                    .optional()
-                    .placeholder(t!("ConnectionForm.enter_remark"))
-                    .default(""),
-                ]),
-            ],
-        }
-    }
-
-    /// Oracle form configuration
-    pub fn oracle() -> Self {
-        Self {
-            db_type: DatabaseType::Oracle,
-            title: format!("{} (Oracle)", t!("Common.new")),
-            hidden_params: HashMap::new(),
-            tab_groups: vec![
-                TabGroup::new("general", t!("ConnectionForm.general")).fields(vec![
-                    FormField::new(
-                        "name",
-                        t!("ConnectionForm.connection_name"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("My Oracle Database")
-                    .default("Local Oracle"),
-                    FormField::new("host", t!("ConnectionForm.host"), FormFieldType::Text)
-                        .placeholder("localhost")
-                        .default("localhost"),
-                    FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
-                        .placeholder("1521")
-                        .default("1521"),
-                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
-                    FormField::new(
-                        "username",
-                        t!("ConnectionForm.username"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("system")
-                    .default("system"),
-                    FormField::new(
-                        "password",
-                        t!("ConnectionForm.password"),
-                        FormFieldType::Password,
-                    )
-                    .placeholder("Enter password"),
-                    FormField::new("service_name", "Service Name", FormFieldType::Text)
-                        .optional()
-                        .placeholder("ORCL (or use SID)"),
-                    FormField::new("sid", "SID", FormFieldType::Text)
-                        .optional()
-                        .placeholder("orcl (or use Service Name)"),
-                ]),
-                TabGroup::new("advanced", t!("ConnectionForm.advanced")).fields(vec![
-                    FormField::new(
-                        "connect_timeout",
-                        t!("ConnectionForm.connect_timeout"),
-                        FormFieldType::Number,
-                    )
-                    .optional()
-                    .placeholder("30")
-                    .default("30"),
-                ]),
-                Self::ssh_tab_group(),
-                TabGroup::new("notes", t!("ConnectionForm.notes")).fields(vec![
-                    FormField::new(
-                        "remark",
-                        t!("ConnectionForm.remark"),
-                        FormFieldType::TextArea,
-                    )
-                    .rows(14)
-                    .optional()
-                    .placeholder(t!("ConnectionForm.enter_remark"))
-                    .default(""),
-                ]),
-            ],
-        }
-    }
-
-    /// ClickHouse form configuration
-    pub fn clickhouse() -> Self {
-        Self {
-            db_type: DatabaseType::ClickHouse,
-            title: format!("{} (ClickHouse)", t!("Common.new")),
-            hidden_params: HashMap::new(),
-            tab_groups: vec![
-                TabGroup::new("general", t!("ConnectionForm.general")).fields(vec![
-                    FormField::new(
-                        "name",
-                        t!("ConnectionForm.connection_name"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("My ClickHouse Database")
-                    .default("Local ClickHouse"),
-                    FormField::new("host", t!("ConnectionForm.host"), FormFieldType::Text)
-                        .placeholder("localhost")
-                        .default("localhost"),
-                    FormField::new("port", t!("ConnectionForm.port"), FormFieldType::Number)
-                        .placeholder("8123 (HTTP port)")
-                        .default("8123"),
-                    Self::certificate_field("credential_ref", t!("ConnectionForm.certificate")),
-                    FormField::new(
-                        "username",
-                        t!("ConnectionForm.username"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("default")
-                    .default("default"),
-                    FormField::new(
-                        "password",
-                        t!("ConnectionForm.password"),
-                        FormFieldType::Password,
-                    )
-                    .placeholder("Enter password"),
-                    FormField::new(
-                        "database",
-                        t!("ConnectionForm.database"),
-                        FormFieldType::Text,
-                    )
-                    .optional()
-                    .placeholder("database name (optional)"),
-                ]),
-                TabGroup::new("advanced", t!("ConnectionForm.advanced")).fields(vec![
-                    FormField::new(
-                        "connect_timeout",
-                        t!("ConnectionForm.connect_timeout"),
-                        FormFieldType::Number,
-                    )
-                    .optional()
-                    .placeholder("30")
-                    .default("30"),
-                    FormField::new(
-                        "compression",
-                        t!("ConnectionForm.compression"),
-                        FormFieldType::Select,
-                    )
-                    .optional()
-                    .default("lz4")
-                    .options(vec![
-                        ("none".to_string(), t!("Common.none").to_string()),
-                        ("lz4".to_string(), "LZ4".to_string()),
-                    ]),
-                ]),
-                Self::clickhouse_ssl_tab_group(),
-                Self::ssh_tab_group(),
-                TabGroup::new("notes", t!("ConnectionForm.notes")).fields(vec![
-                    FormField::new(
-                        "remark",
-                        t!("ConnectionForm.remark"),
-                        FormFieldType::TextArea,
-                    )
-                    .rows(14)
-                    .optional()
-                    .placeholder(t!("ConnectionForm.enter_remark"))
-                    .default(""),
-                ]),
-            ],
-        }
-    }
-
     /// SQLite form configuration
     pub fn sqlite() -> Self {
         let default_db_path = get_config_dir()
@@ -895,52 +614,6 @@ impl DbFormConfig {
             ],
         }
     }
-
-    /// DuckDB form configuration
-    pub fn duckdb() -> Self {
-        let default_db_path = get_config_dir()
-            .map(|p| {
-                p.join("omnihub_default.duckdb")
-                    .to_string_lossy()
-                    .to_string()
-            })
-            .unwrap_or_else(|_| "omnihub_default.duckdb".to_string());
-
-        Self {
-            db_type: DatabaseType::DuckDB,
-            title: format!("{} (DuckDB)", t!("Common.new")),
-            hidden_params: HashMap::new(),
-            tab_groups: vec![
-                TabGroup::new("general", t!("ConnectionForm.general")).fields(vec![
-                    FormField::new(
-                        "name",
-                        t!("ConnectionForm.connection_name"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("My DuckDB Database")
-                    .default("Local DuckDB"),
-                    FormField::new(
-                        "host",
-                        t!("ConnectionForm.database_file_path"),
-                        FormFieldType::Text,
-                    )
-                    .placeholder("/path/to/database.duckdb")
-                    .default(default_db_path),
-                ]),
-                TabGroup::new("notes", t!("ConnectionForm.notes")).fields(vec![
-                    FormField::new(
-                        "remark",
-                        t!("ConnectionForm.remark"),
-                        FormFieldType::TextArea,
-                    )
-                    .rows(14)
-                    .optional()
-                    .placeholder(t!("ConnectionForm.enter_remark"))
-                    .default(""),
-                ]),
-            ],
-        }
-    }
 }
 
 fn normalized_ssh_auth_type(auth_type: &str) -> &str {
@@ -963,15 +636,12 @@ fn is_custom_ssl_enabled(
     db_type: DatabaseType,
     require_ssl: bool,
     ssl_mode: Option<&str>,
-    encrypt: Option<&str>,
+    _encrypt: Option<&str>,
 ) -> bool {
     match db_type {
         DatabaseType::MySQL => require_ssl,
         DatabaseType::PostgreSQL => ssl_mode
             .map(|value| value.trim().to_ascii_lowercase() != "disable")
-            .unwrap_or(false),
-        DatabaseType::MSSQL => encrypt
-            .map(|value| value.trim().to_ascii_lowercase() != "off")
             .unwrap_or(false),
         _ => false,
     }
@@ -1032,9 +702,6 @@ pub struct DbConnectionForm {
     editing_connection: Option<StoredConnection>,
     /// 是否启用云同步
     sync_enabled: Entity<bool>,
-    /// Oracle 客户端检测状态：Ok(版本) / Err(错误)
-    oracle_client_status: Entity<Option<Result<String, String>>>,
-    oracle_client_checking: Entity<bool>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1178,9 +845,6 @@ impl DbConnectionForm {
 
         // 默认启用云同步
         let sync_enabled = cx.new(|_| true);
-        let oracle_client_status = cx.new(|_| None);
-        let oracle_client_checking = cx.new(|_| false);
-
         let mut form = Self {
             config,
             current_db_type,
@@ -1196,8 +860,6 @@ impl DbConnectionForm {
             pending_file_path,
             editing_connection: None,
             sync_enabled,
-            oracle_client_status,
-            oracle_client_checking,
             _subscriptions: Vec::new(),
         };
 
@@ -1211,7 +873,6 @@ impl DbConnectionForm {
             ));
         }
 
-        form.refresh_oracle_client_status(cx);
         form
     }
 
@@ -1275,76 +936,6 @@ impl DbConnectionForm {
             }
         })
         .detach();
-    }
-
-    fn refresh_oracle_client_status(&self, cx: &mut Context<Self>) {
-        if *self.current_db_type.read(cx) != DatabaseType::Oracle {
-            self.oracle_client_checking.update(cx, |checking, cx| {
-                *checking = false;
-                cx.notify();
-            });
-            self.oracle_client_status.update(cx, |status, cx| {
-                *status = None;
-                cx.notify();
-            });
-            return;
-        }
-
-        self.oracle_client_checking.update(cx, |checking, cx| {
-            *checking = true;
-            cx.notify();
-        });
-
-        let checking_handle = self.oracle_client_checking.clone();
-        let status_handle = self.oracle_client_status.clone();
-
-        cx.spawn(async move |_, cx: &mut AsyncApp| {
-            let result = oracle::detect_local_client_version();
-            let _ = cx.update(|cx| {
-                checking_handle.update(cx, |checking, cx| {
-                    *checking = false;
-                    cx.notify();
-                });
-                status_handle.update(cx, |status, cx| {
-                    *status = Some(result);
-                    cx.notify();
-                });
-            });
-        })
-        .detach();
-    }
-
-    fn oracle_client_guide_text(&self, cx: &App) -> Option<String> {
-        if *self.current_db_type.read(cx) != DatabaseType::Oracle {
-            return None;
-        }
-
-        let has_error = matches!(self.oracle_client_status.read(cx).as_ref(), Some(Err(_)));
-        if !has_error {
-            return None;
-        }
-
-        #[cfg(target_os = "windows")]
-        return Some(t!("ConnectionForm.oracle_client_guide_windows").to_string());
-        #[cfg(target_os = "macos")]
-        return Some(t!("ConnectionForm.oracle_client_guide_macos").to_string());
-        #[cfg(target_os = "linux")]
-        return Some(t!("ConnectionForm.oracle_client_guide_linux").to_string());
-        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-        return Some(t!("ConnectionForm.oracle_client_guide_other").to_string());
-    }
-
-    fn oracle_client_download_url(&self, cx: &App) -> Option<&'static str> {
-        if *self.current_db_type.read(cx) != DatabaseType::Oracle {
-            return None;
-        }
-
-        let has_error = matches!(self.oracle_client_status.read(cx).as_ref(), Some(Err(_)));
-        if !has_error {
-            return None;
-        }
-
-        Some("https://www.oracle.com/database/technologies/instant-client/downloads.html")
     }
 
     pub fn set_workspaces(
@@ -1692,7 +1283,6 @@ impl DbConnectionForm {
             }
         }
 
-        self.validate_oracle_client(cx)?;
         self.validate_ssh_tunnel(cx)?;
         Ok(())
     }
@@ -1749,16 +1339,6 @@ impl DbConnectionForm {
         }
 
         Ok(())
-    }
-
-    fn validate_oracle_client(&self, cx: &App) -> Result<(), String> {
-        if *self.current_db_type.read(cx) != DatabaseType::Oracle {
-            return Ok(());
-        }
-
-        oracle::detect_local_client_version()
-            .map(|_| ())
-            .map_err(|error| t!("ConnectionForm.oracle_client_required", error = error).to_string())
     }
 
     fn simplify_connection_error_message(err: &Error) -> String {
@@ -2058,7 +1638,7 @@ impl DbConnectionForm {
     fn should_use_custom_ssl_tab(&self) -> bool {
         matches!(
             self.config.db_type,
-            DatabaseType::MySQL | DatabaseType::PostgreSQL | DatabaseType::MSSQL
+            DatabaseType::MySQL | DatabaseType::PostgreSQL
         )
     }
 
@@ -2101,21 +1681,6 @@ impl DbConnectionForm {
                     "disable".to_string()
                 };
                 self.set_field_value("ssl_mode", &next_mode, window, cx);
-            }
-            DatabaseType::MSSQL => {
-                let next_encrypt = if next_enabled {
-                    let current_encrypt = self
-                        .get_field_value("encrypt", cx)
-                        .unwrap_or_else(|| "on".to_string());
-                    if current_encrypt.eq_ignore_ascii_case("off") {
-                        "on".to_string()
-                    } else {
-                        current_encrypt
-                    }
-                } else {
-                    "off".to_string()
-                };
-                self.set_field_value("encrypt", &next_encrypt, window, cx);
             }
             _ => {}
         }
@@ -2206,72 +1771,79 @@ impl DbConnectionForm {
             .columns(1)
             .label_width(px(100.))
             .text_color(app_style::text())
-            .children(current_tab_fields.iter().enumerate().map(|(i, field_info)| {
-                let input_idx = field_input_offset + i;
-                let is_sqlite_path = matches!(db_type, DatabaseType::SQLite | DatabaseType::DuckDB)
-                    && field_info.name == "host";
-                let is_textarea = field_info.field_type == FormFieldType::TextArea;
-                let is_select = field_info.field_type == FormFieldType::Select;
-                let is_password = field_info.field_type == FormFieldType::Password;
-                let field_name = field_info.name.clone();
-                let disable_field = self.should_disable_field_with_certificate(&field_name, cx);
+            .children(
+                current_tab_fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field_info)| {
+                        let input_idx = field_input_offset + i;
+                        let is_sqlite_path =
+                            db_type == DatabaseType::SQLite && field_info.name == "host";
+                        let is_textarea = field_info.field_type == FormFieldType::TextArea;
+                        let is_select = field_info.field_type == FormFieldType::Select;
+                        let is_password = field_info.field_type == FormFieldType::Password;
+                        let field_name = field_info.name.clone();
+                        let disable_field =
+                            self.should_disable_field_with_certificate(&field_name, cx);
 
-                field()
-                    .label(field_info.label.clone())
-                    .required(field_info.required)
-                    .when(!is_textarea, |f| f.items_center())
-                    .when(is_textarea, |f| f.items_start())
-                    .label_justify_end()
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .gap_2()
-                            .when(is_textarea, |el| el.items_start())
-                            .when(is_select, |el| {
-                                if let Some(select_state) = self.field_selects.get(&field_name) {
-                                    el.child(
-                                        self.styled_select(Select::new(select_state).w_full())
-                                            .disabled(disable_field),
-                                    )
-                                } else {
-                                    el
-                                }
-                            })
-                            .when(!is_select, |el| {
-                                if let Some(Some(input_state)) = self.field_inputs.get(input_idx) {
-                                    let input = self
-                                        .styled_input(Input::new(input_state).w_full())
-                                        .disabled(disable_field);
-                                    let input = if is_password {
-                                        input.mask_toggle().disable_ime()
-                                    } else {
-                                        input
-                                    };
-                                    el.child(input)
-                                } else {
-                                    el
-                                }
-                            })
-                            .when(is_sqlite_path, |el| {
-                                el.child(
-                                    Button::new("browse-file")
-                                        .icon(IconName::FolderOpen)
-                                        .ghost()
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.browse_file_path(window, cx);
-                                        })),
-                                )
-                            }),
-                    )
-            }))
+                        field()
+                            .label(field_info.label.clone())
+                            .required(field_info.required)
+                            .when(!is_textarea, |f| f.items_center())
+                            .when(is_textarea, |f| f.items_start())
+                            .label_justify_end()
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .gap_2()
+                                    .when(is_textarea, |el| el.items_start())
+                                    .when(is_select, |el| {
+                                        if let Some(select_state) =
+                                            self.field_selects.get(&field_name)
+                                        {
+                                            el.child(
+                                                self.styled_select(
+                                                    Select::new(select_state).w_full(),
+                                                )
+                                                .disabled(disable_field),
+                                            )
+                                        } else {
+                                            el
+                                        }
+                                    })
+                                    .when(!is_select, |el| {
+                                        if let Some(Some(input_state)) =
+                                            self.field_inputs.get(input_idx)
+                                        {
+                                            let input = self
+                                                .styled_input(Input::new(input_state).w_full())
+                                                .disabled(disable_field);
+                                            let input = if is_password {
+                                                input.mask_toggle().disable_ime()
+                                            } else {
+                                                input
+                                            };
+                                            el.child(input)
+                                        } else {
+                                            el
+                                        }
+                                    })
+                                    .when(is_sqlite_path, |el| {
+                                        el.child(
+                                            Button::new("browse-file")
+                                                .icon(IconName::FolderOpen)
+                                                .ghost()
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.browse_file_path(window, cx);
+                                                })),
+                                        )
+                                    }),
+                            )
+                    }),
+            )
             .when(is_general_tab, |form| {
                 let sync_enabled = self.sync_enabled.clone();
                 let is_sync_checked = *self.sync_enabled.read(cx);
-                let is_checking = *self.oracle_client_checking.read(cx);
-                let oracle_client_status = self.oracle_client_status.read(cx).clone();
-                let oracle_client_guide = self.oracle_client_guide_text(cx);
-                let oracle_client_download_url = self.oracle_client_download_url(cx);
-
                 form.child(
                     field()
                         .label(t!("ConnectionForm.workspace").to_string())
@@ -2305,173 +1877,6 @@ impl DbConnectionForm {
                                 ),
                         ),
                 )
-                .when(db_type == DatabaseType::Oracle, |form| {
-                    let has_error = matches!(&oracle_client_status, Some(Err(_)));
-                    let oracle_client_guide = oracle_client_guide.clone();
-                    let oracle_client_download_url = oracle_client_download_url;
-
-                    form.child(
-                        field()
-                            .label(t!("ConnectionForm.oracle_client_status").to_string())
-                            .items_center()
-                            .label_justify_end()
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .flex_shrink()
-                                            .min_w_0()
-                                            .when(is_checking, |div| {
-                                                div.text_color(cx.theme().muted_foreground).child(
-                                                    t!("ConnectionForm.oracle_client_checking")
-                                                        .to_string(),
-                                                )
-                                            })
-                                            .when(!is_checking, |div| match &oracle_client_status {
-                                                Some(Ok(version)) => div
-                                                    .text_color(gpui::rgb(0x166534))
-                                                    .child(
-                                                        t!(
-                                                            "ConnectionForm.oracle_client_available",
-                                                            version = version
-                                                        )
-                                                        .to_string(),
-                                                    ),
-                                                Some(Err(error)) => div
-                                                    .text_color(gpui::rgb(0x991b1b))
-                                                    .child(
-                                                        t!(
-                                                            "ConnectionForm.oracle_client_unavailable",
-                                                            error = error
-                                                        )
-                                                        .to_string(),
-                                                    ),
-                                                None => div
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("-"),
-                                            }),
-                                    )
-                                    .child(
-                                        div().flex_shrink_0().child(
-                                            Button::new("oracle-client-status-refresh")
-                                                .small()
-                                                .ghost()
-                                                .icon(IconName::Refresh)
-                                                .disabled(is_checking)
-                                                .on_click(cx.listener(|this, _, _window, cx| {
-                                                    this.refresh_oracle_client_status(cx);
-                                                })),
-                                        ),
-                                    )
-                                    .when(has_error, |this| {
-                                        let guide = oracle_client_guide.clone();
-                                        let download_url = oracle_client_download_url;
-                                        this.child(
-                                            div().flex_shrink_0().child(
-                                                Popover::new("oracle-client-guide-popover")
-                                                    .trigger(
-                                                        Button::new("oracle-client-guide-btn")
-                                                            .small()
-                                                            .ghost()
-                                                            .icon(IconName::Info)
-                                                            .label(
-                                                                t!(
-                                                                    "ConnectionForm.oracle_client_guide_label"
-                                                                )
-                                                                .to_string(),
-                                                            ),
-                                                    )
-                                                    .content(move |_state, _window, cx| {
-                                                        v_flex()
-                                                            .gap_2()
-                                                            .max_w(px(360.))
-                                                            .child(
-                                                                h_flex()
-                                                                    .items_center()
-                                                                    .gap_1()
-                                                                    .child(
-                                                                        Icon::new(IconName::Info)
-                                                                            .with_size(Size::Small)
-                                                                            .text_color(
-                                                                                cx.theme()
-                                                                                    .muted_foreground,
-                                                                            ),
-                                                                    )
-                                                                    .child(
-                                                                        div()
-                                                                            .text_sm()
-                                                                            .font_weight(
-                                                                                gpui::FontWeight::MEDIUM,
-                                                                            )
-                                                                            .child(
-                                                                                t!(
-                                                                                    "ConnectionForm.oracle_client_guide_title"
-                                                                                )
-                                                                                .to_string(),
-                                                                            ),
-                                                                    ),
-                                                            )
-                                                            .when_some(guide.clone(), |this, guide| {
-                                                                this.child(
-                                                                    div()
-                                                                        .text_sm()
-                                                                        .text_color(
-                                                                            cx.theme()
-                                                                                .muted_foreground,
-                                                                        )
-                                                                        .child(guide),
-                                                                )
-                                                            })
-                                                            .when_some(download_url, |this, url| {
-                                                                this.child(
-                                                                    h_flex()
-                                                                        .w_full()
-                                                                        .justify_end()
-                                                                        .gap_2()
-                                                                        .child(
-                                                                            Clipboard::new(
-                                                                                "oracle-client-copy-url",
-                                                                            )
-                                                                            .value(
-                                                                                SharedString::from(
-                                                                                    url,
-                                                                                ),
-                                                                            ),
-                                                                        )
-                                                                        .child(
-                                                                            Button::new(
-                                                                                "oracle-client-download-page",
-                                                                            )
-                                                                            .small()
-                                                                            .outline()
-                                                                            .label(
-                                                                                t!(
-                                                                                    "ConnectionForm.oracle_client_open_download"
-                                                                                )
-                                                                                .to_string(),
-                                                                            )
-                                                                            .on_click(
-                                                                                move |_, _window, cx| {
-                                                                                    cx.open_url(url);
-                                                                                },
-                                                                            ),
-                                                                        ),
-                                                                )
-                                                            })
-                                                    }),
-                                            ),
-                                        )
-                                    }),
-                            ),
-                    )
-                })
             })
             .into_any_element()
     }
@@ -2646,7 +2051,7 @@ impl DbConnectionForm {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let ssl_enabled = self.is_ssl_enabled(cx);
-        // 关闭 TLS 校验类开关时提示中间人风险（覆盖 MySQL/PostgreSQL/MSSQL 三种形态）
+        // 关闭 TLS 校验类开关时提示中间人风险（覆盖 MySQL/PostgreSQL 两种形态）
         let insecure_tls_warning = match self.config.db_type {
             DatabaseType::MySQL => {
                 self.get_field_value("verify_ca", cx).as_deref() == Some("false")
@@ -2655,9 +2060,6 @@ impl DbConnectionForm {
                 self.get_field_value("ssl_accept_invalid_certs", cx)
                     .as_deref()
                     == Some("true")
-            }
-            DatabaseType::MSSQL => {
-                self.get_field_value("trust_cert", cx).as_deref() == Some("true")
             }
             _ => false,
         };
@@ -2698,12 +2100,6 @@ impl DbConnectionForm {
                         form.child(self.insecure_tls_hint(cx))
                     })
                     .child(self.render_field_by_name("ssl_accept_invalid_hostnames", cx)),
-                DatabaseType::MSSQL => form
-                    .child(self.render_field_by_name("encrypt", cx))
-                    .child(self.render_field_by_name("trust_cert", cx))
-                    .when(insecure_tls_warning, |form| {
-                        form.child(self.insecure_tls_hint(cx))
-                    }),
                 _ => form,
             })
             .into_any_element()
@@ -2827,13 +2223,6 @@ mod tests {
     }
 
     #[test]
-    fn oracle_form_omits_empty_ssl_tab() {
-        let config = DbFormConfig::oracle();
-
-        assert!(config.tab_groups.iter().all(|group| group.name != "ssl"));
-    }
-
-    #[test]
     fn ssh_field_group_keeps_expected_storage_keys() {
         let config = DbFormConfig::mysql();
         let ssh_tab = config
@@ -2881,19 +2270,6 @@ mod tests {
             false,
             Some("disable"),
             None,
-        ));
-
-        assert!(is_custom_ssl_enabled(
-            DatabaseType::MSSQL,
-            false,
-            None,
-            Some("required"),
-        ));
-        assert!(!is_custom_ssl_enabled(
-            DatabaseType::MSSQL,
-            false,
-            None,
-            Some("off"),
         ));
     }
 

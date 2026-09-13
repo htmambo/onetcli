@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn external_driver_icon_none_for_non_external() {
-        let registry = IpcDriverRegistry::from_drivers(vec![manifest("demo", "DuckDB")]);
+        let registry = IpcDriverRegistry::from_drivers(vec![manifest("demo", "MySQL")]);
         let mut config = external_config("demo");
         config.database_type = DatabaseType::MySQL;
         assert!(
