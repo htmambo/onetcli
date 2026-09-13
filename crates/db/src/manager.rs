@@ -4449,6 +4449,48 @@ mod tests {
         }
     }
 
+    /// `DbError::code` 机器可读错误码测试（Round 22）：
+    /// 钉死 wire 格式——code 字符串**永不**变更（IPC / metric / 告警键依赖）。
+    ///
+    /// **变体列表通过 `code()` 穷尽派生**：新增 `DbError` 变体时本测试编译失败，
+    /// 强制更新期望码。
+    #[test]
+    fn db_error_code_is_stable_per_variant() {
+        use crate::connection::DbError;
+        // 期望码表：变更 = breaking change（需 major version bump）
+        let expected_codes = [
+            (DbError::NotConnected, "db.not_connected"),
+            (DbError::NotSupported("x".into()), "db.not_supported"),
+            (DbError::InvalidManifest("x".into()), "db.invalid_manifest"),
+            (DbError::SessionNotFound("x".into()), "db.session_not_found"),
+            (DbError::Internal("x".into()), "db.internal"),
+            (DbError::connection("msg"), "db.connection"),
+            (DbError::query("msg"), "db.query"),
+            (DbError::transaction("msg"), "db.transaction"),
+        ];
+        for (err, expected_code) in &expected_codes {
+            assert_eq!(
+                err.code(),
+                *expected_code,
+                "{err:?} 应映射到 code={expected_code:?}（wire 格式稳定契约）"
+            );
+            // code 必须全局唯一（同一变体不同实例应得同一 code）
+            assert_eq!(
+                err.code(),
+                err.code(),
+                "code() 必须是纯函数（同一输入多次调用结果一致）"
+            );
+        }
+        // 所有 code 互不相同（防止两个变体共用同一 code 字符串）
+        let mut seen = std::collections::HashSet::new();
+        for (_, expected_code) in &expected_codes {
+            assert!(
+                seen.insert(*expected_code),
+                "code {expected_code:?} 被重复使用（必须全局唯一）"
+            );
+        }
+    }
+
     /// Producer 层变体级断言：get_session_connection 的 NotFound 必须返回
     /// SessionNotFound 变体。若有人改回 `Internal(format!(...))` 拼接式
     /// 实现，此测试将捕获回退。

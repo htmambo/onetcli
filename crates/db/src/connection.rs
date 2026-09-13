@@ -80,6 +80,31 @@ impl DbError {
             DbError::Internal(_) => "Internal",
         }
     }
+
+    /// 机器可读错误码（稳定字符串，**wire 格式**——可用于 IPC、metric、监控告警键）。
+    ///
+    /// 与 [`variant_tag`](Self::variant_tag) 的区别：
+    /// - `variant_tag`：Rust 标识符风格（PascalCase），**仅供日志/调试**
+    /// - `code`：snake_case 稳定字符串，**面向外部系统**
+    ///
+    /// **稳定性保证**：已发布的 code 字符串**永不变更**——可作为 IPC 协议字段、
+    /// metric 标签键、Sentry/告警路由。**新增**变体时可自由分配新 code；
+    /// **重命名**已有 code 视为 breaking change，需 major version bump。
+    ///
+    /// 调用方注意：code 仅区分错误**类别**，不携带错误**详情**（message/source
+    /// 仍走 Display 序列化，但**禁止**用于自动化决策——含 DSN/凭据等敏感信息）。
+    pub fn code(&self) -> &'static str {
+        match self {
+            DbError::Connection { .. } => "db.connection",
+            DbError::Query { .. } => "db.query",
+            DbError::Transaction { .. } => "db.transaction",
+            DbError::NotConnected => "db.not_connected",
+            DbError::NotSupported(_) => "db.not_supported",
+            DbError::InvalidManifest(_) => "db.invalid_manifest",
+            DbError::SessionNotFound(_) => "db.session_not_found",
+            DbError::Internal(_) => "db.internal",
+        }
+    }
 }
 
 impl DbError {
