@@ -147,6 +147,37 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
 - 端到端 Err 测试未实现（需引入 #[cfg(test)] release_fn seam 注入 mock）
 - 当前 Err 分支靠**纯函数单测 + 源代码审计**保证
 
+## Round 30（Drop 运行时外泄漏清理）
+
+- `ConnectionManager` 新增 `leaked_sessions: Arc<std::sync::Mutex<HashSet<String>>>`
+- Drop 在 `Handle::try_current()` 失败时调用 `mark_session_leaked_sync`（同步、幂等），
+  不再仅 warn 后等 idle timeout（默认 5min）长窗口泄漏
+- `cleanup_expired_sessions` Phase 0 调用 `cleanup_leaked_sessions`：优先于 idle/lifetime
+  清理，逐个 `close_session` 强制回收
+- 失败语义：SessionNotFound 视为无需重试；其他 Err **重新标记**（下一周期重试），
+  避免 drain 后永久丢失
+- 返回值为**成功清理数**（非 drain 数），日志如实汇报
+- 新增 4 测试：`leaked_session_count_initial_zero` / `mark_session_leaked_sync_is_idempotent`
+  / `drop_without_runtime_marks_leaked_session`（std::thread 模拟 runtime 外析构）
+  / `cleanup_prioritizes_leaked_sessions`（未 idle 过期也强制 close 并移出池）
+
+## Round 31-32（GuardReleaseState 枚举化）
+
+- 两步走降低回归风险：Round 31 定义 enum + 派生只读视图 `release_state()` + 5 个状态
+  转换测试；Round 32 将 `session: Option<(id, action)>` + `last_release_id: Option<String>`
+  替换为单一 `state: GuardReleaseState`（Idle / Pending / Released）
+- 非法组合（Pending 与 Released 并存、Some/Some）类型层面不可表达
+- `perform_release` Ok 路径合并原"take session + 记录 last_release_id"为单次状态转移；
+  Err 路径保留 Pending 并 in-place 降级（方案 B 语义不变）
+- 取消安全（Round 23 P3-5）、Drop ≡ Finish 等价、双 finish 幂等、`write_back_session_slot`
+  语义（仅 Pending 违约）经评审确认无漂移
+- 全量 54 个 manager 测试通过；`cargo check -p main` 下游编译通过
+
+## Round 33（reset_session_state）— 评估后不实施
+
+- 当前无明确调用方需要该方法（连接重建场景为推测需求），遵循 YAGNI
+- 若未来出现真实需求，再按计划实现（close_session + 重新入池 + 状态重置）
+
 > OMC trailers:
 > Constraint: 仅修改 crates/db/src/manager.rs
 > Rejected: 保留隐式设计决策 + 无测试矩阵 + 文档冗余 | 后续读者判定为 bug 风险 + 接线回归无测试

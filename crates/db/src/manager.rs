@@ -18,7 +18,7 @@ use gpui::{AppContext, AsyncApp, Global};
 use one_core::connection_notifier::{ConnectionDataEvent, GlobalConnectionNotifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -350,6 +350,14 @@ pub struct ConnectionManager {
     /// **为什么 AtomicU64**：失败计数跨多线程 release 调用，单调递增，
     /// 不需要锁。Relaxed 内存序即可（计数仅供监控，不参与控制流决策）。
     verify_failure_count: Arc<AtomicU64>,
+    /// **泄漏 session 集合**（Round 30）：Drop 在无 tokio runtime 内时
+    /// 推送 session_id 到此集合。下一次 `cleanup_expired_sessions` 周期
+    /// 优先清理这些 session，避免 idle timeout 长窗口（默认 5min）的泄漏。
+    ///
+    /// **为何用 std::sync::Mutex 而非 tokio::Mutex**：Drop 是同步析构，
+    /// 无 runtime 时无法 await。`std::sync::Mutex::lock()` 同步阻塞，
+    /// 不依赖 runtime——可在任何 Drop 上下文调用。
+    leaked_sessions: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl ConnectionManager {
@@ -361,6 +369,7 @@ impl ConnectionManager {
             max_lifetime: Duration::from_secs(1800), // 30 minutes
             session_counter: Arc::new(tokio::sync::Mutex::new(0)),
             verify_failure_count: Arc::new(AtomicU64::new(0)),
+            leaked_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
         }
     }
 
@@ -372,6 +381,7 @@ impl ConnectionManager {
             max_lifetime,
             session_counter: Arc::new(tokio::sync::Mutex::new(0)),
             verify_failure_count: Arc::new(AtomicU64::new(0)),
+            leaked_sessions: Arc::new(std::sync::Mutex::new(HashSet::new())),
         }
     }
 
@@ -381,6 +391,74 @@ impl ConnectionManager {
     /// 或测试断言 verify 失败路径被走到。
     pub fn verify_failure_count(&self) -> u64 {
         self.verify_failure_count.load(Ordering::Relaxed)
+    }
+
+    /// 读取当前泄漏待清理的 session 数（Round 30）。
+    ///
+    /// **场景**：Drop 在无 tokio runtime 内时无法 await release_session，
+    /// 会把 session_id 推入 leaked_sessions 集合——下一次 cleanup 周期
+    /// 优先清理。返回值用于监控/测试断言。
+    pub fn leaked_session_count(&self) -> usize {
+        self.leaked_sessions
+            .lock()
+            .expect("leaked_sessions mutex poisoned")
+            .len()
+    }
+
+    /// **同步**标记 session 泄漏（Round 30）：Drop 在同步析构时调用，
+    /// 把 session_id 推入 leaked_sessions 集合。
+    ///
+    /// **为什么同步**：Drop 是同步析构函数，无法 await。
+    /// std::sync::Mutex::lock() 同步阻塞——不依赖 tokio runtime。
+    ///
+    /// **重复标记**：若 session_id 已在集合中，跳过（幂等）。
+    pub(crate) fn mark_session_leaked_sync(&self, session_id: String) {
+        let mut leaked = self
+            .leaked_sessions
+            .lock()
+            .expect("leaked_sessions mutex poisoned");
+        leaked.insert(session_id);
+    }
+
+    /// **异步**清理泄漏 session（Round 30）：从 leaked_sessions 取出所有
+    /// session_id，调用 `close_session` 强制清理并从池中移除。
+    ///
+    /// 由 `cleanup_expired_sessions` Phase 0 调用——优先于 idle/lifetime 过期清理。
+    /// 返回值：**成功清理数**（NotFound 不计数、视为无需重试；close 失败
+    /// 重标记的同样不计入），供上层日志如实汇报。
+    pub(crate) async fn cleanup_leaked_sessions(&self) -> usize {
+        let leaked_ids: Vec<String> = {
+            let mut leaked = self
+                .leaked_sessions
+                .lock()
+                .expect("leaked_sessions mutex poisoned");
+            leaked.drain().collect::<Vec<String>>()
+        };
+        let mut cleaned = 0;
+        for id in leaked_ids {
+            match self.close_session(&id).await {
+                Ok(()) => cleaned += 1,
+                // 非 NotFound 失败：重新标记，下一 cleanup 周期重试；
+                // 否则该 id 永久丢失，回退到 idle timeout 兜底
+                Err(e @ DbError::SessionNotFound(_)) => {
+                    warn!(
+                        target: "db::session",
+                        session_id = %id,
+                        "cleanup_leaked_sessions: session already gone: {e}"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        target: "db::session",
+                        session_id = %id,
+                        "cleanup_leaked_sessions: close_session failed: {e}, \
+                         re-marked for retry on next cleanup cycle"
+                    );
+                    self.mark_session_leaked_sync(id);
+                }
+            }
+        }
+        cleaned
     }
 
     async fn acquire_physical_open_lock(
@@ -680,11 +758,10 @@ pub enum SessionReleaseAction {
 /// 端已有 60 秒周期 `cleanup_expired_sessions` 兜底回收（不在本次 PR 范围）。
 pub struct SessionGuard {
     manager: ConnectionManager,
-    session: Option<(String, SessionReleaseAction)>,
-    /// 上次成功释放的 session_id，用于二次 finish_with 时定位
-    /// Close-after-Reuse 冲突（首次 Reuse 已成功 → 二次 Close 已被静默忽略）。
-    /// Drop 时无意义（连同 self 一起销毁）。
-    last_release_id: Option<String>,
+    /// 释放状态机（Round 32）：单一 enum 替代原 `session: Option<(id, action)>` 与
+    /// `last_release_id: Option<String>` 两个字段，非法组合（Pending 与
+    /// Released 并存）类型层面不可表达。语义见 [`GuardReleaseState`]。
+    state: GuardReleaseState,
 }
 
 // 禁止 Clone：两个 guard 各自 Drop 会导致 double release
@@ -730,10 +807,47 @@ impl ReleaseIntent {
     }
 }
 
+/// SessionGuard 释放状态机（Round 31-32）：将原 `session: Option<(id, action)>`
+/// 与 `last_release_id: Option<String>` 两个独立 Option 隐含的不变量合并为
+/// 单一枚举，让非法组合（如 Pending 与 Released 并存）在类型层面不可表达。
+///
+/// 状态语义：
+/// - `Idle`：未持有 session 且从未释放（Drop 提交后的终态）
+/// - `Pending { id, action }`：持有待释放的 session（`current_action` /
+///   `drop_release_action` 仅在此状态有意义）
+/// - `Released { id }`：已成功释放（原 `last_release_id` 语义收拢于此）
+///
+/// **落地方式**：Round 31 先以"派生只读视图"（`release_state()` 从两个字段
+/// 推导）验证设计，Round 32 将字段替换为单一 `state: GuardReleaseState`。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GuardReleaseState {
+    /// 未持有 session 且从未释放
+    Idle,
+    /// 持有待释放的 session
+    Pending {
+        id: String,
+        action: SessionReleaseAction,
+    },
+    /// 已成功释放（记录 last_release_id）
+    Released { id: String },
+}
+
 impl SessionGuard {
+    /// 只读状态视图（Round 32）：直接返回内部状态的引用。
+    ///
+    /// **Round 31 兼容**：Round 31 阶段本方法从两个字段派生状态；字段替换后
+    /// 退化为引用返回，调用方语义不变。
+    #[cfg_attr(not(test), allow(dead_code))] // 仅供测试断言，Round 32 后保留
+    pub(crate) fn release_state(&self) -> &GuardReleaseState {
+        &self.state
+    }
+
     /// 测试用：读取当前 session 持有的 release action（用于验证降级逻辑）
     pub(crate) fn current_action(&self) -> Option<SessionReleaseAction> {
-        self.session.as_ref().map(|(_, a)| *a)
+        match &self.state {
+            GuardReleaseState::Pending { action, .. } => Some(*action),
+            _ => None,
+        }
     }
 
     /// 测试用 + Drop 共用：返回 Drop 路径将使用的 release_action。
@@ -747,9 +861,12 @@ impl SessionGuard {
     /// - 测试验证 Drop ≡ Finish 等价性
     /// - 可观测性：在 Drop 触发前读回即将使用的 action（用于上层决策）
     pub(crate) fn drop_release_action(&self) -> Option<SessionReleaseAction> {
-        self.session
-            .as_ref()
-            .map(|(_, stored)| Self::compute_writeback_action(ReleaseIntent::Finish, *stored))
+        match &self.state {
+            GuardReleaseState::Pending { action: stored, .. } => Some(
+                Self::compute_writeback_action(ReleaseIntent::Finish, *stored),
+            ),
+            _ => None,
+        }
     }
 
     /// Err 路径写回策略计算：**纯函数**。给定 `intent` + 原始 `stored_action`，
@@ -804,31 +921,31 @@ impl SessionGuard {
     /// [`compute_writeback_action`](Self::compute_writeback_action) 完成
     /// 后传入本函数。
     ///
-    /// **不变量**：调用前 `session` 必须为 None；函数后 `session` 必须为
-    /// `Some((id, action))`。**双层保护**：debug_assert 在 dev/test 立即失败；
-    /// error! 在 release 构建下生产可观测——避免静默覆盖已存在的另一会话记录
-    /// （资源泄漏风险）。
+    /// **不变量**：调用前状态不得为 `Pending`（即未持有待释放 session）；
+    /// 函数后状态为 `Pending { id, action }`。**双层保护**：debug_assert 在
+    /// dev/test 立即失败；error! 在 release 构建下生产可观测——避免静默覆盖
+    /// 已存在的另一会话记录（资源泄漏风险）。
     ///
     /// **可测试**：纯函数（无 IO）。
     #[allow(dead_code)] // perform_release 不再使用，保留供测试 + 未来调用方
     pub(crate) fn write_back_session_slot(
-        session: &mut Option<(String, SessionReleaseAction)>,
+        state: &mut GuardReleaseState,
         id: String,
         action: SessionReleaseAction,
     ) {
-        if session.is_some() {
+        if matches!(state, GuardReleaseState::Pending { .. }) {
             error!(
                 target: "db::session",
-                current = ?session,
+                current = ?state,
                 new_id = %id,
-                "write_back_session_slot: slot 非 None，写回将覆盖既有条目（契约违约）"
+                "write_back_session_slot: 状态非 Idle/Released，写回将覆盖既有条目（契约违约）"
             );
             debug_assert!(
                 false,
                 "write_back_session_slot: slot must be None before write-back"
             );
         }
-        *session = Some((id, action));
+        *state = GuardReleaseState::Pending { id, action };
     }
 }
 
@@ -840,8 +957,10 @@ impl SessionGuard {
     ) -> Self {
         Self {
             manager,
-            session: Some((session_id, action)),
-            last_release_id: None,
+            state: GuardReleaseState::Pending {
+                id: session_id,
+                action,
+            },
         }
     }
 
@@ -870,10 +989,10 @@ impl SessionGuard {
     /// - 业务成功 → ReleaseForReuse（乐观，允许复用）
     /// - 业务失败 → Close（保守，禁止脏复用）
     ///
-    /// 若 guard 已被 finish 清空或 Drop 已触发（session 字段为 None），
+    /// 若 guard 已被 finish 清空或 Drop 已触发（状态非 Pending），
     /// 该方法为 no-op。
     pub fn set_action(&mut self, action: SessionReleaseAction) {
-        if let Some((_, ref mut act)) = self.session.as_mut() {
+        if let GuardReleaseState::Pending { action: act, .. } = &mut self.state {
             *act = action;
         }
     }
@@ -888,10 +1007,10 @@ impl SessionGuard {
     /// cancel 中途 Drop 兜底使用降级 action 重试。
     ///
     /// **失败保守降级**：release 返回 Err 时 action 由
-    /// `downgrade_action_on_failure` 降级后保留在 self.session，
+    /// `downgrade_action_on_failure` 降级后保留在 Pending 状态，
     /// Drop 兜底继续处理。
     ///
-    /// **幂等性**：第二次调用为 no-op（self.session 已被 take 清空）。
+    /// **幂等性**：第二次调用为 no-op（状态已转移为 Released）。
     /// 这种 no-op 是**显式可观测**的（debug 日志记录 caller 位置 +
     /// requested_action），便于排查"双重 release"类 bug，包括
     /// Close-after-Reuse 冲突检测（首次 Reuse 已成功 → 二次 Close 应被
@@ -907,16 +1026,15 @@ impl SessionGuard {
     ) -> impl std::future::Future<Output = ()> + '_ {
         let caller = std::panic::Location::caller();
         async move {
-            // None 路径由调用方处理协议违规检测；
-            // 这里 None 直接 hard no-op。
-            if self.session.is_none() {
-                Self::handle_double_finish_with(action, caller, self.last_release_id.as_ref());
+            // 非 Pending 路径由调用方处理协议违规检测；
+            // 这里直接 hard no-op。
+            if !matches!(self.state, GuardReleaseState::Pending { .. }) {
+                Self::handle_double_finish_with(action, caller, &self.state);
                 return;
             }
             Self::perform_release(
                 &self.manager,
-                &mut self.session,
-                &mut self.last_release_id,
+                &mut self.state,
                 ReleaseIntent::FinishWith(action),
             )
             .await;
@@ -940,9 +1058,6 @@ impl SessionGuard {
     /// 释放 session；重复调用是 no-op（幂等）。
     ///
     /// **取消安全**：仅 release 成功后清空 session；cancel 时 session
-    /// 释放 session；重复调用是 no-op（幂等）。
-    ///
-    /// **取消安全**：仅 release 成功后清空 session；cancel 时 session
     /// 保留，Drop 兜底能重试。
     ///
     /// **失败保守降级**：release 返回 Err 时，**如果原 action 是 `ReleaseForReuse`**，
@@ -956,41 +1071,35 @@ impl SessionGuard {
     /// `finish_with` 才有完整的 sync-wrapper + caller 传播 + last_release_id
     /// 协议违规检测。
     pub async fn finish(&mut self) {
-        // None 路径：与 finish_with 不同，**静默** no-op
+        // 非 Pending 路径：与 finish_with 不同，**静默** no-op
         // （保留向后兼容，主要给 Drop 路径 + 旧测试用）
-        if self.session.is_none() {
+        if !matches!(self.state, GuardReleaseState::Pending { .. }) {
             debug!(
-                "SessionGuard::finish on already-finished guard — no-op \
-                 (last_release_id={:?})",
-                self.last_release_id
+                "SessionGuard::finish on already-finished guard — no-op (state={:?})",
+                self.state
             );
             return;
         }
-        // None 表示使用 session 内存储的 action（区别于 finish_with 的 override）
-        Self::perform_release(
-            &self.manager,
-            &mut self.session,
-            &mut self.last_release_id,
-            ReleaseIntent::Finish,
-        )
-        .await;
+        // Finish intent 表示使用 state 内存储的 action（区别于 finish_with 的 override）
+        Self::perform_release(&self.manager, &mut self.state, ReleaseIntent::Finish).await;
     }
 
-    /// 共享 release 路径：take session → `release_session` → 处理结果。
+    /// 共享 release 路径：读 Pending 快照 → `release_session` → 处理结果。
     /// 由 `finish_with` 与 `finish` 调用，消除两处重复实现。
     ///
-    /// # 契约
+    /// # 契约（Round 32 起基于 [`GuardReleaseState`]）
     ///
-    /// - **Ok 路径**：清空 `session` + 保存 `last_release_id`
-    /// - **Err 路径**：**保留** `session`，把本次生效的 action 降级后写回
+    /// - **Ok 路径**：`Pending → Released { id }`（action 语义上"清空 session +
+    ///   保存 last_release_id"合并为单次状态转移，类型层面保证互斥）
+    /// - **Err 路径**：**保留** `Pending`，把本次生效的 action 降级后写回
     ///   （不是原始 stored，是 override 或 stored 的解析值）——让 Drop 兜底 /
     ///   重试可以拿到更新后的 action
-    /// - 调用方必须在调用前确保 `session` 是 `Some`（None 路径由调用方处理）
+    /// - 调用方必须在调用前确保状态为 `Pending`（否则由调用方处理协议违规）
     ///
     /// # 不变量
     ///
-    /// - release 调用成功与清空 session 之间不得再插入任何 `.await`
-    /// - Err 路径写回 session 是 Drop 兜底能 retry 的关键，不能漏
+    /// - release 调用成功与状态转移（Pending → Released）之间不得再插入任何 `.await`
+    /// - Err 路径写回降级 action 是 Drop 兜底能 retry 的关键，不能漏
     ///
     /// # Err 写回语义（方案 B：override 视为最新意图）—— 权威定义
     ///
@@ -1023,42 +1132,45 @@ impl SessionGuard {
     ///   seam（注入 mock 失败）。
     async fn perform_release(
         manager: &ConnectionManager,
-        session: &mut Option<(String, SessionReleaseAction)>,
-        last_release_id: &mut Option<String>,
+        state: &mut GuardReleaseState,
         intent: ReleaseIntent,
     ) {
-        // **Cancel safety 关键**（Round 23 P3-5）：
-        // 不在 await 前 take session——只读出 id+stored 的副本（as_ref 借用），
-        // 若 future 在 await 点被取消，本地副本丢弃但 self.session 仍为 Some，
-        // Drop 兜底仍可基于原 stored_action 重试。
-        // 之前的 take-then-await 模式存在取消窗口：take 后 session=None，
-        // Drop no-op，session 永久泄漏（直到 idle timeout 服务端清理）。
-        let Some((id, stored_action)) = session.as_ref().map(|(id, a)| (id.clone(), *a)) else {
+        // **Cancel safety 关键**（Round 23 P3-5）：不在 await 前转移状态——
+        // 只读出 id+stored 的副本，若 future 在 await 点被取消，本地副本丢弃
+        // 但 self.state 仍为 Pending，Drop 兜底仍可基于原 stored_action 重试。
+        // 之前的 take-then-await 模式存在取消窗口：take 后 Drop no-op，
+        // session 永久泄漏（直到 idle timeout 服务端清理）。
+        let GuardReleaseState::Pending {
+            id,
+            action: stored_action,
+        } = state
+        else {
             // 调用方漏检契约违约：debug_assert 让 dev/test 立即失败。
             // release 路径仍输出 warn（生产可观测）：assert 在 release 构建下
             // 被静默跳过，无 warn 的话契约违约将无任何痕迹。
             warn!(
                 target: "db::session",
                 intent = ?intent,
-                "perform_release 契约违约：调用方应在 None 路径前置处理 \
+                "perform_release 契约违约：调用方应在非 Pending 路径前置处理 \
                  (release 构建下 debug_assert 被跳过，必须依赖此 warn 排查)"
             );
             debug_assert!(
                 false,
-                "perform_release 契约违约：调用方应在 None 路径前置处理（{intent:?}）"
+                "perform_release 契约违约：调用方应在非 Pending 路径前置处理（{intent:?}）"
             );
             return;
         };
+        let id = id.clone();
+        let stored_action = *stored_action;
         let action = intent.resolved_action(stored_action);
         match release_session(manager, &id, action).await {
             Ok(()) => {
-                // **取消安全 Ok 路径**：await 已完成才 take（move），无取消窗口
-                let _ = session.take(); // drop the contained (id, action)
-                // 不变量：release 调用成功与 last_release_id 保存之间不得再插入 .await
-                *last_release_id = Some(id);
+                // **取消安全 Ok 路径**：await 已完成才转移状态，无取消窗口
+                // 单次转移合并原"take session + 保存 last_release_id"两步
+                *state = GuardReleaseState::Released { id };
             }
             Err(e) => {
-                // **取消安全 Err 路径**：session 仍为 Some（未 take），更新 action
+                // **取消安全 Err 路径**：state 仍为 Pending（未转移），更新 action
                 // 即可。Drop 兜底即便在 await 取消后仍可读到最新 downgraded action。
                 let downgraded = Self::compute_writeback_action(intent, stored_action);
                 warn!(
@@ -1070,17 +1182,14 @@ impl SessionGuard {
                     action,
                     downgraded,
                 );
-                if let Some((_, ref mut current_action)) = session.as_mut() {
+                // Round 32：Pending 状态由类型保证存在，原"session 意外为 None"
+                // 防御分支随字段替换消失
+                if let GuardReleaseState::Pending {
+                    action: current_action,
+                    ..
+                } = state
+                {
                     *current_action = downgraded;
-                } else {
-                    // 极端：await 期间 session 被并发清空（正常路径不应发生，
-                    // 仅在外部代码持 &mut session 时可能）
-                    debug_assert!(false, "session unexpectedly None after await");
-                    warn!(
-                        target: "db::session",
-                        session_id = %id,
-                        "perform_release Err 分支：session 已为 None，无法写回降级 action"
-                    );
                 }
             }
         }
@@ -1092,32 +1201,37 @@ impl SessionGuard {
     fn handle_double_finish_with(
         action: SessionReleaseAction,
         caller: &std::panic::Location<'static>,
-        last_release_id: Option<&String>,
+        state: &GuardReleaseState,
     ) {
-        if let Some(session_id) = last_release_id {
-            error!(
-                target: "db::session",
-                session_id = %session_id,
-                requested_action = ?action,
-                caller = ?caller,
-                "finish_with called after successful release — second call is hard no-op, \
-                 requested action NOT applied"
-            );
-            debug_assert!(
-                false,
-                "finish_with called twice (session_id={session_id}, caller={caller:?})"
-            );
-        } else {
-            error!(
-                target: "db::session",
-                caller = ?caller,
-                requested_action = ?action,
-                "finish_with on guard with no session and no release record — invariant violated"
-            );
-            debug_assert!(
-                false,
-                "finish_with on (None, None) guard — should be unreachable (caller={caller:?})"
-            );
+        match state {
+            GuardReleaseState::Released { id } => {
+                error!(
+                    target: "db::session",
+                    session_id = %id,
+                    requested_action = ?action,
+                    caller = ?caller,
+                    "finish_with called after successful release — second call is hard no-op, \
+                     requested action NOT applied"
+                );
+                debug_assert!(
+                    false,
+                    "finish_with called twice (session_id={id}, caller={caller:?})"
+                );
+            }
+            other => {
+                error!(
+                    target: "db::session",
+                    current_state = ?other,
+                    caller = ?caller,
+                    requested_action = ?action,
+                    "finish_with on guard with no session and no release record — invariant violated"
+                );
+                debug_assert!(
+                    false,
+                    "finish_with on non-Pending/non-Released guard — should be unreachable \
+                     (state={other:?}, caller={caller:?})"
+                );
+            }
         }
     }
 }
@@ -1130,7 +1244,7 @@ impl Drop for SessionGuard {
         // 捕获到 panic 后只记 error（best-effort 观测），不再传播。
         //
         // **为何不调 AssertUnwindSafe**：本函数内仅有：
-        // - 同步字段访问（self.session.take / drop_release_action / self.manager.clone）
+        // - 同步字段访问（self.state 转移 / drop_release_action / self.manager.clone）
         // - tracing warn 宏（无条件）
         // - tokio Handle 捕获
         // - handle.spawn（异步，不在 catch_unwind 范围内）
@@ -1155,15 +1269,18 @@ impl SessionGuard {
     /// Drop 的实际逻辑（Round 29 拆分）：catch_unwind 包住本函数。
     fn drop_inner(&mut self) {
         // 仅在 finish 未被调用 / 未成功完成时（panic / future drop / cancel / finish Err）兜底
-        // 先快照 release_action（避免 take 后借用冲突），再 take 出 (id, stored)
+        // 先快照 release_action（borrow checker 要求），再取出 id 并置 Idle（等价原 take）
         let Some(release_action) = self.drop_release_action() else {
             return;
         };
-        let Some((id, stored_action)) = self.session.take() else {
-            // 极端：drop_release_action 返回 Some 但 session 已为 None——
-            // 不应发生（两者都读 self.session），但保守防御
+        let GuardReleaseState::Pending { id, .. } = &self.state else {
+            // 极端：drop_release_action 返回 Some 但状态非 Pending——
+            // 不应发生（两者都读 self.state），但保守防御
             return;
         };
+        let id = id.clone();
+        // 等价原 `self.session.take()`：置 Idle 保证 Drop 一次性（no double release）
+        self.state = GuardReleaseState::Idle;
         // 统一入口（Round 20 P3-A + Round 21 P2-2 防语义分叉）：
         // Drop 没有 caller intent，按契约等价于 `ReleaseIntent::Finish`。
         // 通过 `drop_release_action` 访问器计算——本函数同时给测试使用，
@@ -1188,7 +1305,6 @@ impl SessionGuard {
         warn!(
             target: "db::session",
             session_id = %id,
-            stored_action = ?stored_action,
             release_action = ?release_action,
             "SessionGuard dropped without finish() — spawning best-effort release"
         );
@@ -1211,11 +1327,17 @@ impl SessionGuard {
             }
             Err(_) => {
                 // 不在 tokio runtime 内（如同步析构）：泄漏不可避免，
-                // 但至少错误日志让操作者知道这件事发生了
+                // 但 Round 30 改进：把 session_id 推入 manager 的 leaked_sessions
+                // 集合——下一次 cleanup 周期优先清理，避免 idle timeout（默认 5min）
+                // 长窗口泄漏。mark_session_leaked_sync 是 std::sync::Mutex 同步 API，
+                // 不依赖 tokio runtime，可在 Drop 同步上下文调用。
+                self.manager.mark_session_leaked_sync(id.clone());
                 warn!(
                     target: "db::session",
                     session_id = %id,
-                    "SessionGuard dropped outside tokio runtime — session will leak until idle timeout"
+                    leaked_session_count = self.manager.leaked_session_count(),
+                    "SessionGuard dropped outside tokio runtime — \
+                     session marked as leaked, will be cleaned up on next cleanup cycle"
                 );
             }
         }
@@ -1564,6 +1686,15 @@ impl ConnectionManager {
         let idle_timeout = self.idle_timeout;
         let max_lifetime = self.max_lifetime;
 
+        // Phase 0（Round 30）：优先清理泄漏 session（Drop 在无 runtime 内时标记）
+        let leaked_cleaned = self.cleanup_leaked_sessions().await;
+        if leaked_cleaned > 0 {
+            info!(
+                "Cleanup: removed {} leaked session(s) (Drop'd outside tokio runtime)",
+                leaked_cleaned
+            );
+        }
+
         // Phase 1: collect expired Arcs and remove them from the map.
         let to_close: Vec<(String, Arc<AsyncMutex<ConnectionSession>>)> = {
             let mut sessions = self.sessions.write().await;
@@ -1693,6 +1824,7 @@ impl Clone for ConnectionManager {
             max_lifetime: self.max_lifetime,
             session_counter: Arc::clone(&self.session_counter),
             verify_failure_count: Arc::clone(&self.verify_failure_count),
+            leaked_sessions: Arc::clone(&self.leaked_sessions),
         }
     }
 }
@@ -4407,34 +4539,40 @@ mod tests {
     }
 
     /// `write_back_session_slot` 写回不变量单测：
-    /// 验证 slot 操作语义——传入什么存什么（不做降级，降级由调用方完成）。
+    /// 验证状态写回语义——传入什么存什么（不做降级，降级由调用方完成）。
     /// 调用方通常从 [`compute_writeback_action`](SessionGuard::compute_writeback_action)
     /// 拿到降级后的值再传入本函数。
     #[test]
     fn write_back_session_slot_semantics() {
-        // 正向：None → Some（直接写入降级后的值）
-        let mut session: Option<(String, SessionReleaseAction)> = None;
+        // 正向：Idle → Pending（直接写入降级后的值）
+        let mut state = GuardReleaseState::Idle;
         SessionGuard::write_back_session_slot(
-            &mut session,
+            &mut state,
             "id-1".to_string(),
             SessionReleaseAction::Close,
         );
         assert_eq!(
-            session,
-            Some(("id-1".to_string(), SessionReleaseAction::Close)),
-            "None slot 应被覆写为传入的 (id, action)"
+            state,
+            GuardReleaseState::Pending {
+                id: "id-1".to_string(),
+                action: SessionReleaseAction::Close,
+            },
+            "Idle 状态应被写回为传入的 (id, action)"
         );
 
         // 不同降级值均按原样写入（不二次降级）
-        let mut session: Option<(String, SessionReleaseAction)> = None;
+        let mut state = GuardReleaseState::Idle;
         SessionGuard::write_back_session_slot(
-            &mut session,
+            &mut state,
             "id-2".to_string(),
             SessionReleaseAction::Release,
         );
         assert_eq!(
-            session,
-            Some(("id-2".to_string(), SessionReleaseAction::Release)),
+            state,
+            GuardReleaseState::Pending {
+                id: "id-2".to_string(),
+                action: SessionReleaseAction::Release,
+            },
             "Release 值原样写入（不做 close/Release 决策）"
         );
     }
@@ -4476,10 +4614,12 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "slot must be None")]
     fn write_back_session_slot_rejects_double_write_in_debug() {
-        let mut session: Option<(String, SessionReleaseAction)> =
-            Some(("id-prev".to_string(), SessionReleaseAction::Release));
+        let mut state = GuardReleaseState::Pending {
+            id: "id-prev".to_string(),
+            action: SessionReleaseAction::Release,
+        };
         SessionGuard::write_back_session_slot(
-            &mut session,
+            &mut state,
             "id-new".to_string(),
             SessionReleaseAction::Close,
         );
@@ -5484,6 +5624,191 @@ mod tests {
             rollback_count.load(Ordering::SeqCst),
             1,
             "ReleaseForReuse 路径必须调用 rollback_if_active"
+        );
+    }
+
+    #[test]
+    fn leaked_session_count_initial_zero() {
+        let manager = ConnectionManager::new();
+        assert_eq!(0, manager.leaked_session_count());
+    }
+
+    #[test]
+    fn mark_session_leaked_sync_is_idempotent() {
+        let manager = ConnectionManager::new();
+        manager.mark_session_leaked_sync("leak:session:1".to_string());
+        manager.mark_session_leaked_sync("leak:session:1".to_string());
+        assert_eq!(1, manager.leaked_session_count());
+    }
+
+    /// Drop 在无 tokio runtime 时（如 std::thread 同步析构）应标记泄漏，
+    /// 而不是仅 warn 后等 idle timeout 兜底。
+    #[test]
+    fn drop_without_runtime_marks_leaked_session() {
+        let manager = ConnectionManager::new();
+        let dropped_manager = manager.clone();
+        // 模拟 runtime 外析构：普通 std::thread 内 drop guard
+        std::thread::spawn(move || {
+            let guard = SessionGuard::new(
+                dropped_manager,
+                "leak-drop:session:1".to_string(),
+                SessionReleaseAction::Close,
+            );
+            drop(guard);
+        })
+        .join()
+        .unwrap();
+        assert_eq!(1, manager.leaked_session_count());
+    }
+
+    /// cleanup_expired_sessions Phase 0 应优先清理被标记泄漏的 session：
+    /// 即使 session 未 idle 过期（刚 mark_in_use），也会被强制 close 并移出池。
+    #[tokio::test]
+    async fn cleanup_prioritizes_leaked_sessions() {
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let config = test_config("mysql-leak-cleanup");
+        let disconnect_count = Arc::new(AtomicUsize::new(0));
+        let session = ConnectionSession::new(
+            Box::new(MockConnection::with_disconnect_count(
+                config.clone(),
+                true,
+                Arc::clone(&disconnect_count),
+            )),
+            "mysql-leak-cleanup:session:1".to_string(),
+            true,
+        );
+        {
+            let mut s = session;
+            s.mark_in_use();
+            manager
+                .sessions
+                .write()
+                .await
+                .entry(config.id.clone())
+                .or_default()
+                .push(Arc::new(AsyncMutex::new(s)));
+        }
+
+        manager.mark_session_leaked_sync("mysql-leak-cleanup:session:1".to_string());
+        assert_eq!(1, manager.leaked_session_count());
+
+        manager.cleanup_expired_sessions().await;
+
+        assert_eq!(
+            0,
+            manager.leaked_session_count(),
+            "泄漏标记应被 Phase 0 消费"
+        );
+        assert_eq!(
+            1,
+            disconnect_count.load(Ordering::SeqCst),
+            "泄漏 session 应被强制 close（即使未 idle 过期）"
+        );
+        let sessions = manager.list_sessions(&config.id).await;
+        assert_eq!(0, sessions.len(), "泄漏 session 应被移出池");
+    }
+
+    // ---- Round 31：GuardReleaseState 派生视图测试 ----
+
+    #[test]
+    fn guard_release_state_idle_default() {
+        let manager = ConnectionManager::new();
+        let guard = SessionGuard {
+            manager,
+            state: GuardReleaseState::Idle,
+        };
+        assert_eq!(GuardReleaseState::Idle, *guard.release_state());
+    }
+
+    #[test]
+    fn guard_release_state_pending_after_new() {
+        let manager = ConnectionManager::new();
+        let guard = SessionGuard::new(
+            manager,
+            "state-test:session:1".to_string(),
+            SessionReleaseAction::ReleaseForReuse,
+        );
+        assert_eq!(
+            GuardReleaseState::Pending {
+                id: "state-test:session:1".to_string(),
+                action: SessionReleaseAction::ReleaseForReuse,
+            },
+            *guard.release_state()
+        );
+    }
+
+    /// finish Ok 路径：Pending → Released（session 清空 + last_release_id 记录）
+    #[tokio::test]
+    async fn guard_release_state_released_after_finish() {
+        let manager = ConnectionManager::new();
+        let mut guard = SessionGuard::new(
+            manager,
+            "state-finish:session:1".to_string(),
+            SessionReleaseAction::Release,
+        );
+        set_test_release_result(Ok(()));
+        guard.finish().await;
+        assert_eq!(
+            GuardReleaseState::Released {
+                id: "state-finish:session:1".to_string(),
+            },
+            *guard.release_state()
+        );
+    }
+
+    /// finish Err 路径：仍为 Pending，且 action 已降级（RfR → Close），
+    /// 保留 Drop 兜底——这正是枚举化要钉死的"Pending 未完成"语义。
+    #[tokio::test]
+    async fn guard_release_state_pending_preserved_after_finish_err() {
+        let manager = ConnectionManager::new();
+        let mut guard = SessionGuard::new(
+            manager,
+            "state-err:session:1".to_string(),
+            SessionReleaseAction::ReleaseForReuse,
+        );
+        set_test_release_result(Err(DbError::connection("simulated failure")));
+        guard.finish().await;
+        assert_eq!(
+            GuardReleaseState::Pending {
+                id: "state-err:session:1".to_string(),
+                action: SessionReleaseAction::Close,
+            },
+            *guard.release_state()
+        );
+    }
+
+    /// 三变体派生映射的 round-trip 钉死：字段组合 ↔ 状态一一对应。
+    #[test]
+    fn guard_release_state_maps_all_field_combinations() {
+        let manager = ConnectionManager::new();
+        let mk = |state| SessionGuard {
+            manager: manager.clone(),
+            state,
+        };
+        assert_eq!(
+            GuardReleaseState::Idle,
+            *mk(GuardReleaseState::Idle).release_state()
+        );
+        assert_eq!(
+            GuardReleaseState::Pending {
+                id: "a".to_string(),
+                action: SessionReleaseAction::Close,
+            },
+            *mk(GuardReleaseState::Pending {
+                id: "a".to_string(),
+                action: SessionReleaseAction::Close,
+            })
+            .release_state()
+        );
+        assert_eq!(
+            GuardReleaseState::Released {
+                id: "b".to_string(),
+            },
+            *mk(GuardReleaseState::Released {
+                id: "b".to_string(),
+            })
+            .release_state()
         );
     }
 
