@@ -21,7 +21,6 @@ pub mod types;
 
 // Database implementations
 pub mod mysql;
-pub mod oracle_dialect;
 pub mod postgresql;
 pub mod sql_editor;
 pub mod sqlite;
