@@ -1126,6 +1126,14 @@ impl Drop for SessionGuard {
         // 仅记 error! 后**覆盖**旧值（不保留旧 id/action）——可能造成另一
         // 会话记录丢失。但 Drop 路径下我们先快照再 take，不存在 slot 非空
         // 场景，此处不受影响。
+        //
+        // **双重 panic 安全**（Round 27 P3-4 文档化）：
+        // Drop 在 panic 展栈期间也可能执行（future cancel / 业务 panic），
+        // 此时若 Drop 内部再 panic → 双重 panic → abort。
+        // 本函数路径**不调任何 debug_assert!**（drop_release_action 链路全
+        // 是纯函数 + 同步操作，无 panic 源）；release 构建下仅记 warn/error，
+        // 行为降级但不会 panic。**未来若有人加 debug_assert 到 downgrade 或
+        // compute_writeback_action，需特别小心**——会触发此双重 panic 风险。
         warn!(
             target: "db::session",
             session_id = %id,
