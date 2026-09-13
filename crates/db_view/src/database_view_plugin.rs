@@ -328,13 +328,25 @@ impl ManifestDatabaseViewPlugin {
                 last_group = Some(current_group);
             }
 
-            // DumpSqlStructure / DumpSqlData / DumpSqlStructureAndData 直接渲染为 3 个独立
-            // Item（不再合并为带 chevron 的 Submenu）：
-            // - PopupMenuItem::Submenu hover 展开受父 PopupMenu bounds clip，
-            //   与父菜单重叠、无法 hover 选中子项（详见 SUBMENU_HOVER_POSITION_PLAN.md）；
-            // - 扁平化后 3 个 dump_sql 各自是普通 Item，所在 "sql" 分组（Database 节点）
-            //   或 "dump" 分组（Schema/Table 节点）通过 `context_menu_group` 自然与
-            //   上下菜单项用分隔线隔开，无需额外手工分组逻辑。
+            if is_dump_sql_action(actions[index].id) {
+                let mut sub_items = Vec::new();
+
+                while index < actions.len() && is_dump_sql_action(actions[index].id) {
+                    if let Some(item) = action_to_context_menu_item(actions[index], node_id) {
+                        sub_items.push(item);
+                    }
+                    index += 1;
+                }
+
+                if !sub_items.is_empty() {
+                    items.push(ContextMenuItem::submenu(
+                        translate("ImportExport.dump_sql_file"),
+                        sub_items,
+                    ));
+                }
+                continue;
+            }
+
             if let Some(item) = action_to_context_menu_item(actions[index], node_id) {
                 items.push(item);
             }
@@ -409,6 +421,15 @@ fn action_to_context_menu_item(
     } else {
         ContextMenuItem::always_enabled_item(label, event)
     })
+}
+
+fn is_dump_sql_action(action_id: DatabaseActionId) -> bool {
+    matches!(
+        action_id,
+        DatabaseActionId::DumpSqlStructure
+            | DatabaseActionId::DumpSqlData
+            | DatabaseActionId::DumpSqlStructureAndData
+    )
 }
 
 fn context_menu_rank(node_type: DbNodeType, action_id: DatabaseActionId) -> usize {
@@ -908,26 +929,30 @@ mod tests {
     fn mysql_table_context_menu_keeps_dump_sql_submenu() {
         let items = mysql_manifest_plugin().build_context_menu("node-1", DbNodeType::Table);
 
-        // dump_sql 已扁平化为 3 个独立 Item（不再合并为带 chevron 的 Submenu）：
-        // 详见 SUBMENU_HOVER_POSITION_PLAN.md，PopupMenuItem::Submenu hover 展开
-        // 受父 PopupMenu bounds clip 与父菜单重叠，无法 hover 选中子项。
+        let dump_submenu = items.iter().find_map(|item| match item {
+            ContextMenuItem::Submenu { label, items, .. }
+                if label == &translate("ImportExport.dump_sql_file") =>
+            {
+                Some(items)
+            }
+            _ => None,
+        });
+
+        let dump_submenu = dump_submenu.expect("导出 SQL 二级菜单不应丢失");
         assert!(
-            has_label(&items, &translate("ImportExport.export_structure")),
-            "导出结构菜单项应直接显示在一级菜单中"
+            has_label(dump_submenu, &translate("ImportExport.export_structure")),
+            "导出结构菜单项应存在于二级菜单中"
         );
         assert!(
-            has_label(&items, &translate("ImportExport.export_data")),
-            "导出数据菜单项应直接显示在一级菜单中"
+            has_label(dump_submenu, &translate("ImportExport.export_data")),
+            "导出数据菜单项应存在于二级菜单中"
         );
         assert!(
-            has_label(&items, &translate("ImportExport.export_structure_and_data")),
-            "导出结构和数据菜单项应直接显示在一级菜单中"
-        );
-        assert!(
-            !items
-                .iter()
-                .any(|i| matches!(i, ContextMenuItem::Submenu { .. })),
-            "dump_sql 不应再合并为 Submenu"
+            has_label(
+                dump_submenu,
+                &translate("ImportExport.export_structure_and_data")
+            ),
+            "导出结构和数据菜单项应存在于二级菜单中"
         );
     }
 
@@ -944,16 +969,12 @@ mod tests {
             })
             .collect();
 
-        // dump_sql 扁平化后：原 Submenu 一项被替换为 3 个独立 Item；
-        // 都在同一个 "sql" 分组内（与 RunSqlFile 同组），不插入额外分隔线
         let expected = vec![
             translate("Table.new_table"),
             translate("Query.new_query"),
             "---".to_string(),
             translate("ImportExport.run_sql_file"),
-            translate("ImportExport.export_structure"),
-            translate("ImportExport.export_data"),
-            translate("ImportExport.export_structure_and_data"),
+            format!("submenu:{}", translate("ImportExport.dump_sql_file")),
             translate("ImportExport.data_transfer"),
             "---".to_string(),
             translate("Database.edit_database"),

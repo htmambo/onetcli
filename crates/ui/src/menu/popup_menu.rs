@@ -8,7 +8,7 @@ use gpui::{
     Action, AnyElement, App, AppContext, Bounds, Context, Corner, DismissEvent, Edges, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
     ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, anchored, div, prelude::FluentBuilder, px, rems,
+    WeakEntity, Window, anchored, div, point, prelude::FluentBuilder, px, rems,
 };
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
 use std::rc::Rc;
@@ -1285,15 +1285,10 @@ impl PopupMenu {
                             matches!(anchor, Corner::BottomLeft | Corner::BottomRight);
                         anchored()
                             .anchor(anchor)
-                            .child(
-                                div()
-                                    .id("submenu")
-                                    .occlude()
-                                    .when(is_bottom_pos, |this| this.bottom_0())
-                                    .when(!is_bottom_pos, |this| this.top_neg_1())
-                                    .left(left)
-                                    .child(menu.clone()),
-                            )
+                            // 偏移必须走 anchored().offset()：写在子元素 div 的 left 上
+                            // 会被当作普通 inset/margin，导致子菜单与父菜单重叠
+                            .offset(point(left, if is_bottom_pos { px(0.) } else { px(-1.) }))
+                            .child(div().id("submenu").occlude().child(menu.clone()))
                             .snap_to_window_with_margin(Edges::all(EDGE_PADDING))
                     })
                 }),
@@ -1352,7 +1347,15 @@ impl Render for PopupMenu {
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::dismiss))
             .on_mouse_down_out(cx.listener(Self::on_mouse_down_out))
-            .popover_style(cx)
+            // 不能用 popover_style()：其中 overflow_hidden 会把子菜单
+            // （anchored 元素需溢出父菜单 bounds 渲染）整体裁掉。
+            // 圆角背景由 bg + rounded 自身保证；菜单项高亮受 p_1 内边距约束，
+            // 不会触及四角，不依赖整体裁剪。
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
+            .shadow_lg()
+            .rounded(cx.theme().radius)
             .text_color(cx.theme().popover_foreground)
             .relative()
             .occlude()
