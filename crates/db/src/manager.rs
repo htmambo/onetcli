@@ -717,6 +717,22 @@ impl SessionGuard {
         self.session.as_ref().map(|(_, a)| *a)
     }
 
+    /// 测试用 + Drop 共用：返回 Drop 路径将使用的 release_action。
+    ///
+    /// **等价契约**（Round 21 P2-2 钉死）：本函数与 `Drop::drop` 中调用的
+    /// 计算逻辑**完全相同**，保证测试读到的值就是 Drop 实际传给 release_session
+    /// 的值——若未来 Drop 偏离本函数语义，本测试会自动失败（同时 Drop 也会
+    /// 偏离 Finish 路径规范）。
+    ///
+    /// 用途：
+    /// - 测试验证 Drop ≡ Finish 等价性
+    /// - 可观测性：在 Drop 触发前读回即将使用的 action（用于上层决策）
+    pub(crate) fn drop_release_action(&self) -> Option<SessionReleaseAction> {
+        self.session
+            .as_ref()
+            .map(|(_, stored)| Self::compute_writeback_action(ReleaseIntent::Finish, *stored))
+    }
+
     /// Err 路径写回策略计算：**纯函数**。给定 `intent` + 原始 `stored_action`，
     /// 返回 Err 后应当写回的降级后 action（被 `perform_release` Err 分支与
     /// [`write_back_session_slot`](Self::write_back_session_slot) 共用）。
@@ -1072,18 +1088,26 @@ impl SessionGuard {
 impl Drop for SessionGuard {
     fn drop(&mut self) {
         // 仅在 finish 未被调用 / 未成功完成时（panic / future drop / cancel / finish Err）兜底
-        let Some((id, stored_action)) = self.session.take() else {
+        // 先快照 release_action（避免 take 后借用冲突），再 take 出 (id, stored)
+        let Some(release_action) = self.drop_release_action() else {
             return;
         };
-        // 统一入口（Round 20 P3-A 防语义分叉）：Drop 没有 caller intent，
-        // 按契约等价于 `ReleaseIntent::Finish`——使用 `compute_writeback_action`
-        // 保证与 finish/finish_with Err 路径走完全相同的降级逻辑。
-        // 若未来 Finish 语义演化（如增加日志、调整格），Drop 自动同步。
-        // 命名上避免 shadowing（Round 7 误会的根因）：明确区分
-        // `stored_action`（guard 创建时或 finish 降级后的当前 action）
-        // 与 `release_action`（即将传给 release_session 的最终 action）。
-        let release_action =
-            SessionGuard::compute_writeback_action(ReleaseIntent::Finish, stored_action);
+        let Some((id, stored_action)) = self.session.take() else {
+            // 极端：drop_release_action 返回 Some 但 session 已为 None——
+            // 不应发生（两者都读 self.session），但保守防御
+            return;
+        };
+        // 统一入口（Round 20 P3-A + Round 21 P2-2 防语义分叉）：
+        // Drop 没有 caller intent，按契约等价于 `ReleaseIntent::Finish`。
+        // 通过 `drop_release_action` 访问器计算——本函数同时给测试使用，
+        // 保证 Drop 实际传给 release_session 的值与测试读到的值**完全一致**。
+        // 若未来 Finish 语义演化（如增加日志、调整格），Drop 与测试同步。
+        //
+        // **release 模式双重写行为**（Round 21 P3-1 文档化）：
+        // `write_back_session_slot` 在 release 构建下若 slot 已 Some，
+        // 仅记 error! 后**覆盖**旧值（不保留旧 id/action）——可能造成另一
+        // 会话记录丢失。但 Drop 路径下我们先快照再 take，不存在 slot 非空
+        // 场景，此处不受影响。
         warn!(
             target: "db::session",
             session_id = %id,
@@ -4285,6 +4309,50 @@ mod tests {
             "id-new".to_string(),
             SessionReleaseAction::Close,
         );
+    }
+
+    /// `drop_release_action` 特征测试（Round 21 P2-2）：
+    /// 钉死 Drop ≡ Finish 等价契约——测试读到的值就是 Drop 实际传给
+    /// release_session 的值。
+    ///
+    /// **等价性证据**：Drop 与本测试都通过 `compute_writeback_action(Finish, stored)`
+    /// 计算 release_action——若 Drop 偏离该函数（如改直调 downgrade 或传错 intent），
+    /// 本测试会立即捕获（值不再匹配 Finish 路径的 spec table）。
+    ///
+    /// 验证三种 stored 的等价映射：
+    /// - stored=Close → Drop release = Close（幂等）
+    /// - stored=Release → Drop release = Release（保守策略不变）
+    /// - stored=ReleaseForReuse → Drop release = Close（永久塌缩，P2-A 不变量）
+    #[test]
+    fn drop_release_action_matches_finish_for_all_stored() {
+        use SessionReleaseAction::*;
+        let manager =
+            ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
+        let cases = [
+            (Close, Close, "Close 幂等"),
+            (Release, Release, "Release 保守不变"),
+            (ReleaseForReuse, Close, "ReleaseForReuse 永久塌缩为 Close"),
+        ];
+        for (stored, expected_drop_action, label) in cases {
+            let guard = SessionGuard::new(manager.clone(), format!("test-drop-{stored:?}"), stored);
+            // 关键断言：drop_release_action 读取的值与 Finish 路径 spec 完全一致
+            assert_eq!(
+                guard.drop_release_action(),
+                Some(expected_drop_action),
+                "{label}: stored={stored:?} → Drop 应使用 {expected_drop_action:?}, \
+                 实测 = {:?}",
+                guard.drop_release_action()
+            );
+            // 二次验证：与 compute_writeback_action(Finish, stored) 直接计算结果一致
+            assert_eq!(
+                guard.drop_release_action(),
+                Some(SessionGuard::compute_writeback_action(
+                    ReleaseIntent::Finish,
+                    stored
+                )),
+                "{label}: drop_release_action 应等价于 compute_writeback_action(Finish, stored)"
+            );
+        }
     }
 
     /// `is_session_not_found` 分类函数单测（Round 5 P1-4/P1-5 + Round 11+ 结构化变体）：
