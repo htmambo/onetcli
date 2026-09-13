@@ -1124,6 +1124,36 @@ impl SessionGuard {
 
 impl Drop for SessionGuard {
     fn drop(&mut self) {
+        // **Panic guard**（Round 29 P3-4 修复）：
+        // Drop 可能在 panic 展栈期间执行（future cancel / 业务 panic），
+        // 用 std::panic::catch_unwind 包住——避免 Drop 内部意外 panic 升级为 abort。
+        // 捕获到 panic 后只记 error（best-effort 观测），不再传播。
+        //
+        // **为何不调 AssertUnwindSafe**：本函数内仅有：
+        // - 同步字段访问（self.session.take / drop_release_action / self.manager.clone）
+        // - tracing warn 宏（无条件）
+        // - tokio Handle 捕获
+        // - handle.spawn（异步，不在 catch_unwind 范围内）
+        // 全是 unwind-safe 操作，无需 AssertUnwindSafe 包装。
+        let drop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.drop_inner();
+        }));
+        if let Err(payload) = drop_result {
+            // Drop 内部 panic（不期望发生但保险起见捕获）
+            // payload 通常是 &str / String，无法安全 downcast 但可显示 debug
+            tracing::error!(
+                target: "db::session",
+                payload = ?payload,
+                "SessionGuard::drop panicked during best-effort release — \
+                 session will leak until idle timeout"
+            );
+        }
+    }
+}
+
+impl SessionGuard {
+    /// Drop 的实际逻辑（Round 29 拆分）：catch_unwind 包住本函数。
+    fn drop_inner(&mut self) {
         // 仅在 finish 未被调用 / 未成功完成时（panic / future drop / cancel / finish Err）兜底
         // 先快照 release_action（避免 take 后借用冲突），再 take 出 (id, stored)
         let Some(release_action) = self.drop_release_action() else {
@@ -1153,6 +1183,8 @@ impl Drop for SessionGuard {
         // 是纯函数 + 同步操作，无 panic 源）；release 构建下仅记 warn/error，
         // 行为降级但不会 panic。**未来若有人加 debug_assert 到 downgrade 或
         // compute_writeback_action，需特别小心**——会触发此双重 panic 风险。
+        //
+        // **Panic guard**（Round 29）：上层 `Drop::drop` 用 catch_unwind 包住本函数。
         warn!(
             target: "db::session",
             session_id = %id,
