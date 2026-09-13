@@ -60,9 +60,17 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
   - 编译期保证：match 无 `_` 通配臂，新增变体时编译失败
 - 新增 `db_error_code_is_stable_per_variant` 单测：钉死 code 全局唯一 + 纯函数
 
+### Round 23 → Round 24（commit 7158209b）
+- **取消安全修复**（Round 17 P3-5 backlog 关闭）：
+  - 修复前：perform_release await 前 take session，mid-await 取消导致 session 永久泄漏
+  - 修复后：as_ref 仅读副本，await 期间 session 仍 Some，Drop 可重试
+  - Ok 路径：await 后才 take（取消窗口关闭后安全清空）
+  - Err 路径：in-place mutation 替代 write_back_session_slot（保留 cancel-safe）
+- 新增 `perform_release_cancel_safety_preserves_session` 测试
+
 ## 最终状态
 
-- **测试**：41/41 manager 测试通过（含 8 个新测试）
+- **测试**：42/42 manager 测试通过（含 9 个新测试）
   - `release_intent_resolves_stored_or_override`
   - `compute_writeback_action_matrix`
   - `compute_writeback_action_literal_spec`（字面量规格表 12 格）
@@ -71,7 +79,9 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
   - `write_back_session_slot_rejects_double_write_in_debug`（cfg(debug_assertions)）
   - `drop_release_action_matches_finish_for_all_stored`
   - `db_error_code_is_stable_per_variant`
+  - `perform_release_cancel_safety_preserves_session`
 - **三层守卫**：编译期穷尽 + 运行期规格 + 显式不变量
+- **取消安全**：perform_release mid-await 取消不再导致 session 永久泄漏
 - **文档**：方案 B 钉死 + RfR 永久塌缩设计依据 + Drop ≡ Finish 等价性论证
 - **可观测性**：DbError::code 提供稳定 wire 格式错误码（IPC/metric/告警键）
 
@@ -96,6 +106,7 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
 | 869e1479 | RfR 定式收紧 + 守卫唯一性 + 不变量测试 |
 | d5130f75 | drop_release_action 访问器 + Drop ≡ Finish 等价测试 |
 | c9748c37 | DbError::code 机器可读错误码 |
+| 7158209b | perform_release 取消安全修复（Round 17 P3-5 backlog 关闭） |
 
 ## 已知局限（已文档化于 perform_release）
 
