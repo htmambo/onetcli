@@ -68,9 +68,32 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
   - Err 路径：in-place mutation 替代 write_back_session_slot（保留 cancel-safe）
 - 新增 `perform_release_cancel_safety_preserves_session` 测试
 
+### Round 26（commit cf286dba）— backlog #1 release_fn seam 闭环
+- **release_fn cfg(test) seam**：测试可通过 `set_test_release_result` 注入下一次 `release_session` 的返回值
+- 一次性 take 语义 + thread-local + 编译期擦除
+- 闭环 Round 17 P3-5 端到端 Err 测试
+- 新增 2 个集成测试：
+  - `perform_release_err_writes_back_downgraded_via_mock`
+  - `perform_release_err_drop_retry_uses_downgraded_action`
+
+### Round 27（commit 436a969b）— backlog #2 Drop panic 文档化
+- Drop doc 注释新增"双重 panic 安全"章节
+- 显式声明 Drop 路径不调任何 debug_assert + 未来变更警示
+
+### Round 28（commit 165b9ac7）— backlog #3 verify_failure_count metric
+- `ConnectionManager::verify_failure_count()` 公共 getter
+- AtomicU64 + Relaxed 内存序
+- verify 失败时递增 + warn 日志补字段
+- 新增 `verify_failure_count_increments_on_verify_error` 测试
+
+### Round 29（commit b753758a）— backlog #2 修复 Drop panic guard
+- Drop 拆分为 `drop()` + `drop_inner()`
+- `drop()` 用 `std::panic::catch_unwind` 包住 `drop_inner`
+- 即使未来意外引入 panic 也仅记 error 而非升级为 abort
+
 ## 最终状态
 
-- **测试**：42/42 manager 测试通过（含 9 个新测试）
+- **测试**：45/45 manager 测试通过（含 11 个新测试）
   - `release_intent_resolves_stored_or_override`
   - `compute_writeback_action_matrix`
   - `compute_writeback_action_literal_spec`（字面量规格表 12 格）
@@ -80,10 +103,16 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
   - `drop_release_action_matches_finish_for_all_stored`
   - `db_error_code_is_stable_per_variant`
   - `perform_release_cancel_safety_preserves_session`
+  - `perform_release_err_writes_back_downgraded_via_mock`（mock 注入）
+  - `perform_release_err_drop_retry_uses_downgraded_action`（mock 注入）
+  - `verify_failure_count_increments_on_verify_error`
 - **三层守卫**：编译期穷尽 + 运行期规格 + 显式不变量
 - **取消安全**：perform_release mid-await 取消不再导致 session 永久泄漏
-- **文档**：方案 B 钉死 + RfR 永久塌缩设计依据 + Drop ≡ Finish 等价性论证
+- **端到端 Err 测试**：cfg(test) mock seam 让 perform_release Err 路径可集成测试
+- **panic guard**：Drop 内部意外 panic 不升级为 abort
 - **可观测性**：DbError::code 提供稳定 wire 格式错误码（IPC/metric/告警键）
+  + verify_failure_count metric 监控 verify 失败率
+- **文档**：方案 B 钉死 + RfR 永久塌缩设计依据 + Drop ≡ Finish 等价性论证
 
 ## 文件变更
 
@@ -107,6 +136,10 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
 | d5130f75 | drop_release_action 访问器 + Drop ≡ Finish 等价测试 |
 | c9748c37 | DbError::code 机器可读错误码 |
 | 7158209b | perform_release 取消安全修复（Round 17 P3-5 backlog 关闭） |
+| cf286dba | release_fn cfg(test) seam 闭环端到端 Err 测试 |
+| 436a969b | Drop 双重 panic 安全不变式文档化 |
+| 165b9ac7 | verify_failure_count metric（Round 28 可观测性） |
+| b753758a | Drop panic guard（catch_unwind 防 abort 升级） |
 
 ## 已知局限（已文档化于 perform_release）
 
