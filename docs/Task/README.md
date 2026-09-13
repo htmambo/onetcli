@@ -7,6 +7,9 @@
 ## 已完成任务 (Archive)
 
 ### 2026-09
+- ✅ [数据库 import/export session 生命周期泄漏修复](Archive/2026-09/SESSION_LEAK_FIX_PLAN.md) - 完成于 2026-09-13（SessionGuard RAII + Drop best-effort close；7 阶段全部完成：P0-1 panic/cancel 兜底 / P0-2 决策单源 / P0-3 事务回滚 / P1-4 共享分类函数 / P1-5 幂等保护 / P1-4 裸 API 私有化 / P2-4 5 类生命周期测试 + 多线程并发 + rollback 追踪；3 个 commit `51ba141f` + `fc465b69` + `556bfd1c`；外部评审 Round 6 + Round 11 verdict=APPROVED；454 db crate 测试通过；0 新增 clippy 警告；session 生命周期问题 P0-1/P0-2 全修复 + 脏复用防护 + cancel/panic 兜底 + 事务回滚）
+
+### 2026-09
 - ✅ [dump_sql 上下文菜单扁平化为 3 个独立 Item](Archive/2026-09/SUBMENU_FLATTEN_PLAN.md) - 完成于 2026-09-13（用户最终决策扁平化妥协方案：crash 修复 dump_sql 三个 Submenu 子项 hover 与父 PopupMenu 重叠无法选中的问题；build_context_menu 去除 is_dump_sql_action 合并分支，3 个 dump_sql action 直接渲染为 Item，由 context_menu_group 自然分组 + 分隔线分隔；测试断言更新为 3 个 Item 各自存在；mysql_table_context_menu / mysql_database_context_menu 单测 3/3 通过）
 - ✅ [数据库 import/export tokio reactor panic 修复](Archive/2026-09/DB_IMPORT_EXPORT_TOKIO_REACTOR_PANIC_PLAN.md) - 完成于 2026-09-13（修复 MySQL/SQLite 表右键"导出 SQL / 导出表 / 导入表"在 GPUI BackgroundExecutor 上 `tokio::spawn_blocking` 找不到 reactor 的 panic：export_data_with_progress_sync / import_data_with_progress_sync 加 cx: &mut AsyncApp 参数、内部用 Tokio::spawn_result 包裹；3 个调用方从 cx.background_spawn 改为 cx.spawn(async move |cx| { ... })；用户实测 MySQL 转储结构和数据可正常完成导出）
 - 📋 [Submenu hover 展开 PopupMenu 框架层修复](Archive/2026-09/SUBMENU_HOVER_POSITION_PLAN.md) - 待规划（dump_sql 扁平化的妥协方案；PopupMenuItem::Submenu hover 展开受父 PopupMenu bounds clip + 嵌套 deferred 限制，需要 ContextMenuSharedState 扩展 + PopupMenu 多层支持，范围超出本次提交）
