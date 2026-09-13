@@ -47,18 +47,33 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
 - P2-3 守卫唯一性：any → count == 1（既防漏又防重复/冲突）
 - P3-3 不变量命名测试：单独钉死"输出 ⊆ {Close, Release}"
 
+### Round 21 → Round 22（commit d5130f75）
+- P2-2 Drop ≡ Finish 等价特征测试：新增 `drop_release_action` 访问器
+  - Drop 与测试共用同一函数（先快照再 take session，避免借用冲突）
+  - 钉死三种 stored 的 Drop 映射（Close→Close、Release→Release、RfR→Close）
+- P3-1 release 模式双重写行为：Drop doc 注释补说明
+
+### Round 22 → Round 23（commit c9748c37）
+- 新增 `DbError::code()` 方法：机器可读错误码（wire 格式稳定）
+  - 8 个变体 → `db.<variant_snake_case>` 字符串
+  - 与 `variant_tag()` 区分：code 是面向外部系统的稳定格式
+  - 编译期保证：match 无 `_` 通配臂，新增变体时编译失败
+- 新增 `db_error_code_is_stable_per_variant` 单测：钉死 code 全局唯一 + 纯函数
+
 ## 最终状态
 
-- **测试**：39/39 manager 测试通过（含 7 个新测试）
-  - `restore_session_with_downgraded_action_slot_write_semantics` (已重命名)
+- **测试**：41/41 manager 测试通过（含 8 个新测试）
   - `release_intent_resolves_stored_or_override`
   - `compute_writeback_action_matrix`
   - `compute_writeback_action_literal_spec`（字面量规格表 12 格）
+  - `compute_writeback_action_output_domain_excludes_release_for_reuse`
   - `write_back_session_slot_semantics`
   - `write_back_session_slot_rejects_double_write_in_debug`（cfg(debug_assertions)）
-  - `compute_writeback_action_output_domain_excludes_release_for_reuse`
+  - `drop_release_action_matches_finish_for_all_stored`
+  - `db_error_code_is_stable_per_variant`
 - **三层守卫**：编译期穷尽 + 运行期规格 + 显式不变量
 - **文档**：方案 B 钉死 + RfR 永久塌缩设计依据 + Drop ≡ Finish 等价性论证
+- **可观测性**：DbError::code 提供稳定 wire 格式错误码（IPC/metric/告警键）
 
 ## 文件变更
 
@@ -79,6 +94,8 @@ session_leak_fix_plan 主任务（7 阶段全部完成 + 外部评审 Round 6/11
 | b758ad29 | write_back_session_slot 重命名 + 字面量规格 |
 | 257a7e87 | RfR 设计依据 + Drop 入口统一 |
 | 869e1479 | RfR 定式收紧 + 守卫唯一性 + 不变量测试 |
+| d5130f75 | drop_release_action 访问器 + Drop ≡ Finish 等价测试 |
+| c9748c37 | DbError::code 机器可读错误码 |
 
 ## 已知局限（已文档化于 perform_release）
 
