@@ -2416,8 +2416,14 @@ impl GlobalDbState {
     }
 
     /// Export data with progress callback (sync version for background tasks)
+    ///
+    /// 与 `export_data_with_progress` 同语义，但供已在 GPUI BackgroundExecutor 上的调用方使用：
+    /// 内部用 `Tokio::spawn_result` 把 connect / 数据导出等需要 tokio runtime 的步骤
+    /// 派发到 tokio runtime，避免在 GPUI BackgroundExecutor 上 `tokio::spawn_blocking`
+    /// 或 `tokio::time::timeout` 找不到 reactor 而 panic。
     pub async fn export_data_with_progress_sync(
         &self,
+        cx: &mut AsyncApp,
         connection_id: String,
         config: ExportConfig,
         progress_tx: Option<ExportProgressSender>,
@@ -2426,32 +2432,37 @@ impl GlobalDbState {
             .get_config(&connection_id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found: {}", connection_id))?;
 
-        let plugin = self.get_plugin(&db_config.database_type)?;
-        let session_id = self
-            .connection_manager
-            .create_session(db_config.clone(), &self.db_manager)
-            .await?;
-
-        let result = {
-            let mut guard = self
+        let clone_self = self.clone();
+        Tokio::spawn_result(cx, async move {
+            let plugin = clone_self.get_plugin(&db_config.database_type)?;
+            let session_id = clone_self
                 .connection_manager
-                .get_session_connection(&session_id)
+                .create_session(db_config.clone(), &clone_self.db_manager)
                 .await?;
-            let conn = guard
-                .connection()
-                .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
-            plugin
-                .export_data_with_progress(conn, &config, progress_tx)
+
+            let result = {
+                let mut guard = clone_self
+                    .connection_manager
+                    .get_session_connection(&session_id)
+                    .await?;
+                let conn = guard
+                    .connection()
+                    .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
+                plugin
+                    .export_data_with_progress(conn, &config, progress_tx)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))
+            };
+
+            clone_self
+                .connection_manager
+                .release_session(&session_id)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))
-        };
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        self.connection_manager
-            .release_session(&session_id)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        result
+            result
+        })
+        .await
     }
 
     /// Import data
@@ -2503,6 +2514,7 @@ impl GlobalDbState {
     /// Import data with progress callback (sync version for background tasks)
     pub async fn import_data_with_progress_sync(
         &self,
+        cx: &mut AsyncApp,
         connection_id: String,
         config: ImportConfig,
         data: String,
@@ -2513,32 +2525,38 @@ impl GlobalDbState {
             .get_config(&connection_id)
             .ok_or_else(|| anyhow::anyhow!("Connection not found: {}", connection_id))?;
 
-        let plugin = self.get_plugin(&db_config.database_type)?;
-        let session_id = self
-            .connection_manager
-            .create_session(db_config.clone(), &self.db_manager)
-            .await?;
-
-        let result = {
-            let mut guard = self
+        let clone_self = self.clone();
+        let file_name = file_name.to_string();
+        Tokio::spawn_result(cx, async move {
+            let plugin = clone_self.get_plugin(&db_config.database_type)?;
+            let session_id = clone_self
                 .connection_manager
-                .get_session_connection(&session_id)
+                .create_session(db_config.clone(), &clone_self.db_manager)
                 .await?;
-            let conn = guard
-                .connection()
-                .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
-            plugin
-                .import_data_with_progress(conn, &config, &data, file_name, progress_tx)
+
+            let result = {
+                let mut guard = clone_self
+                    .connection_manager
+                    .get_session_connection(&session_id)
+                    .await?;
+                let conn = guard
+                    .connection()
+                    .ok_or_else(|| anyhow::anyhow!("Session connection not found"))?;
+                plugin
+                    .import_data_with_progress(conn, &config, &data, &file_name, progress_tx)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))
+            };
+
+            clone_self
+                .connection_manager
+                .release_session(&session_id)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))
-        };
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        self.connection_manager
-            .release_session(&session_id)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        result
+            result
+        })
+        .await
     }
 
     /// Pure async version of `list_tables` — can be called from any tokio context

@@ -1,6 +1,7 @@
 use gpui::{
-    App, AppContext, ClickEvent, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder, px,
+    App, AppContext, AsyncApp, ClickEvent, Context, Entity, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div,
+    prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, TitleBar, VirtualListScrollHandle,
@@ -261,9 +262,10 @@ impl SqlDumpView {
             let global_state_clone = global_state.clone();
             let connection_id_clone = connection_id.clone();
 
-            let export_handle = cx.background_spawn(async move {
+            let export_handle = cx.spawn(async move |cx: &mut AsyncApp| {
                 global_state_clone
                     .export_data_with_progress_sync(
+                        cx,
                         connection_id_clone,
                         export_config,
                         Some(progress_tx),

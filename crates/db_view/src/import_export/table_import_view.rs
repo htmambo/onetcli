@@ -2,9 +2,9 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled,
-    Window, div, prelude::FluentBuilder, px,
+    App, AppContext, AsyncApp, Context, Entity, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IconName, IndexPath, TitleBar, VirtualListScrollHandle,
@@ -495,9 +495,10 @@ impl TableImportView {
             let connection_id_clone = connection_id.clone();
             let file_name = file_path_str.clone();
 
-            let import_handle = cx.background_spawn(async move {
+            let import_handle = cx.spawn(async move |cx: &mut AsyncApp| {
                 global_state_clone
                     .import_data_with_progress_sync(
+                        cx,
                         connection_id_clone,
                         import_config,
                         data,
