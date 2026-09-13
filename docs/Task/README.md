@@ -7,6 +7,9 @@
 ## 已完成任务 (Archive)
 
 ### 2026-09
+- ✅ [dump_sql 上下文菜单扁平化为 3 个独立 Item](Archive/2026-09/SUBMENU_FLATTEN_PLAN.md) - 完成于 2026-09-13（用户最终决策扁平化妥协方案：crash 修复 dump_sql 三个 Submenu 子项 hover 与父 PopupMenu 重叠无法选中的问题；build_context_menu 去除 is_dump_sql_action 合并分支，3 个 dump_sql action 直接渲染为 Item，由 context_menu_group 自然分组 + 分隔线分隔；测试断言更新为 3 个 Item 各自存在；mysql_table_context_menu / mysql_database_context_menu 单测 3/3 通过）
+- ✅ [数据库 import/export tokio reactor panic 修复](Archive/2026-09/DB_IMPORT_EXPORT_TOKIO_REACTOR_PANIC_PLAN.md) - 完成于 2026-09-13（修复 MySQL/SQLite 表右键"导出 SQL / 导出表 / 导入表"在 GPUI BackgroundExecutor 上 `tokio::spawn_blocking` 找不到 reactor 的 panic：export_data_with_progress_sync / import_data_with_progress_sync 加 cx: &mut AsyncApp 参数、内部用 Tokio::spawn_result 包裹；3 个调用方从 cx.background_spawn 改为 cx.spawn(async move |cx| { ... })；用户实测 MySQL 转储结构和数据可正常完成导出）
+- 📋 [Submenu hover 展开 PopupMenu 框架层修复](Archive/2026-09/SUBMENU_HOVER_POSITION_PLAN.md) - 待规划（dump_sql 扁平化的妥协方案；PopupMenuItem::Submenu hover 展开受父 PopupMenu bounds clip + 嵌套 deferred 限制，需要 ContextMenuSharedState 扩展 + PopupMenu 多层支持，范围超出本次提交）
 - ✅ [AI 输入框上下箭头历史记录](Archive/2026-09/INPUT_HISTORY_PLAN.md) - 完成于 2026-09-05（提交 `09e8f125` + `d45361fe`：InputHistory 公共状态机 + 三宿主接入；36/36 单测通过；SSH 终端启动 panic 在修复 `cx.on_action` 误用后解决）
 - ✅ [AI 输入框历史记录方向 + 浏览语义重构](Archive/2026-09/INPUT_HISTORY_DIRECTION_REWORK_PLAN.md) - 完成于 2026-09-05（按用户需求 ↑/↓ 方向反转；新增 apply_pending_edit 临时副本落定 + can_submit_in_browse 空提交拦截 + escape ESC 复位 + 异步全局历史加载（AiChatPanel 路径）；外部评审 Round 2/4 反馈的 P1-1 ESC 三重守卫已修复；36/36 单测通过；用户实测 SSH terminal AI 助手跨会话历史可见）
 - ✅ [AI 助手 Thinking 可折叠面板](Archive/2026-09/THINKING_PANEL_PLAN.md) - 完成于 2026-09-05（新增 crates/core/src/ai_chat/thinking.rs：split_thinking_blocks 解析函数 + ThinkingPanel 可折叠组件；折叠态 60px + flex column + justify_end 让最新思考贴底；集成到 render_assistant_content；markdown.rs 把 cfg!(debug_assertions) warn 降级为 trace；10/10 thinking 单测通过；External Review MCP Round 5 verdict=APPROVED；解决日志中持续刷屏的 `unsupported inline html tag` 警告）
