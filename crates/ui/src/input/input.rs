@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, DefiniteLength, Edges, EdgesRefinement, Entity, Hsla, InteractiveElement as _,
-    IntoElement, IsZero, MouseButton, ParentElement as _, Pixels, Rems, RenderOnce, StyleRefinement,
-    Styled, TextAlign, Window, div, px, relative,
+    IntoElement, IsZero, MouseButton, ParentElement as _, Pixels, Rems, RenderOnce,
+    StyleRefinement, Styled, TextAlign, Window, div, px, relative,
 };
 
 use crate::button::{Button, ButtonVariants as _};
@@ -454,7 +454,9 @@ impl RenderOnce for Input {
             .when(self.appearance, |this| {
                 this.bg(bg)
                     .text_color(fg)
-                    .when(self.disabled && self.dim_when_disabled, |this| this.opacity(0.5))
+                    .when(self.disabled && self.dim_when_disabled, |this| {
+                        this.opacity(0.5)
+                    })
                     .when(self.bordered, |this| {
                         this.border_color(cx.theme().input)
                             .border_1()

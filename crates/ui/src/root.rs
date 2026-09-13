@@ -10,7 +10,7 @@ use crate::{
 use gpui::{
     AnyView, App, AppContext, Context, DefiniteLength, Entity, FocusHandle, InteractiveElement,
     IntoElement, KeyBinding, ParentElement as _, Pixels, Render, StyleRefinement, Styled,
-    WeakFocusHandle, Window, actions, div, prelude::FluentBuilder as _, px
+    WeakFocusHandle, Window, actions, div, prelude::FluentBuilder as _, px,
 };
 use std::{any::TypeId, cell::RefCell, rc::Rc};
 

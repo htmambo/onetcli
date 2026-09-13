@@ -8,9 +8,7 @@ use rust_i18n::t;
 
 use crate::input_values::{non_empty_text, parse_port, trimmed_text};
 use crate::persistence::save_connection;
-use crate::selects::{
-    ForwardingKindSelectItem, SshConnectionSelectItem, WorkspaceSelectItem,
-};
+use crate::selects::{ForwardingKindSelectItem, SshConnectionSelectItem, WorkspaceSelectItem};
 
 pub struct PortForwardingFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
@@ -263,5 +261,4 @@ impl PortForwardingFormWindow {
             .cloned()
             .flatten()
     }
-
 }

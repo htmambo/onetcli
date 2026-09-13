@@ -74,7 +74,9 @@ impl GlobalProxySettings {
         }
 
         if self.username.trim().is_empty() && !self.password.is_empty() {
-            return Err(t!("Settings.General.Proxy.validation_password_requires_username").to_string());
+            return Err(
+                t!("Settings.General.Proxy.validation_password_requires_username").to_string(),
+            );
         }
 
         Ok(())

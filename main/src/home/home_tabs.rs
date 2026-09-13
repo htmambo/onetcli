@@ -183,15 +183,6 @@ impl HomePage {
             }),
             ConnectionType::PortForwarding => None,
             ConnectionType::Rdp | ConnectionType::Vnc => None,
-            ConnectionType::Serial => tabs.tabs().iter().enumerate().find_map(|(index, tab)| {
-                let view = tab.content().view();
-                let terminal = view.downcast::<TerminalView>().ok()?;
-                let terminal = terminal.read(cx);
-
-                (terminal.connection_kind(cx) == TerminalConnectionKind::Serial
-                    && terminal.connection_id(cx) == Some(connection_id))
-                .then_some(index)
-            }),
             ConnectionType::SshSftp => {
                 let mut sftp_fallback_index = None;
 
@@ -262,9 +253,6 @@ impl HomePage {
             }
             ConnectionType::PortForwarding => {}
             ConnectionType::Rdp | ConnectionType::Vnc => {}
-            ConnectionType::Serial => {
-                self.open_serial_terminal(connection.clone(), window, cx);
-            }
             _ => {}
         }
     }
@@ -698,42 +686,6 @@ impl HomePage {
         }
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
-            tc.add_and_activate_tab_with_focus(tab, window, cx);
-        });
-    }
-
-    pub(crate) fn open_serial_terminal(
-        &mut self,
-        conn: StoredConnection,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let conn_id = conn.id.unwrap_or(0);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let tab_id = format!("serial-terminal-{}-{}", conn_id, timestamp);
-
-        let prefix = format!("serial-terminal-{}-", conn_id);
-        let existing_count = self
-            .tab_container
-            .read(cx)
-            .tabs()
-            .iter()
-            .filter(|t| t.id().starts_with(&prefix))
-            .count();
-        let tab_index = if existing_count > 0 {
-            Some(existing_count + 1)
-        } else {
-            None
-        };
-
-        let terminal_view =
-            cx.new(|cx| TerminalView::new_serial_with_index(conn, tab_index, window, cx));
-        self.setup_terminal_view(&terminal_view, window, cx);
-        self.tab_container.update(cx, |tc, cx| {
-            let tab = TabItem::new(tab_id, "serial", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);
         });
     }
@@ -1274,19 +1226,6 @@ impl HomePage {
                                 .cloned()
                             {
                                 self.open_ssh_terminal(conn, window, cx);
-                            }
-                        }
-                    }
-                    TerminalConnectionKind::Serial => {
-                        let conn_id = terminal_view.read(cx).connection_id(cx);
-                        if let Some(conn_id) = conn_id {
-                            if let Some(conn) = self
-                                .connections
-                                .iter()
-                                .find(|c| c.id == Some(conn_id))
-                                .cloned()
-                            {
-                                self.open_serial_terminal(conn, window, cx);
                             }
                         }
                     }

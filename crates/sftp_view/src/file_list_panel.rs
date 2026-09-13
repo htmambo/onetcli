@@ -4,13 +4,14 @@ use gpui::{
     SharedString, Styled, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, h_flex,
+    ActiveTheme, ElementExt, Icon, IconName, InteractiveElementExt, Sizable, WindowsSurfaceLayer,
+    h_flex,
     input::{Input, InputEvent, InputState},
+    layered_surface_color,
     menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
     scroll::{Scrollbar, ScrollbarShow},
     tooltip::Tooltip,
     v_flex,
-    WindowsSurfaceLayer, layered_surface_color,
 };
 use rust_i18n::t;
 use std::collections::HashSet;
@@ -1006,16 +1007,6 @@ impl FileListPanel {
             );
 
             if !is_dir {
-                menu = menu.item(
-                    PopupMenuItem::new(t!("Common.edit").to_string())
-                        .icon(IconName::Edit)
-                        .on_click(window.listener_for(&view_edit, move |_this, _, _, cx| {
-                            cx.emit(FileListPanelEvent::Edit {
-                                full_path: path_for_edit.clone(),
-                            });
-                        })),
-                );
-
                 if crate::archive_kind_for_name(name).is_some() {
                     let view_extract = view.clone();
                     let extract_name = name.to_string();
@@ -1353,9 +1344,6 @@ pub enum FileListPanelEvent {
     /// 下载文件/文件夹
     Download {
         name: String,
-        full_path: String,
-    },
-    Edit {
         full_path: String,
     },
     /// 远程解压压缩包

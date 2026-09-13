@@ -221,7 +221,9 @@ impl RateLimiter {
             entry.count = 0;
         }
         if entry.count >= self.config.max_qps_per_host.get() {
-            return Err(RemoteGuardError::RateLimited { host: host.to_string() });
+            return Err(RemoteGuardError::RateLimited {
+                host: host.to_string(),
+            });
         }
         entry.count += 1;
         Ok(())
@@ -251,14 +253,22 @@ mod tests {
     fn test_check_url_rejects_loopback_v4() {
         let guard = RemoteGuard::shared();
         let err = guard.check_url("http://127.0.0.1/secret").unwrap_err();
-        assert!(matches!(err, RemoteGuardError::PrivateAddress(IpAddr::V4(_))));
+        assert!(matches!(
+            err,
+            RemoteGuardError::PrivateAddress(IpAddr::V4(_))
+        ));
     }
 
     #[test]
     fn test_check_url_rejects_aws_metadata_ip() {
         let guard = RemoteGuard::shared();
-        let err = guard.check_url("http://169.254.169.254/latest/meta-data").unwrap_err();
-        assert!(matches!(err, RemoteGuardError::PrivateAddress(IpAddr::V4(_))));
+        let err = guard
+            .check_url("http://169.254.169.254/latest/meta-data")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RemoteGuardError::PrivateAddress(IpAddr::V4(_))
+        ));
     }
 
     #[test]
@@ -269,15 +279,11 @@ mod tests {
             RemoteGuardError::PrivateAddress(_)
         ));
         assert!(matches!(
-            guard
-                .check_url("http://192.168.1.1/")
-                .unwrap_err(),
+            guard.check_url("http://192.168.1.1/").unwrap_err(),
             RemoteGuardError::PrivateAddress(_)
         ));
         assert!(matches!(
-            guard
-                .check_url("http://172.16.0.1/")
-                .unwrap_err(),
+            guard.check_url("http://172.16.0.1/").unwrap_err(),
             RemoteGuardError::PrivateAddress(_)
         ));
     }
@@ -307,7 +313,10 @@ mod tests {
         let guard = RemoteGuard::new(cfg);
         assert!(matches!(
             guard.check_body_size(2048).unwrap_err(),
-            RemoteGuardError::BodyTooLarge { size: 2048, limit: 1024 }
+            RemoteGuardError::BodyTooLarge {
+                size: 2048,
+                limit: 1024
+            }
         ));
     }
 

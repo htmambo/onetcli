@@ -9,18 +9,18 @@ use gpui::{
     StatefulInteractiveElement, Styled, Task, Window, div, prelude::FluentBuilder, px, relative,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _,
+    ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _, WindowsSurfaceLayer,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     dialog::DialogButtonProps,
     h_flex,
     highlighter::Language,
     input::{Input, InputEvent, InputState},
+    layered_level_surface_color,
     radio::Radio,
     select::{Select, SelectEvent, SelectItem, SelectState},
     spinner::Spinner,
     v_flex,
-    WindowsSurfaceLayer, layered_level_surface_color,
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::tab_container::{TabContent, TabContentEvent};
@@ -2311,7 +2311,10 @@ impl KeyValueView {
 
     /// 渲染 String 编辑器（使用 Input 组件）
     fn render_string_editor(&self, _cx: &mut Context<Self>) -> impl IntoElement {
-        Input::new(&self.string_editor).size_full().cleanable(false).rounded(px(0.0))
+        Input::new(&self.string_editor)
+            .size_full()
+            .cleanable(false)
+            .rounded(px(0.0))
     }
 
     /// 渲染底部状态栏

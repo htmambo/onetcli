@@ -7,9 +7,7 @@ use crate::{
     build_remote_extract_command, build_remote_extract_conflict_check_command, exec_remote_command,
     join_remote_path, remote_extract_has_conflict,
 };
-use gpui::{
-    AppContext, ClipboardItem, Context, ParentElement, Styled, Window, div, px,
-};
+use gpui::{AppContext, ClipboardItem, Context, ParentElement, Styled, Window, div, px};
 use gpui_component::{
     WindowExt,
     button::{Button, ButtonVariants as _},
@@ -54,8 +52,7 @@ impl SftpView {
             window.push_notification(Notification::error(t!("Error.extract_unsupported")), cx);
             return;
         };
-        let Some(check_command) =
-            build_remote_extract_conflict_check_command(&full_path, &name)
+        let Some(check_command) = build_remote_extract_conflict_check_command(&full_path, &name)
         else {
             window.push_notification(Notification::error(t!("Error.extract_unsupported")), cx);
             return;
@@ -390,9 +387,6 @@ impl ContextMenuHandler for SftpView {
                 full_path: _,
             } => {
                 self.download_selected(window, cx);
-            }
-            FileListPanelEvent::Edit { full_path } => {
-                self.open_remote_editor(full_path.clone(), window, cx);
             }
             FileListPanelEvent::Extract { name, full_path } => {
                 self.extract_archive(name.clone(), full_path.clone(), window, cx);

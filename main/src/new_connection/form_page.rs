@@ -7,7 +7,7 @@ use redis_view::{RedisFormWindow, RedisFormWindowConfig};
 use remote_desktop_view::remote_desktop_form::{
     RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig,
 };
-use terminal_view::{SerialFormWindow, SerialFormWindowConfig, SshFormWindow, SshFormWindowConfig};
+use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::home_tab::HomePage;
 use crate::new_connection::NewConnectionWindow;
@@ -42,7 +42,6 @@ impl NewConnectionFormPage for NewConnectionKind {
             Self::Ssh => build_ssh_form(parent, window, cx),
             Self::Redis => build_redis_form(parent, window, cx),
             Self::MongoDB => build_mongo_form(parent, window, cx),
-            Self::Serial => build_serial_form(parent, window, cx),
             Self::PortForwarding => build_port_forwarding_form(parent, window, cx),
             Self::Rdp => build_remote_desktop_form(parent, RemoteDesktopProtocol::Rdp, window, cx),
             Self::Vnc => build_remote_desktop_form(parent, RemoteDesktopProtocol::Vnc, window, cx),
@@ -188,37 +187,6 @@ fn build_mongo_form(
     };
 
     NewConnectionFormResult::Form(cx.new(|cx| MongoFormWindow::new(config, window, cx)).into())
-}
-
-fn build_serial_form(
-    parent: Entity<HomePage>,
-    window: &mut Window,
-    cx: &mut Context<NewConnectionWindow>,
-) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, _cx| {
-        if !home.is_master_key_ready_for_new_connection() {
-            return None;
-        }
-
-        let editing_connection = home.editing_connection_id.and_then(|id| {
-            home.connections
-                .iter()
-                .find(|c| c.id == Some(id) && c.connection_type == ConnectionType::Serial)
-                .cloned()
-        });
-        home.editing_connection_id = None;
-        Some(SerialFormWindowConfig {
-            editing_connection,
-            workspaces: home.workspaces.clone(),
-        })
-    }) else {
-        return NewConnectionFormResult::Blocked;
-    };
-
-    NewConnectionFormResult::Form(
-        cx.new(|cx| SerialFormWindow::new(config, window, cx))
-            .into(),
-    )
 }
 
 fn build_port_forwarding_form(

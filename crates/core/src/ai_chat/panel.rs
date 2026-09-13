@@ -25,8 +25,8 @@ use gpui_component::{
     dialog::DialogButtonProps,
     h_flex,
     input::{
-        HistoryAction, HistoryEscape, HistoryNext, HistoryPrev, HistorySearch, Input, InputEvent, InputHistory,
-        InputState, is_at_first_line_top, is_at_last_line_bottom,
+        HistoryAction, HistoryEscape, HistoryNext, HistoryPrev, HistorySearch, Input, InputEvent,
+        InputHistory, InputState, is_at_first_line_top, is_at_last_line_bottom,
     },
     list::{List, ListState},
     popover::Popover,

@@ -296,11 +296,7 @@ impl KeyStorage for LocalFileStorage {
 }
 
 /// 用指定 key 尝试解密；返回 Option<String>（失败返回 None 不抛错）。
-fn try_decrypt(
-    key: &[u8; 32],
-    nonce_bytes: &[u8; 12],
-    ciphertext: &[u8],
-) -> Option<String> {
+fn try_decrypt(key: &[u8; 32], nonce_bytes: &[u8; 12], ciphertext: &[u8]) -> Option<String> {
     let cipher = Aes256Gcm::new_from_slice(key).ok()?;
     let nonce = Nonce::from_slice(nonce_bytes);
     let plaintext = cipher.decrypt(nonce, ciphertext).ok()?;

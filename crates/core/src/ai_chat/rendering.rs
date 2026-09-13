@@ -5,7 +5,7 @@
 
 use crate::ai_chat::panel::CodeBlockActionRegistry;
 use crate::ai_chat::reasoning;
-use crate::ai_chat::thinking::{split_thinking_blocks, ThinkingPanel};
+use crate::ai_chat::thinking::{ThinkingPanel, split_thinking_blocks};
 use crate::ai_chat::types::{
     ChatMessageUIGeneric, ChatRole, MessageExtension, MessageVariant, ToolCallStatus,
 };

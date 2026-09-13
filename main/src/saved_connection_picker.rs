@@ -632,7 +632,6 @@ fn supports_saved_connection_picker(connection_type: ConnectionType) -> bool {
             | ConnectionType::SshSftp
             | ConnectionType::Redis
             | ConnectionType::MongoDB
-            | ConnectionType::Serial
             | ConnectionType::PortForwarding
             | ConnectionType::Rdp
             | ConnectionType::Vnc
@@ -721,7 +720,7 @@ mod tests {
         let connections = vec![
             connection(11, "B-数据库", ConnectionType::Database, Some(2), 5),
             connection(12, "A-Redis", ConnectionType::Redis, Some(2), 1),
-            connection(21, "串口", ConnectionType::Serial, Some(1), 0),
+            connection(21, "转发", ConnectionType::PortForwarding, Some(1), 0),
             connection(31, "未分配 SSH", ConnectionType::SshSftp, None, 0),
         ];
 

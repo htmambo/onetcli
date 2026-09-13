@@ -220,7 +220,6 @@ pub struct ThemeColor {
     /// Table row border color.
     pub table_row_border: Hsla,
 
-
     /// Warning background color.
     pub warning: Hsla,
     /// Warning active background color.
@@ -231,7 +230,6 @@ pub struct ThemeColor {
     pub warning_foreground: Hsla,
     /// Overlay background color.
     pub overlay: Hsla,
-
 
     /// The base red color.
     pub red: Hsla,

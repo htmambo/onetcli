@@ -34,7 +34,9 @@ pub(super) fn monospace_font_options() -> Vec<(SharedString, SharedString)> {
 }
 
 /// 在内置选项后追加用户已配置的自定义字体路径
-pub(super) fn mono_font_options_with_custom(custom_paths: &[String]) -> Vec<(SharedString, SharedString)> {
+pub(super) fn mono_font_options_with_custom(
+    custom_paths: &[String],
+) -> Vec<(SharedString, SharedString)> {
     let mut options = monospace_font_options();
     for path in custom_paths {
         // 必须拥有字符串，避免 SharedString 从临时 &str 泄漏借用。

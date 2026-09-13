@@ -53,4 +53,3 @@ pub fn create_workspace_select(
     );
     cx.new(|cx| SelectState::new(items, Some(Default::default()), window, cx))
 }
-

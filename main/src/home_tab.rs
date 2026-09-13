@@ -53,7 +53,6 @@ use remote_desktop_view::remote_desktop_form::{
     RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig,
 };
 use rust_i18n::t;
-use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::auth::AuthService;
@@ -685,11 +684,8 @@ impl HomePage {
                 }
             }
             ConnectionRestoreKind::SerialTerminal => {
-                if let Some(connection) = item.connection {
-                    self.open_serial_terminal(connection, window, cx);
-                } else {
-                    tracing::warn!("恢复串口终端时缺少连接信息");
-                }
+                // 串口功能已移除，存量记录跳过恢复
+                tracing::info!("串口终端恢复已跳过（功能已移除）");
             }
             ConnectionRestoreKind::Sftp => {
                 if let Some(connection) = item.connection {
@@ -785,11 +781,8 @@ impl HomePage {
                 }
             }
             ConnectionRestoreKind::SerialTerminal => {
-                if let Some(connection) = connection {
-                    self.open_serial_terminal(connection, window, cx);
-                } else {
-                    tracing::warn!("恢复串口终端时缺少连接信息");
-                }
+                // 串口功能已移除，存量记录跳过恢复
+                tracing::info!("串口终端恢复已跳过（功能已移除）");
             }
             ConnectionRestoreKind::Sftp => {
                 if let Some(connection) = connection {
@@ -2020,19 +2013,6 @@ impl HomePage {
                     cx,
                 );
             }
-            ConnectionType::Serial => {
-                let config = SerialFormWindowConfig {
-                    editing_connection: Some(connection),
-                    workspaces: self.workspaces.clone(),
-                };
-
-                open_popup_window(
-                    window,
-                    PopupWindowOptions::new(t!("Serial.edit").to_string()).size(700.0, 650.0),
-                    move |window, cx| cx.new(|cx| SerialFormWindow::new(config, window, cx)),
-                    cx,
-                );
-            }
             ConnectionType::PortForwarding => {
                 let ssh_connections = self
                     .connections
@@ -2593,38 +2573,6 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_serial_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
-            return;
-        }
-
-        let editing_conn = self.editing_connection_id.and_then(|id| {
-            self.connections
-                .iter()
-                .find(|c| c.id == Some(id) && c.connection_type == ConnectionType::Serial)
-                .cloned()
-        });
-
-        let config = SerialFormWindowConfig {
-            editing_connection: editing_conn,
-            workspaces: self.workspaces.clone(),
-        };
-
-        self.editing_connection_id = None;
-
-        open_popup_window(
-            window,
-            PopupWindowOptions::new(if config.editing_connection.is_some() {
-                t!("Serial.edit").to_string()
-            } else {
-                t!("Serial.new").to_string()
-            })
-            .size(700.0, 600.0),
-            move |window, cx| cx.new(|cx| SerialFormWindow::new(config, window, cx)),
-            cx,
-        );
-    }
-
     pub(crate) fn show_port_forwarding_form(
         &mut self,
         window: &mut Window,
@@ -3163,21 +3111,6 @@ impl HomePage {
                                                 move |this, _, window, cx| {
                                                     this.editing_connection_id = None;
                                                     this.show_mongodb_form(window, cx);
-                                                },
-                                            )),
-                                    )
-                                    .item(
-                                        PopupMenuItem::new(t!("Serial.new"))
-                                            .icon(
-                                                IconName::SerialPort
-                                                    .color()
-                                                    .with_size(Size::Medium),
-                                            )
-                                            .on_click(window.listener_for(
-                                                &view_for_new_connection,
-                                                move |this, _, window, cx| {
-                                                    this.editing_connection_id = None;
-                                                    this.show_serial_form(window, cx);
                                                 },
                                             )),
                                     )
@@ -4611,21 +4544,6 @@ impl HomePage {
                 .to_remote_desktop_params()
                 .ok()
                 .map(|params| format!("{}:{}", params.host, params.port)),
-            ConnectionType::Serial => conn.to_serial_params().ok().map(|params| {
-                let parity_char = match params.parity {
-                    one_core::storage::models::SerialParity::None => 'N',
-                    one_core::storage::models::SerialParity::Odd => 'O',
-                    one_core::storage::models::SerialParity::Even => 'E',
-                };
-                format!(
-                    "{} ({}, {}{}{})",
-                    params.port_name,
-                    params.baud_rate,
-                    params.data_bits,
-                    parity_char,
-                    params.stop_bits,
-                )
-            }),
             _ => None,
         }
     }
@@ -4650,10 +4568,6 @@ impl HomePage {
                 .with_size(px(size))
                 .text_color(gpui::white()),
             ConnectionType::MongoDB => IconName::MongoDB
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            ConnectionType::Serial => IconName::SerialPort
                 .color()
                 .with_size(px(size))
                 .text_color(gpui::white()),
@@ -5914,10 +5828,6 @@ impl HomePage {
                                             this.editing_connection_id = Some(conn_id);
                                             this.show_mongodb_form(window, cx);
                                         }
-                                        ConnectionType::Serial => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_serial_form(window, cx);
-                                        }
                                         ConnectionType::PortForwarding => {
                                             this.editing_connection_id = Some(conn_id);
                                             this.show_port_forwarding_form(window, cx);
@@ -6648,10 +6558,6 @@ impl HomePage {
                                         ConnectionType::MongoDB => {
                                             this.editing_connection_id = Some(conn_id);
                                             this.show_mongodb_form(window, cx);
-                                        }
-                                        ConnectionType::Serial => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_serial_form(window, cx);
                                         }
                                         ConnectionType::PortForwarding => {
                                             this.editing_connection_id = Some(conn_id);
@@ -7691,11 +7597,6 @@ impl TabContent for HomePage {
             .iter()
             .filter(|c| c.connection_type == ConnectionType::MongoDB)
             .count();
-        let serial_count = self
-            .connections
-            .iter()
-            .filter(|c| c.connection_type == ConnectionType::Serial)
-            .count();
 
         let mut breakdown = Vec::new();
         if db_count > 0 {
@@ -7709,9 +7610,6 @@ impl TabContent for HomePage {
         }
         if mongo_count > 0 {
             breakdown.push(format!("Mongo:{}", mongo_count));
-        }
-        if serial_count > 0 {
-            breakdown.push(format!("Ser:{}", serial_count));
         }
 
         let base = format!(
@@ -7754,11 +7652,6 @@ impl TabContent for HomePage {
             .iter()
             .filter(|c| c.connection_type == ConnectionType::MongoDB)
             .count();
-        let serial_count = self
-            .connections
-            .iter()
-            .filter(|c| c.connection_type == ConnectionType::Serial)
-            .count();
 
         let fg = cx.theme().muted_foreground;
         let fgc = cx.theme().foreground;
@@ -7792,7 +7685,7 @@ impl TabContent for HomePage {
                     .child(db_count.to_string())
                     .into_any_element(),
             );
-            if ssh_sftp_count > 0 || redis_count > 0 || mongo_count > 0 || serial_count > 0 {
+            if ssh_sftp_count > 0 || redis_count > 0 || mongo_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
@@ -7810,7 +7703,7 @@ impl TabContent for HomePage {
                     .child(ssh_sftp_count.to_string())
                     .into_any_element(),
             );
-            if redis_count > 0 || mongo_count > 0 || serial_count > 0 {
+            if redis_count > 0 || mongo_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
@@ -7828,7 +7721,7 @@ impl TabContent for HomePage {
                     .child(redis_count.to_string())
                     .into_any_element(),
             );
-            if mongo_count > 0 || serial_count > 0 {
+            if mongo_count > 0 {
                 parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
             }
         }
@@ -7846,26 +7739,7 @@ impl TabContent for HomePage {
                     .child(mongo_count.to_string())
                     .into_any_element(),
             );
-            if serial_count > 0 {
-                parts.push(div().text_sm().text_color(fg).child("/").into_any_element());
-            }
         }
-        if serial_count > 0 {
-            parts.push(
-                Icon::new(IconName::SerialPort)
-                    .small()
-                    .text_color(fg)
-                    .into_any_element(),
-            );
-            parts.push(
-                div()
-                    .text_sm()
-                    .text_color(fgc)
-                    .child(serial_count.to_string())
-                    .into_any_element(),
-            );
-        }
-
         parts.push(div().text_sm().text_color(fg).child(")").into_any_element());
 
         Some(

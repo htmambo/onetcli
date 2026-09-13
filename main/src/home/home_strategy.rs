@@ -24,7 +24,6 @@ pub(crate) fn build_connection_open_strategy(
             connection,
             workspace,
         }),
-        ConnectionType::Serial => Box::new(SerialOpenStrategy { connection }),
         ConnectionType::PortForwarding => Box::new(PortForwardingOpenStrategy { connection }),
         ConnectionType::Rdp => Box::new(RemoteDesktopOpenStrategy {
             connection,
@@ -94,16 +93,6 @@ impl ConnectionOpenStrategy for MongoOpenStrategy {
 }
 
 struct NoopOpenStrategy;
-
-struct SerialOpenStrategy {
-    connection: StoredConnection,
-}
-
-impl ConnectionOpenStrategy for SerialOpenStrategy {
-    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        home.open_serial_terminal(self.connection, window, cx);
-    }
-}
 
 struct PortForwardingOpenStrategy {
     connection: StoredConnection,

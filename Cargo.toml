@@ -1,25 +1,14 @@
 [workspace]
-default-members = ["crates/ui", "crates/story", "crates/assets", "main"]
+default-members = ["crates/ui", "crates/assets", "main"]
 exclude = ["vendor/zed"]
 members = [
     "crates/macros",
-    "crates/story",
     "crates/ui",
     "crates/assets",
-    "crates/webview",
     "crates/reqwest_client",
-    "examples/app_assets",
-    "examples/hello_world",
-    "examples/input",
-    "examples/window_title",
-    "examples/dialog_overlay",
-    "examples/webview",
-    "examples/system_monitor",
-    "examples/focus_trap",
     "crates/db",
     "crates/db_view",
     "crates/ipc",
-    "crates/er_flow",
     "crates/terminal",
     "crates/terminal_view",
     "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui",
@@ -30,7 +19,6 @@ members = [
     "crates/remote_desktop_view",
     "crates/redis_view",
     "crates/mongodb_view",
-    "crates/remote_file_editor",
 ]
 resolver = "2"
 
@@ -42,7 +30,6 @@ edition = "2024"
 gpui-component = { path = "crates/ui", version = "0.5.1" }
 gpui-component-macros = { path = "crates/macros", version = "0.5.1" }
 gpui-component-assets = { path = "crates/assets", version = "0.5.1" }
-story = { path = "crates/story" }
 
 gpui = { git = "https://github.com/zed-industries/zed" ,rev = "8b5328ca"}
 gpui_tokio = { git = "https://github.com/zed-industries/zed", rev = "8b5328ca" }
@@ -97,8 +84,6 @@ terminal_view = { path = "crates/terminal_view" }
 sftp_view = { path = "crates/sftp_view" }
 one-core = { path = "crates/core" }
 mongodb_view = {path = "crates/mongodb_view"}
-remote_file_editor = { path = "crates/remote_file_editor" }
-er_flow = { path = "crates/er_flow" }
 ipc = { path = "crates/ipc" }
 
 
@@ -154,8 +139,6 @@ zeroize = { version = "1.7", features = ["derive"] }
 # Terminal emulation
 alacritty_terminal = "0.26"
 
-# Serial port
-serialport = "4"
 
 
 

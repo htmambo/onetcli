@@ -193,7 +193,6 @@ impl RemoteDesktopFormWindow {
         persist_connection(connection, self.is_editing, cx)
     }
 
-
     fn connection_name(&self, params: &RemoteDesktopParams, cx: &App) -> String {
         let name = input_text(&self.name_input, cx).trim().to_string();
         if name.is_empty() {
@@ -210,7 +209,6 @@ impl RemoteDesktopFormWindow {
             .cloned()
             .flatten()
     }
-
 }
 
 fn form_title(protocol: RemoteDesktopProtocol, is_editing: bool) -> String {

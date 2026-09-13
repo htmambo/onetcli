@@ -15,7 +15,10 @@ use std::collections::VecDeque;
 
 use gpui::{Action, actions};
 
-actions!(input_history, [HistoryPrev, HistoryNext, HistorySearch, HistoryEscape]);
+actions!(
+    input_history,
+    [HistoryPrev, HistoryNext, HistorySearch, HistoryEscape]
+);
 
 /// 宿主执行动作的指令。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,7 +211,9 @@ impl InputHistory {
     ///
     /// **调用方必须**: 切换 history 前（recall_next/previous 之前）调用。
     pub fn apply_pending_edit(&mut self, current_text: &str) {
-        let Some(i) = self.cursor else { return; };
+        let Some(i) = self.cursor else {
+            return;
+        };
         if current_text.is_empty() {
             // 清空态：不动 history[i]
             return;
@@ -439,9 +444,15 @@ mod tests {
             HistoryAction::SetValue("c".to_string())
         );
         // ↑ 第二次：cursor=1, value=b
-        assert_eq!(h.recall_previous("d"), HistoryAction::SetValue("b".to_string()));
+        assert_eq!(
+            h.recall_previous("d"),
+            HistoryAction::SetValue("b".to_string())
+        );
         // ↑ 第三次：cursor=2, value=a
-        assert_eq!(h.recall_previous("d"), HistoryAction::SetValue("a".to_string()));
+        assert_eq!(
+            h.recall_previous("d"),
+            HistoryAction::SetValue("a".to_string())
+        );
         // ↑ 第四次：已在最旧 → Noop
         assert_eq!(h.recall_previous("d"), HistoryAction::Noop);
     }

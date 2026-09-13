@@ -8,9 +8,7 @@
 //! **不持久化**: reasoning 仅在当前对话 (in-memory) 展示，不写入 chat_messages 表。
 
 use gpui::prelude::FluentBuilder;
-use gpui::{
-    App, Component, IntoElement, ParentElement, SharedString, Styled, Window,
-};
+use gpui::{App, Component, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::{
     ActiveTheme, IconName, Sizable,
     button::{Button, ButtonVariants},
@@ -243,8 +241,7 @@ mod tests {
 
     #[test]
     fn split_multiple_blocks_merged() {
-        let parsed =
-            split_thinking_blocks("<think>first</think>between<think>second</think>after");
+        let parsed = split_thinking_blocks("<think>first</think>between<think>second</think>after");
         assert_eq!(parsed.thinking.as_deref(), Some("first\n\nsecond"));
         assert_eq!(parsed.body, "betweenafter");
     }
@@ -303,7 +300,13 @@ mod tests {
         let content = "<think>The user wants to check the schema.\nLet me query.\n\nSELECT * FROM users</think>I've queried the users table.";
         let parsed = split_thinking_blocks(content);
         assert!(parsed.thinking.is_some());
-        assert!(parsed.thinking.as_ref().unwrap().contains("SELECT * FROM users"));
+        assert!(
+            parsed
+                .thinking
+                .as_ref()
+                .unwrap()
+                .contains("SELECT * FROM users")
+        );
         assert_eq!(parsed.body, "I've queried the users table.");
     }
 }

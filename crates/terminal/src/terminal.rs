@@ -21,9 +21,7 @@ use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::ActiveConnections;
-use one_core::storage::models::{
-    ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
-};
+use one_core::storage::models::{ProxyType as StorageProxyType, SshAuthMethod, StoredConnection};
 use rust_i18n::t;
 use std::cell::Cell;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -63,8 +61,7 @@ use crate::shell_integration::embedded_shell_integration_script;
 use anyhow::Context as _;
 
 use crate::{
-    LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent,
-    TerminalSize,
+    LocalConfig, SshBackend, TerminalBackend, TerminalCloseMode, TerminalEvent, TerminalSize,
 };
 use ssh::{
     ChannelEvent, KeyboardInteractiveRequest, KeyboardInteractiveResponder,
@@ -337,7 +334,6 @@ pub enum ConnectionState {
 pub enum TerminalConnectionKind {
     Local,
     Ssh,
-    Serial,
 }
 
 /// SSH 终端配置
@@ -1296,8 +1292,6 @@ pub struct Terminal {
     /// SSH 进程检测是否已禁用（当检测到 shell integration 不可用时）
     ssh_detection_disabled: Cell<bool>,
     /// 串口参数（用于重连）
-    serial_params: Option<SerialParams>,
-    /// 事件发送器（用于 SSH 重连）
     event_tx: Option<UnboundedSender<TerminalEvent>>,
     /// 事件代理（用于设置 PtyWrite 回写通道）
     event_proxy: Option<GpuiEventProxy>,
@@ -1424,7 +1418,6 @@ impl Terminal {
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
             ssh_connection_established_at: None,
             ssh_detection_disabled: Cell::new(false),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
             connection_id: None,
@@ -1545,7 +1538,6 @@ impl Terminal {
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
             ssh_connection_established_at: None,
             ssh_detection_disabled: Cell::new(false),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
             connection_id: None,
@@ -1648,7 +1640,6 @@ impl Terminal {
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
             ssh_connection_established_at: None,
             ssh_detection_disabled: Cell::new(false),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
             connection_id: None,
@@ -1745,7 +1736,6 @@ impl Terminal {
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
             ssh_connection_established_at: None,
             ssh_detection_disabled: Cell::new(false),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
             connection_id: None,
@@ -1947,7 +1937,6 @@ impl Terminal {
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
             ssh_connection_established_at: None,
             ssh_detection_disabled: Cell::new(false),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
             connection_id: conn.id,
@@ -1957,67 +1946,6 @@ impl Terminal {
             persisted_history: Vec::new(),
             connection_generation,
             connection_kind: TerminalConnectionKind::Ssh,
-            local_pty_session_id: None,
-        }
-    }
-
-    /// 创建串口终端
-    pub fn new_serial(conn: StoredConnection, cx: &mut Context<Self>) -> Self {
-        let serial_params = conn
-            .to_serial_params()
-            .expect("StoredConnection 应包含有效的 SerialParams");
-
-        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, event_proxy, _colors) =
-            Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
-        let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
-        let connection_generation = 1;
-
-        Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
-        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
-        Self::spawn_serial_connect(
-            serial_params.clone(),
-            term.clone(),
-            event_tx.clone(),
-            Some(disconnect_tx),
-            connection_generation,
-            cx,
-        );
-
-        Self {
-            term,
-            backend: None,
-            title: String::new(),
-            current_working_dir: None,
-            local_shell_pid: None,
-            local_cwd_file: None,
-            #[cfg(target_os = "macos")]
-            local_process_tree_settled: Cell::new(true),
-            child_exited: None,
-            connection_state: ConnectionState::Connecting,
-            connection_status_message: None,
-            connection_wait_started_at: None,
-            cols: DEFAULT_COLS,
-            rows: DEFAULT_ROWS,
-            pixel_width: 0,
-            pixel_height: 0,
-            ssh_config: None,
-            ssh_session_manager: None,
-            ssh_process_state: Cell::new(SshProcessState::Unknown),
-            ssh_prompt_detected: false,
-            ssh_command_submitted_without_prompt_sync: Cell::new(false),
-            ssh_connection_established_at: None,
-            ssh_detection_disabled: Cell::new(false),
-            serial_params: Some(serial_params),
-            event_tx: Some(event_tx),
-            event_proxy: None,
-            connection_id: conn.id,
-            connection_name: Some(conn.name),
-            init_commands: None,
-            session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
-            connection_generation,
-            connection_kind: TerminalConnectionKind::Serial,
             local_pty_session_id: None,
         }
     }
@@ -2412,65 +2340,6 @@ impl Terminal {
         cx.emit(TerminalModelEvent::Wakeup);
     }
 
-    fn spawn_serial_connect(
-        params: SerialParams,
-        term: Arc<FairMutex<Term<GpuiEventProxy>>>,
-        event_tx: UnboundedSender<TerminalEvent>,
-        on_disconnect: Option<tokio::sync::oneshot::Sender<bool>>,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let disconnect_tx = on_disconnect.map(|tx| {
-            let (sender, receiver) = tokio::sync::oneshot::channel::<bool>();
-            Tokio::spawn(cx, async move {
-                if let Ok(is_graceful) = receiver.await {
-                    let _ = tx.send(is_graceful);
-                }
-            })
-            .detach();
-            sender
-        });
-
-        let result = SerialBackend::connect(params, term, event_tx, disconnect_tx);
-
-        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let _ = this.update(cx, |this, cx| {
-                this.handle_serial_result(result, generation, cx);
-            });
-        })
-        .detach();
-    }
-
-    fn handle_serial_result(
-        &mut self,
-        result: anyhow::Result<SerialBackend>,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.is_current_connection_generation(generation) {
-            if let Ok(backend) = result {
-                backend.shutdown();
-            }
-            return;
-        }
-
-        match result {
-            Ok(backend) => {
-                self.connection_state = ConnectionState::Connected;
-                self.set_connection_active(true, cx);
-                self.backend = Some(Box::new(backend));
-                tracing::info!("串口连接成功");
-            }
-            Err(e) => {
-                self.connection_state = ConnectionState::Disconnected {
-                    error: Some(e.to_string()),
-                };
-                self.set_connection_active(false, cx);
-            }
-        }
-        cx.emit(TerminalModelEvent::Wakeup);
-    }
-
     fn set_connection_active(&self, active: bool, cx: &mut Context<Self>) {
         let Some(connection_id) = self.connection_id else {
             return;
@@ -2849,7 +2718,7 @@ impl Terminal {
 
     /// 是否可以重连
     pub fn can_reconnect(&self) -> bool {
-        self.ssh_config.is_some() || self.serial_params.is_some()
+        self.ssh_config.is_some()
     }
 
     /// 写入用户输入到终端，并更新与关闭提示相关的 SSH 状态。
@@ -3022,31 +2891,6 @@ impl Terminal {
             })
             .detach();
             Self::spawn_connection_status_tick(cx);
-        } else if let Some(params) = self.serial_params.clone() {
-            let Some(event_tx) = self.event_tx.clone() else {
-                return;
-            };
-
-            self.connection_state = ConnectionState::Connecting;
-            self.connection_status_message = None;
-            self.connection_wait_started_at = None;
-            self.set_connection_active(false, cx);
-            if let Some(backend) = self.backend.take() {
-                backend.shutdown();
-            }
-            self.reset_terminal_surface();
-            let generation = self.next_connection_generation();
-
-            let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
-            Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
-            Self::spawn_serial_connect(
-                params,
-                self.term.clone(),
-                event_tx,
-                Some(disconnect_tx),
-                generation,
-                cx,
-            );
         } else {
             return;
         }
@@ -3566,7 +3410,6 @@ mod tests {
             ssh_command_submitted_without_prompt_sync: Cell::new(false),
             ssh_connection_established_at: None,
             ssh_detection_disabled: Cell::new(false),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
             connection_id: Some(1),

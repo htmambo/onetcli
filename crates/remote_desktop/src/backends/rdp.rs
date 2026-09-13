@@ -634,9 +634,7 @@ where
         .map(|rect| usize::from(rect.width) * usize::from(rect.height) * 4)
         .sum();
     if bgra_len != expected_len {
-        anyhow::bail!(
-            "invalid rects BGRA payload length: expected {expected_len}, got {bgra_len}"
-        );
+        anyhow::bail!("invalid rects BGRA payload length: expected {expected_len}, got {bgra_len}");
     }
     let mut bgra = vec![0; bgra_len];
     reader.read_exact(&mut bgra)?;

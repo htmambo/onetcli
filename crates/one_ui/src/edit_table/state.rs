@@ -2124,19 +2124,10 @@ where
         let size_pad = self.options.size.table_cell_padding();
         let (target_pt, target_pb, target_pl, target_pr) = match col_padding {
             Some(p) => (p.top, p.bottom, p.left, p.right),
-            None => (
-                size_pad.top,
-                size_pad.bottom,
-                size_pad.left,
-                size_pad.right,
-            ),
+            None => (size_pad.top, size_pad.bottom, size_pad.left, size_pad.right),
         };
 
-        cell = cell
-            .pt(target_pt)
-            .pb(target_pb)
-            .pl(target_pl)
-            .pr(target_pr);
+        cell = cell.pt(target_pt).pb(target_pb).pl(target_pl).pr(target_pr);
 
         // 编辑模式：嵌入轻量编辑器（无自带样式，由容器控制布局）
         if is_editing {
@@ -2969,7 +2960,7 @@ where
 impl<D> EventEmitter<EditTableEvent> for EditTableState<D> where D: EditTableDelegate {}
 
 #[cfg(test)]
-mod tests {
+mod tests_row_cleanup {
     use super::*;
 
     #[test]
@@ -3230,7 +3221,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_key_handling {
     use super::EditTableState;
     use crate::edit_table::{Column, EditTableDelegate};
     use gpui::{App, Context, IntoElement, Keystroke, Modifiers, Window, div};

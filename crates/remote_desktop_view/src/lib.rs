@@ -1,7 +1,7 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
-mod ime_guard;
 pub mod display_mode;
+mod ime_guard;
 pub mod keyboard;
 mod modifiers;
 pub mod pixels;

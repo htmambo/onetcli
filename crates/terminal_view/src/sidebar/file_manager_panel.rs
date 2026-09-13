@@ -33,7 +33,6 @@ use one_core::storage::{
     GlobalStorageState, SftpFavoritePathRepository, normalize_sftp_favorite_path,
     sftp_favorite_connection_key,
 };
-use remote_file_editor::open_remote_file_editor;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{ChannelEvent, SshChannel, SshSessionManager};
@@ -2947,18 +2946,6 @@ impl FileManagerPanel {
         .detach();
     }
 
-    fn open_remote_editor(&self, full_path: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(client) = self.sftp_client.clone() else {
-            window.push_notification(
-                Notification::error("SFTP client is not connected".to_string()),
-                cx,
-            );
-            return;
-        };
-
-        open_remote_file_editor(full_path, client, window, cx);
-    }
-
     // ── 渲染方法 ──────────────────────────────────────────────
 
     /// 渲染工具栏
@@ -3699,15 +3686,6 @@ impl FileManagerPanel {
         );
 
         if !is_dir {
-            let view_edit = view.clone();
-            menu = menu.item(
-                PopupMenuItem::new(t!("Common.edit"))
-                    .icon(IconName::Edit)
-                    .on_click(window.listener_for(&view_edit, move |this, _, window, cx| {
-                        this.open_remote_editor(path_for_edit.clone(), window, cx);
-                    })),
-            );
-
             if archive_kind_for_name(name).is_some() {
                 let view_extract = view.clone();
                 let extract_name = name.to_string();
@@ -4236,12 +4214,6 @@ impl FileManagerPanel {
                                                             if is_dir {
                                                                 this.navigate_to(
                                                                     fp.clone(),
-                                                                    cx,
-                                                                );
-                                                            } else {
-                                                                this.open_remote_editor(
-                                                                    fp.clone(),
-                                                                    window,
                                                                     cx,
                                                                 );
                                                             }

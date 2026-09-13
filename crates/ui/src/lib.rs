@@ -10,8 +10,6 @@ mod geometry;
 mod global_state;
 mod icon;
 mod index_path;
-#[cfg(any(feature = "inspector", debug_assertions))]
-mod inspector;
 mod root;
 mod styled;
 mod surface_alpha;
@@ -24,11 +22,8 @@ mod window_ext;
 
 pub(crate) mod actions;
 
-pub mod accordion;
 pub mod alert;
 pub mod animation;
-pub mod avatar;
-pub mod badge;
 pub mod breadcrumb;
 pub mod button;
 pub mod chart;
@@ -36,7 +31,6 @@ pub mod checkbox;
 pub mod clipboard;
 pub mod collapsible;
 pub mod color_picker;
-pub mod description_list;
 pub mod dialog;
 pub mod divider;
 pub mod dock;
@@ -44,7 +38,6 @@ pub mod form;
 pub mod group_box;
 pub mod highlighter;
 pub mod history;
-pub mod hover_card;
 pub mod input;
 pub mod kbd;
 pub mod label;
@@ -57,7 +50,6 @@ pub mod plot;
 pub mod popover;
 pub mod progress;
 pub mod radio;
-pub mod rating;
 pub mod resizable;
 pub mod scroll;
 pub mod select;
@@ -87,8 +79,6 @@ pub use geometry::*;
 pub use icon::*;
 pub use index_path::IndexPath;
 pub use input::{BlinkCursor, Rope, RopeExt, RopeLines};
-#[cfg(any(feature = "inspector", debug_assertions))]
-pub use inspector::*;
 pub use root::Root;
 pub use styled::*;
 pub use surface_alpha::{
@@ -111,8 +101,6 @@ rust_i18n::i18n!("locales", fallback = "en");
 pub fn init(cx: &mut App) {
     theme::init(cx);
     global_state::init(cx);
-    #[cfg(any(feature = "inspector", debug_assertions))]
-    inspector::init(cx);
     root::init(cx);
     focus_trap::init(cx);
     color_picker::init(cx);

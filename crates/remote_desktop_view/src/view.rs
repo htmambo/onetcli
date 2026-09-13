@@ -588,9 +588,13 @@ impl RemoteDesktopView {
         let px_x = pixels_to_f32(position.x);
         let px_y = pixels_to_f32(position.y);
         let mapped = match self.display_mode {
-            DisplayMode::Fill => {
-                scale_filled_window_pointer_position(px_x, px_y, bounds, remote_width, remote_height)
-            }
+            DisplayMode::Fill => scale_filled_window_pointer_position(
+                px_x,
+                px_y,
+                bounds,
+                remote_width,
+                remote_height,
+            ),
             DisplayMode::Contain => {
                 scale_window_pointer_position(px_x, px_y, bounds, remote_width, remote_height)
             }
@@ -1090,10 +1094,7 @@ mod tests {
 
         super::patch_bgra_rects(&mut buffer, 3, &rects, &data).unwrap();
 
-        assert_eq!(
-            buffer,
-            vec![0, 0, 0, 0, 9, 8, 7, 255, 0, 0, 0, 0]
-        );
+        assert_eq!(buffer, vec![0, 0, 0, 0, 9, 8, 7, 255, 0, 0, 0, 0]);
     }
 
     #[test]

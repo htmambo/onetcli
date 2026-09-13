@@ -314,7 +314,6 @@ pub struct ThemeConfigColors {
     #[serde(rename = "overlay")]
     pub overlay: Option<SharedString>,
 
-
     /// Base blue color.
     #[serde(rename = "base.blue")]
     blue: Option<String>,
@@ -568,9 +567,7 @@ impl ThemeColor {
         apply_color!(table_hover, fallback = self.list_hover);
         apply_color!(table_row_border, fallback = self.border);
 
-
         apply_color!(overlay, fallback = gpui::hsla(0., 0., 0., 0.4));
-
 
         // Sync base palette after all colors are applied
         self.sync_base_palette();

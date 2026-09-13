@@ -52,7 +52,6 @@ pub(super) enum NewConnectionKind {
     Terminal,
     Redis,
     MongoDB,
-    Serial,
     PortForwarding,
     Rdp,
     Vnc,
@@ -72,7 +71,6 @@ impl NewConnectionKind {
             Self::Terminal,
             Self::Redis,
             Self::MongoDB,
-            Self::Serial,
             Self::PortForwarding,
             Self::Rdp,
             Self::Vnc,
@@ -103,7 +101,6 @@ impl NewConnectionKind {
             Self::Terminal => "Terminal".to_string(),
             Self::Redis => "Redis".to_string(),
             Self::MongoDB => "MongoDB".to_string(),
-            Self::Serial => t!("Serial.new").to_string(),
             Self::PortForwarding => t!("NewConnection.port_forwarding").to_string(),
             Self::Rdp => t!("NewConnection.rdp").to_string(),
             Self::Vnc => t!("NewConnection.vnc").to_string(),
@@ -118,7 +115,6 @@ impl NewConnectionKind {
             Self::Terminal => "打开一个本地终端标签页".to_string(),
             Self::Redis => "Redis 单机、哨兵或集群连接".to_string(),
             Self::MongoDB => "MongoDB 数据库连接".to_string(),
-            Self::Serial => "串口设备连接".to_string(),
             Self::PortForwarding => t!("NewConnection.description_port_forwarding").to_string(),
             Self::Rdp => t!("NewConnection.description_rdp").to_string(),
             Self::Vnc => t!("NewConnection.description_vnc").to_string(),
@@ -129,12 +125,9 @@ impl NewConnectionKind {
 
     pub(super) fn category(&self) -> NewConnectionCategory {
         match self {
-            Self::Ssh
-            | Self::Terminal
-            | Self::Serial
-            | Self::PortForwarding
-            | Self::Rdp
-            | Self::Vnc => NewConnectionCategory::Terminal,
+            Self::Ssh | Self::Terminal | Self::PortForwarding | Self::Rdp | Self::Vnc => {
+                NewConnectionCategory::Terminal
+            }
             Self::Redis | Self::MongoDB => NewConnectionCategory::NoSql,
             Self::Database(_) => NewConnectionCategory::Database,
             Self::ExternalDatabase { category, .. } => {
@@ -156,7 +149,6 @@ impl NewConnectionKind {
                 .with_size(px(40.0)),
             Self::Redis => IconName::Redis.color().with_size(px(40.0)),
             Self::MongoDB => IconName::MongoDB.color().with_size(px(40.0)),
-            Self::Serial => IconName::SerialPort.color().with_size(px(40.0)),
             Self::PortForwarding => IconName::PortForwardingColor.color().with_size(px(40.0)),
             Self::Rdp => IconName::Rdp.color().with_size(px(40.0)),
             Self::Vnc => IconName::Vnc.color().with_size(px(40.0)),

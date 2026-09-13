@@ -293,12 +293,19 @@ impl RenderOnce for Settings {
                     .size(self.sidebar_width)
                     .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
             )
-            .child(resizable_panel().child(div().size_full().bg(cx.theme().muted).child(self.render_active_page(
-                &state,
-                &filtered_pages,
-                &options,
-                window,
-                cx,
-            ))))
+            .child(
+                resizable_panel().child(
+                    div()
+                        .size_full()
+                        .bg(cx.theme().muted)
+                        .child(self.render_active_page(
+                            &state,
+                            &filtered_pages,
+                            &options,
+                            window,
+                            cx,
+                        )),
+                ),
+            )
     }
 }

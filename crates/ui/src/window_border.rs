@@ -118,7 +118,9 @@ impl RenderOnce for WindowBorder {
                 _ => shadow_size,
             }
         };
-        let client_inset = if prefers_system_frame || (cfg!(target_os = "linux") && linux_uses_wayland_session()) {
+        let client_inset = if prefers_system_frame
+            || (cfg!(target_os = "linux") && linux_uses_wayland_session())
+        {
             px(0.0)
         } else {
             shadow_size

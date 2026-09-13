@@ -614,8 +614,8 @@ mod tests {
     }
 
     // S4：env::set_var / env::remove_var 在新版本 Rust 标记 unsafe；仅测试用。
-#[allow(unsafe_code)]
-fn setup_test_storage(temp_home: &PathBuf) -> crate::storage::StorageManager {
+    #[allow(unsafe_code)]
+    fn setup_test_storage(temp_home: &PathBuf) -> crate::storage::StorageManager {
         let previous_home = std::env::var_os("HOME");
         unsafe {
             std::env::set_var("HOME", temp_home);

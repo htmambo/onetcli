@@ -1038,23 +1038,6 @@ impl TerminalView {
         )
     }
 
-    pub fn new_serial(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_serial_with_index(conn, None, window, cx)
-    }
-
-    pub fn new_serial_with_index(
-        conn: StoredConnection,
-        tab_index: Option<usize>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let connection_id = conn.id;
-        let terminal =
-            <gpui::App as gpui::AppContext>::new(cx, |cx| Terminal::new_serial(conn, cx));
-        // 串口不传 stored_connection，避免创建文件管理器面板
-        Self::new_with_terminal(terminal, connection_id, None, true, tab_index, window, cx)
-    }
-
     fn new_with_terminal(
         terminal: Entity<Terminal>,
         connection_id: Option<i64>,
@@ -3559,10 +3542,7 @@ impl TerminalView {
         let is_user_exit = child_exited.is_some();
 
         // 根据连接类型选择正确的 locale 前缀
-        let is_ssh = matches!(
-            terminal.connection_kind(),
-            TerminalConnectionKind::Ssh | TerminalConnectionKind::Serial
-        );
+        let is_ssh = terminal.connection_kind() == TerminalConnectionKind::Ssh;
 
         let muted = cx.theme().muted;
 
@@ -4371,11 +4351,7 @@ impl TabContent for TerminalView {
     }
 
     fn icon(&self, cx: &App) -> Option<Icon> {
-        if self.connection_kind(cx) == TerminalConnectionKind::Serial {
-            Some(IconName::SerialPort.color())
-        } else {
-            Some(IconName::TerminalColor.color())
-        }
+        Some(IconName::TerminalColor.color())
     }
 
     fn status_summary(&self, cx: &App) -> Option<SharedString> {
@@ -4425,21 +4401,6 @@ impl TabContent for TerminalView {
                     active_connection_id: None,
                     local_terminal: None,
                     ssh_terminal,
-                    title: self.title(cx).to_string(),
-                }
-                .into_tab_data()
-            }
-            TerminalConnectionKind::Serial => {
-                let Some(connection_id) = self.connection_id(cx) else {
-                    return JsonValue::Null;
-                };
-                ConnectionRestorePayload {
-                    kind: ConnectionRestoreKind::SerialTerminal,
-                    connection_id: Some(connection_id),
-                    workspace_id: None,
-                    active_connection_id: None,
-                    local_terminal: None,
-                    ssh_terminal: None,
                     title: self.title(cx).to_string(),
                 }
                 .into_tab_data()

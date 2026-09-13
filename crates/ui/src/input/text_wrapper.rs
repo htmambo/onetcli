@@ -577,7 +577,8 @@ mod tests {
             features: FontFeatures::default(),
             fallbacks: None,
         };
-        let text = "前5的进程/应用的简介（包括但前5的进程/应用的简介（包括但前5的进程/应用的简介（包括但";
+        let text =
+            "前5的进程/应用的简介（包括但前5的进程/应用的简介（包括但前5的进程/应用的简介（包括但";
         let mut wrapper = cx.text_system().line_wrapper(font.clone(), px(14.));
         for width in [20.0f32, 33.3, 37.5, 53.0, 77.7, 100.0, 121.3, 200.0] {
             let boundaries: Vec<_> = wrapper

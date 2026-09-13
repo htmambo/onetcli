@@ -232,10 +232,7 @@ mod truncate_tests {
 
     #[test]
     fn strips_thinking_block() {
-        let result = truncate_for_log(
-            "<think>internal reasoning</think>actual content",
-            100,
-        );
+        let result = truncate_for_log("<think>internal reasoning</think>actual content", 100);
         assert_eq!(result, "actual content");
         assert!(!result.contains("internal reasoning"));
     }

@@ -33,7 +33,6 @@ use one_core::gpui_tokio::Tokio;
 use one_core::serde_json::Value as JsonValue;
 use one_core::storage::models::StoredConnection;
 use one_core::tab_container::{TabContent, TabContentEvent};
-use remote_file_editor::open_remote_file_editor;
 use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
 use ssh::{ChannelEvent, SshChannel, SshConnectConfig, SshSessionManager};
@@ -643,8 +642,6 @@ pub(crate) async fn remote_extract_has_conflict(
     }
 }
 
-
-
 fn should_apply_remote_listing(current_path: &str, listed_path: &str) -> bool {
     current_path == listed_path
 }
@@ -1210,22 +1207,8 @@ impl SftpView {
             self.remote_current_path = join_remote_path(&self.remote_current_path, &name);
             self.push_remote_history(self.remote_current_path.clone());
             self.refresh_remote_dir(cx);
-        } else {
-            self.open_remote_editor(full_path, window, cx);
         }
         cx.notify();
-    }
-
-    fn open_remote_editor(&self, full_path: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(client) = self.sftp_client.clone() else {
-            window.push_notification(
-                Notification::error("SFTP client is not connected".to_string()),
-                cx,
-            );
-            return;
-        };
-
-        open_remote_file_editor(full_path, client, window, cx);
     }
 
     fn navigate_local_to(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -4385,8 +4368,8 @@ mod tests {
 #[cfg(test)]
 mod extract_archive_tests {
     use super::{
-        archive_kind_for_name, build_remote_extract_command, build_remote_extract_conflict_check_command,
-        ExtractConflictAction,
+        ExtractConflictAction, archive_kind_for_name, build_remote_extract_command,
+        build_remote_extract_conflict_check_command,
     };
 
     #[test]

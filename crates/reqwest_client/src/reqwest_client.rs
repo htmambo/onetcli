@@ -271,7 +271,10 @@ impl http_client::HttpClient for ReqwestClient {
             // 在 Tokio runtime 上读取完整 body，避免返回的 stream 需要在 Tokio reactor 上 poll
             let body_bytes = handle
                 .spawn(async move {
-                    response.bytes().await.map_err(|e| futures::io::Error::other(e))
+                    response
+                        .bytes()
+                        .await
+                        .map_err(|e| futures::io::Error::other(e))
                 })
                 .await??;
 

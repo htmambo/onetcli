@@ -73,9 +73,7 @@ fn build_ssh_auth(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| {
-                    RedisError::connection(
-                        "ssh tunnel enabled but private key is missing",
-                    )
+                    RedisError::connection("ssh tunnel enabled but private key is missing")
                 })?;
             let key_content = resolve_private_key_content(key_value)?;
             Ok(SshAuth::PrivateKey {
@@ -397,8 +395,7 @@ impl RedisConnectionImpl {
 
         // 不持写锁建连：建连涉及网络 I/O，持锁会串行化该连接对所有 db 的缓存访问。
         let (host, port) = self.current_endpoint();
-        let (_, conn) =
-            Self::open_connection_for_endpoint(&self.config, db, host, port).await?;
+        let (_, conn) = Self::open_connection_for_endpoint(&self.config, db, host, port).await?;
 
         let mut guard = self.db_connections.write().await;
         // 二次检查：建连期间可能已有其他任务写入同一 db 的连接，复用之、丢弃本次。
@@ -415,12 +412,10 @@ impl RedisConnectionImpl {
         }
 
         let (host, port) = self.current_endpoint();
-        let (_, conn) =
-            Self::open_connection_for_endpoint(&self.config, db, host, port).await?;
+        let (_, conn) = Self::open_connection_for_endpoint(&self.config, db, host, port).await?;
         self.db_connections.write().await.insert(db, conn.clone());
         Ok(conn)
     }
-
 
     async fn open_connection_for_endpoint(
         config: &RedisConnectionConfig,

@@ -9,6 +9,10 @@ node_modules/
 
 .worktrees/
 
+# proptest 自动生成的反例回归目录（失败测试的反例，下次跑会重放）
+# 不应入仓：每次失败都覆盖，体积小但语义是临时反例池
+**/proptest-regressions/
+
 # Rust build artifacts
 target/
 **/target/
