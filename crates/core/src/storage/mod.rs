@@ -7,6 +7,7 @@ pub mod quick_command;
 pub mod repository;
 pub mod row_mapping;
 pub mod runtime_paths;
+pub mod sensitive_migration;
 pub mod sftp_favorite_path;
 pub mod ssh_convert;
 pub mod traits;

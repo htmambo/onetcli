@@ -130,16 +130,18 @@ fn decrypt_secret(value: Option<String>) -> Option<String> {
 }
 
 /// 对证书 params 中的敏感字段加密后序列化
+///
+/// A1：改用与 `models::encrypt_json_passwords` 一致的 `is_sensitive_field` 谓词，
+/// 避免密码/口令走"独立短名单"路径、SSH 私钥走"扩展长名单"路径导致再次分叉。
 fn encrypt_certificate_params(params: &serde_json::Value) -> String {
     let mut encrypted = params.clone();
     if let Some(obj) = encrypted.as_object_mut() {
-        for key in ["password", "passphrase"] {
-            if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
-                if !v.is_empty() {
-                    obj.insert(
-                        key.to_string(),
-                        serde_json::Value::String(crypto::encrypt_password(v)),
-                    );
+        for (key, value) in obj.iter_mut() {
+            if crate::storage::models::is_sensitive_field(key) {
+                if let serde_json::Value::String(s) = value {
+                    if !s.is_empty() {
+                        *s = crypto::encrypt_password(s);
+                    }
                 }
             }
         }

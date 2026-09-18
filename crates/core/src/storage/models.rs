@@ -1709,7 +1709,7 @@ fn detach_certificate_from_mongodb_params(
 }
 
 /// 递归加密 JSON 中所有名为 password 或 passphrase 的字符串字段
-fn encrypt_json_passwords(json_str: &str) -> String {
+pub(crate) fn encrypt_json_passwords(json_str: &str) -> String {
     match serde_json::from_str::<Value>(json_str) {
         Ok(mut value) => {
             encrypt_value(&mut value);
@@ -1720,7 +1720,7 @@ fn encrypt_json_passwords(json_str: &str) -> String {
 }
 
 /// 递归解密 JSON 中所有名为 password 或 passphrase 的字符串字段
-fn decrypt_json_passwords(json_str: &str) -> String {
+pub(crate) fn decrypt_json_passwords(json_str: &str) -> String {
     match serde_json::from_str::<Value>(json_str) {
         Ok(mut value) => {
             decrypt_value(&mut value);
@@ -1731,11 +1731,27 @@ fn decrypt_json_passwords(json_str: &str) -> String {
 }
 
 /// 判断字段名是否为敏感字段
-fn is_sensitive_field(key: &str) -> bool {
+///
+/// A1：扩展名单覆盖 SSH 私钥相关字段（ssh_private_key / private_key /
+/// private_key_path / key_content / ssh_key_content），使 `encrypt_value` /
+/// `decrypt_value` 的递归遍历同步加密这些字段，避免 H-1 类问题。
+///
+/// 新增敏感字段请同步：
+/// 1. 在此函数追加命中规则
+/// 2. 在 `certificates` / `connections` 两表启动期迁移函数（见
+///    `migrate_encrypt_existing_sensitive_fields`）覆盖存量明文
+pub(crate) fn is_sensitive_field(key: &str) -> bool {
     key == "password"
         || key == "passphrase"
+        || key == "ssh_private_key"
+        || key == "private_key"
+        || key == "private_key_path"
+        || key == "key_content"
+        || key == "ssh_key_content"
         || key.ends_with("_password")
         || key.ends_with("_passphrase")
+        || key.ends_with("_private_key")
+        || key.ends_with("_key_content")
 }
 
 /// 递归遍历 JSON Value，加密敏感字段
@@ -2095,5 +2111,98 @@ mod serial_tests {
         let parsed: SshAuthMethod =
             serde_json::from_str(&json).expect("自动公钥认证方式应可反序列化");
         assert!(matches!(parsed, SshAuthMethod::AutoPublicKey));
+    }
+}
+
+/// A1：扩展敏感字段名单 + 启动期迁移的回归测试。
+///
+/// 历史问题：仓库中的 SSH 私钥明文落库（H-1 高危）。
+/// 修复路径：扩 `is_sensitive_field` 让 `encrypt_json_passwords` /
+/// `decrypt_json_passwords` 同步覆盖 SSH 私钥字段，迁移函数据此把存量明文重加密。
+#[cfg(test)]
+mod sensitive_field_tests {
+    use super::*;
+
+    #[test]
+    fn is_sensitive_field_covers_ssh_private_key() {
+        assert!(is_sensitive_field("ssh_private_key"));
+        assert!(is_sensitive_field("private_key"));
+        assert!(is_sensitive_field("private_key_path"));
+        assert!(is_sensitive_field("key_content"));
+        assert!(is_sensitive_field("ssh_key_content"));
+        // 既有 password / passphrase 仍命中（不回归）
+        assert!(is_sensitive_field("password"));
+        assert!(is_sensitive_field("passphrase"));
+        assert!(is_sensitive_field("db_password"));
+        // 非敏感字段不命中（防误伤）
+        assert!(!is_sensitive_field("username"));
+        assert!(!is_sensitive_field("host"));
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip_ssh_private_key() {
+        let _guard = crate::crypto::lock_for_test();
+        crate::crypto::test_support::set_master_key("a1_test_master_key");
+
+        // 模拟 SSH 连接表单提交的 params：含 ssh_private_key 明文
+        let original = r#"{"host":"1.2.3.4","port":22,"username":"u","ssh_private_key":"-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----","passphrase":"abc"}"#;
+        let encrypted = encrypt_json_passwords(original);
+
+        // ssh_private_key + passphrase 都应以 ENC:V3: 开头落库
+        let parsed: Value = serde_json::from_str(&encrypted).expect("parse encrypted");
+        let obj = parsed.as_object().expect("object");
+        assert!(
+            crate::crypto::is_encrypted(obj["ssh_private_key"].as_str().unwrap_or("")),
+            "ssh_private_key 字段未加密：{}",
+            obj["ssh_private_key"]
+        );
+        assert!(
+            crate::crypto::is_encrypted(obj["passphrase"].as_str().unwrap_or("")),
+            "passphrase 字段未加密"
+        );
+        // host/port/username 不动
+        assert_eq!(obj["host"].as_str().unwrap(), "1.2.3.4");
+        assert_eq!(obj["username"].as_str().unwrap(), "u");
+
+        // 解密后明文应与原始一致
+        let decrypted = decrypt_json_passwords(&encrypted);
+        let parsed_back: Value = serde_json::from_str(&decrypted).expect("parse decrypted");
+        assert_eq!(
+            parsed_back["ssh_private_key"].as_str().unwrap(),
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----"
+        );
+        assert_eq!(parsed_back["passphrase"].as_str().unwrap(), "abc");
+
+        crate::crypto::clear_master_key();
+    }
+
+    #[test]
+    fn encrypt_handles_nested_ssh_private_key() {
+        // 嵌套场景：jump_server.auth_method.PrivateKey.ssh_private_key
+        let _guard = crate::crypto::lock_for_test();
+        crate::crypto::test_support::set_master_key("a1_test_master_key");
+
+        let original = r#"{"jump_server":{"auth_method":{"PrivateKey":{"ssh_private_key":"NESTED_KEY","passphrase":"np"}}}}"#;
+        let encrypted = encrypt_json_passwords(original);
+        let parsed: Value = serde_json::from_str(&encrypted).expect("parse");
+        let nested = parsed["jump_server"]["auth_method"]["PrivateKey"]["ssh_private_key"]
+            .as_str()
+            .unwrap_or("");
+        let nested_p = parsed["jump_server"]["auth_method"]["PrivateKey"]["passphrase"]
+            .as_str()
+            .unwrap_or("");
+        assert!(crate::crypto::is_encrypted(nested));
+        assert!(crate::crypto::is_encrypted(nested_p));
+
+        let decrypted = decrypt_json_passwords(&encrypted);
+        let back: Value = serde_json::from_str(&decrypted).expect("parse back");
+        assert_eq!(
+            back["jump_server"]["auth_method"]["PrivateKey"]["ssh_private_key"]
+                .as_str()
+                .unwrap(),
+            "NESTED_KEY"
+        );
+
+        crate::crypto::clear_master_key();
     }
 }
