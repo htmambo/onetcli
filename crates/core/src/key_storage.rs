@@ -35,6 +35,28 @@ const HKDF_SALT_LEGACY: &[u8] = b"onetcli-key-derivation-v1";
 /// 全局密钥存储后端
 static KEY_STORAGE: RwLock<Option<Arc<dyn KeyStorage>>> = RwLock::new(None);
 
+/// 以受限权限写入机密文件（Unix 0600；其它平台退化为 `fs::write`）。
+///
+/// 用于 `key_salt` / `key_storage` / `key_verification` 三处主密钥相关文件，
+/// 防止默认 umask（如 0644）让同机其他用户读取。
+/// Windows 下 `OpenOptionsExt::mode` 不可用，仍走 `fs::write`（依赖 NTFS ACL）。
+#[cfg(unix)]
+pub(crate) fn write_secret_file(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    std::io::Write::write_all(&mut file, data)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn write_secret_file(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    fs::write(path, data)
+}
+
 // ============================================================================
 // KeyStorage trait
 // ============================================================================
@@ -187,24 +209,7 @@ fn get_or_init_salt() -> [u8; 16] {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        // 0600 权限（Unix 平台；Windows 下 std fs::write 不支持 mode，需用 OpenOptions）。
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&path)
-            {
-                let _ = std::io::Write::write_all(&mut file, &salt);
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = fs::write(&path, &salt);
-        }
+        let _ = write_secret_file(&path, &salt);
     }
     salt
 }
@@ -253,7 +258,7 @@ impl KeyStorage for LocalFileStorage {
         let mut data = nonce_bytes.to_vec();
         data.extend(ciphertext);
 
-        fs::write(&path, &data).map_err(|e| format!("写入密钥文件失败: {}", e))?;
+        write_secret_file(&path, &data).map_err(|e| format!("写入密钥文件失败: {}", e))?;
         Ok(())
     }
 
@@ -496,6 +501,65 @@ mod tests {
         assert_eq!(loaded, "legacy_master_key");
 
         // 清理
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// L-1：`write_secret_file` 在 Unix 平台上写出的文件权限应为 0600。
+    #[cfg(unix)]
+    #[test]
+    fn test_write_secret_file_unix_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "omnihub-write-secret-file-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("secret.bin");
+
+        write_secret_file(&path, b"payload").expect("write 成功");
+
+        let metadata = fs::metadata(&path).expect("metadata 成功");
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            0o600,
+            "expected 0o600, got 0o{:o}",
+            metadata.permissions().mode()
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// L-1：`LocalFileStorage::save` 写出的 `key_storage` 主密钥文件权限为 0600。
+    #[cfg(unix)]
+    #[test]
+    fn test_key_storage_file_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = TEST_DIR_MUTEX.lock().unwrap();
+        let dir = fresh_data_dir("key_storage_mode");
+
+        let storage = LocalFileStorage;
+        storage.delete().ok();
+        storage
+            .save("master_key_for_mode_check")
+            .expect("save 成功");
+
+        let path = get_key_storage_path().unwrap();
+        let metadata = fs::metadata(&path).expect("metadata 成功");
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            0o600,
+            "expected 0o600, got 0o{:o}",
+            metadata.permissions().mode()
+        );
+
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -8530,6 +8530,7 @@ dependencies = [
  "russh",
  "rust-i18n",
  "sha1 0.10.6",
+ "tempfile",
  "tokio",
  "tokio-socks",
  "tracing",

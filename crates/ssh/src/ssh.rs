@@ -450,10 +450,22 @@ pub fn verify_server_key(
     match russh::keys::check_known_hosts(host, port, server_public_key) {
         Ok(true) => Ok(true),
         Ok(false) => {
+            // B3：把"首次连接"也记录到 KEY_CHANGE_FINGERPRINTS，
+            // 让上层（终端 / 弹窗）可以通过 take_key_change_fingerprints 取出
+            // 新指纹展示给用户，用户核对后再决定是否接受。
+            // 旧指纹设为 "NEW_HOST" 作为哨兵，上层识别后展示"是否信任新主机"。
+            let new_fingerprint = ssh_key_sha256_fingerprint(server_public_key);
+            if let Ok(mut map) = KEY_CHANGE_FINGERPRINTS.lock() {
+                map.insert(
+                    (host.to_string(), port),
+                    ("NEW_HOST".to_string(), new_fingerprint.clone()),
+                );
+            }
             tracing::warn!(
-                "首次连接 SSH 主机 {}:{}，自动写入 known_hosts 指纹",
+                "首次连接 SSH 主机 {}:{}，自动写入 known_hosts 指纹: {}",
                 host,
-                port
+                port,
+                new_fingerprint
             );
             russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
             Ok(true)
@@ -639,20 +651,34 @@ where
             passphrase,
             certificate_path,
         } => {
-            // Write key content to a temp file since russh's decode_secret_key reads from a file path.
-            let temp_dir = std::env::temp_dir();
-            let temp_key_path = temp_dir.join(format!("omnihub_ssh_key_{}", uuid::Uuid::new_v4()));
-            std::fs::write(&temp_key_path, &key_content)?;
+            // A3：russh 的 decode_secret_key 需要文件路径。用 tempfile::Builder
+            // 写出受 0600 权限保护的临时文件；NamedTempFile 在本作用域结束时自动清理，
+            // 避免 panic / kill -9 等失败路径残留同机可读的私钥。
+            let mut temp_key = tempfile::Builder::new()
+                .prefix("omnihub_ssh_key_")
+                .rand_bytes(16)
+                .tempfile()?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                temp_key
+                    .as_file_mut()
+                    .set_permissions(PermissionsExt::from_mode(0o600))
+                    .context("设置临时私钥文件权限失败")?;
+            }
+            std::io::Write::write_all(temp_key.as_file_mut(), key_content.as_bytes())
+                .context("写入临时私钥失败")?;
+            let temp_key_path = temp_key.path().to_path_buf();
+
             let key_pair = match load_secret_key(&temp_key_path, passphrase.as_deref()) {
-                Ok(kp) => {
-                    let _ = std::fs::remove_file(&temp_key_path);
-                    kp
-                }
+                Ok(kp) => kp,
                 Err(e) => {
-                    let _ = std::fs::remove_file(&temp_key_path);
+                    drop(temp_key);
                     return Err(e.into());
                 }
             };
+            // 成功后立即显式清理；NamedTempFile 的 Drop 也会兜底。
+            drop(temp_key);
 
             if let Some(cert_path) = certificate_path {
                 let cert = load_openssh_certificate(cert_path)?;
@@ -1098,6 +1124,33 @@ mod tests {
 
     fn home_dir_env_key() -> &'static str {
         if cfg!(windows) { "USERPROFILE" } else { "HOME" }
+    }
+
+    /// A3 回归：模拟鉴权流程里 tempfile Builder + set_permissions(0o600) 的组合，
+    /// 防止未来重构删除 set_permissions 调用导致同机可读 SSH 私钥。
+    #[cfg(unix)]
+    #[test]
+    fn test_tempfile_private_key_creates_0600_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut temp_key = tempfile::Builder::new()
+            .prefix("omnihub_ssh_key_")
+            .rand_bytes(16)
+            .tempfile()
+            .expect("tempfile 成功");
+        temp_key
+            .as_file_mut()
+            .set_permissions(PermissionsExt::from_mode(0o600))
+            .expect("set_permissions 成功");
+
+        let metadata = std::fs::metadata(temp_key.path()).expect("metadata");
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            0o600,
+            "expected 0o600, got 0o{:o}",
+            metadata.permissions().mode()
+        );
     }
 
     #[cfg(unix)]

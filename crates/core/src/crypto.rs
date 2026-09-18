@@ -132,7 +132,7 @@ fn save_verification_data(data: &str) -> bool {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        fs::write(path, data).is_ok()
+        crate::key_storage::write_secret_file(&path, data.as_bytes()).is_ok()
     } else {
         false
     }
@@ -1067,6 +1067,31 @@ mod tests {
         assert_eq!(encrypted, double_encrypted);
 
         clear_master_key();
+    }
+
+    /// L-1：`save_verification_data` 写出的 `key_verification` 文件权限应为 0600。
+    #[cfg(unix)]
+    #[test]
+    fn test_verification_file_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = lock_for_test();
+        install_test_data_dir();
+
+        // 直接调用底层写入函数：避开 has_repo_password_set 短路，
+        // 保证在 test data dir 上确实落盘一次。
+        let payload = "V3:test_mode_payload";
+        save_verification_data(payload);
+
+        let path = get_verification_file_path().expect("verification path");
+        let metadata = std::fs::metadata(&path).expect("metadata");
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            0o600,
+            "expected 0o600, got 0o{:o}",
+            metadata.permissions().mode()
+        );
     }
 
     #[test]

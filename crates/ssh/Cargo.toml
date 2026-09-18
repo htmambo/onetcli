@@ -21,6 +21,8 @@ tokio-socks.workspace = true
 data-encoding = "2.3"
 hmac = "0.12"
 sha1 = "0.10"
+# A3：SSH 鉴权临时私钥文件 0600 权限 + 自动清理
+tempfile = "3"
 
 [lints]
 workspace = true
