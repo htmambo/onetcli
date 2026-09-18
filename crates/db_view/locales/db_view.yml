@@ -399,13 +399,13 @@ ConnectionForm:
     zh-CN: 强制
     zh-HK: 強制
   ssl_accept_invalid_certs:
-    en: Accept Invalid Certificates
-    zh-CN: 接受无效证书
-    zh-HK: 接受無效憑證
+    en: Accept Invalid Certificates (⚠️ MITM risk, test only)
+    zh-CN: 接受无效证书（⚠️ 中间人攻击风险，仅测试环境）
+    zh-HK: 接受無效憑證（⚠️ 中間人攻擊風險，僅測試環境）
   ssl_accept_invalid_hostnames:
-    en: Accept Invalid Hostnames
-    zh-CN: 接受主机名不匹配
-    zh-HK: 接受主機名稱不匹配
+    en: Accept Invalid Hostnames (⚠️ MITM risk, test only)
+    zh-CN: 接受主机名不匹配（⚠️ 中间人攻击风险，仅测试环境）
+    zh-HK: 接受主機名稱不匹配（⚠️ 中間人攻擊風險，僅測試環境）
 
   # Oracle 特定
   username_schema:

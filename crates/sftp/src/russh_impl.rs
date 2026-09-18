@@ -690,6 +690,53 @@ impl RusshSftpClient {
     }
 }
 
+/// P3 同步扫描：递归读取本地目录树，返回 (path, is_dir, size) 列表。
+/// 在 tokio 阻塞线程池内运行，避免在 async 上下文直接调 std::fs。
+///
+/// 这是 file-level 自由函数（不在 impl 块内）：impl 块内的所有项都必须是
+/// `SftpClient` trait 的方法，而 walk_local_dir 不属于该 trait 公开接口。
+fn walk_local_dir(base: &std::path::Path) -> Vec<(std::path::PathBuf, bool, u64)> {
+    let mut entries: Vec<(std::path::PathBuf, bool, u64)> = Vec::new();
+    let mut dirs_to_scan: Vec<std::path::PathBuf> = vec![base.to_path_buf()];
+
+    while let Some(dir) = dirs_to_scan.pop() {
+        let read_dir = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("SFTP 扫描目录 {:?} 失败: {}", dir, e);
+                continue;
+            }
+        };
+
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("SFTP 读取条目失败: {}", e);
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let metadata = match entry.metadata() {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!("SFTP 读取 metadata {:?} 失败: {}", path, e);
+                    continue;
+                }
+            };
+
+            if metadata.is_dir() {
+                entries.push((path.clone(), true, 0));
+                dirs_to_scan.push(path);
+            } else {
+                entries.push((path, false, metadata.len()));
+            }
+        }
+    }
+
+    entries
+}
+
 #[async_trait]
 impl SftpClient for RusshSftpClient {
     async fn connect(ssh_config: SshConnectConfig) -> Result<Self> {
@@ -1255,6 +1302,15 @@ impl SftpClient for RusshSftpClient {
             if relative.is_empty() {
                 continue;
             }
+            // B5：恶意 / 被入侵 SSH 服务端可能返回 `..` 段文件名，
+            // 拒绝越过 base_local 的条目，跳过并 warn。
+            if relative.starts_with("..") || relative.contains("/../") {
+                tracing::warn!(
+                    "SFTP 目录条目相对路径含 `..`，跳过以防越界：{}",
+                    dir_entry.path
+                );
+                continue;
+            }
             let local_dir = base_local.join(relative);
             std::fs::create_dir_all(&local_dir)
                 .map_err(|e| anyhow!("Failed to create directory {:?}: {}", local_dir, e))?;
@@ -1288,6 +1344,14 @@ impl SftpClient for RusshSftpClient {
                 .strip_prefix(base_remote)
                 .unwrap_or(&file_entry.path);
             let relative = relative.trim_start_matches('/');
+            // B5：同上，拦截 `..` 段路径，防越界写入 base_local 之外。
+            if relative.starts_with("..") || relative.contains("/../") {
+                tracing::warn!(
+                    "SFTP 文件条目相对路径含 `..`，跳过以防越界：{}",
+                    file_entry.path
+                );
+                continue;
+            }
             let local_file = base_local.join(relative);
 
             let current_file_name = file_entry.name.clone();
@@ -1413,29 +1477,15 @@ impl SftpClient for RusshSftpClient {
             anyhow::bail!("Local path is not a directory: {}", local_path);
         }
 
-        let mut entries: Vec<(std::path::PathBuf, bool, u64)> = Vec::new();
-        let mut dirs_to_scan = vec![local_base.to_path_buf()];
-
-        while let Some(dir) = dirs_to_scan.pop() {
-            ensure_not_cancelled(&cancelled)?;
-            let read_dir = std::fs::read_dir(&dir)
-                .map_err(|e| anyhow!("Failed to read directory {:?}: {}", dir, e))?;
-
-            for entry in read_dir {
-                let entry = entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
-                let path = entry.path();
-                let metadata = entry
-                    .metadata()
-                    .map_err(|e| anyhow!("Failed to get metadata for {:?}: {}", path, e))?;
-
-                if metadata.is_dir() {
-                    entries.push((path.clone(), true, 0));
-                    dirs_to_scan.push(path);
-                } else {
-                    entries.push((path, false, metadata.len()));
-                }
-            }
-        }
+        // P3：把同步 std::fs::read_dir + entry.metadata() 递归扫描整个本地树
+        // 移到 tokio 阻塞线程池，避免在 2-worker tokio runtime 上阻塞其他
+        // SSH / DB 任务。大目录（数千文件 / 网络盘）下影响尤甚。
+        let entries: Vec<(std::path::PathBuf, bool, u64)> = tokio::task::spawn_blocking({
+            let local_base = local_base.to_path_buf();
+            move || walk_local_dir(&local_base)
+        })
+        .await
+        .map_err(|e| anyhow!("walk_local_dir join error: {}", e))?;
 
         let total_size: u64 = entries
             .iter()

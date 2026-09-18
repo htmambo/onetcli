@@ -164,14 +164,14 @@ impl FilterValue {
                 if v.is_empty() {
                     return "'".to_string();
                 }
-                // 检测是否已经是 SQL 表达式（函数调用、数字、NULL 等）
+                // B2：仅 SQL 字面量（数字 / NULL / TRUE / FALSE）允许透传；
+                // 含 `(` 的值视为普通字符串字面量，强制走单引号转义路径，
+                // 避免过滤器输入被当 SQL 函数/子查询注入到 WHERE。
                 let v = v.trim();
                 if v.eq_ignore_ascii_case("NULL")
                     || v.starts_with(|c: char| c.is_ascii_digit())
                     || v == "TRUE"
                     || v == "FALSE"
-                    || v.starts_with('(')
-                    || v.contains('(')
                 {
                     v.to_string()
                 } else {

@@ -93,8 +93,16 @@ impl MysqlDbConnection {
             .map(|value| value.trim())
             .filter(|value| !value.is_empty());
 
+        let mut commands: Vec<String> = Vec::new();
+
+        // B1：默认开启 NO_BACKSLASH_ESCAPES，把现有 sql_mode 作为卷接基础
+        // 保留用户的其他 sql_mode 设置；NO_BACKSLASH_ESCAPES 让客户端的
+        // 反斜杠不再被 MySQL 当作转义符，避免导入/编辑含 `\` 的值时
+        // 破坏字符串字面量边界。
+        commands.push("SET sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')".to_string());
+
         if charset.is_none() && collation.is_none() {
-            return Ok(Vec::new());
+            return Ok(commands);
         }
 
         let charset = charset.ok_or_else(|| {
@@ -108,8 +116,9 @@ impl MysqlDbConnection {
             Self::validate_mysql_identifier("collation", collation)?;
             command.push_str(&format!(" COLLATE {}", collation));
         }
+        commands.push(command);
 
-        Ok(vec![command])
+        Ok(commands)
     }
 
     fn validate_mysql_identifier(field_name: &str, value: &str) -> Result<(), DbError> {
