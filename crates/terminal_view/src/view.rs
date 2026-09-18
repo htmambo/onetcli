@@ -2606,13 +2606,17 @@ impl TerminalView {
 
     fn set_marked_text(
         &mut self,
-        _text: String,
+        text: String,
         range: Option<std::ops::Range<usize>>,
         cx: &mut Context<Self>,
     ) {
-        self.ime_state = Some(ImeState {
-            marked_range: range,
-        });
+        // Wayland preedit 不携带 marked range（恒为 None），若原样存储，
+        // gpui 的 get_ime_area 会因 marked_text_range 返回 None 而跳过
+        // set_cursor_rectangle，输入法候选窗回退到窗口左上角。
+        // 这里补一个范围仅为让 marked_text_range 返回 Some，
+        // 实际 IME 定位由 bounds_for_range 按终端光标位置计算。
+        let marked_range = range.or_else(|| (!text.is_empty()).then_some(0..text.len()));
+        self.ime_state = Some(ImeState { marked_range });
         cx.notify();
     }
 
