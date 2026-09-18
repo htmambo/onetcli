@@ -432,6 +432,13 @@
 - **验证方式**：编译后手工复测对应弹窗/面板，滚动条完整可见且能滚到最后一行（本次在数据传输向导第 2/3 步复测通过）。
 - **适用范围**：所有使用 gpui-component `ScrollableElement::overflow_*_scrollbar()` 且滚动区与兄弟节点共存于 flex 容器的场景。
 
+- **标题**：自定义 gpui 元素的 IME 候选窗不跟随光标时，检查 `marked_text_range` 是否返回 `Some`，而不是先查 `bounds_for_range`。
+- **触发信号**：输入法候选窗固定出现在窗口左上角（或位置完全不更新），但标准输入框（gpui-component Input）定位正常；自定义元素已实现 `EntityInputHandler::bounds_for_range` 且计算正确。
+- **根因 / 约束**：Wayland 下 gpui 收到 preedit 时以 `marked_range = None` 调 `replace_and_mark_text_in_range`（`vendor/zed/crates/gpui/src/platform/linux/wayland/window.rs:903`）；随后 `get_ime_area()` 仅当 `marked_text_range()` 返回 `Some` 才调 `set_cursor_rectangle`（`wayland/window.rs:923`、`wayland/client.rs:1580`），返回 `None` 时整条定位链路被静默跳过，合成器回退默认位置。gpui 的 `invalidate_character_coordinates` 在本仓无任何调用方，不能依赖它刷新位置。X11 路径走 `selected_text_range`，不受此影响。
+- **正确做法**：自定义元素的 `set_marked_text`/`replace_and_mark_text_in_range` 在平台未给 marked range 时合成一个范围（如 `0..text.len()`），保证 preedit 期间 `marked_text_range` 返回 `Some`；实际候选窗坐标仍由 `bounds_for_range` 按真实光标计算。参考修复：`crates/terminal_view/src/view.rs` `set_marked_text`（提交 a44d7c34）。
+- **验证方式**：`cargo check -p <crate>` 后手工复测：打开对应视图，用中文输入法打字，候选窗应跟随光标；同时确认 preedit 清空（空 text）时不合成范围。
+- **适用范围**：所有自绘文本输入的 gpui 自定义元素（终端画布等），尤其 Linux Wayland 后端；排查 IME 定位问题时先看平台层 preedit 链路对 `marked_text_range` 的依赖。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
