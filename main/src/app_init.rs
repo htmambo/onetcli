@@ -62,7 +62,9 @@ mod system_hotkey {
     use std::cell::RefCell;
     use std::sync::{Mutex, OnceLock, mpsc};
 
-    const HOTKEY_POLL_INTERVAL: Duration = Duration::from_millis(16);
+    // 100ms 是权衡唤醒开销与热键响应延迟的经验值：人眼对窗口切换的延迟
+    // 感知阈值约 150ms，100ms 内无感；同时主线程每秒唤醒次数从 60+ 降到 10。
+    const HOTKEY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
     thread_local! {
         static HOTKEY_MANAGER: RefCell<Option<GlobalHotKeyManager>> = const { RefCell::new(None) };

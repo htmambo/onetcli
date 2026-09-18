@@ -184,6 +184,7 @@ fn block_element_geometry(c: char) -> Option<Vec<BlockRect>> {
 }
 
 /// Manages decorations from all addons
+#[derive(Clone)]
 pub struct DecorationManager {
     /// 按行索引的装饰 span 列表；外层 Vec 长度为 `num_lines`，
     /// 内层 Vec 仅在行内有装饰时非空。
@@ -359,7 +360,13 @@ pub struct BlockRect {
     pub h: f32,
 }
 
-/// Terminal rendering cache maintained by TerminalView
+/// Terminal rendering cache maintained by TerminalView.
+///
+/// P2：`RenderCache` 改为共享（包成 `Arc<RenderCache>`），需要派生 `Clone`
+/// 以满足 `Arc::make_mut` 在引用计数 >1 时回退到 clone-on-write 的要求。
+/// 所有字段都是 Clone 友好的（Vec/Option/Hsla/Colors/DecorationManager），
+/// clone-on-write 仅在多线程临时持有 Arc 时触发，正常路径仅 1 个持有者。
+#[derive(Clone)]
 pub struct RenderCache {
     lines: Vec<CachedLine>,
     cursor: Option<CachedCursor>,
@@ -653,6 +660,28 @@ impl RenderCache {
         // 调试日志:统计 cache 重建后各行的内容分布。
         // 关注底部最后 8 行,若 TUI 仅画了上半部,底部 8 行的 text/bg 应该为空。
         let total = self.lines.len();
+        // P6：删除原 `tail_summary` 8 行 `format!` 无条件求值（即使 tracing 关闭也会跑），
+        // 改成在 tracing 启用时再生成调试摘要，避免全量重建路径上的固定开销。
+        let tail_summary_enabled =
+            tracing::enabled!(target: "terminal_residue", tracing::Level::DEBUG);
+        let mut tail_summary: Vec<String> = Vec::new();
+        if tail_summary_enabled {
+            let tail_start = total.saturating_sub(8);
+            for idx in tail_start..total {
+                let l = &self.lines[idx];
+                tail_summary.push(format!(
+                    "[{idx}] bg={} text={} chars={}",
+                    l.background_rects.len(),
+                    l.text_runs.len(),
+                    l.text_runs.iter().map(|r| r.char_count).sum::<usize>(),
+                ));
+            }
+        }
+        tracing::debug!(
+            target: "terminal_residue",
+            tail = tail_summary.join(" | "),
+            "rebuild_all done"
+        );
         let non_empty_lines = self
             .lines
             .iter()
@@ -1052,7 +1081,7 @@ impl Clone for CellData {
 
 /// Terminal element that renders from cached data
 pub struct TerminalElement<'a> {
-    cache: &'a RenderCache,
+    cache: &'a Arc<RenderCache>,
     font_family: SharedString,
     font_size: Pixels,
     font_fallbacks: Vec<String>,
@@ -1065,7 +1094,7 @@ pub struct TerminalElement<'a> {
 
 impl<'a> TerminalElement<'a> {
     pub fn new(
-        cache: &'a RenderCache,
+        cache: &'a Arc<RenderCache>,
         font_family: SharedString,
         font_size: Pixels,
         font_fallbacks: Vec<String>,
@@ -1092,11 +1121,7 @@ impl<'a> IntoElement for TerminalElement<'a> {
 
     fn into_element(self) -> Self::Element {
         TerminalElementImpl {
-            lines: self.cache.lines.clone(),
-            cursor: self.cache.cursor.clone(),
-            num_cols: self.cache.num_cols,
-            custom_background: self.cache.custom_background,
-            custom_cursor: self.cache.custom_cursor,
+            cache: Arc::clone(self.cache),
             font_family: self.font_family,
             font_size: self.font_size,
             font_fallbacks: self.font_fallbacks,
@@ -1109,13 +1134,12 @@ impl<'a> IntoElement for TerminalElement<'a> {
 }
 
 pub struct TerminalElementImpl {
-    lines: Vec<CachedLine>,
-    cursor: Option<CachedCursor>,
-    num_cols: usize,
-    /// 主题定义的背景色
-    custom_background: Hsla,
-    /// 主题定义的光标颜色
-    custom_cursor: Hsla,
+    /// 共享的渲染缓存（Arc）。
+    /// P2：原 owned `Vec<CachedLine>` 在 `into_element` 中克隆 200+ 行的
+    /// background_rects / text_runs / block_glyphs，每次 paint 都付一次大 Vec
+    /// 浅拷贝。改为 `Arc<RenderCache>` 后，只在 `into_element` 时做一次
+    /// `Arc::clone`（原子引用计数），paint 阶段借 Arc 内容只读访问。
+    cache: Arc<RenderCache>,
     font_family: SharedString,
     font_size: Pixels,
     font_fallbacks: Vec<String>,
@@ -1243,18 +1267,18 @@ impl Element for TerminalElementImpl {
 
         // 视口裁剪：计算可见行范围，跳过不可见行的渲染
         let content_mask = window.content_mask().bounds;
-        let terminal_height = tb.cell_height * self.lines.len() as f32;
+        let terminal_height = tb.cell_height * self.cache.lines.len() as f32;
         let terminal_bounds = Bounds::new(
             tb.origin,
-            size(tb.cell_width * self.num_cols as f32, terminal_height),
+            size(tb.cell_width * self.cache.num_cols as f32, terminal_height),
         );
 
         let intersection = content_mask.intersect(&terminal_bounds);
         if intersection.size.height <= px(0.) || intersection.size.width <= px(0.) {
             tracing::debug!(
                 target: "terminal_residue",
-                lines = self.lines.len(),
-                num_cols = self.num_cols,
+                lines = self.cache.lines.len(),
+                num_cols = self.cache.num_cols,
                 cell_w = ?tb.cell_width,
                 cell_h = ?tb.cell_height,
                 origin = ?tb.origin,
@@ -1268,7 +1292,7 @@ impl Element for TerminalElementImpl {
         // terminal_bounds 基于缓存尺寸 (num_cols * cell_width, num_lines * cell_height)，
         // 在 resize 过渡期间或交互式程序重绘时可能小于实际可见区域，
         // 导致边缘区域残留上一帧的文字。使用 content_mask 可确保全部区域被清除。
-        window.paint_quad(fill(content_mask, self.custom_background));
+        window.paint_quad(fill(content_mask, self.cache.custom_background));
 
         let first_visible = ((intersection.origin.y - tb.origin.y) / tb.cell_height)
             .floor()
@@ -1276,16 +1300,16 @@ impl Element for TerminalElementImpl {
         let last_visible = ((intersection.origin.y + intersection.size.height - tb.origin.y)
             / tb.cell_height)
             .ceil() as usize;
-        let visible_end = last_visible.min(self.lines.len());
+        let visible_end = last_visible.min(self.cache.lines.len());
 
         // 仅在统计行数 / 像素差异时记录一次,避免每帧爆量
         let cm_h: f32 = content_mask.size.height.into();
         let tb_h: f32 = terminal_height.into();
-        if (cm_h - tb_h).abs() > 0.5 || self.lines.len() < visible_end {
+        if (cm_h - tb_h).abs() > 0.5 || self.cache.lines.len() < visible_end {
             tracing::debug!(
                 target: "terminal_residue",
-                lines = self.lines.len(),
-                num_cols = self.num_cols,
+                lines = self.cache.lines.len(),
+                num_cols = self.cache.num_cols,
                 cell_w = ?tb.cell_width,
                 cell_h = ?tb.cell_height,
                 origin = ?tb.origin,
@@ -1293,14 +1317,14 @@ impl Element for TerminalElementImpl {
                 content_mask = ?content_mask,
                 first_visible,
                 visible_end,
-                bg_alpha = self.custom_background.a,
+                bg_alpha = self.cache.custom_background.a,
                 "paint metrics"
             );
         }
 
         // Paint backgrounds (only visible lines)
         for line_idx in first_visible..visible_end {
-            let line = &self.lines[line_idx];
+            let line = &self.cache.lines[line_idx];
             for &(start, end, color) in &line.background_rects {
                 let rect = Bounds::new(
                     tb.cell_origin(line_idx, start),
@@ -1312,7 +1336,7 @@ impl Element for TerminalElementImpl {
 
         // Paint block-element geometry（在文字之前，与背景同样的覆盖关系）
         for line_idx in first_visible..visible_end {
-            let line = &self.lines[line_idx];
+            let line = &self.cache.lines[line_idx];
             for glyph in &line.block_glyphs {
                 let cell_origin = tb.cell_origin(line_idx, glyph.column);
                 for r in &glyph.rects {
@@ -1331,7 +1355,7 @@ impl Element for TerminalElementImpl {
         // Paint text (only visible lines, using cached fonts)
         // 使用 cell_width 确保等宽渲染，避免字符布局漂移
         for line_idx in first_visible..visible_end {
-            let line = &self.lines[line_idx];
+            let line = &self.cache.lines[line_idx];
             for run in &line.text_runs {
                 let font = fonts.get(run.bold, run.italic);
 
@@ -1371,12 +1395,12 @@ impl Element for TerminalElementImpl {
 
         // Paint cursor (if visible and in visible range)
         if self.cursor_visible {
-            if let Some(cursor) = &self.cursor {
+            if let Some(cursor) = &self.cache.cursor {
                 if cursor.line >= first_visible
                     && cursor.line < visible_end
-                    && cursor.column < self.num_cols
+                    && cursor.column < self.cache.num_cols
                 {
-                    let cursor_color = self.custom_cursor;
+                    let cursor_color = self.cache.custom_cursor;
                     let cursor_bounds = tb.cell_rect(cursor.line, cursor.column);
 
                     match cursor.shape {

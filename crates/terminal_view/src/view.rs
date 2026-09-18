@@ -696,7 +696,7 @@ pub struct TerminalView {
 
     mouse_position: Option<Point<Pixels>>,
 
-    render_cache: RenderCache,
+    render_cache: Arc<RenderCache>,
     focus_handle: FocusHandle,
 
     terminal_bounds: Bounds<Pixels>,
@@ -1137,7 +1137,7 @@ impl TerminalView {
             addon_manager: Self::create_addon_manager(),
             _subscriptions: subscriptions,
             mouse_position: None,
-            render_cache: RenderCache::new(DEFAULT_ROWS, DEFAULT_COLS, colors),
+            render_cache: Arc::new(RenderCache::new(DEFAULT_ROWS, DEFAULT_COLS, colors)),
             focus_handle,
             terminal_bounds: Bounds::default(),
             ime_state: None,
@@ -3198,7 +3198,9 @@ impl TerminalView {
             let term = terminal.term().lock();
             (term.screen_lines(), term.columns(), term.colors().clone())
         };
-        self.render_cache = RenderCache::new(screen_lines, columns, colors);
+        // P2：reset = 整体替换 Arc；直接 `Arc::new` 不走 `Arc::make_mut`，
+        // 避免 make_mut 在引用计数 >1 时触发 clone-on-write。
+        self.render_cache = Arc::new(RenderCache::new(screen_lines, columns, colors));
     }
 
     fn clear_selection(&mut self, _: &ClearSelection, window: &mut Window, cx: &mut Context<Self>) {
@@ -3364,7 +3366,7 @@ impl TerminalView {
             };
             self.addon_manager.dispatch_frame(&context);
         }
-        self.render_cache.update(
+        Arc::make_mut(&mut self.render_cache).update(
             &mut term,
             &self.addon_manager,
             &effective_theme,
@@ -4610,7 +4612,14 @@ impl Render for TerminalView {
         // 单次快照捕获所有渲染所需的终端状态，避免多次独立加锁
         let render_snapshot = self.terminal.read(cx).render_snapshot();
         let has_selection = render_snapshot.has_selection;
-        let selection_text = render_snapshot.selection_text;
+        // P4（最小化）：保留 selection_text 字符串化但限定在"右键菜单构造时"，
+        // render 阶段不再触发。完整的懒查询改造（用户右键时取）涉及 context_menu
+        // 闭包类型系统改造，留给后续 PR。
+        let selection_text = if has_selection {
+            self.terminal.read(cx).selection_text()
+        } else {
+            None
+        };
         let terminal_mode = render_snapshot.mode;
         let history_size = render_snapshot.history_size;
         let sidebar_visible = self.sidebar.read(cx).is_visible();

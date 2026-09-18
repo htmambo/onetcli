@@ -1332,10 +1332,15 @@ pub struct TerminalScrollSnapshot {
 
 /// Snapshot of terminal render state, captured in a single lock acquisition
 /// to avoid multiple independent locks that cause inconsistency and overhead.
+///
+/// P4：移除 `selection_text` 字段。`render_snapshot` 每帧调用一次，
+/// 原实现里 `term.selection_to_string()` 会把整个选中区拼成 String 并分配堆，
+/// 拖选几千行时每个 mouse-move 都付一次完整拼接。改为：snapshot 只携带
+/// `has_selection`，上层（右键菜单）在用户实际右键时再调用
+/// `Terminal::selection_text()` 懒获取。
 #[derive(Clone, Debug)]
 pub struct TerminalRenderSnapshot {
     pub has_selection: bool,
-    pub selection_text: Option<String>,
     pub mode: TermMode,
     pub history_size: usize,
 }
@@ -2492,7 +2497,6 @@ impl Terminal {
         let term = self.term.lock();
         TerminalRenderSnapshot {
             has_selection: term.selection.is_some(),
-            selection_text: term.selection_to_string(),
             mode: *term.mode(),
             history_size: term.history_size(),
         }
