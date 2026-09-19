@@ -10,6 +10,10 @@ Error:
     en: "-- No data changes"
     zh-CN: -- 没有变更数据
     zh-HK: -- 沒有變更資料
+  external_drivers_unsupported:
+    en: External database drivers are no longer supported
+    zh-CN: 外部数据库驱动已停止支持
+    zh-HK: 外部資料庫驅動已停止支援
 
 Common:
   new:

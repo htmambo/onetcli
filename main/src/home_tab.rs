@@ -60,7 +60,6 @@ use crate::connection_restore::{
     ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
     open_connection_restore_dialog, resolve_restore_items,
 };
-use crate::external_driver_display::external_driver_icon_for_config;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
@@ -1797,6 +1796,12 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 外部驱动已移除：存量 External 连接不可编辑，仅可删除
+        if db_type == Some(DatabaseType::External) {
+            window.push_notification(t!("Home.external_driver_unsupported").to_string(), cx);
+            return;
+        }
+
         let is_active = cx.global::<ActiveConnections>().is_active(conn_id);
 
         if is_active {
@@ -1864,6 +1869,17 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 外部驱动已移除：存量 External 连接不可复制（复制后也无法打开编辑器）
+        let is_external_database = source.connection_type == ConnectionType::Database
+            && matches!(
+                source.to_db_connection().map(|p| p.database_type),
+                Ok(DatabaseType::External)
+            );
+        if is_external_database {
+            window.push_notification(t!("Home.external_driver_unsupported").to_string(), cx);
+            return;
+        }
+
         if !self.ensure_master_key_ready_for_new_connection(window, cx) {
             return;
         }
@@ -1964,7 +1980,6 @@ impl HomePage {
 
                 let config = ConnectionFormWindowConfig {
                     db_type,
-                    external_driver_id: None,
                     editing_connection: Some(connection),
                     workspaces: self.workspaces.clone(),
                 };
@@ -2451,7 +2466,6 @@ impl HomePage {
 
         let config = ConnectionFormWindowConfig {
             db_type,
-            external_driver_id: None,
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
         };
@@ -4473,6 +4487,10 @@ impl HomePage {
     fn connection_subtitle(&self, conn: &StoredConnection) -> Option<String> {
         match conn.connection_type {
             ConnectionType::Database => conn.to_db_connection().ok().map(|params| {
+                // 外部驱动已移除：存量 External 连接显示停止支持提示
+                if matches!(params.database_type, DatabaseType::External) {
+                    return t!("Home.external_driver_subtitle").to_string();
+                }
                 if matches!(params.database_type, DatabaseType::SQLite) {
                     params.host
                 } else {
@@ -4552,10 +4570,7 @@ impl HomePage {
         let icon = match conn.connection_type {
             ConnectionType::Database => conn
                 .to_db_connection()
-                .map(|c| {
-                    external_driver_icon_for_config(&c, px(size))
-                        .unwrap_or_else(|| c.database_type.as_icon())
-                })
+                .map(|c| c.database_type.as_icon())
                 .unwrap_or_else(|_| IconName::Database.color())
                 .with_size(px(size))
                 .text_color(gpui::white()),

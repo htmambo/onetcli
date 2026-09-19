@@ -2206,3 +2206,34 @@ mod sensitive_field_tests {
         crate::crypto::clear_master_key();
     }
 }
+
+/// 存量兼容：`DatabaseType::External` 是已移除驱动（DuckDB/MSSQL/Oracle/ClickHouse
+/// 及外部 IPC 驱动如达梦）的反序列化兜底。驱动能力虽已移除，存量连接的 params JSON
+/// 必须仍能正常反序列化，否则连接列表加载/云同步会失败。
+#[cfg(test)]
+mod external_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_database_type_deserializes_to_external() {
+        let json = r#"{"database_type":"DuckDB","host":"localhost","port":0,"username":"","password":"","database":null,"service_name":null,"sid":null}"#;
+        let config: DbConnectionConfig =
+            serde_json::from_str(json).expect("历史 DuckDB 连接参数应可反序列化");
+        assert_eq!(config.database_type, DatabaseType::External);
+    }
+
+    #[test]
+    fn external_driver_database_type_deserializes_to_external() {
+        let json = r#"{"database_type":"External","host":"192.168.1.10","port":5236,"username":"SYSDBA","password":"x","database":null,"service_name":null,"sid":null}"#;
+        let config: DbConnectionConfig =
+            serde_json::from_str(json).expect("外部驱动连接参数应可反序列化");
+        assert_eq!(config.database_type, DatabaseType::External);
+    }
+
+    #[test]
+    fn parse_db_type_falls_back_to_external() {
+        assert_eq!(parse_db_type("DuckDB"), DatabaseType::External);
+        assert_eq!(parse_db_type("Dameng"), DatabaseType::External);
+        assert_eq!(parse_db_type("MySQL"), DatabaseType::MySQL);
+    }
+}

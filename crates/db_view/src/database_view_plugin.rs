@@ -1,5 +1,4 @@
 use db::DbNodeType;
-use db::ipc::{EXTERNAL_DRIVER_ID_PARAM, IpcDriverManifest, IpcDriverRegistry};
 use db::plugin::DatabasePlugin;
 use db::plugin_manifest::{
     DatabaseActionDescriptor, DatabaseActionId, DatabaseActionPlacement,
@@ -9,9 +8,7 @@ use gpui::{App, AppContext, Entity, Window};
 use gpui_component::IconName;
 use one_core::storage::DatabaseType;
 
-use crate::common::db_connection_form::{
-    DbConnectionForm, DbFormConfig, FormField, FormFieldType, TabGroup,
-};
+use crate::common::db_connection_form::DbConnectionForm;
 use crate::common::manifest_bridge::{
     find_form, matches_node_type, to_column_editor_capabilities, to_connection_form_config,
     to_table_designer_capabilities, translate,
@@ -19,7 +16,6 @@ use crate::common::manifest_bridge::{
 use crate::common::{DatabaseEditorView, GenericDatabaseForm, GenericSchemaForm, SchemaEditorView};
 use crate::database_objects_tab::DatabaseObjectsEvent;
 use crate::db_tree_view::{DbTreeViewEvent, SqlDumpMode};
-use std::collections::HashMap;
 
 /// 工具栏按钮类型
 #[derive(Debug, Clone)]
@@ -240,15 +236,15 @@ impl ManifestDatabaseViewPlugin {
         &self,
         window: &mut Window,
         cx: &mut App,
-    ) -> Entity<DbConnectionForm> {
+    ) -> Option<Entity<DbConnectionForm>> {
+        // 已移除驱动的类型（如存量 External 连接）无 plugin，返回 None 而非 panic
         let plugin = cx
             .global::<db::GlobalDbState>()
             .get_plugin(&self.database_type)
-            .expect("database plugin should exist");
-        let form = find_form(&self.manifest, DatabaseFormKind::Connection)
-            .expect("connection form manifest should exist");
+            .ok()?;
+        let form = find_form(&self.manifest, DatabaseFormKind::Connection)?;
         let config = to_connection_form_config(self.database_type, &form, plugin.as_ref());
-        cx.new(|cx| DbConnectionForm::new(config, window, cx))
+        Some(cx.new(|cx| DbConnectionForm::new(config, window, cx)))
     }
 
     fn create_database_editor_view(
@@ -401,13 +397,14 @@ impl ManifestDatabaseViewPlugin {
 fn manifest_plugin(
     database_type: DatabaseType,
     cx: &impl AppContext,
-) -> ManifestDatabaseViewPlugin {
-    let plugin = cx.read_global::<db::GlobalDbState, _>(|state, _| {
-        state
-            .get_plugin(&database_type)
-            .expect("database plugin should exist")
-    });
-    ManifestDatabaseViewPlugin::new(database_type, plugin.as_ref())
+) -> Option<ManifestDatabaseViewPlugin> {
+    // 已移除驱动的类型（存量 External 连接）取不到 plugin，返回 None 由调用方兜底
+    let plugin =
+        cx.read_global::<db::GlobalDbState, _>(|state, _| state.get_plugin(&database_type).ok())?;
+    Some(ManifestDatabaseViewPlugin::new(
+        database_type,
+        plugin.as_ref(),
+    ))
 }
 
 fn action_to_context_menu_item(
@@ -573,95 +570,8 @@ pub fn create_connection_form_for(
     database_type: DatabaseType,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<DbConnectionForm> {
-    manifest_plugin(database_type, cx).create_connection_form(window, cx)
-}
-
-pub fn create_external_connection_form_for(
-    driver_id: &str,
-    window: &mut Window,
-    cx: &mut App,
 ) -> Option<Entity<DbConnectionForm>> {
-    let driver = IpcDriverRegistry::load_default().find(driver_id)?;
-    let config = external_form_config(&driver, cx)?;
-    Some(cx.new(|cx| DbConnectionForm::new(config, window, cx)))
-}
-
-fn external_form_config(driver: &IpcDriverManifest, cx: &mut App) -> Option<DbFormConfig> {
-    let plugin = cx
-        .global::<db::GlobalDbState>()
-        .get_plugin(&DatabaseType::External)
-        .ok()?;
-    let mut config = if let Some(manifest) = driver.ui.form.clone() {
-        let form = find_form(&manifest, DatabaseFormKind::Connection)?;
-        to_connection_form_config(DatabaseType::External, &form, plugin.as_ref())
-    } else {
-        default_external_form_config(driver)
-    };
-    config.title = format!("{} ({})", translate("Common.new"), driver.name);
-    config.hidden_params =
-        HashMap::from([(EXTERNAL_DRIVER_ID_PARAM.to_string(), driver.id.clone())]);
-    ensure_external_ssh_tab(&mut config);
-    Some(config)
-}
-
-fn ensure_external_ssh_tab(config: &mut DbFormConfig) {
-    if config.tab_groups.iter().any(|group| group.name == "ssh") {
-        return;
-    }
-    config.tab_groups.push(DbFormConfig::ssh_tab_group());
-}
-
-fn default_external_form_config(driver: &IpcDriverManifest) -> DbFormConfig {
-    DbFormConfig {
-        db_type: DatabaseType::External,
-        title: format!("{} ({})", translate("Common.new"), driver.name),
-        hidden_params: HashMap::new(),
-        tab_groups: vec![
-            TabGroup::new("general", translate("ConnectionForm.general")).fields(vec![
-                FormField::new(
-                    "name",
-                    translate("ConnectionForm.connection_name"),
-                    FormFieldType::Text,
-                )
-                .placeholder(driver.name.clone())
-                .default(driver.name.clone()),
-                FormField::new(
-                    "host",
-                    translate("ConnectionForm.host"),
-                    FormFieldType::Text,
-                )
-                .placeholder("localhost")
-                .default("localhost"),
-                FormField::new(
-                    "port",
-                    translate("ConnectionForm.port"),
-                    FormFieldType::Number,
-                )
-                .placeholder("0")
-                .default(driver.ui.default_port.unwrap_or_default().to_string()),
-                FormField::new(
-                    "username",
-                    translate("ConnectionForm.username"),
-                    FormFieldType::Text,
-                )
-                .optional(),
-                FormField::new(
-                    "password",
-                    translate("ConnectionForm.password"),
-                    FormFieldType::Password,
-                )
-                .optional(),
-                FormField::new(
-                    "database",
-                    translate("ConnectionForm.database"),
-                    FormFieldType::Text,
-                )
-                .optional(),
-            ]),
-            DbFormConfig::ssh_tab_group(),
-        ],
-    }
+    manifest_plugin(database_type, cx)?.create_connection_form(window, cx)
 }
 
 pub fn create_database_editor_view_for_new(
@@ -669,8 +579,8 @@ pub fn create_database_editor_view_for_new(
     connection_id: String,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<DatabaseEditorView> {
-    manifest_plugin(database_type, cx).create_database_editor_view(connection_id, window, cx)
+) -> Option<Entity<DatabaseEditorView>> {
+    Some(manifest_plugin(database_type, cx)?.create_database_editor_view(connection_id, window, cx))
 }
 
 pub fn create_database_editor_view_for_edit_type(
@@ -679,12 +589,14 @@ pub fn create_database_editor_view_for_edit_type(
     database_name: String,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<DatabaseEditorView> {
-    manifest_plugin(database_type, cx).create_database_editor_view_for_edit(
-        connection_id,
-        database_name,
-        window,
-        cx,
+) -> Option<Entity<DatabaseEditorView>> {
+    Some(
+        manifest_plugin(database_type, cx)?.create_database_editor_view_for_edit(
+            connection_id,
+            database_name,
+            window,
+            cx,
+        ),
     )
 }
 
@@ -695,7 +607,7 @@ pub fn create_schema_editor_view_for(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<Entity<SchemaEditorView>> {
-    manifest_plugin(database_type, cx).create_schema_editor_view(
+    manifest_plugin(database_type, cx)?.create_schema_editor_view(
         connection_id,
         database_name,
         window,
@@ -709,8 +621,9 @@ pub fn build_context_menu_for(
     node_type: DbNodeType,
     cx: &impl AppContext,
 ) -> Vec<ContextMenuItem> {
-    let mut items = manifest_plugin(database_type, cx).build_context_menu(node_id, node_type);
-    items
+    manifest_plugin(database_type, cx)
+        .map(|plugin| plugin.build_context_menu(node_id, node_type))
+        .unwrap_or_default()
 }
 
 pub fn build_toolbar_buttons_for(
@@ -719,25 +632,33 @@ pub fn build_toolbar_buttons_for(
     data_node_type: DbNodeType,
     cx: &impl AppContext,
 ) -> Vec<ToolbarButton> {
-    manifest_plugin(database_type, cx).build_toolbar_buttons(node_type, data_node_type)
+    manifest_plugin(database_type, cx)
+        .map(|plugin| plugin.build_toolbar_buttons(node_type, data_node_type))
+        .unwrap_or_default()
 }
 
 pub fn get_table_designer_capabilities_for(
     database_type: DatabaseType,
     cx: &impl AppContext,
 ) -> TableDesignerCapabilities {
-    manifest_plugin(database_type, cx).get_table_designer_capabilities()
+    manifest_plugin(database_type, cx)
+        .map(|plugin| plugin.get_table_designer_capabilities())
+        .unwrap_or_default()
 }
 
 pub fn get_column_editor_capabilities_for(
     database_type: DatabaseType,
     cx: &impl AppContext,
 ) -> ColumnEditorCapabilities {
-    manifest_plugin(database_type, cx).get_column_editor_capabilities()
+    manifest_plugin(database_type, cx)
+        .map(|plugin| plugin.get_column_editor_capabilities())
+        .unwrap_or_default()
 }
 
 pub fn get_engines_for(database_type: DatabaseType, cx: &impl AppContext) -> Vec<String> {
-    manifest_plugin(database_type, cx).get_engines()
+    manifest_plugin(database_type, cx)
+        .map(|plugin| plugin.get_engines())
+        .unwrap_or_default()
 }
 
 fn map_tree_event(action_id: DatabaseActionId, node_id: &str) -> Option<DbTreeViewEvent> {

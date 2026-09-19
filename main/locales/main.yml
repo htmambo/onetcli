@@ -333,6 +333,14 @@ Home:
     en: "Failed to duplicate connection: %{error}"
     zh-CN: "复制连接失败：%{error}"
     zh-HK: "複製連線失敗：%{error}"
+  external_driver_unsupported:
+    en: "External database drivers are no longer supported; this connection can only be deleted"
+    zh-CN: "外部数据库驱动已停止支持，该连接仅可删除"
+    zh-HK: "外部資料庫驅動已停止支援，此連線僅可刪除"
+  external_driver_subtitle:
+    en: "External driver (no longer supported)"
+    zh-CN: "外部驱动（已停止支持）"
+    zh-HK: "外部驅動（已停止支援）"
 
 # 用户认证
 Auth:

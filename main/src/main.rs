@@ -7,7 +7,6 @@ mod auth;
 mod app_init;
 mod bootstrap;
 mod connection_restore;
-mod external_driver_display;
 mod home;
 mod home_tab;
 pub mod new_connection;
