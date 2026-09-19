@@ -164,7 +164,7 @@ TDD：
 
 #### B4 IPC 驱动密码通路收敛（已完成 2026-09-19，收敛版）
 
-> 后续（2026-09-20）：外部驱动子系统已按 `docs/plans/2026-09-19-remove-external-db-drivers.md`
+> 后续（2026-09-20）：外部驱动子系统已按同目录 `REMOVE_EXTERNAL_DB_DRIVERS_PLAN.md`
 > 整体移除，本节两道闸门随之删除，风险点不复存在。
 
 - 原方案：`crates/db/src/ipc/client.rs:360-398` 新增 `DriverHandshake` IPC 消息，client 在驱动进程启动后通过 Unix socket 发握手包；`Command::new` 时不再设密码环境变量。

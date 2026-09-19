@@ -439,6 +439,27 @@
 - **验证方式**：`cargo check -p <crate>` 后手工复测：打开对应视图，用中文输入法打字，候选窗应跟随光标；同时确认 preedit 清空（空 text）时不合成范围。
 - **适用范围**：所有自绘文本输入的 gpui 自定义元素（终端画布等），尤其 Linux Wayland 后端；排查 IME 定位问题时先看平台层 preedit 链路对 `marked_text_range` 的依赖。
 
+- **标题**：proptest 生成器的关键字/保留字过滤必须与被测解析器共用同一张表，不要手写排除清单。
+- **触发信号**：proptest 随机红灯，最小反例是合法但撞上关键字的标识符（如 `table = "in"`）；失败随 seed 漂移，时有时无。
+- **根因 / 约束**：测试策略用 `matches!` 手写关键字排除清单，与解析器内部关键字表各自演进必然漂移（本次 `identifier_strategy` 漏排 `IN`，`FROM in AS a` 被 tokenizer 当关键字，alias 解析失败）。
+- **正确做法**：`prop_filter` 直接调用解析器自己的判定函数（如 `SqlKeyword::from_str(&s).is_some()`），让过滤条件与被测代码同一来源；不要用硬编码字符串断言随 locale 变化的错误文案（应断言等于同一 `t!()` key 的输出，参考 main proxy 测试修复）。
+- **验证方式**：`cargo test -p db_view --lib sql_editor_completion` 全绿；多次复跑确认无 seed 漂移。
+- **适用范围**：所有 proptest / 模糊测试的标识符生成器；所有断言 i18n 文案的测试。
+
+- **标题**：实现协议载体变更（如 set_env 改为 exec 内联）时，先升级 mock 的记录粒度，再改断言。
+- **触发信号**：断言操作序列的测试红灯，但实际行为是正确的新协议（如 shell integration 从 `SetEnv×N` 改为 `[RequestPty, Exec]`，环境变量内联进 exec 命令）。
+- **根因 / 约束**：mock 的 `exec()` 只记录占位操作、丢弃命令文本，新协议的关键信息（内联环境变量）无处可断言；只改断言为操作序列会丢失对载荷的验证。
+- **正确做法**：给 mock 状态加载荷记录（如 `exec_commands: Vec<String>`），断言"操作序列 + 命令内容"两层；实现侧协议变更时用 `rg` 全量搜该协议的断言点逐一同步（防只改一处）。
+- **验证方式**：`cargo test -p terminal --lib` 全量不带过滤全绿。
+- **适用范围**：`crates/terminal` 的 ssh_backend mock 桥及所有"断言交互序列"的 mock 测试。
+
+- **标题**：SSH 首次连接未知主机的 TOFU 确认用"哨兵 + 静态暂存表 + 覆盖层按钮"模式，不要新建弹窗或在握手回调里阻塞等 UI。
+- **触发信号**：需要在 russh `check_server_key` 握手回调里做交互式确认；或首次连接需要展示指纹给用户核对。
+- **根因 / 约束**：`check_server_key` 在 tokio 上执行且有 inactivity_timeout，挂起等 UI 会被服务端判超时；错误文案（"Unknown server key"）不可靠，不能靠字符串嗅探分场景。
+- **正确做法**：握手层只记录（哨兵指纹写 `KEY_CHANGE_FINGERPRINTS`、公钥暂存 `PENDING_UNKNOWN_HOST_KEYS`）并拒绝（`Ok(false)`）；UI 层在连接失败分支用哨兵识别场景、展示指纹与"信任并连接"覆盖层按钮；用户确认后 `trust_pending_host_key` 写 known_hosts 再重连。无确认 UI 的消费方（db 隧道/redis/port-forwarding）显式传 `auto_learn_unknown_hosts: true` 保持旧行为，不要把拒绝语义硬塞给它们。
+- **验证方式**：`cargo test -p ssh --lib`（含 trust 写入 + 一次性消费用例）；手工用 known_hosts 外的主机连一次终端/SFTP。
+- **适用范围**：`crates/ssh` 主机密钥校验、终端/SFTP 连接错误覆盖层；其他需要"异步底层 + UI 确认"的场景可复刻该模式。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
