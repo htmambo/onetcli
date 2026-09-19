@@ -1,9 +1,20 @@
+import { argon2id } from "hash-wasm";
+
 const ENCRYPTED_PREFIX = "ENC:";
 const ENCRYPTED_PREFIX_V2 = "ENC:V2:";
+const ENCRYPTED_PREFIX_V3 = "ENC:V3:";
 const DERIVE_SALT = "onehub_password_encryption_salt_v1";
+/// V3 派生盐：必须与 Rust 端 crypto.rs 的 MASTER_KEY_APP_SALT_V3 完全一致
+const MASTER_KEY_APP_SALT_V3 = "omnihub-master-key-v3-argon2id-salt-v1";
 const VERIFICATION_MAGIC = "ONEHUB_KEY_VERIFY_V1";
 const NONCE_LENGTH = 12;
 const SALT_LENGTH = 16;
+
+/// Argon2id 参数：与 Rust argon2 0.5  crate `Argon2::default()` 一致（RFC 9106 第一组推荐值）
+const ARGON2_MEMORY_SIZE_KIB = 19456;
+const ARGON2_ITERATIONS = 2;
+const ARGON2_PARALLELISM = 1;
+const AES_KEY_LENGTH = 32;
 
 export class SyncCryptoError extends Error {}
 
@@ -34,12 +45,33 @@ function decodeBase64(value: string): Uint8Array {
   }
 }
 
-/// 使用 SHA-256 派生 AES-256 密钥（与 Rust 后端 derive_key 一致）
+/// 使用 SHA-256 派生 AES-256 密钥（与 Rust 后端 derive_key 一致，仅用于 V1/V2 读取）
 async function deriveKey(masterKey: string): Promise<CryptoKey> {
   ensureWebCryptoSupport();
   const material = toUtf8Bytes(masterKey + DERIVE_SALT);
   const digest = await crypto.subtle.digest("SHA-256", material);
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["decrypt", "encrypt"]);
+}
+
+/// 使用 Argon2id 派生 AES-256 密钥（与 Rust 端 derive_key_v3 一致，用于 V3 读取）
+///
+/// WebCrypto 不支持 Argon2，这里走 hash-wasm 的 WASM 实现；
+/// 参数与 Rust argon2 0.5 `Argon2::default()` 对齐（m=19MiB / t=2 / p=1）。
+async function deriveKeyV3(masterKey: string): Promise<CryptoKey> {
+  ensureWebCryptoSupport();
+  const keyBytes = await argon2id({
+    password: masterKey,
+    salt: toUtf8Bytes(MASTER_KEY_APP_SALT_V3),
+    parallelism: ARGON2_PARALLELISM,
+    memorySize: ARGON2_MEMORY_SIZE_KIB,
+    iterations: ARGON2_ITERATIONS,
+    hashLength: AES_KEY_LENGTH,
+    outputType: "binary",
+  });
+  return crypto.subtle.importKey("raw", keyBytes as BufferSource, "AES-GCM", false, [
+    "decrypt",
+    "encrypt",
+  ]);
 }
 
 /// 解密 V2 格式密文（salt(16) + nonce(12) + ciphertext）
@@ -110,7 +142,10 @@ export async function verifySyncMasterKey(
   }
 }
 
-/// 解密云同步加密数据（支持 ENC:V2: 和 ENC: 前缀）
+/// 解密云同步加密数据（支持 ENC:V3: / ENC:V2: / ENC: 前缀）
+///
+/// 注意前缀分发顺序：V3/V2 必须先于 V1 判断，
+/// 因为 "ENC:V3:" / "ENC:V2:" 同样满足 startsWith("ENC:")。
 export async function decryptSyncEncryptedData(
   encryptedData: string,
   masterKey: string,
@@ -121,6 +156,14 @@ export async function decryptSyncEncryptedData(
 
   if (!encryptedData) {
     return "";
+  }
+
+  if (encryptedData.startsWith(ENCRYPTED_PREFIX_V3)) {
+    // V3 格式: ENC:V3: + base64(salt(16 字节，占位) + nonce(12) + ciphertext)
+    // 与 V2 密文布局一致，区别仅在密钥派生（Argon2id vs SHA-256）
+    const encodedPayload = encryptedData.slice(ENCRYPTED_PREFIX_V3.length);
+    const key = await deriveKeyV3(masterKey);
+    return decryptV2Payload(encodedPayload, key);
   }
 
   if (encryptedData.startsWith(ENCRYPTED_PREFIX_V2)) {
