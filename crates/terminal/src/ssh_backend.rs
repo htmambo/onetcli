@@ -630,6 +630,9 @@ mod tests {
     #[derive(Default)]
     struct MockChannelState {
         ops: Vec<ChannelOp>,
+        /// exec 的命令文本（ops 只记 Exec 占位，环境变量内联在命令里，
+        //  断言 shell integration 环境变量需从这里取）
+        exec_commands: Vec<String>,
         events: VecDeque<ChannelEvent>,
         exec_consumes_session: bool,
         recv_delay: Option<Duration>,
@@ -654,6 +657,7 @@ mod tests {
         ) -> (Self, Arc<Mutex<MockChannelState>>) {
             let state = Arc::new(Mutex::new(MockChannelState {
                 ops: Vec::new(),
+                exec_commands: Vec::new(),
                 events: events.into_iter().collect(),
                 exec_consumes_session,
                 recv_delay,
@@ -681,6 +685,7 @@ mod tests {
         async fn exec(&mut self, _command: &str) -> Result<()> {
             let mut state = self.state.lock().expect("mock channel state should lock");
             state.ops.push(ChannelOp::Exec);
+            state.exec_commands.push(_command.to_string());
             Ok(())
         }
 
@@ -789,6 +794,14 @@ mod tests {
             .clone()
     }
 
+    fn recorded_exec_commands(state: &Arc<Mutex<MockChannelState>>) -> Vec<String> {
+        state
+            .lock()
+            .expect("mock channel state should lock")
+            .exec_commands
+            .clone()
+    }
+
     #[tokio::test]
     async fn prepare_ssh_channel_uses_dedicated_setup_channel_for_zsh() {
         let (setup_channel, setup_state) = MockChannel::new(
@@ -823,18 +836,30 @@ mod tests {
             recorded_ops(&setup_state),
             vec![ChannelOp::Exec, ChannelOp::Close]
         );
+        // zsh 走 exec 内联环境变量（服务器通常不 AcceptEnv，不能用 set_env）
         assert_eq!(
             recorded_ops(&interactive_state),
-            vec![
-                ChannelOp::SetEnv("OMNIHUB_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("OMNIHUB_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::SetEnv(
-                    "ZDOTDIR".into(),
-                    "/tmp/home/.config/omnihub/sessions/42/zsh".into(),
-                ),
-                ChannelOp::RequestPty,
-                ChannelOp::RequestShell,
-            ]
+            vec![ChannelOp::RequestPty, ChannelOp::Exec]
+        );
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        let command = exec_commands
+            .last()
+            .expect("zsh 交互 channel 应 exec wrapper");
+        assert!(
+            command.contains("ZDOTDIR='/tmp/home/.config/omnihub/sessions/42/zsh'"),
+            "exec 命令应内联 ZDOTDIR: {command}"
+        );
+        assert!(
+            command.contains("OMNIHUB_ORIG_ZDOTDIR='/tmp/home'"),
+            "exec 命令应内联 OMNIHUB_ORIG_ZDOTDIR: {command}"
+        );
+        assert!(
+            command.contains("OMNIHUB_SHELL_INTEGRATION=1"),
+            "exec 命令应内联 OMNIHUB_SHELL_INTEGRATION: {command}"
+        );
+        assert!(
+            command.ends_with("zsh -l -i"),
+            "exec 命令应以 zsh 登录交互 shell 结尾: {command}"
         );
     }
 
@@ -868,19 +893,23 @@ mod tests {
             recorded_ops(&setup_state),
             vec![ChannelOp::Exec, ChannelOp::Close]
         );
-        let interactive_ops = recorded_ops(&interactive_state);
+        // bash 同样走 exec 内联环境变量 + --rcfile wrapper
         assert_eq!(
-            interactive_ops[0..3],
-            [
-                ChannelOp::SetEnv("OMNIHUB_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("OMNIHUB_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::RequestPty,
-            ]
+            recorded_ops(&interactive_state),
+            vec![ChannelOp::RequestPty, ChannelOp::Exec]
         );
-        match interactive_ops.get(3) {
-            Some(ChannelOp::Exec) => {}
-            other => panic!("expected bash interactive channel to exec wrapper, got {other:?}"),
-        }
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        let command = exec_commands
+            .last()
+            .expect("bash 交互 channel 应 exec wrapper");
+        assert!(
+            command.contains("OMNIHUB_SHELL_INTEGRATION=1"),
+            "exec 命令应内联 OMNIHUB_SHELL_INTEGRATION: {command}"
+        );
+        assert!(
+            command.contains("--rcfile '/tmp/home/.config/omnihub/sessions/42/bash/.bashrc'"),
+            "exec 命令应携带 bash rcfile: {command}"
+        );
     }
 
     #[tokio::test]
@@ -1015,18 +1044,18 @@ mod tests {
             new_setup.is_none(),
             "缓存命中不应再向 manager 写入新的 integration"
         );
+        // 缓存命中同样走 exec 内联环境变量（zsh 路径）
         assert_eq!(
             recorded_ops(&interactive_state),
-            vec![
-                ChannelOp::SetEnv("OMNIHUB_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("OMNIHUB_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::SetEnv(
-                    "ZDOTDIR".into(),
-                    "/tmp/home/.config/omnihub/sessions/42/zsh".into(),
-                ),
-                ChannelOp::RequestPty,
-                ChannelOp::RequestShell,
-            ]
+            vec![ChannelOp::RequestPty, ChannelOp::Exec]
+        );
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        let command = exec_commands
+            .last()
+            .expect("缓存命中后交互 channel 应 exec zsh wrapper");
+        assert!(
+            command.contains("ZDOTDIR='/tmp/home/.config/omnihub/sessions/42/zsh'"),
+            "exec 命令应内联缓存的 ZDOTDIR: {command}"
         );
     }
 
