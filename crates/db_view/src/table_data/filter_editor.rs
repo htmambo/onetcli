@@ -1,6 +1,7 @@
 use crate::table_data::filter_types::{
-    ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, LogicOperator,
-    OperatorCategory, enum_values_for_column, is_enum_column, operators_for_column, uuid_simple,
+    ConditionItem, FilterGroup, FilterOperator, FilterState, FilterValue, IdentifierQuote,
+    LogicOperator, OperatorCategory, enum_values_for_column, is_enum_column, operators_for_column,
+    uuid_simple,
 };
 #[cfg(test)]
 use crate::table_data::filter_types::{is_datetime_type, is_numeric_type, is_string_type};
@@ -809,6 +810,7 @@ enum FilterItem {
 pub struct VisualFilterBuilder {
     schema: Option<TableSchema>,
     filter_state: FilterState,
+    identifier_quote: IdentifierQuote,
     collapsed_groups: std::collections::HashSet<String>,
     /// 根级别的筛选项（条件或分组）
     root_items: Vec<FilterItem>,
@@ -1321,6 +1323,7 @@ impl VisualFilterBuilder {
         Self {
             schema: None,
             filter_state: FilterState::new(),
+            identifier_quote: IdentifierQuote::default(),
             collapsed_groups: std::collections::HashSet::new(),
             root_items: Vec::new(),
             column_selects: std::collections::HashMap::new(),
@@ -1339,11 +1342,16 @@ impl VisualFilterBuilder {
     }
 
     pub fn get_where_clause(&self) -> String {
-        self.filter_state.to_where_clause()
+        self.filter_state.to_where_clause(self.identifier_quote)
     }
 
     pub fn get_order_by_clause(&self) -> String {
-        self.filter_state.to_order_by_clause()
+        self.filter_state.to_order_by_clause(self.identifier_quote)
+    }
+
+    /// 设置列名引用风格（按数据库类型，MySQL 反引号 / 其余双引号）
+    pub fn set_identifier_quote(&mut self, quote: IdentifierQuote) {
+        self.identifier_quote = quote;
     }
 
     pub fn add_sort_column(
@@ -2625,6 +2633,12 @@ impl TableFilterEditor {
 
     pub fn get_order_by_clause(&self, cx: &App) -> String {
         self.inner.read(cx).get_order_by_clause()
+    }
+
+    /// 设置列名引用风格（按数据库类型）
+    pub fn set_identifier_quote(&mut self, quote: IdentifierQuote, cx: &mut Context<Self>) {
+        self.inner
+            .update(cx, |inner, _| inner.set_identifier_quote(quote));
     }
 
     pub fn set_schema(&mut self, schema: TableSchema, cx: &mut Context<Self>) {

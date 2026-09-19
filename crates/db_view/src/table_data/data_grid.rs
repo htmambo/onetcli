@@ -22,6 +22,7 @@ use crate::settings::{LargeTextEditorOpenMode, current_settings as current_db_vi
 use crate::sql_editor::SqlEditor;
 use crate::table_data::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
 use crate::table_data::filter_editor::{FilterEditorEvent, TableFilterEditor, TableSchema};
+use crate::table_data::filter_types::IdentifierQuote;
 use crate::table_data::results_delegate::{EditorTableDelegate, RowChange};
 use chrono::Local;
 use db::ipc::EXTERNAL_DRIVER_ID_PARAM;
@@ -406,6 +407,13 @@ impl DataGrid {
         });
         let focus_handle = cx.focus_handle();
         let filter_editor = cx.new(|cx| TableFilterEditor::new(window, cx));
+        // B2：按数据库类型确定列名引用风格（MySQL 反引号，其余双引号）
+        filter_editor.update(cx, |editor, cx| {
+            editor.set_identifier_quote(
+                IdentifierQuote::from_database_type(config.database_type),
+                cx,
+            );
+        });
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(t!("TableDataGrid.search_placeholder").to_string())

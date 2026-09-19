@@ -1,8 +1,37 @@
 //! 数据筛选构建器类型定义与 SQL 生成器
 
 use db::ColumnInfo;
+use one_core::storage::DatabaseType;
 use one_ui::edit_table::ColumnSort;
 use tracing;
+
+/// 标识符引用风格（WHERE/ORDER BY 中列名加引号，防注入与关键字冲突）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IdentifierQuote {
+    /// 双引号（PostgreSQL / SQLite / 标准 SQL）
+    #[default]
+    Double,
+    /// 反引号（MySQL）
+    Backtick,
+}
+
+impl IdentifierQuote {
+    /// 按数据库类型选择引用风格（MySQL 反引号，其余双引号）
+    pub fn from_database_type(db_type: DatabaseType) -> Self {
+        match db_type {
+            DatabaseType::MySQL => Self::Backtick,
+            _ => Self::Double,
+        }
+    }
+
+    /// 给标识符加引号，内嵌引号字符按 SQL 规则双写转义
+    pub fn quote(&self, identifier: &str) -> String {
+        match self {
+            Self::Double => format!("\"{}\"", identifier.replace('"', "\"\"")),
+            Self::Backtick => format!("`{}`", identifier.replace('`', "``")),
+        }
+    }
+}
 
 /// 操作符分组类别
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,8 +289,8 @@ impl SortCondition {
         Self { column, direction }
     }
 
-    pub fn to_sql(&self) -> String {
-        format!("{} {}", self.column, self.direction.to_sql())
+    pub fn to_sql(&self, quote: IdentifierQuote) -> String {
+        format!("{} {}", quote.quote(&self.column), self.direction.to_sql())
     }
 }
 
@@ -279,17 +308,17 @@ pub struct ConditionItem {
 #[cfg(test)]
 impl ConditionItem {
     /// 转换为 SQL WHERE 片段（无前导逻辑操作符）
-    pub fn to_sql(&self) -> Option<String> {
-        condition_sql_fragment(self)
+    pub fn to_sql(&self, quote: IdentifierQuote) -> Option<String> {
+        condition_sql_fragment(self, quote)
     }
 }
 
-fn condition_sql_fragment(condition: &ConditionItem) -> Option<String> {
+fn condition_sql_fragment(condition: &ConditionItem, quote: IdentifierQuote) -> Option<String> {
     if !condition.enabled {
         return None;
     }
 
-    let col = &condition.column;
+    let col = quote.quote(&condition.column);
     let op = condition.operator;
 
     match op {
@@ -353,7 +382,7 @@ impl FilterGroup {
     }
     /// 转换为 SQL WHERE 片段
     /// 每个条件的 logic_operator 表示它如何连接到前一个条件
-    pub fn to_sql(&self) -> Option<String> {
+    pub fn to_sql(&self, quote: IdentifierQuote) -> Option<String> {
         // 如果分组被禁用，整个分组不生成 SQL
         if !self.enabled || self.children.is_empty() {
             return None;
@@ -365,7 +394,7 @@ impl FilterGroup {
         for child in &self.children {
             match child {
                 FilterChild::Condition(c) => {
-                    let Some(cond_sql) = condition_sql_fragment(c) else {
+                    let Some(cond_sql) = condition_sql_fragment(c, quote) else {
                         continue;
                     };
                     if is_first {
@@ -377,7 +406,7 @@ impl FilterGroup {
                     }
                 }
                 FilterChild::Group(g) => {
-                    if let Some(s) = g.to_sql() {
+                    if let Some(s) = g.to_sql(quote) {
                         if is_first {
                             result = s;
                             is_first = false;
@@ -400,7 +429,7 @@ impl FilterGroup {
             .iter()
             .filter(|c| match c {
                 FilterChild::Condition(c) => c.enabled,
-                FilterChild::Group(g) => g.to_sql().is_some(),
+                FilterChild::Group(g) => g.to_sql(quote).is_some(),
             })
             .count()
             == 1
@@ -434,8 +463,8 @@ impl FilterState {
     }
 
     /// 转换为完整 WHERE 子句（不含 WHERE 关键字）
-    pub fn to_where_clause(&self) -> String {
-        let sql = self.root.to_sql().unwrap_or_default();
+    pub fn to_where_clause(&self, quote: IdentifierQuote) -> String {
+        let sql = self.root.to_sql(quote).unwrap_or_default();
         tracing::debug!(
             "[FilterState] to_where_clause: {} conditions, WHERE=\"{}\"",
             self.root.children.len(),
@@ -445,7 +474,7 @@ impl FilterState {
     }
 
     /// 转换为 ORDER BY 子句（不含 ORDER BY 关键字）
-    pub fn to_order_by_clause(&self) -> String {
+    pub fn to_order_by_clause(&self, quote: IdentifierQuote) -> String {
         if self.sorts.is_empty() {
             tracing::debug!("[FilterState] to_order_by_clause: (no sorts)");
             return String::new();
@@ -453,7 +482,7 @@ impl FilterState {
         let sql = self
             .sorts
             .iter()
-            .map(|s| s.to_sql())
+            .map(|s| s.to_sql(quote))
             .collect::<Vec<_>>()
             .join(", ");
         tracing::info!(
@@ -635,7 +664,57 @@ mod tests {
             enabled: true,
             logic_operator: LogicOperator::And,
         };
-        assert_eq!(cond.to_sql(), Some("name = 'Alice'".to_string()));
+        assert_eq!(
+            cond.to_sql(IdentifierQuote::Double),
+            Some("\"name\" = 'Alice'".to_string())
+        );
+    }
+
+    #[test]
+    fn quotes_column_with_backtick_for_mysql() {
+        let cond = ConditionItem {
+            column: "name".to_string(),
+            operator: FilterOperator::Equal,
+            value: FilterValue::Single("Alice".to_string()),
+            enabled: true,
+            logic_operator: LogicOperator::And,
+        };
+        assert_eq!(
+            cond.to_sql(IdentifierQuote::Backtick),
+            Some("`name` = 'Alice'".to_string())
+        );
+    }
+
+    #[test]
+    fn quote_escapes_embedded_quote_chars() {
+        assert_eq!(
+            IdentifierQuote::Double.quote("we\"ird"),
+            "\"we\"\"ird\"".to_string()
+        );
+        assert_eq!(
+            IdentifierQuote::Backtick.quote("we`ird"),
+            "`we``ird`".to_string()
+        );
+    }
+
+    #[test]
+    fn identifier_quote_maps_database_type() {
+        assert_eq!(
+            IdentifierQuote::from_database_type(one_core::storage::DatabaseType::MySQL),
+            IdentifierQuote::Backtick
+        );
+        assert_eq!(
+            IdentifierQuote::from_database_type(one_core::storage::DatabaseType::PostgreSQL),
+            IdentifierQuote::Double
+        );
+        assert_eq!(
+            IdentifierQuote::from_database_type(one_core::storage::DatabaseType::SQLite),
+            IdentifierQuote::Double
+        );
+        assert_eq!(
+            IdentifierQuote::from_database_type(one_core::storage::DatabaseType::External),
+            IdentifierQuote::Double
+        );
     }
 
     #[test]
@@ -647,7 +726,10 @@ mod tests {
             enabled: true,
             logic_operator: LogicOperator::And,
         };
-        assert_eq!(cond.to_sql(), Some("name IS NULL".to_string()));
+        assert_eq!(
+            cond.to_sql(IdentifierQuote::Double),
+            Some("\"name\" IS NULL".to_string())
+        );
     }
 
     #[test]
@@ -659,7 +741,7 @@ mod tests {
             enabled: false,
             logic_operator: LogicOperator::And,
         };
-        assert_eq!(cond.to_sql(), None);
+        assert_eq!(cond.to_sql(IdentifierQuote::Double), None);
     }
 
     #[test]
@@ -681,8 +763,8 @@ mod tests {
             logic_operator: LogicOperator::And,
         });
         assert_eq!(
-            group.to_sql(),
-            Some("(age > 18 AND name LIKE 'A%')".to_string())
+            group.to_sql(IdentifierQuote::Double),
+            Some("(\"age\" > 18 AND \"name\" LIKE 'A%')".to_string())
         );
     }
 
@@ -705,8 +787,8 @@ mod tests {
             logic_operator: LogicOperator::Or,
         });
         assert_eq!(
-            group.to_sql(),
-            Some("(status = 'active' OR status = 'pending')".to_string())
+            group.to_sql(IdentifierQuote::Double),
+            Some("(\"status\" = 'active' OR \"status\" = 'pending')".to_string())
         );
     }
 
@@ -737,8 +819,8 @@ mod tests {
             logic_operator: LogicOperator::And, // 第3个条件用 AND
         });
         assert_eq!(
-            group.to_sql(),
-            Some("(age > 18 OR name LIKE 'A%' AND status = 'active')".to_string())
+            group.to_sql(IdentifierQuote::Double),
+            Some("(\"age\" > 18 OR \"name\" LIKE 'A%' AND \"status\" = 'active')".to_string())
         );
     }
 
@@ -772,9 +854,9 @@ mod tests {
         });
         outer.add_group(inner);
 
-        let sql = outer.to_sql().unwrap();
-        assert!(sql.contains("age > 18"));
-        assert!(sql.contains("(name = 'Alice' OR name = 'Bob')"));
+        let sql = outer.to_sql(IdentifierQuote::Double).unwrap();
+        assert!(sql.contains("\"age\" > 18"));
+        assert!(sql.contains("(\"name\" = 'Alice' OR \"name\" = 'Bob')"));
     }
 
     #[test]
@@ -787,8 +869,8 @@ mod tests {
             logic_operator: LogicOperator::And,
         };
         assert_eq!(
-            cond.to_sql(),
-            Some("status IN ('active', 'pending')".to_string())
+            cond.to_sql(IdentifierQuote::Double),
+            Some("\"status\" IN ('active', 'pending')".to_string())
         );
     }
 
@@ -804,13 +886,16 @@ mod tests {
             enabled: true,
             logic_operator: LogicOperator::And,
         };
-        assert_eq!(cond.to_sql(), Some("age BETWEEN 18 AND 30".to_string()));
+        assert_eq!(
+            cond.to_sql(IdentifierQuote::Double),
+            Some("\"age\" BETWEEN 18 AND 30".to_string())
+        );
     }
 
     #[test]
     fn test_sort_to_sql() {
         let sort = SortCondition::new("created_at".to_string(), SortDirection::Desc);
-        assert_eq!(sort.to_sql(), "created_at DESC");
+        assert_eq!(sort.to_sql(IdentifierQuote::Double), "\"created_at\" DESC");
     }
 
     #[test]
@@ -827,8 +912,14 @@ mod tests {
             .sorts
             .push(SortCondition::new("id".to_string(), SortDirection::Asc));
 
-        assert_eq!(state.to_where_clause(), "name LIKE 'A%'");
-        assert_eq!(state.to_order_by_clause(), "id ASC");
+        assert_eq!(
+            state.to_where_clause(IdentifierQuote::Double),
+            "\"name\" LIKE 'A%'"
+        );
+        assert_eq!(
+            state.to_order_by_clause(IdentifierQuote::Double),
+            "\"id\" ASC"
+        );
     }
 
     #[test]
@@ -844,7 +935,10 @@ mod tests {
 
         state.apply_header_sort("updated_at", ColumnSort::Descending);
 
-        assert_eq!(state.to_order_by_clause(), "updated_at DESC");
+        assert_eq!(
+            state.to_order_by_clause(IdentifierQuote::Double),
+            "\"updated_at\" DESC"
+        );
     }
 
     #[test]
@@ -857,7 +951,7 @@ mod tests {
         state.apply_header_sort("name", ColumnSort::Default);
 
         assert!(state.sorts.is_empty());
-        assert_eq!(state.to_order_by_clause(), "");
+        assert_eq!(state.to_order_by_clause(IdentifierQuote::Double), "");
     }
 
     #[test]
@@ -869,7 +963,10 @@ mod tests {
             enabled: true,
             logic_operator: LogicOperator::And,
         };
-        assert_eq!(cond.to_sql(), Some("name = 'O''Brien'".to_string()));
+        assert_eq!(
+            cond.to_sql(IdentifierQuote::Double),
+            Some("\"name\" = 'O''Brien'".to_string())
+        );
     }
 
     fn enum_column(values: &[&str]) -> ColumnInfo {
