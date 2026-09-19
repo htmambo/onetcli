@@ -2030,6 +2030,7 @@ mod tests {
     use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
     use gpui_component::{MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, ThemeMode};
+    use rust_i18n::t;
 
     #[test]
     fn 自动切换关闭时沿用手动主题() {
@@ -2286,7 +2287,11 @@ mod tests {
 
         let err = settings.validate().expect_err("缺少主机和端口时应校验失败");
 
-        assert!(err.contains("主机"));
+        // 错误文案随 locale 变化，断言与实现走同一 t!() 而不是硬编码中文
+        assert_eq!(
+            err,
+            t!("Settings.General.Proxy.validation_host_empty").to_string()
+        );
     }
 
     #[test]
