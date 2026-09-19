@@ -14,6 +14,17 @@ Error:
     en: External database drivers are no longer supported
     zh-CN: 外部数据库驱动已停止支持
     zh-HK: 外部資料庫驅動已停止支援
+  parse_error:
+    en: "Parse error: %{error}"
+    zh-CN: "解析错误: %{error}"
+    zh-HK: "解析錯誤: %{error}"
+
+# 数据库对象树节点 / 表头
+Tree:
+  tables:
+    en: Tables
+    zh-CN: 表
+    zh-HK: 表
 
 Common:
   new:

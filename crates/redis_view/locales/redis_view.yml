@@ -978,6 +978,26 @@ RedisPubSub:
     zh-CN: "分片频道"
     zh-HK: "分片頻道"
 
+# 键值视图工具提示
+KeyValueView:
+  view_full_value_tooltip:
+    en: "View full value"
+    zh-CN: "查看完整值"
+    zh-HK: "查看完整值"
+
+# 连接失败消息（warn/error 级日志）
+RedisForm:
+  test_failed:
+    en: "Redis connection test failed: %{error}"
+    zh-CN: "Redis 连接测试失败: %{error}"
+    zh-HK: "Redis 連線測試失敗: %{error}"
+
+RedisTree:
+  connect_node_failed:
+    en: "Redis connection failed, node %{node_id}: %{error}"
+    zh-CN: "Redis 连接失败，节点 %{node_id}: %{error}"
+    zh-HK: "Redis 連線失敗，節點 %{node_id}: %{error}"
+
 # 团队同步
 TeamSync:
   personal:

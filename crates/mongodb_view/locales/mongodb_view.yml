@@ -251,6 +251,10 @@ MongoTree:
     en: "CONNECTIONS"
     zh-CN: "连接"
     zh-HK: "連接"
+  connect_node_failed:
+    en: "MongoDB connection failed, node {node_id}: {error}"
+    zh-CN: "MongoDB 连接失败，节点 {node_id}: {error}"
+    zh-HK: "MongoDB 連線失敗，節點 {node_id}: {error}"
 
 MongoConnection:
   connect_failed:
@@ -541,6 +545,10 @@ MongoForm:
     en: "Manage Certificates"
     zh-CN: "管理证书"
     zh-HK: "管理憑證"
+  test_failed:
+    en: "MongoDB connection test failed: {error}"
+    zh-CN: "MongoDB 连接测试失败: {error}"
+    zh-HK: "MongoDB 連線測試失敗: {error}"
 
 MongoCollection:
   parse_failed:
@@ -951,3 +959,106 @@ MongoCollection:
     en: "Index Size"
     zh-CN: "索引大小"
     zh-HK: "索引大小"
+
+# 内部日志（连接层/查询层追踪消息，warn/error/info 级别，统一通过 t!() 走 i18n）
+MongoLog:
+  session_query_started:
+    en: "Querying system.sessions via $listSessions aggregate pipeline"
+    zh-CN: "使用 $listSessions 聚合管道查询"
+    zh-HK: "使用 $listSessions 聚合管道查詢"
+  session_iter_failed:
+    en: "Cursor iteration failed: {error}"
+    zh-CN: "遍历失败: {error}"
+    zh-HK: "遍歷失敗: {error}"
+  session_allusers_success:
+    en: "allUsers=true succeeded, fetched {count} documents"
+    zh-CN: "allUsers=true 成功，共 {count} 条文档"
+    zh-HK: "allUsers=true 成功，共 {count} 條文件"
+  session_allusers_failed:
+    en: "allUsers=true failed: {error}, falling back to current user"
+    zh-CN: "allUsers=true 失败: {error}，回退到当前用户"
+    zh-HK: "allUsers=true 失敗: {error}，回退到當前使用者"
+  session_fallback_aggregate_failed:
+    en: "Fallback aggregate also failed: {error}"
+    zh-CN: "回退查询也失败: {error}"
+    zh-HK: "回退查詢也失敗: {error}"
+  session_fallback_iter_failed:
+    en: "Fallback cursor iteration failed: {error}"
+    zh-CN: "回退遍历失败: {error}"
+    zh-HK: "回退遍歷失敗: {error}"
+  session_fallback_success:
+    en: "Fallback query succeeded, fetched {count} documents"
+    zh-CN: "回退查询成功，共 {count} 条文档"
+    zh-HK: "回退查詢成功，共 {count} 條文件"
+  find_documents_running:
+    en: "Running find, actual_filter={actual_filter}"
+    zh-CN: "执行 find, actual_filter={actual_filter}"
+    zh-HK: "執行 find, actual_filter={actual_filter}"
+  find_documents_cursor_failed:
+    en: "find() cursor creation failed: {error}"
+    zh-CN: "find() 游标创建失败: {error}"
+    zh-HK: "find() 游標建立失敗: {error}"
+  find_documents_iter_start:
+    en: "Cursor created, iterating documents"
+    zh-CN: "游标创建成功，开始遍历文档"
+    zh-HK: "游標建立成功，開始遍歷文件"
+  find_documents_iter_failed:
+    en: "try_next() iteration failed: {error}"
+    zh-CN: "try_next() 遍历失败: {error}"
+    zh-HK: "try_next() 遍歷失敗: {error}"
+  find_documents_iter_complete:
+    en: "Iteration complete, fetched {count} documents"
+    zh-CN: "遍历完成，共 {count} 条文档"
+    zh-HK: "遍歷完成，共 {count} 條文件"
+  count_documents_log_failed:
+    en: "count_documents failed: {error}"
+    zh-CN: "失败: {error}"
+    zh-HK: "失敗: {error}"
+  count_documents_log_success:
+    en: "count_documents succeeded, count={count}"
+    zh-CN: "成功, count={count}"
+    zh-HK: "成功, count={count}"
+  count_documents_started:
+    en: "count_documents db={database}, collection={collection}, filter={filter}"
+    zh-CN: "count_documents db={database}, collection={collection}, filter={filter}"
+    zh-HK: "count_documents db={database}, collection={collection}, filter={filter}"
+  run_query_started:
+    en: "run_query db={database}, collection={collection}, filter={filter}"
+    zh-CN: "开始查询 db={database}, collection={collection}, filter={filter}"
+    zh-HK: "開始查詢 db={database}, collection={collection}, filter={filter}"
+  run_query_find_documents_started:
+    en: "run_query find_documents started"
+    zh-CN: "开始 find_documents"
+    zh-HK: "開始 find_documents"
+  run_query_find_documents_success:
+    en: "run_query find_documents succeeded, returned {count}"
+    zh-CN: "find_documents 成功，返回 {count} 条文档"
+    zh-HK: "find_documents 成功，返回 {count} 條文件"
+  run_query_find_documents_failed:
+    en: "run_query find_documents failed: {error}"
+    zh-CN: "find_documents 失败: {error}"
+    zh-HK: "find_documents 失敗: {error}"
+  run_query_count_documents_started:
+    en: "run_query count_documents started"
+    zh-CN: "开始 count_documents"
+    zh-HK: "開始 count_documents"
+  run_query_count_documents_success:
+    en: "run_query count_documents succeeded, total={total}"
+    zh-CN: "count_documents 成功，total={total}"
+    zh-HK: "count_documents 成功，total={total}"
+  run_query_count_documents_failed:
+    en: "run_query count_documents failed (will be ignored): {error}"
+    zh-CN: "count_documents 失败（将忽略）: {error}"
+    zh-HK: "count_documents 失敗（將忽略）: {error}"
+  run_query_async_success:
+    en: "run_query async result ok, documents={count}, total={total}"
+    zh-CN: "异步结果成功，文档数={count}, total={total}"
+    zh-HK: "異步結果成功，文件數={count}, total={total}"
+  run_query_doc_serialize_failed:
+    en: "run_query document serialization failed: {error}"
+    zh-CN: "文档序列化失败: {error}"
+    zh-HK: "文件序列化失敗: {error}"
+  run_query_tokio_failed:
+    en: "run_query tokio task failed: {error}"
+    zh-CN: "Tokio任务失败: {error}"
+    zh-HK: "Tokio任務失敗: {error}"

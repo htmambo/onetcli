@@ -13,3 +13,189 @@ SshSession:
     en: "This host is not in known_hosts yet.\nFingerprint: %{fingerprint}\nVerify it carefully, then click 'Trust new host and connect'."
     zh-CN: "该主机尚未写入 known_hosts。\n指纹：%{fingerprint}\n请仔细核对后点击\"信任新主机并连接\"。"
     zh-HK: "該主機尚未寫入 known_hosts。\n指紋：%{fingerprint}\n請仔細核對後點擊\"信任新主機並連接\"。"
+
+SshBackend:
+  channel_open_rejected_max_sessions:
+    en: "Server refused to open a new channel. This may be the MaxSessions limit (try raising it on the SSH server)."
+    zh-CN: "服务器拒绝打开新 channel，可能是 MaxSessions 限制（可尝试在 SSH server 设置更大值）。"
+    zh-HK: "伺服器拒絕開啟新 channel，可能是 MaxSessions 限制（可嘗試在 SSH server 設定更大值）。"
+  connect_timeout_hint:
+    en: "Connection timed out. Check network, proxy, or jump host reachability."
+    zh-CN: "连接超时，检查网络/代理/跳板机可达性。"
+    zh-HK: "連線逾時，檢查網路/代理/跳板機可達性。"
+  channel_open_retry_max_sessions:
+    en: "channel open failed, invalidating and retrying once (possible MaxSessions limit)."
+    zh-CN: "channel open 失败，尝试 invalidate 并重连一次（可能是 MaxSessions 限制）。"
+    zh-HK: "channel open 失敗，嘗試 invalidate 並重連一次（可能是 MaxSessions 限制）。"
+  trust_no_pending_key:
+    en: "trust_new_host_and_reconnect: %{host}:%{port} has no pending host key to trust."
+    zh-CN: "trust_new_host_and_reconnect: %{host}:%{port} 没有待信任的主机密钥。"
+    zh-HK: "trust_new_host_and_reconnect: %{host}:%{port} 沒有待信任的主機密鑰。"
+  trust_write_known_hosts_failed:
+    en: "Trusting new host %{host}:%{port} failed to write known_hosts: %{error}."
+    zh-CN: "信任新主机 %{host}:%{port} 写入 known_hosts 失败: %{error}。"
+    zh-HK: "信任新主機 %{host}:%{port} 寫入 known_hosts 失敗: %{error}。"
+
+ShellIntegration:
+  install_channel_open_failed:
+    en: "Failed to open the shell integration install channel. Falling back to no-integration mode."
+    zh-CN: "打开 shell integration 安装通道失败，降级为无 integration 模式。"
+    zh-HK: "開啟 shell integration 安裝通道失敗，降級為無 integration 模式。"
+  install_timeout:
+    en: "shell integration install timed out. Falling back to no-integration mode."
+    zh-CN: "shell integration 安装超时，降级为无 integration 模式。"
+    zh-HK: "shell integration 安裝逾時，降級為無 integration 模式。"
+  ssh_detect_timeout_disable_process_check:
+    en: "SSH shell integration was not detected (timeout %{seconds}s). Disabling process check to avoid false positives."
+    zh-CN: "SSH shell integration 未检测到（超时 %{seconds} 秒），禁用进程检查以避免误报。"
+    zh-HK: "SSH shell integration 未偵測到（逾時 %{seconds} 秒），停用行程檢查以避免誤報。"
+  skip_temp_dir_failed:
+    en: "Could not create temp directory %{dir}; skipping Shell Integration."
+    zh-CN: "无法创建临时目录 %{dir}，跳过 Shell Integration。"
+    zh-HK: "無法建立臨時目錄 %{dir}，跳過 Shell Integration。"
+  write_script_failed:
+    en: "Failed to write shell_integration.sh: %{error}."
+    zh-CN: "写入 shell_integration.sh 失败: %{error}。"
+    zh-HK: "寫入 shell_integration.sh 失敗: %{error}。"
+  ssh_detect_timeout_disabled:
+    en: "SSH shell integration detection timed out; process check disabled."
+    zh-CN: "SSH shell integration 检测超时，已禁用进程检查。"
+    zh-HK: "SSH shell integration 偵測逾時，已停用行程檢查。"
+
+Connection:
+  ssh_connected_synced_size:
+    en: "SSH connected, syncing terminal size to remote: %{cols}x%{rows}."
+    zh-CN: "SSH 连接成功，同步终端尺寸到远程: %{cols}x%{rows}。"
+    zh-HK: "SSH 連線成功，同步終端尺寸到遠端: %{cols}x%{rows}。"
+
+LocalPtyHost:
+  clone_unix_stream_failed:
+    en: "Failed to clone UnixStream."
+    zh-CN: "克隆 UnixStream 失败。"
+    zh-HK: "複製 UnixStream 失敗。"
+  client_channel_closed:
+    en: "host client channel closed."
+    zh-CN: "host client 通道已关闭。"
+    zh-HK: "host client 通道已關閉。"
+  spawn_response_timeout:
+    en: "Timed out waiting for Spawned response."
+    zh-CN: "等待 Spawned 响应超时。"
+    zh-HK: "等待 Spawned 回應逾時。"
+  attach_response_timeout:
+    en: "Timed out waiting for Attached response."
+    zh-CN: "等待 Attached 响应超时。"
+    zh-HK: "等待 Attached 回應逾時。"
+  current_exe_failed:
+    en: "Failed to get current executable path."
+    zh-CN: "获取当前可执行文件路径失败。"
+    zh-HK: "取得目前可執行檔路徑失敗。"
+  spawn_host_failed:
+    en: "Failed to launch local-pty-host."
+    zh-CN: "启动 local-pty-host 失败。"
+    zh-HK: "啟動 local-pty-host 失敗。"
+  host_exited_early:
+    en: "local-pty-host exited prematurely."
+    zh-CN: "local-pty-host 进程过早退出。"
+    zh-HK: "local-pty-host 行程過早退出。"
+  host_ready_timeout:
+    en: "local-pty-host was not ready within the timeout."
+    zh-CN: "local-pty-host 未在超时时间内就绪。"
+    zh-HK: "local-pty-host 未在逾時內就緒。"
+  endpoint_connect_failed:
+    en: "Could not connect to the local-pty-host endpoint."
+    zh-CN: "无法连接到 local-pty-host endpoint。"
+    zh-HK: "無法連線到 local-pty-host endpoint。"
+  write_pid_file_failed:
+    en: "Failed to write host pid file."
+    zh-CN: "写入 host pid 文件失败。"
+    zh-HK: "寫入 host pid 檔案失敗。"
+  open_pty_failed:
+    en: "Failed to open PTY."
+    zh-CN: "打开 PTY 失败。"
+    zh-HK: "開啟 PTY 失敗。"
+  spawn_shell_failed:
+    en: "Failed to spawn shell in PTY."
+    zh-CN: "在 PTY 中启动 shell 失败。"
+    zh-HK: "在 PTY 中啟動 shell 失敗。"
+  pty_master_writer_failed:
+    en: "Failed to obtain PTY master writer."
+    zh-CN: "获取 PTY master writer 失败。"
+    zh-HK: "取得 PTY master writer 失敗。"
+  pty_master_reader_failed:
+    en: "Failed to obtain PTY master reader."
+    zh-CN: "获取 PTY master reader 失败。"
+    zh-HK: "取得 PTY master reader 失敗。"
+  starting_subprocess:
+    en: "Starting local PTY host subprocess."
+    zh-CN: "启动本地 PTY host 子进程。"
+    zh-HK: "啟動本地 PTY host 子行程。"
+  detached_session_ttl_cleanup:
+    en: "Detached session TTL expired; running cleanup."
+    zh-CN: "detached session TTL 到期，执行清理。"
+    zh-HK: "detached session TTL 到期，執行清理。"
+  runtime_dir_hardening_failed:
+    en: "Failed to harden local-pty runtime directory (refusing to start to prevent unauthorized access)."
+    zh-CN: "local-pty 运行时目录加固失败（拒绝启动，防止越权访问）。"
+    zh-HK: "local-pty 執行時目錄加固失敗（拒絕啟動，防止越權存取）。"
+  already_running:
+    en: "Another local-pty-host is already running: %{endpoint}."
+    zh-CN: "另一个 local-pty-host 正在运行: %{endpoint}。"
+    zh-HK: "另一個 local-pty-host 正在執行: %{endpoint}。"
+  unix_socket_bind_failed:
+    en: "Failed to bind Unix Domain Socket: %{endpoint}."
+    zh-CN: "绑定 Unix Domain Socket 失败: %{endpoint}。"
+    zh-HK: "綁定 Unix Domain Socket 失敗: %{endpoint}。"
+  unix_listener_started:
+    en: "local-pty-host Unix listener started."
+    zh-CN: "local-pty-host Unix listener 已启动。"
+    zh-HK: "local-pty-host Unix listener 已啟動。"
+  windows_listener_started:
+    en: "local-pty-host Windows listener started."
+    zh-CN: "local-pty-host Windows listener 已启动。"
+    zh-HK: "local-pty-host Windows listener 已啟動。"
+  accept_client_failed:
+    en: "Failed to accept client connection."
+    zh-CN: "接受 client 连接失败。"
+    zh-HK: "接受 client 連線失敗。"
+  named_pipe_path_invalid:
+    en: "Invalid named pipe path."
+    zh-CN: "无效的 named pipe 路径。"
+    zh-HK: "無效的 named pipe 路徑。"
+  named_pipe_create_failed:
+    en: "Failed to create Windows Named Pipe Server."
+    zh-CN: "创建 Windows Named Pipe Server 失败。"
+    zh-HK: "建立 Windows Named Pipe Server 失敗。"
+  named_pipe_next_create_failed:
+    en: "Failed to create next Windows Named Pipe Server."
+    zh-CN: "创建下一个 Windows Named Pipe Server 失败。"
+    zh-HK: "建立下一個 Windows Named Pipe Server 失敗。"
+  connect_failed:
+    en: "Failed to connect to local-pty-host."
+    zh-CN: "连接 local-pty-host 失败。"
+    zh-HK: "連線 local-pty-host 失敗。"
+  hosted_spawn_failed:
+    en: "Hosted local PTY spawn failed."
+    zh-CN: "hosted local PTY spawn 失败。"
+    zh-HK: "hosted local PTY spawn 失敗。"
+  hosted_attach_failed:
+    en: "Hosted local PTY attach failed."
+    zh-CN: "hosted local PTY attach 失败。"
+    zh-HK: "hosted local PTY attach 失敗。"
+  runtime_dir_hardening_fallback:
+    en: "Runtime directory hardening failed; continuing with default path (connections will fail naturally): %{error}."
+    zh-CN: "运行时目录加固失败，按默认路径继续（连接将自然失败）: %{error}。"
+    zh-HK: "執行時目錄加固失敗，按預設路徑繼續（連線將自然失敗）: %{error}。"
+  runtime_dir_hardening_default_path:
+    en: "Runtime directory hardening failed; continuing with default path: %{error}."
+    zh-CN: "运行时目录加固失败，按默认路径继续: %{error}。"
+    zh-HK: "執行時目錄加固失敗，按預設路徑繼續: %{error}。"
+
+Terminal:
+  history_restored_banner:
+    en: "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m History restored \x1b[0m\r\n\r\n"
+    zh-CN: "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n"
+    zh-HK: "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 歷史記錄已恢復 \x1b[0m\r\n\r\n"
+  history_restored_banner_compact:
+    en: "*History restored"
+    zh-CN: "*历史记录已恢复"
+    zh-HK: "*歷史記錄已恢復"

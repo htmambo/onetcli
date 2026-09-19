@@ -25,6 +25,7 @@ use aes_gcm::{
 use argon2::Argon2;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use rand::RngCore;
+use rust_i18n::t;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
@@ -57,14 +58,20 @@ pub enum CryptoError {
 impl std::fmt::Display for CryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CryptoError::InvalidOldPassword => write!(f, "旧密码错误"),
-            CryptoError::EmptyNewPassword => write!(f, "新密码不能为空"),
-            CryptoError::PasswordMismatch => write!(f, "两次输入的新密码不一致"),
-            CryptoError::NoPasswordSet => write!(f, "未设置过主密码"),
-            CryptoError::SaveVerificationFailed => write!(f, "保存验证数据失败"),
-            CryptoError::DecryptionFailed => write!(f, "解密失败"),
-            CryptoError::EncodingFailed => write!(f, "编码失败"),
-            CryptoError::InvalidDataFormat => write!(f, "数据格式错误"),
+            CryptoError::InvalidOldPassword => {
+                write!(f, "{}", t!("Crypto.error_invalid_old_password"))
+            }
+            CryptoError::EmptyNewPassword => write!(f, "{}", t!("Crypto.error_empty_new_password")),
+            CryptoError::PasswordMismatch => write!(f, "{}", t!("Crypto.error_password_mismatch")),
+            CryptoError::NoPasswordSet => write!(f, "{}", t!("Crypto.error_no_password_set")),
+            CryptoError::SaveVerificationFailed => {
+                write!(f, "{}", t!("Crypto.error_save_verification_failed"))
+            }
+            CryptoError::DecryptionFailed => write!(f, "{}", t!("Crypto.error_decryption_failed")),
+            CryptoError::EncodingFailed => write!(f, "{}", t!("Crypto.error_encoding_failed")),
+            CryptoError::InvalidDataFormat => {
+                write!(f, "{}", t!("Crypto.error_invalid_data_format"))
+            }
         }
     }
 }
@@ -364,7 +371,14 @@ pub fn set_master_key(master_key: &str) {
     // 保存到存储后端
     let storage = key_storage::get_key_storage();
     if let Err(e) = storage.save(master_key) {
-        tracing::warn!("[{}] 保存密钥失败: {}", storage.name(), e);
+        tracing::warn!(
+            "{}",
+            t!(
+                "Crypto.log_save_key_failed",
+                storage = storage.name(),
+                error = e.to_string()
+            )
+        );
     }
 }
 
@@ -372,12 +386,12 @@ pub fn set_master_key(master_key: &str) {
 ///
 /// 如果已设置过密码，需要先验证密钥是否正确。
 /// 返回 Ok(()) 表示设置成功，Err 表示密码错误。
-pub fn verify_and_set_master_key(master_key: &str) -> Result<(), &'static str> {
+pub fn verify_and_set_master_key(master_key: &str) -> Result<(), String> {
     if has_repo_password_set() {
         // 已设置过密码，需要验证
         if let Some(verification_data) = load_verification_data() {
             if !verify_master_key(master_key, &verification_data) {
-                return Err("密码错误");
+                return Err(t!("Crypto.error_password_incorrect").to_string());
             }
         }
     }
@@ -799,7 +813,14 @@ pub fn change_master_key(
     // 更新存储后端中的密钥
     let storage = key_storage::get_key_storage();
     if let Err(e) = storage.save(new_key) {
-        tracing::warn!("[{}] 更新密钥失败: {}", storage.name(), e);
+        tracing::warn!(
+            "{}",
+            t!(
+                "Crypto.log_update_key_failed",
+                storage = storage.name(),
+                error = e.to_string()
+            )
+        );
     }
 
     Ok(())
@@ -929,8 +950,8 @@ pub(crate) mod test_support {
     struct InMemoryKeyStorage(Mutex<Option<String>>);
 
     impl KeyStorage for InMemoryKeyStorage {
-        fn name(&self) -> &'static str {
-            "in-memory-test"
+        fn name(&self) -> String {
+            "in-memory-test".to_string()
         }
         fn save(&self, master_key: &str) -> Result<(), String> {
             *self.0.lock().unwrap() = Some(master_key.to_string());

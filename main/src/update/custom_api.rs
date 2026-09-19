@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request};
+use rust_i18n::t;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -30,26 +31,40 @@ pub(crate) async fn fetch_update_info(
         .uri(update_url)
         .header("Accept", "application/json")
         .body(AsyncBody::empty())
-        .map_err(|err| format!("构建更新请求失败: {}", err))?;
+        .map_err(|err| {
+            t!(
+                "UpdateCustomApi.build_request_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
-    let response = http_client
-        .send(request)
-        .await
-        .map_err(|err| format!("发送更新请求失败: {}", err))?;
+    let response = http_client.send(request).await.map_err(|err| {
+        t!("UpdateCustomApi.send_request_failed", err = err.to_string()).to_string()
+    })?;
 
     let status = response.status();
     let mut body = response.into_body();
     let mut bytes = Vec::new();
-    body.read_to_end(&mut bytes)
-        .await
-        .map_err(|err| format!("读取更新响应失败: {}", err))?;
+    body.read_to_end(&mut bytes).await.map_err(|err| {
+        t!(
+            "UpdateCustomApi.read_response_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     if !status.is_success() {
-        return Err(format!("更新接口返回异常状态码: {}", status));
+        return Err(t!("UpdateCustomApi.status_error", status = status.to_string()).to_string());
     }
 
-    serde_json::from_slice::<UpdateResponse>(&bytes)
-        .map_err(|err| format!("解析更新响应失败: {}", err))
+    serde_json::from_slice::<UpdateResponse>(&bytes).map_err(|err| {
+        t!(
+            "UpdateCustomApi.parse_response_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })
 }
 
 pub(crate) fn select_download_url(

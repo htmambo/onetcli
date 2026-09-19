@@ -31,6 +31,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rust_i18n::t;
 use url::{Host, Url};
 
 /// 守卫配置
@@ -107,7 +108,7 @@ impl RemoteGuard {
         let host = url
             .host_str()
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| RemoteGuardError::InvalidUrl("缺少 host".to_string()))?
+            .ok_or_else(|| RemoteGuardError::InvalidUrl(t!("CloudSync.missing_host").to_string()))?
             .to_lowercase();
 
         // host 白名单（精确匹配）

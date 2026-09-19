@@ -20,8 +20,8 @@ impl SyncTypeHandler for CertificateSyncType {
         "certificate"
     }
 
-    fn display_name(&self) -> &'static str {
-        "证书"
+    fn display_name(&self) -> String {
+        rust_i18n::t!("CloudSync.type_certificate").to_string()
     }
 
     fn queue_key(&self) -> &'static str {

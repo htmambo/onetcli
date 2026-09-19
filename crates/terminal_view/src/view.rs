@@ -891,10 +891,14 @@ impl TerminalView {
         if let Some(error) = init_error.borrow_mut().take() {
             // 窗口初始化期间（如标签页恢复）Root 尚未设置，跳过通知以避免崩溃
             if window.root::<Root>().is_some() {
-                let error_msg = format!("创建本地终端失败: {}", error);
+                let error_msg = t!(
+                    "TerminalView.create_local_failed",
+                    error = error.to_string()
+                )
+                .to_string();
                 window.show_system_notification(
                     SystemNotificationOptions::with_id(
-                        "终端错误",
+                        t!("TerminalView.error_title").as_ref(),
                         &error_msg,
                         "terminal-init-error",
                     ),
@@ -902,7 +906,13 @@ impl TerminalView {
                 );
                 window.push_notification(Notification::error(error_msg).autohide(true), cx);
             } else {
-                tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "TerminalView.init_failed_window_not_ready",
+                        error = error.to_string()
+                    )
+                );
             }
         }
 
@@ -930,7 +940,10 @@ impl TerminalView {
                 match Terminal::new_local_hosted_attach(config.clone(), session_id, cx) {
                     Ok(terminal) => return terminal,
                     Err(e) => {
-                        tracing::warn!("live attach 失败，回退到 buffer 恢复: {}", e);
+                        tracing::warn!(
+                            "{}",
+                            t!("TerminalView.live_attach_failed", error = e.to_string())
+                        );
                     }
                 }
             }
@@ -946,10 +959,14 @@ impl TerminalView {
 
         if let Some(error) = init_error.borrow_mut().take() {
             if window.root::<Root>().is_some() {
-                let error_msg = format!("创建本地终端失败: {}", error);
+                let error_msg = t!(
+                    "TerminalView.create_local_failed",
+                    error = error.to_string()
+                )
+                .to_string();
                 window.show_system_notification(
                     SystemNotificationOptions::with_id(
-                        "终端错误",
+                        t!("TerminalView.error_title").as_ref(),
                         &error_msg,
                         "terminal-init-error",
                     ),
@@ -957,7 +974,13 @@ impl TerminalView {
                 );
                 window.push_notification(Notification::error(error_msg).autohide(true), cx);
             } else {
-                tracing::warn!("本地终端初始化失败（窗口未就绪）: {}", error);
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "TerminalView.init_failed_window_not_ready",
+                        error = error.to_string()
+                    )
+                );
             }
         }
 

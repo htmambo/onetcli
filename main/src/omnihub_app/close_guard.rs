@@ -108,10 +108,10 @@ fn force_close_tabs_then_quit(
 
         let _ = cx.update(|cx| {
             if can_quit {
-                tracing::info!("所有标签页已关闭，准备退出应用");
+                tracing::info!("{}", t!("CloseGuard.all_tabs_closed"));
                 cx.quit();
             } else {
-                tracing::warn!("部分标签页关闭失败，取消退出");
+                tracing::warn!("{}", t!("CloseGuard.some_tabs_failed"));
                 guard.borrow_mut().cancel_force_close();
             }
         });
@@ -233,7 +233,7 @@ pub(super) fn request_main_window_close(window: &mut Window, cx: &mut App) -> bo
         AppCloseDecision::Allow | AppCloseDecision::ForceClose => true,
         AppCloseDecision::Ignore => false,
         AppCloseDecision::Prompt => {
-            tracing::info!("准备显示退出确认对话框，先保存当前标签状态");
+            tracing::info!("{}", t!("CloseGuard.prepare_prompt"));
             let state = with_recovery_snapshot_overrides(
                 cx,
                 None,
@@ -241,9 +241,15 @@ pub(super) fn request_main_window_close(window: &mut Window, cx: &mut App) -> bo
                 |cx| tab_container.read(cx).dump(cx),
             );
             if let Err(err) = save_tab_state(&state) {
-                tracing::error!("保存标签状态失败：{:?}", err);
+                tracing::error!(
+                    "{}",
+                    t!("CloseGuard.save_state_failed", error = format!("{err:?}"))
+                );
             } else {
-                tracing::info!("标签状态保存成功，共 {} 个标签", state.tabs.len());
+                tracing::info!(
+                    "{}",
+                    t!("CloseGuard.save_state_ok", count = state.tabs.len())
+                );
             }
             AppSettings::save_global(cx);
 

@@ -1,6 +1,7 @@
 use crate::highlight_presets::{builtin_highlight_rules, merge_builtin_highlight_rules};
 use gpui::{App, AppContext, Context, Entity, EventEmitter};
 use one_core::storage::get_config_dir;
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::error;
@@ -21,10 +22,10 @@ pub struct TerminalHighlightRule {
 impl TerminalHighlightRule {
     pub fn validate(&self) -> Result<(), String> {
         if self.pattern.trim().is_empty() {
-            return Err("正则不能为空".into());
+            return Err(t!("Settings.highlight_regex_empty").to_string());
         }
         if self.foreground.is_none() && self.background.is_none() {
-            return Err("至少设置一种颜色".into());
+            return Err(t!("Settings.highlight_color_required").to_string());
         }
         Ok(())
     }

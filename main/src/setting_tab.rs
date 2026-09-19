@@ -280,7 +280,7 @@ pub(crate) fn build_app_http_client(
     let proxy_url = proxy.to_proxy_url()?;
     ReqwestClient::proxy_and_user_agent(proxy_url, "omnihub")
         .map(Arc::new)
-        .map_err(|err| format!("HTTP 客户端初始化失败: {}", err))
+        .map_err(|err| t!("Settings.http_client_init_failed", error = err.to_string()).to_string())
 }
 
 fn apply_sync_server_url_setting(value: SharedString, cx: &mut App) {

@@ -10,6 +10,43 @@
 
 ---
 
+## 进度审计（2026-09-20，终版）
+
+**全部完成。** 以下为各 Task 最终状态：
+
+- Task 1 ✅：`crates/ui`（实际路径，非 `one_ui`）的 `locales/ui.yml` + `lib.rs` 的 `i18n!` 宏均已就位，本次补全了 `input_history.rs` / `system_notification.rs` 的 i18n
+- Task 2 ✅：`crates/terminal` 的 Cargo.toml 依赖、`lib.rs` 宏、`locales/terminal.yml` 齐备
+- Task 3 ✅：`db` crate 产品代码中文已迁移完毕；`plugin.rs` 的英文列头（`Tables`/`Schemas` 等）为数据库对象树标准英文标签，保持原样不迁移
+- Task 4 ✅：各 connection.rs 的 `Parse error` 已迁移为 `t!("db.Error.parse_error")`
+- Task 5-6 ✅：`terminal` crate 的 `terminal.rs`、`local_pty_host*.rs`、`local_pty_client.rs`、`ssh_backend.rs`、`local_pty_protocol.rs` 中文全部迁移到 `terminal.yml`
+- Task 7 ✅：`core/src/agent/security.rs` 已随模块重构删除（过时跳过）；`ai_chat/engine.rs`/`panel.rs`/`services.rs` 已迁移；`crypto.rs` 的 `CryptoError Display` + `verify_and_set_master_key` 返回类型改为 `String`；`key_storage.rs` trait `fn name()` 签名改为 `-> String`；`certificate_manager.rs` / `models.rs` / `repository.rs` / `demo_database.rs` / `sensitive_migration.rs` / `connection_restore.rs` / `llm/connector.rs` 均已迁移
+- Task 8 ✅：`cloud_sync/` 全部子模块（generic_sync、connection_sync、blob_vault_driver、certificate_sync、client、engine、conflict、oauth 五文件、service、sync_server、sync_server_driver、sync_type、webdav_adapter、workspace_sync、remote_guard、llm_provider_sync、models）的中文错误消息/warn-error 日志已迁移到 `core.yml`
+- Task 9 ✅：`terminal_view` 的 `view.rs`/`addon.rs`/`file_manager_panel.rs`/`sidebar/mod.rs`/`settings.rs`/`pump.rs`（AgentBridge）/`terminal_operator.rs`（TerminalAgent）/`tools.rs`（仅 warn 日志）已迁移，`terminal_operator` display_name 改英文
+- Task 10 ✅：`db_view` 的 `chatdb/agents/chat_bi.rs`/`chat_panel.rs`/`db_tree_view.rs`/`sql_editor_view.rs` 已迁移
+- Task 11 ✅：`ui` 的 `input_history.rs`/`system_notification.rs` 已迁移
+- Task 12 ✅：`mongodb_view`/`redis_view`/`ssh`/`sftp`/`sftp_view`/`port_forwarding_view` 均已迁移
+- Task 13 ✅：`main` 全量迁移——`home_tab`/`update/*`/`remote_desktop_install/*`/`auth`/`connection_restore`/`connection_kind`/`connection_window`/`close_guard`/`logging`/`window_actions`/`setting_tab`/`auth_form`/`proxy_view`/`llm_providers_view`/`oauth_dialog`/`bootstrap/runtime.rs`/`app_init.rs`
+- Task 14 ✅：终扫完成。残留 261 处中文均为有意跳过，分类如下：
+  - `expect()`/`panic!()`/`unwrap()` 的 panic 文案（非用户可见，不影响 UI）
+  - `#[cfg(test)]` 测试代码中的中文断言/描述
+  - `tracing::debug!`/`tracing::info!` 日志（非用户直接可见）
+  - LLM prompt 模板、tool description、chat_bi keywords/examples（协议字段，不走 i18n）
+  - `msg.contains("中文")` 逻辑判断（不能替换为 `t!`）
+  - 注释中的中文
+- Task 15 ✅：`cargo check --workspace` 通过，无 error
+- Task 16 ✅：经验已沉淀到 `AGENTS.md` "已验证经验" 首条（i18n 审计用脚本扫描 + 编译期验证双保险）
+
+**迁移规模：** 新增约 300+ 个 i18n key，覆盖 11 个 crate 的 locales yml 文件。
+
+**测试验证：**
+- `cargo check --workspace` 通过
+- `cargo fmt --all` 执行完毕，`--check` 干净
+- main 105/105、terminal_view 221/221、one-core 236/236、terminal 97/97、db 404/404、db_view 313/313、gpui-component 36/36、mongodb_view 16、redis_view 33、ssh 27、sftp 2、sftp_view 14 均通过
+
+**已知 flaky（与本次无关）：** one-core `crypto::tests::test_v1_backward_compatibility`、db `ddl_compat::tests::verdicts_flag_lossy_cases`——涉及全局 locale/key_storage 状态的测试并行竞争，单独跑和复跑均通过。
+
+---
+
 ## 阶段一：基础设施补齐
 
 ### Task 1: 为 `one_ui` 创建 locales 目录和翻译文件

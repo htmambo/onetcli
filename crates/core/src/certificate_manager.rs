@@ -90,7 +90,13 @@ impl CertificateManagerView {
                 self.certificates = certificates;
             }
             Err(error) => {
-                tracing::error!("加载证书失败: {}", error);
+                tracing::error!(
+                    "{}",
+                    t!(
+                        "CertificateManager.log_load_failed",
+                        error = error.to_string()
+                    )
+                );
                 self.certificates.clear();
             }
         }
@@ -137,7 +143,13 @@ impl CertificateManagerView {
         if let Some(cloud_id) = &certificate.cloud_id {
             if let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() {
                 if let Err(error) = pending_repo.add(cloud_id, "certificate") {
-                    tracing::error!("记录证书待删除同步失败: {}", error);
+                    tracing::error!(
+                        "{}",
+                        t!(
+                            "CertificateManager.log_record_pending_deletion_failed",
+                            error = error.to_string()
+                        )
+                    );
                 }
             }
         }
@@ -150,7 +162,13 @@ impl CertificateManagerView {
             Ok(changed_connections) => {
                 if let Some(id) = certificate.id {
                     if let Err(error) = repo.delete(id) {
-                        tracing::error!("删除证书失败: {}", error);
+                        tracing::error!(
+                            "{}",
+                            t!(
+                                "CertificateManager.log_delete_failed",
+                                error = error.to_string()
+                            )
+                        );
                         return;
                     }
                 }
@@ -170,7 +188,13 @@ impl CertificateManagerView {
                 }
             }
             Err(error) => {
-                tracing::error!("解除证书引用失败: {}", error);
+                tracing::error!(
+                    "{}",
+                    t!(
+                        "CertificateManager.log_detach_refs_failed",
+                        error = error.to_string()
+                    )
+                );
                 return;
             }
         }
@@ -859,7 +883,13 @@ impl CertificateEditorView {
                                 request_popup_window_close(window, cx);
                             }
                             Err(error) => {
-                                tracing::error!("保存证书失败: {}", error);
+                                tracing::error!(
+                                    "{}",
+                                    t!(
+                                        "CertificateManager.log_save_failed",
+                                        error = error.to_string()
+                                    )
+                                );
                                 this.error_message = Some(
                                     t!("CertificateManager.save_failed", error = error.to_string())
                                         .to_string(),

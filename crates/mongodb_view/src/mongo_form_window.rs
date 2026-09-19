@@ -680,7 +680,7 @@ impl MongoFormWindow {
             .await
             .map_err(|error| {
                 let detailed = format!("{:#}", error);
-                error!("MongoDB 连接测试失败: {}", detailed);
+                error!("{}", t!("MongoForm.test_failed", error = detailed));
                 detailed
             });
 

@@ -964,7 +964,7 @@ impl RedisFormWindow {
             .await
             .map_err(|e| {
                 let detailed = format!("{:#}", e);
-                error!("Redis 连接测试失败: {}", detailed);
+                error!("{}", t!("RedisForm.test_failed", error = detailed));
                 detailed
             });
 

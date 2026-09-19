@@ -115,7 +115,7 @@ pub fn handle_update_command() -> bool {
     }
 
     let Some(download_path) = args.next().map(PathBuf::from) else {
-        tracing::error!("缺少更新包路径");
+        tracing::error!("{}", t!("UpdateCheck.apply_update_flag_missing_path"));
         return true;
     };
 
@@ -126,7 +126,7 @@ pub fn handle_update_command() -> bool {
         .unwrap_or_else(|| download_path.clone());
 
     if let Err(err) = apply_update_helper(&download_path, &target_path) {
-        tracing::error!("更新失败: {}", err);
+        tracing::error!("{}", t!("UpdateInstall.update_failed", err = err));
     }
 
     true
@@ -165,7 +165,8 @@ fn run_update_check(window: &mut Window, cx: &mut App, trigger: UpdateCheckTrigg
             let outcome = match update_task.await {
                 Ok(outcome) => outcome,
                 Err(err) => {
-                    let message = format!("更新检查任务执行失败: {}", err);
+                    let message =
+                        t!("UpdateCheck.task_join_failed", err = err.to_string()).to_string();
                     tracing::warn!("{}", message);
                     notify_failure_if_needed(trigger, message, cx);
                     return;
@@ -210,7 +211,7 @@ async fn perform_update_check(
                 Ok(Some(info)) => UpdateCheckOutcome::ShowDialog(info),
                 Ok(None) => no_update_outcome(trigger),
                 Err(err) => {
-                    tracing::warn!("GitHub Release 检查失败: {}", err);
+                    tracing::warn!("{}", t!("UpdateCheck.github_check_failed", err = err));
                     failure_outcome(trigger, err)
                 }
             }
@@ -220,7 +221,7 @@ async fn perform_update_check(
                 Ok(Some(info)) => UpdateCheckOutcome::ShowDialog(info),
                 Ok(None) => no_update_outcome(trigger),
                 Err(err) => {
-                    tracing::warn!("自定义更新检查失败: {}", err);
+                    tracing::warn!("{}", t!("UpdateCheck.custom_check_failed", err = err));
                     failure_outcome(trigger, err)
                 }
             }
@@ -265,23 +266,33 @@ async fn fetch_github_dialog_info(
     current_version: &str,
 ) -> Result<Option<UpdateDialogInfo>, String> {
     let release = fetch_github_release(http_client.clone()).await?;
-    let latest_version = parse_version(&release.tag_name)
-        .ok_or_else(|| format!("版本号无法解析 {}", release.tag_name))?;
-    let current_semver = parse_version(current_version)
-        .ok_or_else(|| format!("当前版本号无法解析 {}", current_version))?;
+    let latest_version = parse_version(&release.tag_name).ok_or_else(|| {
+        t!(
+            "UpdateCheck.version_unparseable",
+            version = release.tag_name.clone()
+        )
+        .to_string()
+    })?;
+    let current_semver = parse_version(current_version).ok_or_else(|| {
+        t!(
+            "UpdateCheck.current_version_unparseable",
+            version = current_version
+        )
+        .to_string()
+    })?;
 
     if latest_version <= current_semver {
         return Ok(None);
     }
 
     let mut info = github_release_to_dialog_info(&release, current_version)
-        .map_err(|err| format!("转换 GitHub Release 失败: {}", err))?;
+        .map_err(|err| t!("UpdateGithub.convert_failed", err = err).to_string())?;
     // GitHub 渠道补充完整性校验：拉取 sha256sums.txt 匹配当前平台安装包哈希；
     // 拉取失败降级为不校验（与旧行为一致），不阻断更新
     match fetch_github_sha256(http_client, &release).await {
         Some(hash) => info.expected_sha256 = Some(hash),
         None => {
-            tracing::warn!("GitHub Release 未提供可用 sha256sums.txt，下载将跳过 SHA256 校验")
+            tracing::warn!("{}", t!("UpdateGithub.sha256sums_unavailable"));
         }
     }
     Ok(Some(info))
@@ -293,14 +304,24 @@ async fn fetch_custom_dialog_info(
     current_version: &str,
 ) -> Result<Option<UpdateDialogInfo>, String> {
     if !config.is_valid() {
-        return Err("缺少 OMNIHUB_UPDATE_URL，无法使用自定义更新接口兜底".to_string());
+        return Err(t!("UpdateCheck.custom_api_url_missing").to_string());
     }
 
     let response = fetch_update_info(http_client, &config.update_url).await?;
-    let latest_version = parse_version(&response.version)
-        .ok_or_else(|| format!("版本号无法解析 {}", response.version))?;
-    let current_semver = parse_version(current_version)
-        .ok_or_else(|| format!("当前版本号无法解析 {}", current_version))?;
+    let latest_version = parse_version(&response.version).ok_or_else(|| {
+        t!(
+            "UpdateCheck.version_unparseable",
+            version = response.version.clone()
+        )
+        .to_string()
+    })?;
+    let current_semver = parse_version(current_version).ok_or_else(|| {
+        t!(
+            "UpdateCheck.current_version_unparseable",
+            version = current_version
+        )
+        .to_string()
+    })?;
 
     if latest_version <= current_semver {
         return Ok(None);

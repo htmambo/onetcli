@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use rusqlite::Connection;
+use rust_i18n::t;
 use tracing::{error, info};
 
 use super::get_config_dir;
@@ -21,7 +22,10 @@ pub fn try_init_demo(repo: &ConnectionRepository) {
     let count = match repo.count() {
         Ok(c) => c,
         Err(e) => {
-            error!("检查连接数失败，跳过演示数据库创建: {e}");
+            error!(
+                "{}",
+                t!("DemoDatabase.log_check_count_failed", error = e.to_string())
+            );
             return;
         }
     };
@@ -30,10 +34,13 @@ pub fn try_init_demo(repo: &ConnectionRepository) {
         return;
     }
 
-    info!("首次启动，开始创建演示数据库...");
+    info!("{}", t!("DemoDatabase.log_first_run_start"));
 
     if let Err(e) = init_demo_inner(repo) {
-        error!("创建演示数据库失败: {e}");
+        error!(
+            "{}",
+            t!("DemoDatabase.log_create_failed", error = e.to_string())
+        );
     }
 }
 
@@ -43,11 +50,23 @@ fn init_demo_inner(repo: &ConnectionRepository) -> Result<()> {
 
     if !db_path.exists() {
         create_demo_db_file(&db_path)?;
-        info!("演示数据库文件已创建: {}", db_path.display());
+        info!(
+            "{}",
+            t!(
+                "DemoDatabase.log_db_file_created",
+                path = db_path.display().to_string()
+            )
+        );
     }
 
     register_demo_connection(repo, &db_path)?;
-    info!("演示连接已注册: {DEMO_CONNECTION_NAME}");
+    info!(
+        "{}",
+        t!(
+            "DemoDatabase.log_connection_registered",
+            name = DEMO_CONNECTION_NAME
+        )
+    );
 
     Ok(())
 }
@@ -64,7 +83,7 @@ fn create_demo_db_file(path: &std::path::Path) -> Result<()> {
 fn register_demo_connection(repo: &ConnectionRepository, db_path: &std::path::Path) -> Result<i64> {
     let path_str = db_path
         .to_str()
-        .ok_or_else(|| anyhow::anyhow!("演示数据库路径包含非法字符"))?
+        .ok_or_else(|| anyhow::anyhow!("{}", t!("DemoDatabase.invalid_path")))?
         .to_string();
 
     let config = DbConnectionConfig {

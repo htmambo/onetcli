@@ -5,6 +5,7 @@
 //! - Windows: 暂不支持（可后续扩展）
 
 use gpui::App;
+use rust_i18n::t;
 
 /// 系统通知选项
 #[derive(Debug, Clone)]
@@ -76,7 +77,10 @@ fn show_notification(title: &str, body: &str) {
             .show();
 
         if let Err(e) = result {
-            tracing::warn!("系统通知发送失败: {}", e);
+            tracing::warn!(
+                "{}",
+                t!("SystemNotification.send_failed", error = e.to_string())
+            );
         }
     }
 

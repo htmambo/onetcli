@@ -259,7 +259,7 @@ pub fn build_client_config(config: &SshConnectConfig) -> client::Config {
     // 否则 russh 默认的 3072 会导致仅下发 2048-bit 素数的老服务端 KEX 失败。
     // 旧版本此处仅在 enable_legacy_kex=true 时下调，导致默认路径下 2048-bit 服务端
     // 触发 `DH prime size (2048 bits) not within requested range` 警告后连接失败。
-    let gex = client::GexParams::new(2048, 4096, 8192).expect("GEX 参数必须有效");
+    let gex = client::GexParams::new(2048, 4096, 8192).expect(&t!("Ssh.host_key_gex_invalid"));
 
     client::Config {
         inactivity_timeout: config.timeout.or(Some(defaults::INACTIVITY_TIMEOUT)),
@@ -399,7 +399,7 @@ fn remove_known_hosts_entry(host: &str, port: u16) -> Result<(), russh::Error> {
         let key = s.next();
         if let (Some(h), Some(_)) = (hosts, key) {
             if match_known_host(&host_port, h) {
-                tracing::debug!("从 known_hosts 移除条目: {}", line);
+                tracing::debug!("{}", t!("Ssh.known_hosts_remove_entry", line = line));
                 continue;
             }
         }
@@ -480,13 +480,13 @@ fn ssh_key_sha256_fingerprint(key: &PublicKey) -> String {
 pub fn trust_pending_host_key(host: &str, port: u16) -> Result<bool> {
     let pending_key = PENDING_UNKNOWN_HOST_KEYS
         .lock()
-        .map_err(|_| anyhow::anyhow!("PENDING_UNKNOWN_HOST_KEYS 锁已中毒"))?
+        .map_err(|_| anyhow::anyhow!(t!("Ssh.pending_lock_poisoned").to_string()))?
         .remove(&(host.to_string(), port));
     let Some(pending_key) = pending_key else {
         return Ok(false);
     };
     russh::keys::known_hosts::learn_known_hosts(host, port, &pending_key)?;
-    tracing::info!("已信任 SSH 主机 {}:{} 并写入 known_hosts", host, port);
+    tracing::info!("{}", t!("Ssh.host_key_trusted", host = host, port = port));
     Ok(true)
 }
 
@@ -516,10 +516,13 @@ pub fn verify_server_key(
             }
             if policy.auto_learn_unknown_hosts {
                 tracing::warn!(
-                    "首次连接 SSH 主机 {}:{}，自动写入 known_hosts 指纹: {}",
-                    host,
-                    port,
-                    new_fingerprint
+                    "{}",
+                    t!(
+                        "Ssh.first_connect_auto_learn",
+                        host = host,
+                        port = port,
+                        fingerprint = new_fingerprint
+                    )
                 );
                 russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
                 Ok(true)
@@ -528,10 +531,13 @@ pub fn verify_server_key(
                 // `russh::Error::UnknownKey`（文案 "Unknown server key"）终止握手；
                 // 终端 UI 不依赖该文案，靠 UNKNOWN_HOST_SENTINEL 哨兵识别。
                 tracing::warn!(
-                    "首次连接 SSH 主机 {}:{}，指纹 {} 待用户确认，暂不写入 known_hosts",
-                    host,
-                    port,
-                    new_fingerprint
+                    "{}",
+                    t!(
+                        "Ssh.first_connect_pending_user",
+                        host = host,
+                        port = port,
+                        fingerprint = new_fingerprint
+                    )
                 );
                 Ok(false)
             }
@@ -554,29 +560,38 @@ pub fn verify_server_key(
                     );
                 }
                 tracing::warn!(
-                    "SSH 主机 {}:{} 指纹变更 old={} new={}",
-                    host,
-                    port,
-                    old_fingerprint,
-                    new_fingerprint
+                    "{}",
+                    t!(
+                        "Ssh.host_key_changed",
+                        host = host,
+                        port = port,
+                        old = old_fingerprint,
+                        new = new_fingerprint
+                    )
                 );
             }
             if policy.auto_accept_new_keys {
                 tracing::warn!(
-                    "SSH 主机 {}:{} 的指纹发生变化，自动移除旧指纹并写入新指纹（known_hosts 第 {} 行）",
-                    host,
-                    port,
-                    line
+                    "{}",
+                    t!(
+                        "Ssh.host_key_changed_auto_replaced",
+                        host = host,
+                        port = port,
+                        line = line
+                    )
                 );
                 remove_known_hosts_entry(host, port)?;
                 russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
                 Ok(true)
             } else {
                 tracing::error!(
-                    "SSH 主机 {}:{} 的指纹发生变化，拒绝连接（known_hosts 第 {} 行）",
-                    host,
-                    port,
-                    line
+                    "{}",
+                    t!(
+                        "Ssh.host_key_changed_rejected",
+                        host = host,
+                        port = port,
+                        line = line
+                    )
                 );
                 Err(russh::Error::KeyChanged { line })
             }
@@ -725,10 +740,10 @@ where
                 temp_key
                     .as_file_mut()
                     .set_permissions(PermissionsExt::from_mode(0o600))
-                    .context("设置临时私钥文件权限失败")?;
+                    .context(t!("Ssh.auth_tmp_key_perm_failed"))?;
             }
             std::io::Write::write_all(temp_key.as_file_mut(), key_content.as_bytes())
-                .context("写入临时私钥失败")?;
+                .context(t!("Ssh.auth_tmp_key_write_failed"))?;
             let temp_key_path = temp_key.path().to_path_buf();
 
             let key_pair = match load_secret_key(&temp_key_path, passphrase.as_deref()) {
@@ -776,7 +791,7 @@ where
             }
         }
         SshAuth::Agent => authenticate_with_agent(session, username, hash_alg, &messages).await?,
-        SshAuth::AutoPublicKey => unreachable!("AutoPublicKey 应由高层认证编排处理"),
+        SshAuth::AutoPublicKey => unreachable!("{}", t!("Ssh.auth_auto_publickey_unreachable")),
     }
     Ok(())
 }

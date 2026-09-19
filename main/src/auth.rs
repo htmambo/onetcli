@@ -52,7 +52,7 @@ pub fn get_auth_service(cx: &App) -> Arc<AuthService> {
 pub fn check_and_reset_session_expired() -> bool {
     let expired = SESSION_EXPIRED.swap(false, Ordering::SeqCst);
     if expired {
-        warn!("检测到会话过期标志，准备弹出登录对话框");
+        warn!("{}", t!("AuthSession.session_expired_flag_detected"));
     }
     expired
 }
@@ -70,7 +70,7 @@ impl AuthService {
     fn configure_client(cloud_client: &Arc<SyncServerClient>) {
         // 设置会话过期回调：刷新 token 失败时通过静态标志通知 UI
         let callback: SessionExpiredCallback = Arc::new(|| {
-            warn!("会话已过期，需要重新登录");
+            warn!("{}", t!("AuthSession.session_expired_callback_fired"));
             SESSION_EXPIRED.store(true, Ordering::SeqCst);
         });
         cloud_client.set_session_expired_callback(callback);
@@ -84,8 +84,12 @@ impl AuthService {
                 auth_resp.expires_at,
             );
             info!(
-                "自动刷新令牌已持久化: user_id={} expires_at={}",
-                auth_resp.user_id, auth_resp.expires_at
+                "{}",
+                t!(
+                    "AuthSession.refresh_token_persisted",
+                    user_id = auth_resp.user_id,
+                    expires_at = auth_resp.expires_at
+                )
             );
         }));
     }
@@ -108,9 +112,15 @@ impl AuthService {
     fn new_with_http(http: Arc<dyn HttpClient>, settings: &AppSettings, _cx: &App) -> Self {
         let sync_server_base_url = SyncServerClient::normalize_base_url(&settings.sync_server_url);
         if SyncServerClient::is_valid_base_url(&sync_server_base_url) {
-            info!("认证服务使用 sync_server 后端: {}", sync_server_base_url);
+            info!(
+                "{}",
+                t!(
+                    "AuthSession.using_sync_server_backend",
+                    url = sync_server_base_url
+                )
+            );
         } else {
-            warn!("未配置有效的 sync_server 地址，认证和同步请求可能失败");
+            warn!("{}", t!("AuthSession.sync_server_url_invalid"));
         }
         let cloud_client = Arc::new(SyncServerClient::new(
             SyncServerClientConfig {
@@ -177,7 +187,13 @@ impl AuthService {
         if !SyncServerClient::is_valid_base_url(&normalized) {
             //     info!("sync_server 地址已更新: {}", normalized);
             // } else {
-            warn!("sync_server 地址已更新，但当前值无效: {}", normalized);
+            warn!(
+                "{}",
+                t!(
+                    "AuthSession.sync_server_url_updated_invalid",
+                    value = normalized
+                )
+            );
         }
 
         true
@@ -186,19 +202,26 @@ impl AuthService {
     /// 尝试恢复会话
     pub async fn try_restore_session(&self) -> Option<UserInfo> {
         if let Err(message) = self.ensure_sync_server_url_configured() {
-            warn!("跳过恢复会话：{}", message);
+            warn!(
+                "{}",
+                t!("AuthSession.skip_restore_session", message = message)
+            );
             return None;
         }
 
-        info!("开始尝试恢复会话");
+        info!("{}", t!("AuthSession.restore_session_started"));
         let auth_data = load_auth_data();
         let Some((access_token, refresh_token, user_id, expires_at)) = auth_data else {
-            warn!("恢复会话失败: 本地无认证数据");
+            warn!("{}", t!("AuthSession.restore_session_no_local_data"));
             return None;
         };
         info!(
-            "已读取本地认证数据: user_id={} expires_at={}",
-            user_id, expires_at
+            "{}",
+            t!(
+                "AuthSession.local_auth_data_loaded",
+                user_id = user_id,
+                expires_at = expires_at
+            )
         );
 
         let now = std::time::SystemTime::now()
@@ -208,17 +231,27 @@ impl AuthService {
 
         let needs_refresh = expires_at <= now + 60;
         info!(
-            "令牌过期检查: now={} expires_at={} diff={}s needs_refresh={}",
-            now,
-            expires_at,
-            expires_at - now,
-            needs_refresh
+            "{}",
+            t!(
+                "AuthSession.token_expiry_check",
+                now = now,
+                expires_at = expires_at,
+                diff = expires_at - now,
+                needs_refresh = needs_refresh
+            )
         );
 
         let cloud_client = self.current_client();
 
         if needs_refresh {
-            info!("访问令牌需要刷新: now={} expires_at={}", now, expires_at);
+            info!(
+                "{}",
+                t!(
+                    "AuthSession.token_needs_refresh",
+                    now = now,
+                    expires_at = expires_at
+                )
+            );
             const MAX_RETRIES: u32 = 3;
             let mut last_error = None;
             for attempt in 1..=MAX_RETRIES {
@@ -231,23 +264,35 @@ impl AuthService {
                             auth_resp.expires_at,
                         );
                         info!(
-                            "令牌刷新成功: user_id={} new_expires_at={}",
-                            auth_resp.user_id, auth_resp.expires_at
+                            "{}",
+                            t!(
+                                "AuthSession.token_refresh_succeeded",
+                                user_id = auth_resp.user_id,
+                                expires_at = auth_resp.expires_at
+                            )
                         );
                         last_error = None;
                         break;
                     }
                     Err(error) => {
                         if error.is_auth_error() {
-                            warn!("令牌刷新认证失败，清除本地认证数据: {}", error);
+                            warn!(
+                                "{}",
+                                t!("AuthSession.token_refresh_auth_failed", error = error)
+                            );
                             cloud_client.clear_auth();
                             clear_auth_data();
                             return None;
                         }
 
                         warn!(
-                            "令牌刷新失败（第 {}/{} 次），稍后重试: {}",
-                            attempt, MAX_RETRIES, error
+                            "{}",
+                            t!(
+                                "AuthSession.token_refresh_failed_retry",
+                                current = attempt,
+                                max = MAX_RETRIES,
+                                error = error
+                            )
                         );
                         last_error = Some(error);
                         if attempt < MAX_RETRIES {
@@ -260,8 +305,8 @@ impl AuthService {
 
             if let Some(error) = last_error {
                 warn!(
-                    "令牌刷新重试耗尽，保留本地认证数据，本次跳过恢复会话: {}",
-                    error
+                    "{}",
+                    t!("AuthSession.token_refresh_retries_exhausted", error = error)
                 );
                 return None;
             }
@@ -272,27 +317,46 @@ impl AuthService {
                 user_id,
                 expires_at,
             );
-            info!("访问令牌有效（剩余 {}s），已设置认证状态", expires_at - now);
+            info!(
+                "{}",
+                t!(
+                    "AuthSession.token_valid_remaining",
+                    remaining = expires_at - now
+                )
+            );
         }
 
         match cloud_client.get_current_user().await {
             Ok(Some(user)) => {
-                info!("恢复会话成功: user_id={} email={}", user.id, user.email);
+                info!(
+                    "{}",
+                    t!(
+                        "AuthSession.restore_session_succeeded",
+                        user_id = user.id,
+                        email = user.email
+                    )
+                );
                 Some(user)
             }
             Ok(None) => {
-                warn!("恢复会话失败: 用户信息为空，清除本地认证数据");
+                warn!("{}", t!("AuthSession.restore_session_user_info_empty"));
                 cloud_client.clear_auth();
                 clear_auth_data();
                 None
             }
             Err(error) => {
                 if error.is_auth_error() {
-                    warn!("恢复会话失败: 认证错误，清除本地认证数据: {}", error);
+                    warn!(
+                        "{}",
+                        t!("AuthSession.restore_session_auth_error", error = error)
+                    );
                     cloud_client.clear_auth();
                     clear_auth_data();
                 } else {
-                    warn!("恢复会话失败: 获取用户信息错误（保留本地数据）: {}", error);
+                    warn!(
+                        "{}",
+                        t!("AuthSession.restore_session_user_info_error", error = error)
+                    );
                 }
                 None
             }
@@ -301,7 +365,7 @@ impl AuthService {
 
     /// 登出
     pub async fn sign_out(&self) {
-        info!("用户登出");
+        info!("{}", t!("AuthSession.user_signed_out"));
         let _ = self.cloud_client().sign_out().await;
         self.current_client().clear_auth();
         clear_auth_data();
@@ -394,16 +458,19 @@ pub fn save_auth_data(access_token: &str, refresh_token: &str, user_id: &str, ex
         if let Ok(json) = serde_json::to_string(&data) {
             match std::fs::write(&path, json) {
                 Ok(()) => info!(
-                    "认证数据已保存: user_id={} expires_at={} path={}",
-                    user_id,
-                    expires_at,
-                    path.display()
+                    "{}",
+                    t!(
+                        "AuthSession.auth_data_saved",
+                        user_id = user_id,
+                        expires_at = expires_at,
+                        path = path.display()
+                    )
                 ),
-                Err(error) => warn!("认证数据保存失败: {}", error),
+                Err(error) => warn!("{}", t!("AuthSession.auth_data_save_failed", error = error)),
             }
         }
     } else {
-        warn!("无法获取认证数据存储路径");
+        warn!("{}", t!("AuthSession.auth_data_path_missing"));
     }
 }
 
@@ -414,7 +481,14 @@ pub fn load_auth_data() -> Option<(String, String, String, i64)> {
         Ok(content) => content,
         Err(error) => {
             if error.kind() != std::io::ErrorKind::NotFound {
-                warn!("读取认证数据失败: {} path={}", error, path.display());
+                warn!(
+                    "{}",
+                    t!(
+                        "AuthSession.auth_data_read_failed",
+                        error = error,
+                        path = path.display()
+                    )
+                );
             }
             return None;
         }
@@ -427,11 +501,14 @@ pub fn load_auth_data() -> Option<(String, String, String, i64)> {
     let expires_at = data.get("expires_at").and_then(|v| v.as_i64()).unwrap_or(0);
 
     info!(
-        "加载本地认证数据: user_id={} expires_at={} token_len={} refresh_token_len={}",
-        user_id,
-        expires_at,
-        access_token.len(),
-        refresh_token.len()
+        "{}",
+        t!(
+            "AuthSession.local_auth_data_loaded_detail",
+            user_id = user_id,
+            expires_at = expires_at,
+            token_len = access_token.len(),
+            refresh_token_len = refresh_token.len()
+        )
     );
 
     Some((access_token, refresh_token, user_id, expires_at))
@@ -441,10 +518,16 @@ pub fn load_auth_data() -> Option<(String, String, String, i64)> {
 pub fn clear_auth_data() {
     if let Some(path) = get_auth_file_path() {
         match std::fs::remove_file(&path) {
-            Ok(()) => info!("本地认证数据已清除: path={}", path.display()),
+            Ok(()) => info!(
+                "{}",
+                t!("AuthSession.local_auth_data_cleared", path = path.display())
+            ),
             Err(error) => {
                 if error.kind() != std::io::ErrorKind::NotFound {
-                    warn!("清除本地认证数据失败: {}", error);
+                    warn!(
+                        "{}",
+                        t!("AuthSession.local_auth_data_clear_failed", error = error)
+                    );
                 }
             }
         }

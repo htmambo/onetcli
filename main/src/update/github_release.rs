@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request};
+use rust_i18n::t;
 use serde::Deserialize;
 
 use super::UpdateDialogInfo;
@@ -47,29 +48,34 @@ pub(crate) async fn fetch_github_release(
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", GITHUB_USER_AGENT)
         .body(AsyncBody::empty())
-        .map_err(|err| format!("构建 GitHub Release 请求失败: {}", err))?;
+        .map_err(|err| {
+            t!("UpdateGithub.build_request_failed", err = err.to_string()).to_string()
+        })?;
 
     let response = http_client
         .send(request)
         .await
-        .map_err(|err| format!("发送 GitHub Release 请求失败: {}", err))?;
+        .map_err(|err| t!("UpdateGithub.send_request_failed", err = err.to_string()).to_string())?;
 
     let status = response.status();
     let mut body = response.into_body();
     let mut bytes = Vec::new();
-    body.read_to_end(&mut bytes)
-        .await
-        .map_err(|err| format!("读取 GitHub Release 响应失败: {}", err))?;
+    body.read_to_end(&mut bytes).await.map_err(|err| {
+        t!("UpdateGithub.read_response_failed", err = err.to_string()).to_string()
+    })?;
 
     if !status.is_success() {
-        return Err(format!(
-            "GitHub Release 接口返回异常状态码: {} ({}/{})",
-            status, GITHUB_OWNER, GITHUB_REPO
-        ));
+        return Err(t!(
+            "UpdateGithub.status_error",
+            status = status.to_string(),
+            owner = GITHUB_OWNER,
+            repo = GITHUB_REPO
+        )
+        .to_string());
     }
 
     serde_json::from_slice::<GithubRelease>(&bytes)
-        .map_err(|err| format!("解析 GitHub Release 响应失败: {}", err))
+        .map_err(|err| t!("UpdateGithub.parse_response_failed", err = err.to_string()).to_string())
 }
 
 pub(crate) fn select_github_asset(release: &GithubRelease) -> Option<&GithubReleaseAsset> {
@@ -118,9 +124,15 @@ pub(crate) async fn fetch_github_sha256(
         .header("User-Agent", GITHUB_USER_AGENT)
         .body(AsyncBody::empty())
         .ok()?;
-    let mut response = http_client.send(request).await.ok()?;
+    let response = http_client.send(request).await.ok()?;
     if !response.status().is_success() {
-        tracing::warn!("拉取 sha256sums.txt 返回异常状态码: {}", response.status());
+        tracing::warn!(
+            "{}",
+            t!(
+                "UpdateGithub.sha256sums_unexpected_status",
+                status = response.status().to_string()
+            )
+        );
         return None;
     }
     let mut body = response.into_body();
@@ -130,7 +142,13 @@ pub(crate) async fn fetch_github_sha256(
     match parse_sha256_for(&text, EXPECTED_ARCHIVE_NAME) {
         Some(hash) => Some(hash),
         None => {
-            tracing::warn!("sha256sums.txt 中未找到 {} 的校验值", EXPECTED_ARCHIVE_NAME);
+            tracing::warn!(
+                "{}",
+                t!(
+                    "UpdateGithub.sha256sums_missing_hash",
+                    asset = EXPECTED_ARCHIVE_NAME
+                )
+            );
             None
         }
     }
@@ -140,8 +158,13 @@ pub(crate) fn github_release_to_dialog_info(
     release: &GithubRelease,
     current_version: &str,
 ) -> Result<UpdateDialogInfo, String> {
-    let asset = select_github_asset(release)
-        .ok_or_else(|| format!("未找到当前平台的发布资产: {}", EXPECTED_ARCHIVE_NAME))?;
+    let asset = select_github_asset(release).ok_or_else(|| {
+        t!(
+            "UpdateGithub.asset_not_found",
+            asset = EXPECTED_ARCHIVE_NAME
+        )
+        .to_string()
+    })?;
 
     let release_page_url = GITHUB_LATEST_RELEASE_URL.to_string();
 
@@ -233,7 +256,9 @@ mod tests {
             .await
             .expect_err("传输失败应返回错误");
 
-        assert!(err.contains("发送 GitHub Release 请求失败"));
+        assert!(
+            err.contains(&t!("UpdateGithub.send_request_failed", err = "network down").to_string())
+        );
     }
 
     #[test]

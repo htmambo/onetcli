@@ -17,6 +17,7 @@ use aes_gcm::{
 use hkdf::Hkdf;
 use rand::RngCore;
 use rand::rngs::OsRng;
+use rust_i18n::t;
 use sha2::Sha256;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -64,7 +65,7 @@ pub(crate) fn write_secret_file(path: &Path, data: &[u8]) -> std::io::Result<()>
 /// 密钥存储后端 trait
 pub trait KeyStorage: Send + Sync {
     /// 存储后端名称，用于日志标识
-    fn name(&self) -> &'static str;
+    fn name(&self) -> String;
 
     /// 保存主密钥
     fn save(&self, master_key: &str) -> Result<(), String>;
@@ -232,20 +233,22 @@ fn read_persisted_salt() -> Option<[u8; 16]> {
 pub struct LocalFileStorage;
 
 impl KeyStorage for LocalFileStorage {
-    fn name(&self) -> &'static str {
-        "本地文件"
+    fn name(&self) -> String {
+        t!("KeyStorage.backend_local_file").to_string()
     }
 
     fn save(&self, master_key: &str) -> Result<(), String> {
-        let path = get_key_storage_path().ok_or_else(|| "无法获取密钥存储路径".to_string())?;
+        let path =
+            get_key_storage_path().ok_or_else(|| t!("KeyStorage.no_storage_path").to_string())?;
 
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
 
         let key = derive_encryption_key();
-        let cipher =
-            Aes256Gcm::new_from_slice(&key).map_err(|e| format!("创建加密器失败: {}", e))?;
+        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| {
+            t!("KeyStorage.create_cipher_failed", error = e.to_string()).to_string()
+        })?;
 
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -253,12 +256,14 @@ impl KeyStorage for LocalFileStorage {
 
         let ciphertext = cipher
             .encrypt(nonce, master_key.as_bytes())
-            .map_err(|e| format!("加密密钥失败: {}", e))?;
+            .map_err(|e| t!("KeyStorage.encrypt_key_failed", error = e.to_string()).to_string())?;
 
         let mut data = nonce_bytes.to_vec();
         data.extend(ciphertext);
 
-        write_secret_file(&path, &data).map_err(|e| format!("写入密钥文件失败: {}", e))?;
+        write_secret_file(&path, &data).map_err(|e| {
+            t!("KeyStorage.write_key_file_failed", error = e.to_string()).to_string()
+        })?;
         Ok(())
     }
 
@@ -289,7 +294,9 @@ impl KeyStorage for LocalFileStorage {
     fn delete(&self) -> Result<(), String> {
         if let Some(path) = get_key_storage_path() {
             if path.exists() {
-                fs::remove_file(&path).map_err(|e| format!("删除密钥文件失败: {}", e))?;
+                fs::remove_file(&path).map_err(|e| {
+                    t!("KeyStorage.delete_key_file_failed", error = e.to_string()).to_string()
+                })?;
             }
         }
         Ok(())

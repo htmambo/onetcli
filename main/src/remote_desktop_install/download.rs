@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, http};
+use rust_i18n::t;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
@@ -18,9 +19,15 @@ pub(crate) async fn download_package(
     mut on_progress: impl FnMut(u64, Option<u64>) + Send,
 ) -> anyhow::Result<PathBuf> {
     let download_dir = std::env::temp_dir().join(DOWNLOAD_DIR_NAME);
-    fs::create_dir_all(&download_dir)
-        .await
-        .map_err(|error| anyhow!("创建下载目录失败: {error}"))?;
+    fs::create_dir_all(&download_dir).await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.create_download_dir_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
     let download_path = download_dir.join(package_file_name(url)?);
 
     if let Err(error) = download_to_file(http_client, url, &download_path, &mut on_progress).await {
@@ -45,13 +52,32 @@ async fn download_to_file(
         .uri(url)
         .header("Accept", "application/octet-stream")
         .body(AsyncBody::empty())
-        .map_err(|error| anyhow!("构建下载请求失败: {error}"))?;
-    let response = http_client
-        .send(request)
-        .await
-        .map_err(|error| anyhow!("发送下载请求失败: {error}"))?;
+        .map_err(|error| {
+            anyhow!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.build_download_request_failed",
+                    error = error.to_string()
+                )
+            )
+        })?;
+    let response = http_client.send(request).await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.send_download_request_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
     if !response.status().is_success() {
-        anyhow::bail!("远程桌面插件包下载失败: {}", response.status());
+        anyhow::bail!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.provider_package_download_failed",
+                status = response.status().to_string()
+            )
+        );
     }
 
     let total_bytes = response
@@ -61,40 +87,85 @@ async fn download_to_file(
         .and_then(|value| value.parse::<u64>().ok());
 
     let mut body = response.into_body();
-    let mut file = fs::File::create(download_path)
-        .await
-        .map_err(|error| anyhow!("创建插件包文件失败: {error}"))?;
+    let mut file = fs::File::create(download_path).await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.create_provider_package_file_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
     let mut downloaded = 0;
     let mut buffer = vec![0u8; BUFFER_SIZE];
     loop {
-        let read = body
-            .read(&mut buffer)
-            .await
-            .map_err(|error| anyhow!("读取插件包数据失败: {error}"))?;
+        let read = body.read(&mut buffer).await.map_err(|error| {
+            anyhow!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.read_provider_package_data_failed",
+                    error = error.to_string()
+                )
+            )
+        })?;
         if read == 0 {
             break;
         }
-        file.write_all(&buffer[..read])
-            .await
-            .map_err(|error| anyhow!("写入插件包文件失败: {error}"))?;
+        file.write_all(&buffer[..read]).await.map_err(|error| {
+            anyhow!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.write_provider_package_file_failed",
+                    error = error.to_string()
+                )
+            )
+        })?;
         downloaded += read as u64;
         on_progress(downloaded, total_bytes);
     }
-    file.flush()
-        .await
-        .map_err(|error| anyhow!("刷新插件包文件失败: {error}"))?;
-    file.sync_all()
-        .await
-        .map_err(|error| anyhow!("同步插件包文件失败: {error}"))?;
+    file.flush().await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.flush_provider_package_file_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
+    file.sync_all().await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.sync_provider_package_file_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
     Ok(())
 }
 
 fn package_file_name(url: &str) -> anyhow::Result<String> {
-    let uri = http::Uri::try_from(url).map_err(|error| anyhow!("插件包地址非法: {error}"))?;
+    let uri = http::Uri::try_from(url).map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.provider_package_url_invalid",
+                error = error.to_string()
+            )
+        )
+    })?;
     uri.path()
         .rsplit('/')
         .next()
         .filter(|name| !name.is_empty())
         .map(|name| name.to_string())
-        .ok_or_else(|| anyhow!("插件包地址缺少文件名: {url}"))
+        .ok_or_else(|| {
+            anyhow!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.provider_package_url_missing_filename",
+                    url = url.to_string()
+                )
+            )
+        })
 }

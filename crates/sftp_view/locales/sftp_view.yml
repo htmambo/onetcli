@@ -494,3 +494,11 @@ Notification:
     en: Extract completed
     zh-CN: 解压完成
     zh-HK: 解壓完成
+  trust_new_host_missing:
+    en: "SFTP trust new host: %{host}:%{port} has no pending host key"
+    zh-CN: "SFTP 信任新主机: %{host}:%{port} 没有待确认的主机密钥"
+    zh-HK: "SFTP 信任新主機: %{host}:%{port} 沒有待確認的主機密鑰"
+  trust_new_host_failed:
+    en: "SFTP trust new host %{host}:%{port} failed to write known_hosts: %{error}"
+    zh-CN: "SFTP 信任新主机 %{host}:%{port} 写入 known_hosts 失败: %{error}"
+    zh-HK: "SFTP 信任新主機 %{host}:%{port} 寫入 known_hosts 失敗: %{error}"

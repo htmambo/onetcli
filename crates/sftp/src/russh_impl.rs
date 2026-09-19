@@ -698,7 +698,14 @@ fn walk_local_dir(base: &std::path::Path) -> Vec<(std::path::PathBuf, bool, u64)
         let read_dir = match std::fs::read_dir(&dir) {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("SFTP 扫描目录 {:?} 失败: {}", dir, e);
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "Sftp.scan_dir_failed",
+                        dir = format!("{dir:?}"),
+                        error = e.to_string()
+                    )
+                );
                 continue;
             }
         };
@@ -707,7 +714,7 @@ fn walk_local_dir(base: &std::path::Path) -> Vec<(std::path::PathBuf, bool, u64)
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    tracing::warn!("SFTP 读取条目失败: {}", e);
+                    tracing::warn!("{}", t!("Sftp.read_entry_failed", error = e.to_string()));
                     continue;
                 }
             };
@@ -715,7 +722,14 @@ fn walk_local_dir(base: &std::path::Path) -> Vec<(std::path::PathBuf, bool, u64)
             let metadata = match entry.metadata() {
                 Ok(m) => m,
                 Err(e) => {
-                    tracing::warn!("SFTP 读取 metadata {:?} 失败: {}", path, e);
+                    tracing::warn!(
+                        "{}",
+                        t!(
+                            "Sftp.read_metadata_failed",
+                            path = format!("{path:?}"),
+                            error = e.to_string()
+                        )
+                    );
                     continue;
                 }
             };
@@ -742,11 +756,21 @@ impl SftpClient for RusshSftpClient {
         let config = Arc::new(config);
 
         let (mut session, jump_session) = if let Some(ref jump) = ssh_config.jump_server {
-            tracing::info!("SFTP: 通过跳板机 {}:{} 连接", jump.host, jump.port);
+            tracing::info!(
+                "{}",
+                t!("Sftp.connect_via_jump", host = jump.host, port = jump.port)
+            );
 
             // 连接跳板机
             let mut jump_session = if let Some(ref proxy) = ssh_config.proxy {
-                tracing::info!("SFTP: 通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
+                tracing::info!(
+                    "{}",
+                    t!(
+                        "Sftp.connect_jump_via_proxy",
+                        host = proxy.host,
+                        port = proxy.port
+                    )
+                );
                 let stream = sftp_connect_via_proxy(proxy, &jump.host, jump.port).await?;
                 let handler = SftpHandler::new(&jump.host, jump.port, ssh_config.host_key_policy());
                 client::connect_stream(config.clone(), stream, handler).await?
@@ -779,7 +803,14 @@ impl SftpClient for RusshSftpClient {
 
             (session, Some(jump_session))
         } else if let Some(ref proxy) = ssh_config.proxy {
-            tracing::info!("SFTP: 通过代理 {}:{} 连接", proxy.host, proxy.port);
+            tracing::info!(
+                "{}",
+                t!(
+                    "Sftp.connect_via_proxy",
+                    host = proxy.host,
+                    port = proxy.port
+                )
+            );
             let stream = sftp_connect_via_proxy(proxy, &ssh_config.host, ssh_config.port).await?;
             let handler = SftpHandler::new(
                 &ssh_config.host,
@@ -1299,8 +1330,8 @@ impl SftpClient for RusshSftpClient {
             // 拒绝越过 base_local 的条目，跳过并 warn。
             if relative.starts_with("..") || relative.contains("/../") {
                 tracing::warn!(
-                    "SFTP 目录条目相对路径含 `..`，跳过以防越界：{}",
-                    dir_entry.path
+                    "{}",
+                    t!("Sftp.dir_entry_unsafe_path", path = dir_entry.path.clone())
                 );
                 continue;
             }
@@ -1340,8 +1371,11 @@ impl SftpClient for RusshSftpClient {
             // B5：同上，拦截 `..` 段路径，防越界写入 base_local 之外。
             if relative.starts_with("..") || relative.contains("/../") {
                 tracing::warn!(
-                    "SFTP 文件条目相对路径含 `..`，跳过以防越界：{}",
-                    file_entry.path
+                    "{}",
+                    t!(
+                        "Sftp.file_entry_unsafe_path",
+                        path = file_entry.path.clone()
+                    )
                 );
                 continue;
             }

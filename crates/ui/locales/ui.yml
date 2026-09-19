@@ -321,3 +321,15 @@ Inspector:
     en: Reset
     zh-CN: 重置
     zh-HK: 重置
+
+SystemNotification:
+  send_failed:
+    en: "System notification failed to send: %{error}"
+    zh-CN: "系统通知发送失败: %{error}"
+    zh-HK: "系統通知發送失敗: %{error}"
+
+InputHistory:
+  preview_truncated:
+    en: "%{head}\n... (%{total} lines total)"
+    zh-CN: "%{head}\n...（共 %{total} 行）"
+    zh-HK: "%{head}\n...（共 %{total} 行）"

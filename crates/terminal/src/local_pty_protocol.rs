@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::{LocalConfig, TerminalCloseMode, TerminalSize};
@@ -73,7 +74,10 @@ pub fn local_pty_endpoint() -> PathBuf {
         match ensure_private_runtime_dir() {
             Ok(dir) => dir.join("local-pty.sock"),
             Err(err) => {
-                tracing::warn!("运行时目录加固失败，按默认路径继续（连接将自然失败）: {err}");
+                tracing::warn!(
+                    "{}",
+                    t!("LocalPtyHost.runtime_dir_hardening_fallback", error = err)
+                );
                 runtime_dir().join("local-pty.sock")
             }
         }
@@ -90,7 +94,13 @@ pub fn local_pty_pid_file() -> PathBuf {
     match ensure_private_runtime_dir() {
         Ok(dir) => dir.join("local-pty.pid"),
         Err(err) => {
-            tracing::warn!("运行时目录加固失败，按默认路径继续: {err}");
+            tracing::warn!(
+                "{}",
+                t!(
+                    "LocalPtyHost.runtime_dir_hardening_default_path",
+                    error = err
+                )
+            );
             runtime_dir().join("local-pty.pid")
         }
     }

@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use rusqlite::{Connection, OpenFlags, types::ValueRef};
+use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio::task::spawn_blocking;
 use tracing::{debug, error, info};
@@ -453,7 +454,8 @@ impl DbConnection for SqliteDbConnection {
                                 current,
                                 SqlResult::Error(SqlErrorInfo {
                                     sql: String::new(),
-                                    message: format!("Parse error: {}", e),
+                                    message: t!("Error.parse_error", error = e.to_string())
+                                        .into_owned(),
                                 }),
                                 bytes_read,
                                 total_size,
@@ -533,7 +535,8 @@ impl DbConnection for SqliteDbConnection {
                                 current,
                                 SqlResult::Error(SqlErrorInfo {
                                     sql: String::new(),
-                                    message: format!("Parse error: {}", e),
+                                    message: t!("Error.parse_error", error = e.to_string())
+                                        .into_owned(),
                                 }),
                                 bytes_read,
                                 total_size,

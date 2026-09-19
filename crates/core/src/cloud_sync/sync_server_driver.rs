@@ -9,6 +9,7 @@
 use super::engine::SyncEngine;
 use super::models::SyncResult;
 use super::service::SyncError;
+use rust_i18n::t;
 
 impl SyncEngine {
     /// sync_server 后端同步流程
@@ -25,10 +26,17 @@ impl SyncEngine {
                     result.errors.extend(sync_result.errors);
                 }
                 Err(e) => {
-                    tracing::error!("[同步] {}同步失败: {}", handler.name(), e);
-                    result
-                        .errors
-                        .push(format!("{}同步失败: {}", handler.name(), e));
+                    let message = t!(
+                        "CloudSync.handler_sync_failed",
+                        name = handler.name(),
+                        error = e.to_string()
+                    )
+                    .to_string();
+                    tracing::error!(
+                        "{}",
+                        t!("CloudSync.log_handler_error_wrapper", message = message)
+                    );
+                    result.errors.push(message);
                 }
             }
         }

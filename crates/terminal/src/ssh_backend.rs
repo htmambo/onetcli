@@ -5,6 +5,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+use rust_i18n::t;
 
 use ssh::{
     ChannelEvent, PtyConfig, ShellIntegrationSetup, SshChannel, SshClient, SshSessionManager,
@@ -53,13 +54,11 @@ fn is_timeout_failure(err: &anyhow::Error) -> bool {
 
 fn add_connect_error_context(err: anyhow::Error) -> anyhow::Error {
     if is_channel_open_failure(&err) {
-        return err.context(
-            "服务器拒绝打开新 channel，可能是 MaxSessions 限制（可尝试在 SSH server 设置更大值）",
-        );
+        return err.context(t!("SshBackend.channel_open_rejected_max_sessions"));
     }
 
     if is_timeout_failure(&err) {
-        return err.context("连接超时，检查网络/代理/跳板机可达性");
+        return err.context(t!("SshBackend.connect_timeout_hint"));
     }
 
     err
@@ -382,7 +381,8 @@ impl SshBackend {
                     tracing::warn!(
                         target: "terminal.ssh.connect",
                         error = %err,
-                        "channel open 失败，尝试 invalidate 并重连一次（可能是 MaxSessions 限制）"
+                        "{}",
+                        t!("SshBackend.channel_open_retry_max_sessions"),
                     );
                     session_manager.invalidate().await;
                     attempt += 1;
@@ -443,7 +443,8 @@ impl SshBackend {
                     target: "terminal.ssh.setup",
                     connection_id,
                     error = %err,
-                    "打开 shell integration 安装通道失败，降级为无 integration 模式"
+                    "{}",
+                    t!("ShellIntegration.install_channel_open_failed"),
                 );
                 return None;
             }
@@ -457,7 +458,8 @@ impl SshBackend {
                     target: "terminal.ssh.setup",
                     connection_id,
                     timeout_secs = timeout.as_secs(),
-                    "shell integration 安装超时，降级为无 integration 模式"
+                    "{}",
+                    t!("ShellIntegration.install_timeout"),
                 );
                 let _ = setup_channel.close().await;
                 return None;
@@ -1112,7 +1114,7 @@ mod tests {
         let message = add_connect_error_context(err).to_string();
 
         assert!(
-            message.contains("服务器拒绝打开新 channel"),
+            message.contains(t!("SshBackend.channel_open_rejected_max_sessions").as_ref()),
             "channel open 错误应补充 MaxSessions 提示，实际: {message}"
         );
     }
@@ -1123,7 +1125,7 @@ mod tests {
         let message = add_connect_error_context(err).to_string();
 
         assert!(
-            message.contains("连接超时"),
+            message.contains(t!("SshBackend.connect_timeout_hint").as_ref()),
             "timeout 错误应补充网络/代理排查提示，实际: {message}"
         );
     }

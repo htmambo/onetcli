@@ -39,7 +39,7 @@ const MID_SESSION_REMINDER_TEXT: &str = "你刚才只返回了文字总结，但
 
 static DESCRIPTOR: AgentDescriptor = AgentDescriptor {
     id: "terminal_operator",
-    display_name: "终端操作员",
+    display_name: "Terminal Operator",
     description: "读取终端输出、向终端写入命令并执行、跨终端操作。\
                   适用于查看终端状态、执行 shell 命令、排查终端中的问题。",
     keywords: &["终端", "terminal", "命令", "执行"],
@@ -187,7 +187,11 @@ impl TerminalOperatorAgent {
                     Ok(json) => json,
                     Err(err) => {
                         tracing::warn!(
-                            "[terminal_agent] 序列化 tool_calls 失败，跳过持久化: {err}"
+                            "{}",
+                            t!(
+                                "TerminalAgent.log_serialize_tool_calls_failed",
+                                error = err.to_string()
+                            )
                         );
                         return;
                     }
@@ -198,7 +202,13 @@ impl TerminalOperatorAgent {
                     tool_calls_json,
                 );
                 if let Err(err) = repo.insert(&mut msg) {
-                    tracing::warn!("[terminal_agent] 持久化 assistant tool_calls 消息失败: {err}");
+                    tracing::warn!(
+                        "{}",
+                        t!(
+                            "TerminalAgent.log_persist_tool_calls_failed",
+                            error = err.to_string()
+                        )
+                    );
                 }
             };
         let persist_tool_result = |repo: &one_core::llm::chat_history::MessageRepository,
@@ -211,7 +221,13 @@ impl TerminalOperatorAgent {
                 result.to_string(),
             );
             if let Err(err) = repo.insert(&mut msg) {
-                tracing::warn!("[terminal_agent] 持久化 tool 结果消息失败: {err}");
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "TerminalAgent.log_persist_tool_result_failed",
+                        error = err.to_string()
+                    )
+                );
             }
         };
 
@@ -287,7 +303,8 @@ impl TerminalOperatorAgent {
                             had_tool = had_tool_in_session,
                             text_len = outcome.text.len(),
                             finish_reason = ?outcome.finish_reason,
-                            "[terminal_agent] max_tokens 截断；不续轮"
+                            "{}",
+                            t!("TerminalAgent.log_max_tokens_stop")
                         );
                         full_text.push_str("\n\n");
                         full_text.push_str(&t!("TerminalAgent.response_truncated").to_string());
@@ -299,7 +316,8 @@ impl TerminalOperatorAgent {
                             round = round,
                             had_tool = had_tool_in_session,
                             text_len = outcome.text.len(),
-                            "[terminal_agent] 触发 content_filter；终止循环"
+                            "{}",
+                            t!("TerminalAgent.log_content_filter_stop")
                         );
                         // 先发 Error 事件再返回 Err（与 Agent::execute 包装行为对齐，
                         // 让 run_loop 直接调用方也能收到 Error 事件）
@@ -313,7 +331,8 @@ impl TerminalOperatorAgent {
                             round = round,
                             raw_finish_reason = raw.as_str(),
                             had_tool = had_tool_in_session,
-                            "[terminal_agent] 遇到未识别的 finish_reason；按 fail-safe break 处理"
+                            "{}",
+                            t!("TerminalAgent.log_unknown_finish_reason")
                         );
                         break;
                     }
@@ -348,7 +367,8 @@ impl TerminalOperatorAgent {
                             had_tool = had_tool_in_session,
                             text_len = outcome.text.len(),
                             finish_reason = ?outcome.finish_reason,
-                            "[terminal_agent] reminder 注入本轮循环"
+                            "{}",
+                            t!("TerminalAgent.log_reminder_injected")
                         );
                         messages.push(Message::text(Role::User, MID_SESSION_REMINDER_TEXT));
                         continue;
@@ -371,7 +391,8 @@ impl TerminalOperatorAgent {
                             had_tool = had_tool_in_session,
                             text_len = outcome.text.len(),
                             finish_reason = ?outcome.finish_reason,
-                            "[terminal_agent] 假性终结 break ({cause})"
+                            "{}",
+                            t!("TerminalAgent.log_premature_break", cause = cause.to_string())
                         );
                         full_text.push_str("\n\n");
                         full_text.push_str(&t!("TerminalAgent.mid_session_aborted").to_string());
@@ -382,9 +403,13 @@ impl TerminalOperatorAgent {
                 // 既有 warn 日志保留——便于排查"自动停止"路径
                 if had_tool_in_session && !is_empty_text {
                     tracing::warn!(
-                        "[terminal_agent] 第 {round} 轮已执行过 tool_call 后返回 text-only (text={}B, finish_reason={:?})；用户报告的『自动停止』疑似本路径",
-                        outcome.text.len(),
-                        outcome.finish_reason
+                        "{}",
+                        t!(
+                            "TerminalAgent.log_text_only_after_tool",
+                            round = round.to_string(),
+                            text_len = outcome.text.len().to_string(),
+                            finish_reason = format!("{:?}", outcome.finish_reason)
+                        )
                     );
                 }
                 break;
@@ -451,7 +476,7 @@ impl TerminalOperatorAgent {
                 )
                 .await
                 {
-                    tracing::warn!("[terminal_agent] 事件通道已关闭，终止 Agent 循环");
+                    tracing::warn!("{}", t!("TerminalAgent.log_event_channel_closed"));
                     return Ok(());
                 }
                 let (ok, result_text, effect) = execute_tool(handle, call).await;
@@ -469,7 +494,7 @@ impl TerminalOperatorAgent {
                 )
                 .await
                 {
-                    tracing::warn!("[terminal_agent] 事件通道已关闭，终止 Agent 循环");
+                    tracing::warn!("{}", t!("TerminalAgent.log_event_channel_closed"));
                     return Ok(());
                 }
                 tool_records.push(serde_json::json!({

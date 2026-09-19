@@ -328,7 +328,8 @@ pub(crate) fn summarize_args(call: &ToolCall) -> String {
                 tool = %call.function.name,
                 call_id = %call.id,
                 error = %err,
-                "工具参数 JSON 解析失败，摘要回退为空对象"
+                "{}",
+                t!("AiChat.log_tool_args_parse_failed_summary")
             );
             serde_json::json!({})
         }
@@ -413,7 +414,8 @@ pub(crate) fn action_summary(call: &ToolCall) -> String {
                 tool = %call.function.name,
                 call_id = %call.id,
                 error = %err,
-                "工具参数 JSON 解析失败，动作摘要回退到工具名"
+                "{}",
+                t!("AiChat.log_tool_args_parse_failed_action")
             );
             return call.function.name.clone();
         }

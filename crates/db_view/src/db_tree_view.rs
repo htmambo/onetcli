@@ -1157,8 +1157,8 @@ impl DbTreeView {
 
         let Some(storage_state) = cx.try_global::<GlobalStorageState>() else {
             warn!(
-                "GlobalStorageState 不存在，无法持久化连接 {} 的数据库筛选状态",
-                connection_id
+                "{}",
+                t!("DbTreeViewLog.storage_state_missing", id = connection_id)
             );
             return;
         };
@@ -1323,7 +1323,7 @@ impl DbTreeView {
                 })
                 .await
                 {
-                    error!("刷新数据库树缓存时 Tokio 任务失败: {}", err);
+                    error!("{}", t!("DbTreeViewLog.tokio_task_failed", error = err));
                 }
             }
 
@@ -1443,8 +1443,11 @@ impl DbTreeView {
 
         let Some(global_state) = cx.try_global::<GlobalDbState>() else {
             warn!(
-                "GlobalDbState 不存在，无法加载连接 {} 的子节点",
-                &node.connection_id
+                "{}",
+                t!(
+                    "DbTreeViewLog.global_db_state_missing",
+                    id = &node.connection_id
+                )
             );
             return;
         };

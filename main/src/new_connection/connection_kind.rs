@@ -16,12 +16,21 @@ impl NewConnectionCategory {
         [Self::All, Self::Database, Self::NoSql, Self::Terminal]
     }
 
-    pub(super) fn label(self) -> &'static str {
+    pub(super) fn label(self) -> String {
         match self {
-            Self::All => "全部",
-            Self::Database => "数据库",
-            Self::NoSql => "NoSQL",
-            Self::Terminal => "终端",
+            Self::All => t!("NewConnection.category_all").to_string(),
+            Self::Database => t!("NewConnection.category_database").to_string(),
+            Self::NoSql => "NoSQL".to_string(),
+            Self::Terminal => t!("NewConnection.category_terminal").to_string(),
+        }
+    }
+
+    pub(super) fn id_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Database => "database",
+            Self::NoSql => "nosql",
+            Self::Terminal => "terminal",
         }
     }
 
@@ -82,14 +91,14 @@ impl NewConnectionKind {
 
     pub(super) fn description(&self) -> String {
         match self {
-            Self::Ssh => "远程服务器终端与文件连接".to_string(),
-            Self::Terminal => "打开一个本地终端标签页".to_string(),
-            Self::Redis => "Redis 单机、哨兵或集群连接".to_string(),
-            Self::MongoDB => "MongoDB 数据库连接".to_string(),
+            Self::Ssh => t!("NewConnection.description_ssh").to_string(),
+            Self::Terminal => t!("NewConnection.description_terminal").to_string(),
+            Self::Redis => t!("NewConnection.description_redis").to_string(),
+            Self::MongoDB => t!("NewConnection.description_mongodb").to_string(),
             Self::PortForwarding => t!("NewConnection.description_port_forwarding").to_string(),
             Self::Rdp => t!("NewConnection.description_rdp").to_string(),
             Self::Vnc => t!("NewConnection.description_vnc").to_string(),
-            Self::Database(_) => "关系型数据库连接".to_string(),
+            Self::Database(_) => t!("NewConnection.description_database").to_string(),
         }
     }
 

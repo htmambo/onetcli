@@ -2110,7 +2110,7 @@ impl ChatPanel {
         let title = chart_block
             .title
             .clone()
-            .unwrap_or_else(|| "数据图表".to_string());
+            .unwrap_or_else(|| t!("ChatPanel.default_chart_title").to_string());
         let description = chart_block.description.clone();
 
         let chart_element = match chart_block.chart_type {

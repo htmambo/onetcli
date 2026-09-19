@@ -6,6 +6,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use gpui_component::table::Column;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
+use rust_i18n::t;
 
 use crate::connection::{DbConnection, DbError};
 use crate::executor::SqlResult;
@@ -935,7 +936,9 @@ impl DatabasePlugin for PostgresPlugin {
             Column::new("charset", "Encoding").width(px(120.0)),
             Column::new("collation", "Collation").width(px(180.0)),
             Column::new("size", "Size").width(px(100.0)).text_right(),
-            Column::new("tables", "Tables").width(px(80.0)).text_right(),
+            Column::new("tables", t!("Tree.tables").into_owned())
+                .width(px(80.0))
+                .text_right(),
             Column::new("comment", "Comment").width(px(250.0)),
         ];
 
@@ -1071,7 +1074,9 @@ impl DatabasePlugin for PostgresPlugin {
             let columns = vec![
                 Column::new("name", "Name").width(px(180.0)),
                 Column::new("owner", "Owner").width(px(120.0)),
-                Column::new("tables", "Tables").width(px(80.0)).text_right(),
+                Column::new("tables", t!("Tree.tables").into_owned())
+                    .width(px(80.0))
+                    .text_right(),
                 Column::new("description", "Description").width(px(300.0)),
             ];
 

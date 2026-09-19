@@ -708,10 +708,10 @@ impl CertificateKind {
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            Self::UsernamePassword => "账号密码",
-            Self::SshPrivateKey => "SSH 私钥",
+            Self::UsernamePassword => t!("CertificateManager.kind_username_password").to_string(),
+            Self::SshPrivateKey => t!("CertificateManager.kind_ssh_private_key").to_string(),
         }
     }
 }
@@ -844,15 +844,19 @@ impl Certificate {
         match self.kind {
             CertificateKind::UsernamePassword => {
                 let username = self.username().unwrap_or("");
-                format!("{} / 账号密码", username)
+                format!(
+                    "{} / {}",
+                    username,
+                    t!("CertificateManager.kind_username_password")
+                )
             }
             CertificateKind::SshPrivateKey => {
                 let username = self.username().unwrap_or("");
                 let has_key = self.key_path().map(|k| !k.is_empty()).unwrap_or(false);
                 let key_info = if has_key {
-                    "[已存储私钥]"
+                    t!("CertificateManager.key_stored").to_string()
                 } else {
-                    "未设置私钥"
+                    t!("CertificateManager.key_not_set").to_string()
                 };
                 format!("{} / {}", username, key_info)
             }

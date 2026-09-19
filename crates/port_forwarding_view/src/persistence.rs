@@ -2,6 +2,7 @@ use gpui::Context;
 use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::storage::StoredConnection;
 use one_core::storage::traits::Repository;
+use rust_i18n::t;
 
 use crate::form_window::PortForwardingFormWindow;
 
@@ -28,7 +29,13 @@ pub(super) fn save_connection(
         })();
         match result {
             Ok(saved) => notify_connection_saved(saved, is_editing, cx),
-            Err(error) => tracing::error!("保存端口转发连接失败: {}", error),
+            Err(error) => tracing::error!(
+                "{}",
+                t!(
+                    "PortForwarding.log_save_connection_failed",
+                    error = error.to_string()
+                )
+            ),
         }
     })
     .detach();

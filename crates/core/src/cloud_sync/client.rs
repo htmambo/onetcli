@@ -6,6 +6,7 @@ use crate::cloud_sync::models::*;
 use crate::llm::ChatStream;
 use async_trait::async_trait;
 use llm_connector::ChatRequest;
+use rust_i18n::t;
 use std::fmt;
 use std::sync::Arc;
 
@@ -39,17 +40,45 @@ pub enum CloudApiError {
 impl fmt::Display for CloudApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CloudApiError::NotAuthenticated => write!(f, "未登录"),
-            CloudApiError::AuthenticationFailed(msg) => write!(f, "认证失败: {}", msg),
-            CloudApiError::EmailConfirmationRequired(msg) => write!(f, "需要邮箱确认: {}", msg),
-            CloudApiError::NetworkError(msg) => write!(f, "网络错误: {}", msg),
-            CloudApiError::ServerError(msg) => write!(f, "服务端错误: {}", msg),
-            CloudApiError::ParseError(msg) => write!(f, "数据解析错误: {}", msg),
-            CloudApiError::NotFound(msg) => write!(f, "资源未找到: {}", msg),
-            CloudApiError::Conflict(msg) => write!(f, "冲突: {}", msg),
-            CloudApiError::NotSupported(msg) => write!(f, "不支持: {}", msg),
-            CloudApiError::DataFormatError(msg) => write!(f, "数据格式错误: {}", msg),
-            CloudApiError::Unknown(msg) => write!(f, "未知错误: {}", msg),
+            CloudApiError::NotAuthenticated => {
+                write!(f, "{}", t!("CloudSync.api_not_authenticated"))
+            }
+            CloudApiError::AuthenticationFailed(msg) => {
+                write!(
+                    f,
+                    "{}",
+                    t!("CloudSync.api_authentication_failed", error = msg)
+                )
+            }
+            CloudApiError::EmailConfirmationRequired(msg) => write!(
+                f,
+                "{}",
+                t!("CloudSync.api_email_confirmation_required", error = msg)
+            ),
+            CloudApiError::NetworkError(msg) => {
+                write!(f, "{}", t!("CloudSync.network_error", error = msg))
+            }
+            CloudApiError::ServerError(msg) => {
+                write!(f, "{}", t!("CloudSync.api_server_error", error = msg))
+            }
+            CloudApiError::ParseError(msg) => {
+                write!(f, "{}", t!("CloudSync.api_parse_error", error = msg))
+            }
+            CloudApiError::NotFound(msg) => {
+                write!(f, "{}", t!("CloudSync.api_not_found", error = msg))
+            }
+            CloudApiError::Conflict(msg) => {
+                write!(f, "{}", t!("CloudSync.api_conflict", error = msg))
+            }
+            CloudApiError::NotSupported(msg) => {
+                write!(f, "{}", t!("CloudSync.api_not_supported", error = msg))
+            }
+            CloudApiError::DataFormatError(msg) => {
+                write!(f, "{}", t!("CloudSync.data_format_error", error = msg))
+            }
+            CloudApiError::Unknown(msg) => {
+                write!(f, "{}", t!("CloudSync.api_unknown", error = msg))
+            }
         }
     }
 }

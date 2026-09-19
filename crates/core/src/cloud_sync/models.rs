@@ -1,5 +1,6 @@
 //! 云同步数据模型
 
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 /// 云端用户加密配置
@@ -93,9 +94,9 @@ pub enum ConflictResolution {
 impl std::fmt::Display for ConflictResolution {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConflictResolution::UseCloud => write!(f, "使用云端版本"),
-            ConflictResolution::UseLocal => write!(f, "使用本地版本"),
-            ConflictResolution::KeepBoth => write!(f, "保留两者"),
+            ConflictResolution::UseCloud => write!(f, "{}", t!("CloudSync.resolution_use_cloud")),
+            ConflictResolution::UseLocal => write!(f, "{}", t!("CloudSync.resolution_use_local")),
+            ConflictResolution::KeepBoth => write!(f, "{}", t!("CloudSync.resolution_keep_both")),
         }
     }
 }
@@ -103,9 +104,21 @@ impl std::fmt::Display for ConflictResolution {
 impl std::fmt::Display for ConflictType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConflictType::BothModified => write!(f, "本地和云端都有修改"),
-            ConflictType::LocalDeletedCloudModified => write!(f, "本地已删除，但云端有更新"),
-            ConflictType::LocalModifiedCloudDeleted => write!(f, "本地有更新，但云端已删除"),
+            ConflictType::BothModified => write!(f, "{}", t!("CloudSync.conflict_both_modified")),
+            ConflictType::LocalDeletedCloudModified => {
+                write!(
+                    f,
+                    "{}",
+                    t!("CloudSync.conflict_local_deleted_cloud_modified")
+                )
+            }
+            ConflictType::LocalModifiedCloudDeleted => {
+                write!(
+                    f,
+                    "{}",
+                    t!("CloudSync.conflict_local_modified_cloud_deleted")
+                )
+            }
         }
     }
 }
@@ -113,14 +126,14 @@ impl std::fmt::Display for ConflictType {
 impl std::fmt::Display for SyncStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SyncStatus::Synced => write!(f, "已同步"),
-            SyncStatus::LocalModified => write!(f, "本地修改待同步"),
-            SyncStatus::CloudModified => write!(f, "云端修改待下载"),
-            SyncStatus::Conflict => write!(f, "存在冲突"),
-            SyncStatus::PendingUpload => write!(f, "待上传"),
-            SyncStatus::PendingDownload => write!(f, "待下载"),
-            SyncStatus::LocalDeleted => write!(f, "本地已删除"),
-            SyncStatus::CloudDeleted => write!(f, "云端已删除"),
+            SyncStatus::Synced => write!(f, "{}", t!("CloudSync.status_synced")),
+            SyncStatus::LocalModified => write!(f, "{}", t!("CloudSync.status_local_modified")),
+            SyncStatus::CloudModified => write!(f, "{}", t!("CloudSync.status_cloud_modified")),
+            SyncStatus::Conflict => write!(f, "{}", t!("CloudSync.status_conflict")),
+            SyncStatus::PendingUpload => write!(f, "{}", t!("CloudSync.status_pending_upload")),
+            SyncStatus::PendingDownload => write!(f, "{}", t!("CloudSync.status_pending_download")),
+            SyncStatus::LocalDeleted => write!(f, "{}", t!("CloudSync.status_local_deleted")),
+            SyncStatus::CloudDeleted => write!(f, "{}", t!("CloudSync.status_cloud_deleted")),
         }
     }
 }

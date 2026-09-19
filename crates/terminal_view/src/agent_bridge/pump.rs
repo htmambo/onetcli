@@ -112,13 +112,22 @@ fn lookup_terminal(
 ) -> Result<(Entity<Terminal>, Option<gpui::AnyWindowHandle>)> {
     let registry = cx
         .try_global::<TerminalViewRegistry>()
-        .ok_or_else(|| anyhow!("终端注册表未初始化"))?;
-    let (weak, window_handle) = registry
-        .get(terminal_id)
-        .ok_or_else(|| anyhow!("终端 #{terminal_id} 不存在或已关闭"))?;
-    let view = weak
-        .upgrade()
-        .ok_or_else(|| anyhow!("终端 #{terminal_id} 已关闭"))?;
+        .ok_or_else(|| anyhow!("{}", t!("AgentBridge.registry_not_initialized")))?;
+    let (weak, window_handle) = registry.get(terminal_id).ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "AgentBridge.terminal_not_found",
+                id = terminal_id.to_string()
+            )
+        )
+    })?;
+    let view = weak.upgrade().ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!("AgentBridge.terminal_closed", id = terminal_id.to_string())
+        )
+    })?;
     Ok((view.read(cx).terminal(), window_handle))
 }
 
@@ -128,7 +137,13 @@ fn read_output(cx: &App, terminal_id: u64, max_lines: usize, from_line: usize) -
     let terminal = terminal.read(cx);
     if terminal.mode().contains(TermMode::ALT_SCREEN) {
         // alt screen（vim/top 等）下序列化文本为空，直接说明比返回空串更可诊断
-        anyhow::bail!("终端 #{terminal_id} 正处于全屏交互模式，暂无法读取文本输出");
+        anyhow::bail!(
+            "{}",
+            t!(
+                "AgentBridge.terminal_alt_screen",
+                id = terminal_id.to_string()
+            )
+        );
     }
     let max_lines = max_lines.clamp(1, MAX_READ_LINES);
     Ok(terminal
@@ -150,8 +165,14 @@ async fn write_command(
     if level.needs_confirmation() {
         let approved = confirm_risk(cx, terminal_id, command, level).await;
         if !approved {
-            tracing::warn!("[agent_bridge] 高危命令被用户拒绝: {command}");
-            anyhow::bail!("用户拒绝执行该高危命令");
+            tracing::warn!(
+                "{}",
+                t!(
+                    "AgentBridge.log_risk_command_rejected",
+                    command = command.to_string()
+                )
+            );
+            anyhow::bail!("{}", t!("AgentBridge.risk_command_rejected"));
         }
     }
 
@@ -183,7 +204,7 @@ async fn write_command(
     let output = cx.update(
         |cx| match read_output(cx, terminal_id, WRITE_TAIL_LINES, 0) {
             Ok(text) => text,
-            Err(err) => format!("(回读输出失败: {err})"),
+            Err(err) => t!("AgentBridge.read_back_failed", error = err.to_string()).to_string(),
         },
     );
     Ok(WriteOutcome {
@@ -220,7 +241,13 @@ async fn wait_for_completion(
     loop {
         cx.background_executor().timer(POLL_INTERVAL).await;
         let Some((hash, running)) = cx.update(|cx| poll_state(cx, terminal_id, kind)) else {
-            anyhow::bail!("终端 #{terminal_id} 在等待期间被关闭");
+            anyhow::bail!(
+                "{}",
+                t!(
+                    "AgentBridge.terminal_closed_during_wait",
+                    id = terminal_id.to_string()
+                )
+            );
         };
         if hash != last_hash {
             last_hash = hash;
@@ -236,7 +263,8 @@ async fn wait_for_completion(
         }
         if Instant::now() >= deadline {
             tracing::warn!(
-                "[agent_bridge] 终端 #{terminal_id} 等待超时，命令可能仍在运行或已进入交互模式"
+                "{}",
+                t!("AgentBridge.log_wait_timeout", id = terminal_id.to_string())
             );
             return Ok(true);
         }
@@ -278,13 +306,26 @@ fn focus_terminal(cx: &mut AsyncApp, terminal_id: u64) -> Result<()> {
     let (weak, window_handle) = cx.update(|cx| {
         let registry = cx
             .try_global::<TerminalViewRegistry>()
-            .ok_or_else(|| anyhow!("终端注册表未初始化"))?;
-        registry
-            .get(terminal_id)
-            .ok_or_else(|| anyhow!("终端 #{terminal_id} 不存在或已关闭"))
+            .ok_or_else(|| anyhow!("{}", t!("AgentBridge.registry_not_initialized")))?;
+        registry.get(terminal_id).ok_or_else(|| {
+            anyhow!(
+                "{}",
+                t!(
+                    "AgentBridge.terminal_not_found",
+                    id = terminal_id.to_string()
+                )
+            )
+        })
     })?;
-    let window_handle =
-        window_handle.ok_or_else(|| anyhow!("终端 #{terminal_id} 窗口句柄不可用"))?;
+    let window_handle = window_handle.ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "AgentBridge.window_handle_unavailable",
+                id = terminal_id.to_string()
+            )
+        )
+    })?;
     cx.update_window(window_handle, |_, window, cx| {
         window.activate_window();
         // 协议层写入：先于 request_focus 触发 GPUI on_focus 副作用，
@@ -317,7 +358,13 @@ async fn confirm_risk(
             .or_else(|| cx.active_window())
     });
     let Some(window_handle) = window_handle else {
-        tracing::warn!("[agent_bridge] 无可用窗口，高危命令确认请求被拒绝: {command}");
+        tracing::warn!(
+            "{}",
+            t!(
+                "AgentBridge.log_no_window_risk_rejected",
+                command = command.to_string()
+            )
+        );
         return false;
     };
 
@@ -327,7 +374,13 @@ async fn confirm_risk(
         open_risk_dialog(window, cx, command, level, slot);
     });
     if let Err(err) = opened {
-        tracing::warn!("[agent_bridge] 高危命令确认对话框打开失败: {err}");
+        tracing::warn!(
+            "{}",
+            t!(
+                "AgentBridge.log_risk_dialog_open_failed",
+                error = err.to_string()
+            )
+        );
         return false;
     }
 
@@ -336,7 +389,7 @@ async fn confirm_risk(
     tokio::select! {
         result = rx => result.unwrap_or(false),
         _ = &mut timer => {
-            tracing::warn!("[agent_bridge] 高危命令确认超时（120s），按拒绝处理: {command}");
+            tracing::warn!("{}", t!("AgentBridge.log_risk_confirm_timeout", command = command.to_string()));
             // close_dialog 关闭的是该窗口栈顶对话框：极端情况下用户 120s 内打开了
             // 另一个对话框会误关栈顶（命令已按超时拒绝，方向 fail-safe）
             let _ = cx.update_window(window_handle, |_, window, cx| {

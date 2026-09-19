@@ -18,8 +18,8 @@ impl SyncTypeHandler for LlmProviderSyncType {
         "llm_provider"
     }
 
-    fn display_name(&self) -> &'static str {
-        "LLM 提供商"
+    fn display_name(&self) -> String {
+        rust_i18n::t!("CloudSync.type_llm_provider").to_string()
     }
 
     fn queue_key(&self) -> &'static str {

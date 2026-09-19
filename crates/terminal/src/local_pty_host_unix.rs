@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use rust_i18n::t;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
@@ -16,27 +17,40 @@ pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
     // fail-closed：运行时目录必须归当前用户所有且为 0700，否则拒绝启动
     // （socket 无应用层鉴权，目录权限是唯一安全边界）
     let endpoint_dir = ensure_private_runtime_dir()
-        .with_context(|| "local-pty 运行时目录加固失败（拒绝启动，防止越权访问）")?;
+        .with_context(|| t!("LocalPtyHost.runtime_dir_hardening_failed"))?;
     let endpoint = endpoint_dir.join("local-pty.sock");
     if endpoint.exists() {
         // 尝试连接现有 endpoint 以确认是否存活
         if UnixStream::connect(&endpoint).await.is_ok() {
-            anyhow::bail!("另一个 local-pty-host 正在运行: {}", endpoint.display());
+            anyhow::bail!(
+                "{}",
+                t!(
+                    "LocalPtyHost.already_running",
+                    endpoint = endpoint.display()
+                )
+            );
         }
         let _ = std::fs::remove_file(&endpoint);
     }
 
-    let listener = UnixListener::bind(&endpoint)
-        .with_context(|| format!("绑定 Unix Domain Socket 失败: {}", endpoint.display()))?;
+    let listener = UnixListener::bind(&endpoint).with_context(|| {
+        t!(
+            "LocalPtyHost.unix_socket_bind_failed",
+            endpoint = endpoint.display()
+        )
+    })?;
     // socket 文件收敛为 0600：连接 Unix socket 需要写权限；目录 0700 之外的又一层保险
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(0o600));
     }
-    tracing::info!(endpoint = %endpoint.display(), "local-pty-host Unix listener 已启动");
+    tracing::info!(endpoint = %endpoint.display(), "{}", t!("LocalPtyHost.unix_listener_started"));
 
     loop {
-        let (stream, _) = listener.accept().await.context("接受 client 连接失败")?;
+        let (stream, _) = listener
+            .accept()
+            .await
+            .context(t!("LocalPtyHost.accept_client_failed"))?;
         let registry = registry.clone();
         tokio::spawn(handle_client(registry, stream));
     }

@@ -9,6 +9,7 @@ use crate::cloud_sync::oauth::OAuthTokens;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -168,10 +169,13 @@ impl OneDriveVault {
         if !response.status().is_success() {
             let mut bytes = Vec::new();
             response.into_body().read_to_end(&mut bytes).await.ok();
-            return Err(CloudApiError::ServerError(format!(
-                "创建 OneDrive 文件夹失败: {}",
-                String::from_utf8_lossy(&bytes)
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "OneDrive.create_folder_failed",
+                    body = String::from_utf8_lossy(&bytes).to_string()
+                )
+                .to_string(),
+            ));
         }
 
         let mut bytes = Vec::new();
@@ -221,10 +225,13 @@ impl OneDriveVault {
         if !response.status().is_success() {
             let mut bytes = Vec::new();
             response.into_body().read_to_end(&mut bytes).await.ok();
-            return Err(CloudApiError::ServerError(format!(
-                "上传 OneDrive 文件失败: {}",
-                String::from_utf8_lossy(&bytes)
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "OneDrive.upload_file_failed",
+                    body = String::from_utf8_lossy(&bytes).to_string()
+                )
+                .to_string(),
+            ));
         }
 
         let mut bytes = Vec::new();
@@ -271,10 +278,13 @@ impl OneDriveVault {
             return Err(CloudApiError::NotFound(item_id.to_string()));
         }
         if !response.status().is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "下载 OneDrive 文件失败: HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "OneDrive.download_file_failed",
+                    status = response.status().as_u16().to_string()
+                )
+                .to_string(),
+            ));
         }
 
         let mut bytes = Vec::new();
@@ -314,10 +324,13 @@ impl OneDriveVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if !response.status().is_success() && response.status() != StatusCode::NOT_FOUND {
-            return Err(CloudApiError::ServerError(format!(
-                "删除 OneDrive 文件失败: HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "OneDrive.delete_file_failed",
+                    status = response.status().as_u16().to_string()
+                )
+                .to_string(),
+            ));
         }
 
         Ok(())
@@ -423,9 +436,11 @@ impl BlobVault for OneDriveVault {
     async fn download(&self, key: &str) -> Result<Blob, CloudApiError> {
         let folder_id = self.get_or_create_vault_folder().await?;
         let file = self.find_vault_file(&folder_id, key).await?;
-        let item_id = file
-            .map(|f| f.id)
-            .ok_or_else(|| CloudApiError::NotFound(format!("OneDrive 中未找到文件: {}", key)))?;
+        let item_id = file.map(|f| f.id).ok_or_else(|| {
+            CloudApiError::NotFound(
+                t!("OneDrive.file_not_found", key = key.to_string()).to_string(),
+            )
+        })?;
         self.download_file(&item_id).await
     }
 

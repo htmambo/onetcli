@@ -138,7 +138,11 @@ fn start_provider_install(ctx: InstallContext, window: &mut Window, cx: &mut App
             });
             let outcome = match install_task.await {
                 Ok(result) => result.map_err(|error| format!("{error:?}")),
-                Err(error) => Err(format!("安装任务执行失败: {error}")),
+                Err(error) => Err(t!(
+                    "RemoteDesktop.install_task_join_failed",
+                    error = error.to_string()
+                )
+                .to_string()),
             };
             finished.store(true, Ordering::Relaxed);
             if outcome.is_ok() {
@@ -187,7 +191,11 @@ async fn run_install(
     snapshot: &Arc<Mutex<VecDeque<DownloadProgress>>>,
 ) -> anyhow::Result<PathBuf> {
     let package = fetch_provider_package(Arc::clone(&http_client), provider_id).await?;
-    tracing::debug!(version = %package.version, "已获取远程桌面插件下载信息");
+    tracing::debug!(
+        version = %package.version,
+        "{}",
+        t!("RemoteDesktopInstall.fetched_provider_package")
+    );
     push_snapshot(snapshot, DownloadProgress::Started);
     let bytes_snapshot = Arc::clone(snapshot);
     let archive = download_package(

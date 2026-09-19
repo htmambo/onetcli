@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use rust_i18n::t;
 use tokio::sync::{Mutex, mpsc};
 
 use crate::local_pty_protocol::{
@@ -28,7 +29,9 @@ impl LocalPtyClient {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<LocalPtyHostEvent>();
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<LocalPtyHostRequest>();
 
-        let read_stream = stream.try_clone().context("克隆 UnixStream 失败")?;
+        let read_stream = stream
+            .try_clone()
+            .context(t!("LocalPtyHost.clone_unix_stream_failed"))?;
         let write_stream = Arc::new(Mutex::new(stream));
 
         let io_handle = std::thread::spawn(move || {
@@ -97,14 +100,14 @@ impl LocalPtyClient {
     ) -> Result<(LocalPtySessionId, Option<u32>)> {
         self.request_tx
             .send(LocalPtyHostRequest::Spawn { config, size })
-            .map_err(|_| anyhow::anyhow!("host client 通道已关闭"))?;
+            .map_err(|_| anyhow::anyhow!(t!("LocalPtyHost.client_channel_closed")))?;
         match self.recv_event(Duration::from_secs(5)) {
             Some(LocalPtyHostEvent::Spawned {
                 session_id,
                 child_pid,
             }) => Ok((session_id, child_pid)),
             Some(LocalPtyHostEvent::Error { message, .. }) => anyhow::bail!(message),
-            _ => anyhow::bail!("等待 Spawned 响应超时"),
+            _ => anyhow::bail!(t!("LocalPtyHost.spawn_response_timeout")),
         }
     }
 
@@ -119,11 +122,11 @@ impl LocalPtyClient {
                 session_id: session_id.clone(),
                 size,
             })
-            .map_err(|_| anyhow::anyhow!("host client 通道已关闭"))?;
+            .map_err(|_| anyhow::anyhow!(t!("LocalPtyHost.client_channel_closed")))?;
         match self.recv_event(Duration::from_secs(5)) {
             Some(LocalPtyHostEvent::Attached { child_pid, .. }) => Ok(child_pid),
             Some(LocalPtyHostEvent::Error { message, .. }) => anyhow::bail!(message),
-            _ => anyhow::bail!("等待 Attached 响应超时"),
+            _ => anyhow::bail!(t!("LocalPtyHost.attach_response_timeout")),
         }
     }
 
@@ -131,7 +134,7 @@ impl LocalPtyClient {
     pub fn send_request(&self, request: LocalPtyHostRequest) -> Result<()> {
         self.request_tx
             .send(request)
-            .map_err(|_| anyhow::anyhow!("host client 通道已关闭"))
+            .map_err(|_| anyhow::anyhow!(t!("LocalPtyHost.client_channel_closed")))
     }
 
     /// 将 client 拆分为请求发送端和事件接收端，用于后续异步处理。
@@ -177,14 +180,14 @@ fn ensure_host_running() -> Result<()> {
         let _ = std::fs::remove_file(&endpoint);
     }
 
-    let current_exe = std::env::current_exe().context("获取当前可执行文件路径失败")?;
+    let current_exe = std::env::current_exe().context(t!("LocalPtyHost.current_exe_failed"))?;
     let mut child = Command::new(&current_exe)
         .arg("--local-pty-host")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .context("启动 local-pty-host 失败")?;
+        .context(t!("LocalPtyHost.spawn_host_failed"))?;
 
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_secs(3) {
@@ -193,11 +196,11 @@ fn ensure_host_running() -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(50));
         if let Ok(Some(_)) = child.try_wait() {
-            anyhow::bail!("local-pty-host 进程过早退出");
+            anyhow::bail!(t!("LocalPtyHost.host_exited_early"));
         }
     }
 
-    anyhow::bail!("local-pty-host 未在超时时间内就绪")
+    anyhow::bail!(t!("LocalPtyHost.host_ready_timeout"))
 }
 
 fn endpoint_exists_and_alive(path: &Path) -> bool {
@@ -217,7 +220,7 @@ fn connect_with_retry() -> Result<UnixStream> {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    anyhow::bail!("无法连接到 local-pty-host endpoint")
+    anyhow::bail!(t!("LocalPtyHost.endpoint_connect_failed"))
 }
 
 /// 基于 host client 的 `TerminalBackend` 实现。

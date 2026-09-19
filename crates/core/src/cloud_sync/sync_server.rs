@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
 use llm_connector::ChatRequest;
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex as AsyncMutex;
@@ -358,9 +359,11 @@ impl SyncServerClient {
         let status = response.status();
         let mut body = response.into_body();
         let mut bytes = Vec::new();
-        body.read_to_end(&mut bytes)
-            .await
-            .map_err(|error| CloudApiError::NetworkError(format!("读取响应失败: {}", error)))?;
+        body.read_to_end(&mut bytes).await.map_err(|error| {
+            CloudApiError::NetworkError(
+                t!("CloudSync.read_response_failed", error = error.to_string()).to_string(),
+            )
+        })?;
 
         debug!(
             "[sync_server] request done: {} {} -> {}",
@@ -588,7 +591,7 @@ impl SyncServerClient {
         }
 
         Err(CloudApiError::AuthenticationFailed(
-            Self::extract_error_message(result.err(), "刷新会话失败"),
+            Self::extract_error_message(result.err(), &t!("CloudSync.refresh_session_failed")),
         ))
     }
 
@@ -721,7 +724,7 @@ impl CloudApiClient for SyncServerClient {
         }
 
         Err(CloudApiError::AuthenticationFailed(
-            Self::extract_error_message(result.err(), "登录失败"),
+            Self::extract_error_message(result.err(), &t!("CloudSync.login_failed")),
         ))
     }
 
@@ -747,7 +750,7 @@ impl CloudApiClient for SyncServerClient {
         }
 
         Err(CloudApiError::AuthenticationFailed(
-            Self::extract_error_message(result.err(), "注册失败"),
+            Self::extract_error_message(result.err(), &t!("CloudSync.register_failed")),
         ))
     }
 
@@ -782,7 +785,7 @@ impl CloudApiClient for SyncServerClient {
             }
             Ok((_status, result)) => Err(CloudApiError::ServerError(Self::extract_error_message(
                 result.err(),
-                "获取当前用户失败",
+                &t!("CloudSync.get_current_user_failed"),
             ))),
             Err(CloudApiError::NotAuthenticated) => Ok(None),
             Err(error) => Err(error),
@@ -809,7 +812,7 @@ impl CloudApiClient for SyncServerClient {
 
         Err(CloudApiError::ServerError(Self::extract_error_message(
             result.err(),
-            "获取用户配置失败",
+            &t!("CloudSync.get_user_config_failed"),
         )))
     }
 
@@ -829,7 +832,7 @@ impl CloudApiClient for SyncServerClient {
 
         Err(CloudApiError::ServerError(Self::extract_error_message(
             result.err(),
-            "保存用户配置失败",
+            &t!("CloudSync.save_user_config_failed"),
         )))
     }
 
@@ -866,7 +869,7 @@ impl CloudApiClient for SyncServerClient {
 
         Err(CloudApiError::ServerError(Self::extract_error_message(
             result.err(),
-            "获取同步数据失败",
+            &t!("CloudSync.list_sync_data_failed"),
         )))
     }
 
@@ -891,7 +894,7 @@ impl CloudApiClient for SyncServerClient {
 
         Err(CloudApiError::ServerError(Self::extract_error_message(
             result.err(),
-            "创建同步数据失败",
+            &t!("CloudSync.create_sync_data_failed"),
         )))
     }
 
@@ -917,13 +920,13 @@ impl CloudApiClient for SyncServerClient {
         if status == StatusCode::CONFLICT {
             return Err(CloudApiError::Conflict(Self::extract_error_message(
                 result.err(),
-                "同步数据版本冲突",
+                &t!("CloudSync.sync_data_version_conflict"),
             )));
         }
 
         Err(CloudApiError::ServerError(Self::extract_error_message(
             result.err(),
-            "更新同步数据失败",
+            &t!("CloudSync.update_sync_data_failed"),
         )))
     }
 
@@ -940,22 +943,26 @@ impl CloudApiClient for SyncServerClient {
         if status == StatusCode::CONFLICT {
             return Err(CloudApiError::Conflict(Self::extract_error_message(
                 result.err(),
-                "删除同步数据失败",
+                &t!("CloudSync.delete_sync_data_failed"),
             )));
         }
 
         Err(CloudApiError::ServerError(Self::extract_error_message(
             result.err(),
-            "删除同步数据失败",
+            &t!("CloudSync.delete_sync_data_failed"),
         )))
     }
 
     async fn chat(&self, _request: &ChatRequest) -> Result<String, CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持云端 AI 聊天"))
+        Err(Self::unsupported(&t!(
+            "CloudSync.cloud_ai_chat_unsupported"
+        )))
     }
 
     async fn chat_stream(&self, _request: &ChatRequest) -> Result<ChatStream, CloudApiError> {
-        Err(Self::unsupported("当前 sync_server 不支持云端 AI 聊天"))
+        Err(Self::unsupported(&t!(
+            "CloudSync.cloud_ai_chat_unsupported"
+        )))
     }
 }
 

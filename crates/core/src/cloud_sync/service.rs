@@ -4,6 +4,7 @@ use crate::cloud_sync::models::*;
 use crate::cloud_sync::queue::OperationQueue;
 use crate::crypto::{self, CryptoError};
 use crate::storage::{Certificate, CertificateKind, ConnectionType, StoredConnection};
+use rust_i18n::t;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -35,15 +36,19 @@ pub enum SyncError {
 impl std::fmt::Display for SyncError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SyncError::NotUnlocked => write!(f, "请先输入主密钥解锁"),
-            SyncError::InvalidMasterKey => write!(f, "主密钥错误"),
+            SyncError::NotUnlocked => write!(f, "{}", t!("CloudSync.not_unlocked")),
+            SyncError::InvalidMasterKey => write!(f, "{}", t!("CloudSync.invalid_master_key")),
             SyncError::CloudMasterKeyMismatch(message) => write!(f, "{}", message),
-            SyncError::KeyVersionMismatch => write!(f, "密钥版本不匹配，请重新同步"),
-            SyncError::NetworkError(e) => write!(f, "网络错误: {}", e),
-            SyncError::CryptoError(e) => write!(f, "加解密错误: {}", e),
-            SyncError::DataFormatError(e) => write!(f, "数据格式错误: {}", e),
-            SyncError::StorageError(e) => write!(f, "存储错误: {}", e),
-            SyncError::NotLoggedIn => write!(f, "请先登录云端账户"),
+            SyncError::KeyVersionMismatch => write!(f, "{}", t!("CloudSync.key_version_mismatch")),
+            SyncError::NetworkError(e) => write!(f, "{}", t!("CloudSync.network_error", error = e)),
+            SyncError::CryptoError(e) => write!(f, "{}", t!("CloudSync.crypto_error", error = e)),
+            SyncError::DataFormatError(e) => {
+                write!(f, "{}", t!("CloudSync.data_format_error", error = e))
+            }
+            SyncError::StorageError(e) => {
+                write!(f, "{}", t!("CloudSync.storage_error", error = e))
+            }
+            SyncError::NotLoggedIn => write!(f, "{}", t!("CloudSync.not_logged_in")),
         }
     }
 }

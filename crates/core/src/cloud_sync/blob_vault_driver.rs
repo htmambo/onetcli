@@ -18,6 +18,7 @@ use super::blob_vault::BlobVault;
 use super::engine::SyncEngine;
 use super::models::SyncResult;
 use super::service::SyncError;
+use rust_i18n::t;
 
 /// 云端 bundle 元信息（存储在 blob 头部）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +59,9 @@ const BUNDLE_KEY: &str = "omnihub-vault.bundle";
 impl SyncEngine {
     /// BlobVault 后端同步流程
     pub(crate) async fn blob_sync(&self) -> Result<SyncResult, SyncError> {
-        let vault = self
-            .blob_vault
-            .as_ref()
-            .ok_or_else(|| SyncError::NetworkError("未配置 Blob 存储后端".to_string()))?;
+        let vault = self.blob_vault.as_ref().ok_or_else(|| {
+            SyncError::NetworkError(t!("CloudSync.blob_backend_not_configured").to_string())
+        })?;
 
         // tracing::info!("[Blob同步] 后端类型: {}", vault.backend_type());
 
@@ -106,7 +106,10 @@ impl SyncEngine {
                     }
                     Err(e) => {
                         // tracing::error!("[Blob同步] 应用云端 bundle 失败: {}", e);
-                        result.errors.push(format!("应用云端数据失败: {}", e));
+                        result.errors.push(
+                            t!("CloudSync.apply_cloud_data_failed", error = e.to_string())
+                                .to_string(),
+                        );
                     }
                 }
             }
@@ -122,7 +125,9 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     // tracing::error!("[Blob同步] 上传 bundle 失败: {}", e);
-                    result.errors.push(format!("上传云端失败: {}", e));
+                    result.errors.push(
+                        t!("CloudSync.upload_cloud_failed", error = e.to_string()).to_string(),
+                    );
                 }
             }
         }
@@ -351,8 +356,11 @@ impl SyncEngine {
 
         let plaintext = String::from_utf8_lossy(&blob.data).to_string();
 
-        let bundle: SyncBundle = serde_json::from_str(&plaintext)
-            .map_err(|e| SyncError::StorageError(format!("bundle 反序列化失败: {}", e)))?;
+        let bundle: SyncBundle = serde_json::from_str(&plaintext).map_err(|e| {
+            SyncError::StorageError(
+                t!("CloudSync.bundle_deserialize_failed", error = e.to_string()).to_string(),
+            )
+        })?;
 
         Ok(Some(bundle))
     }
@@ -365,8 +373,11 @@ impl SyncEngine {
         _timestamp: i64,
     ) -> Result<usize, SyncError> {
         // 序列化为 JSON 明文直接存储（暂不加密，便于观察验证）
-        let plaintext = serde_json::to_string_pretty(&bundle)
-            .map_err(|e| SyncError::StorageError(format!("bundle 序列化失败: {}", e)))?;
+        let plaintext = serde_json::to_string_pretty(&bundle).map_err(|e| {
+            SyncError::StorageError(
+                t!("CloudSync.bundle_serialize_failed", error = e.to_string()).to_string(),
+            )
+        })?;
 
         // 上传
         vault
@@ -405,8 +416,15 @@ impl SyncEngine {
         if let Some(ref val) = bundle.connections {
             let decrypted_conns = self.decrypt_connection_params(val);
             let cloud_connections: Vec<crate::storage::StoredConnection> =
-                serde_json::from_value(decrypted_conns)
-                    .map_err(|e| SyncError::StorageError(format!("连接数据解析失败: {}", e)))?;
+                serde_json::from_value(decrypted_conns).map_err(|e| {
+                    SyncError::StorageError(
+                        t!(
+                            "CloudSync.connection_data_parse_failed",
+                            error = e.to_string()
+                        )
+                        .to_string(),
+                    )
+                })?;
 
             let repo = self
                 .storage
@@ -415,9 +433,15 @@ impl SyncEngine {
                     SyncError::StorageError("ConnectionRepository not found".to_string())
                 })?;
 
-            let local_connections = repo
-                .list()
-                .map_err(|e| SyncError::StorageError(format!("获取本地连接失败: {}", e)))?;
+            let local_connections = repo.list().map_err(|e| {
+                SyncError::StorageError(
+                    t!(
+                        "CloudSync.get_local_connections_failed",
+                        error = e.to_string()
+                    )
+                    .to_string(),
+                )
+            })?;
 
             let local_by_cloud_id: HashMap<String, &crate::storage::StoredConnection> =
                 local_connections
@@ -453,7 +477,10 @@ impl SyncEngine {
                             updated_conn.last_synced_at = Some(SyncEngine::current_timestamp());
 
                             repo.update(&updated_conn).map_err(|e| {
-                                SyncError::StorageError(format!("更新连接失败: {}", e))
+                                SyncError::StorageError(
+                                    t!("CloudSync.update_connection_failed", error = e.to_string())
+                                        .to_string(),
+                                )
                             })?;
                             updated += 1;
                         }
@@ -463,8 +490,12 @@ impl SyncEngine {
                         let mut new_conn = cloud_conn.clone();
                         new_conn.id = None;
                         new_conn.last_synced_at = Some(SyncEngine::current_timestamp());
-                        repo.insert(&mut new_conn)
-                            .map_err(|e| SyncError::StorageError(format!("创建连接失败: {}", e)))?;
+                        repo.insert(&mut new_conn).map_err(|e| {
+                            SyncError::StorageError(
+                                t!("CloudSync.create_connection_failed", error = e.to_string())
+                                    .to_string(),
+                            )
+                        })?;
                         downloaded += 1;
                     }
                 } else if !local_by_name.contains_key(cloud_conn.name.as_str()) {
@@ -473,8 +504,12 @@ impl SyncEngine {
                     new_conn.id = None;
                     new_conn.cloud_id = None;
                     new_conn.last_synced_at = Some(SyncEngine::current_timestamp());
-                    repo.insert(&mut new_conn)
-                        .map_err(|e| SyncError::StorageError(format!("创建连接失败: {}", e)))?;
+                    repo.insert(&mut new_conn).map_err(|e| {
+                        SyncError::StorageError(
+                            t!("CloudSync.create_connection_failed", error = e.to_string())
+                                .to_string(),
+                        )
+                    })?;
                     downloaded += 1;
                 }
             }
@@ -483,8 +518,15 @@ impl SyncEngine {
         // 恢复工作空间
         if let Some(ref val) = bundle.workspaces {
             let cloud_workspaces: Vec<crate::storage::Workspace> =
-                serde_json::from_value(val.clone())
-                    .map_err(|e| SyncError::StorageError(format!("工作空间数据解析失败: {}", e)))?;
+                serde_json::from_value(val.clone()).map_err(|e| {
+                    SyncError::StorageError(
+                        t!(
+                            "CloudSync.workspace_data_parse_failed",
+                            error = e.to_string()
+                        )
+                        .to_string(),
+                    )
+                })?;
 
             let repo = self
                 .storage
@@ -493,9 +535,15 @@ impl SyncEngine {
                     SyncError::StorageError("WorkspaceRepository not found".to_string())
                 })?;
 
-            let local_workspaces = repo
-                .list()
-                .map_err(|e| SyncError::StorageError(format!("获取本地工作空间失败: {}", e)))?;
+            let local_workspaces = repo.list().map_err(|e| {
+                SyncError::StorageError(
+                    t!(
+                        "CloudSync.get_local_workspaces_failed",
+                        error = e.to_string()
+                    )
+                    .to_string(),
+                )
+            })?;
 
             let local_by_cloud_id: HashMap<String, &crate::storage::Workspace> = local_workspaces
                 .iter()
@@ -515,7 +563,10 @@ impl SyncEngine {
                             updated_ws.updated_at = cloud_ws.updated_at;
                             updated_ws.last_synced_at = Some(SyncEngine::current_timestamp());
                             repo.update_from_cloud(&updated_ws).map_err(|e| {
-                                SyncError::StorageError(format!("更新工作空间失败: {}", e))
+                                SyncError::StorageError(
+                                    t!("CloudSync.update_workspace_failed", error = e.to_string())
+                                        .to_string(),
+                                )
                             })?;
                             updated += 1;
                         }
@@ -524,7 +575,10 @@ impl SyncEngine {
                         new_ws.id = None;
                         new_ws.last_synced_at = Some(SyncEngine::current_timestamp());
                         repo.insert(&mut new_ws).map_err(|e| {
-                            SyncError::StorageError(format!("创建工作空间失败: {}", e))
+                            SyncError::StorageError(
+                                t!("CloudSync.create_workspace_failed", error = e.to_string())
+                                    .to_string(),
+                            )
                         })?;
                         downloaded += 1;
                     }
@@ -536,8 +590,15 @@ impl SyncEngine {
         if let Some(ref val) = bundle.certificates {
             let decrypted_certs = self.decrypt_certificate_params(val);
             let cloud_certs: Vec<crate::storage::Certificate> =
-                serde_json::from_value(decrypted_certs)
-                    .map_err(|e| SyncError::StorageError(format!("凭证数据解析失败: {}", e)))?;
+                serde_json::from_value(decrypted_certs).map_err(|e| {
+                    SyncError::StorageError(
+                        t!(
+                            "CloudSync.certificate_data_parse_failed",
+                            error = e.to_string()
+                        )
+                        .to_string(),
+                    )
+                })?;
 
             let repo = self
                 .storage
@@ -546,9 +607,15 @@ impl SyncEngine {
                     SyncError::StorageError("CertificateRepository not found".to_string())
                 })?;
 
-            let local_certs = repo
-                .list()
-                .map_err(|e| SyncError::StorageError(format!("获取本地凭证失败: {}", e)))?;
+            let local_certs = repo.list().map_err(|e| {
+                SyncError::StorageError(
+                    t!(
+                        "CloudSync.get_local_certificates_failed",
+                        error = e.to_string()
+                    )
+                    .to_string(),
+                )
+            })?;
 
             let local_by_cloud_id: HashMap<String, &crate::storage::Certificate> = local_certs
                 .iter()
@@ -572,7 +639,13 @@ impl SyncEngine {
                             updated_cert.last_synced_at = Some(SyncEngine::current_timestamp());
 
                             repo.update(&updated_cert).map_err(|e| {
-                                SyncError::StorageError(format!("更新凭证失败: {}", e))
+                                SyncError::StorageError(
+                                    t!(
+                                        "CloudSync.update_certificate_failed",
+                                        error = e.to_string()
+                                    )
+                                    .to_string(),
+                                )
                             })?;
                             updated += 1;
                         }
@@ -580,8 +653,12 @@ impl SyncEngine {
                         let mut new_cert = cloud_cert.clone();
                         new_cert.id = None;
                         new_cert.last_synced_at = Some(SyncEngine::current_timestamp());
-                        repo.insert(&mut new_cert)
-                            .map_err(|e| SyncError::StorageError(format!("创建凭证失败: {}", e)))?;
+                        repo.insert(&mut new_cert).map_err(|e| {
+                            SyncError::StorageError(
+                                t!("CloudSync.create_certificate_failed", error = e.to_string())
+                                    .to_string(),
+                            )
+                        })?;
                         downloaded += 1;
                     }
                 }

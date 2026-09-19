@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use mysql_async::{Conn, Opts, OptsBuilder, SslOpts, Value, prelude::*};
 use one_core::storage::DbConnectionConfig;
+use rust_i18n::t;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -699,7 +700,8 @@ impl DbConnection for MysqlDbConnection {
                                 current,
                                 SqlResult::Error(SqlErrorInfo {
                                     sql: String::new(),
-                                    message: format!("Parse error: {}", e),
+                                    message: t!("Error.parse_error", error = e.to_string())
+                                        .into_owned(),
                                 }),
                                 bytes_read,
                                 total_size,
@@ -794,7 +796,8 @@ impl DbConnection for MysqlDbConnection {
                                 current,
                                 SqlResult::Error(SqlErrorInfo {
                                     sql: String::new(),
-                                    message: format!("Parse error: {}", e),
+                                    message: t!("Error.parse_error", error = e.to_string())
+                                        .into_owned(),
                                 }),
                                 bytes_read,
                                 total_size,

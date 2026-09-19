@@ -473,6 +473,10 @@ Auth:
     en: Change email
     zh-CN: 更换邮箱
     zh-HK: 更換電郵
+  password_login_failed:
+    en: "Password login failed: %{error}"
+    zh-CN: "密码登录失败: %{error}"
+    zh-HK: "密碼登入失敗: %{error}"
 
 # 主密钥
 Encryption:
@@ -1677,6 +1681,26 @@ Settings:
       en: Not logged in. Please log in from the sidebar to manage your account.
       zh-CN: 未登录。请在侧边栏登录以管理您的账户。
       zh-HK: 未登入。請在側邊欄登入以管理您的帳戶。
+  http_client_init_failed:
+    en: "HTTP client initialization failed: %{error}"
+    zh-CN: "HTTP 客户端初始化失败: %{error}"
+    zh-HK: "HTTP 用戶端初始化失敗: %{error}"
+  proxy_test_task_failed:
+    en: "Proxy test task failed: %{error}"
+    zh-CN: "代理测试任务执行失败: %{error}"
+    zh-HK: "代理測試任務執行失敗: %{error}"
+  proxy_test_build_request_failed:
+    en: "Failed to build proxy test request: %{error}"
+    zh-CN: "构建代理测试请求失败: %{error}"
+    zh-HK: "構建代理測試請求失敗: %{error}"
+  proxy_test_connect_failed:
+    en: "Proxy connection test failed: %{error}"
+    zh-CN: "代理连接测试失败: %{error}"
+    zh-HK: "代理連線測試失敗: %{error}"
+  proxy_test_bad_status:
+    en: "Proxy test returned unexpected status: %{status}"
+    zh-CN: "代理测试返回异常状态码: %{status}"
+    zh-HK: "代理測試返回異常狀態碼: %{status}"
 
 # 许可证/订阅
 License:
@@ -2007,6 +2031,10 @@ LlmProviders:
     en: At least one model is required
     zh-CN: 至少需要选择一个模型
     zh-HK: 至少需要選擇一個模型
+  pending_deletion_registered:
+    en: "[LLM Provider] Pending deletion registered, waiting for sync engine: %{cloud_id}"
+    zh-CN: "[LLM Provider] 已登记待删除，等待同步引擎处理: %{cloud_id}"
+    zh-HK: "[LLM Provider] 已登記待刪除，等待同步引擎處理: %{cloud_id}"
 
 CertificateManager:
   title:
@@ -2304,6 +2332,34 @@ OAuth:
     en: "Have you completed authorization in your browser? Confirming... (waiting up to 5 minutes)"
     zh-CN: 已在浏览器中完成授权？正在确认... (最多等待 5 分钟)
     zh-HK: 已在瀏覽器中完成授權？正在確認... (最多等待 5 分鐘)
+  state_mismatch:
+    en: State mismatch
+    zh-CN: State 不匹配
+    zh-HK: State 不匹配
+  start_callback_server_failed:
+    en: "Failed to start callback server: %{error}"
+    zh-CN: "启动回调服务器失败: %{error}"
+    zh-HK: "啟動回調伺服器失敗: %{error}"
+  build_request_failed:
+    en: "Failed to build request: %{error}"
+    zh-CN: "请求构建失败: %{error}"
+    zh-HK: "請求構建失敗: %{error}"
+  network_request_failed:
+    en: "Network request failed: %{error}"
+    zh-CN: "网络请求失败: %{error}"
+    zh-HK: "網路請求失敗: %{error}"
+  read_response_failed:
+    en: "Failed to read response: %{error}"
+    zh-CN: "读取响应失败: %{error}"
+    zh-HK: "讀取回應失敗: %{error}"
+  token_request_failed:
+    en: "Token request failed: %{error}"
+    zh-CN: "Token 请求失败: %{error}"
+    zh-HK: "Token 請求失敗: %{error}"
+  parse_response_failed:
+    en: "Failed to parse response: %{error}"
+    zh-CN: "解析响应失败: %{error}"
+    zh-HK: "解析回應失敗: %{error}"
 
 # 连接恢复弹窗
 ConnectionRestore:
@@ -2339,6 +2395,10 @@ ConnectionRestore:
     en: Restore Selected
     zh-CN: 恢复所选
     zh-HK: 恢復所選
+  snapshot_read_failed:
+    en: "Failed to read connection restore snapshot: %{error}"
+    zh-CN: "读取连接恢复快照失败: %{error}"
+    zh-HK: "讀取連線恢復快照失敗: %{error}"
   # 连接类型标签
   ssh_terminal:
     en: SSH Terminal
@@ -2392,6 +2452,18 @@ ConnectionRestore:
     en: Default Directory
     zh-CN: 默认目录
     zh-HK: 預設目錄
+  clear_snapshot_failed:
+    en: "Failed to clear connection restore snapshot: %{error}"
+    zh-CN: "清理连接恢复快照失败：%{error}"
+    zh-HK: "清理連線恢復快照失敗：%{error}"
+  skip_restore_failed:
+    en: "Failed to skip restore in main window: %{error}"
+    zh-CN: "在主窗口执行跳过恢复失败：%{error}"
+    zh-HK: "在主視窗執行略過恢復失敗：%{error}"
+  exec_restore_failed:
+    en: "Failed to execute connection restore in main window: %{error}"
+    zh-CN: "在主窗口执行连接恢复失败：%{error}"
+    zh-HK: "在主視窗執行連線恢復失敗：%{error}"
 
 # 新建连接类型
 NewConnection:
@@ -2431,6 +2503,50 @@ NewConnection:
     en: Database
     zh-CN: 数据库
     zh-HK: 資料庫
+  category_all:
+    en: All
+    zh-CN: 全部
+    zh-HK: 全部
+  category_database:
+    en: Database
+    zh-CN: 数据库
+    zh-HK: 資料庫
+  category_terminal:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
+  description_ssh:
+    en: Remote server terminal and file connection
+    zh-CN: 远程服务器终端与文件连接
+    zh-HK: 遠端伺服器終端與檔案連線
+  description_terminal:
+    en: Open a local terminal tab
+    zh-CN: 打开一个本地终端标签页
+    zh-HK: 開啟一個本地終端分頁
+  description_redis:
+    en: Redis standalone, sentinel or cluster connection
+    zh-CN: Redis 单机、哨兵或集群连接
+    zh-HK: Redis 單機、哨兵或叢集連線
+  description_mongodb:
+    en: MongoDB database connection
+    zh-CN: MongoDB 数据库连接
+    zh-HK: MongoDB 資料庫連線
+  description_database:
+    en: Relational database connection
+    zh-CN: 关系型数据库连接
+    zh-HK: 關聯式資料庫連線
+  select_type_title:
+    en: Select Connection Type
+    zh-CN: 选择连接类型
+    zh-HK: 選擇連線類型
+  select_type_hint:
+    en: Click to select, then click Next; or double-click to open the connection form directly.
+    zh-CN: 单击选择后点击下一步，或双击直接进入连接表单。
+    zh-HK: 單擊選擇後點擊下一步，或雙擊直接進入連線表單。
+  back:
+    en: Back
+    zh-CN: 上一步
+    zh-HK: 上一步
 
 RemoteDesktopForm:
   title_new:
@@ -2467,3 +2583,963 @@ RemoteDesktop:
     en: "Failed to install remote desktop provider: %{error}"
     zh-CN: "安装远程桌面插件失败: %{error}"
     zh-HK: "安裝遠端桌面插件失敗: %{error}"
+  install_status_installing:
+    en: "Installing provider..."
+    zh-CN: 正在安装插件。
+    zh-HK: 正在安裝插件。
+  install_status_finished:
+    en: "Install completed, opening connection..."
+    zh-CN: 安装完成，正在打开连接。
+    zh-HK: 安裝完成，正在打開連線。
+  install_task_join_failed:
+    en: "Install task failed to execute: %{error}"
+    zh-CN: "安装任务执行失败: %{error}"
+    zh-HK: "安裝任務執行失敗: %{error}"
+
+RemoteDesktopInstall:
+  open_provider_archive_failed:
+    en: "Failed to open provider archive: %{path}"
+    zh-CN: "打开插件包失败: %{path}"
+    zh-HK: "打開插件包失敗: %{path}"
+  read_tar_entries_failed:
+    en: Failed to read tar entries
+    zh-CN: 读取 tar 条目失败
+    zh-HK: 讀取 tar 條目失敗
+  unpack_provider_archive_failed:
+    en: "Failed to unpack provider archive: %{path}"
+    zh-CN: "解包插件包失败: %{path}"
+    zh-HK: "解包插件包失敗: %{path}"
+  tar_entry_out_of_bounds:
+    en: tar entry unpacked out of target directory
+    zh-CN: tar 条目解包目标超出目录
+    zh-HK: tar 條目解包目標超出目錄
+  tar_entry_path_out_of_bounds:
+    en: "tar entry path out of bounds: %{path}"
+    zh-CN: "tar 条目路径越界: %{path}"
+    zh-HK: "tar 條目路徑越界: %{path}"
+  tar_entry_symlink_forbidden:
+    en: "tar entry must not be a symlink or hard link: %{path}"
+    zh-CN: "tar 条目不允许符号链接或硬链接: %{path}"
+    zh-HK: "tar 條目不允許符號連結或硬連結: %{path}"
+  read_tar_entry_path_failed:
+    en: Failed to read tar entry path
+    zh-CN: 读取 tar 条目路径失败
+    zh-HK: 讀取 tar 條目路徑失敗
+  package_missing_manifest:
+    en: "Provider package is missing %{file}"
+    zh-CN: "扩展包缺少 %{file}"
+    zh-HK: "擴充套件缺少 %{file}"
+  package_multiple_provider_dirs:
+    en: Provider package contains multiple remote desktop provider directories
+    zh-CN: 扩展包包含多个远程桌面插件目录
+    zh-HK: 擴充套件包含多個遠端桌面插件目錄
+  read_provider_manifest_failed:
+    en: "Failed to read provider manifest: %{path}"
+    zh-CN: "读取插件清单失败: %{path}"
+    zh-HK: "讀取插件清單失敗: %{path}"
+  parse_provider_manifest_failed:
+    en: "Failed to parse provider manifest: %{path}"
+    zh-CN: "解析插件清单失败: %{path}"
+    zh-HK: "解析插件清單失敗: %{path}"
+  provider_manifest_missing_id:
+    en: Remote desktop provider manifest is missing the id field
+    zh-CN: 远程桌面插件清单缺少 id 字段
+    zh-HK: 遠端桌面插件清單缺少 id 欄位
+  provider_id_invalid:
+    en: "Invalid remote desktop provider id: %{id}"
+    zh-CN: "远程桌面插件 id 非法: %{id}"
+    zh-HK: "遠端桌面插件 id 非法: %{id}"
+  provider_manifest_missing:
+    en: "Remote desktop provider manifest missing: %{path}"
+    zh-CN: "远程桌面插件清单缺失: %{path}"
+    zh-HK: "遠端桌面插件清單缺失: %{path}"
+  create_provider_dir_failed:
+    en: "Failed to create provider directory: %{path}"
+    zh-CN: "创建插件目录失败: %{path}"
+    zh-HK: "創建插件目錄失敗: %{path}"
+  backup_existing_provider_failed:
+    en: "Failed to back up existing provider: %{path}"
+    zh-CN: "备份已有插件失败: %{path}"
+    zh-HK: "備份已有插件失敗: %{path}"
+  restore_old_provider_failed:
+    en: "Failed to restore old provider: %{path}"
+    zh-CN: "恢复旧版插件失败: %{path}"
+    zh-HK: "恢復舊版插件失敗: %{path}"
+  create_staging_dir_failed:
+    en: "Failed to create staging directory: %{path}"
+    zh-CN: "创建临时目录失败: %{path}"
+    zh-HK: "創建臨時目錄失敗: %{path}"
+  remove_install_backup_failed:
+    en: "Failed to remove provider install backup: %{path}"
+    zh-CN: "删除插件安装备份失败: %{path}"
+    zh-HK: "刪除插件安裝備份失敗: %{path}"
+  create_directory_failed:
+    en: "Failed to create directory: %{path}"
+    zh-CN: "创建目录失败: %{path}"
+    zh-HK: "創建目錄失敗: %{path}"
+  read_directory_failed:
+    en: "Failed to read directory: %{path}"
+    zh-CN: "读取目录失败: %{path}"
+    zh-HK: "讀取目錄失敗: %{path}"
+  read_file_metadata_failed:
+    en: "Failed to read file metadata: %{path}"
+    zh-CN: "读取文件信息失败: %{path}"
+    zh-HK: "讀取檔案資訊失敗: %{path}"
+  symlink_copy_rejected:
+    en: "Refusing to copy symlink: %{path}"
+    zh-CN: "拒绝拷贝符号链接: %{path}"
+    zh-HK: "拒絕拷貝符號連結: %{path}"
+  copy_file_failed:
+    en: "Failed to copy file: %{path}"
+    zh-CN: "拷贝文件失败: %{path}"
+    zh-HK: "拷貝檔案失敗: %{path}"
+  create_download_dir_failed:
+    en: "Failed to create download directory: %{error}"
+    zh-CN: "创建下载目录失败: %{error}"
+    zh-HK: "創建下載目錄失敗: %{error}"
+  build_download_request_failed:
+    en: "Failed to build download request: %{error}"
+    zh-CN: "构建下载请求失败: %{error}"
+    zh-HK: "構建下載請求失敗: %{error}"
+  send_download_request_failed:
+    en: "Failed to send download request: %{error}"
+    zh-CN: "发送下载请求失败: %{error}"
+    zh-HK: "發送下載請求失敗: %{error}"
+  provider_package_download_failed:
+    en: "Failed to download provider package: %{status}"
+    zh-CN: "远程桌面插件包下载失败: %{status}"
+    zh-HK: "遠端桌面插件包下載失敗: %{status}"
+  create_provider_package_file_failed:
+    en: "Failed to create provider package file: %{error}"
+    zh-CN: "创建插件包文件失败: %{error}"
+    zh-HK: "創建插件包檔案失敗: %{error}"
+  read_provider_package_data_failed:
+    en: "Failed to read provider package data: %{error}"
+    zh-CN: "读取插件包数据失败: %{error}"
+    zh-HK: "讀取插件包資料失敗: %{error}"
+  write_provider_package_file_failed:
+    en: "Failed to write provider package file: %{error}"
+    zh-CN: "写入插件包文件失败: %{error}"
+    zh-HK: "寫入插件包檔案失敗: %{error}"
+  flush_provider_package_file_failed:
+    en: "Failed to flush provider package file: %{error}"
+    zh-CN: "刷新插件包文件失败: %{error}"
+    zh-HK: "刷新插件包檔案失敗: %{error}"
+  sync_provider_package_file_failed:
+    en: "Failed to sync provider package file: %{error}"
+    zh-CN: "同步插件包文件失败: %{error}"
+    zh-HK: "同步插件包檔案失敗: %{error}"
+  provider_package_url_invalid:
+    en: "Provider package URL is invalid: %{error}"
+    zh-CN: "插件包地址非法: %{error}"
+    zh-HK: "插件包位址非法: %{error}"
+  provider_package_url_missing_filename:
+    en: "Provider package URL is missing a filename: %{url}"
+    zh-CN: "插件包地址缺少文件名: %{url}"
+    zh-HK: "插件包位址缺少檔名: %{url}"
+  marketplace_provider_not_found:
+    en: "Remote desktop provider %{id} not found in marketplace"
+    zh-CN: "扩展市场未找到远程桌面插件 %{id}"
+    zh-HK: "擴充套件市集未找到遠端桌面插件 %{id}"
+  marketplace_provider_missing_release_tag:
+    en: "Remote desktop provider %{id} is missing a release_tag"
+    zh-CN: "远程桌面插件 %{id} 缺少 release_tag"
+    zh-HK: "遠端桌面插件 %{id} 缺少 release_tag"
+  marketplace_provider_missing_release_manifest:
+    en: "Remote desktop provider %{id} is missing a release manifest"
+    zh-CN: "远程桌面插件 %{id} 缺少发行清单"
+    zh-HK: "遠端桌面插件 %{id} 缺少發行清單"
+  marketplace_resolved_provider_release:
+    en: "Resolved remote desktop provider release"
+    zh-CN: 已解析远程桌面插件发行清单
+    zh-HK: 已解析遠端桌面插件發行清單
+  marketplace_provider_no_artifact:
+    en: "Remote desktop provider %{id} has no build artifact for the current platform"
+    zh-CN: "远程桌面插件 %{id} 没有适配当前平台的构建产物"
+    zh-HK: "遠端桌面插件 %{id} 沒有適配當前平台的建置產物"
+  marketplace_provider_missing_file:
+    en: "Remote desktop provider %{id} is missing the build artifact file name"
+    zh-CN: "远程桌面插件 %{id} 缺少构建产物文件名"
+    zh-HK: "遠端桌面插件 %{id} 缺少建置產物檔名"
+  marketplace_provider_missing_sha256:
+    en: "Remote desktop provider %{id} is missing the SHA256 checksum"
+    zh-CN: "远程桌面插件 %{id} 缺少 SHA256 校验值"
+    zh-HK: "遠端桌面插件 %{id} 缺少 SHA256 校驗值"
+  build_manifest_request_failed:
+    en: "Failed to build manifest request: %{error}"
+    zh-CN: "构建清单请求失败: %{error}"
+    zh-HK: "構建清單請求失敗: %{error}"
+  fetch_marketplace_manifest_failed:
+    en: "Failed to fetch marketplace manifest: %{error}"
+    zh-CN: "请求扩展市场清单失败: %{error}"
+    zh-HK: "請求擴充套件市集清單失敗: %{error}"
+  read_marketplace_manifest_failed:
+    en: "Failed to read marketplace manifest: %{error}"
+    zh-CN: "读取扩展市场清单失败: %{error}"
+    zh-HK: "讀取擴充套件市集清單失敗: %{error}"
+  parse_marketplace_manifest_failed:
+    en: Failed to parse marketplace manifest
+    zh-CN: 解析扩展市场清单失败
+    zh-HK: 解析擴充套件市集清單失敗
+  fetched_provider_package:
+    en: "Fetched remote desktop provider package info"
+    zh-CN: 已获取远程桌面插件下载信息
+    zh-HK: 已獲取遠端桌面插件下載資訊
+
+HomeOpenConnection:
+  title:
+    en: Open Connection
+    zh-CN: 打开连接
+    zh-HK: 打開連線
+
+HomeStatus:
+  connection_repository_missing:
+    en: Failed to retrieve connection repository
+    zh-CN: 无法获取连接存储库
+    zh-HK: 無法獲取連線儲存庫
+  database_type_unrecognized:
+    en: Unrecognized database connection type
+    zh-CN: 无法识别数据库连接类型
+    zh-HK: 無法識別資料庫連線類型
+
+HomeRestore:
+  ssh_missing_connection:
+    en: Missing connection info when restoring SSH terminal
+    zh-CN: 恢复 SSH 终端时缺少连接信息
+    zh-HK: 恢復 SSH 終端時缺少連線資訊
+  serial_skipped_removed:
+    en: Serial terminal restore skipped (feature removed)
+    zh-CN: 串口终端恢复已跳过（功能已移除）
+    zh-HK: 串列埠終端恢復已跳過（功能已移除）
+  sftp_missing_connection:
+    en: Missing connection info when restoring SFTP
+    zh-CN: 恢复 SFTP 时缺少连接信息
+    zh-HK: 恢復 SFTP 時缺少連線資訊
+  database_missing_connection:
+    en: Missing connection info when restoring database page
+    zh-CN: 恢复数据库页时缺少连接信息
+    zh-HK: 恢復資料庫頁時缺少連線資訊
+  database_workspace_missing_connection:
+    en: Missing connection info when restoring database workspace
+    zh-CN: 恢复数据库工作区时缺少连接信息
+    zh-HK: 恢復資料庫工作區時缺少連線資訊
+  redis_missing_connection:
+    en: Missing connection info when restoring Redis page
+    zh-CN: 恢复 Redis 页时缺少连接信息
+    zh-HK: 恢復 Redis 頁時缺少連線資訊
+  redis_workspace_missing_connection:
+    en: Missing connection info when restoring Redis workspace
+    zh-CN: 恢复 Redis 工作区时缺少连接信息
+    zh-HK: 恢復 Redis 工作區時缺少連線資訊
+  mongodb_missing_connection:
+    en: Missing connection info when restoring MongoDB page
+    zh-CN: 恢复 MongoDB 页时缺少连接信息
+    zh-HK: 恢復 MongoDB 頁時缺少連線資訊
+  mongodb_workspace_missing_connection:
+    en: Missing connection info when restoring MongoDB workspace
+    zh-CN: 恢复 MongoDB 工作区时缺少连接信息
+    zh-HK: 恢復 MongoDB 工作區時缺少連線資訊
+  local_terminal_missing_state:
+    en: Missing local terminal state when restoring local terminal
+    zh-CN: 恢复本地终端时缺少本地终端状态
+    zh-HK: 恢復本地終端時缺少本地終端狀態
+
+HomeCloudDeletion:
+  log_tag: "[删除]"
+  log_tag_workspace: "[删除]"
+  entity_pending_missing_repo:
+    en: "Cannot record pending %{entity} deletion: PendingCloudDeletionRepository missing"
+    zh-CN: "[删除] 无法记录待删除%{entity}：PendingCloudDeletionRepository 不存在"
+    zh-HK: "[刪除] 無法記錄待刪除%{entity}：PendingCloudDeletionRepository 不存在"
+  entity_pending_registered:
+    en: "[Delete] Registered pending %{entity} for sync engine: %{cloud_id}"
+    zh-CN: "[删除] 已登记待删除%{entity}，等待同步引擎处理: %{cloud_id}"
+    zh-HK: "[刪除] 已登記待刪除%{entity}，等待同步引擎處理: %{cloud_id}"
+  entity_pending_failed:
+    en: "[Delete] Failed to record pending %{entity}: %{cloud_id} - %{error}"
+    zh-CN: "[删除] 记录待删除%{entity}失败: %{cloud_id} - %{error}"
+    zh-HK: "[刪除] 記錄待刪除%{entity}失敗: %{cloud_id} - %{error}"
+  workspace_pending_missing_repo:
+    en: "[Delete] Cannot record pending workspace deletion: PendingCloudDeletionRepository missing"
+    zh-CN: "[删除] 无法记录待删除工作空间：PendingCloudDeletionRepository 不存在"
+    zh-HK: "[刪除] 無法記錄待刪除工作空間：PendingCloudDeletionRepository 不存在"
+  workspace_pending_registered:
+    en: "[Delete] Registered pending workspace for sync engine: %{cloud_id}"
+    zh-CN: "[删除] 已登记待删除工作空间，等待同步引擎处理: %{cloud_id}"
+    zh-HK: "[刪除] 已登記待刪除工作空間，等待同步引擎處理: %{cloud_id}"
+  workspace_pending_failed:
+    en: "[Delete] Failed to record pending workspace deletion: %{cloud_id} - %{error}"
+    zh-CN: "[删除] 记录待删除工作空间失败: %{cloud_id} - %{error}"
+    zh-HK: "[刪除] 記錄待刪除工作空間失敗: %{cloud_id} - %{error}"
+
+HomeAuth:
+  sync_server_url_lock_lost:
+    en: "Failed to reset cloud sync state after sync server URL change: write lock unavailable"
+    zh-CN: 同步地址变更后重置云同步状态失败：无法获取写锁
+    zh-HK: 同步位址變更後重設雲端同步狀態失敗：無法獲取寫入鎖
+  sync_service_lock_lost:
+    en: "Failed to set user ID before sync: cloud sync service write lock unavailable"
+    zh-CN: 同步前设置用户ID失败：无法获取云同步服务写锁
+    zh-HK: 同步前設定使用者 ID 失敗：無法獲取雲端同步服務寫入鎖
+  conflict_service_lock_lost:
+    en: "Failed to set user ID before conflict resolution: cloud sync service write lock unavailable"
+    zh-CN: 冲突解决前设置用户ID失败：无法获取云同步服务写锁
+    zh-HK: 衝突解決前設定使用者 ID 失敗：無法獲取雲端同步服務寫入鎖
+
+HomeSync:
+  summary_uploaded:
+    en: "Uploaded %{count} items"
+    zh-CN: "上传 %{count} 项"
+    zh-HK: "上傳 %{count} 項"
+  summary_downloaded:
+    en: "Downloaded %{count} items"
+    zh-CN: "下载 %{count} 项"
+    zh-HK: "下載 %{count} 項"
+  summary_deleted:
+    en: "Deleted %{count} items"
+    zh-CN: "删除 %{count} 项"
+    zh-HK: "刪除 %{count} 項"
+  trace_decryption_health_header:
+    en: "Detected %{count} connection decryption failures: those connections will be skipped by the sync engine, others continue syncing. Failed connections: %{preview}"
+    zh-CN: "检测到 %{count} 个连接解密失败：将由同步引擎跳过这些连接，其它连接继续同步和拉取。失败连接: %{preview}"
+    zh-HK: "偵測到 %{count} 個連線解密失敗：將由同步引擎跳過這些連線，其它連線繼續同步和拉取。失敗連線: %{preview}"
+  trace_decryption_health_failed:
+    en: "Failed to check decryption status before %{scene}, sync will continue: %{error}"
+    zh-CN: "%{scene}前解密状态检查失败，将继续执行同步流程: %{error}"
+    zh-HK: "%{scene}前解密狀態檢查失敗，將繼續執行同步流程: %{error}"
+  trace_decryption_health_no_repo:
+    en: "Failed to check decryption status before %{scene}: ConnectionRepository missing, sync will continue"
+    zh-CN: "%{scene}前解密状态检查失败：ConnectionRepository 不存在，将继续执行同步流程"
+    zh-HK: "%{scene}前解密狀態檢查失敗：ConnectionRepository 不存在，將繼續執行同步流程"
+  trace_sync_completed:
+    en: "Sync completed: uploaded %{uploaded}, downloaded %{downloaded}, conflicts %{conflicts}"
+    zh-CN: "同步完成：上传 %{uploaded} 个，下载 %{downloaded} 个，冲突 %{conflicts} 个"
+    zh-HK: "同步完成：上傳 %{uploaded} 個，下載 %{downloaded} 個，衝突 %{conflicts} 個"
+  trace_sync_has_conflicts:
+    en: "Sync has %{count} conflicts pending"
+    zh-CN: "同步存在 %{count} 个冲突需要处理"
+    zh-HK: "同步存在 %{count} 個衝突需要處理"
+  trace_sync_failed:
+    en: "Sync failed: %{error}"
+    zh-CN: "同步失败: %{error}"
+    zh-HK: "同步失敗: %{error}"
+  trace_resolve_individual:
+    en: "Resolving %{count} conflicts with individual strategies"
+    zh-CN: "使用单独策略解决 %{count} 个冲突"
+    zh-HK: "使用單獨策略解決 %{count} 個衝突"
+  trace_resolve_completed:
+    en: Conflict resolution completed
+    zh-CN: 冲突解决完成
+    zh-HK: 衝突解決完成
+  trace_resolve_partial:
+    en: "Conflict resolution not fully applied: %{remaining} unresolved conflicts, %{errors} errors"
+    zh-CN: "冲突解决未完全生效：剩余 %{remaining} 个未解决冲突，%{errors} 个错误"
+    zh-HK: "衝突解決未完全生效：剩餘 %{remaining} 個未解決衝突，%{errors} 個錯誤"
+  trace_resolve_failed:
+    en: "Conflict resolution failed: %{error}"
+    zh-CN: "冲突解决失败: %{error}"
+    zh-HK: "衝突解決失敗: %{error}"
+  scene_routine_sync:
+    en: routine sync
+    zh-CN: 常规同步
+    zh-HK: 常规同步
+  scene_individual_conflict:
+    en: individual conflict resolution
+    zh-CN: 单独冲突解决
+    zh-HK: 單獨衝突解決
+
+HomeSession:
+  restored_session_auto_sync:
+    en: Session restored and master key unlocked, automatically triggering cloud sync
+    zh-CN: 会话已恢复且密钥已解锁，自动触发云同步
+    zh-HK: 工作階段已恢復且密鑰已解鎖，自動觸發雲端同步
+  master_key_restored:
+    en: Master key restored
+    zh-CN: 已恢复主密钥
+    zh-HK: 已恢復主密鑰
+  master_key_restore_failed:
+    en: Master key restore failed, user must re-enter master key
+    zh-CN: 密钥恢复失败，需要用户重新输入主密钥
+    zh-HK: 密鑰恢復失敗，需要使用者重新輸入主密鑰
+  first_use_setup_master_key:
+    en: First-time use, master key setup required
+    zh-CN: 首次使用，需要设置主密钥
+    zh-HK: 首次使用，需要設定主密鑰
+  connection_data_changed_auto_sync:
+    en: Connection data changed, automatically triggering cloud sync
+    zh-CN: 连接数据变化，自动触发云同步
+    zh-HK: 連線資料變化，自動觸發雲端同步
+  workspace_data_changed_auto_sync:
+    en: Workspace data changed, automatically triggering cloud sync
+    zh-CN: 工作区数据变化，自动触发云同步
+    zh-HK: 工作區資料變化，自動觸發雲端同步
+  master_key_locked_postpone_load:
+    en: Master key is not unlocked, postponing local connection load to avoid decrypting encrypted passwords as empty
+    zh-CN: 主密钥未解锁，暂缓加载本地连接，避免将加密密码解密为空
+    zh-HK: 主密鑰未解鎖，暫緩載入本地連線，避免將加密密碼解密為空
+  workspace_saved_auto_sync:
+    en: Workspace saved locally, automatically triggering cloud sync
+    zh-CN: 本地工作区保存成功，自动触发云同步
+    zh-HK: 本地工作區儲存成功，自動觸發雲端同步
+  workspace_deleted_auto_sync:
+    en: Workspace deleted locally, automatically triggering cloud sync
+    zh-CN: 本地工作区删除成功，自动触发云同步
+    zh-HK: 本地工作區刪除成功，自動觸發雲端同步
+  master_key_unlock_succeeded_auto_sync:
+    en: Master key set/unlocked successfully, automatically triggering cloud sync
+    zh-CN: 密钥设置/解锁成功，自动触发云同步
+    zh-HK: 密鑰設定/解鎖成功，自動觸發雲端同步
+  re_encrypt_local_connections_succeeded:
+    en: "Master key changed successfully, re-encrypted %{count} local connections"
+    zh-CN: "主密钥修改成功，已重新加密 %{count} 个本地连接"
+    zh-HK: "主密鑰修改成功，已重新加密 %{count} 個本地連線"
+  re_encrypt_local_connections_failed:
+    en: "Failed to re-encrypt local connections: %{error}"
+    zh-CN: "重新加密本地连接失败: %{error}"
+    zh-HK: "重新加密本地連線失敗: %{error}"
+  connection_repo_not_found:
+    en: "Failed to delete connection: ConnectionRepository not found"
+    zh-CN: "Failed to delete connection: ConnectionRepository not found"
+    zh-HK: "Failed to delete connection: ConnectionRepository not found"
+  connection_repository_missing:
+    en: ConnectionRepository not found
+    zh-CN: ConnectionRepository not found
+    zh-HK: ConnectionRepository not found
+  workspace_repository_missing:
+    en: WorkspaceRepository not found
+    zh-CN: WorkspaceRepository not found
+    zh-HK: WorkspaceRepository not found
+  workspace_delete_move_failed:
+    en: "Failed to move connection to unassigned: %{error}"
+    zh-CN: "Failed to move connection to unassigned: %{error}"
+    zh-HK: "Failed to move connection to unassigned: %{error}"
+  workspace_delete_failed:
+    en: "Failed to delete workspace: %{error}"
+    zh-CN: "Failed to delete workspace: %{error}"
+    zh-HK: "Failed to delete workspace: %{error}"
+  workspace_save_failed:
+    en: "Failed to save workspace: %{error}"
+    zh-CN: "Failed to save workspace: %{error}"
+    zh-HK: "Failed to save workspace: %{error}"
+  connection_updated_lost:
+    en: "Connection %{id} missing after update"
+    zh-CN: "连接 %{id} 更新后丢失"
+    zh-HK: "連線 %{id} 更新後遺失"
+
+UpdateInstall:
+  create_update_temp_dir_failed:
+    en: "Failed to create update staging directory: %{err}"
+    zh-CN: "创建更新临时目录失败: %{err}"
+    zh-HK: "創建更新臨時目錄失敗: %{err}"
+  read_system_time_failed:
+    en: "Failed to read system time: %{err}"
+    zh-CN: "读取系统时间失败: %{err}"
+    zh-HK: "讀取系統時間失敗: %{err}"
+  cleanup_staging_dir_failed:
+    en: "Failed to clean up old staging directory: %{err}"
+    zh-CN: "清理旧 staging 目录失败: %{err}"
+    zh-HK: "清理舊 staging 目錄失敗: %{err}"
+  create_staging_dir_failed:
+    en: "Failed to create staging directory: %{err}"
+    zh-CN: "创建 staging 目录失败: %{err}"
+    zh-HK: "創建 staging 目錄失敗: %{err}"
+  get_current_exe_path_failed:
+    en: "Failed to get current executable path: %{err}"
+    zh-CN: "获取当前路径失败: %{err}"
+    zh-HK: "獲取當前路徑失敗: %{err}"
+  spawn_update_process_failed:
+    en: "Failed to launch update process: %{err}"
+    zh-CN: "启动更新进程失败: %{err}"
+    zh-HK: "啟動更新進程失敗: %{err}"
+  windows_executable_not_found:
+    en: omnihub.exe not found
+    zh-CN: 未找到 omnihub.exe
+    zh-HK: 未找到 omnihub.exe
+  replace_update_file_failed:
+    en: "Failed to replace update file: %{err}"
+    zh-CN: "替换更新文件失败: %{err}"
+    zh-HK: "替換更新檔案失敗: %{err}"
+  update_failed:
+    en: "Update failed: %{err}"
+    zh-CN: "更新失败: %{err}"
+    zh-HK: "更新失敗: %{err}"
+  unknown_reason:
+    en: Unknown reason
+    zh-CN: 未知原因
+    zh-HK: 未知原因
+  cleanup_old_backup_failed:
+    en: "Failed to clean up old backup: %{err}"
+    zh-CN: "清理旧备份失败: %{err}"
+    zh-HK: "清理舊備份失敗: %{err}"
+  backup_current_app_failed:
+    en: "Failed to back up current app: %{err}"
+    zh-CN: "备份当前应用失败: %{err}"
+    zh-HK: "備份當前應用失敗: %{err}"
+  install_macos_failed:
+    en: "Failed to install macOS update: %{err}"
+    zh-CN: "安装 macOS 更新失败: %{err}"
+    zh-HK: "安裝 macOS 更新失敗: %{err}"
+  restart_app_failed:
+    en: "Failed to restart application: %{err}"
+    zh-CN: "重启应用失败: %{err}"
+    zh-HK: "重啟應用失敗: %{err}"
+  exe_missing_parent_dir:
+    en: Current executable is missing a parent directory
+    zh-CN: 当前可执行文件缺少父目录
+    zh-HK: 當前可執行檔缺少父目錄
+  exe_not_in_app_bundle:
+    en: Current executable is not located inside .app/Contents/MacOS
+    zh-CN: 当前可执行文件不在 .app/Contents/MacOS 中
+    zh-HK: 當前可執行檔不在 .app/Contents/MacOS 中
+  exe_missing_contents_dir:
+    en: Current executable is missing the Contents directory
+    zh-CN: 当前可执行文件缺少 Contents 目录
+    zh-HK: 當前可執行檔缺少 Contents 目錄
+  exe_missing_app_dir:
+    en: Current executable is missing the .app directory
+    zh-CN: 当前可执行文件缺少 .app 目录
+    zh-HK: 當前可執行檔缺少 .app 目錄
+  read_staging_dir_failed:
+    en: "Failed to read staging directory %{path}: %{err}"
+    zh-CN: "读取 staging 目录失败 %{path}: %{err}"
+    zh-HK: "讀取 staging 目錄失敗 %{path}: %{err}"
+  read_staging_entry_failed:
+    en: "Failed to read staging entry: %{err}"
+    zh-CN: "读取 staging 条目失败: %{err}"
+    zh-HK: "讀取 staging 條目失敗: %{err}"
+  app_bundle_not_found:
+    en: OmniHub.app not found
+    zh-CN: 未找到 OmniHub.app
+    zh-HK: 未找到 OmniHub.app
+  bundle_entry_copy_unsupported:
+    en: "Unsupported bundle entry to copy: %{path}"
+    zh-CN: "不支持复制的 bundle 条目: %{path}"
+    zh-HK: "不支援複製的 bundle 條目: %{path}"
+  linux_binary_not_found:
+    en: Linux update binary omnihub not found
+    zh-CN: 未找到 Linux 更新二进制 omnihub
+    zh-HK: 未找到 Linux 更新二進位檔
+  install_location_unwritable:
+    en: "Current install location is not writable: %{err}"
+    zh-CN: "当前安装位置不可写: %{err}"
+    zh-HK: "當前安裝位置不可寫入: %{err}"
+  rollback_missing_backup:
+    en: No backup file available for rollback
+    zh-CN: 缺少可回滚的备份文件
+    zh-HK: 缺少可回滾的備份檔案
+  rollback_failed:
+    en: "%{err}; rollback failed: %{rollback_err}"
+    zh-CN: "%{err}; 回滚失败: %{rollback_err}"
+    zh-HK: "%{err}; 回滾失敗: %{rollback_err}"
+  read_file_permissions_failed:
+    en: "Failed to read file permissions: %{err}"
+    zh-CN: "读取文件权限失败: %{err}"
+    zh-HK: "讀取檔案權限失敗: %{err}"
+  set_executable_permission_failed:
+    en: "Failed to set executable permission: %{err}"
+    zh-CN: "设置可执行权限失败: %{err}"
+    zh-HK: "設定可執行權限失敗: %{err}"
+
+UpdateExtract:
+  create_extract_dir_failed:
+    en: "Failed to create extract directory: %{err}"
+    zh-CN: "创建解压目录失败: %{err}"
+    zh-HK: "創建解壓目錄失敗: %{err}"
+  archive_filename_unrecognized:
+    en: "Unrecognized archive filename: %{path}"
+    zh-CN: "无法识别归档文件名: %{path}"
+    zh-HK: "無法識別歸檔檔名: %{path}"
+  open_update_archive_failed:
+    en: "Failed to open update archive %{path}: %{err}"
+    zh-CN: "打开更新归档失败 %{path}: %{err}"
+    zh-HK: "打開更新歸檔失敗 %{path}: %{err}"
+  extract_tar_gz_failed:
+    en: "Failed to extract tar.gz update package: %{err}"
+    zh-CN: "解压 tar.gz 更新包失败: %{err}"
+    zh-HK: "解壓 tar.gz 更新包失敗: %{err}"
+  read_zip_update_failed:
+    en: "Failed to read zip update package: %{err}"
+    zh-CN: "读取 zip 更新包失败: %{err}"
+    zh-HK: "讀取 zip 更新包失敗: %{err}"
+  extract_zip_update_failed:
+    en: "Failed to extract zip update package: %{err}"
+    zh-CN: "解压 zip 更新包失败: %{err}"
+    zh-HK: "解壓 zip 更新包失敗: %{err}"
+  zip_unsupported_on_platform:
+    en: The current platform does not support extracting zip update packages
+    zh-CN: 当前平台不支持解压 zip 更新包
+    zh-HK: 當前平台不支援解壓 zip 更新包
+  unsupported_archive_format:
+    en: "Unsupported update archive format: %{path}"
+    zh-CN: "不支持的更新包格式: %{path}"
+    zh-HK: "不支援的更新包格式: %{path}"
+
+UpdateDownload:
+  create_download_dir_failed:
+    en: "Failed to create download directory: %{err}"
+    zh-CN: "创建下载目录失败: %{err}"
+    zh-HK: "創建下載目錄失敗: %{err}"
+  set_download_dir_permissions_failed:
+    en: "Failed to set download directory permissions: %{err}"
+    zh-CN: "设置下载目录权限失败: %{err}"
+    zh-HK: "設定下載目錄權限失敗: %{err}"
+  build_download_request_failed:
+    en: "Failed to build download request: %{err}"
+    zh-CN: "构建下载请求失败: %{err}"
+    zh-HK: "構建下載請求失敗: %{err}"
+  send_download_request_failed:
+    en: "Failed to send download request: %{err}"
+    zh-CN: "发送下载请求失败: %{err}"
+    zh-HK: "發送下載請求失敗: %{err}"
+  update_package_download_failed:
+    en: "Failed to download update package: %{status}"
+    zh-CN: "更新包下载失败: %{status}"
+    zh-HK: "更新包下載失敗: %{status}"
+  create_update_file_failed:
+    en: "Failed to create update file: %{err}"
+    zh-CN: "创建更新文件失败: %{err}"
+    zh-HK: "創建更新檔案失敗: %{err}"
+  read_update_data_failed:
+    en: "Failed to read update data: %{err}"
+    zh-CN: "读取更新数据失败: %{err}"
+    zh-HK: "讀取更新資料失敗: %{err}"
+  write_update_file_failed:
+    en: "Failed to write update file: %{err}"
+    zh-CN: "写入更新文件失败: %{err}"
+    zh-HK: "寫入更新檔案失敗: %{err}"
+  flush_update_file_failed:
+    en: "Failed to flush update file: %{err}"
+    zh-CN: "刷新更新文件失败: %{err}"
+    zh-HK: "刷新更新檔案失敗: %{err}"
+  sync_update_file_failed:
+    en: "Failed to sync update file: %{err}"
+    zh-CN: "同步更新文件失败: %{err}"
+    zh-HK: "同步更新檔案失敗: %{err}"
+  read_download_file_failed:
+    en: "Failed to read downloaded file: %{err}"
+    zh-CN: "读取下载文件失败: %{err}"
+    zh-HK: "讀取下載檔案失敗: %{err}"
+  sha256_mismatch:
+    en: "SHA256 mismatch: expected %{expected}, got %{actual}"
+    zh-CN: "SHA256 校验失败: 期望 %{expected}，实际 %{actual}"
+    zh-HK: "SHA256 校驗失敗: 期望 %{expected}，實際 %{actual}"
+  no_download_source_available:
+    en: No available update download source
+    zh-CN: 缺少可用的更新下载源
+    zh-HK: 缺少可用的更新下載來源
+  network_check_request_failed:
+    en: "Failed to build network check request: %{err}"
+    zh-CN: "构建网络检查请求失败: %{err}"
+    zh-HK: "構建網路檢查請求失敗: %{err}"
+
+UpdateGithub:
+  build_request_failed:
+    en: "Failed to build GitHub Release request: %{err}"
+    zh-CN: "构建 GitHub Release 请求失败: %{err}"
+    zh-HK: "構建 GitHub Release 請求失敗: %{err}"
+  send_request_failed:
+    en: "Failed to send GitHub Release request: %{err}"
+    zh-CN: "发送 GitHub Release 请求失败: %{err}"
+    zh-HK: "發送 GitHub Release 請求失敗: %{err}"
+  read_response_failed:
+    en: "Failed to read GitHub Release response: %{err}"
+    zh-CN: "读取 GitHub Release 响应失败: %{err}"
+    zh-HK: "讀取 GitHub Release 回應失敗: %{err}"
+  parse_response_failed:
+    en: "Failed to parse GitHub Release response: %{err}"
+    zh-CN: "解析 GitHub Release 响应失败: %{err}"
+    zh-HK: "解析 GitHub Release 回應失敗: %{err}"
+  status_error:
+    en: "GitHub Release API returned an error status: %{status} (%{owner}/%{repo})"
+    zh-CN: "GitHub Release 接口返回异常状态码: %{status} (%{owner}/%{repo})"
+    zh-HK: "GitHub Release 介面回傳異常狀態碼: %{status} (%{owner}/%{repo})"
+  asset_not_found:
+    en: "No release asset found for the current platform: %{asset}"
+    zh-CN: "未找到当前平台的发布资产: %{asset}"
+    zh-HK: "未找到當前平台的發布資產: %{asset}"
+  convert_failed:
+    en: "Failed to convert GitHub Release: %{err}"
+    zh-CN: "转换 GitHub Release 失败: %{err}"
+    zh-HK: "轉換 GitHub Release 失敗: %{err}"
+  sha256sums_unexpected_status:
+    en: "sha256sums.txt returned an unexpected status: %{status}"
+    zh-CN: "拉取 sha256sums.txt 返回异常状态码: %{status}"
+    zh-HK: "拉取 sha256sums.txt 回傳異常狀態碼: %{status}"
+  sha256sums_missing_hash:
+    en: "sha256sums.txt has no checksum entry for %{asset}"
+    zh-CN: "sha256sums.txt 中未找到 %{asset} 的校验值"
+    zh-HK: "sha256sums.txt 中未找到 %{asset} 的校驗值"
+  sha256sums_unavailable:
+    en: "GitHub Release did not provide usable sha256sums.txt, the download will skip SHA256 verification"
+    zh-CN: "GitHub Release 未提供可用 sha256sums.txt，下载将跳过 SHA256 校验"
+    zh-HK: "GitHub Release 未提供可用 sha256sums.txt，下載將跳過 SHA256 校驗"
+
+UpdateCheck:
+  task_join_failed:
+    en: "Update check task failed to execute: %{err}"
+    zh-CN: "更新检查任务执行失败: %{err}"
+    zh-HK: "更新檢查任務執行失敗: %{err}"
+  version_unparseable:
+    en: "Version string could not be parsed: %{version}"
+    zh-CN: "版本号无法解析 %{version}"
+    zh-HK: "版本號無法解析 %{version}"
+  current_version_unparseable:
+    en: "Current version could not be parsed: %{version}"
+    zh-CN: "当前版本号无法解析 %{version}"
+    zh-HK: "當前版本號無法解析 %{version}"
+  github_check_failed:
+    en: "GitHub Release check failed: %{err}"
+    zh-CN: "GitHub Release 检查失败: %{err}"
+    zh-HK: "GitHub Release 檢查失敗: %{err}"
+  custom_check_failed:
+    en: "Custom update check failed: %{err}"
+    zh-CN: "自定义更新检查失败: %{err}"
+    zh-HK: "自訂更新檢查失敗: %{err}"
+  custom_api_url_missing:
+    en: "OMNIHUB_UPDATE_URL is not set, custom update endpoint fallback is unavailable"
+    zh-CN: "缺少 OMNIHUB_UPDATE_URL，无法使用自定义更新接口兜底"
+    zh-HK: "缺少 OMNIHUB_UPDATE_URL，無法使用自訂更新介面兜底"
+  download_task_join_failed:
+    en: "Download task failed to execute: %{err}"
+    zh-CN: "下载任务执行失败: %{err}"
+    zh-HK: "下載任務執行失敗: %{err}"
+  apply_update_flag_missing_path:
+    en: Missing update package path argument
+    zh-CN: 缺少更新包路径
+    zh-HK: 缺少更新包路徑
+
+UpdateCustomApi:
+  build_request_failed:
+    en: "Failed to build update request: %{err}"
+    zh-CN: "构建更新请求失败: %{err}"
+    zh-HK: "構建更新請求失敗: %{err}"
+  send_request_failed:
+    en: "Failed to send update request: %{err}"
+    zh-CN: "发送更新请求失败: %{err}"
+    zh-HK: "發送更新請求失敗: %{err}"
+  read_response_failed:
+    en: "Failed to read update response: %{err}"
+    zh-CN: "读取更新响应失败: %{err}"
+    zh-HK: "讀取更新回應失敗: %{err}"
+  parse_response_failed:
+    en: "Failed to parse update response: %{err}"
+    zh-CN: "解析更新响应失败: %{err}"
+    zh-HK: "解析更新回應失敗: %{err}"
+  status_error:
+    en: "Update endpoint returned an error status: %{status}"
+    zh-CN: "更新接口返回异常状态码: %{status}"
+    zh-HK: "更新介面回傳異常狀態碼: %{status}"
+
+# 全局认证会话生命周期（tracing 日志）
+AuthSession:
+  session_expired_flag_detected:
+    en: Session expiration flag detected, preparing to show the login dialog
+    zh-CN: 检测到会话过期标志，准备弹出登录对话框
+    zh-HK: 檢測到工作階段過期標誌，準備彈出登入對話框
+  session_expired_callback_fired:
+    en: Session has expired, please log in again
+    zh-CN: 会话已过期，需要重新登录
+    zh-HK: 工作階段已過期，需要重新登入
+  refresh_token_persisted:
+    en: "Auto refresh token persisted: user_id=%{user_id} expires_at=%{expires_at}"
+    zh-CN: "自动刷新令牌已持久化: user_id=%{user_id} expires_at=%{expires_at}"
+    zh-HK: "自動重新整理權杖已持久化: user_id=%{user_id} expires_at=%{expires_at}"
+  using_sync_server_backend:
+    en: "Auth service uses sync_server backend: %{url}"
+    zh-CN: "认证服务使用 sync_server 后端: %{url}"
+    zh-HK: "認證服務使用 sync_server 後端: %{url}"
+  sync_server_url_invalid:
+    en: No valid sync_server URL configured; auth and sync requests may fail
+    zh-CN: 未配置有效的 sync_server 地址，认证和同步请求可能失败
+    zh-HK: 未配置有效的 sync_server 位址，認證和同步請求可能失敗
+  sync_server_url_updated_invalid:
+    en: "sync_server URL updated, but the current value is invalid: %{value}"
+    zh-CN: "sync_server 地址已更新，但当前值无效: %{value}"
+    zh-HK: "sync_server 位址已更新，但當前值無效: %{value}"
+  skip_restore_session:
+    en: "Skip restore session: %{message}"
+    zh-CN: "跳过恢复会话：%{message}"
+    zh-HK: "跳過恢復工作階段：%{message}"
+  restore_session_started:
+    en: Starting to try to restore the session
+    zh-CN: 开始尝试恢复会话
+    zh-HK: 開始嘗試恢復工作階段
+  restore_session_no_local_data:
+    en: "Restore session failed: no local auth data"
+    zh-CN: "恢复会话失败: 本地无认证数据"
+    zh-HK: "恢復工作階段失敗: 本地無認證資料"
+  local_auth_data_loaded:
+    en: "Local auth data loaded: user_id=%{user_id} expires_at=%{expires_at}"
+    zh-CN: "已读取本地认证数据: user_id=%{user_id} expires_at=%{expires_at}"
+    zh-HK: "已讀取本地認證資料: user_id=%{user_id} expires_at=%{expires_at}"
+  token_expiry_check:
+    en: "Token expiry check: now=%{now} expires_at=%{expires_at} diff=%{diff}s needs_refresh=%{needs_refresh}"
+    zh-CN: "令牌过期检查: now=%{now} expires_at=%{expires_at} diff=%{diff}s needs_refresh=%{needs_refresh}"
+    zh-HK: "權杖過期檢查: now=%{now} expires_at=%{expires_at} diff=%{diff}s needs_refresh=%{needs_refresh}"
+  token_needs_refresh:
+    en: "Access token needs refresh: now=%{now} expires_at=%{expires_at}"
+    zh-CN: "访问令牌需要刷新: now=%{now} expires_at=%{expires_at}"
+    zh-HK: "存取權杖需要重新整理: now=%{now} expires_at=%{expires_at}"
+  token_refresh_succeeded:
+    en: "Token refresh succeeded: user_id=%{user_id} new_expires_at=%{expires_at}"
+    zh-CN: "令牌刷新成功: user_id=%{user_id} new_expires_at=%{expires_at}"
+    zh-HK: "權杖重新整理成功: user_id=%{user_id} new_expires_at=%{expires_at}"
+  token_refresh_auth_failed:
+    en: "Token refresh auth failed, local auth data cleared: %{error}"
+    zh-CN: "令牌刷新认证失败，清除本地认证数据: %{error}"
+    zh-HK: "權杖重新整理認證失敗，清除本地認證資料: %{error}"
+  token_refresh_failed_retry:
+    en: "Token refresh failed (attempt %{current}/%{max}), will retry later: %{error}"
+    zh-CN: "令牌刷新失败（第 %{current}/%{max} 次），稍后重试: %{error}"
+    zh-HK: "權杖重新整理失敗（第 %{current}/%{max} 次），稍後重試: %{error}"
+  token_refresh_retries_exhausted:
+    en: "Token refresh retries exhausted, local auth data kept, skipping restore this time: %{error}"
+    zh-CN: "令牌刷新重试耗尽，保留本地认证数据，本次跳过恢复会话: %{error}"
+    zh-HK: "權杖重新整理重試耗盡，保留本地認證資料，本次跳過恢復工作階段: %{error}"
+  token_valid_remaining:
+    en: "Access token valid (%{remaining}s remaining), auth state set"
+    zh-CN: "访问令牌有效（剩余 %{remaining}s），已设置认证状态"
+    zh-HK: "存取權杖有效（剩餘 %{remaining}s），已設定認證狀態"
+  restore_session_succeeded:
+    en: "Restore session succeeded: user_id=%{user_id} email=%{email}"
+    zh-CN: "恢复会话成功: user_id=%{user_id} email=%{email}"
+    zh-HK: "恢復工作階段成功: user_id=%{user_id} email=%{email}"
+  restore_session_user_info_empty:
+    en: "Restore session failed: user info is empty, local auth data cleared"
+    zh-CN: "恢复会话失败: 用户信息为空，清除本地认证数据"
+    zh-HK: "恢復工作階段失敗: 使用者資訊為空，清除本地認證資料"
+  restore_session_auth_error:
+    en: "Restore session failed: auth error, local auth data cleared: %{error}"
+    zh-CN: "恢复会话失败: 认证错误，清除本地认证数据: %{error}"
+    zh-HK: "恢復工作階段失敗: 認證錯誤，清除本地認證資料: %{error}"
+  restore_session_user_info_error:
+    en: "Restore session failed: error fetching user info (local data kept): %{error}"
+    zh-CN: "恢复会话失败: 获取用户信息错误（保留本地数据）: %{error}"
+    zh-HK: "恢復工作階段失敗: 取得使用者資訊錯誤（保留本地資料）: %{error}"
+  user_signed_out:
+    en: User signed out
+    zh-CN: 用户登出
+    zh-HK: 使用者登出
+  auth_data_saved:
+    en: "Auth data saved: user_id=%{user_id} expires_at=%{expires_at} path=%{path}"
+    zh-CN: "认证数据已保存: user_id=%{user_id} expires_at=%{expires_at} path=%{path}"
+    zh-HK: "認證資料已儲存: user_id=%{user_id} expires_at=%{expires_at} path=%{path}"
+  auth_data_save_failed:
+    en: "Auth data save failed: %{error}"
+    zh-CN: "认证数据保存失败: %{error}"
+    zh-HK: "認證資料儲存失敗: %{error}"
+  auth_data_path_missing:
+    en: Cannot resolve auth data storage path
+    zh-CN: 无法获取认证数据存储路径
+    zh-HK: 無法獲取認證資料儲存路徑
+  auth_data_read_failed:
+    en: "Auth data read failed: %{error} path=%{path}"
+    zh-CN: "读取认证数据失败: %{error} path=%{path}"
+    zh-HK: "讀取認證資料失敗: %{error} path=%{path}"
+  local_auth_data_loaded_detail:
+    en: "Local auth data loaded: user_id=%{user_id} expires_at=%{expires_at} token_len=%{token_len} refresh_token_len=%{refresh_token_len}"
+    zh-CN: "加载本地认证数据: user_id=%{user_id} expires_at=%{expires_at} token_len=%{token_len} refresh_token_len=%{refresh_token_len}"
+    zh-HK: "載入本地認證資料: user_id=%{user_id} expires_at=%{expires_at} token_len=%{token_len} refresh_token_len=%{refresh_token_len}"
+  local_auth_data_cleared:
+    en: "Local auth data cleared: path=%{path}"
+    zh-CN: "本地认证数据已清除: path=%{path}"
+    zh-HK: "本地認證資料已清除: path=%{path}"
+  local_auth_data_clear_failed:
+    en: "Local auth data clear failed: %{error}"
+    zh-CN: "清除本地认证数据失败: %{error}"
+    zh-HK: "清除本地認證資料失敗: %{error}"
+
+# 系统级热键
+Hotkey:
+  register_failed:
+    en: "System-level hotkey registration failed: %{err}"
+    zh-CN: "系统级热键注册失败: %{err}"
+    zh-HK: "系統層級熱鍵註冊失敗: %{err}"
+  unregister_failed:
+    en: "System-level hotkey unregistration failed: %{err}"
+    zh-CN: "系统级热键注销失败: %{err}"
+    zh-HK: "系統層級熱鍵註銷失敗: %{err}"
+  refresh_register_failed:
+    en: "System-level hotkey refresh registration failed: %{err}"
+    zh-CN: "系统级热键刷新注册失败: %{err}"
+    zh-HK: "系統層級熱鍵重新註冊失敗: %{err}"
+  event_dispatch_failed:
+    en: "Main window hotkey event dispatch failed: %{err}"
+    zh-CN: "主窗口热键事件派发失败: %{err}"
+    zh-HK: "主視窗熱鍵事件派發失敗: %{err}"
+  manager_init_failed:
+    en: "System-level hotkey manager initialization failed: %{err}"
+    zh-CN: "系统级热键管理器初始化失败: %{err}"
+    zh-HK: "系統層級熱鍵管理器初始化失敗: %{err}"
+  invalid_config_fallback:
+    en: "Invalid system-level hotkey config, fell back to default: input=%{spec}, fallback=%{fallback}, err=%{err}"
+    zh-CN: "系统级热键配置非法，已回退默认值: input=%{spec}, fallback=%{fallback}, err=%{err}"
+    zh-HK: "系統層級熱鍵設定非法，已回退預設值: input=%{spec}, fallback=%{fallback}, err=%{err}"
+  handle_shortcut_failed:
+    en: "Main window system-level shortcut handling failed: %{err}"
+    zh-CN: "主窗口系统级快捷键处理失败: %{err}"
+    zh-HK: "主視窗系統層級快捷鍵處理失敗: %{err}"
+
+# 启动命令分流
+Bootstrap:
+  tokio_runtime_create_failed:
+    en: Failed to create Tokio runtime
+    zh-CN: 创建 Tokio runtime 失败
+    zh-HK: 建立 Tokio runtime 失敗
+  local_pty_host_start_failed:
+    en: "Failed to start local-pty-host: %{err}"
+    zh-CN: "local-pty-host 启动失败: %{err}"
+    zh-HK: "local-pty-host 啟動失敗: %{err}"
+
+# 退出守卫
+CloseGuard:
+  all_tabs_closed:
+    en: All tabs closed, ready to quit
+    zh-CN: 所有标签页已关闭，准备退出应用
+    zh-HK: 所有分頁已關閉，準備結束應用
+  some_tabs_failed:
+    en: Some tabs failed to close, quitting cancelled
+    zh-CN: 部分标签页关闭失败，取消退出
+    zh-HK: 部分分頁關閉失敗，取消結束
+  prepare_prompt:
+    en: Preparing to show quit confirmation, saving current tab state first
+    zh-CN: 准备显示退出确认对话框，先保存当前标签状态
+    zh-HK: 準備顯示結束確認對話框，先儲存目前分頁狀態
+  save_state_failed:
+    en: "Failed to save tab state: %{error}"
+    zh-CN: "保存标签状态失败：%{error}"
+    zh-HK: "儲存分頁狀態失敗：%{error}"
+  save_state_ok:
+    en: "Tab state saved, %{count} tabs"
+    zh-CN: "标签状态保存成功，共 %{count} 个标签"
+    zh-HK: "分頁狀態儲存成功，共 %{count} 個分頁"
+
+# 日志初始化
+Logging:
+  file_init_failed:
+    en: Failed to initialize log file
+    zh-CN: 日志文件初始化失败
+    zh-HK: 日誌檔案初始化失敗
+  default_dir_init_failed:
+    en: Failed to initialize default log directory
+    zh-CN: 默认日志目录初始化失败
+    zh-HK: 預設日誌目錄初始化失敗
+
+# 窗口操作
+WindowActions:
+  get_handle_failed:
+    en: "Failed to get window handle: %{error}"
+    zh-CN: "获取窗口句柄失败: %{error}"
+    zh-HK: "取得視窗控制代碼失敗: %{error}"
+  always_on_top_unsupported:
+    en: Always-on-top is not supported on this platform
+    zh-CN: 当前平台暂不支持窗口置顶
+    zh-HK: 目前平台暫不支援視窗置頂
+  get_nsview_failed:
+    en: Failed to get NSView
+    zh-CN: 获取 NSView 失败
+    zh-HK: 取得 NSView 失敗
+  get_nswindow_failed:
+    en: Failed to get NSWindow
+    zh-CN: 获取 NSWindow 失败
+    zh-HK: 取得 NSWindow 失敗

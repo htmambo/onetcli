@@ -12,6 +12,7 @@ use crate::cloud_sync::client::CloudApiError;
 use crate::cloud_sync::oauth::OAuthTokens;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use smol::Timer;
 use std::collections::HashMap;
@@ -91,10 +92,13 @@ impl GithubOAuthClient {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if response.status() != StatusCode::OK {
-            return Err(CloudApiError::ServerError(format!(
-                "GitHub device code 请求失败: HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "GitHubAuth.device_code_http_failed",
+                    status = response.status().as_u16().to_string()
+                )
+                .to_string(),
+            ));
         }
 
         let _status = response.status();
@@ -116,17 +120,23 @@ impl GithubOAuthClient {
 
         // 再尝试解析错误
         if let Ok(err_resp) = serde_json::from_slice::<GithubDeviceError>(&body_bytes) {
-            return Err(CloudApiError::ServerError(format!(
-                "GitHub device code 错误: {} - {}",
-                err_resp.error,
-                err_resp.error_description.unwrap_or_default()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "GitHubAuth.device_code_error",
+                    error = err_resp.error.clone(),
+                    description = err_resp.error_description.clone().unwrap_or_default()
+                )
+                .to_string(),
+            ));
         }
 
-        Err(CloudApiError::ParseError(format!(
-            "无法解析 GitHub device code 响应: {}",
-            String::from_utf8_lossy(&body_bytes)
-        )))
+        Err(CloudApiError::ParseError(
+            t!(
+                "GitHubAuth.device_code_parse_failed",
+                body = String::from_utf8_lossy(&body_bytes).to_string()
+            )
+            .to_string(),
+        ))
     }
 
     /// 轮询获取 access_token
@@ -183,32 +193,39 @@ impl GithubOAuthClient {
                     }
                     "access_denied" => {
                         return Err(CloudApiError::AuthenticationFailed(
-                            "用户拒绝了授权请求".to_string(),
+                            t!("GitHubAuth.access_denied").to_string(),
                         ));
                     }
                     "expired_token" => {
                         return Err(CloudApiError::AuthenticationFailed(
-                            "device_code 已过期，请重新发起授权".to_string(),
+                            t!("GitHubAuth.device_code_expired").to_string(),
                         ));
                     }
                     _ => {
-                        return Err(CloudApiError::ServerError(format!(
-                            "GitHub token 错误: {} - {}",
-                            err_resp.error,
-                            err_resp.error_description.unwrap_or_default()
-                        )));
+                        return Err(CloudApiError::ServerError(
+                            t!(
+                                "GitHubAuth.token_error",
+                                error = err_resp.error.clone(),
+                                description =
+                                    err_resp.error_description.clone().unwrap_or_default()
+                            )
+                            .to_string(),
+                        ));
                     }
                 }
             }
 
-            return Err(CloudApiError::ParseError(format!(
-                "无法解析 GitHub token 响应: {}",
-                String::from_utf8_lossy(&body_bytes)
-            )));
+            return Err(CloudApiError::ParseError(
+                t!(
+                    "GitHubAuth.token_parse_failed",
+                    body = String::from_utf8_lossy(&body_bytes).to_string()
+                )
+                .to_string(),
+            ));
         }
 
         Err(CloudApiError::AuthenticationFailed(
-            "授权超时，请重试".to_string(),
+            t!("GitHubAuth.auth_timeout").to_string(),
         ))
     }
 }
@@ -259,10 +276,13 @@ pub async fn find_vault_gist(
         .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
     if !response.status().is_success() {
-        return Err(CloudApiError::ServerError(format!(
-            "列出 gists 失败: HTTP {}",
-            response.status().as_u16()
-        )));
+        return Err(CloudApiError::ServerError(
+            t!(
+                "GitHubAuth.list_gists_failed",
+                status = response.status().as_u16().to_string()
+            )
+            .to_string(),
+        ));
     }
 
     let mut bytes = Vec::new();
@@ -320,10 +340,13 @@ pub async fn create_vault_gist(
         .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
     if !response.status().is_success() && response.status() != StatusCode::CREATED {
-        return Err(CloudApiError::ServerError(format!(
-            "创建 gist 失败: HTTP {}",
-            response.status().as_u16()
-        )));
+        return Err(CloudApiError::ServerError(
+            t!(
+                "GitHubAuth.create_gist_failed",
+                status = response.status().as_u16().to_string()
+            )
+            .to_string(),
+        ));
     }
 
     let mut bytes = Vec::new();

@@ -88,8 +88,8 @@ pub(crate) trait SyncTypeHandler: Send + Sync + 'static {
     /// 数据类型标识（对应 `CloudSyncData.data_type`，如 "connection" / "workspace"）
     fn data_type(&self) -> &'static str;
 
-    /// 显示名称（用于日志，如 "连接" / "工作空间"）
-    fn display_name(&self) -> &'static str;
+    /// 显示名称（用于日志和错误信息，如 "连接" / "工作空间"）
+    fn display_name(&self) -> String;
 
     /// 操作队列 key
     fn queue_key(&self) -> &'static str;
