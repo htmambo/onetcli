@@ -40,15 +40,15 @@ fn ensure_not_cancelled(cancelled: &AtomicBool) -> Result<()> {
 struct SftpHandler {
     host: String,
     port: u16,
-    auto_accept_new_keys: bool,
+    policy: ssh::HostKeyPolicy,
 }
 
 impl SftpHandler {
-    fn new(host: impl Into<String>, port: u16, auto_accept_new_keys: bool) -> Self {
+    fn new(host: impl Into<String>, port: u16, policy: ssh::HostKeyPolicy) -> Self {
         Self {
             host: host.into(),
             port,
-            auto_accept_new_keys,
+            policy,
         }
     }
 }
@@ -60,12 +60,7 @@ impl client::Handler for SftpHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        ssh::verify_server_key(
-            &self.host,
-            self.port,
-            server_public_key,
-            self.auto_accept_new_keys,
-        )
+        ssh::verify_server_key(&self.host, self.port, server_public_key, self.policy)
     }
 }
 
@@ -753,12 +748,10 @@ impl SftpClient for RusshSftpClient {
             let mut jump_session = if let Some(ref proxy) = ssh_config.proxy {
                 tracing::info!("SFTP: 通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
                 let stream = sftp_connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                let handler =
-                    SftpHandler::new(&jump.host, jump.port, ssh_config.auto_accept_new_keys);
+                let handler = SftpHandler::new(&jump.host, jump.port, ssh_config.host_key_policy());
                 client::connect_stream(config.clone(), stream, handler).await?
             } else {
-                let handler =
-                    SftpHandler::new(&jump.host, jump.port, ssh_config.auto_accept_new_keys);
+                let handler = SftpHandler::new(&jump.host, jump.port, ssh_config.host_key_policy());
                 client::connect(config.clone(), (jump.host.as_str(), jump.port), handler).await?
             };
 
@@ -779,7 +772,7 @@ impl SftpClient for RusshSftpClient {
             let handler = SftpHandler::new(
                 &ssh_config.host,
                 ssh_config.port,
-                ssh_config.auto_accept_new_keys,
+                ssh_config.host_key_policy(),
             );
             let session =
                 client::connect_stream(config, forwarded_channel.into_stream(), handler).await?;
@@ -791,7 +784,7 @@ impl SftpClient for RusshSftpClient {
             let handler = SftpHandler::new(
                 &ssh_config.host,
                 ssh_config.port,
-                ssh_config.auto_accept_new_keys,
+                ssh_config.host_key_policy(),
             );
             let session = client::connect_stream(config, stream, handler).await?;
             (session, None)
@@ -799,7 +792,7 @@ impl SftpClient for RusshSftpClient {
             let handler = SftpHandler::new(
                 &ssh_config.host,
                 ssh_config.port,
-                ssh_config.auto_accept_new_keys,
+                ssh_config.host_key_policy(),
             );
             let session =
                 client::connect(config, (ssh_config.host.as_str(), ssh_config.port), handler)

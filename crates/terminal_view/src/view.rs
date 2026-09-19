@@ -2506,6 +2506,8 @@ impl TerminalView {
     }
 
     fn reconnect_internal(&mut self, auto_accept_keys: bool, cx: &mut Context<Self>) {
+        // 必须在 terminal.reconnect 之前取工作目录：reconnect 会 reset_terminal_surface，
+        // 清空 current_working_dir。
         let working_dir = self
             .terminal
             .read(cx)
@@ -2518,7 +2520,29 @@ impl TerminalView {
                 terminal.reconnect(cx);
             }
         });
+        self.spawn_post_reconnect_sidebar_sync(working_dir, cx);
+    }
 
+    /// B3：用户确认"信任新主机并连接"。写入 known_hosts 由终端模型完成，
+    /// 成功后沿用与 reconnect 相同的 sidebar（文件管理器/监控）重连逻辑。
+    pub fn trust_new_host_and_reconnect(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let working_dir = self
+            .terminal
+            .read(cx)
+            .current_working_dir()
+            .map(str::to_string);
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.trust_new_host_and_reconnect(cx);
+        });
+        self.spawn_post_reconnect_sidebar_sync(working_dir, cx);
+    }
+
+    /// 重连成功后同步 sidebar 的文件管理器与服务器监控面板。
+    fn spawn_post_reconnect_sidebar_sync(
+        &self,
+        working_dir: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn(async move |this, cx| {
             loop {
                 let state = match this.update(cx, |this, cx| {
@@ -3542,6 +3566,9 @@ impl TerminalView {
             .as_ref()
             .map(|m| m.contains("Key changed"))
             .unwrap_or(false);
+        // B3：首次连接未知主机被拒时，终端模型已记录待确认指纹；
+        // 覆盖层据此渲染"信任新主机并连接"按钮（与 accept-new-key 互斥）。
+        let has_unknown_host = terminal.pending_unknown_host_fingerprint().is_some();
 
         // 区分用户 exit 和网络故障：child_exited 有值表示子进程已退出（用户 exit）
         let child_exited = terminal.child_exited();
@@ -3666,23 +3693,39 @@ impl TerminalView {
                                             this.request_close(window, cx);
                                         })),
                                 )
-                                .when(can_reconnect && !is_key_changed && !is_user_exit, |el| {
-                                    el.child(
-                                        Button::new("reconnect-btn")
-                                            .label(t!("SshSession.reconnect"))
-                                            .primary()
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.reconnect(window, cx);
-                                            })),
-                                    )
-                                })
-                                .when(is_key_changed, |el| {
+                                .when(
+                                    can_reconnect
+                                        && !is_key_changed
+                                        && !has_unknown_host
+                                        && !is_user_exit,
+                                    |el| {
+                                        el.child(
+                                            Button::new("reconnect-btn")
+                                                .label(t!("SshSession.reconnect"))
+                                                .primary()
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.reconnect(window, cx);
+                                                })),
+                                        )
+                                    },
+                                )
+                                .when(is_key_changed && !has_unknown_host, |el| {
                                     el.child(
                                         Button::new("accept-new-key-btn")
                                             .label(t!("SshSession.accept_new_key"))
                                             .primary()
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.reconnect_with_auto_accept_keys(window, cx);
+                                            })),
+                                    )
+                                })
+                                .when(has_unknown_host, |el| {
+                                    el.child(
+                                        Button::new("trust-new-host-btn")
+                                            .label(t!("SshSession.trust_new_host"))
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.trust_new_host_and_reconnect(window, cx);
                                             })),
                                     )
                                 }),

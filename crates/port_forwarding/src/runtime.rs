@@ -108,8 +108,12 @@ pub fn build_local_forwarding_request(
         .to_ssh_params()
         .context("failed to parse referenced SSH params")?;
 
+    let mut ssh_config = ssh_params.to_connect_config();
+    // 非交互路径暂无确认 UI，保持自动学习
+    ssh_config.auto_learn_unknown_hosts = true;
+
     Ok(LocalForwardingRequest {
-        ssh_config: ssh_params.to_connect_config(),
+        ssh_config,
         bind_host: params.bind_host,
         bind_port: params.bind_port,
         target_host: params.target_host,
@@ -142,8 +146,12 @@ pub fn build_dynamic_forwarding_request(
         .to_ssh_params()
         .context("failed to parse referenced SSH params")?;
 
+    let mut ssh_config = ssh_params.to_connect_config();
+    // 非交互路径暂无确认 UI，保持自动学习
+    ssh_config.auto_learn_unknown_hosts = true;
+
     Ok(DynamicForwardingRequest {
-        ssh_config: ssh_params.to_connect_config(),
+        ssh_config,
         bind_host: params.bind_host,
         bind_port: params.bind_port,
     })

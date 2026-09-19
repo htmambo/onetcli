@@ -9,3 +9,7 @@ SshSession:
     en: "Old fingerprint: %{old_fingerprint}\nNew fingerprint: %{new_fingerprint}\nVerify carefully before accepting the new key."
     zh-CN: "旧指纹：%{old_fingerprint}\n新指纹：%{new_fingerprint}\n接受前请仔细核对。"
     zh-HK: "舊指紋：%{old_fingerprint}\n新指紋：%{new_fingerprint}\n接受前請仔細核對。"
+  unknown_host_fingerprint:
+    en: "This host is not in known_hosts yet.\nFingerprint: %{fingerprint}\nVerify it carefully, then click 'Trust new host and connect'."
+    zh-CN: "该主机尚未写入 known_hosts。\n指纹：%{fingerprint}\n请仔细核对后点击\"信任新主机并连接\"。"
+    zh-HK: "該主機尚未寫入 known_hosts。\n指紋：%{fingerprint}\n請仔細核對後點擊\"信任新主機並連接\"。"

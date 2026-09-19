@@ -91,6 +91,9 @@ impl SshParams {
             proxy: self.proxy.clone().map(ssh_proxy_config_from_storage),
             keyboard_interactive_responder: None,
             auto_accept_new_keys,
+            // B3：默认不自动学习未知主机；需要自动学习的非交互调用方
+            // （port_forwarding 等）在拿到配置后显式置 true。
+            auto_learn_unknown_hosts: false,
         }
     }
 }

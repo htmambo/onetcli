@@ -57,6 +57,30 @@ pub struct SshConnectConfig {
     pub keyboard_interactive_responder: Option<Arc<dyn KeyboardInteractiveResponder>>,
     /// 是否自动接受新的 SSH 主机密钥（密钥变更时自动替换）
     pub auto_accept_new_keys: bool,
+    /// B3：首次连接未知主机（known_hosts 无记录）时是否自动写入 known_hosts。
+    /// false 时握手会被拒绝，指纹与公钥登记到 PENDING_UNKNOWN_HOST_KEYS，
+    /// 由上层 UI 展示并等待用户确认后调 `trust_pending_host_key` 再重连。
+    pub auto_learn_unknown_hosts: bool,
+}
+
+impl SshConnectConfig {
+    /// 汇总为主机密钥策略，供 russh handler 穿透使用。
+    pub fn host_key_policy(&self) -> HostKeyPolicy {
+        HostKeyPolicy {
+            auto_accept_new_keys: self.auto_accept_new_keys,
+            auto_learn_unknown_hosts: self.auto_learn_unknown_hosts,
+        }
+    }
+}
+
+/// 主机密钥校验策略：把两个布尔收敛为一个结构体，
+/// 避免 `verify_server_key` 位置参数超过本仓硬门禁（≤ 3/4 个）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostKeyPolicy {
+    /// 密钥变更（KeyChanged）时是否自动移除旧指纹并写入新指纹。
+    pub auto_accept_new_keys: bool,
+    /// 首次连接未知主机（known_hosts 无记录）时是否自动学习新指纹。
+    pub auto_learn_unknown_hosts: bool,
 }
 
 /// 跳板机连接配置
@@ -428,6 +452,16 @@ static KEY_CHANGE_FINGERPRINTS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<(String, u16), (String, String)>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// B3：KEY_CHANGE_FINGERPRINTS 中"首次连接未知主机"的哨兵旧指纹。
+/// 上层 UI 据此区分 KeyChanged 与 NewHost，不依赖 russh 的错误文案。
+pub const UNKNOWN_HOST_SENTINEL: &str = "NEW_HOST";
+
+/// B3：首次连接未知主机被拒时暂存的服务端公钥，
+/// 用户确认后由 `trust_pending_host_key` 写入 known_hosts。
+static PENDING_UNKNOWN_HOST_KEYS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<(String, u16), PublicKey>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 /// 取出并清除指定主机的密钥变更指纹记录。
 pub fn take_key_change_fingerprints(host: &str, port: u16) -> Option<(String, String)> {
     KEY_CHANGE_FINGERPRINTS
@@ -441,11 +475,26 @@ fn ssh_key_sha256_fingerprint(key: &PublicKey) -> String {
     key.fingerprint(russh::keys::HashAlg::Sha256).to_string()
 }
 
+/// B3：用户确认信任某个未知主机后，把暂存的服务端公钥写入 known_hosts。
+/// 返回 Ok(true) 表示存在待信任条目并已写入；无待信任条目返回 Ok(false)。
+pub fn trust_pending_host_key(host: &str, port: u16) -> Result<bool> {
+    let pending_key = PENDING_UNKNOWN_HOST_KEYS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("PENDING_UNKNOWN_HOST_KEYS 锁已中毒"))?
+        .remove(&(host.to_string(), port));
+    let Some(pending_key) = pending_key else {
+        return Ok(false);
+    };
+    russh::keys::known_hosts::learn_known_hosts(host, port, &pending_key)?;
+    tracing::info!("已信任 SSH 主机 {}:{} 并写入 known_hosts", host, port);
+    Ok(true)
+}
+
 pub fn verify_server_key(
     host: &str,
     port: u16,
     server_public_key: &PublicKey,
-    auto_accept_new_keys: bool,
+    policy: HostKeyPolicy,
 ) -> std::result::Result<bool, russh::Error> {
     match russh::keys::check_known_hosts(host, port, server_public_key) {
         Ok(true) => Ok(true),
@@ -453,22 +502,39 @@ pub fn verify_server_key(
             // B3：把"首次连接"也记录到 KEY_CHANGE_FINGERPRINTS，
             // 让上层（终端 / 弹窗）可以通过 take_key_change_fingerprints 取出
             // 新指纹展示给用户，用户核对后再决定是否接受。
-            // 旧指纹设为 "NEW_HOST" 作为哨兵，上层识别后展示"是否信任新主机"。
+            // 旧指纹设为 UNKNOWN_HOST_SENTINEL 作为哨兵，上层识别后展示"是否信任新主机"。
+            // 同时把公钥本身暂存到 PENDING_UNKNOWN_HOST_KEYS，供 trust_pending_host_key 写入。
             let new_fingerprint = ssh_key_sha256_fingerprint(server_public_key);
             if let Ok(mut map) = KEY_CHANGE_FINGERPRINTS.lock() {
                 map.insert(
                     (host.to_string(), port),
-                    ("NEW_HOST".to_string(), new_fingerprint.clone()),
+                    (UNKNOWN_HOST_SENTINEL.to_string(), new_fingerprint.clone()),
                 );
             }
-            tracing::warn!(
-                "首次连接 SSH 主机 {}:{}，自动写入 known_hosts 指纹: {}",
-                host,
-                port,
-                new_fingerprint
-            );
-            russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
-            Ok(true)
+            if let Ok(mut map) = PENDING_UNKNOWN_HOST_KEYS.lock() {
+                map.insert((host.to_string(), port), server_public_key.clone());
+            }
+            if policy.auto_learn_unknown_hosts {
+                tracing::warn!(
+                    "首次连接 SSH 主机 {}:{}，自动写入 known_hosts 指纹: {}",
+                    host,
+                    port,
+                    new_fingerprint
+                );
+                russh::keys::known_hosts::learn_known_hosts(host, port, server_public_key)?;
+                Ok(true)
+            } else {
+                // handler 返回 Ok(false) 时，russh 0.60 在初始 KEX 阶段以
+                // `russh::Error::UnknownKey`（文案 "Unknown server key"）终止握手；
+                // 终端 UI 不依赖该文案，靠 UNKNOWN_HOST_SENTINEL 哨兵识别。
+                tracing::warn!(
+                    "首次连接 SSH 主机 {}:{}，指纹 {} 待用户确认，暂不写入 known_hosts",
+                    host,
+                    port,
+                    new_fingerprint
+                );
+                Ok(false)
+            }
         }
         Err(russh::keys::Error::KeyChanged { line }) => {
             // 记录新旧指纹：旧钥取自 known_hosts 变更行（必须在移除前读取）
@@ -495,7 +561,7 @@ pub fn verify_server_key(
                     new_fingerprint
                 );
             }
-            if auto_accept_new_keys {
+            if policy.auto_accept_new_keys {
                 tracing::warn!(
                     "SSH 主机 {}:{} 的指纹发生变化，自动移除旧指纹并写入新指纹（known_hosts 第 {} 行）",
                     host,
@@ -522,15 +588,15 @@ pub fn verify_server_key(
 struct RusshHandler {
     host: String,
     port: u16,
-    auto_accept_new_keys: bool,
+    policy: HostKeyPolicy,
 }
 
 impl RusshHandler {
-    fn new(host: impl Into<String>, port: u16, auto_accept_new_keys: bool) -> Self {
+    fn new(host: impl Into<String>, port: u16, policy: HostKeyPolicy) -> Self {
         Self {
             host: host.into(),
             port,
-            auto_accept_new_keys,
+            policy,
         }
     }
 }
@@ -542,12 +608,7 @@ impl client::Handler for RusshHandler {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        verify_server_key(
-            &self.host,
-            self.port,
-            server_public_key,
-            self.auto_accept_new_keys,
-        )
+        verify_server_key(&self.host, self.port, server_public_key, self.policy)
     }
 }
 
@@ -1395,6 +1456,152 @@ mod tests {
         assert_eq!(requests[0].target, KeyboardInteractiveTarget::JumpServer);
         assert_eq!(requests[0].prompts[0].prompt, "Verification code:");
     }
+
+    /// B3 测试共享的 HOME 环境锁：known_hosts 读写都走 HOME，
+    /// 这组测试必须彼此串行，避免临时 HOME 互相污染。
+    #[cfg(unix)]
+    static KNOWN_HOSTS_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    /// 进入隔离的临时 HOME，返回 (锁守卫, 临时目录, 原 HOME 值)。
+    #[cfg(unix)]
+    fn enter_isolated_home(
+        test_name: &str,
+    ) -> (std::sync::MutexGuard<'static, ()>, PathBuf, Option<String>) {
+        let lock = KNOWN_HOSTS_ENV_LOCK.get_or_init(|| Mutex::new(()));
+        let guard = lock.lock().expect("环境锁不应中毒");
+        let temp_home = std::env::temp_dir().join(format!(
+            "omnihub-ssh-b3-{test_name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("系统时间应晚于 unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(temp_home.join(".ssh")).expect("应可创建临时 .ssh 目录");
+        let env_key = home_dir_env_key();
+        let previous = std::env::var(env_key).ok();
+        unsafe {
+            std::env::set_var(env_key, &temp_home);
+        }
+        (guard, temp_home, previous)
+    }
+
+    /// 恢复原 HOME 并清理临时目录。
+    #[cfg(unix)]
+    fn restore_home(temp_home: &std::path::Path, previous: Option<String>) {
+        let env_key = home_dir_env_key();
+        match previous {
+            Some(value) => unsafe { std::env::set_var(env_key, value) },
+            None => unsafe { std::env::remove_var(env_key) },
+        }
+        let _ = std::fs::remove_dir_all(temp_home);
+    }
+
+    /// 固定的 ed25519 测试公钥（取自 russh 文档示例）。
+    #[cfg(unix)]
+    fn test_public_key() -> PublicKey {
+        parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ",
+        )
+        .expect("测试公钥应可解析")
+    }
+
+    #[cfg(unix)]
+    fn test_policy(auto_accept_new_keys: bool, auto_learn_unknown_hosts: bool) -> HostKeyPolicy {
+        HostKeyPolicy {
+            auto_accept_new_keys,
+            auto_learn_unknown_hosts,
+        }
+    }
+
+    /// B3：未知主机 + 不自动学习时，握手被拒、登记哨兵指纹并暂存公钥，但不写 known_hosts。
+    #[cfg(unix)]
+    #[test]
+    fn verify_server_key_pending_when_auto_learn_disabled() {
+        let (_guard, temp_home, previous) = enter_isolated_home("pending");
+        let host = "b3-unknown-host-pending.example";
+        let port = 2222;
+        let key = test_public_key();
+
+        let accepted =
+            verify_server_key(host, port, &key, test_policy(false, false)).expect("校验不应报错");
+        assert!(!accepted, "未知主机且未开自动学习时应拒绝");
+
+        let (old, new) = take_key_change_fingerprints(host, port).expect("应登记指纹记录");
+        assert_eq!(old, UNKNOWN_HOST_SENTINEL);
+        assert!(new.starts_with("SHA256:"), "新指纹应为 SHA256 格式: {new}");
+
+        let known_hosts = temp_home.join(".ssh").join("known_hosts");
+        let contents = std::fs::read_to_string(&known_hosts).unwrap_or_default();
+        assert!(!contents.contains(host), "拒绝时不应写入 known_hosts");
+
+        // 暂存的公钥应可被 trust_pending_host_key 消费（顺带清理暂存表）
+        assert!(trust_pending_host_key(host, port).expect("信任不应报错"));
+        restore_home(&temp_home, previous);
+    }
+
+    /// B3：未知主机 + 自动学习开启时保持旧行为（learn + 接受）。
+    #[cfg(unix)]
+    #[test]
+    fn verify_server_key_learns_when_auto_learn_enabled() {
+        let (_guard, temp_home, previous) = enter_isolated_home("learn");
+        let host = "b3-unknown-host-learn.example";
+        let port = 22;
+        let key = test_public_key();
+
+        let accepted =
+            verify_server_key(host, port, &key, test_policy(false, true)).expect("校验不应报错");
+        assert!(accepted, "自动学习开启时应接受");
+
+        let contents = std::fs::read_to_string(temp_home.join(".ssh").join("known_hosts"))
+            .expect("自动学习应写入 known_hosts");
+        assert!(contents.contains(host), "known_hosts 应包含该主机");
+
+        // 清理登记的指纹与暂存公钥，避免污染其他测试
+        let _ = take_key_change_fingerprints(host, port);
+        let _ = trust_pending_host_key(host, port);
+        restore_home(&temp_home, previous);
+    }
+
+    /// B3：信任暂存公钥后写入 known_hosts，再次校验直接通过；暂存条目只能消费一次。
+    #[cfg(unix)]
+    #[test]
+    fn trust_pending_host_key_writes_known_hosts_and_reverifies() {
+        let (_guard, temp_home, previous) = enter_isolated_home("trust");
+        let host = "b3-unknown-host-trust.example";
+        let port = 2223;
+        let key = test_public_key();
+
+        let accepted =
+            verify_server_key(host, port, &key, test_policy(false, false)).expect("校验不应报错");
+        assert!(!accepted);
+        let _ = take_key_change_fingerprints(host, port);
+
+        assert!(trust_pending_host_key(host, port).expect("信任不应报错"));
+        let contents = std::fs::read_to_string(temp_home.join(".ssh").join("known_hosts"))
+            .expect("信任后应写入 known_hosts");
+        assert!(contents.contains(host), "known_hosts 应包含该主机");
+
+        let accepted =
+            verify_server_key(host, port, &key, test_policy(false, false)).expect("校验不应报错");
+        assert!(accepted, "信任后再次校验应通过");
+
+        assert!(
+            !trust_pending_host_key(host, port).expect("无暂存时不应报错"),
+            "暂存条目已被消费，再次信任应返回 false"
+        );
+        restore_home(&temp_home, previous);
+    }
+
+    /// B3：没有暂存条目时 trust_pending_host_key 返回 Ok(false)。
+    #[cfg(unix)]
+    #[test]
+    fn trust_pending_host_key_returns_false_without_pending() {
+        let (_guard, temp_home, previous) = enter_isolated_home("nopending");
+        assert!(
+            !trust_pending_host_key("b3-unknown-host-none.example", 22).expect("无暂存时不应报错")
+        );
+        restore_home(&temp_home, previous);
+    }
 }
 
 /// 通过代理建立TCP连接
@@ -1681,11 +1888,11 @@ impl SshClient for RusshClient {
             let jump_session = if let Some(ref proxy) = config.proxy {
                 tracing::info!("通过代理 {}:{} 连接跳板机", proxy.host, proxy.port);
                 let stream = connect_via_proxy(proxy, &jump.host, jump.port).await?;
-                let handler = RusshHandler::new(&jump.host, jump.port, config.auto_accept_new_keys);
+                let handler = RusshHandler::new(&jump.host, jump.port, config.host_key_policy());
                 client::connect_stream(russh_config.clone(), stream, handler).await?
             } else {
                 let addrs = (jump.host.as_str(), jump.port);
-                let handler = RusshHandler::new(&jump.host, jump.port, config.auto_accept_new_keys);
+                let handler = RusshHandler::new(&jump.host, jump.port, config.host_key_policy());
                 client::connect(russh_config.clone(), addrs, handler).await?
             };
 
@@ -1708,7 +1915,7 @@ impl SshClient for RusshClient {
                 .await?;
 
             // 使用转发通道创建SSH会话
-            let handler = RusshHandler::new(&config.host, config.port, config.auto_accept_new_keys);
+            let handler = RusshHandler::new(&config.host, config.port, config.host_key_policy());
             let mut session =
                 client::connect_stream(russh_config, forwarded_channel.into_stream(), handler)
                     .await?;
@@ -1739,7 +1946,7 @@ impl SshClient for RusshClient {
                 config.port
             );
             let stream = connect_via_proxy(proxy, &config.host, config.port).await?;
-            let handler = RusshHandler::new(&config.host, config.port, config.auto_accept_new_keys);
+            let handler = RusshHandler::new(&config.host, config.port, config.host_key_policy());
             let mut session = client::connect_stream(russh_config, stream, handler).await?;
 
             authenticate_with_strategy_for_target(
@@ -1760,7 +1967,7 @@ impl SshClient for RusshClient {
         // 情况3: 直接连接
         else {
             let addrs = (config.host.as_str(), config.port);
-            let handler = RusshHandler::new(&config.host, config.port, config.auto_accept_new_keys);
+            let handler = RusshHandler::new(&config.host, config.port, config.host_key_policy());
             let mut session = client::connect(russh_config, addrs, handler).await?;
 
             authenticate_with_strategy_for_target(

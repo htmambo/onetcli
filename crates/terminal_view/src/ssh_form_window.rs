@@ -965,6 +965,10 @@ impl SshFormWindow {
             proxy,
             keyboard_interactive_responder: None,
             auto_accept_new_keys,
+            // B3：表单测试连接没有指纹确认 UI，且未知主机被拒时 russh 返回
+            // `russh::Error::UnknownKey`（文案 "Unknown server key"）对用户不可理解；
+            // 因此测试连接保持自动学习，正式连接（终端/SFTP）才走指纹确认流程。
+            auto_learn_unknown_hosts: true,
         }
     }
 

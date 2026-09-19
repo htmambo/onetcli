@@ -86,6 +86,8 @@ pub async fn resolve_connection_target(
         proxy: None,
         keyboard_interactive_responder: None,
         auto_accept_new_keys: false,
+        // 非交互路径暂无确认 UI，保持自动学习
+        auto_learn_unknown_hosts: true,
     };
 
     // Wrap tunnel setup with an explicit timeout.

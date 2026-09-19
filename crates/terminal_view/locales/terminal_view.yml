@@ -1069,6 +1069,10 @@ SshSession:
     en: Accept new key and reconnect
     zh-CN: 接受新密钥并重新连接
     zh-HK: 接受新密鑰並重新連接
+  trust_new_host:
+    en: Trust new host and connect
+    zh-CN: 信任新主机并连接
+    zh-HK: 信任新主機並連接
 
 # 文件管理器
 FileManager:

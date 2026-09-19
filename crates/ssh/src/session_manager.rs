@@ -390,6 +390,7 @@ mod tests {
             proxy: None::<ProxyConnectConfig>,
             keyboard_interactive_responder: None,
             auto_accept_new_keys: false,
+            auto_learn_unknown_hosts: false,
         }
     }
 

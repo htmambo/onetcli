@@ -786,6 +786,10 @@ pub struct SftpView {
 
     /// 标签页序号（用于多实例显示）
     tab_index: Option<usize>,
+
+    /// B3：首次连接未知主机被拒时记录的新指纹；
+    /// 为 Some 时错误覆盖层渲染"信任新主机并连接"按钮。
+    unknown_host_fingerprint: Option<String>,
 }
 
 fn initial_remote_path(configured_path: Option<&str>) -> String {
@@ -957,6 +961,7 @@ impl SftpView {
             _subscriptions: subscriptions,
             connection_name: conn.name,
             tab_index,
+            unknown_host_fingerprint: None,
         };
 
         view.refresh_local_dir(cx);
@@ -967,6 +972,7 @@ impl SftpView {
 
     fn connect(&mut self, cx: &mut Context<Self>) {
         self.connection_state = ConnectionState::Connecting;
+        self.unknown_host_fingerprint = None;
         let config = self.sftp_config.clone();
         let requested_remote_path = self.remote_current_path.clone();
 
@@ -1016,9 +1022,29 @@ impl SftpView {
                 });
             }
             Ok(Err(e)) => {
-                let error_msg = format!("{}", e);
+                let mut error_msg = format!("{}", e);
                 tracing::error!("SFTP connection failed: {}", error_msg);
                 let _ = this.update(cx, |this, cx| {
+                    // B3：未知主机被拒时从 ssh 层取出指纹（靠 NEW_HOST 哨兵识别，
+                    // 不依赖 russh 的错误文案），覆盖层据此渲染信任按钮。
+                    this.unknown_host_fingerprint = None;
+                    if let Some((old_fingerprint, new_fingerprint)) =
+                        ssh::take_key_change_fingerprints(
+                            &this.sftp_config.host,
+                            this.sftp_config.port,
+                        )
+                    {
+                        if old_fingerprint == ssh::UNKNOWN_HOST_SENTINEL {
+                            this.unknown_host_fingerprint = Some(new_fingerprint.clone());
+                            error_msg.push_str(&format!(
+                                "\n{}",
+                                t!(
+                                    "Connection.unknown_host_fingerprint",
+                                    fingerprint = new_fingerprint
+                                )
+                            ));
+                        }
+                    }
                     this.connection_state = ConnectionState::Disconnected {
                         error: Some(error_msg),
                     };
@@ -1052,6 +1078,33 @@ impl SftpView {
             MAX_CONCURRENT_TRANSFERS,
         )));
         self.connect(cx);
+    }
+
+    /// B3：用户确认"信任新主机并连接"：把暂存的公钥写入 known_hosts 后走原有 reconnect 流程。
+    fn trust_new_host_and_reconnect(&mut self, cx: &mut Context<Self>) {
+        let host = self.sftp_config.host.clone();
+        let port = self.sftp_config.port;
+        match ssh::trust_pending_host_key(&host, port) {
+            Ok(true) => {
+                self.unknown_host_fingerprint = None;
+                self.reconnect(cx);
+            }
+            Ok(false) => {
+                tracing::warn!("SFTP 信任新主机：{}:{} 没有待确认的主机密钥", host, port);
+            }
+            Err(err) => {
+                tracing::error!(
+                    "SFTP 信任新主机 {}:{} 写入 known_hosts 失败: {}",
+                    host,
+                    port,
+                    err
+                );
+                self.connection_state = ConnectionState::Disconnected {
+                    error: Some(err.to_string()),
+                };
+                cx.notify();
+            }
+        }
     }
 
     fn refresh_local_dir(&mut self, cx: &mut Context<Self>) {
@@ -3389,16 +3442,33 @@ impl SftpView {
                                 t!("Connection.session_disconnected").to_string()
                             }),
                     )
-                    .when(!is_connecting, |el| {
-                        el.child(
-                            Button::new("reconnect-btn")
-                                .label(t!("Common.reconnect").to_string())
-                                .primary()
-                                .on_click(cx.listener(|this, _, _window, cx| {
-                                    this.reconnect(cx);
-                                })),
-                        )
-                    }),
+                    .when(
+                        !is_connecting && self.unknown_host_fingerprint.is_none(),
+                        |el| {
+                            el.child(
+                                Button::new("reconnect-btn")
+                                    .label(t!("Common.reconnect").to_string())
+                                    .primary()
+                                    .on_click(cx.listener(|this, _, _window, cx| {
+                                        this.reconnect(cx);
+                                    })),
+                            )
+                        },
+                    )
+                    // B3：未知主机待确认时只给"信任新主机并连接"，普通 reconnect 必然再次失败
+                    .when(
+                        !is_connecting && self.unknown_host_fingerprint.is_some(),
+                        |el| {
+                            el.child(
+                                Button::new("trust-new-host-btn")
+                                    .label(t!("Connection.trust_new_host").to_string())
+                                    .primary()
+                                    .on_click(cx.listener(|this, _, _window, cx| {
+                                        this.trust_new_host_and_reconnect(cx);
+                                    })),
+                            )
+                        },
+                    ),
             )
     }
 

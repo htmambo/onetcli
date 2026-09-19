@@ -1312,6 +1312,9 @@ pub struct Terminal {
     connection_kind: TerminalConnectionKind,
     /// Hosted 本地 PTY 的 session id（供恢复使用）
     local_pty_session_id: Option<String>,
+    /// B3：首次连接未知主机被拒时记录的新指纹，供错误覆盖层展示
+    /// 与"信任新主机并连接"按钮判定；为 Some 时表示等待用户确认。
+    unknown_host_fingerprint: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1433,6 +1436,7 @@ impl Terminal {
             connection_generation: 0,
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: None,
+            unknown_host_fingerprint: None,
         }
     }
 
@@ -1553,6 +1557,7 @@ impl Terminal {
             connection_generation: 0,
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: None,
+            unknown_host_fingerprint: None,
         })
     }
 
@@ -1655,6 +1660,7 @@ impl Terminal {
             connection_generation: 0,
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: Some(session_id),
+            unknown_host_fingerprint: None,
         })
     }
 
@@ -1751,6 +1757,7 @@ impl Terminal {
             connection_generation: 0,
             connection_kind: TerminalConnectionKind::Local,
             local_pty_session_id: Some(session_id),
+            unknown_host_fingerprint: None,
         })
     }
 
@@ -1872,6 +1879,8 @@ impl Terminal {
             }),
             keyboard_interactive_responder: None,
             auto_accept_new_keys,
+            // B3：终端路径有指纹确认 UI，首次连接未知主机必须等用户确认
+            auto_learn_unknown_hosts: false,
         };
 
         let pty_config = PtyConfig::default();
@@ -1952,6 +1961,7 @@ impl Terminal {
             connection_generation,
             connection_kind: TerminalConnectionKind::Ssh,
             local_pty_session_id: None,
+            unknown_host_fingerprint: None,
         }
     }
 
@@ -2273,6 +2283,7 @@ impl Terminal {
                 self.connection_state = ConnectionState::Connected;
                 self.connection_status_message = None;
                 self.connection_wait_started_at = None;
+                self.unknown_host_fingerprint = None;
                 // 后端任务与这里并发执行，prompt 事件可能先于连接成功回调到达。
                 // 成功分支不能重置 SSH 跟踪状态，否则会把已收到的 Idle/prompt 信号抹掉，
                 // 导致 top 等前台程序运行时无法正确拦截关闭。
@@ -2309,19 +2320,34 @@ impl Terminal {
             }
             Ok(Err(e)) => {
                 let mut error_text = format_connection_error(&e);
-                // 密钥变更时补充新旧指纹，供用户核对后再决定是否接受新密钥
+                self.unknown_host_fingerprint = None;
+                // 密钥变更/未知主机时补充指纹，供用户核对后再决定是否信任
                 if let Some(cfg) = self.ssh_config.as_ref().map(|c| &c.ssh_config) {
                     if let Some((old_fingerprint, new_fingerprint)) =
                         take_key_change_fingerprints(&cfg.host, cfg.port)
                     {
-                        error_text.push_str(&format!(
-                            "\n{}",
-                            t!(
-                                "SshSession.key_change_fingerprints",
-                                old_fingerprint = old_fingerprint,
-                                new_fingerprint = new_fingerprint
-                            )
-                        ));
+                        if old_fingerprint == ssh::UNKNOWN_HOST_SENTINEL {
+                            // B3：首次连接未知主机被拒。记录指纹供覆盖层渲染
+                            // "信任新主机并连接"按钮；错误文案不复用 key_change_fingerprints，
+                            // 避免出现 "old=NEW_HOST" 的误导性内容。
+                            self.unknown_host_fingerprint = Some(new_fingerprint.clone());
+                            error_text.push_str(&format!(
+                                "\n{}",
+                                t!(
+                                    "SshSession.unknown_host_fingerprint",
+                                    fingerprint = new_fingerprint
+                                )
+                            ));
+                        } else {
+                            error_text.push_str(&format!(
+                                "\n{}",
+                                t!(
+                                    "SshSession.key_change_fingerprints",
+                                    old_fingerprint = old_fingerprint,
+                                    new_fingerprint = new_fingerprint
+                                )
+                            ));
+                        }
                     }
                 }
                 self.connection_state = ConnectionState::Disconnected {
@@ -2832,6 +2858,43 @@ impl Terminal {
         self.reconnect_internal(true, cx);
     }
 
+    /// B3：首次连接未知主机被拒时，待用户确认的 SHA256 指纹。
+    pub fn pending_unknown_host_fingerprint(&self) -> Option<&str> {
+        self.unknown_host_fingerprint.as_deref()
+    }
+
+    /// B3：用户确认"信任新主机并连接"后调用：把暂存的公钥写入 known_hosts 并重连。
+    pub fn trust_new_host_and_reconnect(&mut self, cx: &mut Context<Self>) {
+        let Some(ssh_config) = self.ssh_config.as_ref().map(|c| c.ssh_config.clone()) else {
+            return;
+        };
+        match ssh::trust_pending_host_key(&ssh_config.host, ssh_config.port) {
+            Ok(true) => {
+                self.unknown_host_fingerprint = None;
+                self.reconnect(cx);
+            }
+            Ok(false) => {
+                tracing::warn!(
+                    "trust_new_host_and_reconnect: {}:{} 没有待信任的主机密钥",
+                    ssh_config.host,
+                    ssh_config.port
+                );
+            }
+            Err(err) => {
+                tracing::error!(
+                    "信任新主机 {}:{} 写入 known_hosts 失败: {}",
+                    ssh_config.host,
+                    ssh_config.port,
+                    err
+                );
+                self.connection_state = ConnectionState::Disconnected {
+                    error: Some(err.to_string()),
+                };
+                cx.emit(TerminalModelEvent::Wakeup);
+            }
+        }
+    }
+
     fn reconnect_internal(&mut self, auto_accept_keys: bool, cx: &mut Context<Self>) {
         if let Some(mut config) = self.ssh_config.clone() {
             if auto_accept_keys {
@@ -2854,6 +2917,7 @@ impl Terminal {
             };
             self.ssh_session_manager = Some(session_manager.clone());
 
+            self.unknown_host_fingerprint = None;
             self.connection_state = ConnectionState::Connecting;
             self.connection_status_message =
                 Some(SshConnectionStage::initial_for_config(&config.ssh_config).description());
@@ -3424,6 +3488,7 @@ mod tests {
             connection_generation: 1,
             connection_kind: TerminalConnectionKind::Ssh,
             local_pty_session_id: None,
+            unknown_host_fingerprint: None,
         };
 
         let mut processor: Processor<StdSyncHandler> = Processor::new();
