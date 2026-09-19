@@ -1063,7 +1063,14 @@ mod tests {
         let commands =
             MysqlDbConnection::build_init_commands(&config).expect("charset should be valid");
 
-        assert_eq!(commands, vec!["SET NAMES gbk".to_string()]);
+        // B1：首条固定为 NO_BACKSLASH_ESCAPES 的 sql_mode 卷接
+        assert_eq!(
+            commands,
+            vec![
+                "SET sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')".to_string(),
+                "SET NAMES gbk".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -1075,7 +1082,10 @@ mod tests {
 
         assert_eq!(
             commands,
-            vec!["SET NAMES gbk COLLATE gbk_chinese_ci".to_string()]
+            vec![
+                "SET sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')".to_string(),
+                "SET NAMES gbk COLLATE gbk_chinese_ci".to_string()
+            ]
         );
     }
 
