@@ -1035,14 +1035,14 @@ impl SftpView {
                         )
                     {
                         if old_fingerprint == ssh::UNKNOWN_HOST_SENTINEL {
+                            // russh 原文固定为 "Unknown server key"，对用户是纯噪音，
+                            // 替换为引导文案（原文已在上面的 error 日志留痕）。
                             this.unknown_host_fingerprint = Some(new_fingerprint.clone());
-                            error_msg.push_str(&format!(
-                                "\n{}",
-                                t!(
-                                    "Connection.unknown_host_fingerprint",
-                                    fingerprint = new_fingerprint
-                                )
-                            ));
+                            error_msg = t!(
+                                "Connection.unknown_host_fingerprint",
+                                fingerprint = new_fingerprint
+                            )
+                            .to_string();
                         }
                     }
                     this.connection_state = ConnectionState::Disconnected {

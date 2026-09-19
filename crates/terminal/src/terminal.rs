@@ -2328,16 +2328,15 @@ impl Terminal {
                     {
                         if old_fingerprint == ssh::UNKNOWN_HOST_SENTINEL {
                             // B3：首次连接未知主机被拒。记录指纹供覆盖层渲染
-                            // "信任新主机并连接"按钮；错误文案不复用 key_change_fingerprints，
-                            // 避免出现 "old=NEW_HOST" 的误导性内容。
+                            // "信任新主机并连接"按钮；此时 russh 原文固定为
+                            // "Unknown server key"，对用户是纯噪音，替换为引导文案。
+                            tracing::debug!("未知主机握手拒绝原文: {}", error_text);
                             self.unknown_host_fingerprint = Some(new_fingerprint.clone());
-                            error_text.push_str(&format!(
-                                "\n{}",
-                                t!(
-                                    "SshSession.unknown_host_fingerprint",
-                                    fingerprint = new_fingerprint
-                                )
-                            ));
+                            error_text = t!(
+                                "SshSession.unknown_host_fingerprint",
+                                fingerprint = new_fingerprint
+                            )
+                            .to_string();
                         } else {
                             error_text.push_str(&format!(
                                 "\n{}",
