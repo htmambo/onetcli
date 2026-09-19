@@ -118,6 +118,11 @@
           </section>
 
           <section class="panel hover-card rounded-[28px] p-6">
+            <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">加密数据</p>
+            <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ item.encryptedData }}</pre>
+          </section>
+
+          <section class="panel hover-card rounded-[28px] p-6">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">本地解密</p>
@@ -220,11 +225,6 @@
               <!-- 非 JSON 或解析失败时降级为原文 -->
               <pre v-else class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[color:rgba(0,217,163,0.22)] bg-[color:rgba(0,217,163,0.08)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ formattedDecryptedPayload }}</pre>
             </div>
-          </section>
-
-          <section class="panel hover-card rounded-[28px] p-6">
-            <p class="text-xs uppercase tracking-[0.28em] text-[var(--muted)]">加密数据</p>
-            <pre class="mt-4 max-h-[30rem] overflow-auto rounded-2xl border border-[var(--line)] bg-[var(--panel-strong)] p-4 text-xs leading-6 text-[var(--text)] whitespace-pre-wrap break-all">{{ item.encryptedData }}</pre>
           </section>
         </div>
       </section>

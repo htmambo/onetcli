@@ -9,6 +9,7 @@
 use crate::TerminalTheme;
 use crate::addon::{AddonManager, CellDecoration, DecorationSpan};
 use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::selection::SelectionRange;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
@@ -360,6 +361,18 @@ pub struct BlockRect {
     pub h: f32,
 }
 
+/// 左边缘兜底探测的列数：只哈希每行前几列，检测"首列擦除但 damage 漏报"的残字。
+const LEFT_EDGE_PROBE_COLS: usize = 4;
+
+/// 左边缘指纹全网格兜底扫描间隔（帧）。
+/// 增量帧只重算 dirty 行指纹，漏报的行最多延迟一个周期被发现。
+const LEFT_EDGE_FULL_SCAN_INTERVAL: u32 = 30;
+
+/// 左边缘指纹滚动哈希参数（FNV-1a 风格，仅用于变化检测，不追求密码学强度）。
+/// 全量与单行指纹必须共用同一组参数，否则增量更新与周期全量扫描之间会互相误报。
+const EDGE_HASH_MUL: u64 = 1099511628211;
+const EDGE_HASH_ADD: u64 = 1469598103934665603;
+
 /// Terminal rendering cache maintained by TerminalView.
 ///
 /// P2：`RenderCache` 改为共享（包成 `Arc<RenderCache>`），需要派生 `Clone`
@@ -388,6 +401,8 @@ pub struct RenderCache {
 
     /// 左边缘列指纹（用于检测脏区漏报导致的首列残字）
     left_edge_fingerprint: Vec<u64>,
+    /// 左边缘指纹帧计数：每 `LEFT_EDGE_FULL_SCAN_INTERVAL` 帧做一次全网格兜底扫描
+    left_edge_scan_frame: u32,
 }
 
 #[derive(Clone)]
@@ -438,6 +453,7 @@ impl RenderCache {
             custom_cursor: rgb(0xFFFFFF).into(),
             last_selection: None,
             left_edge_fingerprint: vec![0; num_lines],
+            left_edge_scan_frame: 0,
         }
     }
 
@@ -577,17 +593,20 @@ impl RenderCache {
             }
         }
 
-        // 首列兜底：检测左边缘变化但未被 damage 标记的行。
-        let edge_changed_lines = self.detect_left_edge_changed_lines(term, 4);
-        for line in &edge_changed_lines {
-            dirty_set.insert(*line);
+        // 首列兜底：检测左边缘变化但未被 damage 标记的行（增量帧只同步 dirty 行指纹）。
+        let mut lines: Vec<usize> = dirty_set.into_iter().collect();
+        let edge_changed_lines =
+            self.detect_left_edge_changed_lines(term, &lines, LEFT_EDGE_PROBE_COLS);
+        if !edge_changed_lines.is_empty() {
+            lines.extend(edge_changed_lines);
+            lines.sort_unstable();
+            lines.dedup();
         }
 
         // Rebuild dirty lines or just update cursor
-        if dirty_set.is_empty() {
+        if lines.is_empty() {
             self.update_cursor(term);
         } else {
-            let lines: Vec<usize> = dirty_set.into_iter().collect();
             self.rebuild_lines(term, &lines);
         }
     }
@@ -609,7 +628,7 @@ impl RenderCache {
     fn rebuild_all_and_update_state(&mut self, term: &Term<GpuiEventProxy>) {
         self.rebuild_all(term);
         self.update_last_selection(term);
-        self.sync_left_edge_fingerprint(term, 4);
+        self.sync_left_edge_fingerprint(term, LEFT_EDGE_PROBE_COLS);
     }
 
     fn rebuild_all(&mut self, term: &Term<GpuiEventProxy>) {
@@ -803,16 +822,37 @@ impl RenderCache {
     ///
     /// 目的：在某些复杂 ANSI 序列下，`TermDamage::Partial` 可能未覆盖到首列擦除场景，
     /// 该指纹用于兜底发现“首几列变化但未标脏”的行，避免残字。
+    ///
+    /// P6：全网格指纹每帧扫描要遍历整个 display_iter（O(行数 × 列数)），改为增量
+    /// 维护——普通帧只重算 dirty 行的指纹（这些行本就会重建，无需再上报），每
+    /// `LEFT_EDGE_FULL_SCAN_INTERVAL` 帧做一次全网格兜底扫描；漏报的行最多延迟
+    /// 一个周期被发现。
     fn detect_left_edge_changed_lines(
         &mut self,
         term: &Term<GpuiEventProxy>,
+        dirty_lines: &[usize],
         probe_cols: usize,
     ) -> Vec<usize> {
-        let current = self.compute_left_edge_fingerprint(term, probe_cols);
-
         if self.left_edge_fingerprint.len() != self.num_lines {
             self.left_edge_fingerprint.resize(self.num_lines, 0);
         }
+
+        let frame = self.left_edge_scan_frame;
+        self.left_edge_scan_frame = frame.wrapping_add(1);
+
+        if frame % LEFT_EDGE_FULL_SCAN_INTERVAL != 0 {
+            // 增量帧：同步 dirty 行指纹，避免下次全量扫描把这些行误报为"漏报变化"。
+            for &line in dirty_lines {
+                if line < self.num_lines {
+                    self.left_edge_fingerprint[line] =
+                        self.compute_line_left_edge_fingerprint(term, line, probe_cols);
+                }
+            }
+            return Vec::new();
+        }
+
+        // 全网格兜底扫描
+        let current = self.compute_left_edge_fingerprint(term, probe_cols);
 
         let mut changed = Vec::new();
         for (line_idx, (old, new)) in self
@@ -832,6 +872,33 @@ impl RenderCache {
 
     fn sync_left_edge_fingerprint(&mut self, term: &Term<GpuiEventProxy>, probe_cols: usize) {
         self.left_edge_fingerprint = self.compute_left_edge_fingerprint(term, probe_cols);
+    }
+
+    /// 单个屏幕行的左边缘指纹。与 `compute_left_edge_fingerprint` 的哈希算法保持
+    /// 一致（初值 0、列升序、同一组滚动哈希参数），否则增量更新与周期全量扫描
+    /// 之间会产生误报。
+    fn compute_line_left_edge_fingerprint(
+        &self,
+        term: &Term<GpuiEventProxy>,
+        screen_line: usize,
+        probe_cols: usize,
+    ) -> u64 {
+        let grid = term.grid();
+        // 与 view.rs `get_line_text` 同一坐标约定：grid 行 = 屏幕行 - display_offset
+        let grid_line = screen_line as i32 - grid.display_offset() as i32;
+        let row = &grid[Line(grid_line)];
+
+        let mut hash = 0_u64;
+        for col in 0..probe_cols.min(row.len()) {
+            let cell = &row[Column(col)];
+            let piece = (col as u64).wrapping_shl(56)
+                ^ (cell.c as u32 as u64).wrapping_shl(24)
+                ^ cell.flags.bits() as u64;
+            hash = hash
+                .wrapping_mul(EDGE_HASH_MUL)
+                .wrapping_add(piece.wrapping_add(EDGE_HASH_ADD));
+        }
+        hash
     }
 
     fn compute_left_edge_fingerprint(
@@ -861,11 +928,10 @@ impl RenderCache {
             let code = cell.c as u32 as u64;
             let col = cell.point.column.0 as u64;
             let flags = cell.flags.bits() as u64;
-            // 仅用于变化检测，不追求密码学强度
             let piece = col.wrapping_shl(56) ^ code.wrapping_shl(24) ^ flags;
             current[line_idx] = current[line_idx]
-                .wrapping_mul(1099511628211)
-                .wrapping_add(piece.wrapping_add(1469598103934665603));
+                .wrapping_mul(EDGE_HASH_MUL)
+                .wrapping_add(piece.wrapping_add(EDGE_HASH_ADD));
         }
 
         current
@@ -1642,11 +1708,19 @@ fn indexed_color_to_hsla(idx: u8) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellData, RenderCache, hsla_eq, terminal_font_features};
+    use super::{
+        CellData, LEFT_EDGE_FULL_SCAN_INTERVAL, LEFT_EDGE_PROBE_COLS, RenderCache, hsla_eq,
+        terminal_font_features,
+    };
+    use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::term::cell::Flags;
     use alacritty_terminal::term::color::Colors;
-    use alacritty_terminal::vte::ansi::{Color, NamedColor};
+    use alacritty_terminal::term::test::TermSize;
+    use alacritty_terminal::term::{Config as TermConfig, Term};
+    use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, StdSyncHandler};
     use gpui::hsla;
+    use terminal::TerminalEvent;
+    use terminal::pty_backend::GpuiEventProxy;
 
     #[test]
     fn terminal_font_features_explicitly_enable_all_ligature_tags() {
@@ -1732,5 +1806,82 @@ mod tests {
             cache.lines[0].text_runs[0].color,
             cache.custom_background
         ));
+    }
+
+    /// 构造一个带 GpuiEventProxy 的测试终端；返回事件接收端以保持通道存活。
+    fn build_fingerprint_test_term(
+        columns: usize,
+        screen_lines: usize,
+    ) -> (
+        Term<GpuiEventProxy>,
+        tokio::sync::mpsc::UnboundedReceiver<TerminalEvent>,
+    ) {
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<TerminalEvent>();
+        let proxy = GpuiEventProxy::new(event_tx);
+        let term = Term::new(
+            TermConfig::default(),
+            &TermSize::new(columns, screen_lines),
+            proxy,
+        );
+        (term, event_rx)
+    }
+
+    #[test]
+    fn line_left_edge_fingerprint_matches_full_scan() {
+        let (mut term, _rx) = build_fingerprint_test_term(10, 5);
+        // 写入两行内容，覆盖非空行与空行两种指纹
+        let mut processor: Processor<StdSyncHandler> = Processor::new();
+        processor.advance(&mut term, b"hello\r\nworld");
+
+        let cache = RenderCache::new(5, 10, Colors::default());
+        let full = cache.compute_left_edge_fingerprint(&term, LEFT_EDGE_PROBE_COLS);
+        assert_eq!(full.len(), 5);
+        for line in 0..5 {
+            assert_eq!(
+                full[line],
+                cache.compute_line_left_edge_fingerprint(&term, line, LEFT_EDGE_PROBE_COLS),
+                "line {line} 的单行指纹必须与全量扫描一致，否则增量/全量之间会误报"
+            );
+        }
+    }
+
+    #[test]
+    fn left_edge_fingerprint_incremental_defers_detection_to_full_scan() {
+        let (mut term, _rx) = build_fingerprint_test_term(10, 5);
+        let mut cache = RenderCache::new(5, 10, Colors::default());
+        cache.sync_left_edge_fingerprint(&term, LEFT_EDGE_PROBE_COLS);
+
+        // 跳过 frame 0 的全量扫描，从增量帧开始
+        cache.left_edge_scan_frame = 1;
+
+        // 直接改 grid（模拟 damage 漏报的首列变化，不经过 damage 标记）
+        term.grid_mut()[Line(2)][Column(0)].c = 'X';
+
+        // 增量帧：只同步 dirty 行指纹，不上报
+        let changed = cache.detect_left_edge_changed_lines(&term, &[], LEFT_EDGE_PROBE_COLS);
+        assert!(changed.is_empty());
+
+        // 推进到下一个全量兜底帧，漏报的行被捕获
+        cache.left_edge_scan_frame = LEFT_EDGE_FULL_SCAN_INTERVAL;
+        let changed = cache.detect_left_edge_changed_lines(&term, &[], LEFT_EDGE_PROBE_COLS);
+        assert_eq!(changed, vec![2]);
+    }
+
+    #[test]
+    fn left_edge_fingerprint_dirty_sync_avoids_full_scan_false_positive() {
+        let (mut term, _rx) = build_fingerprint_test_term(10, 5);
+        let mut cache = RenderCache::new(5, 10, Colors::default());
+        cache.sync_left_edge_fingerprint(&term, LEFT_EDGE_PROBE_COLS);
+        cache.left_edge_scan_frame = 1;
+
+        // line 1 首列变化且已被正常标脏：增量帧同步其指纹
+        term.grid_mut()[Line(1)][Column(0)].c = 'Y';
+        let changed = cache.detect_left_edge_changed_lines(&term, &[1], LEFT_EDGE_PROBE_COLS);
+        assert!(changed.is_empty());
+
+        // 下一次全量扫描不应把 line 1 误报为漏报变化
+        cache.left_edge_scan_frame = LEFT_EDGE_FULL_SCAN_INTERVAL;
+        let changed = cache.detect_left_edge_changed_lines(&term, &[], LEFT_EDGE_PROBE_COLS);
+        assert!(changed.is_empty());
     }
 }
