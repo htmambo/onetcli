@@ -40,10 +40,10 @@
 ## 拆分原则（5 个 PR）
 
 1. **PR1（安全加固，本地文件权限）** — A2 + A3，纯文件权限加固，零逻辑变更
-2. **PR2（性能 Top3）** — P1 + P2 + P5，最小风险、立即可见收益
-3. **PR3（私钥加密，含数据迁移）** — A1，需要重点验证，附迁移函数测试
-4. **PR4（SQL/SSH 中危修复）** — B1 + B2 + B3 + B5 + B6
-5. **PR5（性能清理 + IPC 重构）** — P3 + P4 + P6 + B4
+2. **PR2（性能 Top3）** — P1 + P2 + P5，最小风险、立即可见收益（已全部完成 2026-09-18，commit `060c3abb`）
+3. **PR3（私钥加密，含数据迁移）** — A1，需要重点验证，附迁移函数测试（代码已完成 2026-09-19；启动期接线按方案 A 推迟，待启用窗口期）
+4. **PR4（SQL/SSH 中危修复）** — B1 + B2 + B3 + B5 + B6（已全部完成：B1/B5/B6 于 `512cb202`，B2/B3 于 2026-09-19）
+5. **PR5（性能清理 + IPC 重构）** — P3 + P4 + P6 + B4（P3/P4/P6 已完成；**B4 是唯一剩余代码项**）
 
 5 个 PR 互不阻塞，可并行做。
 
@@ -70,25 +70,31 @@
 
 ### Phase 2 — PR2：性能 Top3
 
-#### P1 sysinfo 精确刷新 + 后台化
+#### P1 sysinfo 精确刷新 + 后台化（已完成 2026-09-18，commit `060c3abb`）
+
+> **现状（2026-09-20 核对）**：`main/src/omnihub_app/system_monitor.rs` 已按下方方案落地——`build_system()` 用 `new_with_specifics`（仅 memory + cpu），`refresh_system()` 用 `refresh_specifics` + `refresh_processes_specifics(Some(&[pid]))`，含首次预热解决 cpu_usage 基线问题。`cargo check -p main` 通过。
 
 - `main/src/omnihub_app/system_monitor.rs:39-42`：`System::new_all()` → `System::new_with_specifics(RefreshKind::nothing().with_memory().with_cpu(CpuRefreshKind::everything()))`。
 - `refresh_all()` → `refresh_specifics(...)` + `refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), ...)`。
 
-#### P2 RenderCache → Arc 共享
+#### P2 RenderCache → Arc 共享（已完成 2026-09-18，commit `060c3abb`）
+
+> **现状（2026-09-20 核对）**：`view.rs:699` `render_cache: Arc<RenderCache>`；`terminal_element.rs:1150` `TerminalElement` 持 `&'a Arc<RenderCache>`、`TerminalElementImpl` 持 `Arc<RenderCache>`（into_element 仅 `Arc::clone`，paint 只读借用）；`view.rs:3397` update 走 `Arc::make_mut`（clone-on-write 回退）。`cargo test -p terminal_view --lib` 221/221 通过。
 
 - `TerminalView` 中 `render_cache: RenderCache` → `render_cache: Arc<RenderCache>`。
 - `TerminalElement<'a>` 增加 `cache: &'a Arc<RenderCache>`；`into_element` 直接 `Arc::clone`。
 - `TerminalElementImpl::lines: Vec<CachedLine>` → `Arc<[CachedLine]>`；`cursor` 同步改 `Arc<Option<CachedCursor>>`。
 - `render_terminal` 用 `Arc::make_mut` 在 update 时获取 `&mut RenderCache`。
 
-#### P5 hotkey 16ms → 100ms
+#### P5 hotkey 16ms → 100ms（已完成 2026-09-18，commit `060c3abb`）
 
-- `main/src/app_init.rs:65` 常量从 16ms 改为 100ms。
+- `main/src/app_init.rs:67` 常量已从 16ms 改为 100ms（`HOTKEY_POLL_INTERVAL`）。
 
 ### Phase 3 — PR3：SSH 私钥加密 + 启动期迁移
 
-#### A1 扩展敏感字段 + 自动迁移
+#### A1 扩展敏感字段 + 自动迁移（已完成 2026-09-20，含启动期接线）
+
+> **现状（2026-09-20）**：`is_sensitive_field` 扩展（`models.rs:1743`）、`encrypt_certificate_params` 统一谓词（`repository.rs:136`）、迁移函数 `migrate_encrypt_existing_sensitive_fields`（`sensitive_migration.rs`，幂等 + 单事务 + 主密钥未解锁跳过）均已落地并测试通过（5/5，commit `996dd6fc`）。**启动期接线已于 2026-09-20 经用户授权提前启用**：接入点为 `main/src/home_tab.rs` 主密钥对话框 `on_close`（`has_master_key()` 为真时执行，覆盖首次设置 / 解锁 / 改密三条路径），telemetry 走 `tracing`（target `sensitive_migration`，含 cert/conn 行数与错误）。**未注册 `_migrations` 版本门**（与原计划偏离，理由：提前启用后老客户端仍可能经云同步把明文写回本地，版本门会让迟到明文永久漏迁；改为每次解锁幂等重扫，见函数级文档）。SQL 迁移文件被函数式迁移取代，未新增。
 
 - `crates/core/src/storage/models.rs:1734-1739` `is_sensitive_field` 增加 `ssh_private_key`、`ssh_key_content`、`private_key`、`private_key_path`、`key_content`。
 - `crates/core/src/storage/repository.rs:132-148` `encrypt_certificate_params` 内部改为调统一的 `is_sensitive_field` 判定。
@@ -102,7 +108,7 @@ TDD：
 
 ### Phase 4 — PR4：SQL/SSH/SFTP/TLS 中低危
 
-#### B1 MySQL `NO_BACKSLASH_ESCAPES`
+#### B1 MySQL `NO_BACKSLASH_ESCAPES`（已完成 2026-09-18，commit `512cb202`）
 
 - `crates/db/src/mysql/connection.rs`：新连接建立后 `SET sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')`（条件拼接，不覆盖用户显式设置）。
 
@@ -136,23 +142,23 @@ TDD：
   - 测试：ssh crate 新增 4 个用例（拒绝+暂存+不写 known_hosts / auto_learn=true 旧行为 /
     trust 写入+再校验+一次性消费 / 无暂存返回 false），27/27 全绿。
 
-#### B5 SFTP 递归下载路径校验
+#### B5 SFTP 递归下载路径校验（已完成 2026-09-18，commit `512cb202`）
 
 - `crates/sftp/src/russh_impl.rs:797-800`：额外 `entry.name.contains("..")` 兜底拒绝。
 - `1204-1292`：下载拼接后调 `path.starts_with(base_local.canonicalize().unwrap_or(base_local.clone()))` 校验，越界则跳过并 `tracing::warn!`。
 
-#### B6 TLS 关闭校验风险提示
+#### B6 TLS 关闭校验风险提示（已完成 2026-09-18，commit `512cb202`，i18n 文案已加 ⚠️ 提示）
 
 - `crates/db_view/src/common/db_connection_form.rs:397-409`：开关旁加一行红字提示（i18n）。
 
 ### Phase 5 — PR5：性能清理 + IPC 重构
 
-#### P3 SFTP upload_dir spawn_blocking
+#### P3 SFTP upload_dir spawn_blocking（已完成 2026-09-18，commit `512cb202`，`walk_local_dir` 已抽至 tokio `spawn_blocking`）
 
 - `crates/core/src/gpui_tokio.rs`：新增 `spawn_blocking` helper。
 - `crates/sftp/src/russh_impl.rs:1419-1438`：抽出同步 `walk_local_dir` 函数，用 `spawn_blocking` 调度。
 
-#### P4 selection_text 懒查询
+#### P4 selection_text 懒查询（已完成 2026-09-18，commit `060c3abb`，快照字段已移除）
 
 - `crates/terminal/src/terminal.rs:1333-1341, 2489-2499`：`TerminalRenderSnapshot` 删除 `selection_text` 字段。
 - `crates/terminal_view/src/view.rs:4611, 4736-4746`：右键菜单闭包改为用户右键时现取。
@@ -162,25 +168,28 @@ TDD：
 - `crates/terminal_view/src/terminal_element.rs:661-680`：删除 `tail_summary`。（已在此前提交完成：改为 tracing 启用时才生成）
 - `808-843` `compute_left_edge_fingerprint`：增加 `dirty_lines: &[usize]` 参数；保留全网格兜底作为 fallback（每 N 帧跑一次）。（本次完成：`detect_left_edge_changed_lines` 加 `dirty_lines` 参数，增量帧只重算 dirty 行指纹，每 `LEFT_EDGE_FULL_SCAN_INTERVAL=30` 帧全量兜底；新增 `compute_line_left_edge_fingerprint` 单行哈希，与全量扫描共用 `EDGE_HASH_MUL/EDGE_HASH_ADD` 保证一致；3 个回归测试）
 
-#### B4 IPC 驱动密码通路收敛（已完成 2026-09-19，收敛版）
+#### B4 IPC 驱动密码通路收敛（已完成，收敛版；已随子系统删除消解）
 
-> 后续（2026-09-20）：外部驱动子系统已按同目录 `REMOVE_EXTERNAL_DB_DRIVERS_PLAN.md`
-> 整体移除，本节两道闸门随之删除，风险点不复存在。
-
-- 原方案：`crates/db/src/ipc/client.rs:360-398` 新增 `DriverHandshake` IPC 消息，client 在驱动进程启动后通过 Unix socket 发握手包；`Command::new` 时不再设密码环境变量。
-- 实际落地（收敛版）：调查发现密码主通道本来就走 socket（`protocol.rs` connect 参数），
-  `env_from_config` 只是 manifest 可选声明的附加通路，且本机/仓内无任何驱动使用 password 映射。
-  因此不做握手协议，改为双重闸门：
-  1. `registry.rs` `IpcDriverManifest::validate`：`env_from_config` 映射到 `password` 时拒绝加载
-     （`DbError::InvalidManifest`，错误信息引导改用 socket connect 参数）；
-  2. `client.rs` `env_pairs_from_connection_config`：兜底跳过 `password` 映射并 warn 留痕，
-     防止代码内直接构造的 manifest 绕过校验。
-  - `IpcDriverEntry::env_from_config` 文档注释同步标注禁令；新建 `crates/db/src/ipc/AGENTS.md`
-    记录该安全硬约束与"未来确需启动期敏感值时走握手消息 + 版本门禁"的升级路径。
-  - TDD：新增 3 个用例（registry 拒绝 password 映射 / 非敏感字段放行 / client 兜底过滤）。
-  - 顺带修复两处既有红灯：`mysql::connection` B1 的 2 个 `build_init_commands` 断言未随
-    NO_BACKSLASH_ESCAPES 更新；`ipc_concurrency` / `ipc_mock_driver` 的 `field_type`
-    裸字符串与 FieldType 内部标签枚举不匹配。
+> **最终状态（2026-09-20）**：外部驱动子系统已按同目录 `REMOVE_EXTERNAL_DB_DRIVERS_PLAN.md`
+> 整体移除（`b12eec2e`），本节两道闸门随之删除，风险点不复存在。
+>
+> 核对后发现密码主通道本就走 socket 协议载荷（`protocol.rs::connection_config_params`），
+> 风险面是 manifest 的 `env_from_config` 可把敏感路径声明为子进程环境变量
+> （`/proc/<pid>/environ` 泄漏 + 孙进程遗传）。两条分支线独立收敛到同一双闸门设计
+> （09-19 收敛版 + 09-20 `a1790611` 加强版）：
+>
+> 1. `registry.rs` `IpcDriverManifest::validate`：映射敏感路径（`password` /
+>    `extra_params.<敏感字段>`）的 manifest 拒绝加载；敏感判定复用
+>    `one_core::storage::models::is_sensitive_field`（已改 `pub`），与落库加密名单同源。
+> 2. `client.rs` `env_pairs_from_connection_config`：兜底跳过 + warn 留痕，
+>    兜住 `from_drivers` 等绕过校验的构造路径。
+> 3. 测试：registry 3（password 拒绝 / 敏感 extra_param 拒绝 / 非敏感放行）+
+>    client 2（既有映射回归 + 敏感字段跳过），5/5 通过。
+> 4. `crates/db/src/ipc/AGENTS.md` 握手协议文档已建（随子系统一并删除）。
+>
+> 顺带修复两处既有红灯：`mysql::connection` B1 的 2 个 `build_init_commands` 断言
+> 未随 NO_BACKSLASH_ESCAPES 更新（两分支分别修复，内容一致）；`ipc_concurrency` /
+> `ipc_mock_driver` 的 `field_type` 裸字符串与 FieldType 内部标签枚举不匹配。
 
 ## 测试策略
 
@@ -230,6 +239,12 @@ PR5 中 B4 完成后：`crates/db/src/ipc/AGENTS.md` 新建握手协议文档。
 - sync_server 独立部署文档（运维侧，本仓库不维护）
 
 ## 兼容性策略：方案 A（推迟启动期迁移）
+
+> **2026-09-20 决策变更**：经用户明确授权，迁移函数已提前接入
+> （`main/src/home_tab.rs` 主密钥对话框 `on_close`）。下方"方案 A 的取舍 /
+> 存量明文自然收敛 / 启用条件检查清单"三节为历史决策记录，保留备查。
+> 已知风险：兼容性矩阵"新 → 老"行——若仍有 < `7b36af88` 的老客户端从云端
+> 拉取 ENC:V3 密文，会解出空串丢私钥。启用前请确认无老客户端在线同步。
 
 ### 背景
 
