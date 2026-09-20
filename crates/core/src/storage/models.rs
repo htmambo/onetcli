@@ -708,10 +708,10 @@ impl CertificateKind {
         }
     }
 
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            Self::UsernamePassword => "账号密码",
-            Self::SshPrivateKey => "SSH 私钥",
+            Self::UsernamePassword => t!("CertificateManager.kind_username_password").to_string(),
+            Self::SshPrivateKey => t!("CertificateManager.kind_ssh_private_key").to_string(),
         }
     }
 }
@@ -844,15 +844,19 @@ impl Certificate {
         match self.kind {
             CertificateKind::UsernamePassword => {
                 let username = self.username().unwrap_or("");
-                format!("{} / 账号密码", username)
+                format!(
+                    "{} / {}",
+                    username,
+                    t!("CertificateManager.kind_username_password")
+                )
             }
             CertificateKind::SshPrivateKey => {
                 let username = self.username().unwrap_or("");
                 let has_key = self.key_path().map(|k| !k.is_empty()).unwrap_or(false);
                 let key_info = if has_key {
-                    "[已存储私钥]"
+                    t!("CertificateManager.key_stored").to_string()
                 } else {
-                    "未设置私钥"
+                    t!("CertificateManager.key_not_set").to_string()
                 };
                 format!("{} / {}", username, key_info)
             }
@@ -2207,5 +2211,36 @@ mod sensitive_field_tests {
         );
 
         crate::crypto::clear_master_key();
+    }
+}
+
+/// 存量兼容：`DatabaseType::External` 是已移除驱动（DuckDB/MSSQL/Oracle/ClickHouse
+/// 及外部 IPC 驱动如达梦）的反序列化兜底。驱动能力虽已移除，存量连接的 params JSON
+/// 必须仍能正常反序列化，否则连接列表加载/云同步会失败。
+#[cfg(test)]
+mod external_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_database_type_deserializes_to_external() {
+        let json = r#"{"database_type":"DuckDB","host":"localhost","port":0,"username":"","password":"","database":null,"service_name":null,"sid":null}"#;
+        let config: DbConnectionConfig =
+            serde_json::from_str(json).expect("历史 DuckDB 连接参数应可反序列化");
+        assert_eq!(config.database_type, DatabaseType::External);
+    }
+
+    #[test]
+    fn external_driver_database_type_deserializes_to_external() {
+        let json = r#"{"database_type":"External","host":"192.168.1.10","port":5236,"username":"SYSDBA","password":"x","database":null,"service_name":null,"sid":null}"#;
+        let config: DbConnectionConfig =
+            serde_json::from_str(json).expect("外部驱动连接参数应可反序列化");
+        assert_eq!(config.database_type, DatabaseType::External);
+    }
+
+    #[test]
+    fn parse_db_type_falls_back_to_external() {
+        assert_eq!(parse_db_type("DuckDB"), DatabaseType::External);
+        assert_eq!(parse_db_type("Dameng"), DatabaseType::External);
+        assert_eq!(parse_db_type("MySQL"), DatabaseType::MySQL);
     }
 }

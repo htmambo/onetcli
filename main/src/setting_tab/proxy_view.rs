@@ -257,7 +257,9 @@ impl GlobalProxySettingsView {
 
             let result = match test_task.await {
                 Ok(result) => result,
-                Err(err) => Err(format!("代理测试任务执行失败: {}", err)),
+                Err(err) => {
+                    Err(t!("Settings.proxy_test_task_failed", error = err.to_string()).to_string())
+                }
             };
 
             let _ = this.update(cx, |view, cx| {
@@ -485,15 +487,28 @@ async fn test_proxy_connectivity(http_client: Arc<dyn HttpClient>) -> Result<(),
         .uri("https://www.gstatic.com/generate_204")
         .header("User-Agent", "omnihub-updater")
         .body(AsyncBody::empty())
-        .map_err(|err| format!("构建代理测试请求失败: {}", err))?;
+        .map_err(|err| {
+            t!(
+                "Settings.proxy_test_build_request_failed",
+                error = err.to_string()
+            )
+            .to_string()
+        })?;
 
-    let response = http_client
-        .send(request)
-        .await
-        .map_err(|err| format!("代理连接测试失败: {}", err))?;
+    let response = http_client.send(request).await.map_err(|err| {
+        t!(
+            "Settings.proxy_test_connect_failed",
+            error = err.to_string()
+        )
+        .to_string()
+    })?;
 
     if !response.status().is_success() {
-        return Err(format!("代理测试返回异常状态码: {}", response.status()));
+        return Err(t!(
+            "Settings.proxy_test_bad_status",
+            status = response.status().to_string()
+        )
+        .to_string());
     }
 
     Ok(())

@@ -109,8 +109,11 @@ impl LlmProvidersView {
             Ok(cloud_id_to_purge) => {
                 if let Some(cloud_id) = cloud_id_to_purge.as_deref() {
                     tracing::info!(
-                        "[LLM Provider] 已登记待删除，等待同步引擎处理: {}",
-                        cloud_id
+                        "{}",
+                        t!(
+                            "LlmProviders.pending_deletion_registered",
+                            cloud_id = cloud_id
+                        )
                     );
                 }
                 notify_provider_configs_changed(cx);

@@ -10,6 +10,7 @@ use crate::cloud_sync::service::SyncError;
 use crate::cloud_sync::sync_type::{
     GenericSyncPlan, PendingDeletionDecision, SyncTypeHandler, SyncableItem,
 };
+use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,11 +127,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
         if let Some(local_id) = item.local_id() {
             operations.push(SyncOperation::Upload { local_id });
         } else {
-            result.errors.push(format!(
-                "上传{}失败 {}: 缺少本地 ID",
-                type_name,
-                item.item_name()
-            ));
+            result.errors.push(
+                t!(
+                    "CloudSync.upload_typed_failed_missing_local_id",
+                    type_name = type_name.as_str(),
+                    name = item.item_name()
+                )
+                .to_string(),
+            );
         }
     }
 
@@ -141,11 +145,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 cloud_id: cloud_data.id.clone(),
             });
         } else {
-            result.errors.push(format!(
-                "更新云端{}失败 {}: 缺少本地 ID",
-                type_name,
-                item.item_name()
-            ));
+            result.errors.push(
+                t!(
+                    "CloudSync.update_cloud_typed_failed_missing_local_id",
+                    type_name = type_name.as_str(),
+                    name = item.item_name()
+                )
+                .to_string(),
+            );
         }
     }
 
@@ -164,9 +171,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                 .get(&cloud_data.id)
                 .cloned()
                 .unwrap_or_else(|| cloud_data.id.clone());
-            result
-                .errors
-                .push(format!("更新本地{}失败 {}: 缺少本地 ID", type_name, name));
+            result.errors.push(
+                t!(
+                    "CloudSync.update_local_typed_failed_missing_local_id",
+                    type_name = type_name.as_str(),
+                    name = name.as_str()
+                )
+                .to_string(),
+            );
         }
     }
 
@@ -180,10 +192,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
         match operation {
             SyncOperation::Upload { local_id } => {
                 let Some(local_item) = local_item_map.get(&local_id).copied() else {
-                    result.errors.push(format!(
-                        "上传{}失败 {}: 本地数据不存在",
-                        type_name, local_id
-                    ));
+                    result.errors.push(
+                        t!(
+                            "CloudSync.upload_typed_failed_local_missing",
+                            type_name = type_name.as_str(),
+                            name = local_id
+                        )
+                        .to_string(),
+                    );
                     continue;
                 };
 
@@ -194,15 +210,25 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                             tracing::info!("[上传{}] 成功: {}", type_name, local_item.item_name());
                         }
                         Err(e) => {
-                            let msg =
-                                format!("上传{}失败 {}: {}", type_name, local_item.item_name(), e);
+                            let msg = t!(
+                                "CloudSync.upload_typed_failed",
+                                type_name = type_name.as_str(),
+                                name = local_item.item_name(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(msg.clone());
                             queue.mark_failed(queued_operation, msg);
                         }
                     },
                     Err(e) => {
-                        let msg =
-                            format!("上传{}失败 {}: {}", type_name, local_item.item_name(), e);
+                        let msg = t!(
+                            "CloudSync.upload_typed_failed",
+                            type_name = type_name.as_str(),
+                            name = local_item.item_name(),
+                            error = e.to_string()
+                        )
+                        .to_string();
                         result.errors.push(msg.clone());
                         queue.mark_failed(queued_operation, msg);
                     }
@@ -210,17 +236,25 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
             }
             SyncOperation::UpdateCloud { local_id, cloud_id } => {
                 let Some(local_item) = local_item_map.get(&local_id).copied() else {
-                    result.errors.push(format!(
-                        "更新云端{}失败 {}: 本地数据不存在",
-                        type_name, local_id
-                    ));
+                    result.errors.push(
+                        t!(
+                            "CloudSync.update_cloud_typed_failed_local_missing",
+                            type_name = type_name.as_str(),
+                            name = local_id
+                        )
+                        .to_string(),
+                    );
                     continue;
                 };
                 let Some(cloud_data) = cloud_data_map.get(cloud_id.as_str()).copied() else {
-                    result.errors.push(format!(
-                        "更新云端{}失败 {}: 云端数据不存在",
-                        type_name, cloud_id
-                    ));
+                    result.errors.push(
+                        t!(
+                            "CloudSync.update_cloud_typed_failed_cloud_missing",
+                            type_name = type_name.as_str(),
+                            name = cloud_id.as_str()
+                        )
+                        .to_string(),
+                    );
                     continue;
                 };
 
@@ -235,23 +269,25 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                             );
                         }
                         Err(e) => {
-                            let msg = format!(
-                                "更新云端{}失败 {}: {}",
-                                type_name,
-                                local_item.item_name(),
-                                e
-                            );
+                            let msg = t!(
+                                "CloudSync.update_cloud_typed_failed",
+                                type_name = type_name.as_str(),
+                                name = local_item.item_name(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(msg.clone());
                             queue.mark_failed(queued_operation, msg);
                         }
                     },
                     Err(e) => {
-                        let msg = format!(
-                            "更新云端{}失败 {}: {}",
-                            type_name,
-                            local_item.item_name(),
-                            e
-                        );
+                        let msg = t!(
+                            "CloudSync.update_cloud_typed_failed",
+                            type_name = type_name.as_str(),
+                            name = local_item.item_name(),
+                            error = e.to_string()
+                        )
+                        .to_string();
                         result.errors.push(msg.clone());
                         queue.mark_failed(queued_operation, msg);
                     }
@@ -259,17 +295,25 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
             }
             SyncOperation::UpdateLocal { local_id, cloud_id } => {
                 let Some(local_item) = local_item_map.get(&local_id).copied() else {
-                    result.errors.push(format!(
-                        "更新本地{}失败 {}: 本地数据不存在",
-                        type_name, local_id
-                    ));
+                    result.errors.push(
+                        t!(
+                            "CloudSync.update_local_typed_failed_local_missing",
+                            type_name = type_name.as_str(),
+                            name = local_id
+                        )
+                        .to_string(),
+                    );
                     continue;
                 };
                 let Some(cloud_data) = cloud_data_map.get(cloud_id.as_str()).copied() else {
-                    result.errors.push(format!(
-                        "更新本地{}失败 {}: 云端数据不存在",
-                        type_name, cloud_id
-                    ));
+                    result.errors.push(
+                        t!(
+                            "CloudSync.update_local_typed_failed_cloud_missing",
+                            type_name = type_name.as_str(),
+                            name = cloud_id.as_str()
+                        )
+                        .to_string(),
+                    );
                     continue;
                 };
 
@@ -283,7 +327,13 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                         tracing::info!("[更新本地{}] 成功: {}", type_name, name);
                     }
                     Err(e) => {
-                        let msg = format!("更新本地{}失败 {}: {}", type_name, name, e);
+                        let msg = t!(
+                            "CloudSync.update_local_typed_failed",
+                            type_name = type_name.as_str(),
+                            name = name.as_str(),
+                            error = e.to_string()
+                        )
+                        .to_string();
                         result.errors.push(msg.clone());
                         queue.mark_failed(queued_operation, msg);
                     }
@@ -291,10 +341,14 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
             }
             SyncOperation::Download(cloud_id) => {
                 let Some(cloud_data) = cloud_data_map.get(cloud_id.as_str()).copied() else {
-                    result.errors.push(format!(
-                        "下载{}失败 {}: 云端数据不存在",
-                        type_name, cloud_id
-                    ));
+                    result.errors.push(
+                        t!(
+                            "CloudSync.download_typed_failed_cloud_missing",
+                            type_name = type_name.as_str(),
+                            name = cloud_id.as_str()
+                        )
+                        .to_string(),
+                    );
                     continue;
                 };
 
@@ -308,7 +362,13 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                         tracing::info!("[下载{}] 成功: {}", type_name, name);
                     }
                     Err(e) => {
-                        let msg = format!("下载{}失败 {}: {}", type_name, name, e);
+                        let msg = t!(
+                            "CloudSync.download_typed_failed",
+                            type_name = type_name.as_str(),
+                            name = name.as_str(),
+                            error = e.to_string()
+                        )
+                        .to_string();
                         result.errors.push(msg.clone());
                         queue.mark_failed(queued_operation, msg);
                     }
@@ -326,7 +386,13 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                         tracing::info!("[删除云端{}] 成功: {}", type_name, cloud_id);
                     }
                     Err(e) => {
-                        let msg = format!("删除云端{}失败 {}: {}", type_name, cloud_id, e);
+                        let msg = t!(
+                            "CloudSync.delete_cloud_typed_failed",
+                            type_name = type_name.as_str(),
+                            name = cloud_id.as_str(),
+                            error = e.to_string()
+                        )
+                        .to_string();
                         result.errors.push(msg.clone());
                         queue.mark_failed(queued_operation, msg);
                     }
@@ -338,7 +404,13 @@ pub(crate) async fn generic_sync<H: SyncTypeHandler>(
                     tracing::info!("[删除本地{}] 成功: {}", type_name, local_id);
                 }
                 Err(e) => {
-                    let msg = format!("删除本地{}失败 {}: {}", type_name, local_id, e);
+                    let msg = t!(
+                        "CloudSync.delete_local_typed_failed",
+                        type_name = type_name.as_str(),
+                        name = local_id,
+                        error = e.to_string()
+                    )
+                    .to_string();
                     result.errors.push(msg.clone());
                     queue.mark_failed(queued_operation, msg);
                 }
@@ -399,7 +471,10 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
         match handler.decide_pending_deletion(engine, &pending, current_cloud) {
             Ok(PendingDeletionDecision::DropPending) => {
                 if let Err(e) = handler.remove_pending_deletion(engine, &pending.cloud_id) {
-                    tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                    tracing::error!(
+                        "{}",
+                        t!("CloudSync.log_remove_pending_failed", error = e.to_string())
+                    );
                 } else {
                     outcome.handled_ids.push(pending.cloud_id);
                 }
@@ -408,10 +483,13 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
             Ok(PendingDeletionDecision::DeleteCloud) => {}
             Err(error) => {
                 tracing::warn!(
-                    "[同步] 处理待删除{}决策失败: {} - {}（保留在待删除列表）",
-                    handler.display_name(),
-                    pending.cloud_id,
-                    error
+                    "{}",
+                    t!(
+                        "CloudSync.log_pending_decision_failed",
+                        type_name = handler.display_name(),
+                        id = pending.cloud_id.as_str(),
+                        error = error.to_string()
+                    )
                 );
                 continue;
             }
@@ -429,7 +507,10 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
                     pending.cloud_id
                 );
                 if let Err(e) = handler.remove_pending_deletion(engine, &pending.cloud_id) {
-                    tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                    tracing::error!(
+                        "{}",
+                        t!("CloudSync.log_remove_pending_failed", error = e.to_string())
+                    );
                 } else {
                     outcome.handled_ids.push(pending.cloud_id);
                     outcome.refetch_cloud = true;
@@ -444,16 +525,22 @@ async fn process_pending_deletions<H: SyncTypeHandler>(
                         pending.cloud_id
                     );
                     if let Err(e) = handler.remove_pending_deletion(engine, &pending.cloud_id) {
-                        tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!("CloudSync.log_remove_pending_failed", error = e.to_string())
+                        );
                     } else {
                         outcome.handled_ids.push(pending.cloud_id);
                     }
                 } else {
                     tracing::warn!(
-                        "[同步] 删除云端{}失败: {} - {}（保留在待删除列表）",
-                        handler.display_name(),
-                        pending.cloud_id,
-                        e
+                        "{}",
+                        t!(
+                            "CloudSync.log_delete_cloud_typed_failed",
+                            type_name = handler.display_name(),
+                            id = pending.cloud_id.as_str(),
+                            error = e.to_string()
+                        )
                     );
                 }
             }
@@ -523,7 +610,14 @@ fn process_soft_deletions<H: SyncTypeHandler>(
                     match handler.delete_local(engine, local_id) {
                         Ok(()) => deleted_count += 1,
                         Err(e) => {
-                            tracing::error!("[软删除] 删除本地数据失败: {} - {}", local_id, e);
+                            tracing::error!(
+                                "{}",
+                                t!(
+                                    "CloudSync.log_soft_delete_local_item_failed",
+                                    id = local_id,
+                                    error = e.to_string()
+                                )
+                            );
                         }
                     }
                 }
@@ -770,7 +864,7 @@ async fn upload_item<H: SyncTypeHandler>(
         let service = engine
             .crypto_service
             .read()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+            .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
         handler.encrypt(&service, item)?
     };
 
@@ -794,7 +888,7 @@ async fn update_cloud_item<H: SyncTypeHandler>(
         let service = engine
             .crypto_service
             .read()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+            .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
         let mut data = handler.encrypt(&service, item)?;
         data.id = cloud_data.id.clone();
         data.version = cloud_data.version;
@@ -819,7 +913,7 @@ async fn download_item<H: SyncTypeHandler>(
     let service = engine
         .crypto_service
         .read()
-        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+        .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
 
     let mut local_item = handler.decrypt(&service, cloud_data)?;
     local_item.set_local_id(None);
@@ -839,7 +933,7 @@ async fn download_and_update_item<H: SyncTypeHandler>(
     let service = engine
         .crypto_service
         .read()
-        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+        .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
 
     let mut updated = handler.decrypt(&service, cloud_data)?;
     updated.set_local_id(existing.local_id());

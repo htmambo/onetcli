@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, div, px,
+    App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
+    SharedString, Styled, Window, div, px,
 };
 use gpui_component::{
     ActiveTheme, Disableable, IconName, Sizable, StyledExt, TitleBar, app_style,
@@ -16,15 +16,12 @@ use one_core::storage::{DatabaseType, StoredConnection, Workspace};
 use rust_i18n::locale;
 use rust_i18n::t;
 
-use crate::common::db_connection_form::{DbConnectionForm, DbConnectionFormEvent};
-use crate::database_view_plugin::{
-    create_connection_form_for, create_external_connection_form_for,
-};
+use crate::common::db_connection_form::{DbConnectionForm, DbConnectionFormEvent, DbFormConfig};
+use crate::database_view_plugin::create_connection_form_for;
 
 /// 连接表单窗口的配置
 pub struct ConnectionFormWindowConfig {
     pub db_type: DatabaseType,
-    pub external_driver_id: Option<String>,
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
 }
@@ -38,34 +35,8 @@ pub struct ConnectionFormWindow {
     title: SharedString,
 }
 
-fn external_driver_id_from_connection(conn: Option<&StoredConnection>) -> Option<String> {
-    conn.and_then(|conn| conn.to_db_connection().ok())
-        .and_then(|config| {
-            config
-                .extra_params
-                .get(db::ipc::EXTERNAL_DRIVER_ID_PARAM)
-                .cloned()
-        })
-}
-
-fn external_driver_name_for_title(driver_id: Option<&str>) -> Option<String> {
-    driver_id.and_then(|driver_id| {
-        db::ipc::IpcDriverRegistry::load_default()
-            .find(driver_id)
-            .map(|driver| driver.name)
-    })
-}
-
-fn connection_title_for_locale(
-    locale: &str,
-    is_editing: bool,
-    db_type: &DatabaseType,
-    external_driver_name: Option<&str>,
-) -> String {
-    let db_type_label = external_driver_name
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| db_type.as_str());
-    db::translate_connection_title_for_locale(locale, is_editing, db_type_label)
+fn connection_title_for_locale(locale: &str, is_editing: bool, db_type: &DatabaseType) -> String {
+    db::translate_connection_title_for_locale(locale, is_editing, db_type.as_str())
 }
 
 impl ConnectionFormWindow {
@@ -77,23 +48,20 @@ impl ConnectionFormWindow {
         let is_editing = config.editing_connection.is_some();
         let db_type = config.db_type;
 
-        let external_driver_id = config
-            .external_driver_id
-            .clone()
-            .or_else(|| external_driver_id_from_connection(config.editing_connection.as_ref()));
-        let external_driver_name = external_driver_name_for_title(external_driver_id.as_deref());
-        let title: SharedString = connection_title_for_locale(
-            locale().as_ref(),
-            is_editing,
-            &db_type,
-            external_driver_name.as_deref(),
-        )
-        .into();
+        let title: SharedString =
+            connection_title_for_locale(locale().as_ref(), is_editing, &db_type).into();
 
-        let form = external_driver_id
-            .as_deref()
-            .and_then(|driver_id| create_external_connection_form_for(driver_id, window, cx))
-            .unwrap_or_else(|| create_connection_form_for(db_type, window, cx));
+        // 已移除驱动的类型（存量 External 连接）没有 plugin 与表单 manifest；
+        // 入口已拦截编辑，这里仅作防御兜底，构造空表单避免 panic
+        let form = create_connection_form_for(db_type, window, cx).unwrap_or_else(|| {
+            let fallback = DbFormConfig {
+                db_type,
+                title: String::new(),
+                hidden_params: Default::default(),
+                tab_groups: Vec::new(),
+            };
+            cx.new(|cx| DbConnectionForm::new(fallback, window, cx))
+        });
 
         form.update(cx, |f, cx| {
             f.set_workspaces(config.workspaces.clone(), window, cx);
@@ -312,18 +280,10 @@ mod tests {
     use one_core::storage::DatabaseType;
 
     #[test]
-    fn connection_title_uses_external_driver_name() {
-        assert_eq!(
-            "新建 Dameng DM 连接",
-            connection_title_for_locale("zh-CN", false, &DatabaseType::External, Some("Dameng DM"))
-        );
-    }
-
-    #[test]
     fn connection_title_falls_back_to_database_type_name() {
         assert_eq!(
             "新建 External 连接",
-            connection_title_for_locale("zh-CN", false, &DatabaseType::External, None)
+            connection_title_for_locale("zh-CN", false, &DatabaseType::External)
         );
     }
 }

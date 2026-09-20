@@ -74,9 +74,8 @@ pub use ssh::{
 
 pub const DEFAULT_RECOVERY_SCROLLBACK_LINES: usize = 2000;
 pub const MAX_RECOVERY_SCROLLBACK_LINES: usize = 5000;
-const HISTORY_RESTORED_BANNER: &str =
-    "\r\n\r\n\x1b[30;47m * \x1b[0m\x1b[97;100m 历史记录已恢复 \x1b[0m\r\n\r\n";
-const HISTORY_RESTORED_BANNER_COMPACT: &str = "*历史记录已恢复";
+const HISTORY_RESTORED_BANNER_COMPACT_KEY: &str = "Terminal.history_restored_banner_compact";
+const HISTORY_RESTORED_BANNER_KEY: &str = "Terminal.history_restored_banner";
 
 fn is_osc_palette_line(line: &str) -> bool {
     // OSC 4 调色板序列：\x1b]4;n;rgb:R/G/B
@@ -95,7 +94,7 @@ fn is_osc_palette_line(line: &str) -> bool {
 
 fn is_history_restored_banner_line(line: &str) -> bool {
     let compact: String = line.chars().filter(|ch| !ch.is_whitespace()).collect();
-    compact == HISTORY_RESTORED_BANNER_COMPACT
+    compact == t!(HISTORY_RESTORED_BANNER_COMPACT_KEY)
 }
 
 fn is_recovery_artifact_line(line: &str) -> bool {
@@ -823,8 +822,11 @@ fn should_report_ssh_running_processes(
         if !ssh_prompt_detected && established_at.elapsed().as_secs() > SSH_DETECTION_TIMEOUT_SECS {
             tracing::warn!(
                 target: "terminal.ssh",
-                "SSH shell integration 未检测到（超时 {} 秒），禁用进程检查以避免误报",
-                SSH_DETECTION_TIMEOUT_SECS
+                "{}",
+                t!(
+                    "ShellIntegration.ssh_detect_timeout_disable_process_check",
+                    seconds = SSH_DETECTION_TIMEOUT_SECS,
+                ),
             );
             return false;
         }
@@ -1060,8 +1062,11 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
     let session_dir = std::env::temp_dir().join(format!("omnihub-{}", std::process::id()));
     if fs::create_dir_all(&session_dir).is_err() {
         tracing::warn!(
-            "无法创建临时目录 {}，跳过 Shell Integration",
-            session_dir.display()
+            "{}",
+            t!(
+                "ShellIntegration.skip_temp_dir_failed",
+                dir = session_dir.display(),
+            ),
         );
         return (vec![], vec![]);
     }
@@ -1069,7 +1074,7 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
     // 写入 shell_integration.sh（含交互式守卫，不影响 rsync/scp 等非交互通道）
     let integration_path = session_dir.join("shell_integration.sh");
     if let Err(e) = fs::write(&integration_path, embedded_shell_integration_script()) {
-        tracing::warn!("写入 shell_integration.sh 失败: {e}");
+        tracing::warn!("{}", t!("ShellIntegration.write_script_failed", error = e),);
         return (vec![], vec![]);
     }
 
@@ -1504,7 +1509,7 @@ impl Terminal {
 
         if let Some(content) = recovery_content.and_then(sanitize_recovery_content) {
             replay_term_output(&term, content.as_bytes(), None);
-            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
+            replay_term_output(&term, t!(HISTORY_RESTORED_BANNER_KEY).as_bytes(), None);
         }
 
         let pty_options = PtyOptions {
@@ -1576,10 +1581,10 @@ impl Terminal {
 
         if let Some(content) = recovery_content.and_then(sanitize_recovery_content) {
             replay_term_output(&term, content.as_bytes(), None);
-            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
+            replay_term_output(&term, t!(HISTORY_RESTORED_BANNER_KEY).as_bytes(), None);
         }
 
-        let mut client = LocalPtyClient::connect().context("连接 local-pty-host 失败")?;
+        let mut client = LocalPtyClient::connect().context(t!("LocalPtyHost.connect_failed"))?;
         let size = TerminalSize {
             rows: DEFAULT_ROWS as u16,
             cols: DEFAULT_COLS as u16,
@@ -1588,7 +1593,7 @@ impl Terminal {
         };
         let (session_id, child_pid) = client
             .spawn_sync(config.clone(), size)
-            .context("hosted local PTY spawn 失败")?;
+            .context(t!("LocalPtyHost.hosted_spawn_failed"))?;
         let (request_tx, mut host_event_rx) = client.split();
 
         let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> =
@@ -1675,7 +1680,7 @@ impl Terminal {
             Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
         let history_shell = config.shell.clone();
 
-        let mut client = LocalPtyClient::connect().context("连接 local-pty-host 失败")?;
+        let mut client = LocalPtyClient::connect().context(t!("LocalPtyHost.connect_failed"))?;
         let size = TerminalSize {
             rows: DEFAULT_ROWS as u16,
             cols: DEFAULT_COLS as u16,
@@ -1684,7 +1689,7 @@ impl Terminal {
         };
         let child_pid = client
             .attach_sync(session_id.clone(), size)
-            .context("hosted local PTY attach 失败")?;
+            .context(t!("LocalPtyHost.hosted_attach_failed"))?;
         let (request_tx, mut host_event_rx) = client.split();
 
         let writeback_tx: UnboundedSender<crate::local_pty_protocol::LocalPtyHostRequest> =
@@ -1903,7 +1908,7 @@ impl Terminal {
 
         if let Some(content) = recovery_content.and_then(sanitize_recovery_content) {
             replay_term_output(&term, content.as_bytes(), None);
-            replay_term_output(&term, HISTORY_RESTORED_BANNER.as_bytes(), None);
+            replay_term_output(&term, t!(HISTORY_RESTORED_BANNER_KEY).as_bytes(), None);
         }
         let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<bool>();
         let connection_generation = 1;
@@ -2306,9 +2311,12 @@ impl Terminal {
                     rows: self.rows,
                 });
                 tracing::info!(
-                    "SSH 连接成功，同步终端尺寸到远程: {}x{}",
-                    self.cols,
-                    self.rows
+                    "{}",
+                    t!(
+                        "Connection.ssh_connected_synced_size",
+                        cols = self.cols,
+                        rows = self.rows,
+                    ),
                 );
                 backend.resize(TerminalSize {
                     rows: self.rows as u16,
@@ -2648,7 +2656,8 @@ impl Terminal {
                 self.ssh_detection_disabled.set(true);
                 tracing::warn!(
                     target: "terminal.ssh",
-                    "SSH shell integration 检测超时，已禁用进程检查"
+                    "{}",
+                    t!("ShellIntegration.ssh_detect_timeout_disabled"),
                 );
             }
 
@@ -2874,17 +2883,23 @@ impl Terminal {
             }
             Ok(false) => {
                 tracing::warn!(
-                    "trust_new_host_and_reconnect: {}:{} 没有待信任的主机密钥",
-                    ssh_config.host,
-                    ssh_config.port
+                    "{}",
+                    t!(
+                        "SshBackend.trust_no_pending_key",
+                        host = ssh_config.host,
+                        port = ssh_config.port,
+                    ),
                 );
             }
             Err(err) => {
                 tracing::error!(
-                    "信任新主机 {}:{} 写入 known_hosts 失败: {}",
-                    ssh_config.host,
-                    ssh_config.port,
-                    err
+                    "{}",
+                    t!(
+                        "SshBackend.trust_write_known_hosts_failed",
+                        host = ssh_config.host,
+                        port = ssh_config.port,
+                        error = err,
+                    ),
                 );
                 self.connection_state = ConnectionState::Disconnected {
                     error: Some(err.to_string()),

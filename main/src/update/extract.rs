@@ -1,43 +1,83 @@
 use std::path::Path;
 
+use rust_i18n::t;
+
 pub(crate) fn extract_archive(archive: &Path, dest_dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dest_dir).map_err(|err| format!("创建解压目录失败: {err}"))?;
+    std::fs::create_dir_all(dest_dir).map_err(|err| {
+        t!(
+            "UpdateExtract.create_extract_dir_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     let file_name = archive
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("无法识别归档文件名: {}", archive.display()))?;
+        .ok_or_else(|| {
+            t!(
+                "UpdateExtract.archive_filename_unrecognized",
+                path = archive.display().to_string()
+            )
+            .to_string()
+        })?;
 
     if file_name.ends_with(".tar.gz") || file_name.ends_with(".tgz") {
-        let file = std::fs::File::open(archive)
-            .map_err(|err| format!("打开更新归档失败 {}: {err}", archive.display()))?;
+        let file = std::fs::File::open(archive).map_err(|err| {
+            t!(
+                "UpdateExtract.open_update_archive_failed",
+                path = archive.display().to_string(),
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
-        archive
-            .unpack(dest_dir)
-            .map_err(|err| format!("解压 tar.gz 更新包失败: {err}"))?;
+        archive.unpack(dest_dir).map_err(|err| {
+            t!("UpdateExtract.extract_tar_gz_failed", err = err.to_string()).to_string()
+        })?;
         return Ok(());
     }
 
     if file_name.ends_with(".zip") {
         #[cfg(target_os = "windows")]
         {
-            let file = std::fs::File::open(archive)
-                .map_err(|err| format!("打开更新归档失败 {}: {err}", archive.display()))?;
-            let mut zip =
-                zip::ZipArchive::new(file).map_err(|err| format!("读取 zip 更新包失败: {err}"))?;
-            zip.extract(dest_dir)
-                .map_err(|err| format!("解压 zip 更新包失败: {err}"))?;
+            let file = std::fs::File::open(archive).map_err(|err| {
+                t!(
+                    "UpdateExtract.open_update_archive_failed",
+                    path = archive.display().to_string(),
+                    err = err.to_string()
+                )
+                .to_string()
+            })?;
+            let mut zip = zip::ZipArchive::new(file).map_err(|err| {
+                t!(
+                    "UpdateExtract.read_zip_update_failed",
+                    err = err.to_string()
+                )
+                .to_string()
+            })?;
+            zip.extract(dest_dir).map_err(|err| {
+                t!(
+                    "UpdateExtract.extract_zip_update_failed",
+                    err = err.to_string()
+                )
+                .to_string()
+            })?;
             return Ok(());
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            return Err("当前平台不支持解压 zip 更新包".to_string());
+            return Err(t!("UpdateExtract.zip_unsupported_on_platform").to_string());
         }
     }
 
-    Err(format!("不支持的更新包格式: {}", archive.display()))
+    Err(t!(
+        "UpdateExtract.unsupported_archive_format",
+        path = archive.display().to_string()
+    )
+    .to_string())
 }
 
 #[cfg(test)]

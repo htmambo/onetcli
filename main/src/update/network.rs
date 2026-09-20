@@ -15,7 +15,13 @@ pub(crate) async fn check_network_connectivity(
         .uri(target_url)
         .header("User-Agent", USER_AGENT)
         .body(AsyncBody::empty())
-        .map_err(|err| format!("构建网络检查请求失败: {}", err))?;
+        .map_err(|err| {
+            t!(
+                "UpdateDownload.network_check_request_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
     let response = http_client
         .send(request)

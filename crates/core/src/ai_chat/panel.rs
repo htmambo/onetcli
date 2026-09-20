@@ -1296,7 +1296,9 @@ impl AiChatPanel {
                 Err(join_err) => {
                     if let Some(entity) = this.upgrade() {
                         let msg_id = assistant_msg_id.clone();
-                        let error_msg = format!("Agent 调度任务失败: {join_err}");
+                        let error_msg =
+                            t!("AiChat.agent_dispatch_failed", error = join_err.to_string())
+                                .to_string();
                         let _ = cx.update(|cx| {
                             entity.update(cx, |this, cx| {
                                 this.engine.set_message_error(&msg_id, error_msg);
@@ -2042,7 +2044,13 @@ fn chat_message_to_llm_message(msg: &ChatMessage) -> Message {
             }
             Ok(_) => {} // 空数组，保持纯文本
             Err(err) => {
-                tracing::warn!("反序列化 tool_calls_json 失败，降级为纯文本 assistant 消息: {err}");
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "AiChat.log_tool_calls_deserialize_failed",
+                        error = err.to_string()
+                    )
+                );
             }
         }
     }

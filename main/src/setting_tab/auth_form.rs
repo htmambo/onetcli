@@ -137,7 +137,10 @@ fn auth_submit(cx: &mut App) {
                     cx.notify();
                 }
                 Err(error) => {
-                    tracing::error!("密码登录失败: {}", error);
+                    tracing::error!(
+                        "{}",
+                        t!("Auth.password_login_failed", error = error.to_string())
+                    );
                     this.error.update(cx, |v, cx| {
                         *v = Some(error.clone());
                         cx.notify();

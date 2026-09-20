@@ -1,6 +1,7 @@
 use anyhow::Result;
 use gpui::{App, SharedString};
 use rusqlite::params;
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto;
@@ -391,20 +392,24 @@ impl ConnectionRepository {
         target_connection_ids: &[i64],
     ) -> Result<()> {
         if source_workspace_id == target_workspace_id {
-            return Err(anyhow::anyhow!(
-                "源工作区和目标工作区相同，无法跨工作区移动"
-            ));
+            return Err(anyhow::anyhow!("{}", t!("Storage.same_workspace_move")));
         }
         if source_connection_ids.contains(&connection_id) {
             return Err(anyhow::anyhow!(
-                "跨工作区移动后的源工作区排序中仍包含目标连接 {}",
-                connection_id
+                "{}",
+                t!(
+                    "Storage.source_still_contains_moved",
+                    id = connection_id.to_string()
+                )
             ));
         }
         if !target_connection_ids.contains(&connection_id) {
             return Err(anyhow::anyhow!(
-                "目标工作区排序中缺少被移动连接 {}",
-                connection_id
+                "{}",
+                t!(
+                    "Storage.target_missing_moved",
+                    id = connection_id.to_string()
+                )
             ));
         }
 
@@ -420,10 +425,13 @@ impl ConnectionRepository {
                 .map_err(anyhow::Error::from)?;
             if current_workspace_id != source_workspace_id {
                 return Err(anyhow::anyhow!(
-                    "连接 {} 当前工作区已变化，预期 {:?}，实际 {:?}",
-                    connection_id,
-                    source_workspace_id,
-                    current_workspace_id
+                    "{}",
+                    t!(
+                        "Storage.connection_workspace_changed",
+                        id = connection_id.to_string(),
+                        expected = format!("{:?}", source_workspace_id),
+                        actual = format!("{:?}", current_workspace_id)
+                    )
                 ));
             }
 
@@ -471,8 +479,11 @@ fn apply_connection_orders_in_workspace(
 
         if rows == 0 {
             return Err(anyhow::anyhow!(
-                "连接 {} 不在目标工作区内，无法重排",
-                connection_id
+                "{}",
+                t!(
+                    "Storage.connection_not_in_target",
+                    id = connection_id.to_string()
+                )
             ));
         }
     }
@@ -1048,7 +1059,7 @@ impl WorkspaceRepository {
                     params![sort_order as i64, ts, workspace_id],
                 )?;
                 if rows == 0 {
-                    return Err(anyhow::anyhow!("工作区 {} 不存在，无法重排", workspace_id));
+                    return Err(anyhow::anyhow!("{}", t!("Storage.workspace_not_found_reorder", id = workspace_id.to_string())));
                 }
             }
             tx.commit()?;

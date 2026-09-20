@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -207,8 +208,10 @@ fn load_connection_restore_snapshot_from_path(path: &Path) -> Result<ConnectionR
         return Ok(ConnectionRestoreSnapshot::default());
     }
 
-    let json = std::fs::read_to_string(path).context("读取连接恢复快照文件失败")?;
-    let snapshot = serde_json::from_str(&json).context("解析连接恢复快照 JSON 失败")?;
+    let json = std::fs::read_to_string(path)
+        .context(t!("ConnectionRestore.read_snapshot_failed").to_string())?;
+    let snapshot = serde_json::from_str(&json)
+        .context(t!("ConnectionRestore.parse_snapshot_failed").to_string())?;
     Ok(snapshot)
 }
 

@@ -2304,15 +2304,23 @@ impl CollectionView {
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let result = Tokio::spawn_result(cx, async move {
                 info!(
-                    "[run_query] 开始查询 db={}, collection={}, filter={:?}",
-                    database_name, collection_name, inputs.filter
+                    "[run_query] {}",
+                    t!(
+                        "MongoLog.run_query_started",
+                        database = database_name,
+                        collection = collection_name,
+                        filter = format!("{:?}", inputs.filter)
+                    )
                 );
                 let connection = global_state.get_connection(&connection_id).ok_or_else(|| {
                     anyhow::anyhow!(t!("MongoCollection.connection_missing").to_string())
                 })?;
                 let guard = connection.read().await;
 
-                info!("[run_query] 开始 find_documents");
+                info!(
+                    "[run_query] {}",
+                    t!("MongoLog.run_query_find_documents_started")
+                );
                 let documents = guard
                     .find_documents(
                         &database_name,
@@ -2323,20 +2331,41 @@ impl CollectionView {
                     .await;
                 match &documents {
                     Ok(docs) => info!(
-                        "[run_query] find_documents 成功，返回 {} 条文档",
-                        docs.len()
+                        "[run_query] {}",
+                        t!(
+                            "MongoLog.run_query_find_documents_success",
+                            count = docs.len()
+                        )
                     ),
-                    Err(e) => error!("[run_query] find_documents 失败: {e}"),
+                    Err(e) => error!(
+                        "[run_query] {}",
+                        t!(
+                            "MongoLog.run_query_find_documents_failed",
+                            error = e.to_string()
+                        )
+                    ),
                 }
                 let documents = documents.map_err(|e| anyhow::anyhow!("{}", e))?;
 
-                info!("[run_query] 开始 count_documents");
+                info!(
+                    "[run_query] {}",
+                    t!("MongoLog.run_query_count_documents_started")
+                );
                 let total = guard
                     .count_documents(&database_name, &collection_name, inputs.filter)
                     .await;
                 match &total {
-                    Ok(count) => info!("[run_query] count_documents 成功，total={count}"),
-                    Err(e) => warn!("[run_query] count_documents 失败（将忽略）: {e}"),
+                    Ok(count) => info!(
+                        "[run_query] {}",
+                        t!("MongoLog.run_query_count_documents_success", total = count)
+                    ),
+                    Err(e) => warn!(
+                        "[run_query] {}",
+                        t!(
+                            "MongoLog.run_query_count_documents_failed",
+                            error = e.to_string()
+                        )
+                    ),
                 }
                 // count_documents 在某些系统集合（如 system.sessions）上可能失败，
                 // 失败时不阻断文档展示，总数显示为未知
@@ -2349,9 +2378,12 @@ impl CollectionView {
                 match result {
                     Ok((documents, total)) => {
                         info!(
-                            "[run_query] 异步结果成功，文档数={}, total={:?}",
-                            documents.len(),
-                            total
+                            "[run_query] {}",
+                            t!(
+                                "MongoLog.run_query_async_success",
+                                count = documents.len(),
+                                total = format!("{total:?}")
+                            )
                         );
                         let items_result = document_items_from_documents(documents);
                         match items_result {
@@ -2381,7 +2413,13 @@ impl CollectionView {
                                 }
                             }
                             Err(error) => {
-                                error!("[run_query] 文档序列化失败: {error}");
+                                error!(
+                                    "[run_query] {}",
+                                    t!(
+                                        "MongoLog.run_query_doc_serialize_failed",
+                                        error = error.to_string()
+                                    )
+                                );
                                 view.is_loading = false;
                                 view.error_message = Some(error.to_string());
                                 Self::notify_error(&error.to_string(), cx);
@@ -2389,7 +2427,10 @@ impl CollectionView {
                         }
                     }
                     Err(error) => {
-                        error!("[run_query] Tokio任务失败: {error}");
+                        error!(
+                            "[run_query] {}",
+                            t!("MongoLog.run_query_tokio_failed", error = error.to_string())
+                        );
                         view.is_loading = false;
                         view.error_message = Some(error.to_string());
                         Self::notify_error(&error.to_string(), cx);

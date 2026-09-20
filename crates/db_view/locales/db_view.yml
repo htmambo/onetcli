@@ -3138,6 +3138,14 @@ DataTransfer:
     en: Blocking issues found. Resolve them before starting the transfer.
     zh-CN: 存在阻塞问题，处理后才能开始传输。
     zh-HK: 存在阻塞問題，處理後才能開始傳輸。
+  precheck_connect_failed:
+    en: Precheck failed
+    zh-CN: 预检测失败
+    zh-HK: 預檢測失敗
+  precheck_config_missing:
+    en: Transfer configuration is incomplete
+    zh-CN: 传输配置不完整
+    zh-HK: 傳輸配置不完整
   continue_on_error:
     en: Continue on error
     zh-CN: 遇到错误时继续
@@ -3218,3 +3226,100 @@ DataTransfer:
     en: "%{count} views"
     zh-CN: "%{count}个视图"
     zh-HK: "%{count}個檢視"
+
+# BI 分析 Agent
+ChatBi:
+  missing_db_capability:
+    en: Database connection capability is unavailable, cannot run BI analysis
+    zh-CN: 缺少数据库连接能力，无法执行 BI 分析
+    zh-HK: 缺少資料庫連線能力，無法執行 BI 分析
+  progress_identifying:
+    en: Identifying analysis question and candidate tables...
+    zh-CN: 正在识别分析问题与候选表...
+    zh-HK: 正在識別分析問題與候選資料表...
+  fetch_tables_failed:
+    en: "Failed to fetch table list: %{error}"
+    zh-CN: "获取表列表失败: %{error}"
+    zh-HK: "取得資料表列表失敗: %{error}"
+  no_tables_found:
+    en: No available tables were identified. Try using @table_name in your question
+    zh-CN: 未能识别可用数据表，请尝试在问题中使用 @表名
+    zh-HK: 未能識別可用資料表，請嘗試在問題中使用 @表名
+  progress_generating_sql:
+    en: Generating analysis SQL...
+    zh-CN: 正在生成分析 SQL...
+    zh-HK: 正在產生分析 SQL...
+  non_query_rejected:
+    en: Non-query statement detected and rejected. Adjust the question to generate only SELECT/SHOW/WITH/EXPLAIN queries.
+    zh-CN: 检测到非查询语句，已拒绝执行。请调整问题，仅生成 SELECT/SHOW/WITH/EXPLAIN 等查询 SQL。
+    zh-HK: 偵測到非查詢語句，已拒絕執行。請調整問題，僅產生 SELECT/SHOW/WITH/EXPLAIN 等查詢 SQL。
+  progress_executing_sql:
+    en: Executing SQL to fetch analysis data...
+    zh-CN: 正在执行 SQL 获取分析数据...
+    zh-HK: 正在執行 SQL 取得分析資料...
+  execute_sql_failed:
+    en: "Failed to execute analysis SQL: %{error}"
+    zh-CN: "执行分析 SQL 失败: %{error}"
+    zh-HK: "執行分析 SQL 失敗: %{error}"
+  progress_generating_bi:
+    en: Generating BI analysis and chart configuration...
+    zh-CN: 正在生成 BI 分析与图表配置...
+    zh-HK: 正在產生 BI 分析與圖表設定...
+  send_result_failed:
+    en: "Failed to send result: %{error}"
+    zh-CN: "发送结果失败: %{error}"
+    zh-HK: "傳送結果失敗: %{error}"
+  get_model_failed:
+    en: "Failed to get model: %{error}"
+    zh-CN: "获取模型失败: %{error}"
+    zh-HK: "取得模型失敗: %{error}"
+  ai_select_tables_failed:
+    en: "AI table selection failed: %{error}"
+    zh-CN: "AI 选表失败: %{error}"
+    zh-HK: "AI 選表失敗: %{error}"
+  generate_sql_failed:
+    en: "Failed to generate SQL: %{error}"
+    zh-CN: "生成 SQL 失败: %{error}"
+    zh-HK: "產生 SQL 失敗: %{error}"
+  no_sql_extracted:
+    en: No SQL was extracted from the model response. Please retry or clarify the analysis dimensions.
+    zh-CN: 未从模型返回中提取到 SQL，请重试或明确说明分析维度
+    zh-HK: 未從模型回應中擷取到 SQL，請重試或明確說明分析維度
+  generate_bi_report_failed:
+    en: "Failed to generate BI report: %{error}"
+    zh-CN: "生成 BI 报告失败: %{error}"
+    zh-HK: "產生 BI 報告失敗: %{error}"
+  fallback_chart_title:
+    en: Auto-generated chart
+    zh-CN: 自动生成图表
+    zh-HK: 自動產生圖表
+
+SqlEditorView:
+  db_plugin_not_found:
+    en: Current database plugin not found
+    zh-CN: 未找到当前数据库插件
+    zh-HK: 找不到目前資料庫外掛
+  explain_only_query:
+    en: EXPLAIN only supports query statements
+    zh-CN: EXPLAIN 仅支持查询语句
+    zh-HK: EXPLAIN 僅支援查詢語句
+
+DbTreeViewLog:
+  storage_state_missing:
+    en: "GlobalStorageState is unavailable, cannot persist database filter state for connection %{id}"
+    zh-CN: "GlobalStorageState 不存在，无法持久化连接 %{id} 的数据库筛选状态"
+    zh-HK: "GlobalStorageState 不存在，無法持久化連線 %{id} 的資料庫篩選狀態"
+  tokio_task_failed:
+    en: "Tokio task failed while refreshing database tree cache: %{error}"
+    zh-CN: "刷新数据库树缓存时 Tokio 任务失败: %{error}"
+    zh-HK: "重新整理資料庫樹狀快取時 Tokio 任務失敗: %{error}"
+  global_db_state_missing:
+    en: "GlobalDbState is unavailable, cannot load children for connection %{id}"
+    zh-CN: "GlobalDbState 不存在，无法加载连接 %{id} 的子节点"
+    zh-HK: "GlobalDbState 不存在，無法載入連線 %{id} 的子節點"
+
+ChatPanel:
+  default_chart_title:
+    en: Data chart
+    zh-CN: 数据图表
+    zh-HK: 資料圖表

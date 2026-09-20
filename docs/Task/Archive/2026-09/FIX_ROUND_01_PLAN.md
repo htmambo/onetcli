@@ -19,7 +19,7 @@
 | **B1** | 安全中 | MySQL 连接设 `NO_BACKSLASH_ESCAPES` | 低 / 即时 |
 | **B2** | 安全中 | 表格过滤器列名加引号、移除 `(` 透传旁路 | 中 / 即时 |
 | **B3** | 安全中 | SSH 主机密钥 TOFU 加首次确认弹窗 | 中 / UX 变更 |
-| **B4** | 安全中 | IPC 驱动改走 Unix socket 传密码（去环境变量） | 中 / 改动大 |
+| **B4** | 安全中 | ~~IPC 驱动改走 Unix socket 传密码~~ → 收敛版：禁 password env 映射（已完成 2026-09-19） | 低 / 即时 |
 | **B5** | 安全低 | SFTP 递归下载校验远端路径不越界 | 低 / 即时 |
 | **B6** | 安全低 | TLS 关闭校验选项加风险提示 | 低 / UI 文案 |
 | **P1** | 性能高 | sysinfo 精确刷新 + 后台化 | 低 / 高 |
@@ -168,23 +168,28 @@ TDD：
 - `crates/terminal_view/src/terminal_element.rs:661-680`：删除 `tail_summary`。（已在此前提交完成：改为 tracing 启用时才生成）
 - `808-843` `compute_left_edge_fingerprint`：增加 `dirty_lines: &[usize]` 参数；保留全网格兜底作为 fallback（每 N 帧跑一次）。（本次完成：`detect_left_edge_changed_lines` 加 `dirty_lines` 参数，增量帧只重算 dirty 行指纹，每 `LEFT_EDGE_FULL_SCAN_INTERVAL=30` 帧全量兜底；新增 `compute_line_left_edge_fingerprint` 单行哈希，与全量扫描共用 `EDGE_HASH_MUL/EDGE_HASH_ADD` 保证一致；3 个回归测试）
 
-#### B4 IPC 驱动改走 socket 传密码（已完成 2026-09-20）
+#### B4 IPC 驱动密码通路收敛（已完成，收敛版；已随子系统删除消解）
 
-> **实现说明**：核对后发现密码本就走 socket 协议载荷（`protocol.rs::connection_config_params`），
-> 风险面是 manifest 的 `env_from_config` 可把 `password` / `extra_params.ssh_private_key`
-> 等敏感路径声明为子进程环境变量。实际修复为双封堵（未新增 DriverHandshake 消息）：
+> **最终状态（2026-09-20）**：外部驱动子系统已按同目录 `REMOVE_EXTERNAL_DB_DRIVERS_PLAN.md`
+> 整体移除（`b12eec2e`），本节两道闸门随之删除，风险点不复存在。
 >
-> - `crates/db/src/ipc/registry.rs`：`validate()` 拒绝映射敏感路径的 manifest（加载即失败）；
->   新增 `is_sensitive_config_path`，复用 `one_core::storage::models::is_sensitive_field`
->   （已改为 `pub`）与落库加密名单同一来源。
-> - `crates/db/src/ipc/client.rs`：`env_pairs_from_connection_config` 防御纵深跳过 + warn，
->   兜住 `from_drivers` 等绕过校验的构造路径。
-> - 测试 5/5：registry 3（password 拒绝 / 敏感 extra_param 拒绝 / 非敏感放行）+
->   client 2（既有映射回归 + 敏感字段跳过）。
-> - `crates/db/src/ipc/AGENTS.md` 握手协议文档已新建（计划文档同步项 ✅）。
+> 核对后发现密码主通道本就走 socket 协议载荷（`protocol.rs::connection_config_params`），
+> 风险面是 manifest 的 `env_from_config` 可把敏感路径声明为子进程环境变量
+> （`/proc/<pid>/environ` 泄漏 + 孙进程遗传）。两条分支线独立收敛到同一双闸门设计
+> （09-19 收敛版 + 09-20 `a1790611` 加强版）：
 >
-> ⚠️ 注意：分支 `refactor/remove-external-db-drivers`（`b12eec2e`）已整体删除
-> `crates/db/src/ipc/`（4219 行）。若该分支合入，本项改动随之消解。
+> 1. `registry.rs` `IpcDriverManifest::validate`：映射敏感路径（`password` /
+>    `extra_params.<敏感字段>`）的 manifest 拒绝加载；敏感判定复用
+>    `one_core::storage::models::is_sensitive_field`（已改 `pub`），与落库加密名单同源。
+> 2. `client.rs` `env_pairs_from_connection_config`：兜底跳过 + warn 留痕，
+>    兜住 `from_drivers` 等绕过校验的构造路径。
+> 3. 测试：registry 3（password 拒绝 / 敏感 extra_param 拒绝 / 非敏感放行）+
+>    client 2（既有映射回归 + 敏感字段跳过），5/5 通过。
+> 4. `crates/db/src/ipc/AGENTS.md` 握手协议文档已建（随子系统一并删除）。
+>
+> 顺带修复两处既有红灯：`mysql::connection` B1 的 2 个 `build_init_commands` 断言
+> 未随 NO_BACKSLASH_ESCAPES 更新（两分支分别修复，内容一致）；`ipc_concurrency` /
+> `ipc_mock_driver` 的 `field_type` 裸字符串与 FieldType 内部标签枚举不匹配。
 
 ## 测试策略
 

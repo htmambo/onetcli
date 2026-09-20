@@ -73,12 +73,12 @@ impl ChatBiAgent {
 
         let db_meta = ctx
             .get_capability::<DatabaseMetadataProvider>(CAP_DB_METADATA)
-            .ok_or_else(|| "缺少数据库连接能力，无法执行 BI 分析".to_string())?
+            .ok_or_else(|| t!("ChatBi.missing_db_capability").to_string())?
             .clone();
 
         let _ = tx
             .send(AgentEvent::Progress(
-                "正在识别分析问题与候选表...".to_string(),
+                t!("ChatBi.progress_identifying").to_string(),
             ))
             .await;
 
@@ -102,13 +102,13 @@ impl ChatBiAgent {
             let tables = db_meta
                 .list_tables()
                 .await
-                .map_err(|e| format!("获取表列表失败: {}", e))?;
+                .map_err(|e| t!("ChatBi.fetch_tables_failed", error = e).to_string())?;
             let selected = self.ai_select_tables(&ctx, &tables, &question).await?;
             (selected, TableSelectionSource::AiSelected)
         };
 
         if selected_tables.is_empty() {
-            return Err("未能识别可用数据表，请尝试在问题中使用 @表名".to_string());
+            return Err(t!("ChatBi.no_tables_found").to_string());
         }
 
         // 发送选表信息（类似 SqlWorkflowAgent 的 workflow_summary）
@@ -131,7 +131,9 @@ impl ChatBiAgent {
             .await;
 
         let _ = tx
-            .send(AgentEvent::Progress("正在生成分析 SQL...".to_string()))
+            .send(AgentEvent::Progress(
+                t!("ChatBi.progress_generating_sql").to_string(),
+            ))
             .await;
 
         let sql = self
@@ -139,10 +141,7 @@ impl ChatBiAgent {
             .await?;
 
         if !is_query_statement_fallback(&sql) {
-            return Err(
-                "检测到非查询语句，已拒绝执行。请调整问题，仅生成 SELECT/SHOW/WITH/EXPLAIN 等查询 SQL。"
-                    .to_string(),
-            );
+            return Err(t!("ChatBi.non_query_rejected").to_string());
         }
 
         // 发送生成的 SQL
@@ -151,18 +150,18 @@ impl ChatBiAgent {
 
         let _ = tx
             .send(AgentEvent::Progress(
-                "正在执行 SQL 获取分析数据...".to_string(),
+                t!("ChatBi.progress_executing_sql").to_string(),
             ))
             .await;
 
         let query_result = db_meta
             .execute_query_preview(&sql, PREVIEW_MAX_ROWS)
             .await
-            .map_err(|e| format!("执行分析 SQL 失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.execute_sql_failed", error = e).to_string())?;
 
         let _ = tx
             .send(AgentEvent::Progress(
-                "正在生成 BI 分析与图表配置...".to_string(),
+                t!("ChatBi.progress_generating_bi").to_string(),
             ))
             .await;
 
@@ -186,7 +185,7 @@ impl ChatBiAgent {
 
         tx.send(AgentEvent::Completed(AgentResult::default()))
             .await
-            .map_err(|e| format!("发送结果失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.send_result_failed", error = e).to_string())?;
 
         Ok(())
     }
@@ -203,7 +202,7 @@ impl ChatBiAgent {
             .manager()
             .get_provider(&ctx.provider_config)
             .await
-            .map_err(|e| format!("获取模型失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.get_model_failed", error = e).to_string())?;
 
         let request = ChatRequest {
             model: ctx.provider_config.model.clone(),
@@ -217,7 +216,7 @@ impl ChatBiAgent {
         let response = provider
             .chat(&request)
             .await
-            .map_err(|e| format!("AI 选表失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.ai_select_tables_failed", error = e).to_string())?;
         Ok(parse_table_selection_response(&response))
     }
 
@@ -260,7 +259,7 @@ impl ChatBiAgent {
             .manager()
             .get_provider(&ctx.provider_config)
             .await
-            .map_err(|e| format!("获取模型失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.get_model_failed", error = e).to_string())?;
 
         let request = ChatRequest {
             model: ctx.provider_config.model.clone(),
@@ -274,10 +273,10 @@ impl ChatBiAgent {
         let response = provider
             .chat(&request)
             .await
-            .map_err(|e| format!("生成 SQL 失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.generate_sql_failed", error = e).to_string())?;
 
         extract_sql_from_response(&response)
-            .ok_or_else(|| "未从模型返回中提取到 SQL，请重试或明确说明分析维度".to_string())
+            .ok_or_else(|| t!("ChatBi.no_sql_extracted").to_string())
     }
 
     async fn generate_analysis_report(
@@ -306,7 +305,7 @@ impl ChatBiAgent {
             .manager()
             .get_provider(&ctx.provider_config)
             .await
-            .map_err(|e| format!("获取模型失败: {}", e))?;
+            .map_err(|e| t!("ChatBi.get_model_failed", error = e).to_string())?;
 
         let request = ChatRequest {
             model: ctx.provider_config.model.clone(),
@@ -320,7 +319,7 @@ impl ChatBiAgent {
         provider
             .chat(&request)
             .await
-            .map_err(|e| format!("生成 BI 报告失败: {}", e))
+            .map_err(|e| t!("ChatBi.generate_bi_report_failed", error = e).to_string())
     }
 
     fn build_fallback_chart_json(&self, query_result: &db::QueryResult) -> String {
@@ -367,7 +366,7 @@ impl ChatBiAgent {
 
         json!({
             "chart_type": "bar",
-            "title": "自动生成图表",
+            "title": t!("ChatBi.fallback_chart_title").to_string(),
             "x_key": x_key,
             "y_key": y_key,
             "data": data,

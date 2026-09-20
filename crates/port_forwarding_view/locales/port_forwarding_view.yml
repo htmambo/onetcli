@@ -91,3 +91,7 @@ PortForwarding:
   validation_number:
     en: "%{field} must be a valid port number."
     zh-CN: "%{field} 必须是有效端口。"
+  log_save_connection_failed:
+    en: "Failed to save port forwarding connection: %{error}"
+    zh-CN: "保存端口转发连接失败: %{error}"
+    zh-HK: "儲存端口轉發連線失敗: %{error}"

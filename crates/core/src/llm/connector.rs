@@ -8,6 +8,7 @@ use llm_connector::types::{
     ChatRequest, ChatResponse, Message, MessageBlock, Role, StreamingResponse, Tool, ToolCall,
     ToolChoice,
 };
+use rust_i18n::t;
 
 use super::types::{ProviderConfig, ProviderType};
 
@@ -38,7 +39,7 @@ pub trait LlmProvider: Send + Sync {
     async fn chat(&self, request: &ChatRequest) -> Result<String> {
         let response = self.chat_full(request).await?;
         if response.content.is_empty() && response.has_tool_calls() {
-            tracing::warn!("chat() 丢弃了响应中的 tool_calls，仅正文被返回");
+            tracing::warn!("{}", t!("Llm.chat_dropped_tool_calls"));
         }
         Ok(response.content)
     }
@@ -235,8 +236,11 @@ impl LlmConnector {
     ) -> Result<ChatRequest> {
         if !self.supports_tools && !tools.is_empty() {
             anyhow::bail!(
-                "Provider {} 不支持工具调用（当前协议序列化不含 tools 字段）",
-                self.provider_type.as_str()
+                "{}",
+                t!(
+                    "Llm.provider_no_tool_calls",
+                    provider = self.provider_type.as_str()
+                )
             );
         }
         let mut request = self.build_request(config, messages);

@@ -1090,14 +1090,24 @@ impl SftpView {
                 self.reconnect(cx);
             }
             Ok(false) => {
-                tracing::warn!("SFTP 信任新主机：{}:{} 没有待确认的主机密钥", host, port);
+                tracing::warn!(
+                    "{}",
+                    t!(
+                        "Notification.trust_new_host_missing",
+                        host = host,
+                        port = port
+                    )
+                );
             }
             Err(err) => {
                 tracing::error!(
-                    "SFTP 信任新主机 {}:{} 写入 known_hosts 失败: {}",
-                    host,
-                    port,
-                    err
+                    "{}",
+                    t!(
+                        "Notification.trust_new_host_failed",
+                        host = host,
+                        port = port,
+                        error = err.to_string()
+                    )
                 );
                 self.connection_state = ConnectionState::Disconnected {
                     error: Some(err.to_string()),

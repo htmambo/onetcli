@@ -1517,11 +1517,17 @@ impl FileManagerPanel {
                         this.selected_indices.clear();
                     }
                     Ok(Err(e)) => {
-                        tracing::error!("列出目录失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!("FileManager.log_list_dir_failed", error = e.to_string())
+                        );
                         this.recover_from_navigation_error(e.to_string(), cx);
                     }
                     Err(e) => {
-                        tracing::error!("SFTP 任务失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!("FileManager.log_sftp_task_failed", error = e.to_string())
+                        );
                         this.recover_from_navigation_error(e.to_string(), cx);
                     }
                 }
@@ -2147,7 +2153,13 @@ impl FileManagerPanel {
                         .map(|entry| entry.name)
                         .collect(),
                     Ok(Err(e)) => {
-                        tracing::error!("读取远程目录失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!(
+                                "FileManager.log_read_remote_dir_failed",
+                                error = e.to_string()
+                            )
+                        );
                         let error_msg = t!("FileManager.read_dir_failed", error = e).to_string();
                         let _ = view.update_in(cx, |_this, window, cx| {
                             window.push_notification(Notification::error(error_msg.clone()), cx);
@@ -2155,7 +2167,13 @@ impl FileManagerPanel {
                         return;
                     }
                     Err(e) => {
-                        tracing::error!("远程目录检查任务失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!(
+                                "FileManager.log_remote_dir_task_failed",
+                                error = e.to_string()
+                            )
+                        );
                         let error_msg = t!("FileManager.read_dir_failed", error = e).to_string();
                         let _ = view.update_in(cx, |_this, window, cx| {
                             window.push_notification(Notification::error(error_msg.clone()), cx);
@@ -2525,7 +2543,13 @@ impl FileManagerPanel {
                                     });
                                 }
                                 Ok(Err(e)) => {
-                                    tracing::error!("创建远程文件夹失败: {}", e);
+                                    tracing::error!(
+                                        "{}",
+                                        t!(
+                                            "FileManager.log_create_folder_failed",
+                                            error = e.to_string()
+                                        )
+                                    );
                                     let error_msg =
                                         t!("FileManager.create_folder_failed", error = e)
                                             .to_string();
@@ -2537,7 +2561,13 @@ impl FileManagerPanel {
                                     });
                                 }
                                 Err(e) => {
-                                    tracing::error!("远程创建文件夹任务失败: {}", e);
+                                    tracing::error!(
+                                        "{}",
+                                        t!(
+                                            "FileManager.log_create_folder_task_failed",
+                                            error = e.to_string()
+                                        )
+                                    );
                                     let error_msg =
                                         t!("FileManager.create_folder_failed", error = e)
                                             .to_string();

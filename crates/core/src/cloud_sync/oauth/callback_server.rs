@@ -8,6 +8,7 @@
 //! 3. 等待回调（含 auth code）
 //! 4. 返回 auth code，关闭服务器
 
+use rust_i18n::t;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
@@ -29,10 +30,18 @@ pub enum CallbackServerError {
 impl std::fmt::Display for CallbackServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NoAvailablePort => write!(f, "找不到可用端口"),
-            Self::StartFailed(msg) => write!(f, "服务器启动失败: {}", msg),
-            Self::Timeout => write!(f, "回调超时"),
-            Self::ConnectionError(msg) => write!(f, "连接错误: {}", msg),
+            Self::NoAvailablePort => write!(f, "{}", t!("OAuthCallback.no_available_port")),
+            Self::StartFailed(msg) => write!(
+                f,
+                "{}",
+                t!("OAuthCallback.start_failed", error = msg.clone())
+            ),
+            Self::Timeout => write!(f, "{}", t!("OAuthCallback.timeout")),
+            Self::ConnectionError(msg) => write!(
+                f,
+                "{}",
+                t!("OAuthCallback.connection_error", error = msg.clone())
+            ),
         }
     }
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, http};
+use rust_i18n::t;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -17,17 +18,26 @@ where
     F: FnMut(u64, Option<u64>),
 {
     if let Some(parent) = download_path.parent() {
-        fs::create_dir_all(parent)
-            .await
-            .map_err(|err| format!("创建下载目录失败: {}", err))?;
+        fs::create_dir_all(parent).await.map_err(|err| {
+            t!(
+                "UpdateDownload.create_download_dir_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
         // 设置目录权限为仅当前用户可访问，防止 TOCTOU 攻击
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let permissions = std::fs::Permissions::from_mode(0o700);
-            std::fs::set_permissions(parent, permissions)
-                .map_err(|err| format!("设置下载目录权限失败: {}", err))?;
+            std::fs::set_permissions(parent, permissions).map_err(|err| {
+                t!(
+                    "UpdateDownload.set_download_dir_permissions_failed",
+                    err = err.to_string()
+                )
+                .to_string()
+            })?;
         }
 
         // 清理目录中超过 7 天的旧下载文件
@@ -39,15 +49,28 @@ where
         .uri(download_url)
         .header("Accept", "application/octet-stream")
         .body(AsyncBody::empty())
-        .map_err(|err| format!("构建下载请求失败: {}", err))?;
+        .map_err(|err| {
+            t!(
+                "UpdateDownload.build_download_request_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
-    let response = http_client
-        .send(request)
-        .await
-        .map_err(|err| format!("发送下载请求失败: {}", err))?;
+    let response = http_client.send(request).await.map_err(|err| {
+        t!(
+            "UpdateDownload.send_download_request_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     if !response.status().is_success() {
-        return Err(format!("更新包下载失败: {}", response.status()));
+        return Err(t!(
+            "UpdateDownload.update_package_download_failed",
+            status = response.status().to_string()
+        )
+        .to_string());
     }
 
     let total_bytes = response
@@ -57,36 +80,55 @@ where
         .and_then(|value| value.parse::<u64>().ok());
 
     let mut body = response.into_body();
-    let mut file = fs::File::create(download_path)
-        .await
-        .map_err(|err| format!("创建更新文件失败: {}", err))?;
+    let mut file = fs::File::create(download_path).await.map_err(|err| {
+        t!(
+            "UpdateDownload.create_update_file_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     let mut downloaded = 0;
     let mut buffer = vec![0u8; 8192];
 
     loop {
-        let read = body
-            .read(&mut buffer)
-            .await
-            .map_err(|err| format!("读取更新数据失败: {}", err))?;
+        let read = body.read(&mut buffer).await.map_err(|err| {
+            t!(
+                "UpdateDownload.read_update_data_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
         if read == 0 {
             break;
         }
 
-        file.write_all(&buffer[..read])
-            .await
-            .map_err(|err| format!("写入更新文件失败: {}", err))?;
+        file.write_all(&buffer[..read]).await.map_err(|err| {
+            t!(
+                "UpdateDownload.write_update_file_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
         downloaded += read as u64;
         on_progress(downloaded, total_bytes);
     }
 
-    file.flush()
-        .await
-        .map_err(|err| format!("刷新更新文件失败: {}", err))?;
-    file.sync_all()
-        .await
-        .map_err(|err| format!("同步更新文件失败: {}", err))?;
+    file.flush().await.map_err(|err| {
+        t!(
+            "UpdateDownload.flush_update_file_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
+    file.sync_all().await.map_err(|err| {
+        t!(
+            "UpdateDownload.sync_update_file_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     Ok(())
 }
@@ -120,7 +162,7 @@ where
         }
     }
 
-    Err(last_error.unwrap_or_else(|| "缺少可用的更新下载源".to_string()))
+    Err(last_error.unwrap_or_else(|| t!("UpdateDownload.no_download_source_available").to_string()))
 }
 
 pub(crate) fn build_download_path(version: &str, download_url: &str) -> Result<PathBuf, String> {
@@ -166,17 +208,25 @@ fn archive_extension(file_name: &str) -> String {
 /// 校验下载文件的 SHA256 哈希值。
 /// 使用同步文件读取——下载文件为本地文件且体积有限，无需异步。
 pub(crate) fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
-    let data = std::fs::read(path).map_err(|err| format!("读取下载文件失败: {}", err))?;
+    let data = std::fs::read(path).map_err(|err| {
+        t!(
+            "UpdateDownload.read_download_file_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     let hash = Sha256::digest(&data);
     let actual = format!("{:x}", hash);
     let expected_lower = expected.trim().to_lowercase();
 
     if actual != expected_lower {
-        return Err(format!(
-            "SHA256 校验失败: 期望 {}，实际 {}",
-            expected_lower, actual
-        ));
+        return Err(t!(
+            "UpdateDownload.sha256_mismatch",
+            expected = expected_lower,
+            actual = actual
+        )
+        .to_string());
     }
 
     Ok(())

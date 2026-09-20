@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use rust_i18n::t;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::broadcast;
@@ -14,19 +15,22 @@ pub(crate) async fn run(registry: Arc<SessionRegistry>) -> Result<()> {
     let endpoint = local_pty_endpoint();
     let pipe_name = endpoint
         .to_str()
-        .ok_or_else(|| anyhow::anyhow!("无效的 named pipe 路径"))?;
+        .ok_or_else(|| anyhow::anyhow!(t!("LocalPtyHost.named_pipe_path_invalid")))?;
 
     let mut listener = ServerOptions::new()
         .create(pipe_name)
-        .context("创建 Windows Named Pipe Server 失败")?;
-    tracing::info!(endpoint = %pipe_name, "local-pty-host Windows listener 已启动");
+        .context(t!("LocalPtyHost.named_pipe_create_failed"))?;
+    tracing::info!(endpoint = %pipe_name, "{}", t!("LocalPtyHost.windows_listener_started"));
 
     loop {
-        listener.connect().await.context("接受 client 连接失败")?;
+        listener
+            .connect()
+            .await
+            .context(t!("LocalPtyHost.accept_client_failed"))?;
         // 为下一个连接创建新的 server
         let next_listener = ServerOptions::new()
             .create(pipe_name)
-            .context("创建下一个 Windows Named Pipe Server 失败")?;
+            .context(t!("LocalPtyHost.named_pipe_next_create_failed"))?;
         let current_listener = std::mem::replace(&mut listener, next_listener);
         let registry = registry.clone();
         tokio::spawn(handle_client(registry, current_listener));

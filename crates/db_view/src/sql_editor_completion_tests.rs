@@ -10,7 +10,7 @@ mod tests {
     use db::plugin::SqlCompletionInfo;
     use db::sql_editor::sql_context_inferrer::{ContextInferrer, SqlContext};
     use db::sql_editor::sql_symbol_table::SymbolTable;
-    use db::sql_editor::sql_tokenizer::SqlTokenizer;
+    use db::sql_editor::sql_tokenizer::{SqlKeyword, SqlTokenizer};
     use gpui_component::input::CompletionProvider;
     use proptest::prelude::*;
     use std::collections::HashMap;
@@ -25,73 +25,24 @@ mod tests {
 
     /// Generate valid SQL identifier
     fn identifier_strategy() -> impl Strategy<Value = String> {
-        "[a-z][a-z0-9_]{0,10}".prop_filter("not a keyword", |s| {
-            !matches!(
-                s.to_uppercase().as_str(),
-                "SELECT"
-                    | "FROM"
-                    | "WHERE"
-                    | "JOIN"
-                    | "AND"
-                    | "OR"
-                    | "ON"
-                    | "ORDER"
-                    | "GROUP"
-                    | "BY"
-                    | "SET"
-                    | "VALUES"
-                    | "INTO"
-                    | "UPDATE"
-                    | "DELETE"
-                    | "INSERT"
-                    | "CREATE"
-                    | "TABLE"
-                    | "LEFT"
-                    | "RIGHT"
-                    | "INNER"
-                    | "FULL"
-                    | "CROSS"
-                    | "AS"
-                    | "HAVING"
-                    | "LIMIT"
-                    | "DISTINCT"
-                    | "ALL"
-                    | "ID"
-                    | "NAME"
-            )
-        })
+        // 关键字判定与 tokenizer 保持同一来源，避免手写清单漂移
+        // （本测试曾因此漏排 IN，table="in" 时 alias 解析失败）
+        "[a-z][a-z0-9_]{0,10}".prop_filter("not a keyword", |s| !is_sql_keyword(s))
     }
 
     /// Generate table alias (single letter or short identifier)
     fn alias_strategy() -> impl Strategy<Value = String> {
-        "[a-z][a-z0-9]{0,2}".prop_filter("not a keyword", |s| {
-            !matches!(
-                s.to_uppercase().as_str(),
-                "AND" | "AS" | "ON" | "OR" | "BY" | "IN" | "IS"
-            )
-        })
+        "[a-z][a-z0-9]{0,2}".prop_filter("not a keyword", |s| !is_sql_keyword(s))
     }
 
     /// Generate column name
     fn column_strategy() -> impl Strategy<Value = String> {
-        "[a-z][a-z0-9_]{0,8}".prop_filter("not a keyword", |s| {
-            !matches!(
-                s.to_uppercase().as_str(),
-                "SELECT"
-                    | "FROM"
-                    | "WHERE"
-                    | "JOIN"
-                    | "AND"
-                    | "OR"
-                    | "ON"
-                    | "AS"
-                    | "BY"
-                    | "IN"
-                    | "IS"
-                    | "SET"
-                    | "ALL"
-            )
-        })
+        "[a-z][a-z0-9_]{0,8}".prop_filter("not a keyword", |s| !is_sql_keyword(s))
+    }
+
+    /// 与 SqlTokenizer 同一来源的关键字判定
+    fn is_sql_keyword(s: &str) -> bool {
+        SqlKeyword::from_str(s).is_some()
     }
 
     /// Helper to build symbol table from SQL

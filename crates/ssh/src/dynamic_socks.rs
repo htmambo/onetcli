@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use rust_i18n::t;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, oneshot};
@@ -79,7 +80,7 @@ pub async fn start_dynamic_socks_forward(
                     let (inbound, inbound_addr) = match accept_result {
                         Ok(result) => result,
                         Err(error) => {
-                            tracing::error!("SOCKS accept 失败: {}", error);
+                            tracing::error!("{}", t!("Ssh.socks_accept_failed", error = error.to_string()));
                             break;
                         }
                     };
@@ -111,7 +112,10 @@ async fn handle_socks_connection(
     client: Arc<Mutex<RusshClient>>,
 ) {
     if let Err(error) = run_socks_connection(inbound, inbound_addr, client).await {
-        tracing::debug!("SOCKS 连接结束: {}", error);
+        tracing::debug!(
+            "{}",
+            t!("Ssh.socks_connection_ended", error = error.to_string())
+        );
     }
 }
 

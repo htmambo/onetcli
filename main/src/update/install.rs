@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rust_i18n::t;
+
 use super::extract::extract_archive;
 use super::util::UpdateInstallAction;
 
@@ -65,31 +67,65 @@ pub(super) fn cleanup_stale_update_backups() {
 
 fn create_staging_dir() -> Result<PathBuf, String> {
     let root = std::env::temp_dir().join("omnihub-update");
-    fs::create_dir_all(&root).map_err(|err| format!("创建更新临时目录失败: {err}"))?;
+    fs::create_dir_all(&root).map_err(|err| {
+        t!(
+            "UpdateInstall.create_update_temp_dir_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|err| format!("读取系统时间失败: {err}"))?
+        .map_err(|err| {
+            t!(
+                "UpdateInstall.read_system_time_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?
         .as_millis();
     let staging_dir = root.join(format!("staged-{}-{now}", std::process::id()));
-    remove_dir_all_if_exists(&staging_dir)
-        .map_err(|err| format!("清理旧 staging 目录失败: {err}"))?;
-    fs::create_dir_all(&staging_dir).map_err(|err| format!("创建 staging 目录失败: {err}"))?;
+    remove_dir_all_if_exists(&staging_dir).map_err(|err| {
+        t!(
+            "UpdateInstall.cleanup_staging_dir_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
+    fs::create_dir_all(&staging_dir).map_err(|err| {
+        t!(
+            "UpdateInstall.create_staging_dir_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
     Ok(staging_dir)
 }
 
 #[cfg(target_os = "windows")]
 fn spawn_windows_helper(staging_dir: &Path) -> Result<(), String> {
     let source_path = find_windows_executable(staging_dir)?;
-    let target_path =
-        std::env::current_exe().map_err(|err| format!("获取当前路径失败: {}", err))?;
+    let target_path = std::env::current_exe().map_err(|err| {
+        t!(
+            "UpdateInstall.get_current_exe_path_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     Command::new(&source_path)
         .arg(super::APPLY_UPDATE_FLAG)
         .arg(&source_path)
         .arg(&target_path)
         .spawn()
-        .map_err(|err| format!("启动更新进程失败: {}", err))?;
+        .map_err(|err| {
+            t!(
+                "UpdateInstall.spawn_update_process_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
     Ok(())
 }
@@ -101,7 +137,8 @@ fn find_windows_executable(staging_dir: &Path) -> Result<PathBuf, String> {
         return Ok(direct);
     }
 
-    find_file_named(staging_dir, "omnihub.exe").ok_or_else(|| "未找到 omnihub.exe".to_string())
+    find_file_named(staging_dir, "omnihub.exe")
+        .ok_or_else(|| t!("UpdateInstall.windows_executable_not_found").to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -122,16 +159,20 @@ fn apply_update_windows(source_path: &Path, target_path: &Path) -> Result<(), St
                 last_error = Some(err);
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
-            Err(err) => return Err(format!("替换更新文件失败: {}", err)),
+            Err(err) => {
+                return Err(t!(
+                    "UpdateInstall.replace_update_file_failed",
+                    err = err.to_string()
+                )
+                .to_string());
+            }
         }
     }
 
-    Err(format!(
-        "更新失败: {}",
-        last_error
-            .map(|err| err.to_string())
-            .unwrap_or_else(|| "未知原因".to_string())
-    ))
+    let detail = last_error
+        .map(|err| err.to_string())
+        .unwrap_or_else(|| t!("UpdateInstall.unknown_reason").to_string());
+    Err(t!("UpdateInstall.update_failed", err = detail).to_string())
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -140,7 +181,13 @@ fn apply_update_unix_with_target(source_path: &Path, target_path: &Path) -> Resu
     replace_target_with_backup(target_path, &backup_path, || {
         try_replace_unix(source_path, target_path)
     })
-    .map_err(|err| format!("替换更新文件失败: {}", err))?;
+    .map_err(|err| {
+        t!(
+            "UpdateInstall.replace_update_file_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     #[cfg(unix)]
     set_executable_permission(target_path)?;
@@ -166,8 +213,20 @@ fn install_macos(staging_dir: &Path) -> Result<(), String> {
     let current_app = current_app_bundle_path()?;
     let backup_app = current_app.with_extension("app.old");
 
-    remove_dir_all_if_exists(&backup_app).map_err(|err| format!("清理旧备份失败: {err}"))?;
-    move_dir(&current_app, &backup_app).map_err(|err| format!("备份当前应用失败: {}", err))?;
+    remove_dir_all_if_exists(&backup_app).map_err(|err| {
+        t!(
+            "UpdateInstall.cleanup_old_backup_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
+    move_dir(&current_app, &backup_app).map_err(|err| {
+        t!(
+            "UpdateInstall.backup_current_app_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     match move_dir(&new_app, &current_app) {
         Ok(()) => {
@@ -178,7 +237,7 @@ fn install_macos(staging_dir: &Path) -> Result<(), String> {
         }
         Err(err) => {
             let _ = move_dir(&backup_app, &current_app);
-            Err(format!("安装 macOS 更新失败: {}", err))
+            Err(t!("UpdateInstall.install_macos_failed", err = err.to_string()).to_string())
         }
     }
 }
@@ -189,13 +248,19 @@ fn restart_macos_application(app_path: &Path) -> Result<(), String> {
         .arg("-n")
         .arg(app_path)
         .spawn()
-        .map_err(|err| format!("重启应用失败: {}", err))?;
+        .map_err(|err| t!("UpdateInstall.restart_app_failed", err = err.to_string()).to_string())?;
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn current_app_bundle_path() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe().map_err(|err| format!("获取当前路径失败: {err}"))?;
+    let exe_path = std::env::current_exe().map_err(|err| {
+        t!(
+            "UpdateInstall.get_current_exe_path_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
     current_app_bundle_path_from_exe(&exe_path)
 }
 
@@ -203,23 +268,23 @@ fn current_app_bundle_path() -> Result<PathBuf, String> {
 fn current_app_bundle_path_from_exe(exe_path: &Path) -> Result<PathBuf, String> {
     let macos_dir = exe_path
         .parent()
-        .ok_or_else(|| "当前可执行文件缺少父目录".to_string())?;
+        .ok_or_else(|| t!("UpdateInstall.exe_missing_parent_dir").to_string())?;
     if macos_dir.file_name().and_then(|name| name.to_str()) != Some("MacOS") {
-        return Err("当前可执行文件不在 .app/Contents/MacOS 中".to_string());
+        return Err(t!("UpdateInstall.exe_not_in_app_bundle").to_string());
     }
 
     let contents_dir = macos_dir
         .parent()
-        .ok_or_else(|| "当前可执行文件缺少 Contents 目录".to_string())?;
+        .ok_or_else(|| t!("UpdateInstall.exe_missing_contents_dir").to_string())?;
     if contents_dir.file_name().and_then(|name| name.to_str()) != Some("Contents") {
-        return Err("当前可执行文件不在 .app/Contents/MacOS 中".to_string());
+        return Err(t!("UpdateInstall.exe_not_in_app_bundle").to_string());
     }
 
     let app_dir = contents_dir
         .parent()
-        .ok_or_else(|| "当前可执行文件缺少 .app 目录".to_string())?;
+        .ok_or_else(|| t!("UpdateInstall.exe_missing_app_dir").to_string())?;
     if app_dir.extension().and_then(|ext| ext.to_str()) != Some("app") {
-        return Err("当前可执行文件不在 .app bundle 中".to_string());
+        return Err(t!("UpdateInstall.exe_not_in_app_bundle").to_string());
     }
 
     Ok(app_dir.to_path_buf())
@@ -229,11 +294,23 @@ fn current_app_bundle_path_from_exe(exe_path: &Path) -> Result<PathBuf, String> 
 fn find_first_app_bundle(staging_dir: &Path) -> Result<PathBuf, String> {
     let mut stack = vec![staging_dir.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let entries = fs::read_dir(&dir)
-            .map_err(|err| format!("读取 staging 目录失败 {}: {}", dir.display(), err))?;
+        let entries = fs::read_dir(&dir).map_err(|err| {
+            t!(
+                "UpdateInstall.read_staging_dir_failed",
+                path = dir.display().to_string(),
+                err = err.to_string()
+            )
+            .to_string()
+        })?;
 
         for entry in entries {
-            let entry = entry.map_err(|err| format!("读取 staging 条目失败: {}", err))?;
+            let entry = entry.map_err(|err| {
+                t!(
+                    "UpdateInstall.read_staging_entry_failed",
+                    err = err.to_string()
+                )
+                .to_string()
+            })?;
             let path = entry.path();
             if path.is_dir() {
                 if path.extension().and_then(|ext| ext.to_str()) == Some("app") {
@@ -244,7 +321,7 @@ fn find_first_app_bundle(staging_dir: &Path) -> Result<PathBuf, String> {
         }
     }
 
-    Err("未找到 OmniHub.app".to_string())
+    Err(t!("UpdateInstall.app_bundle_not_found").to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -283,10 +360,13 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> std::io::Result<()> 
         } else if file_type.is_file() {
             fs::copy(&source_path, &destination_path)?;
         } else {
-            return Err(std::io::Error::other(format!(
-                "不支持复制的 bundle 条目: {}",
-                source_path.display()
-            )));
+            return Err(std::io::Error::other(
+                t!(
+                    "UpdateInstall.bundle_entry_copy_unsupported",
+                    path = source_path.display().to_string()
+                )
+                .to_string(),
+            ));
         }
     }
 
@@ -296,14 +376,26 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> std::io::Result<()> 
 #[cfg(target_os = "linux")]
 fn install_linux(staging_dir: &Path) -> Result<(), String> {
     let new_binary = locate_linux_binary(staging_dir)?;
-    let target_path = std::env::current_exe().map_err(|err| format!("获取当前路径失败: {err}"))?;
+    let target_path = std::env::current_exe().map_err(|err| {
+        t!(
+            "UpdateInstall.get_current_exe_path_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
     let backup_path = target_path.with_extension("old");
 
     ensure_writable(&target_path)?;
     replace_target_with_backup(&target_path, &backup_path, || {
         replace_via_staging_copy(&new_binary, &target_path)
     })
-    .map_err(|err| format!("替换更新文件失败: {}", err))?;
+    .map_err(|err| {
+        t!(
+            "UpdateInstall.replace_update_file_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
     set_executable_permission(&target_path)?;
     restart_application(&target_path)?;
     Ok(())
@@ -321,7 +413,7 @@ fn locate_linux_binary(staging_dir: &Path) -> Result<PathBuf, String> {
         return Ok(direct);
     }
 
-    Err("未找到 Linux 更新二进制 omnihub".to_string())
+    Err(t!("UpdateInstall.linux_binary_not_found").to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -330,7 +422,13 @@ fn ensure_writable(target_path: &Path) -> Result<(), String> {
         .write(true)
         .open(target_path)
         .map(|_| ())
-        .map_err(|err| format!("当前安装位置不可写: {}", err))
+        .map_err(|err| {
+            t!(
+                "UpdateInstall.install_location_unwritable",
+                err = err.to_string()
+            )
+            .to_string()
+        })
 }
 
 fn replace_target_with_backup(
@@ -355,7 +453,14 @@ fn replace_target_with_backup(
         Err(err) => {
             rollback_target_from_backup(target_path, backup_path, had_target).map_err(
                 |rollback_err| {
-                    std::io::Error::other(format!("{}; 回滚失败: {}", err, rollback_err))
+                    std::io::Error::other(
+                        t!(
+                            "UpdateInstall.rollback_failed",
+                            err = err.to_string(),
+                            rollback_err = rollback_err.to_string()
+                        )
+                        .to_string(),
+                    )
                 },
             )?;
             Err(err)
@@ -376,7 +481,7 @@ fn rollback_target_from_backup(
     if !backup_path.exists() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "缺少可回滚的备份文件",
+            t!("UpdateInstall.rollback_missing_backup").to_string(),
         ));
     }
 
@@ -438,7 +543,7 @@ fn remove_dir_all_if_exists(path: &Path) -> std::io::Result<()> {
 fn restart_application(target_path: &Path) -> Result<(), String> {
     Command::new(target_path)
         .spawn()
-        .map_err(|err| format!("重启应用失败: {}", err))?;
+        .map_err(|err| t!("UpdateInstall.restart_app_failed", err = err.to_string()).to_string())?;
     Ok(())
 }
 
@@ -452,10 +557,22 @@ pub(super) fn set_executable_permission(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
 
     let mut permissions = fs::metadata(path)
-        .map_err(|err| format!("读取文件权限失败: {}", err))?
+        .map_err(|err| {
+            t!(
+                "UpdateInstall.read_file_permissions_failed",
+                err = err.to_string()
+            )
+            .to_string()
+        })?
         .permissions();
     permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).map_err(|err| format!("设置可执行权限失败: {}", err))?;
+    fs::set_permissions(path, permissions).map_err(|err| {
+        t!(
+            "UpdateInstall.set_executable_permission_failed",
+            err = err.to_string()
+        )
+        .to_string()
+    })?;
 
     Ok(())
 }

@@ -112,7 +112,10 @@ impl<E: MessageExtension + Default> ChatEngine<E> {
                 Some(id)
             }
             Err(e) => {
-                warn!("创建会话失败: {}", e);
+                warn!(
+                    "{}",
+                    t!("AiChat.log_create_session_failed", error = e.to_string())
+                );
                 None
             }
         }

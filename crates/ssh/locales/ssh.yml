@@ -65,6 +65,62 @@ Ssh:
     en: "Proxy connection timed out after %{secs}s"
     zh-CN: "代理连接超时（%{secs} 秒）"
     zh-HK: "代理連線超時（%{secs} 秒）"
+  host_key_gex_invalid:
+    en: "GEX parameters must be valid"
+    zh-CN: "GEX 参数必须有效"
+    zh-HK: "GEX 參數必須有效"
+  known_hosts_remove_entry:
+    en: "Removing entry from known_hosts: %{line}"
+    zh-CN: "从 known_hosts 移除条目: %{line}"
+    zh-HK: "從 known_hosts 移除條目: %{line}"
+  pending_lock_poisoned:
+    en: "PENDING_UNKNOWN_HOST_KEYS lock has been poisoned"
+    zh-CN: "PENDING_UNKNOWN_HOST_KEYS 锁已中毒"
+    zh-HK: "PENDING_UNKNOWN_HOST_KEYS 鎖已中毒"
+  host_key_trusted:
+    en: "Trusted SSH host %{host}:%{port} and wrote to known_hosts"
+    zh-CN: "已信任 SSH 主机 %{host}:%{port} 并写入 known_hosts"
+    zh-HK: "已信任 SSH 主機 %{host}:%{port} 並寫入 known_hosts"
+  first_connect_auto_learn:
+    en: "First connection to SSH host %{host}:%{port}, auto-learned known_hosts fingerprint: %{fingerprint}"
+    zh-CN: "首次连接 SSH 主机 %{host}:%{port}，自动写入 known_hosts 指纹: %{fingerprint}"
+    zh-HK: "首次連線 SSH 主機 %{host}:%{port}，自動寫入 known_hosts 指紋: %{fingerprint}"
+  first_connect_pending_user:
+    en: "First connection to SSH host %{host}:%{port}, fingerprint %{fingerprint} pending user confirmation, not written to known_hosts yet"
+    zh-CN: "首次连接 SSH 主机 %{host}:%{port}，指纹 %{fingerprint} 待用户确认，暂不写入 known_hosts"
+    zh-HK: "首次連線 SSH 主機 %{host}:%{port}，指紋 %{fingerprint} 待使用者確認，暫不寫入 known_hosts"
+  host_key_changed:
+    en: "SSH host %{host}:%{port} fingerprint changed old=%{old} new=%{new}"
+    zh-CN: "SSH 主机 %{host}:%{port} 指纹变更 old=%{old} new=%{new}"
+    zh-HK: "SSH 主機 %{host}:%{port} 指紋變更 old=%{old} new=%{new}"
+  host_key_changed_auto_replaced:
+    en: "SSH host %{host}:%{port} fingerprint changed, auto-removed old fingerprint and wrote new one (known_hosts line %{line})"
+    zh-CN: "SSH 主机 %{host}:%{port} 的指纹发生变化，自动移除旧指纹并写入新指纹（known_hosts 第 %{line} 行）"
+    zh-HK: "SSH 主機 %{host}:%{port} 的指紋發生變化，自動移除舊指紋並寫入新指紋（known_hosts 第 %{line} 行）"
+  host_key_changed_rejected:
+    en: "SSH host %{host}:%{port} fingerprint changed, connection rejected (known_hosts line %{line})"
+    zh-CN: "SSH 主机 %{host}:%{port} 的指纹发生变化，拒绝连接（known_hosts 第 %{line} 行）"
+    zh-HK: "SSH 主機 %{host}:%{port} 的指紋發生變化，拒絕連線（known_hosts 第 %{line} 行）"
+  auth_tmp_key_perm_failed:
+    en: "Failed to set temporary private key file permissions"
+    zh-CN: "设置临时私钥文件权限失败"
+    zh-HK: "設定臨時私鑰檔案權限失敗"
+  auth_tmp_key_write_failed:
+    en: "Failed to write temporary private key"
+    zh-CN: "写入临时私钥失败"
+    zh-HK: "寫入臨時私鑰失敗"
+  auth_auto_publickey_unreachable:
+    en: "AutoPublicKey should be handled by the high-level auth orchestration"
+    zh-CN: "AutoPublicKey 应由高层认证编排处理"
+    zh-HK: "AutoPublicKey 應由高層驗證編排處理"
+  socks_accept_failed:
+    en: "SOCKS accept failed: %{error}"
+    zh-CN: "SOCKS accept 失败: %{error}"
+    zh-HK: "SOCKS accept 失敗: %{error}"
+  socks_connection_ended:
+    en: "SOCKS connection ended: %{error}"
+    zh-CN: "SOCKS 连接结束: %{error}"
+    zh-HK: "SOCKS 連線結束: %{error}"
 
 SshProgress:
   connecting_jump_server:

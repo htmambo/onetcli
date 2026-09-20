@@ -23,6 +23,7 @@ use super::workspace_sync::WorkspaceSyncType;
 use crate::crypto;
 use crate::storage::StorageManager;
 use crate::storage::traits::Repository;
+use rust_i18n::t;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -32,7 +33,7 @@ use zeroize::Zeroizing;
 pub type SyncFuture<'a> = Pin<Box<dyn Future<Output = Result<SyncResult, SyncError>> + Send + 'a>>;
 
 pub(crate) trait SyncHandler: Send + Sync {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> String;
     fn sync<'a>(&'a self, engine: &'a SyncEngine) -> SyncFuture<'a>;
 }
 
@@ -44,7 +45,7 @@ struct TypedSyncBridge<H: SyncTypeHandler> {
 }
 
 impl<H: SyncTypeHandler> SyncHandler for TypedSyncBridge<H> {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> String {
         self.handler.display_name()
     }
 
@@ -129,10 +130,9 @@ impl SyncEngine {
         // 如果本地 crypto 模块已解锁但同步服务未解锁，同步密钥状态
         if crypto::has_master_key() {
             if let Some(raw_key) = crypto::raw_master_key_for_sync() {
-                let mut service_write = self
-                    .crypto_service
-                    .write()
-                    .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+                let mut service_write = self.crypto_service.write().map_err(|_| {
+                    SyncError::StorageError(t!("CloudSync.lock_failed").to_string())
+                })?;
                 if !service_write.is_unlocked() {
                     tracing::info!("[同步引擎] 从本地 crypto 模块同步密钥状态");
                     service_write.set_master_key_directly(raw_key);
@@ -143,7 +143,7 @@ impl SyncEngine {
         let service = self
             .crypto_service
             .read()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+            .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
 
         if !service.is_unlocked() {
             return Err(SyncError::NotUnlocked);
@@ -166,10 +166,9 @@ impl SyncEngine {
         match cloud_config {
             Some(config) => {
                 let unlock_result = {
-                    let mut service = self
-                        .crypto_service
-                        .write()
-                        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+                    let mut service = self.crypto_service.write().map_err(|_| {
+                        SyncError::StorageError(t!("CloudSync.lock_failed").to_string())
+                    })?;
 
                     if service.key_version() != config.key_version {
                         tracing::info!(
@@ -191,13 +190,11 @@ impl SyncEngine {
                             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
 
                         if cloud_items.is_empty() {
-                            tracing::warn!(
-                                "[同步引擎] 云端密钥配置与当前主密钥不匹配，但账号下没有同步数据，自动重建云端密钥配置"
-                            );
+                            tracing::warn!("{}", t!("CloudSync.log_key_config_rebuilt"));
 
                             let new_config = {
                                 let mut service = self.crypto_service.write().map_err(|_| {
-                                    SyncError::StorageError("同步服务锁获取失败".to_string())
+                                    SyncError::StorageError(t!("CloudSync.lock_failed").to_string())
                                 })?;
                                 service.setup_master_key(&raw_key)?
                             };
@@ -210,8 +207,7 @@ impl SyncEngine {
                             Ok(())
                         } else {
                             Err(SyncError::CloudMasterKeyMismatch(
-                                "云端同步密钥与当前本地主密钥不一致，请使用原主密钥解锁，或清空该账号的云端同步数据后重试"
-                                    .to_string(),
+                                t!("CloudSync.cloud_master_key_mismatch").to_string(),
                             ))
                         }
                     }
@@ -220,10 +216,9 @@ impl SyncEngine {
             }
             None => {
                 let config = {
-                    let mut service = self
-                        .crypto_service
-                        .write()
-                        .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+                    let mut service = self.crypto_service.write().map_err(|_| {
+                        SyncError::StorageError(t!("CloudSync.lock_failed").to_string())
+                    })?;
 
                     if service.key_version() >= 1 {
                         return Ok(());
@@ -263,7 +258,7 @@ impl SyncEngine {
         let mut service = self
             .crypto_service
             .write()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+            .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
 
         Ok(service.take_operation_queue(key))
     }
@@ -276,7 +271,7 @@ impl SyncEngine {
         let mut service = self
             .crypto_service
             .write()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+            .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
 
         service.store_operation_queue(key, queue);
         Ok(())
@@ -306,7 +301,9 @@ impl SyncEngine {
             let resolved_action = self.create_resolved_action(conflict, strategy);
 
             if let Err(e) = self.apply_single_conflict(&resolved_action).await {
-                result.errors.push(format!("应用冲突解决失败: {}", e));
+                result
+                    .errors
+                    .push(t!("CloudSync.apply_conflict_failed", error = e.to_string()).to_string());
                 result.conflicts.push(conflict.clone());
             }
         }
@@ -339,7 +336,12 @@ impl SyncEngine {
                 copy.cloud_id = None;
                 copy.last_synced_at = None;
                 let timestamp = Self::current_timestamp();
-                copy.name = format!("{} (冲突副本 {})", copy.name, timestamp);
+                copy.name = t!(
+                    "CloudSync.conflict_copy_suffix",
+                    name = copy.name.as_str(),
+                    timestamp = timestamp
+                )
+                .to_string();
 
                 ResolvedConflictAction {
                     conflict: conflict.clone(),
@@ -450,7 +452,7 @@ impl SyncEngine {
         cloud_id: Option<String>,
     ) -> Result<(), SyncError> {
         let local_id = local_id.ok_or_else(|| {
-            SyncError::StorageError("连接缺少本地 ID，无法更新同步状态".to_string())
+            SyncError::StorageError(t!("CloudSync.connection_missing_local_id").to_string())
         })?;
 
         let repo = self
@@ -464,7 +466,9 @@ impl SyncEngine {
 
     fn delete_local_conflict_connection(&self, local_id: Option<i64>) -> Result<(), SyncError> {
         let local_id = local_id.ok_or_else(|| {
-            SyncError::StorageError("连接缺少本地 ID，无法应用云端删除结果".to_string())
+            SyncError::StorageError(
+                t!("CloudSync.connection_missing_local_id_for_delete").to_string(),
+            )
         })?;
 
         let repo = self

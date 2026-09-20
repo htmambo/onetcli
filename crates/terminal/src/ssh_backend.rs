@@ -5,6 +5,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+use rust_i18n::t;
 
 use ssh::{
     ChannelEvent, PtyConfig, ShellIntegrationSetup, SshChannel, SshClient, SshSessionManager,
@@ -53,13 +54,11 @@ fn is_timeout_failure(err: &anyhow::Error) -> bool {
 
 fn add_connect_error_context(err: anyhow::Error) -> anyhow::Error {
     if is_channel_open_failure(&err) {
-        return err.context(
-            "服务器拒绝打开新 channel，可能是 MaxSessions 限制（可尝试在 SSH server 设置更大值）",
-        );
+        return err.context(t!("SshBackend.channel_open_rejected_max_sessions"));
     }
 
     if is_timeout_failure(&err) {
-        return err.context("连接超时，检查网络/代理/跳板机可达性");
+        return err.context(t!("SshBackend.connect_timeout_hint"));
     }
 
     err
@@ -382,7 +381,8 @@ impl SshBackend {
                     tracing::warn!(
                         target: "terminal.ssh.connect",
                         error = %err,
-                        "channel open 失败，尝试 invalidate 并重连一次（可能是 MaxSessions 限制）"
+                        "{}",
+                        t!("SshBackend.channel_open_retry_max_sessions"),
                     );
                     session_manager.invalidate().await;
                     attempt += 1;
@@ -443,7 +443,8 @@ impl SshBackend {
                     target: "terminal.ssh.setup",
                     connection_id,
                     error = %err,
-                    "打开 shell integration 安装通道失败，降级为无 integration 模式"
+                    "{}",
+                    t!("ShellIntegration.install_channel_open_failed"),
                 );
                 return None;
             }
@@ -457,7 +458,8 @@ impl SshBackend {
                     target: "terminal.ssh.setup",
                     connection_id,
                     timeout_secs = timeout.as_secs(),
-                    "shell integration 安装超时，降级为无 integration 模式"
+                    "{}",
+                    t!("ShellIntegration.install_timeout"),
                 );
                 let _ = setup_channel.close().await;
                 return None;
@@ -630,6 +632,9 @@ mod tests {
     #[derive(Default)]
     struct MockChannelState {
         ops: Vec<ChannelOp>,
+        /// exec 的命令文本（ops 只记 Exec 占位，环境变量内联在命令里，
+        //  断言 shell integration 环境变量需从这里取）
+        exec_commands: Vec<String>,
         events: VecDeque<ChannelEvent>,
         exec_consumes_session: bool,
         recv_delay: Option<Duration>,
@@ -654,6 +659,7 @@ mod tests {
         ) -> (Self, Arc<Mutex<MockChannelState>>) {
             let state = Arc::new(Mutex::new(MockChannelState {
                 ops: Vec::new(),
+                exec_commands: Vec::new(),
                 events: events.into_iter().collect(),
                 exec_consumes_session,
                 recv_delay,
@@ -681,6 +687,7 @@ mod tests {
         async fn exec(&mut self, _command: &str) -> Result<()> {
             let mut state = self.state.lock().expect("mock channel state should lock");
             state.ops.push(ChannelOp::Exec);
+            state.exec_commands.push(_command.to_string());
             Ok(())
         }
 
@@ -789,6 +796,14 @@ mod tests {
             .clone()
     }
 
+    fn recorded_exec_commands(state: &Arc<Mutex<MockChannelState>>) -> Vec<String> {
+        state
+            .lock()
+            .expect("mock channel state should lock")
+            .exec_commands
+            .clone()
+    }
+
     #[tokio::test]
     async fn prepare_ssh_channel_uses_dedicated_setup_channel_for_zsh() {
         let (setup_channel, setup_state) = MockChannel::new(
@@ -823,18 +838,30 @@ mod tests {
             recorded_ops(&setup_state),
             vec![ChannelOp::Exec, ChannelOp::Close]
         );
+        // zsh 走 exec 内联环境变量（服务器通常不 AcceptEnv，不能用 set_env）
         assert_eq!(
             recorded_ops(&interactive_state),
-            vec![
-                ChannelOp::SetEnv("OMNIHUB_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("OMNIHUB_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::SetEnv(
-                    "ZDOTDIR".into(),
-                    "/tmp/home/.config/omnihub/sessions/42/zsh".into(),
-                ),
-                ChannelOp::RequestPty,
-                ChannelOp::RequestShell,
-            ]
+            vec![ChannelOp::RequestPty, ChannelOp::Exec]
+        );
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        let command = exec_commands
+            .last()
+            .expect("zsh 交互 channel 应 exec wrapper");
+        assert!(
+            command.contains("ZDOTDIR='/tmp/home/.config/omnihub/sessions/42/zsh'"),
+            "exec 命令应内联 ZDOTDIR: {command}"
+        );
+        assert!(
+            command.contains("OMNIHUB_ORIG_ZDOTDIR='/tmp/home'"),
+            "exec 命令应内联 OMNIHUB_ORIG_ZDOTDIR: {command}"
+        );
+        assert!(
+            command.contains("OMNIHUB_SHELL_INTEGRATION=1"),
+            "exec 命令应内联 OMNIHUB_SHELL_INTEGRATION: {command}"
+        );
+        assert!(
+            command.ends_with("zsh -l -i"),
+            "exec 命令应以 zsh 登录交互 shell 结尾: {command}"
         );
     }
 
@@ -868,19 +895,23 @@ mod tests {
             recorded_ops(&setup_state),
             vec![ChannelOp::Exec, ChannelOp::Close]
         );
-        let interactive_ops = recorded_ops(&interactive_state);
+        // bash 同样走 exec 内联环境变量 + --rcfile wrapper
         assert_eq!(
-            interactive_ops[0..3],
-            [
-                ChannelOp::SetEnv("OMNIHUB_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("OMNIHUB_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::RequestPty,
-            ]
+            recorded_ops(&interactive_state),
+            vec![ChannelOp::RequestPty, ChannelOp::Exec]
         );
-        match interactive_ops.get(3) {
-            Some(ChannelOp::Exec) => {}
-            other => panic!("expected bash interactive channel to exec wrapper, got {other:?}"),
-        }
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        let command = exec_commands
+            .last()
+            .expect("bash 交互 channel 应 exec wrapper");
+        assert!(
+            command.contains("OMNIHUB_SHELL_INTEGRATION=1"),
+            "exec 命令应内联 OMNIHUB_SHELL_INTEGRATION: {command}"
+        );
+        assert!(
+            command.contains("--rcfile '/tmp/home/.config/omnihub/sessions/42/bash/.bashrc'"),
+            "exec 命令应携带 bash rcfile: {command}"
+        );
     }
 
     #[tokio::test]
@@ -1015,18 +1046,18 @@ mod tests {
             new_setup.is_none(),
             "缓存命中不应再向 manager 写入新的 integration"
         );
+        // 缓存命中同样走 exec 内联环境变量（zsh 路径）
         assert_eq!(
             recorded_ops(&interactive_state),
-            vec![
-                ChannelOp::SetEnv("OMNIHUB_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("OMNIHUB_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
-                ChannelOp::SetEnv(
-                    "ZDOTDIR".into(),
-                    "/tmp/home/.config/omnihub/sessions/42/zsh".into(),
-                ),
-                ChannelOp::RequestPty,
-                ChannelOp::RequestShell,
-            ]
+            vec![ChannelOp::RequestPty, ChannelOp::Exec]
+        );
+        let exec_commands = recorded_exec_commands(&interactive_state);
+        let command = exec_commands
+            .last()
+            .expect("缓存命中后交互 channel 应 exec zsh wrapper");
+        assert!(
+            command.contains("ZDOTDIR='/tmp/home/.config/omnihub/sessions/42/zsh'"),
+            "exec 命令应内联缓存的 ZDOTDIR: {command}"
         );
     }
 
@@ -1083,7 +1114,7 @@ mod tests {
         let message = add_connect_error_context(err).to_string();
 
         assert!(
-            message.contains("服务器拒绝打开新 channel"),
+            message.contains(t!("SshBackend.channel_open_rejected_max_sessions").as_ref()),
             "channel open 错误应补充 MaxSessions 提示，实际: {message}"
         );
     }
@@ -1094,7 +1125,7 @@ mod tests {
         let message = add_connect_error_context(err).to_string();
 
         assert!(
-            message.contains("连接超时"),
+            message.contains(t!("SshBackend.connect_timeout_hint").as_ref()),
             "timeout 错误应补充网络/代理排查提示，实际: {message}"
         );
     }

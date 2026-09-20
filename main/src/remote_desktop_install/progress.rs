@@ -16,8 +16,6 @@ const START_PROGRESS: f32 = 5.0;
 const INSTALLING_PROGRESS: f32 = 95.0;
 const FINISHED_PROGRESS: f32 = 100.0;
 const PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const STATUS_INSTALLING: &str = "正在安装插件。";
-const STATUS_FINISHED: &str = "安装完成，正在打开连接。";
 
 #[derive(Debug)]
 pub(crate) enum DownloadProgress {
@@ -39,7 +37,9 @@ impl ProviderInstallProgressView {
         Self {
             provider_label: provider_label.to_string().into(),
             connection_name: connection_name.to_string().into(),
-            status: STATUS_INSTALLING.into(),
+            status: t!("RemoteDesktop.install_status_installing")
+                .to_string()
+                .into(),
             value: 0.0,
         }
     }
@@ -48,25 +48,33 @@ impl ProviderInstallProgressView {
         match progress {
             DownloadProgress::Started => {
                 self.value = START_PROGRESS;
-                self.status = STATUS_INSTALLING.into();
+                self.status = t!("RemoteDesktop.install_status_installing")
+                    .to_string()
+                    .into();
             }
             DownloadProgress::Bytes { downloaded, total } => {
                 self.value = byte_progress_value(downloaded, total);
-                self.status = STATUS_INSTALLING.into();
+                self.status = t!("RemoteDesktop.install_status_installing")
+                    .to_string()
+                    .into();
             }
             DownloadProgress::Failed { error } => {
                 self.status = error.into();
             }
             DownloadProgress::Finished => {
                 self.value = INSTALLING_PROGRESS;
-                self.status = STATUS_INSTALLING.into();
+                self.status = t!("RemoteDesktop.install_status_installing")
+                    .to_string()
+                    .into();
             }
         }
     }
 
     fn mark_finished(&mut self) {
         self.value = FINISHED_PROGRESS;
-        self.status = STATUS_FINISHED.into();
+        self.status = t!("RemoteDesktop.install_status_finished")
+            .to_string()
+            .into();
     }
 }
 
@@ -78,10 +86,14 @@ impl Render for ProviderInstallProgressView {
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "连接「{}」需要安装「{}」远程桌面插件。",
-                        self.connection_name, self.provider_label
-                    )),
+                    .child(
+                        t!(
+                            "RemoteDesktop.install_required_message",
+                            connection = self.connection_name.to_string(),
+                            label = self.provider_label.to_string()
+                        )
+                        .to_string(),
+                    ),
             )
             .child(
                 Progress::new("remote-desktop-provider-install-progress")
@@ -181,11 +193,14 @@ mod tests {
 
     #[test]
     fn view_maps_download_events_to_progress_values() {
+        let installing = t!("RemoteDesktop.install_status_installing").to_string();
+        let finished = t!("RemoteDesktop.install_status_finished").to_string();
+
         let mut view = ProviderInstallProgressView::new("VNC", "测试连接");
 
         view.apply_download_progress(DownloadProgress::Started);
         assert_eq!(5.0, view.value);
-        assert_eq!(STATUS_INSTALLING, view.status.as_ref());
+        assert_eq!(installing, view.status.as_ref());
 
         view.apply_download_progress(DownloadProgress::Bytes {
             downloaded: 50,
@@ -209,7 +224,7 @@ mod tests {
 
         view.mark_finished();
         assert_eq!(100.0, view.value);
-        assert_eq!(STATUS_FINISHED, view.status.as_ref());
+        assert_eq!(finished, view.status.as_ref());
     }
 
     #[test]

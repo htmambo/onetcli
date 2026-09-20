@@ -13,7 +13,8 @@
 
 use std::collections::VecDeque;
 
-use gpui::{Action, actions};
+use gpui::actions;
+use rust_i18n::t;
 
 actions!(
     input_history,
@@ -362,7 +363,12 @@ fn truncate_preview_lines(text: &str, max_lines: usize) -> String {
         return text.to_string();
     }
     let head: String = text.lines().take(max_lines).collect::<Vec<_>>().join("\n");
-    format!("{}\n… (共 {} 行)", head, total_lines)
+    t!(
+        "InputHistory.preview_truncated",
+        head = head,
+        total = total_lines
+    )
+    .into_owned()
 }
 
 /// 光标是否在第一行最顶。
@@ -706,9 +712,13 @@ mod tests {
         h.push_local("a\nb\nc\nd".to_string());
         h.recall_previous("");
         let preview = h.preview_text().unwrap();
-        assert!(preview.contains("a"));
-        assert!(preview.contains("…"));
-        assert!(preview.contains("共 4 行"));
+        let expected = t!(
+            "InputHistory.preview_truncated",
+            head = "a\nb",
+            total = 4usize
+        )
+        .to_string();
+        assert_eq!(preview, expected);
     }
 
     #[test]

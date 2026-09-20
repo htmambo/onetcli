@@ -37,10 +37,7 @@ use crate::database_view_plugin::build_context_menu_for;
 use crate::search_shortcut::{
     DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
 };
-use db::{
-    DbNode, DbNodeType, GlobalDbState,
-    ipc::{IpcDriverRegistry, driver_icon_from_asset_path, driver_icon_from_file_path},
-};
+use db::{DbNode, DbNodeType, GlobalDbState};
 use gpui_component::label::Label;
 use gpui_component::menu::PopupMenu;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
@@ -94,10 +91,6 @@ fn sync_selected_databases_for_connection(
     selected_databases.insert(connection_id, selected);
 }
 
-const EXTERNAL_DRIVER_ICON_METADATA: &str = "external_driver_icon";
-const EXTERNAL_DRIVER_ID_METADATA: &str = "external_driver_id";
-const EXTERNAL_DRIVER_NAME_METADATA: &str = "external_driver_name";
-
 fn connection_node(id: String, name: String, config: &DbConnectionConfig) -> DbNode {
     let mut node = DbNode::new(
         id.clone(),
@@ -106,58 +99,18 @@ fn connection_node(id: String, name: String, config: &DbConnectionConfig) -> DbN
         id,
         config.database_type,
     );
-    let metadata = external_driver_metadata(config);
-    apply_connection_node_config(&mut node, config, metadata);
+    apply_connection_node_config(&mut node, config);
     node
 }
 
-fn external_driver_metadata(config: &DbConnectionConfig) -> HashMap<String, String> {
-    let registry = IpcDriverRegistry::load_default();
-    external_driver_metadata_from_registry(config, &registry)
-}
-
-fn external_driver_metadata_from_registry(
-    config: &DbConnectionConfig,
-    registry: &IpcDriverRegistry,
-) -> HashMap<String, String> {
-    let mut metadata = HashMap::new();
-    if let Some(display) = registry.display_for_config(config) {
-        metadata.insert(EXTERNAL_DRIVER_ID_METADATA.to_string(), display.driver_id);
-        metadata.insert(EXTERNAL_DRIVER_NAME_METADATA.to_string(), display.name);
-        if let Some(icon_path) = display
-            .icon_file_path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .or(display.icon_asset_path.clone())
-        {
-            metadata.insert(EXTERNAL_DRIVER_ICON_METADATA.to_string(), icon_path);
-        }
-    }
-    metadata
-}
-
 fn connection_node_icon(node: &DbNode) -> Icon {
-    if let Some(path) = node.metadata.get(EXTERNAL_DRIVER_ICON_METADATA) {
-        let file_path = std::path::Path::new(path);
-        if file_path.is_absolute() {
-            return driver_icon_from_file_path(file_path.to_path_buf(), ComponentSize::Large);
-        }
-        return driver_icon_from_asset_path(path.clone(), ComponentSize::Large);
-    }
+    // 外部驱动已移除，节点图标统一按数据库类型兜底
     node.database_type.as_node_icon()
 }
 
-fn apply_connection_node_config(
-    node: &mut DbNode,
-    config: &DbConnectionConfig,
-    metadata: HashMap<String, String>,
-) {
+fn apply_connection_node_config(node: &mut DbNode, config: &DbConnectionConfig) {
     node.name = config.name.to_string();
     node.database_type = config.database_type;
-    node.metadata.remove(EXTERNAL_DRIVER_ID_METADATA);
-    node.metadata.remove(EXTERNAL_DRIVER_NAME_METADATA);
-    node.metadata.remove(EXTERNAL_DRIVER_ICON_METADATA);
-    node.metadata.extend(metadata);
 }
 
 fn apply_db_selection_state(
@@ -850,7 +803,7 @@ impl DbTreeView {
             sync_selected_databases_for_connection(&mut self.selected_databases, connection);
 
             if let Some(node) = self.db_nodes.get_mut(&id) {
-                apply_connection_node_config(node, &config, external_driver_metadata(&config));
+                apply_connection_node_config(node, &config);
                 let mut global_db_state = cx.global_mut::<GlobalDbState>().clone();
                 let conn_id = id.clone();
                 if let Some(exist_config) = global_db_state.get_config(&id) {
@@ -1204,8 +1157,8 @@ impl DbTreeView {
 
         let Some(storage_state) = cx.try_global::<GlobalStorageState>() else {
             warn!(
-                "GlobalStorageState 不存在，无法持久化连接 {} 的数据库筛选状态",
-                connection_id
+                "{}",
+                t!("DbTreeViewLog.storage_state_missing", id = connection_id)
             );
             return;
         };
@@ -1370,7 +1323,7 @@ impl DbTreeView {
                 })
                 .await
                 {
-                    error!("刷新数据库树缓存时 Tokio 任务失败: {}", err);
+                    error!("{}", t!("DbTreeViewLog.tokio_task_failed", error = err));
                 }
             }
 
@@ -1490,8 +1443,11 @@ impl DbTreeView {
 
         let Some(global_state) = cx.try_global::<GlobalDbState>() else {
             warn!(
-                "GlobalDbState 不存在，无法加载连接 {} 的子节点",
-                &node.connection_id
+                "{}",
+                t!(
+                    "DbTreeViewLog.global_db_state_missing",
+                    id = &node.connection_id
+                )
             );
             return;
         };
@@ -3156,126 +3112,5 @@ mod tests {
         assert_eq!(selected_node_id.as_deref(), Some("node-2"));
         assert_eq!(selected_ix, Some(4));
         assert_eq!(context_menu_node_id, None);
-    }
-
-    fn external_config(driver_id: &str) -> DbConnectionConfig {
-        let mut extra_params = HashMap::new();
-        extra_params.insert(
-            db::ipc::EXTERNAL_DRIVER_ID_PARAM.to_string(),
-            driver_id.to_string(),
-        );
-        DbConnectionConfig {
-            id: "1".to_string(),
-            database_type: DatabaseType::External,
-            name: "saved".to_string(),
-            host: "localhost".to_string(),
-            port: 0,
-            username: String::new(),
-            password: String::new(),
-            database: None,
-            service_name: None,
-            sid: None,
-            credential_ref: None,
-            ssh_tunnel_credential_ref: None,
-            workspace_id: None,
-            extra_params,
-        }
-    }
-
-    fn driver_manifest() -> db::ipc::IpcDriverManifest {
-        db::ipc::IpcDriverManifest {
-            id: "demo".to_string(),
-            name: "DemoDB".to_string(),
-            category: None,
-            description: String::new(),
-            version: String::new(),
-            protocol_version: None,
-            entry: db::ipc::IpcDriverEntry {
-                command: "driver".to_string(),
-                args: Vec::new(),
-                working_dir: None,
-                commands: Default::default(),
-                env_from_config: Default::default(),
-            },
-            transport: db::ipc::IpcDriverTransport::local_socket("demo.sock"),
-            dialect: Default::default(),
-            capabilities: None,
-            ui: db::ipc::IpcDriverUi {
-                icon: "MySQL".to_string(),
-                default_port: None,
-                form: None,
-            },
-            connection: Default::default(),
-            manifest_dir: std::path::PathBuf::from("/drivers/demo"),
-        }
-    }
-
-    #[test]
-    fn external_connection_metadata_uses_driver_display() {
-        let registry = IpcDriverRegistry::from_drivers(vec![driver_manifest()]);
-        let metadata = external_driver_metadata_from_registry(&external_config("demo"), &registry);
-
-        assert_eq!(
-            Some(&"demo".to_string()),
-            metadata.get(EXTERNAL_DRIVER_ID_METADATA)
-        );
-        assert_eq!(
-            Some(&"DemoDB".to_string()),
-            metadata.get(EXTERNAL_DRIVER_NAME_METADATA)
-        );
-        assert_eq!(
-            Some(&"icons/mysql_color.svg".to_string()),
-            metadata.get(EXTERNAL_DRIVER_ICON_METADATA)
-        );
-    }
-
-    #[test]
-    fn apply_connection_node_config_refreshes_external_driver_metadata() {
-        let mut node = build_node(
-            DbNodeType::Connection,
-            "old",
-            &[(EXTERNAL_DRIVER_ICON_METADATA, "driver://old/icon")],
-        );
-        let config = external_config("demo");
-        let metadata = HashMap::from([
-            (EXTERNAL_DRIVER_ID_METADATA.to_string(), "demo".to_string()),
-            (
-                EXTERNAL_DRIVER_ICON_METADATA.to_string(),
-                "driver://demo/icon".to_string(),
-            ),
-        ]);
-
-        apply_connection_node_config(&mut node, &config, metadata);
-
-        assert_eq!("saved", node.name);
-        assert_eq!(DatabaseType::External, node.database_type);
-        assert_eq!(
-            Some(&"driver://demo/icon".to_string()),
-            node.metadata.get(EXTERNAL_DRIVER_ICON_METADATA)
-        );
-    }
-
-    #[test]
-    fn apply_connection_node_config_clears_stale_external_driver_metadata() {
-        let mut node = build_node(
-            DbNodeType::Connection,
-            "old",
-            &[
-                (EXTERNAL_DRIVER_ID_METADATA, "demo"),
-                (EXTERNAL_DRIVER_NAME_METADATA, "DemoDB"),
-                (EXTERNAL_DRIVER_ICON_METADATA, "driver://demo/icon"),
-                ("custom", "kept"),
-            ],
-        );
-        let mut config = external_config("demo");
-        config.database_type = DatabaseType::MySQL;
-
-        apply_connection_node_config(&mut node, &config, HashMap::new());
-
-        assert_eq!(DatabaseType::MySQL, node.database_type);
-        assert!(!node.metadata.contains_key(EXTERNAL_DRIVER_ID_METADATA));
-        assert!(!node.metadata.contains_key(EXTERNAL_DRIVER_NAME_METADATA));
-        assert!(!node.metadata.contains_key(EXTERNAL_DRIVER_ICON_METADATA));
-        assert_eq!(Some(&"kept".to_string()), node.metadata.get("custom"));
     }
 }

@@ -112,7 +112,7 @@ impl GoogleDriveAuthDialog {
                     if callback.state.as_deref() != Some(&state_for_exchange) {
                         let _ = this.update(cx, |d, _| {
                             d.state = OAuthState::Error {
-                                message: "State 不匹配".to_string(),
+                                message: t!("OAuth.state_mismatch").to_string(),
                             };
                         });
                         return;
@@ -153,7 +153,11 @@ impl GoogleDriveAuthDialog {
                 Err(e) => {
                     let _ = this.update(cx, |d, _| {
                         d.state = OAuthState::Error {
-                            message: format!("启动回调服务器失败: {}", e),
+                            message: t!(
+                                "OAuth.start_callback_server_failed",
+                                error = e.to_string()
+                            )
+                            .to_string(),
                         };
                     });
                 }
@@ -400,7 +404,7 @@ impl OneDriveAuthDialog {
                     if callback.state.as_deref() != Some(&state_for_exchange) {
                         let _ = this.update(cx, |d, _| {
                             d.state = OAuthState::Error {
-                                message: "State 不匹配".to_string(),
+                                message: t!("OAuth.state_mismatch").to_string(),
                             };
                         });
                         return;
@@ -439,7 +443,11 @@ impl OneDriveAuthDialog {
                 Err(e) => {
                     let _ = this.update(cx, |d, _| {
                         d.state = OAuthState::Error {
-                            message: format!("启动回调服务器失败: {}", e),
+                            message: t!(
+                                "OAuth.start_callback_server_failed",
+                                error = e.to_string()
+                            )
+                            .to_string(),
                         };
                     });
                 }
@@ -656,12 +664,12 @@ async fn exchange_google_token(
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("Accept", "application/json")
         .body(AsyncBody::from(body.into_bytes()))
-        .map_err(|e| format!("请求构建失败: {}", e))?;
+        .map_err(|e| t!("OAuth.build_request_failed", error = e.to_string()).to_string())?;
 
     let response = http
         .send(req)
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| t!("OAuth.network_request_failed", error = e.to_string()).to_string())?;
 
     let status = response.status();
     let mut bytes = Vec::new();
@@ -669,13 +677,14 @@ async fn exchange_google_token(
         .into_body()
         .read_to_end(&mut bytes)
         .await
-        .map_err(|e| format!("读取响应失败: {}", e))?;
+        .map_err(|e| t!("OAuth.read_response_failed", error = e.to_string()).to_string())?;
 
     if !status.is_success() {
-        return Err(format!(
-            "Token 请求失败: {}",
-            String::from_utf8_lossy(&bytes)
-        ));
+        return Err(t!(
+            "OAuth.token_request_failed",
+            error = String::from_utf8_lossy(&bytes).to_string()
+        )
+        .to_string());
     }
 
     #[derive(serde::Deserialize)]
@@ -687,8 +696,8 @@ async fn exchange_google_token(
         token_type: String,
     }
 
-    let resp: GoogleTokenResp =
-        serde_json::from_slice(&bytes).map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp: GoogleTokenResp = serde_json::from_slice(&bytes)
+        .map_err(|e| t!("OAuth.parse_response_failed", error = e.to_string()).to_string())?;
 
     let expires_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -730,12 +739,12 @@ async fn exchange_onedrive_token(
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("Accept", "application/json")
         .body(AsyncBody::from(body.into_bytes()))
-        .map_err(|e| format!("请求构建失败: {}", e))?;
+        .map_err(|e| t!("OAuth.build_request_failed", error = e.to_string()).to_string())?;
 
     let response = http
         .send(req)
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| t!("OAuth.network_request_failed", error = e.to_string()).to_string())?;
 
     let status = response.status();
     let mut bytes = Vec::new();
@@ -743,13 +752,14 @@ async fn exchange_onedrive_token(
         .into_body()
         .read_to_end(&mut bytes)
         .await
-        .map_err(|e| format!("读取响应失败: {}", e))?;
+        .map_err(|e| t!("OAuth.read_response_failed", error = e.to_string()).to_string())?;
 
     if !status.is_success() {
-        return Err(format!(
-            "Token 请求失败: {}",
-            String::from_utf8_lossy(&bytes)
-        ));
+        return Err(t!(
+            "OAuth.token_request_failed",
+            error = String::from_utf8_lossy(&bytes).to_string()
+        )
+        .to_string());
     }
 
     #[derive(serde::Deserialize)]
@@ -761,8 +771,8 @@ async fn exchange_onedrive_token(
         token_type: String,
     }
 
-    let resp: MsTokenResp =
-        serde_json::from_slice(&bytes).map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp: MsTokenResp = serde_json::from_slice(&bytes)
+        .map_err(|e| t!("OAuth.parse_response_failed", error = e.to_string()).to_string())?;
 
     let expires_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

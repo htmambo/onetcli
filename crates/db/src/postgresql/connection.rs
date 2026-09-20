@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use one_core::storage::DbConnectionConfig;
+use rust_i18n::t;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{
@@ -1143,7 +1144,8 @@ impl DbConnection for PostgresDbConnection {
                                 current,
                                 SqlResult::Error(SqlErrorInfo {
                                     sql: String::new(),
-                                    message: format!("Parse error: {}", e),
+                                    message: t!("Error.parse_error", error = e.to_string())
+                                        .into_owned(),
                                 }),
                                 bytes_read,
                                 total_size,
@@ -1262,7 +1264,8 @@ impl DbConnection for PostgresDbConnection {
                                 current,
                                 SqlResult::Error(SqlErrorInfo {
                                     sql: String::new(),
-                                    message: format!("Parse error: {}", e),
+                                    message: t!("Error.parse_error", error = e.to_string())
+                                        .into_owned(),
                                 }),
                                 bytes_read,
                                 total_size,

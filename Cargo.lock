@@ -1949,8 +1949,6 @@ dependencies = [
  "gpui",
  "gpui-component",
  "hex",
- "interprocess",
- "ipc",
  "moka",
  "mysql_async",
  "one-core",
@@ -1962,7 +1960,6 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pemfile",
  "serde",
- "serde_ignored",
  "serde_json",
  "smol",
  "sqlformat",
@@ -8022,16 +8019,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d4ddca14104cd60529e8c7f7ba71a2c8acd8f7f5cfcdc2faf97eeb7c3010a4"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "serde_ignored"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
-dependencies = [
- "serde",
- "serde_core",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 use crate::setting_tab::AppSettings;
 use one_core::storage::get_config_dir;
+use rust_i18n::t;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ pub fn init_tracing(settings: &AppSettings) {
                     .with(tracing_subscriber::fmt::layer())
                     .with(env_filter)
                     .init();
-                tracing::error!(path = %log_file_path.display(), error = %err, "日志文件初始化失败");
+                tracing::error!(path = %log_file_path.display(), error = %err, "{}", t!("Logging.file_init_failed"));
             }
         },
         Err(err) => {
@@ -35,7 +36,7 @@ pub fn init_tracing(settings: &AppSettings) {
                 .with(tracing_subscriber::fmt::layer())
                 .with(env_filter)
                 .init();
-            tracing::error!(error = %err, "默认日志目录初始化失败");
+            tracing::error!(error = %err, "{}", t!("Logging.default_dir_init_failed"));
         }
     }
 }

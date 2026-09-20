@@ -9,6 +9,7 @@ use crate::storage::traits::Repository;
 use crate::storage::{
     ConnectionRepository, PendingCloudDeletionRepository, StoredConnection, WorkspaceRepository,
 };
+use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
 use zeroize::Zeroizing;
 
@@ -17,8 +18,8 @@ const CONNECTION_QUEUE_KEY: &str = "connection";
 pub(crate) struct ConnectionSyncHandler;
 
 impl SyncHandler for ConnectionSyncHandler {
-    fn name(&self) -> &'static str {
-        "连接"
+    fn name(&self) -> String {
+        rust_i18n::t!("CloudSync.type_connection").to_string()
     }
 
     fn sync<'a>(&'a self, engine: &'a SyncEngine) -> SyncFuture<'a> {
@@ -51,9 +52,12 @@ impl SyncEngine {
                 .collect::<Vec<_>>()
                 .join(", ");
             tracing::warn!(
-                "[同步] 检测到 {} 个本地连接解密失败，将跳过其上传与拉取更新: {}",
-                decrypt_failures.len(),
-                preview
+                "{}",
+                t!(
+                    "CloudSync.log_decrypt_failures",
+                    count = decrypt_failures.len(),
+                    preview = preview
+                )
             );
         }
 
@@ -108,8 +112,11 @@ impl SyncEngine {
         let skipped_conflicts = plan.conflicts.len().saturating_sub(active_conflicts.len());
         if skipped_conflicts > 0 {
             tracing::warn!(
-                "[同步] 跳过 {} 个与解密失败连接相关的冲突",
-                skipped_conflicts
+                "{}",
+                t!(
+                    "CloudSync.log_skip_decrypt_conflicts",
+                    count = skipped_conflicts
+                )
             );
         }
 
@@ -130,17 +137,24 @@ impl SyncEngine {
             if let Some(local_id) = local_conn.id {
                 if failure_ids.contains(&local_id) {
                     tracing::warn!(
-                        "[同步] 跳过上传（解密失败）: {} ({})",
-                        local_conn.name,
-                        local_id
+                        "{}",
+                        t!(
+                            "CloudSync.log_skip_upload_decrypt_failed",
+                            name = local_conn.name.as_str(),
+                            id = local_id
+                        )
                     );
                     continue;
                 }
                 operations.push(SyncOperation::Upload { local_id });
             } else {
-                result
-                    .errors
-                    .push(format!("上传失败 {}: 缺少本地 ID", local_conn.name));
+                result.errors.push(
+                    t!(
+                        "CloudSync.upload_failed_missing_local_id",
+                        name = local_conn.name.as_str()
+                    )
+                    .to_string(),
+                );
             }
         }
 
@@ -148,9 +162,12 @@ impl SyncEngine {
             if let Some(local_id) = local_conn.id {
                 if failure_ids.contains(&local_id) {
                     tracing::warn!(
-                        "[同步] 跳过更新云端（解密失败）: {} ({})",
-                        local_conn.name,
-                        local_id
+                        "{}",
+                        t!(
+                            "CloudSync.log_skip_update_cloud_decrypt_failed",
+                            name = local_conn.name.as_str(),
+                            id = local_id
+                        )
                     );
                     continue;
                 }
@@ -159,9 +176,13 @@ impl SyncEngine {
                     cloud_id: cloud_data.id.clone(),
                 });
             } else {
-                result
-                    .errors
-                    .push(format!("更新云端失败 {}: 缺少本地 ID", local_conn.name));
+                result.errors.push(
+                    t!(
+                        "CloudSync.update_cloud_failed_missing_local_id",
+                        name = local_conn.name.as_str()
+                    )
+                    .to_string(),
+                );
             }
         }
 
@@ -173,9 +194,12 @@ impl SyncEngine {
             if let Some(local_id) = local_conn.id {
                 if failure_ids.contains(&local_id) {
                     tracing::warn!(
-                        "[同步] 跳过拉取更新（解密失败）: {} ({})",
-                        local_conn.name,
-                        local_id
+                        "{}",
+                        t!(
+                            "CloudSync.log_skip_pull_decrypt_failed",
+                            name = local_conn.name.as_str(),
+                            id = local_id
+                        )
                     );
                     continue;
                 }
@@ -188,9 +212,13 @@ impl SyncEngine {
                     .get(&cloud_data.id)
                     .cloned()
                     .unwrap_or_else(|| cloud_data.id.clone());
-                result
-                    .errors
-                    .push(format!("更新本地失败 {}: 缺少本地 ID", name));
+                result.errors.push(
+                    t!(
+                        "CloudSync.update_local_failed_missing_local_id",
+                        name = name.as_str()
+                    )
+                    .to_string(),
+                );
             }
         }
 
@@ -203,9 +231,10 @@ impl SyncEngine {
             match operation {
                 SyncOperation::Upload { local_id } => {
                     let Some(local_conn) = local_connection_map.get(&local_id) else {
-                        result
-                            .errors
-                            .push(format!("上传失败 {}: 本地数据不存在", local_id));
+                        result.errors.push(
+                            t!("CloudSync.upload_failed_local_missing", name = local_id)
+                                .to_string(),
+                        );
                         continue;
                     };
                     match self.upload_connection(local_conn).await {
@@ -220,15 +249,24 @@ impl SyncEngine {
                                     // tracing::info!("[上传] 成功: {}", local_conn.name);
                                 }
                                 Err(e) => {
-                                    let error_message =
-                                        format!("上传失败 {}: {}", local_conn.name, e);
+                                    let error_message = t!(
+                                        "CloudSync.upload_failed",
+                                        name = local_conn.name.as_str(),
+                                        error = e.to_string()
+                                    )
+                                    .to_string();
                                     result.errors.push(error_message.clone());
                                     queue.mark_failed(queued_operation, error_message);
                                 }
                             }
                         }
                         Err(e) => {
-                            let error_message = format!("上传失败 {}: {}", local_conn.name, e);
+                            let error_message = t!(
+                                "CloudSync.upload_failed",
+                                name = local_conn.name.as_str(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(error_message.clone());
                             queue.mark_failed(queued_operation, error_message);
                         }
@@ -236,15 +274,23 @@ impl SyncEngine {
                 }
                 SyncOperation::UpdateCloud { local_id, cloud_id } => {
                     let Some(local_conn) = local_connection_map.get(&local_id) else {
-                        result
-                            .errors
-                            .push(format!("更新云端失败 {}: 本地数据不存在", local_id));
+                        result.errors.push(
+                            t!(
+                                "CloudSync.update_cloud_failed_local_missing",
+                                name = local_id
+                            )
+                            .to_string(),
+                        );
                         continue;
                     };
                     let Some(cloud_data) = cloud_data_map.get(&cloud_id) else {
-                        result
-                            .errors
-                            .push(format!("更新云端失败 {}: 云端数据不存在", cloud_id));
+                        result.errors.push(
+                            t!(
+                                "CloudSync.update_cloud_failed_cloud_missing",
+                                name = cloud_id.as_str()
+                            )
+                            .to_string(),
+                        );
                         continue;
                     };
                     match self.update_cloud_connection(local_conn, cloud_data).await {
@@ -259,15 +305,24 @@ impl SyncEngine {
                                     // tracing::info!("[更新云端] 成功: {}", local_conn.name);
                                 }
                                 Err(e) => {
-                                    let error_message =
-                                        format!("更新云端失败 {}: {}", local_conn.name, e);
+                                    let error_message = t!(
+                                        "CloudSync.update_cloud_failed",
+                                        name = local_conn.name.as_str(),
+                                        error = e.to_string()
+                                    )
+                                    .to_string();
                                     result.errors.push(error_message.clone());
                                     queue.mark_failed(queued_operation, error_message);
                                 }
                             }
                         }
                         Err(e) => {
-                            let error_message = format!("更新云端失败 {}: {}", local_conn.name, e);
+                            let error_message = t!(
+                                "CloudSync.update_cloud_failed",
+                                name = local_conn.name.as_str(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(error_message.clone());
                             queue.mark_failed(queued_operation, error_message);
                         }
@@ -275,15 +330,23 @@ impl SyncEngine {
                 }
                 SyncOperation::UpdateLocal { local_id, cloud_id } => {
                     let Some(local_conn) = local_connection_map.get(&local_id) else {
-                        result
-                            .errors
-                            .push(format!("更新本地失败 {}: 本地数据不存在", local_id));
+                        result.errors.push(
+                            t!(
+                                "CloudSync.update_local_failed_local_missing",
+                                name = local_id
+                            )
+                            .to_string(),
+                        );
                         continue;
                     };
                     let Some(cloud_data) = cloud_data_map.get(&cloud_id) else {
-                        result
-                            .errors
-                            .push(format!("更新本地失败 {}: 云端数据不存在", cloud_id));
+                        result.errors.push(
+                            t!(
+                                "CloudSync.update_local_failed_cloud_missing",
+                                name = cloud_id.as_str()
+                            )
+                            .to_string(),
+                        );
                         continue;
                     };
                     let name = cloud_name_map
@@ -296,7 +359,12 @@ impl SyncEngine {
                             // tracing::info!("[更新本地] 成功: {}", name);
                         }
                         Err(e) => {
-                            let error_message = format!("更新本地失败 {}: {}", name, e);
+                            let error_message = t!(
+                                "CloudSync.update_local_failed",
+                                name = name.as_str(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(error_message.clone());
                             queue.mark_failed(queued_operation, error_message);
                         }
@@ -304,9 +372,13 @@ impl SyncEngine {
                 }
                 SyncOperation::Download(cloud_id) => {
                     let Some(cloud_data) = cloud_data_map.get(&cloud_id) else {
-                        result
-                            .errors
-                            .push(format!("下载失败 {}: 云端数据不存在", cloud_id));
+                        result.errors.push(
+                            t!(
+                                "CloudSync.download_failed_cloud_missing",
+                                name = cloud_id.as_str()
+                            )
+                            .to_string(),
+                        );
                         continue;
                     };
                     let name = cloud_name_map
@@ -319,7 +391,12 @@ impl SyncEngine {
                             // tracing::info!("[下载] 成功: {}", name);
                         }
                         Err(e) => {
-                            let error_message = format!("下载失败 {}: {}", name, e);
+                            let error_message = t!(
+                                "CloudSync.download_failed",
+                                name = name.as_str(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(error_message.clone());
                             queue.mark_failed(queued_operation, error_message);
                         }
@@ -332,7 +409,12 @@ impl SyncEngine {
                             // tracing::info!("[删除云端] 成功: {}", cloud_id);
                         }
                         Err(e) => {
-                            let error_message = format!("删除云端失败 {}: {}", cloud_id, e);
+                            let error_message = t!(
+                                "CloudSync.delete_cloud_failed",
+                                name = cloud_id.as_str(),
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(error_message.clone());
                             queue.mark_failed(queued_operation, error_message);
                         }
@@ -345,7 +427,12 @@ impl SyncEngine {
                             // tracing::info!("[删除本地] 成功: {}", local_id);
                         }
                         Err(e) => {
-                            let error_message = format!("删除本地失败 {}: {}", local_id, e);
+                            let error_message = t!(
+                                "CloudSync.delete_local_failed",
+                                name = local_id,
+                                error = e.to_string()
+                            )
+                            .to_string();
                             result.errors.push(error_message.clone());
                             queue.mark_failed(queued_operation, error_message);
                         }
@@ -360,7 +447,9 @@ impl SyncEngine {
                     // tracing::info!("[冲突解决] 成功应用");
                 }
                 Err(e) => {
-                    result.errors.push(format!("应用冲突解决失败: {}", e));
+                    result.errors.push(
+                        t!("CloudSync.apply_conflict_failed", error = e.to_string()).to_string(),
+                    );
                 }
             }
         }
@@ -422,7 +511,7 @@ impl SyncEngine {
         let pending_repo = match self.storage.get::<PendingCloudDeletionRepository>() {
             Some(repo) => repo,
             None => {
-                tracing::warn!("[同步] PendingCloudDeletionRepository not found");
+                tracing::warn!("{}", t!("CloudSync.log_pending_deletion_repo_missing"));
                 return deleted;
             }
         };
@@ -430,7 +519,13 @@ impl SyncEngine {
         let pending_list = match pending_repo.list_connections() {
             Ok(list) => list,
             Err(e) => {
-                tracing::error!("[同步] 获取待删除列表失败: {}", e);
+                tracing::error!(
+                    "{}",
+                    t!(
+                        "CloudSync.log_fetch_pending_deletions_failed",
+                        error = e.to_string()
+                    )
+                );
                 return deleted;
             }
         };
@@ -441,7 +536,10 @@ impl SyncEngine {
                 Ok(_) => {
                     // tracing::info!("[同步] 云端连接删除成功: {}", pending.cloud_id);
                     if let Err(e) = pending_repo.remove(&pending.cloud_id) {
-                        tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!("CloudSync.log_remove_pending_failed", error = e.to_string())
+                        );
                     }
                     deleted.push(pending.cloud_id);
                 }
@@ -453,14 +551,20 @@ impl SyncEngine {
                         //     pending.cloud_id
                         // );
                         if let Err(e) = pending_repo.remove(&pending.cloud_id) {
-                            tracing::error!("[同步] 移除待删除记录失败: {}", e);
+                            tracing::error!(
+                                "{}",
+                                t!("CloudSync.log_remove_pending_failed", error = e.to_string())
+                            );
                         }
                         deleted.push(pending.cloud_id);
                     } else {
                         tracing::warn!(
-                            "[同步] 删除云端连接失败: {} - {}（保留在待删除列表）",
-                            pending.cloud_id,
-                            e
+                            "{}",
+                            t!(
+                                "CloudSync.log_delete_cloud_connection_failed",
+                                id = pending.cloud_id.as_str(),
+                                error = e.to_string()
+                            )
                         );
                     }
                 }
@@ -502,7 +606,14 @@ impl SyncEngine {
                         //     local_id
                         // );
                         if let Err(e) = repo.delete(local_id) {
-                            tracing::error!("[软删除] 删除本地连接失败: {} - {}", local_id, e);
+                            tracing::error!(
+                                "{}",
+                                t!(
+                                    "CloudSync.log_soft_delete_local_connection_failed",
+                                    id = local_id,
+                                    error = e.to_string()
+                                )
+                            );
                         } else {
                             deleted_count += 1;
                         }
@@ -665,7 +776,12 @@ impl SyncEngine {
                     copy.cloud_id = None;
                     copy.last_synced_at = None;
                     let timestamp = Self::current_timestamp();
-                    copy.name = format!("{} (冲突副本 {})", copy.name, timestamp);
+                    copy.name = t!(
+                        "CloudSync.conflict_copy_suffix",
+                        name = copy.name.as_str(),
+                        timestamp = timestamp
+                    )
+                    .to_string();
 
                     resolved.push(ResolvedConflictAction {
                         conflict: conflict.clone(),
@@ -687,7 +803,7 @@ impl SyncEngine {
         let service = self
             .crypto_service
             .read()
-            .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+            .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
 
         service.prepare_sync_data_upload(conn, workspace_cloud_id)
     }
@@ -700,7 +816,7 @@ impl SyncEngine {
             let service = self
                 .crypto_service
                 .read()
-                .map_err(|_| SyncError::StorageError("同步服务锁获取失败".to_string()))?;
+                .map_err(|_| SyncError::StorageError(t!("CloudSync.lock_failed").to_string()))?;
             let local_conn = service.decrypt_sync_data_connection(cloud_data)?;
             let plaintext = service.decrypt_blob(&cloud_data.encrypted_data)?;
             let plain_data: ConnectionPlainData = serde_json::from_str(&plaintext)
@@ -729,14 +845,15 @@ impl SyncEngine {
             .get(workspace_id)
             .map_err(|e| SyncError::StorageError(e.to_string()))?
             .ok_or_else(|| {
-                SyncError::StorageError(format!("工作区 {} 不存在，无法同步其下连接", workspace_id))
+                SyncError::StorageError(
+                    t!("CloudSync.workspace_not_found", id = workspace_id).to_string(),
+                )
             })?;
 
         workspace.cloud_id.map(Some).ok_or_else(|| {
-            SyncError::StorageError(format!(
-                "工作区 {} 缺少 cloud_id，无法同步其下连接",
-                workspace_id
-            ))
+            SyncError::StorageError(
+                t!("CloudSync.workspace_missing_cloud_id", id = workspace_id).to_string(),
+            )
         })
     }
 
@@ -757,17 +874,23 @@ impl SyncEngine {
             .get_by_cloud_id(workspace_cloud_id)
             .map_err(|e| SyncError::StorageError(e.to_string()))?
             .ok_or_else(|| {
-                SyncError::StorageError(format!(
-                    "未找到 cloud_id={} 对应的本地工作区，无法恢复连接归属",
-                    workspace_cloud_id
-                ))
+                SyncError::StorageError(
+                    t!(
+                        "CloudSync.workspace_local_not_found",
+                        id = workspace_cloud_id
+                    )
+                    .to_string(),
+                )
             })?;
 
         workspace.id.map(Some).ok_or_else(|| {
-            SyncError::StorageError(format!(
-                "工作区 cloud_id={} 缺少本地 id，无法恢复连接归属",
-                workspace_cloud_id
-            ))
+            SyncError::StorageError(
+                t!(
+                    "CloudSync.workspace_missing_local_id",
+                    id = workspace_cloud_id
+                )
+                .to_string(),
+            )
         })
     }
 
@@ -857,7 +980,14 @@ impl SyncEngine {
             .map_err(|e| SyncError::StorageError(e.to_string()))?;
 
         if let Some(err) = error {
-            tracing::warn!("[同步状态] 连接 {} 同步出错: {}", local_id, err);
+            tracing::warn!(
+                "{}",
+                t!(
+                    "CloudSync.log_sync_status_error",
+                    id = local_id,
+                    error = err.as_str()
+                )
+            );
         }
 
         Ok(())
@@ -873,9 +1003,9 @@ impl SyncEngine {
             .storage
             .get::<ConnectionRepository>()
             .ok_or_else(|| SyncError::StorageError("ConnectionRepository not found".to_string()))?;
-        let local_id = snapshot
-            .id
-            .ok_or_else(|| SyncError::StorageError("连接缺少本地 ID".to_string()))?;
+        let local_id = snapshot.id.ok_or_else(|| {
+            SyncError::StorageError(t!("CloudSync.connection_missing_local_id_plain").to_string())
+        })?;
         let current = repo
             .get(local_id)
             .map_err(|e| SyncError::StorageError(e.to_string()))?
@@ -897,7 +1027,14 @@ impl SyncEngine {
         .map_err(|e| SyncError::StorageError(e.to_string()))?;
 
         if let Some(err) = error {
-            tracing::warn!("[同步状态] 连接 {} 同步出错: {}", local_id, err);
+            tracing::warn!(
+                "{}",
+                t!(
+                    "CloudSync.log_sync_status_error",
+                    id = local_id,
+                    error = err.as_str()
+                )
+            );
         }
 
         Ok(())
@@ -963,10 +1100,9 @@ impl SyncEngine {
         &self,
         conflict: &SyncConflict,
     ) -> Result<(), SyncError> {
-        let local_id = conflict
-            .local
-            .id
-            .ok_or_else(|| SyncError::StorageError("冲突本地连接缺少 ID".to_string()))?;
+        let local_id = conflict.local.id.ok_or_else(|| {
+            SyncError::StorageError(t!("CloudSync.conflict_connection_missing_id").to_string())
+        })?;
         let latest = self
             .fetch_latest_connection_cloud_data(&conflict.cloud.id)
             .await?;
@@ -1005,14 +1141,18 @@ impl SyncEngine {
             copy.id = None;
             copy.cloud_id = None;
             copy.last_synced_at = None;
-            copy.name = format!("{} (冲突副本 {})", copy.name, Self::current_timestamp());
+            copy.name = t!(
+                "CloudSync.conflict_copy_suffix",
+                name = copy.name.as_str(),
+                timestamp = Self::current_timestamp()
+            )
+            .to_string();
             repo.insert(&mut copy)
                 .map_err(|e| SyncError::StorageError(e.to_string()))?;
         }
-        let local_id = conflict
-            .local
-            .id
-            .ok_or_else(|| SyncError::StorageError("冲突本地连接缺少 ID".to_string()))?;
+        let local_id = conflict.local.id.ok_or_else(|| {
+            SyncError::StorageError(t!("CloudSync.conflict_connection_missing_id").to_string())
+        })?;
         self.delete_local_connection(local_id)
     }
 

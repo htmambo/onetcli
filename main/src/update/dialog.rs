@@ -179,7 +179,11 @@ impl UpdateDialogView {
 
             let download_result = match download_task.await {
                 Ok(result) => result,
-                Err(err) => Err(format!("下载任务执行失败: {}", err)),
+                Err(err) => Err(t!(
+                    "UpdateCheck.download_task_join_failed",
+                    err = err.to_string()
+                )
+                .to_string()),
             };
             progress_finished.store(true, Ordering::Relaxed);
 

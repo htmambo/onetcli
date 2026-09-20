@@ -4,7 +4,6 @@ use crate::connection::{DbConnection, DbError, StreamingProgress};
 use crate::import_export::{
     ExportConfig, ExportProgressSender, ExportResult, ImportConfig, ImportResult,
 };
-use crate::ipc::ExternalDatabasePlugin;
 use crate::mysql::MySqlPlugin;
 use crate::plugin::DatabasePlugin;
 use crate::plugin_manifest::DatabaseCapabilities;
@@ -18,6 +17,7 @@ use gpui::{AppContext, AsyncApp, Global};
 use one_core::connection_notifier::{ConnectionDataEvent, GlobalConnectionNotifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
+use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -171,7 +171,6 @@ pub struct DbManager {
     mysql: Arc<dyn DatabasePlugin>,
     postgresql: Arc<dyn DatabasePlugin>,
     sqlite: Arc<dyn DatabasePlugin>,
-    external: Arc<dyn DatabasePlugin>,
 }
 
 impl DbManager {
@@ -180,7 +179,6 @@ impl DbManager {
             mysql: Arc::new(MySqlPlugin::new()),
             postgresql: Arc::new(PostgresPlugin::new()),
             sqlite: Arc::new(SqlitePlugin::new()),
-            external: Arc::new(ExternalDatabasePlugin::new()),
         }
     }
 
@@ -189,7 +187,10 @@ impl DbManager {
             DatabaseType::MySQL => Ok(Arc::clone(&self.mysql)),
             DatabaseType::PostgreSQL => Ok(Arc::clone(&self.postgresql)),
             DatabaseType::SQLite => Ok(Arc::clone(&self.sqlite)),
-            DatabaseType::External => Ok(Arc::clone(&self.external)),
+            // 外部驱动子系统已移除；External 仅为存量数据反序列化兜底保留，不可连接
+            DatabaseType::External => Err(DbError::NotSupported(
+                t!("Error.external_drivers_unsupported").to_string(),
+            )),
         }
     }
 }
@@ -206,7 +207,6 @@ impl Clone for DbManager {
             mysql: Arc::clone(&self.mysql),
             postgresql: Arc::clone(&self.postgresql),
             sqlite: Arc::clone(&self.sqlite),
-            external: Arc::clone(&self.external),
         }
     }
 }
@@ -843,6 +843,7 @@ impl SessionGuard {
     }
 
     /// 测试用：读取当前 session 持有的 release action（用于验证降级逻辑）
+    #[cfg_attr(not(test), allow(dead_code))] // 仅供测试断言
     pub(crate) fn current_action(&self) -> Option<SessionReleaseAction> {
         match &self.state {
             GuardReleaseState::Pending { action, .. } => Some(*action),

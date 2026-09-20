@@ -65,3 +65,35 @@ Sftp:
     en: "Proxy connection timed out after %{secs}s"
     zh-CN: "代理连接超时（%{secs} 秒）"
     zh-HK: "代理連線超時（%{secs} 秒）"
+  scan_dir_failed:
+    en: "SFTP failed to scan directory %{dir}: %{error}"
+    zh-CN: "SFTP 扫描目录 %{dir} 失败: %{error}"
+    zh-HK: "SFTP 掃描目錄 %{dir} 失敗: %{error}"
+  read_entry_failed:
+    en: "SFTP failed to read directory entry: %{error}"
+    zh-CN: "SFTP 读取条目失败: %{error}"
+    zh-HK: "SFTP 讀取條目失敗: %{error}"
+  read_metadata_failed:
+    en: "SFTP failed to read metadata for %{path}: %{error}"
+    zh-CN: "SFTP 读取 metadata %{path} 失败: %{error}"
+    zh-HK: "SFTP 讀取 metadata %{path} 失敗: %{error}"
+  connect_via_jump:
+    en: "SFTP: connecting via jump server %{host}:%{port}"
+    zh-CN: "SFTP: 通过跳板机 %{host}:%{port} 连接"
+    zh-HK: "SFTP: 透過跳板機 %{host}:%{port} 連線"
+  connect_jump_via_proxy:
+    en: "SFTP: connecting to jump server via proxy %{host}:%{port}"
+    zh-CN: "SFTP: 通过代理 %{host}:%{port} 连接跳板机"
+    zh-HK: "SFTP: 透過代理 %{host}:%{port} 連線跳板機"
+  connect_via_proxy:
+    en: "SFTP: connecting via proxy %{host}:%{port}"
+    zh-CN: "SFTP: 通过代理 %{host}:%{port} 连接"
+    zh-HK: "SFTP: 透過代理 %{host}:%{port} 連線"
+  dir_entry_unsafe_path:
+    en: "SFTP directory entry contains `..`, skipping to prevent path traversal: %{path}"
+    zh-CN: "SFTP 目录条目相对路径含 `..`，跳过以防越界：%{path}"
+    zh-HK: "SFTP 目錄條目相對路徑含 `..`，跳過以防越界：%{path}"
+  file_entry_unsafe_path:
+    en: "SFTP file entry contains `..`, skipping to prevent path traversal: %{path}"
+    zh-CN: "SFTP 文件条目相对路径含 `..`，跳过以防越界：%{path}"
+    zh-HK: "SFTP 檔案條目相對路徑含 `..`，跳過以防越界：%{path}"

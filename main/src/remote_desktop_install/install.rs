@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, anyhow};
+use rust_i18n::t;
 
 use remote_desktop::PROVIDER_MANIFEST_FILE;
 
@@ -35,8 +36,13 @@ fn install_from_staging(
     extract_archive(archive, staging)?;
     let package_root = locate_package_root(staging)?;
     let provider_id = read_provider_id(&package_root)?;
-    std::fs::create_dir_all(providers_root)
-        .with_context(|| format!("创建插件目录失败: {}", providers_root.display()))?;
+    std::fs::create_dir_all(providers_root).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.create_provider_dir_failed",
+            path = providers_root.display().to_string()
+        )
+        .to_string()
+    })?;
 
     let target = providers_root.join(&provider_id);
     let backup = backup_existing_target(providers_root, &provider_id, &target)?;
@@ -51,7 +57,13 @@ fn install_from_staging(
         }
         Ok(None) => {
             restore_failed_install(&target, backup.as_deref())?;
-            Err(anyhow!("远程桌面插件清单缺失: {}", target.display()))
+            Err(anyhow!(
+                t!(
+                    "RemoteDesktopInstall.provider_manifest_missing",
+                    path = target.display().to_string()
+                )
+                .to_string()
+            ))
         }
         Err(error) => {
             restore_failed_install(&target, backup.as_deref())?;
@@ -61,31 +73,58 @@ fn install_from_staging(
 }
 
 fn extract_archive(archive: &Path, staging: &Path) -> anyhow::Result<()> {
-    let file = std::fs::File::open(archive)
-        .with_context(|| format!("打开插件包失败: {}", archive.display()))?;
+    let file = std::fs::File::open(archive).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.open_provider_archive_failed",
+            path = archive.display().to_string()
+        )
+        .to_string()
+    })?;
     let decoder = flate2::read::GzDecoder::new(file);
     let mut tar = tar::Archive::new(decoder);
-    for entry in tar.entries().context("读取 tar 条目失败")? {
-        let mut entry = entry.context("读取 tar 条目失败")?;
+    for entry in tar
+        .entries()
+        .context(t!("RemoteDesktopInstall.read_tar_entries_failed").to_string())?
+    {
+        let mut entry =
+            entry.context(t!("RemoteDesktopInstall.read_tar_entries_failed").to_string())?;
         validate_tar_entry(&entry)?;
-        let unpacked = entry
-            .unpack_in(staging)
-            .with_context(|| format!("解包插件包失败: {}", staging.display()))?;
+        let unpacked = entry.unpack_in(staging).with_context(|| {
+            t!(
+                "RemoteDesktopInstall.unpack_provider_archive_failed",
+                path = staging.display().to_string()
+            )
+            .to_string()
+        })?;
         if !unpacked {
-            anyhow::bail!("tar 条目解包目标超出目录");
+            anyhow::bail!(t!("RemoteDesktopInstall.tar_entry_out_of_bounds").to_string());
         }
     }
     Ok(())
 }
 
 fn validate_tar_entry<R: std::io::Read>(entry: &tar::Entry<'_, R>) -> anyhow::Result<()> {
-    let path = entry.path().context("读取 tar 条目路径失败")?;
+    let path = entry
+        .path()
+        .context(t!("RemoteDesktopInstall.read_tar_entry_path_failed").to_string())?;
     if path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir)) {
-        anyhow::bail!("tar 条目路径越界: {}", path.display());
+        anyhow::bail!(
+            t!(
+                "RemoteDesktopInstall.tar_entry_path_out_of_bounds",
+                path = path.display().to_string()
+            )
+            .to_string()
+        );
     }
     let entry_type = entry.header().entry_type();
     if entry_type.is_symlink() || entry_type.is_hard_link() {
-        anyhow::bail!("tar 条目不允许符号链接或硬链接: {}", path.display());
+        anyhow::bail!(
+            t!(
+                "RemoteDesktopInstall.tar_entry_symlink_forbidden",
+                path = path.display().to_string()
+            )
+            .to_string()
+        );
     }
     Ok(())
 }
@@ -106,8 +145,16 @@ fn locate_package_root(staging: &Path) -> anyhow::Result<PathBuf> {
     }
     match candidates.as_slice() {
         [dir] => Ok(dir.clone()),
-        [] => Err(anyhow!("扩展包缺少 {PROVIDER_MANIFEST_FILE}")),
-        _ => Err(anyhow!("扩展包包含多个远程桌面插件目录")),
+        [] => Err(anyhow!(
+            t!(
+                "RemoteDesktopInstall.package_missing_manifest",
+                file = PROVIDER_MANIFEST_FILE
+            )
+            .to_string()
+        )),
+        _ => Err(anyhow!(
+            t!("RemoteDesktopInstall.package_multiple_provider_dirs").to_string()
+        )),
     }
 }
 
@@ -118,18 +165,36 @@ fn is_ignored_name(name: &OsStr) -> bool {
 
 fn read_provider_id(package_root: &Path) -> anyhow::Result<String> {
     let manifest_path = package_root.join(PROVIDER_MANIFEST_FILE);
-    let content = std::fs::read_to_string(&manifest_path)
-        .with_context(|| format!("读取插件清单失败: {}", manifest_path.display()))?;
-    let manifest: serde_json::Value = serde_json::from_str(&content)
-        .with_context(|| format!("解析插件清单失败: {}", manifest_path.display()))?;
+    let content = std::fs::read_to_string(&manifest_path).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.read_provider_manifest_failed",
+            path = manifest_path.display().to_string()
+        )
+        .to_string()
+    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&content).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.parse_provider_manifest_failed",
+            path = manifest_path.display().to_string()
+        )
+        .to_string()
+    })?;
     let id = manifest
         .get("id")
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("远程桌面插件清单缺少 id 字段"))?;
+        .ok_or_else(|| {
+            anyhow!(t!("RemoteDesktopInstall.provider_manifest_missing_id").to_string())
+        })?;
     if id == "." || id == ".." || id.contains('/') || id.contains('\\') {
-        anyhow::bail!("远程桌面插件 id 非法: {id}");
+        anyhow::bail!(
+            t!(
+                "RemoteDesktopInstall.provider_id_invalid",
+                id = id.to_string()
+            )
+            .to_string()
+        );
     }
     Ok(id.to_string())
 }
@@ -143,46 +208,88 @@ fn backup_existing_target(
         return Ok(None);
     }
     let backup = make_backup_dir(providers_root, provider_id);
-    std::fs::rename(target, &backup)
-        .with_context(|| format!("备份已有插件失败: {}", target.display()))?;
+    std::fs::rename(target, &backup).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.backup_existing_provider_failed",
+            path = target.display().to_string()
+        )
+        .to_string()
+    })?;
     Ok(Some(backup))
 }
 
 fn restore_failed_install(target: &Path, backup: Option<&Path>) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(target);
     if let Some(backup) = backup {
-        std::fs::rename(backup, target)
-            .with_context(|| format!("恢复旧版插件失败: {}", target.display()))?;
+        std::fs::rename(backup, target).with_context(|| {
+            t!(
+                "RemoteDesktopInstall.restore_old_provider_failed",
+                path = target.display().to_string()
+            )
+            .to_string()
+        })?;
     }
     Ok(())
 }
 
 fn remove_install_backup(backup: Option<&Path>) {
     if let Some(backup) = backup {
-        if let Err(error) = std::fs::remove_dir_all(backup) {
-            tracing::warn!("删除插件安装备份失败 {}: {error:?}", backup.display());
+        if let Err(_error) = std::fs::remove_dir_all(backup) {
+            tracing::warn!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.remove_install_backup_failed",
+                    path = backup.display().to_string()
+                )
+            );
         }
     }
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dst).with_context(|| format!("创建目录失败: {}", dst.display()))?;
-    for entry in
-        std::fs::read_dir(src).with_context(|| format!("读取目录失败: {}", src.display()))?
-    {
+    std::fs::create_dir_all(dst).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.create_directory_failed",
+            path = dst.display().to_string()
+        )
+        .to_string()
+    })?;
+    for entry in std::fs::read_dir(src).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.read_directory_failed",
+            path = src.display().to_string()
+        )
+        .to_string()
+    })? {
         let entry = entry?;
         let path = entry.path();
         let target = dst.join(entry.file_name());
-        let metadata = std::fs::symlink_metadata(&path)
-            .with_context(|| format!("读取文件信息失败: {}", path.display()))?;
+        let metadata = std::fs::symlink_metadata(&path).with_context(|| {
+            t!(
+                "RemoteDesktopInstall.read_file_metadata_failed",
+                path = path.display().to_string()
+            )
+            .to_string()
+        })?;
         if metadata.file_type().is_symlink() {
-            anyhow::bail!("拒绝拷贝符号链接: {}", path.display());
+            anyhow::bail!(
+                t!(
+                    "RemoteDesktopInstall.symlink_copy_rejected",
+                    path = path.display().to_string()
+                )
+                .to_string()
+            );
         }
         if metadata.is_dir() {
             copy_dir_recursive(&path, &target)?;
         } else {
-            std::fs::copy(&path, &target)
-                .with_context(|| format!("拷贝文件失败: {}", path.display()))?;
+            std::fs::copy(&path, &target).with_context(|| {
+                t!(
+                    "RemoteDesktopInstall.copy_file_failed",
+                    path = path.display().to_string()
+                )
+                .to_string()
+            })?;
         }
     }
     Ok(())
@@ -195,8 +302,13 @@ fn make_staging_dir() -> anyhow::Result<PathBuf> {
         unix_nanos(),
         STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("创建临时目录失败: {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).with_context(|| {
+        t!(
+            "RemoteDesktopInstall.create_staging_dir_failed",
+            path = dir.display().to_string()
+        )
+        .to_string()
+    })?;
     Ok(dir)
 }
 

@@ -45,7 +45,10 @@ pub fn load_pending_connection_restore_snapshot() -> Option<ConnectionRestoreSna
             (!snapshot.items.is_empty()).then_some(snapshot)
         }
         Err(error) => {
-            tracing::warn!("读取连接恢复快照失败：{}", error);
+            tracing::warn!(
+                "{}",
+                t!("ConnectionRestore.snapshot_read_failed", error = error)
+            );
             None
         }
     }
@@ -76,7 +79,13 @@ fn merge_tab_state_snapshot_items(snapshot: &mut ConnectionRestoreSnapshot) {
 
 pub fn clear_pending_connection_restore_snapshot() {
     if let Err(error) = clear_connection_restore_snapshot() {
-        tracing::warn!("清理连接恢复快照失败：{}", error);
+        tracing::warn!(
+            "{}",
+            t!(
+                "ConnectionRestore.clear_snapshot_failed",
+                error = error.to_string()
+            )
+        );
     }
 }
 
@@ -445,7 +454,13 @@ impl ConnectionRestoreDialogContent {
                             });
                         })
                 {
-                    tracing::warn!("在主窗口执行跳过恢复失败：{}", error);
+                    tracing::warn!(
+                        "{}",
+                        t!(
+                            "ConnectionRestore.skip_restore_failed",
+                            error = error.to_string()
+                        )
+                    );
                 }
             });
         });
@@ -498,7 +513,13 @@ impl ConnectionRestoreDialogContent {
                             });
                         })
                 {
-                    tracing::warn!("在主窗口执行连接恢复失败：{}", error);
+                    tracing::warn!(
+                        "{}",
+                        t!(
+                            "ConnectionRestore.exec_restore_failed",
+                            error = error.to_string()
+                        )
+                    );
                 }
             });
         });

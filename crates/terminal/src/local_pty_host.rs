@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use rust_i18n::t;
 use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing;
 use uuid::Uuid;
@@ -85,7 +86,7 @@ impl SessionRegistry {
 }
 
 pub async fn run_local_pty_host() -> Result<()> {
-    tracing::info!("启动本地 PTY host 子进程");
+    tracing::info!("{}", t!("LocalPtyHost.starting_subprocess"));
 
     let registry = Arc::new(SessionRegistry::new());
 
@@ -104,7 +105,7 @@ pub async fn run_local_pty_host() -> Result<()> {
                 .map(|(id, _)| id)
                 .collect();
             for session_id in to_kill {
-                tracing::info!(session_id = %session_id, "detached session TTL 到期，执行清理");
+                tracing::info!(session_id = %session_id, "{}", t!("LocalPtyHost.detached_session_ttl_cleanup"));
                 if let Some(handle) = ttl_registry.remove(&session_id).await {
                     let _ = handle.shutdown_tx.send(());
                 }
@@ -121,7 +122,8 @@ pub async fn run_local_pty_host() -> Result<()> {
 
 fn write_pid_file() -> Result<()> {
     let path = local_pty_pid_file();
-    std::fs::write(&path, std::process::id().to_string()).context("写入 host pid 文件失败")?;
+    std::fs::write(&path, std::process::id().to_string())
+        .context(t!("LocalPtyHost.write_pid_file_failed"))?;
     Ok(())
 }
 
@@ -227,7 +229,9 @@ async fn spawn_session(
         pixel_width: size.pixel_width,
         pixel_height: size.pixel_height,
     };
-    let pair = pty_system.openpty(pty_size).context("打开 PTY 失败")?;
+    let pair = pty_system
+        .openpty(pty_size)
+        .context(t!("LocalPtyHost.open_pty_failed"))?;
 
     let shell = config.shell.clone().unwrap_or_else(|| default_shell());
     let mut cmd = CommandBuilder::new(&shell);
@@ -242,7 +246,7 @@ async fn spawn_session(
     let child = pair
         .slave
         .spawn_command(cmd)
-        .context("在 PTY 中启动 shell 失败")?;
+        .context(t!("LocalPtyHost.spawn_shell_failed"))?;
     let child_pid = child.process_id().map(|id| id as u32);
 
     let session_id = format!("local-pty-{}", Uuid::new_v4());
@@ -257,11 +261,11 @@ async fn spawn_session(
     let mut master_writer = pair
         .master
         .take_writer()
-        .context("获取 PTY master writer 失败")?;
+        .context(t!("LocalPtyHost.pty_master_writer_failed"))?;
     let mut master_reader = pair
         .master
         .try_clone_reader()
-        .context("获取 PTY master reader 失败")?;
+        .context(t!("LocalPtyHost.pty_master_reader_failed"))?;
 
     // 启动 session I/O 任务：写/resize/关闭在 async 任务中处理，读在 spawn_blocking 中处理
     let output_tx_for_read = output_tx.clone();

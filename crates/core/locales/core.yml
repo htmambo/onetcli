@@ -173,6 +173,42 @@ CertificateManager:
     en: "Failed to save certificate: %{error}"
     zh-CN: "保存凭证失败：%{error}"
     zh-HK: "保存憑證失敗：%{error}"
+  log_load_failed:
+    en: "Failed to load certificates: %{error}"
+    zh-CN: "加载证书失败: %{error}"
+    zh-HK: "載入憑證失敗: %{error}"
+  log_record_pending_deletion_failed:
+    en: "Failed to record certificate pending-deletion sync: %{error}"
+    zh-CN: "记录证书待删除同步失败: %{error}"
+    zh-HK: "記錄憑證待刪除同步失敗: %{error}"
+  log_delete_failed:
+    en: "Failed to delete certificate: %{error}"
+    zh-CN: "删除证书失败: %{error}"
+    zh-HK: "刪除憑證失敗: %{error}"
+  log_detach_refs_failed:
+    en: "Failed to detach certificate references: %{error}"
+    zh-CN: "解除证书引用失败: %{error}"
+    zh-HK: "解除憑證引用失敗: %{error}"
+  log_save_failed:
+    en: "Failed to save certificate: %{error}"
+    zh-CN: "保存证书失败: %{error}"
+    zh-HK: "儲存憑證失敗: %{error}"
+  kind_username_password:
+    en: Password
+    zh-CN: 账号密码
+    zh-HK: 帳號密碼
+  kind_ssh_private_key:
+    en: SSH Private Key
+    zh-CN: SSH 私钥
+    zh-HK: SSH 私鑰
+  key_stored:
+    en: "[private key stored]"
+    zh-CN: "[已存储私钥]"
+    zh-HK: "[已儲存私鑰]"
+  key_not_set:
+    en: No private key set
+    zh-CN: 未设置私钥
+    zh-HK: 未設定私鑰
 
 AiChat:
   title:
@@ -420,6 +456,22 @@ Please help me analyze this error and provide a solution."
     zh-CN: "设置将立即生效"
     zh-HK: "設定將立即生效"
 
+  log_create_session_failed:
+    en: "Failed to create session: %{error}"
+    zh-CN: "创建会话失败: %{error}"
+    zh-HK: "建立工作階段失敗: %{error}"
+  agent_dispatch_failed:
+    en: "Agent dispatch task failed: %{error}"
+    zh-CN: "Agent 调度任务失败: %{error}"
+    zh-HK: "Agent 調度任務失敗: %{error}"
+  log_tool_calls_deserialize_failed:
+    en: "Failed to deserialize tool_calls_json; falling back to plain-text assistant message: %{error}"
+    zh-CN: "反序列化 tool_calls_json 失败，降级为纯文本 assistant 消息: %{error}"
+    zh-HK: "反序列化 tool_calls_json 失敗，降級為純文字 assistant 訊息: %{error}"
+  log_generate_title_failed:
+    en: "AI failed to generate session title: %{error}"
+    zh-CN: "AI 生成会话标题失败: %{error}"
+    zh-HK: "AI 產生工作階段標題失敗: %{error}"
 ConnectionType:
   all:
     en: "All"
@@ -461,3 +513,946 @@ ConnectionType:
     en: VNC
     zh-CN: VNC
     zh-HK: VNC
+
+CloudSync:
+  type_connection:
+    en: "Connection"
+    zh-CN: "连接"
+    zh-HK: "連線"
+  type_workspace:
+    en: "Workspace"
+    zh-CN: "工作空间"
+    zh-HK: "工作區"
+  type_certificate:
+    en: "Certificate"
+    zh-CN: "证书"
+    zh-HK: "證書"
+  type_llm_provider:
+    en: "LLM Provider"
+    zh-CN: "LLM 提供商"
+    zh-HK: "LLM 提供商"
+  lock_failed:
+    en: "Failed to acquire sync service lock"
+    zh-CN: "同步服务锁获取失败"
+    zh-HK: "同步服務鎖獲取失敗"
+  conflict_copy_suffix:
+    en: "%{name} (conflict copy %{timestamp})"
+    zh-CN: "%{name} (冲突副本 %{timestamp})"
+    zh-HK: "%{name} (衝突副本 %{timestamp})"
+  apply_conflict_failed:
+    en: "Failed to apply conflict resolution: %{error}"
+    zh-CN: "应用冲突解决失败: %{error}"
+    zh-HK: "套用衝突解決失敗: %{error}"
+  apply_cloud_data_failed:
+    en: "Failed to apply cloud data: %{error}"
+    zh-CN: "应用云端数据失败: %{error}"
+    zh-HK: "套用雲端資料失敗: %{error}"
+  upload_cloud_failed:
+    en: "Failed to upload to cloud: %{error}"
+    zh-CN: "上传云端失败: %{error}"
+    zh-HK: "上傳雲端失敗: %{error}"
+  not_unlocked:
+    en: "Please unlock with your master key first"
+    zh-CN: "请先输入主密钥解锁"
+    zh-HK: "請先輸入主密鑰解鎖"
+  invalid_master_key:
+    en: "Invalid master key"
+    zh-CN: "主密钥错误"
+    zh-HK: "主密鑰錯誤"
+  key_version_mismatch:
+    en: "Key version mismatch, please sync again"
+    zh-CN: "密钥版本不匹配，请重新同步"
+    zh-HK: "密鑰版本不匹配，請重新同步"
+  network_error:
+    en: "Network error: %{error}"
+    zh-CN: "网络错误: %{error}"
+    zh-HK: "網路錯誤: %{error}"
+  crypto_error:
+    en: "Crypto error: %{error}"
+    zh-CN: "加解密错误: %{error}"
+    zh-HK: "加解密錯誤: %{error}"
+  data_format_error:
+    en: "Data format error: %{error}"
+    zh-CN: "数据格式错误: %{error}"
+    zh-HK: "資料格式錯誤: %{error}"
+  storage_error:
+    en: "Storage error: %{error}"
+    zh-CN: "存储错误: %{error}"
+    zh-HK: "儲存錯誤: %{error}"
+  not_logged_in:
+    en: "Please sign in to your cloud account first"
+    zh-CN: "请先登录云端账户"
+    zh-HK: "請先登入雲端帳戶"
+  api_not_authenticated:
+    en: "Not signed in"
+    zh-CN: "未登录"
+    zh-HK: "未登入"
+  api_authentication_failed:
+    en: "Authentication failed: %{error}"
+    zh-CN: "认证失败: %{error}"
+    zh-HK: "認證失敗: %{error}"
+  api_email_confirmation_required:
+    en: "Email confirmation required: %{error}"
+    zh-CN: "需要邮箱确认: %{error}"
+    zh-HK: "需要電郵確認: %{error}"
+  api_server_error:
+    en: "Server error: %{error}"
+    zh-CN: "服务端错误: %{error}"
+    zh-HK: "伺服器錯誤: %{error}"
+  api_parse_error:
+    en: "Data parse error: %{error}"
+    zh-CN: "数据解析错误: %{error}"
+    zh-HK: "資料解析錯誤: %{error}"
+  api_not_found:
+    en: "Not found: %{error}"
+    zh-CN: "资源未找到: %{error}"
+    zh-HK: "找不到資源: %{error}"
+  api_conflict:
+    en: "Conflict: %{error}"
+    zh-CN: "冲突: %{error}"
+    zh-HK: "衝突: %{error}"
+  api_not_supported:
+    en: "Not supported: %{error}"
+    zh-CN: "不支持: %{error}"
+    zh-HK: "不支援: %{error}"
+  api_unknown:
+    en: "Unknown error: %{error}"
+    zh-CN: "未知错误: %{error}"
+    zh-HK: "未知錯誤: %{error}"
+  resolution_use_cloud:
+    en: "Use cloud version"
+    zh-CN: "使用云端版本"
+    zh-HK: "使用雲端版本"
+  resolution_use_local:
+    en: "Use local version"
+    zh-CN: "使用本地版本"
+    zh-HK: "使用本地版本"
+  resolution_keep_both:
+    en: "Keep both"
+    zh-CN: "保留两者"
+    zh-HK: "保留兩者"
+  conflict_both_modified:
+    en: "Both local and cloud have changes"
+    zh-CN: "本地和云端都有修改"
+    zh-HK: "本地和雲端都有修改"
+  conflict_local_deleted_cloud_modified:
+    en: "Deleted locally, but cloud has updates"
+    zh-CN: "本地已删除，但云端有更新"
+    zh-HK: "本地已刪除，但雲端有更新"
+  conflict_local_modified_cloud_deleted:
+    en: "Modified locally, but deleted from cloud"
+    zh-CN: "本地有更新，但云端已删除"
+    zh-HK: "本地有更新，但雲端已刪除"
+  status_synced:
+    en: "Synced"
+    zh-CN: "已同步"
+    zh-HK: "已同步"
+  status_local_modified:
+    en: "Local changes pending sync"
+    zh-CN: "本地修改待同步"
+    zh-HK: "本地修改待同步"
+  status_cloud_modified:
+    en: "Cloud changes pending download"
+    zh-CN: "云端修改待下载"
+    zh-HK: "雲端修改待下載"
+  status_conflict:
+    en: "Conflict"
+    zh-CN: "存在冲突"
+    zh-HK: "存在衝突"
+  status_pending_upload:
+    en: "Pending upload"
+    zh-CN: "待上传"
+    zh-HK: "待上傳"
+  status_pending_download:
+    en: "Pending download"
+    zh-CN: "待下载"
+    zh-HK: "待下載"
+  status_local_deleted:
+    en: "Deleted locally"
+    zh-CN: "本地已删除"
+    zh-HK: "本地已刪除"
+  status_cloud_deleted:
+    en: "Deleted from cloud"
+    zh-CN: "云端已删除"
+    zh-HK: "雲端已刪除"
+  upload_failed:
+    en: "Failed to upload %{name}: %{error}"
+    zh-CN: "上传失败 %{name}: %{error}"
+    zh-HK: "上傳失敗 %{name}: %{error}"
+  upload_failed_missing_local_id:
+    en: "Failed to upload %{name}: missing local ID"
+    zh-CN: "上传失败 %{name}: 缺少本地 ID"
+    zh-HK: "上傳失敗 %{name}: 缺少本地 ID"
+  upload_failed_local_missing:
+    en: "Failed to upload %{name}: local data not found"
+    zh-CN: "上传失败 %{name}: 本地数据不存在"
+    zh-HK: "上傳失敗 %{name}: 本地資料不存在"
+  update_cloud_failed:
+    en: "Failed to update cloud %{name}: %{error}"
+    zh-CN: "更新云端失败 %{name}: %{error}"
+    zh-HK: "更新雲端失敗 %{name}: %{error}"
+  update_cloud_failed_missing_local_id:
+    en: "Failed to update cloud %{name}: missing local ID"
+    zh-CN: "更新云端失败 %{name}: 缺少本地 ID"
+    zh-HK: "更新雲端失敗 %{name}: 缺少本地 ID"
+  update_cloud_failed_local_missing:
+    en: "Failed to update cloud %{name}: local data not found"
+    zh-CN: "更新云端失败 %{name}: 本地数据不存在"
+    zh-HK: "更新雲端失敗 %{name}: 本地資料不存在"
+  update_cloud_failed_cloud_missing:
+    en: "Failed to update cloud %{name}: cloud data not found"
+    zh-CN: "更新云端失败 %{name}: 云端数据不存在"
+    zh-HK: "更新雲端失敗 %{name}: 雲端資料不存在"
+  update_local_failed:
+    en: "Failed to update local %{name}: %{error}"
+    zh-CN: "更新本地失败 %{name}: %{error}"
+    zh-HK: "更新本地失敗 %{name}: %{error}"
+  update_local_failed_missing_local_id:
+    en: "Failed to update local %{name}: missing local ID"
+    zh-CN: "更新本地失败 %{name}: 缺少本地 ID"
+    zh-HK: "更新本地失敗 %{name}: 缺少本地 ID"
+  update_local_failed_local_missing:
+    en: "Failed to update local %{name}: local data not found"
+    zh-CN: "更新本地失败 %{name}: 本地数据不存在"
+    zh-HK: "更新本地失敗 %{name}: 本地資料不存在"
+  update_local_failed_cloud_missing:
+    en: "Failed to update local %{name}: cloud data not found"
+    zh-CN: "更新本地失败 %{name}: 云端数据不存在"
+    zh-HK: "更新本地失敗 %{name}: 雲端資料不存在"
+  download_failed:
+    en: "Failed to download %{name}: %{error}"
+    zh-CN: "下载失败 %{name}: %{error}"
+    zh-HK: "下載失敗 %{name}: %{error}"
+  download_failed_cloud_missing:
+    en: "Failed to download %{name}: cloud data not found"
+    zh-CN: "下载失败 %{name}: 云端数据不存在"
+    zh-HK: "下載失敗 %{name}: 雲端資料不存在"
+  delete_cloud_failed:
+    en: "Failed to delete cloud item %{name}: %{error}"
+    zh-CN: "删除云端失败 %{name}: %{error}"
+    zh-HK: "刪除雲端失敗 %{name}: %{error}"
+  delete_local_failed:
+    en: "Failed to delete local item %{name}: %{error}"
+    zh-CN: "删除本地失败 %{name}: %{error}"
+    zh-HK: "刪除本地失敗 %{name}: %{error}"
+  upload_typed_failed:
+    en: "Failed to upload %{type_name} %{name}: %{error}"
+    zh-CN: "上传%{type_name}失败 %{name}: %{error}"
+    zh-HK: "上傳%{type_name}失敗 %{name}: %{error}"
+  upload_typed_failed_missing_local_id:
+    en: "Failed to upload %{type_name} %{name}: missing local ID"
+    zh-CN: "上传%{type_name}失败 %{name}: 缺少本地 ID"
+    zh-HK: "上傳%{type_name}失敗 %{name}: 缺少本地 ID"
+  upload_typed_failed_local_missing:
+    en: "Failed to upload %{type_name} %{name}: local data not found"
+    zh-CN: "上传%{type_name}失败 %{name}: 本地数据不存在"
+    zh-HK: "上傳%{type_name}失敗 %{name}: 本地資料不存在"
+  update_cloud_typed_failed:
+    en: "Failed to update cloud %{type_name} %{name}: %{error}"
+    zh-CN: "更新云端%{type_name}失败 %{name}: %{error}"
+    zh-HK: "更新雲端%{type_name}失敗 %{name}: %{error}"
+  update_cloud_typed_failed_missing_local_id:
+    en: "Failed to update cloud %{type_name} %{name}: missing local ID"
+    zh-CN: "更新云端%{type_name}失败 %{name}: 缺少本地 ID"
+    zh-HK: "更新雲端%{type_name}失敗 %{name}: 缺少本地 ID"
+  update_cloud_typed_failed_local_missing:
+    en: "Failed to update cloud %{type_name} %{name}: local data not found"
+    zh-CN: "更新云端%{type_name}失败 %{name}: 本地数据不存在"
+    zh-HK: "更新雲端%{type_name}失敗 %{name}: 本地資料不存在"
+  update_cloud_typed_failed_cloud_missing:
+    en: "Failed to update cloud %{type_name} %{name}: cloud data not found"
+    zh-CN: "更新云端%{type_name}失败 %{name}: 云端数据不存在"
+    zh-HK: "更新雲端%{type_name}失敗 %{name}: 雲端資料不存在"
+  update_local_typed_failed:
+    en: "Failed to update local %{type_name} %{name}: %{error}"
+    zh-CN: "更新本地%{type_name}失败 %{name}: %{error}"
+    zh-HK: "更新本地%{type_name}失敗 %{name}: %{error}"
+  update_local_typed_failed_missing_local_id:
+    en: "Failed to update local %{type_name} %{name}: missing local ID"
+    zh-CN: "更新本地%{type_name}失败 %{name}: 缺少本地 ID"
+    zh-HK: "更新本地%{type_name}失敗 %{name}: 缺少本地 ID"
+  update_local_typed_failed_local_missing:
+    en: "Failed to update local %{type_name} %{name}: local data not found"
+    zh-CN: "更新本地%{type_name}失败 %{name}: 本地数据不存在"
+    zh-HK: "更新本地%{type_name}失敗 %{name}: 本地資料不存在"
+  update_local_typed_failed_cloud_missing:
+    en: "Failed to update local %{type_name} %{name}: cloud data not found"
+    zh-CN: "更新本地%{type_name}失败 %{name}: 云端数据不存在"
+    zh-HK: "更新本地%{type_name}失敗 %{name}: 雲端資料不存在"
+  download_typed_failed:
+    en: "Failed to download %{type_name} %{name}: %{error}"
+    zh-CN: "下载%{type_name}失败 %{name}: %{error}"
+    zh-HK: "下載%{type_name}失敗 %{name}: %{error}"
+  download_typed_failed_cloud_missing:
+    en: "Failed to download %{type_name} %{name}: cloud data not found"
+    zh-CN: "下载%{type_name}失败 %{name}: 云端数据不存在"
+    zh-HK: "下載%{type_name}失敗 %{name}: 雲端資料不存在"
+  delete_cloud_typed_failed:
+    en: "Failed to delete cloud %{type_name} %{name}: %{error}"
+    zh-CN: "删除云端%{type_name}失败 %{name}: %{error}"
+    zh-HK: "刪除雲端%{type_name}失敗 %{name}: %{error}"
+  delete_local_typed_failed:
+    en: "Failed to delete local %{type_name} %{name}: %{error}"
+    zh-CN: "删除本地%{type_name}失败 %{name}: %{error}"
+    zh-HK: "刪除本地%{type_name}失敗 %{name}: %{error}"
+  cloud_master_key_mismatch:
+    en: "The cloud sync key does not match the current local master key. Please unlock with the original master key, or clear this account's cloud sync data and try again"
+    zh-CN: "云端同步密钥与当前本地主密钥不一致，请使用原主密钥解锁，或清空该账号的云端同步数据后重试"
+    zh-HK: "雲端同步密鑰與目前本地主密鑰不一致，請使用原主密鑰解鎖，或清空該帳號的雲端同步資料後重試"
+  connection_missing_local_id:
+    en: "Connection is missing local ID, cannot update sync status"
+    zh-CN: "连接缺少本地 ID，无法更新同步状态"
+    zh-HK: "連線缺少本地 ID，無法更新同步狀態"
+  connection_missing_local_id_for_delete:
+    en: "Connection is missing local ID, cannot apply cloud deletion"
+    zh-CN: "连接缺少本地 ID，无法应用云端删除结果"
+    zh-HK: "連線缺少本地 ID，無法套用雲端刪除結果"
+  connection_missing_local_id_plain:
+    en: "Connection is missing local ID"
+    zh-CN: "连接缺少本地 ID"
+    zh-HK: "連線缺少本地 ID"
+  conflict_connection_missing_id:
+    en: "Conflicting local connection is missing ID"
+    zh-CN: "冲突本地连接缺少 ID"
+    zh-HK: "衝突本地連線缺少 ID"
+  workspace_not_found:
+    en: "Workspace %{id} does not exist, cannot sync its connections"
+    zh-CN: "工作区 %{id} 不存在，无法同步其下连接"
+    zh-HK: "工作區 %{id} 不存在，無法同步其下連線"
+  workspace_missing_cloud_id:
+    en: "Workspace %{id} is missing cloud_id, cannot sync its connections"
+    zh-CN: "工作区 %{id} 缺少 cloud_id，无法同步其下连接"
+    zh-HK: "工作區 %{id} 缺少 cloud_id，無法同步其下連線"
+  workspace_local_not_found:
+    en: "Local workspace for cloud_id=%{id} not found, cannot restore connection ownership"
+    zh-CN: "未找到 cloud_id=%{id} 对应的本地工作区，无法恢复连接归属"
+    zh-HK: "找不到 cloud_id=%{id} 對應的本地工作區，無法恢復連線歸屬"
+  workspace_missing_local_id:
+    en: "Workspace cloud_id=%{id} is missing local id, cannot restore connection ownership"
+    zh-CN: "工作区 cloud_id=%{id} 缺少本地 id，无法恢复连接归属"
+    zh-HK: "工作區 cloud_id=%{id} 缺少本地 id，無法恢復連線歸屬"
+  workspace_lost_after_restore:
+    en: "Workspace lost after restore"
+    zh-CN: "工作空间恢复后丢失"
+    zh-HK: "工作區還原後遺失"
+  workspace_restored_missing_local_id:
+    en: "Restored workspace is missing local ID"
+    zh-CN: "恢复后的工作空间缺少本地 ID"
+    zh-HK: "還原後的工作區缺少本地 ID"
+  blob_backend_not_configured:
+    en: "Blob storage backend not configured"
+    zh-CN: "未配置 Blob 存储后端"
+    zh-HK: "未配置 Blob 儲存後端"
+  bundle_deserialize_failed:
+    en: "Failed to deserialize bundle: %{error}"
+    zh-CN: "bundle 反序列化失败: %{error}"
+    zh-HK: "bundle 反序列化失敗: %{error}"
+  bundle_serialize_failed:
+    en: "Failed to serialize bundle: %{error}"
+    zh-CN: "bundle 序列化失败: %{error}"
+    zh-HK: "bundle 序列化失敗: %{error}"
+  connection_data_parse_failed:
+    en: "Failed to parse connection data: %{error}"
+    zh-CN: "连接数据解析失败: %{error}"
+    zh-HK: "連線資料解析失敗: %{error}"
+  get_local_connections_failed:
+    en: "Failed to get local connections: %{error}"
+    zh-CN: "获取本地连接失败: %{error}"
+    zh-HK: "獲取本地連線失敗: %{error}"
+  update_connection_failed:
+    en: "Failed to update connection: %{error}"
+    zh-CN: "更新连接失败: %{error}"
+    zh-HK: "更新連線失敗: %{error}"
+  create_connection_failed:
+    en: "Failed to create connection: %{error}"
+    zh-CN: "创建连接失败: %{error}"
+    zh-HK: "建立連線失敗: %{error}"
+  workspace_data_parse_failed:
+    en: "Failed to parse workspace data: %{error}"
+    zh-CN: "工作空间数据解析失败: %{error}"
+    zh-HK: "工作區資料解析失敗: %{error}"
+  get_local_workspaces_failed:
+    en: "Failed to get local workspaces: %{error}"
+    zh-CN: "获取本地工作空间失败: %{error}"
+    zh-HK: "獲取本地工作區失敗: %{error}"
+  update_workspace_failed:
+    en: "Failed to update workspace: %{error}"
+    zh-CN: "更新工作空间失败: %{error}"
+    zh-HK: "更新工作區失敗: %{error}"
+  create_workspace_failed:
+    en: "Failed to create workspace: %{error}"
+    zh-CN: "创建工作空间失败: %{error}"
+    zh-HK: "建立工作區失敗: %{error}"
+  certificate_data_parse_failed:
+    en: "Failed to parse certificate data: %{error}"
+    zh-CN: "凭证数据解析失败: %{error}"
+    zh-HK: "憑證資料解析失敗: %{error}"
+  get_local_certificates_failed:
+    en: "Failed to get local certificates: %{error}"
+    zh-CN: "获取本地凭证失败: %{error}"
+    zh-HK: "獲取本地憑證失敗: %{error}"
+  update_certificate_failed:
+    en: "Failed to update certificate: %{error}"
+    zh-CN: "更新凭证失败: %{error}"
+    zh-HK: "更新憑證失敗: %{error}"
+  create_certificate_failed:
+    en: "Failed to create certificate: %{error}"
+    zh-CN: "创建凭证失败: %{error}"
+    zh-HK: "建立憑證失敗: %{error}"
+  log_decrypt_failures:
+    en: "[Sync] Detected %{count} local connections that failed to decrypt; skipping their upload and pull updates: %{preview}"
+    zh-CN: "[同步] 检测到 %{count} 个本地连接解密失败，将跳过其上传与拉取更新: %{preview}"
+    zh-HK: "[同步] 檢測到 %{count} 個本地連線解密失敗，將跳過其上傳與拉取更新: %{preview}"
+  log_skip_decrypt_conflicts:
+    en: "[Sync] Skipping %{count} conflicts related to undecryptable connections"
+    zh-CN: "[同步] 跳过 %{count} 个与解密失败连接相关的冲突"
+    zh-HK: "[同步] 跳過 %{count} 個與解密失敗連線相關的衝突"
+  log_skip_upload_decrypt_failed:
+    en: "[Sync] Skipping upload (decryption failed): %{name} (%{id})"
+    zh-CN: "[同步] 跳过上传（解密失败）: %{name} (%{id})"
+    zh-HK: "[同步] 跳過上傳（解密失敗）: %{name} (%{id})"
+  log_skip_update_cloud_decrypt_failed:
+    en: "[Sync] Skipping cloud update (decryption failed): %{name} (%{id})"
+    zh-CN: "[同步] 跳过更新云端（解密失败）: %{name} (%{id})"
+    zh-HK: "[同步] 跳過更新雲端（解密失敗）: %{name} (%{id})"
+  log_skip_pull_decrypt_failed:
+    en: "[Sync] Skipping pull update (decryption failed): %{name} (%{id})"
+    zh-CN: "[同步] 跳过拉取更新（解密失败）: %{name} (%{id})"
+    zh-HK: "[同步] 跳過拉取更新（解密失敗）: %{name} (%{id})"
+  log_fetch_pending_deletions_failed:
+    en: "[Sync] Failed to get pending deletion list: %{error}"
+    zh-CN: "[同步] 获取待删除列表失败: %{error}"
+    zh-HK: "[同步] 獲取待刪除列表失敗: %{error}"
+  log_remove_pending_failed:
+    en: "[Sync] Failed to remove pending deletion record: %{error}"
+    zh-CN: "[同步] 移除待删除记录失败: %{error}"
+    zh-HK: "[同步] 移除待刪除記錄失敗: %{error}"
+  log_delete_cloud_connection_failed:
+    en: "[Sync] Failed to delete cloud connection: %{id} - %{error} (kept in pending deletion list)"
+    zh-CN: "[同步] 删除云端连接失败: %{id} - %{error}（保留在待删除列表）"
+    zh-HK: "[同步] 刪除雲端連線失敗: %{id} - %{error}（保留在待刪除列表）"
+  log_soft_delete_local_connection_failed:
+    en: "[Soft delete] Failed to delete local connection: %{id} - %{error}"
+    zh-CN: "[软删除] 删除本地连接失败: %{id} - %{error}"
+    zh-HK: "[軟刪除] 刪除本地連線失敗: %{id} - %{error}"
+  log_soft_delete_local_item_failed:
+    en: "[Soft delete] Failed to delete local data: %{id} - %{error}"
+    zh-CN: "[软删除] 删除本地数据失败: %{id} - %{error}"
+    zh-HK: "[軟刪除] 刪除本地資料失敗: %{id} - %{error}"
+  log_sync_status_error:
+    en: "[Sync status] Connection %{id} sync error: %{error}"
+    zh-CN: "[同步状态] 连接 %{id} 同步出错: %{error}"
+    zh-HK: "[同步狀態] 連線 %{id} 同步出錯: %{error}"
+  log_key_config_rebuilt:
+    en: "[Sync engine] Cloud key config does not match the current master key, but the account has no sync data; rebuilding cloud key config automatically"
+    zh-CN: "[同步引擎] 云端密钥配置与当前主密钥不匹配，但账号下没有同步数据，自动重建云端密钥配置"
+    zh-HK: "[同步引擎] 雲端密鑰配置與目前主密鑰不匹配，但帳號下沒有同步資料，自動重建雲端密鑰配置"
+  handler_sync_failed:
+    en: "%{name} sync failed: %{error}"
+    zh-CN: "%{name}同步失败: %{error}"
+    zh-HK: "%{name}同步失敗: %{error}"
+  log_pending_decision_failed:
+    en: "[Sync] Failed to decide pending deletion for %{type_name}: %{id} - %{error} (kept in pending deletion list)"
+    zh-CN: "[同步] 处理待删除%{type_name}决策失败: %{id} - %{error}（保留在待删除列表）"
+    zh-HK: "[同步] 處理待刪除%{type_name}決策失敗: %{id} - %{error}（保留在待刪除列表）"
+  log_delete_cloud_typed_failed:
+    en: "[Sync] Failed to delete cloud %{type_name}: %{id} - %{error} (kept in pending deletion list)"
+    zh-CN: "[同步] 删除云端%{type_name}失败: %{id} - %{error}（保留在待删除列表）"
+    zh-HK: "[同步] 刪除雲端%{type_name}失敗: %{id} - %{error}（保留在待刪除列表）"
+  read_response_failed:
+    en: "Failed to read response: %{error}"
+    zh-CN: "读取响应失败: %{error}"
+    zh-HK: "讀取響應失敗: %{error}"
+  refresh_session_failed:
+    en: "Failed to refresh session"
+    zh-CN: "刷新会话失败"
+    zh-HK: "刷新工作階段失敗"
+  login_failed:
+    en: "Sign-in failed"
+    zh-CN: "登录失败"
+    zh-HK: "登入失敗"
+  register_failed:
+    en: "Sign-up failed"
+    zh-CN: "注册失败"
+    zh-HK: "註冊失敗"
+  get_current_user_failed:
+    en: "Failed to get current user"
+    zh-CN: "获取当前用户失败"
+    zh-HK: "獲取目前使用者失敗"
+  get_user_config_failed:
+    en: "Failed to get user config"
+    zh-CN: "获取用户配置失败"
+    zh-HK: "獲取使用者配置失敗"
+  save_user_config_failed:
+    en: "Failed to save user config"
+    zh-CN: "保存用户配置失败"
+    zh-HK: "保存使用者配置失敗"
+  list_sync_data_failed:
+    en: "Failed to get sync data"
+    zh-CN: "获取同步数据失败"
+    zh-HK: "獲取同步資料失敗"
+  create_sync_data_failed:
+    en: "Failed to create sync data"
+    zh-CN: "创建同步数据失败"
+    zh-HK: "建立同步資料失敗"
+  sync_data_version_conflict:
+    en: "Sync data version conflict"
+    zh-CN: "同步数据版本冲突"
+    zh-HK: "同步資料版本衝突"
+  update_sync_data_failed:
+    en: "Failed to update sync data"
+    zh-CN: "更新同步数据失败"
+    zh-HK: "更新同步資料失敗"
+  delete_sync_data_failed:
+    en: "Failed to delete sync data"
+    zh-CN: "删除同步数据失败"
+    zh-HK: "刪除同步資料失敗"
+  cloud_ai_chat_unsupported:
+    en: "The current sync_server does not support cloud AI chat"
+    zh-CN: "当前 sync_server 不支持云端 AI 聊天"
+    zh-HK: "目前 sync_server 不支援雲端 AI 聊天"
+  missing_host:
+    en: "Missing host"
+    zh-CN: "缺少 host"
+    zh-HK: "缺少 host"
+  webdav_upload_failed:
+    en: "WebDAV upload failed: HTTP %{status}"
+    zh-CN: "WebDAV 上传失败: HTTP %{status}"
+    zh-HK: "WebDAV 上傳失敗: HTTP %{status}"
+  webdav_download_failed:
+    en: "WebDAV download failed: HTTP %{status}"
+    zh-CN: "WebDAV 下载失败: HTTP %{status}"
+    zh-HK: "WebDAV 下載失敗: HTTP %{status}"
+  webdav_delete_failed:
+    en: "WebDAV delete failed: HTTP %{status}"
+    zh-CN: "WebDAV 删除失败: HTTP %{status}"
+    zh-HK: "WebDAV 刪除失敗: HTTP %{status}"
+  webdav_list_failed:
+    en: "WebDAV list failed: HTTP %{status}"
+    zh-CN: "WebDAV 列举失败: HTTP %{status}"
+    zh-HK: "WebDAV 列舉失敗: HTTP %{status}"
+  callback_no_available_port:
+    en: "No available port found"
+    zh-CN: "找不到可用端口"
+    zh-HK: "找不到可用埠"
+  callback_start_failed:
+    en: "Failed to start server: %{error}"
+    zh-CN: "服务器启动失败: %{error}"
+    zh-HK: "伺服器啟動失敗: %{error}"
+  callback_timeout:
+    en: "Callback timed out"
+    zh-CN: "回调超时"
+    zh-HK: "回調逾時"
+  callback_connection_error:
+    en: "Connection error: %{error}"
+    zh-CN: "连接错误: %{error}"
+    zh-HK: "連線錯誤: %{error}"
+  oauth_success_html:
+    en: "<html><body>Authorization successful. You can close this page.</body></html>"
+    zh-CN: "<html><body>授权成功，可以关闭此页面。</body></html>"
+    zh-HK: "<html><body>授權成功，可以關閉此頁面。</body></html>"
+  oauth_failure_html:
+    en: "<html><body>Authorization failed. Please close this page and try again.</body></html>"
+    zh-CN: "<html><body>授权失败，请关闭页面重试。</body></html>"
+    zh-HK: "<html><body>授權失敗，請關閉頁面重試。</body></html>"
+  github_device_code_http_failed:
+    en: "GitHub device code request failed: HTTP %{status}"
+    zh-CN: "GitHub device code 请求失败: HTTP %{status}"
+    zh-HK: "GitHub device code 請求失敗: HTTP %{status}"
+  github_device_code_error:
+    en: "GitHub device code error: %{error} - %{description}"
+    zh-CN: "GitHub device code 错误: %{error} - %{description}"
+    zh-HK: "GitHub device code 錯誤: %{error} - %{description}"
+  github_device_code_parse_failed:
+    en: "Failed to parse GitHub device code response: %{body}"
+    zh-CN: "无法解析 GitHub device code 响应: %{body}"
+    zh-HK: "無法解析 GitHub device code 響應: %{body}"
+  github_auth_denied:
+    en: "The user denied the authorization request"
+    zh-CN: "用户拒绝了授权请求"
+    zh-HK: "使用者拒絕了授權請求"
+  github_device_code_expired:
+    en: "The device_code has expired, please start authorization again"
+    zh-CN: "device_code 已过期，请重新发起授权"
+    zh-HK: "device_code 已過期，請重新發起授權"
+  github_token_error:
+    en: "GitHub token error: %{error} - %{description}"
+    zh-CN: "GitHub token 错误: %{error} - %{description}"
+    zh-HK: "GitHub token 錯誤: %{error} - %{description}"
+  github_token_parse_failed:
+    en: "Failed to parse GitHub token response: %{body}"
+    zh-CN: "无法解析 GitHub token 响应: %{body}"
+    zh-HK: "無法解析 GitHub token 響應: %{body}"
+  github_auth_timeout:
+    en: "Authorization timed out, please try again"
+    zh-CN: "授权超时，请重试"
+    zh-HK: "授權逾時，請重試"
+  list_gists_failed:
+    en: "Failed to list gists: HTTP %{status}"
+    zh-CN: "列出 gists 失败: HTTP %{status}"
+    zh-HK: "列出 gists 失敗: HTTP %{status}"
+  create_gist_failed:
+    en: "Failed to create gist: HTTP %{status}"
+    zh-CN: "创建 gist 失败: HTTP %{status}"
+    zh-HK: "建立 gist 失敗: HTTP %{status}"
+  get_gist_failed:
+    en: "Failed to get gist: HTTP %{status}"
+    zh-CN: "获取 gist 失败: HTTP %{status}"
+    zh-HK: "獲取 gist 失敗: HTTP %{status}"
+  update_gist_failed:
+    en: "Failed to update gist: HTTP %{status} - %{body}"
+    zh-CN: "更新 gist 失败: HTTP %{status} - %{body}"
+    zh-HK: "更新 gist 失敗: HTTP %{status} - %{body}"
+  delete_gist_failed:
+    en: "Failed to delete gist: HTTP %{status}"
+    zh-CN: "删除 gist 失败: HTTP %{status}"
+    zh-HK: "刪除 gist 失敗: HTTP %{status}"
+  gist_not_initialized:
+    en: "Gist not initialized. Please complete GitHub authorization first"
+    zh-CN: "尚未初始化 Gist，请先完成 GitHub 授权"
+    zh-HK: "尚未初始化 Gist，請先完成 GitHub 授權"
+  encrypted_data_invalid_utf8:
+    en: "Encrypted data is not valid UTF-8"
+    zh-CN: "加密数据不是有效的 UTF-8"
+    zh-HK: "加密資料不是有效的 UTF-8"
+  gist_not_found:
+    en: "vault gist not found"
+    zh-CN: "vault gist 不存在"
+    zh-HK: "vault gist 不存在"
+  gdrive_create_folder_failed:
+    en: "Failed to create Google Drive folder: %{error}"
+    zh-CN: "创建 Google Drive 文件夹失败: %{error}"
+    zh-HK: "建立 Google Drive 資料夾失敗: %{error}"
+  gdrive_upload_failed:
+    en: "Failed to upload Google Drive file: %{error}"
+    zh-CN: "上传 Google Drive 文件失败: %{error}"
+    zh-HK: "上傳 Google Drive 檔案失敗: %{error}"
+  gdrive_download_failed:
+    en: "Failed to download Google Drive file: HTTP %{status}"
+    zh-CN: "下载 Google Drive 文件失败: HTTP %{status}"
+    zh-HK: "下載 Google Drive 檔案失敗: HTTP %{status}"
+  gdrive_delete_failed:
+    en: "Failed to delete Google Drive file: HTTP %{status}"
+    zh-CN: "删除 Google Drive 文件失败: HTTP %{status}"
+    zh-HK: "刪除 Google Drive 檔案失敗: HTTP %{status}"
+  gdrive_file_not_found:
+    en: "File %{key} does not exist in Google Drive"
+    zh-CN: "Google Drive 中未找到文件: %{key}"
+    zh-HK: "Google Drive 中找不到檔案: %{key}"
+  onedrive_create_folder_failed:
+    en: "Failed to create OneDrive folder: %{error}"
+    zh-CN: "创建 OneDrive 文件夹失败: %{error}"
+    zh-HK: "建立 OneDrive 資料夾失敗: %{error}"
+  onedrive_upload_failed:
+    en: "Failed to upload OneDrive file: %{error}"
+    zh-CN: "上传 OneDrive 文件失败: %{error}"
+    zh-HK: "上傳 OneDrive 檔案失敗: %{error}"
+  onedrive_download_failed:
+    en: "Failed to download OneDrive file: HTTP %{status}"
+    zh-CN: "下载 OneDrive 文件失败: HTTP %{status}"
+    zh-HK: "下載 OneDrive 檔案失敗: HTTP %{status}"
+  onedrive_delete_failed:
+    en: "Failed to delete OneDrive file: HTTP %{status}"
+    zh-CN: "删除 OneDrive 文件失败: HTTP %{status}"
+    zh-HK: "刪除 OneDrive 檔案失敗: HTTP %{status}"
+  onedrive_file_not_found:
+    en: "File %{key} does not exist in OneDrive"
+    zh-CN: "OneDrive 中未找到文件: %{key}"
+    zh-HK: "OneDrive 中找不到檔案: %{key}"
+  log_pending_deletion_repo_missing:
+    en: "[Sync] PendingCloudDeletionRepository not found"
+    zh-CN: "[同步] 未注册 PendingCloudDeletionRepository"
+    zh-HK: "[同步] 未註冊 PendingCloudDeletionRepository"
+  log_handler_error_wrapper:
+    en: "[Sync] %{message}"
+    zh-CN: "[同步] %{message}"
+    zh-HK: "[同步] %{message}"
+
+# 主密钥加密
+Crypto:
+  error_invalid_old_password:
+    en: Current password is incorrect
+    zh-CN: 旧密码错误
+    zh-HK: 舊密碼錯誤
+  error_empty_new_password:
+    en: New password cannot be empty
+    zh-CN: 新密码不能为空
+    zh-HK: 新密碼不能為空
+  error_password_mismatch:
+    en: The two new passwords do not match
+    zh-CN: 两次输入的新密码不一致
+    zh-HK: 兩次輸入的新密碼不一致
+  error_no_password_set:
+    en: No master password has been set
+    zh-CN: 未设置过主密码
+    zh-HK: 未設定過主密碼
+  error_save_verification_failed:
+    en: Failed to save verification data
+    zh-CN: 保存验证数据失败
+    zh-HK: 儲存驗證資料失敗
+  error_decryption_failed:
+    en: Decryption failed
+    zh-CN: 解密失败
+    zh-HK: 解密失敗
+  error_encoding_failed:
+    en: Encoding failed
+    zh-CN: 编码失败
+    zh-HK: 編碼失敗
+  error_invalid_data_format:
+    en: Invalid data format
+    zh-CN: 数据格式错误
+    zh-HK: 資料格式錯誤
+  error_password_incorrect:
+    en: Incorrect password
+    zh-CN: 密码错误
+    zh-HK: 密碼錯誤
+  log_save_key_failed:
+    en: "[%{storage}] Failed to save key: %{error}"
+    zh-CN: "[%{storage}] 保存密钥失败: %{error}"
+    zh-HK: "[%{storage}] 儲存密鑰失敗: %{error}"
+  log_update_key_failed:
+    en: "[%{storage}] Failed to update key: %{error}"
+    zh-CN: "[%{storage}] 更新密钥失败: %{error}"
+    zh-HK: "[%{storage}] 更新密鑰失敗: %{error}"
+
+# 密钥存储后端
+KeyStorage:
+  backend_local_file:
+    en: Local file
+    zh-CN: 本地文件
+    zh-HK: 本地檔案
+  no_storage_path:
+    en: Cannot resolve key storage path
+    zh-CN: 无法获取密钥存储路径
+    zh-HK: 無法取得密鑰儲存路徑
+  create_cipher_failed:
+    en: "Failed to create cipher: %{error}"
+    zh-CN: "创建加密器失败: %{error}"
+    zh-HK: "建立加密器失敗: %{error}"
+  encrypt_key_failed:
+    en: "Failed to encrypt key: %{error}"
+    zh-CN: "加密密钥失败: %{error}"
+    zh-HK: "加密密鑰失敗: %{error}"
+  write_key_file_failed:
+    en: "Failed to write key file: %{error}"
+    zh-CN: "写入密钥文件失败: %{error}"
+    zh-HK: "寫入密鑰檔案失敗: %{error}"
+  delete_key_file_failed:
+    en: "Failed to delete key file: %{error}"
+    zh-CN: "删除密钥文件失败: %{error}"
+    zh-HK: "刪除密鑰檔案失敗: %{error}"
+
+# 存储层
+Storage:
+  same_workspace_move:
+    en: Source and target workspaces are the same; cannot move across workspaces
+    zh-CN: 源工作区和目标工作区相同，无法跨工作区移动
+    zh-HK: 來源工作區和目標工作區相同，無法跨工作區移動
+  source_still_contains_moved:
+    en: "After cross-workspace move, source workspace ordering still contains the moved connection %{id}"
+    zh-CN: "跨工作区移动后的源工作区排序中仍包含目标连接 %{id}"
+    zh-HK: "跨工作區移動後的來源工作區排序中仍包含目標連線 %{id}"
+  target_missing_moved:
+    en: "Target workspace ordering is missing the moved connection %{id}"
+    zh-CN: "目标工作区排序中缺少被移动连接 %{id}"
+    zh-HK: "目標工作區排序中缺少被移動連線 %{id}"
+  connection_workspace_changed:
+    en: "Connection %{id} workspace changed concurrently, expected %{expected}, actual %{actual}"
+    zh-CN: "连接 %{id} 当前工作区已变化，预期 %{expected}，实际 %{actual}"
+    zh-HK: "連線 %{id} 目前工作區已變化，預期 %{expected}，實際 %{actual}"
+  connection_not_in_target:
+    en: "Connection %{id} is not in the target workspace; cannot reorder"
+    zh-CN: "连接 %{id} 不在目标工作区内，无法重排"
+    zh-HK: "連線 %{id} 不在目標工作區內，無法重排"
+  workspace_not_found_reorder:
+    en: "Workspace %{id} does not exist; cannot reorder"
+    zh-CN: "工作区 %{id} 不存在，无法重排"
+    zh-HK: "工作區 %{id} 不存在，無法重排"
+
+# 演示数据库
+DemoDatabase:
+  log_check_count_failed:
+    en: "Failed to count connections; skipping demo database creation: %{error}"
+    zh-CN: "检查连接数失败，跳过演示数据库创建: %{error}"
+    zh-HK: "檢查連線數失敗，略過演示資料庫建立: %{error}"
+  log_first_run_start:
+    en: First run detected, creating demo database...
+    zh-CN: 首次启动，开始创建演示数据库...
+    zh-HK: 首次啟動，開始建立演示資料庫...
+  log_create_failed:
+    en: "Failed to create demo database: %{error}"
+    zh-CN: "创建演示数据库失败: %{error}"
+    zh-HK: "建立演示資料庫失敗: %{error}"
+  log_db_file_created:
+    en: "Demo database file created: %{path}"
+    zh-CN: "演示数据库文件已创建: %{path}"
+    zh-HK: "演示資料庫檔案已建立: %{path}"
+  log_connection_registered:
+    en: "Demo connection registered: %{name}"
+    zh-CN: "演示连接已注册: %{name}"
+    zh-HK: "演示連線已註冊: %{name}"
+  invalid_path:
+    en: Demo database path contains invalid characters
+    zh-CN: 演示数据库路径包含非法字符
+    zh-HK: 演示資料庫路徑包含非法字元
+
+# 敏感字段迁移
+SensitiveMigration:
+  master_key_locked_skip:
+    en: "[A1 migration] Master key not unlocked; skipping startup sensitive-field re-encryption"
+    zh-CN: "[A1 迁移] 主密钥未解锁，跳过启动期敏感字段重加密"
+    zh-HK: "[A1 遷移] 主密鑰未解鎖，略過啟動期敏感欄位重加密"
+
+# LLM 连接器
+Llm:
+  chat_dropped_tool_calls:
+    en: chat() dropped tool_calls from the response; only the text body was returned
+    zh-CN: chat() 丢弃了响应中的 tool_calls，仅正文被返回
+    zh-HK: chat() 丟棄了回應中的 tool_calls，僅正文被返回
+  provider_no_tool_calls:
+    en: "Provider %{provider} does not support tool calling (current protocol serialization has no tools field)"
+    zh-CN: "Provider %{provider} 不支持工具调用（当前协议序列化不含 tools 字段）"
+    zh-HK: "Provider %{provider} 不支援工具調用（目前協定序列化不含 tools 欄位）"
+
+# OAuth 本地回调服务器
+OAuthCallback:
+  no_available_port:
+    en: No available port found
+    zh-CN: 找不到可用端口
+    zh-HK: 找不到可用端口
+  start_failed:
+    en: "Failed to start server: %{error}"
+    zh-CN: "服务器启动失败: %{error}"
+    zh-HK: "伺服器啟動失敗: %{error}"
+  timeout:
+    en: Callback timed out
+    zh-CN: 回调超时
+    zh-HK: 回調超時
+  connection_error:
+    en: "Connection error: %{error}"
+    zh-CN: "连接错误: %{error}"
+    zh-HK: "連線錯誤: %{error}"
+
+# GitHub 授权 / Gist
+GitHubAuth:
+  device_code_http_failed:
+    en: "GitHub device code request failed: HTTP %{status}"
+    zh-CN: "GitHub device code 请求失败: HTTP %{status}"
+    zh-HK: "GitHub device code 請求失敗: HTTP %{status}"
+  device_code_error:
+    en: "GitHub device code error: %{error} - %{description}"
+    zh-CN: "GitHub device code 错误: %{error} - %{description}"
+    zh-HK: "GitHub device code 錯誤: %{error} - %{description}"
+  device_code_parse_failed:
+    en: "Cannot parse GitHub device code response: %{body}"
+    zh-CN: "无法解析 GitHub device code 响应: %{body}"
+    zh-HK: "無法解析 GitHub device code 回應: %{body}"
+  access_denied:
+    en: Authorization request was denied by the user
+    zh-CN: 用户拒绝了授权请求
+    zh-HK: 使用者拒絕了授權請求
+  device_code_expired:
+    en: device_code has expired; please restart authorization
+    zh-CN: device_code 已过期，请重新发起授权
+    zh-HK: device_code 已過期，請重新發起授權
+  token_error:
+    en: "GitHub token error: %{error} - %{description}"
+    zh-CN: "GitHub token 错误: %{error} - %{description}"
+    zh-HK: "GitHub token 錯誤: %{error} - %{description}"
+  token_parse_failed:
+    en: "Cannot parse GitHub token response: %{body}"
+    zh-CN: "无法解析 GitHub token 响应: %{body}"
+    zh-HK: "無法解析 GitHub token 回應: %{body}"
+  auth_timeout:
+    en: Authorization timed out; please try again
+    zh-CN: 授权超时，请重试
+    zh-HK: 授權超時，請重試
+  list_gists_failed:
+    en: "Failed to list gists: HTTP %{status}"
+    zh-CN: "列出 gists 失败: HTTP %{status}"
+    zh-HK: "列出 gists 失敗: HTTP %{status}"
+  create_gist_failed:
+    en: "Failed to create gist: HTTP %{status}"
+    zh-CN: "创建 gist 失败: HTTP %{status}"
+    zh-HK: "建立 gist 失敗: HTTP %{status}"
+  get_gist_failed:
+    en: "Failed to get gist: HTTP %{status}"
+    zh-CN: "获取 gist 失败: HTTP %{status}"
+    zh-HK: "取得 gist 失敗: HTTP %{status}"
+  update_gist_failed:
+    en: "Failed to update gist: HTTP %{status} - %{body}"
+    zh-CN: "更新 gist 失败: HTTP %{status} - %{body}"
+    zh-HK: "更新 gist 失敗: HTTP %{status} - %{body}"
+  delete_gist_failed:
+    en: "Failed to delete gist: HTTP %{status}"
+    zh-CN: "删除 gist 失败: HTTP %{status}"
+    zh-HK: "刪除 gist 失敗: HTTP %{status}"
+  gist_not_initialized:
+    en: Gist not initialized; please complete GitHub authorization first
+    zh-CN: 尚未初始化 Gist，请先完成 GitHub 授权
+    zh-HK: 尚未初始化 Gist，請先完成 GitHub 授權
+  invalid_utf8:
+    en: Encrypted data is not valid UTF-8
+    zh-CN: 加密数据不是有效的 UTF-8
+    zh-HK: 加密資料不是有效的 UTF-8
+  vault_gist_not_found:
+    en: vault gist does not exist
+    zh-CN: vault gist 不存在
+    zh-HK: vault gist 不存在
+
+# Google Drive
+GoogleDrive:
+  create_folder_failed:
+    en: "Failed to create Google Drive folder: %{body}"
+    zh-CN: "创建 Google Drive 文件夹失败: %{body}"
+    zh-HK: "建立 Google Drive 資料夾失敗: %{body}"
+  upload_file_failed:
+    en: "Failed to upload Google Drive file: %{body}"
+    zh-CN: "上传 Google Drive 文件失败: %{body}"
+    zh-HK: "上傳 Google Drive 檔案失敗: %{body}"
+  download_file_failed:
+    en: "Failed to download Google Drive file: HTTP %{status}"
+    zh-CN: "下载 Google Drive 文件失败: HTTP %{status}"
+    zh-HK: "下載 Google Drive 檔案失敗: HTTP %{status}"
+  delete_file_failed:
+    en: "Failed to delete Google Drive file: HTTP %{status}"
+    zh-CN: "删除 Google Drive 文件失败: HTTP %{status}"
+    zh-HK: "刪除 Google Drive 檔案失敗: HTTP %{status}"
+  file_not_found:
+    en: "File not found in Google Drive: %{key}"
+    zh-CN: "Google Drive 中未找到文件: %{key}"
+    zh-HK: "Google Drive 中未找到檔案: %{key}"
+
+# OneDrive
+OneDrive:
+  create_folder_failed:
+    en: "Failed to create OneDrive folder: %{body}"
+    zh-CN: "创建 OneDrive 文件夹失败: %{body}"
+    zh-HK: "建立 OneDrive 資料夾失敗: %{body}"
+  upload_file_failed:
+    en: "Failed to upload OneDrive file: %{body}"
+    zh-CN: "上传 OneDrive 文件失败: %{body}"
+    zh-HK: "上傳 OneDrive 檔案失敗: %{body}"
+  download_file_failed:
+    en: "Failed to download OneDrive file: HTTP %{status}"
+    zh-CN: "下载 OneDrive 文件失败: HTTP %{status}"
+    zh-HK: "下載 OneDrive 檔案失敗: HTTP %{status}"
+  delete_file_failed:
+    en: "Failed to delete OneDrive file: HTTP %{status}"
+    zh-CN: "删除 OneDrive 文件失败: HTTP %{status}"
+    zh-HK: "刪除 OneDrive 檔案失敗: HTTP %{status}"
+  file_not_found:
+    en: "File not found in OneDrive: %{key}"
+    zh-CN: "OneDrive 中未找到文件: %{key}"
+    zh-HK: "OneDrive 中未找到檔案: %{key}"
+
+# 连接恢复快照
+ConnectionRestore:
+  read_snapshot_failed:
+    en: Failed to read connection restore snapshot file
+    zh-CN: 读取连接恢复快照文件失败
+    zh-HK: 讀取連線恢復快照檔案失敗
+  parse_snapshot_failed:
+    en: Failed to parse connection restore snapshot JSON
+    zh-CN: 解析连接恢复快照 JSON 失败
+    zh-HK: 解析連線恢復快照 JSON 失敗

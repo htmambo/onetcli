@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request};
+use rust_i18n::t;
 use serde::Deserialize;
 
 const PROVIDER_KIND: &str = "remote_desktop_provider";
@@ -55,19 +56,40 @@ pub(crate) async fn fetch_provider_package(
     provider_id: &str,
 ) -> anyhow::Result<ProviderPackage> {
     let manifest = fetch_manifest(http_client.clone(), &manifest_url()).await?;
-    let entry = find_provider_entry(&manifest, provider_id)
-        .ok_or_else(|| anyhow!("扩展市场未找到远程桌面插件 {provider_id}"))?;
+    let entry = find_provider_entry(&manifest, provider_id).ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.marketplace_provider_not_found",
+                id = provider_id.to_string()
+            )
+        )
+    })?;
     if entry.release_tag.trim().is_empty() {
-        anyhow::bail!("远程桌面插件 {provider_id} 缺少 release_tag");
+        anyhow::bail!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.marketplace_provider_missing_release_tag",
+                id = provider_id.to_string()
+            )
+        );
     }
     let sub_manifest_url = release_url(&entry.release_tag, "extension-manifest.json");
     let sub_manifest = fetch_manifest(http_client, &sub_manifest_url).await?;
-    let sub_entry = find_provider_entry(&sub_manifest, provider_id)
-        .ok_or_else(|| anyhow!("远程桌面插件 {provider_id} 缺少发行清单"))?;
+    let sub_entry = find_provider_entry(&sub_manifest, provider_id).ok_or_else(|| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.marketplace_provider_missing_release_manifest",
+                id = provider_id.to_string()
+            )
+        )
+    })?;
     tracing::debug!(
         provider = %sub_entry.name,
         version = %sub_entry.version,
-        "已解析远程桌面插件发行清单"
+        "{}",
+        t!("RemoteDesktopInstall.marketplace_resolved_provider_release")
     );
     select_provider_package(sub_entry, &entry.release_tag)
 }
@@ -89,12 +111,32 @@ fn select_provider_package(
     let artifact = marketplace_target_keys()
         .iter()
         .find_map(|key| entry.artifacts.get(*key))
-        .ok_or_else(|| anyhow!("远程桌面插件 {} 没有适配当前平台的构建产物", entry.id))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.marketplace_provider_no_artifact",
+                    id = entry.id.clone()
+                )
+            )
+        })?;
     if artifact.file.trim().is_empty() {
-        anyhow::bail!("远程桌面插件 {} 缺少构建产物文件名", entry.id);
+        anyhow::bail!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.marketplace_provider_missing_file",
+                id = entry.id.clone()
+            )
+        );
     }
     if artifact.sha256.trim().is_empty() {
-        anyhow::bail!("远程桌面插件 {} 缺少 SHA256 校验值", entry.id);
+        anyhow::bail!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.marketplace_provider_missing_sha256",
+                id = entry.id.clone()
+            )
+        );
     }
     Ok(ProviderPackage {
         version: entry.version.clone(),
@@ -122,20 +164,46 @@ async fn fetch_manifest(
         .method(Method::GET)
         .uri(url)
         .body(AsyncBody::empty())
-        .map_err(|error| anyhow!("构建清单请求失败: {error}"))?;
-    let response = http_client
-        .send(request)
-        .await
-        .map_err(|error| anyhow!("请求扩展市场清单失败: {error}"))?;
+        .map_err(|error| {
+            anyhow!(
+                "{}",
+                t!(
+                    "RemoteDesktopInstall.build_manifest_request_failed",
+                    error = error.to_string()
+                )
+            )
+        })?;
+    let response = http_client.send(request).await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.fetch_marketplace_manifest_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
     if !response.status().is_success() {
-        anyhow::bail!("请求扩展市场清单失败: {}", response.status());
+        anyhow::bail!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.fetch_marketplace_manifest_failed",
+                error = response.status().to_string()
+            )
+        );
     }
     let mut body = response.into_body();
     let mut bytes = Vec::new();
-    body.read_to_end(&mut bytes)
-        .await
-        .map_err(|error| anyhow!("读取扩展市场清单失败: {error}"))?;
-    serde_json::from_slice(&bytes).context("解析扩展市场清单失败")
+    body.read_to_end(&mut bytes).await.map_err(|error| {
+        anyhow!(
+            "{}",
+            t!(
+                "RemoteDesktopInstall.read_marketplace_manifest_failed",
+                error = error.to_string()
+            )
+        )
+    })?;
+    serde_json::from_slice(&bytes)
+        .context(t!("RemoteDesktopInstall.parse_marketplace_manifest_failed").to_string())
 }
 
 fn marketplace_target_keys() -> &'static [&'static str] {

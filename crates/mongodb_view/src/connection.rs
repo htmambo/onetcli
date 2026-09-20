@@ -238,7 +238,10 @@ impl MongoConnectionImpl {
         filter: Option<Document>,
         options: &FindOptions,
     ) -> Result<Vec<Document>, MongoError> {
-        info!("[find_system_sessions] 使用 $listSessions 聚合管道查询");
+        info!(
+            "[find_system_sessions] {}",
+            t!("MongoLog.session_query_started")
+        );
         let client = self.client()?;
         let collection = client
             .database(database_name)
@@ -268,7 +271,10 @@ impl MongoConnectionImpl {
             Ok(mut cursor) => {
                 let mut documents = Vec::new();
                 while let Some(document) = cursor.try_next().await.map_err(|e| {
-                    error!("[find_system_sessions] 遍历失败: {e}");
+                    error!(
+                        "[find_system_sessions] {}",
+                        t!("MongoLog.session_iter_failed", error = e.to_string())
+                    );
                     MongoError::command_with_source(
                         t!("MongoConnection.find_documents_failed").to_string(),
                         e,
@@ -277,14 +283,17 @@ impl MongoConnectionImpl {
                     documents.push(document);
                 }
                 info!(
-                    "[find_system_sessions] allUsers=true 成功，共 {} 条文档",
-                    documents.len()
+                    "[find_system_sessions] {}",
+                    t!("MongoLog.session_allusers_success", count = documents.len())
                 );
                 Ok(documents)
             }
             Err(e) => {
                 // allUsers 权限不足时，回退到当前用户会话
-                warn!("[find_system_sessions] allUsers=true 失败: {e}，回退到当前用户");
+                warn!(
+                    "[find_system_sessions] {}",
+                    t!("MongoLog.session_allusers_failed", error = e.to_string())
+                );
                 let mut pipeline: Vec<Document> = Vec::new();
                 pipeline.push(doc! { "$listSessions": {} });
 
@@ -301,7 +310,13 @@ impl MongoConnectionImpl {
                 }
 
                 let mut cursor = collection.aggregate(pipeline).await.map_err(|e| {
-                    error!("[find_system_sessions] 回退查询也失败: {e}");
+                    error!(
+                        "[find_system_sessions] {}",
+                        t!(
+                            "MongoLog.session_fallback_aggregate_failed",
+                            error = e.to_string()
+                        )
+                    );
                     MongoError::command_with_source(
                         t!("MongoConnection.find_documents_failed").to_string(),
                         e,
@@ -310,7 +325,13 @@ impl MongoConnectionImpl {
 
                 let mut documents = Vec::new();
                 while let Some(document) = cursor.try_next().await.map_err(|e| {
-                    error!("[find_system_sessions] 回退遍历失败: {e}");
+                    error!(
+                        "[find_system_sessions] {}",
+                        t!(
+                            "MongoLog.session_fallback_iter_failed",
+                            error = e.to_string()
+                        )
+                    );
                     MongoError::command_with_source(
                         t!("MongoConnection.find_documents_failed").to_string(),
                         e,
@@ -319,8 +340,8 @@ impl MongoConnectionImpl {
                     documents.push(document);
                 }
                 info!(
-                    "[find_system_sessions] 回退查询成功，共 {} 条文档",
-                    documents.len()
+                    "[find_system_sessions] {}",
+                    t!("MongoLog.session_fallback_success", count = documents.len())
                 );
                 Ok(documents)
             }
@@ -663,23 +684,41 @@ impl MongoConnection for MongoConnectionImpl {
             .database(database_name)
             .collection::<Document>(collection_name);
         let actual_filter = filter.unwrap_or_else(Document::new);
-        info!("[find_documents] 执行 find, actual_filter={actual_filter:?}");
+        info!(
+            "[find_documents] {}",
+            t!(
+                "MongoLog.find_documents_running",
+                actual_filter = format!("{actual_filter:?}")
+            )
+        );
         let mut cursor = collection
             .find(actual_filter)
             .with_options(options)
             .await
             .map_err(|e| {
-                error!("[find_documents] find() 游标创建失败: {e}");
+                error!(
+                    "[find_documents] {}",
+                    t!(
+                        "MongoLog.find_documents_cursor_failed",
+                        error = e.to_string()
+                    )
+                );
                 MongoError::command_with_source(
                     t!("MongoConnection.find_documents_failed").to_string(),
                     e,
                 )
             })?;
-        info!("[find_documents] 游标创建成功，开始遍历文档");
+        info!(
+            "[find_documents] {}",
+            t!("MongoLog.find_documents_iter_start")
+        );
 
         let mut documents = Vec::new();
         while let Some(document) = cursor.try_next().await.map_err(|e| {
-            error!("[find_documents] try_next() 遍历失败: {e}");
+            error!(
+                "[find_documents] {}",
+                t!("MongoLog.find_documents_iter_failed", error = e.to_string())
+            );
             MongoError::command_with_source(
                 t!("MongoConnection.find_documents_failed").to_string(),
                 e,
@@ -687,7 +726,13 @@ impl MongoConnection for MongoConnectionImpl {
         })? {
             documents.push(document);
         }
-        info!("[find_documents] 遍历完成，共 {} 条文档", documents.len());
+        info!(
+            "[find_documents] {}",
+            t!(
+                "MongoLog.find_documents_iter_complete",
+                count = documents.len()
+            )
+        );
         Ok(documents)
     }
 
@@ -698,8 +743,13 @@ impl MongoConnection for MongoConnectionImpl {
         filter: Option<Document>,
     ) -> Result<i64, MongoError> {
         info!(
-            "[count_documents] db={}, collection={}, filter={:?}",
-            database_name, collection_name, filter
+            "[count_documents] {}",
+            t!(
+                "MongoLog.count_documents_started",
+                database = database_name,
+                collection = collection_name,
+                filter = format!("{filter:?}")
+            )
         );
         let client = self.client()?;
         let collection = client
@@ -710,14 +760,20 @@ impl MongoConnection for MongoConnectionImpl {
             .count_documents(actual_filter)
             .await
             .map_err(|e| {
-                error!("[count_documents] 失败: {e}");
+                error!(
+                    "[count_documents] {}",
+                    t!("MongoLog.count_documents_log_failed", error = e.to_string())
+                );
                 MongoError::command_with_source(
                     t!("MongoConnection.count_documents_failed").to_string(),
                     e,
                 )
             })
             .map(|count| {
-                info!("[count_documents] 成功, count={count}");
+                info!(
+                    "[count_documents] {}",
+                    t!("MongoLog.count_documents_log_success", count = count)
+                );
                 count as i64
             })
     }

@@ -269,9 +269,7 @@ impl TerminalSidebar {
                     panel.set_code_block_renderer(tool_card::render_omnihub_tool_block, cx);
                 } else {
                     // 桥接未就绪时静默降级为纯聊天路径，但留下日志便于排查
-                    tracing::warn!(
-                        "[terminal_sidebar] agent 模式已开启但终端桥接不可用，降级为纯聊天"
-                    );
+                    tracing::warn!("{}", t!("TerminalSidebar.bridge_unavailable_fallback"));
                 }
             }
             // 注册复制操作（默认已有，这里只是确保）

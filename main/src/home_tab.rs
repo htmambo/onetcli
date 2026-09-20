@@ -60,7 +60,6 @@ use crate::connection_restore::{
     ResolvedConnectionRestoreItem, load_pending_connection_restore_snapshot,
     open_connection_restore_dialog, resolve_restore_items,
 };
-use crate::external_driver_display::external_driver_icon_for_config;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
@@ -381,13 +380,13 @@ impl HomePage {
         // 尝试从存储后端恢复主密钥
         let key_restored = crypto::try_restore_master_key();
         if key_restored {
-            tracing::info!("已恢复主密钥");
+            tracing::info!("{}", t!("HomeSession.master_key_restored"));
         } else if crypto::has_repo_password_set() {
             // 有验证文件但恢复失败，提示用户需要重新输入密钥
-            tracing::warn!("密钥恢复失败，需要用户重新输入主密钥");
+            tracing::warn!("{}", t!("HomeSession.master_key_restore_failed"));
             page.master_key_unlock_prompt_pending = true;
         } else {
-            tracing::info!("首次使用，需要设置主密钥");
+            tracing::info!("{}", t!("HomeSession.first_use_setup_master_key"));
         }
 
         // 在恢复主密钥后再加载连接，避免解密阶段出现空密码
@@ -409,7 +408,10 @@ impl HomePage {
                         this.load_connections(cx);
                         // 如果已登录且密钥已解锁，自动触发同步
                         if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("连接数据变化，自动触发云同步");
+                            tracing::info!(
+                                "{}",
+                                t!("HomeSession.connection_data_changed_auto_sync")
+                            );
                             this.trigger_sync(cx);
                         }
                     }
@@ -428,7 +430,10 @@ impl HomePage {
                         this.load_connections(cx);
                         // 如果已登录且密钥已解锁，自动触发同步
                         if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("连接数据变化，自动触发云同步");
+                            tracing::info!(
+                                "{}",
+                                t!("HomeSession.connection_data_changed_auto_sync")
+                            );
                             this.trigger_sync(cx);
                         }
                     }
@@ -440,7 +445,10 @@ impl HomePage {
                         this.load_connections(cx);
                         // 如果已登录且密钥已解锁，自动触发同步
                         if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("连接数据变化，自动触发云同步");
+                            tracing::info!(
+                                "{}",
+                                t!("HomeSession.connection_data_changed_auto_sync")
+                            );
                             this.trigger_sync(cx);
                         }
                     }
@@ -450,7 +458,10 @@ impl HomePage {
                         this.load_workspaces(cx);
                         // 如果已登录且密钥已解锁，自动触发同步
                         if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("工作区数据变化，自动触发云同步");
+                            tracing::info!(
+                                "{}",
+                                t!("HomeSession.workspace_data_changed_auto_sync")
+                            );
                             this.trigger_sync(cx);
                         }
                     }
@@ -493,7 +504,7 @@ impl HomePage {
 
     fn load_connections(&mut self, cx: &mut Context<Self>) {
         if self.saved_connections_locked() {
-            tracing::warn!("主密钥未解锁，暂缓加载本地连接，避免将加密密码解密为空");
+            tracing::warn!("{}", t!("HomeSession.master_key_locked_postpone_load"));
             self.connections.clear();
             cx.notify();
             return;
@@ -680,60 +691,63 @@ impl HomePage {
                 if let Some(connection) = item.connection {
                     self.open_ssh_terminal(connection, window, cx);
                 } else {
-                    tracing::warn!("恢复 SSH 终端时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.ssh_missing_connection"));
                 }
             }
             ConnectionRestoreKind::SerialTerminal => {
                 // 串口功能已移除，存量记录跳过恢复
-                tracing::info!("串口终端恢复已跳过（功能已移除）");
+                tracing::info!("{}", t!("HomeRestore.serial_skipped_removed"));
             }
             ConnectionRestoreKind::Sftp => {
                 if let Some(connection) = item.connection {
                     self.open_sftp_view(connection, window, cx);
                 } else {
-                    tracing::warn!("恢复 SFTP 时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.sftp_missing_connection"));
                 }
             }
             ConnectionRestoreKind::Database => {
                 if let Some(connection) = item.connection {
                     self.add_item_to_tab(&connection, None, window, cx);
                 } else {
-                    tracing::warn!("恢复数据库页时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.database_missing_connection"));
                 }
             }
             ConnectionRestoreKind::DatabaseWorkspace => {
                 if let Some(connection) = item.connection {
                     self.add_item_to_tab(&connection, item.workspace, window, cx);
                 } else {
-                    tracing::warn!("恢复数据库工作区时缺少连接信息");
+                    tracing::warn!(
+                        "{}",
+                        t!("HomeRestore.database_workspace_missing_connection")
+                    );
                 }
             }
             ConnectionRestoreKind::Redis => {
                 if let Some(connection) = item.connection {
                     self.open_redis_tab(connection, None, window, cx);
                 } else {
-                    tracing::warn!("恢复 Redis 页时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.redis_missing_connection"));
                 }
             }
             ConnectionRestoreKind::RedisWorkspace => {
                 if let Some(connection) = item.connection {
                     self.open_redis_tab(connection, item.workspace, window, cx);
                 } else {
-                    tracing::warn!("恢复 Redis 工作区时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.redis_workspace_missing_connection"));
                 }
             }
             ConnectionRestoreKind::MongoDb => {
                 if let Some(connection) = item.connection {
                     self.open_mongodb_tab(connection, None, window, cx);
                 } else {
-                    tracing::warn!("恢复 MongoDB 页时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.mongodb_missing_connection"));
                 }
             }
             ConnectionRestoreKind::MongoDbWorkspace => {
                 if let Some(connection) = item.connection {
                     self.open_mongodb_tab(connection, item.workspace, window, cx);
                 } else {
-                    tracing::warn!("恢复 MongoDB 工作区时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.mongodb_workspace_missing_connection"));
                 }
             }
         }
@@ -765,7 +779,7 @@ impl HomePage {
                 if let Some(local_terminal) = local_terminal {
                     self.restore_local_terminal(local_terminal, window, cx);
                 } else {
-                    tracing::warn!("恢复本地终端时缺少本地终端状态");
+                    tracing::warn!("{}", t!("HomeRestore.local_terminal_missing_state"));
                 }
             }
             ConnectionRestoreKind::SshTerminal => {
@@ -777,18 +791,18 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复 SSH 终端时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.ssh_missing_connection"));
                 }
             }
             ConnectionRestoreKind::SerialTerminal => {
                 // 串口功能已移除，存量记录跳过恢复
-                tracing::info!("串口终端恢复已跳过（功能已移除）");
+                tracing::info!("{}", t!("HomeRestore.serial_skipped_removed"));
             }
             ConnectionRestoreKind::Sftp => {
                 if let Some(connection) = connection {
                     self.open_sftp_view(connection, window, cx);
                 } else {
-                    tracing::warn!("恢复 SFTP 时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.sftp_missing_connection"));
                 }
             }
             ConnectionRestoreKind::Database => {
@@ -802,7 +816,7 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复数据库页时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.database_missing_connection"));
                 }
             }
             ConnectionRestoreKind::DatabaseWorkspace => {
@@ -816,7 +830,10 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复数据库工作区时缺少连接信息");
+                    tracing::warn!(
+                        "{}",
+                        t!("HomeRestore.database_workspace_missing_connection")
+                    );
                 }
             }
             ConnectionRestoreKind::Redis => {
@@ -830,7 +847,7 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复 Redis 页时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.redis_missing_connection"));
                 }
             }
             ConnectionRestoreKind::RedisWorkspace => {
@@ -844,7 +861,7 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复 Redis 工作区时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.redis_workspace_missing_connection"));
                 }
             }
             ConnectionRestoreKind::MongoDb => {
@@ -858,7 +875,7 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复 MongoDB 页时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.mongodb_missing_connection"));
                 }
             }
             ConnectionRestoreKind::MongoDbWorkspace => {
@@ -872,7 +889,7 @@ impl HomePage {
                         cx,
                     );
                 } else {
-                    tracing::warn!("恢复 MongoDB 工作区时缺少连接信息");
+                    tracing::warn!("{}", t!("HomeRestore.mongodb_workspace_missing_connection"));
                 }
             }
         }
@@ -889,8 +906,11 @@ impl HomePage {
 
         let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() else {
             tracing::error!(
-                "[删除] 无法记录待删除{}：PendingCloudDeletionRepository 不存在",
-                entity_type
+                "{}",
+                t!(
+                    "HomeCloudDeletion.entity_pending_missing_repo",
+                    entity = entity_type
+                )
             );
             return;
         };
@@ -898,17 +918,23 @@ impl HomePage {
         match pending_repo.add(cloud_id, entity_type) {
             Ok(()) => {
                 tracing::info!(
-                    "[删除] 已登记待删除{}，等待同步引擎处理: {}",
-                    entity_type,
-                    cloud_id
+                    "{}",
+                    t!(
+                        "HomeCloudDeletion.entity_pending_registered",
+                        entity = entity_type,
+                        cloud_id = cloud_id
+                    )
                 );
             }
             Err(error) => {
                 tracing::error!(
-                    "[删除] 记录待删除{}失败: {} - {}",
-                    entity_type,
-                    cloud_id,
-                    error
+                    "{}",
+                    t!(
+                        "HomeCloudDeletion.entity_pending_failed",
+                        entity = entity_type,
+                        cloud_id = cloud_id,
+                        error = error.to_string()
+                    )
                 );
             }
         }
@@ -924,7 +950,7 @@ impl HomePage {
         };
 
         let Some(pending_repo) = storage.get::<PendingCloudDeletionRepository>() else {
-            tracing::error!("[删除] 无法记录待删除工作空间：PendingCloudDeletionRepository 不存在");
+            tracing::error!("{}", t!("HomeCloudDeletion.workspace_pending_missing_repo"));
             return;
         };
 
@@ -944,12 +970,22 @@ impl HomePage {
         ) {
             Ok(()) => {
                 tracing::info!(
-                    "[删除] 已登记待删除工作空间，等待同步引擎处理: {}",
-                    cloud_id
+                    "{}",
+                    t!(
+                        "HomeCloudDeletion.workspace_pending_registered",
+                        cloud_id = cloud_id
+                    )
                 );
             }
             Err(error) => {
-                tracing::error!("[删除] 记录待删除工作空间失败: {} - {}", cloud_id, error);
+                tracing::error!(
+                    "{}",
+                    t!(
+                        "HomeCloudDeletion.workspace_pending_failed",
+                        cloud_id = cloud_id,
+                        error = error.to_string()
+                    )
+                );
             }
         }
     }
@@ -968,7 +1004,7 @@ impl HomePage {
         if let Ok(mut service) = self.cloud_sync_service.write() {
             service.logout();
         } else {
-            tracing::warn!("同步地址变更后重置云同步状态失败：无法获取写锁");
+            tracing::warn!("{}", t!("HomeAuth.sync_server_url_lock_lost"));
         }
 
         cx.notify();
@@ -1001,13 +1037,15 @@ impl HomePage {
     fn summarize_sync_result(result: &one_core::cloud_sync::SyncResult) -> SyncFeedback {
         let mut summary_parts = Vec::new();
         if result.uploaded > 0 {
-            summary_parts.push(format!("上传 {} 项", result.uploaded));
+            summary_parts
+                .push(t!("HomeSync.summary_uploaded", count = result.uploaded).to_string());
         }
         if result.downloaded > 0 {
-            summary_parts.push(format!("下载 {} 项", result.downloaded));
+            summary_parts
+                .push(t!("HomeSync.summary_downloaded", count = result.downloaded).to_string());
         }
         if result.deleted > 0 {
-            summary_parts.push(format!("删除 {} 项", result.deleted));
+            summary_parts.push(t!("HomeSync.summary_deleted", count = result.deleted).to_string());
         }
 
         let summary = if summary_parts.is_empty() {
@@ -1210,7 +1248,7 @@ impl HomePage {
         }
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
-        self.log_sync_decrypt_health(&storage, "常规同步");
+        self.log_sync_decrypt_health(&storage, &t!("HomeSync.scene_routine_sync").to_string());
 
         if self.syncing {
             self.sync_requested = true;
@@ -1230,7 +1268,7 @@ impl HomePage {
             if let Ok(mut service) = sync_service.write() {
                 service.set_logged_in(user.id.clone());
             } else {
-                tracing::warn!("同步前设置用户ID失败：无法获取云同步服务写锁");
+                tracing::warn!("{}", t!("HomeAuth.sync_service_lock_lost"));
             }
         }
 
@@ -1271,16 +1309,25 @@ impl HomePage {
                     Ok(stats) => {
                         let feedback = Self::summarize_sync_result(&stats);
                         tracing::info!(
-                            "同步完成：上传 {} 个，下载 {} 个，冲突 {} 个",
-                            stats.uploaded,
-                            stats.downloaded,
-                            stats.conflicts.len()
+                            "{}",
+                            t!(
+                                "HomeSync.trace_sync_completed",
+                                uploaded = stats.uploaded,
+                                downloaded = stats.downloaded,
+                                conflicts = stats.conflicts.len()
+                            )
                         );
                         this.cloud_error = None;
 
                         // 如果有冲突，保存并显示冲突解决对话框
                         if !stats.conflicts.is_empty() {
-                            tracing::warn!("同步存在 {} 个冲突需要处理", stats.conflicts.len());
+                            tracing::warn!(
+                                "{}",
+                                t!(
+                                    "HomeSync.trace_sync_has_conflicts",
+                                    count = stats.conflicts.len()
+                                )
+                            );
                             this.pending_conflicts = stats.conflicts;
                         }
 
@@ -1296,7 +1343,10 @@ impl HomePage {
                         this.refresh_local_home_data(cx);
                     }
                     Err(e) => {
-                        tracing::error!("同步失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!("HomeSync.trace_sync_failed", error = e.to_string())
+                        );
                         let message = format!("{}：{}", t!("Home.sync_failed"), e);
                         this.cloud_error = Some(e.to_string());
                         this.set_sync_feedback(SyncFeedbackLevel::Error, message);
@@ -1330,21 +1380,30 @@ impl HomePage {
                         .collect::<Vec<_>>()
                         .join(", ");
                     tracing::warn!(
-                        "{}检测到 {} 个连接解密失败：将由同步引擎跳过这些连接，其它连接继续同步和拉取。失败连接: {}",
-                        scene,
-                        failures.len(),
-                        preview
+                        "{}",
+                        t!(
+                            "HomeSync.trace_decryption_health_header",
+                            count = failures.len(),
+                            preview = preview
+                        )
                     );
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    tracing::warn!("{}前解密状态检查失败，将继续执行同步流程: {}", scene, e);
+                    tracing::warn!(
+                        "{}",
+                        t!(
+                            "HomeSync.trace_decryption_health_failed",
+                            scene = scene,
+                            error = e.to_string()
+                        )
+                    );
                 }
             }
         } else {
             tracing::warn!(
-                "{}前解密状态检查失败：ConnectionRepository 不存在，将继续执行同步流程",
-                scene
+                "{}",
+                t!("HomeSync.trace_decryption_health_no_repo", scene = scene)
             );
         }
     }
@@ -1628,7 +1687,13 @@ impl HomePage {
             return;
         }
 
-        tracing::info!("使用单独策略解决 {} 个冲突", self.pending_conflicts.len());
+        tracing::info!(
+            "{}",
+            t!(
+                "HomeSync.trace_resolve_individual",
+                count = self.pending_conflicts.len()
+            )
+        );
 
         if self.syncing {
             self.sync_requested = true;
@@ -1643,12 +1708,15 @@ impl HomePage {
             if let Ok(mut service) = sync_service.write() {
                 service.set_logged_in(user.id.clone());
             } else {
-                tracing::warn!("冲突解决前设置用户ID失败：无法获取云同步服务写锁");
+                tracing::warn!("{}", t!("HomeAuth.conflict_service_lock_lost"));
             }
         }
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
-        self.log_sync_decrypt_health(&storage, "单独冲突解决");
+        self.log_sync_decrypt_health(
+            &storage,
+            &t!("HomeSync.scene_individual_conflict").to_string(),
+        );
         self.syncing = true;
         self.sync_requested = false;
         self.cloud_error = None;
@@ -1694,13 +1762,16 @@ impl HomePage {
                     Ok(stats) => {
                         let feedback = Self::build_conflict_resolution_feedback(&stats);
                         if stats.errors.is_empty() && stats.conflicts.is_empty() {
-                            tracing::info!("冲突解决完成");
+                            tracing::info!("{}", t!("HomeSync.trace_resolve_completed"));
                             this.pending_conflicts.clear();
                         } else {
                             tracing::warn!(
-                                "冲突解决未完全生效：剩余 {} 个未解决冲突，{} 个错误",
-                                stats.conflicts.len(),
-                                stats.errors.len()
+                                "{}",
+                                t!(
+                                    "HomeSync.trace_resolve_partial",
+                                    remaining = stats.conflicts.len(),
+                                    errors = stats.errors.len()
+                                )
                             );
                             this.pending_conflicts = stats.conflicts.clone();
                         }
@@ -1714,7 +1785,10 @@ impl HomePage {
                         this.refresh_local_home_data(cx);
                     }
                     Err(e) => {
-                        tracing::error!("冲突解决失败: {}", e);
+                        tracing::error!(
+                            "{}",
+                            t!("HomeSync.trace_resolve_failed", error = e.to_string())
+                        );
                         let message = format!("{}：{}", t!("Home.sync_failed"), e);
                         this.cloud_error = Some(e.to_string());
                         this.set_sync_feedback(SyncFeedbackLevel::Error, message);
@@ -1754,7 +1828,7 @@ impl HomePage {
 
                     // 如果密钥已解锁，自动触发同步
                     if crypto::has_master_key() {
-                        tracing::info!("会话已恢复且密钥已解锁，自动触发云同步");
+                        tracing::info!("{}", t!("HomeSession.restored_session_auto_sync"));
                         this.trigger_sync(cx);
                     }
                 });
@@ -1797,6 +1871,12 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 外部驱动已移除：存量 External 连接不可编辑，仅可删除
+        if db_type == Some(DatabaseType::External) {
+            window.push_notification(t!("Home.external_driver_unsupported").to_string(), cx);
+            return;
+        }
+
         let is_active = cx.global::<ActiveConnections>().is_active(conn_id);
 
         if is_active {
@@ -1864,6 +1944,17 @@ impl HomePage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 外部驱动已移除：存量 External 连接不可复制（复制后也无法打开编辑器）
+        let is_external_database = source.connection_type == ConnectionType::Database
+            && matches!(
+                source.to_db_connection().map(|p| p.database_type),
+                Ok(DatabaseType::External)
+            );
+        if is_external_database {
+            window.push_notification(t!("Home.external_driver_unsupported").to_string(), cx);
+            return;
+        }
+
         if !self.ensure_master_key_ready_for_new_connection(window, cx) {
             return;
         }
@@ -1876,7 +1967,7 @@ impl HomePage {
                     .child(
                         t!(
                             "Home.duplicate_connection_failed",
-                            error = "无法获取连接存储库"
+                            error = t!("HomeStatus.connection_repository_missing").to_string()
                         )
                         .to_string()
                         .into_any_element(),
@@ -1952,7 +2043,7 @@ impl HomePage {
                             .child(
                                 t!(
                                     "Home.duplicate_connection_failed",
-                                    error = "无法识别数据库连接类型"
+                                    error = t!("HomeStatus.database_type_unrecognized").to_string()
                                 )
                                 .to_string()
                                 .into_any_element(),
@@ -1964,7 +2055,6 @@ impl HomePage {
 
                 let config = ConnectionFormWindowConfig {
                     db_type,
-                    external_driver_id: None,
                     editing_connection: Some(connection),
                     workspaces: self.workspaces.clone(),
                 };
@@ -2107,7 +2197,7 @@ impl HomePage {
                     });
                 }
                 Err(e) => {
-                    tracing::error!("Failed to delete connection: {}", e);
+                    tracing::error!("{}", t!("HomeSession.connection_repo_not_found"));
                 }
             }
         })
@@ -2134,7 +2224,7 @@ impl HomePage {
         let list_for_focus = list.clone();
         window.open_dialog(cx, move |dialog, _window, cx| {
             dialog
-                .title("打开连接".to_string())
+                .title(t!("HomeOpenConnection.title").to_string())
                 .w(px(520.0))
                 .child(
                     v_flex().gap_2().child(
@@ -2264,14 +2354,17 @@ impl HomePage {
                     }
                     // 兜底触发一次自动同步，避免当前页对自身工作区事件未回流时漏同步。
                     if this.current_user.is_some() && crypto::has_master_key() {
-                        tracing::info!("本地工作区保存成功，自动触发云同步");
+                        tracing::info!("{}", t!("HomeSession.workspace_saved_auto_sync"));
                         this.trigger_sync(cx);
                     }
                     cx.notify();
                 });
             }
             Err(e) => {
-                tracing::error!("Failed to save workspace: {}", e);
+                tracing::error!(
+                    "{}",
+                    t!("HomeSession.workspace_save_failed", error = e.to_string())
+                );
             }
         })
         .detach();
@@ -2378,11 +2471,11 @@ impl HomePage {
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let Some(connection_repo) = storage.get::<ConnectionRepository>() else {
-                tracing::error!("Failed to delete workspace: ConnectionRepository not found");
+                tracing::error!("{}", t!("HomeSession.connection_repository_missing"));
                 return;
             };
             let Some(workspace_repo) = storage.get::<WorkspaceRepository>() else {
-                tracing::error!("Failed to delete workspace: WorkspaceRepository not found");
+                tracing::error!("{}", t!("HomeSession.workspace_repository_missing"));
                 return;
             };
 
@@ -2392,14 +2485,23 @@ impl HomePage {
                 updated_connection.workspace_id = None;
                 updated_connection.sort_order = None;
                 if let Err(e) = connection_repo.update(&updated_connection) {
-                    tracing::error!("Failed to move connection to unassigned: {}", e);
+                    tracing::error!(
+                        "{}",
+                        t!(
+                            "HomeSession.workspace_delete_move_failed",
+                            error = e.to_string()
+                        )
+                    );
                     return;
                 }
                 updated_connections.push(updated_connection);
             }
 
             if let Err(e) = workspace_repo.delete(workspace_id) {
-                tracing::error!("Failed to delete workspace: {}", e);
+                tracing::error!(
+                    "{}",
+                    t!("HomeSession.workspace_delete_failed", error = e.to_string())
+                );
                 return;
             }
             Self::queue_pending_workspace_deletion(&storage, &workspace, &workspace_connections);
@@ -2426,7 +2528,7 @@ impl HomePage {
 
                 emit_connection_event(ConnectionDataEvent::WorkspaceDeleted { workspace_id }, cx);
                 if this.current_user.is_some() && crypto::has_master_key() {
-                    tracing::info!("本地工作区删除成功，自动触发云同步");
+                    tracing::info!("{}", t!("HomeSession.workspace_deleted_auto_sync"));
                     this.trigger_sync(cx);
                 }
                 cx.notify();
@@ -2451,7 +2553,6 @@ impl HomePage {
 
         let config = ConnectionFormWindowConfig {
             db_type,
-            external_driver_id: None,
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
         };
@@ -2663,7 +2764,7 @@ impl HomePage {
                 t!(
                     "Home.port_forwarding_failed",
                     name = connection_name,
-                    error = "missing connection id"
+                    error = "missing connection id".to_string()
                 )
                 .to_string(),
                 cx,
@@ -2892,12 +2993,21 @@ impl HomePage {
                                     match re_encrypt_all_connections(&storage) {
                                         Ok(count) => {
                                             tracing::info!(
-                                                "主密钥修改成功，已重新加密 {} 个本地连接",
-                                                count
+                                                "{}",
+                                                t!(
+                                                    "HomeSession.re_encrypt_local_connections_succeeded",
+                                                    count = count
+                                                )
                                             );
                                         }
                                         Err(e) => {
-                                            tracing::error!("重新加密本地连接失败: {}", e);
+                                            tracing::error!(
+                                                "{}",
+                                                t!(
+                                                    "HomeSession.re_encrypt_local_connections_failed",
+                                                    error = e.to_string()
+                                                )
+                                            );
                                             error_msg_ok.update(cx, |msg, cx| {
                                                 *msg = Some(e.to_string());
                                                 cx.notify();
@@ -2961,7 +3071,10 @@ impl HomePage {
                                 // 密钥已就绪后刷新连接列表，修复启动时序导致的空密码回显
                                 this.load_connections(cx);
                                 if this.current_user.is_some() {
-                                    tracing::info!("密钥设置/解锁成功，自动触发云同步");
+                                    tracing::info!(
+                                        "{}",
+                                        t!("HomeSession.master_key_unlock_succeeded_auto_sync")
+                                    );
                                     this.trigger_sync(cx);
                                 }
                             }
@@ -4394,8 +4507,11 @@ impl HomePage {
                     &plan.source_connection_ids,
                     &plan.target_connection_ids,
                 )?;
-                repo.get(connection_id)?
-                    .ok_or_else(|| anyhow::anyhow!("连接 {} 更新后丢失", connection_id))
+                repo.get(connection_id)?.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        t!("HomeSession.connection_updated_lost", id = connection_id).to_string()
+                    )
+                })
             })();
 
             match result {
@@ -4495,6 +4611,10 @@ impl HomePage {
     fn connection_subtitle(&self, conn: &StoredConnection) -> Option<String> {
         match conn.connection_type {
             ConnectionType::Database => conn.to_db_connection().ok().map(|params| {
+                // 外部驱动已移除：存量 External 连接显示停止支持提示
+                if matches!(params.database_type, DatabaseType::External) {
+                    return t!("Home.external_driver_subtitle").to_string();
+                }
                 if matches!(params.database_type, DatabaseType::SQLite) {
                     params.host
                 } else {
@@ -4574,10 +4694,7 @@ impl HomePage {
         let icon = match conn.connection_type {
             ConnectionType::Database => conn
                 .to_db_connection()
-                .map(|c| {
-                    external_driver_icon_for_config(&c, px(size))
-                        .unwrap_or_else(|| c.database_type.as_icon())
-                })
+                .map(|c| c.database_type.as_icon())
                 .unwrap_or_else(|_| IconName::Database.color())
                 .with_size(px(size))
                 .text_color(gpui::white()),
@@ -7901,6 +8018,7 @@ fn re_encrypt_all_connections(
 mod tests {
     use super::{HomePage, SyncFeedbackLevel};
     use one_core::cloud_sync::SyncResult;
+    use rust_i18n::t;
 
     #[test]
     fn summarize_sync_result_returns_info_when_nothing_changed() {
@@ -7925,8 +8043,16 @@ mod tests {
         let feedback = HomePage::summarize_sync_result(&result);
 
         assert_eq!(feedback.level, SyncFeedbackLevel::Success);
-        assert!(feedback.message.contains("上传 2 项"));
-        assert!(feedback.message.contains("下载 1 项"));
+        assert!(
+            feedback
+                .message
+                .contains(&t!("HomeSync.summary_uploaded", count = 2).to_string())
+        );
+        assert!(
+            feedback
+                .message
+                .contains(&t!("HomeSync.summary_downloaded", count = 1).to_string())
+        );
     }
 
     #[test]
@@ -7936,13 +8062,17 @@ mod tests {
             downloaded: 0,
             deleted: 0,
             conflicts: Vec::new(),
-            errors: vec!["请先输入主密钥解锁".to_string()],
+            errors: vec![t!("HomeSession.first_use_setup_master_key").to_string()],
         };
 
         let feedback = HomePage::summarize_sync_result(&result);
 
         assert_eq!(feedback.level, SyncFeedbackLevel::Warning);
         assert!(!feedback.message.is_empty());
-        assert!(feedback.message.contains("请先输入主密钥解锁"));
+        assert!(
+            feedback
+                .message
+                .contains(&t!("HomeSession.first_use_setup_master_key").to_string())
+        );
     }
 }

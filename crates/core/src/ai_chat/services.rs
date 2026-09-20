@@ -270,7 +270,10 @@ pub async fn generate_ai_session_title(
             if title.is_empty() { None } else { Some(title) }
         }
         Err(e) => {
-            tracing::warn!("AI 生成会话标题失败: {}", e);
+            tracing::warn!(
+                "{}",
+                t!("AiChat.log_generate_title_failed", error = e.to_string())
+            );
             None
         }
     }

@@ -20,6 +20,7 @@
 
 use anyhow::Result;
 use rusqlite::Connection;
+use rust_i18n::t;
 use serde_json::Value;
 use tracing::warn;
 
@@ -65,7 +66,7 @@ pub fn migrate_encrypt_existing_sensitive_fields(
 ) -> Result<MigrationCounts> {
     // 主密钥未解锁时跳过整个流程（旧设备用户可能没有设密码）。
     if !crate::crypto::has_master_key() {
-        warn!("[A1 迁移] 主密钥未解锁，跳过启动期敏感字段重加密");
+        warn!("{}", t!("SensitiveMigration.master_key_locked_skip"));
         return Ok((0, 0));
     }
 

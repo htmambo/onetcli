@@ -8,6 +8,7 @@ use crate::cloud_sync::service::{CloudSyncService, SyncError};
 use crate::cloud_sync::sync_type::{PendingDeletionDecision, SyncTypeHandler};
 use crate::storage::traits::Repository;
 use crate::storage::{ConnectionRepository, PendingCloudDeletion, Workspace, WorkspaceRepository};
+use rust_i18n::t;
 
 /// 工作空间同步类型处理器
 pub(crate) struct WorkspaceSyncType;
@@ -28,44 +29,47 @@ impl WorkspaceSyncType {
             .get::<ConnectionRepository>()
             .ok_or_else(|| SyncError::StorageError("ConnectionRepository not found".to_string()))?;
 
-        let restored_workspace =
-            match workspace_repo
-                .get_by_cloud_id(&current_cloud.id)
-                .map_err(|e| SyncError::StorageError(e.to_string()))?
-            {
-                Some(existing) => {
-                    let mut restored = {
-                        let service = engine.crypto_service.read().map_err(|_| {
-                            SyncError::StorageError("同步服务锁获取失败".to_string())
-                        })?;
-                        self.decrypt(&service, current_cloud)?
-                    };
-                    restored.id = existing.id;
-                    workspace_repo
-                        .update_from_cloud(&restored)
-                        .map_err(|e| SyncError::StorageError(e.to_string()))?;
-                    workspace_repo
-                        .get_by_cloud_id(&current_cloud.id)
-                        .map_err(|e| SyncError::StorageError(e.to_string()))?
-                        .ok_or_else(|| SyncError::StorageError("工作空间恢复后丢失".to_string()))?
-                }
-                None => {
-                    let mut restored = {
-                        let service = engine.crypto_service.read().map_err(|_| {
-                            SyncError::StorageError("同步服务锁获取失败".to_string())
-                        })?;
-                        self.decrypt(&service, current_cloud)?
-                    };
-                    workspace_repo
-                        .insert(&mut restored)
-                        .map_err(|e| SyncError::StorageError(e.to_string()))?;
-                    restored
-                }
-            };
+        let restored_workspace = match workspace_repo
+            .get_by_cloud_id(&current_cloud.id)
+            .map_err(|e| SyncError::StorageError(e.to_string()))?
+        {
+            Some(existing) => {
+                let mut restored = {
+                    let service = engine.crypto_service.read().map_err(|_| {
+                        SyncError::StorageError(t!("CloudSync.lock_failed").to_string())
+                    })?;
+                    self.decrypt(&service, current_cloud)?
+                };
+                restored.id = existing.id;
+                workspace_repo
+                    .update_from_cloud(&restored)
+                    .map_err(|e| SyncError::StorageError(e.to_string()))?;
+                workspace_repo
+                    .get_by_cloud_id(&current_cloud.id)
+                    .map_err(|e| SyncError::StorageError(e.to_string()))?
+                    .ok_or_else(|| {
+                        SyncError::StorageError(
+                            t!("CloudSync.workspace_lost_after_restore").to_string(),
+                        )
+                    })?
+            }
+            None => {
+                let mut restored = {
+                    let service = engine.crypto_service.read().map_err(|_| {
+                        SyncError::StorageError(t!("CloudSync.lock_failed").to_string())
+                    })?;
+                    self.decrypt(&service, current_cloud)?
+                };
+                workspace_repo
+                    .insert(&mut restored)
+                    .map_err(|e| SyncError::StorageError(e.to_string()))?;
+                restored
+            }
+        };
 
-        let restored_workspace_id = restored_workspace
-            .id
-            .ok_or_else(|| SyncError::StorageError("恢复后的工作空间缺少本地 ID".to_string()))?;
+        let restored_workspace_id = restored_workspace.id.ok_or_else(|| {
+            SyncError::StorageError(t!("CloudSync.workspace_restored_missing_local_id").to_string())
+        })?;
 
         if let Some(metadata) = &pending.metadata {
             for connection_id in &metadata.affected_connection_ids {
@@ -100,8 +104,8 @@ impl SyncTypeHandler for WorkspaceSyncType {
         "workspace"
     }
 
-    fn display_name(&self) -> &'static str {
-        "工作空间"
+    fn display_name(&self) -> String {
+        rust_i18n::t!("CloudSync.type_workspace").to_string()
     }
 
     fn queue_key(&self) -> &'static str {

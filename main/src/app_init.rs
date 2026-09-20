@@ -1,5 +1,6 @@
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use gpui::{AnyWindowHandle, App, Window};
+use rust_i18n::t;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -92,7 +93,7 @@ mod system_hotkey {
         };
 
         if let Err(err) = result {
-            tracing::warn!("系统级热键注册失败: {err:?}");
+            tracing::warn!("{}", t!("Hotkey.register_failed", err = format!("{err:?}")));
             return;
         }
 
@@ -107,7 +108,10 @@ mod system_hotkey {
                 return;
             };
             if let Err(err) = result {
-                tracing::warn!("系统级热键注销失败: {err:?}");
+                tracing::warn!(
+                    "{}",
+                    t!("Hotkey.unregister_failed", err = format!("{err:?}"))
+                );
             }
         }
 
@@ -117,7 +121,10 @@ mod system_hotkey {
             return;
         };
         if let Err(err) = result {
-            tracing::warn!("系统级热键刷新注册失败: {err:?}");
+            tracing::warn!(
+                "{}",
+                t!("Hotkey.refresh_register_failed", err = format!("{err:?}"))
+            );
             set_registered_hotkey(None, None);
             return;
         }
@@ -133,7 +140,10 @@ mod system_hotkey {
         if should_dispatch_hotkey_event(event.id, registered_id, event.state) {
             if let Some(tx) = TOGGLE_REQUEST_TX.get() {
                 if let Err(err) = tx.send(()) {
-                    tracing::warn!("主窗口热键事件派发失败: {err}");
+                    tracing::warn!(
+                        "{}",
+                        t!("Hotkey.event_dispatch_failed", err = format!("{err}"))
+                    );
                 }
             }
         }
@@ -145,7 +155,10 @@ mod system_hotkey {
             if manager.is_none() {
                 *manager = GlobalHotKeyManager::new()
                     .map_err(|err| {
-                        tracing::warn!("系统级热键管理器初始化失败: {err:?}");
+                        tracing::warn!(
+                            "{}",
+                            t!("Hotkey.manager_init_failed", err = format!("{err:?}"))
+                        );
                     })
                     .ok();
             }
@@ -195,7 +208,13 @@ mod system_hotkey {
     pub(crate) fn toggle_hotkey_from_config(spec: &str, fallback: &str) -> HotKey {
         parse_project_hotkey(spec).unwrap_or_else(|err| {
             tracing::warn!(
-                "系统级热键配置非法，已回退默认值: input={spec:?}, fallback={fallback:?}, err={err:?}"
+                "{}",
+                t!(
+                    "Hotkey.invalid_config_fallback",
+                    spec = format!("{spec:?}"),
+                    fallback = format!("{fallback:?}"),
+                    err = format!("{err:?}")
+                )
             );
             parse_project_hotkey(fallback).expect("默认系统级热键定义非法")
         })
@@ -275,7 +294,10 @@ mod system_hotkey {
 
                     while rx.try_recv().is_ok() {
                         if let Err(err) = toggle_main_window(&mut cx) {
-                            tracing::warn!("主窗口系统级快捷键处理失败: {err:?}");
+                            tracing::warn!(
+                                "{}",
+                                t!("Hotkey.handle_shortcut_failed", err = format!("{err:?}"))
+                            );
                         }
                     }
                 }

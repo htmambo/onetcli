@@ -540,7 +540,14 @@ impl RedisTreeView {
                 }
                 Err(e) => {
                     let error_msg = format!("{:#}", e);
-                    error!("Redis 连接失败，节点 {}: {}", node_id, error_msg);
+                    error!(
+                        "{}",
+                        t!(
+                            "RedisTree.connect_node_failed",
+                            node_id = node_id,
+                            error = error_msg
+                        )
+                    );
                     _ = this.update(cx, |view, cx| {
                         view.loading_nodes.remove(&node_id);
                         view.error_nodes.insert(node_id.clone(), error_msg);

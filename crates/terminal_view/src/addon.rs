@@ -9,6 +9,7 @@ use alacritty_terminal::term::Term;
 use alacritty_terminal::term::search::RegexSearch;
 use gpui::*;
 use gpui_component::try_parse_color;
+use rust_i18n::t;
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::{Range, RangeInclusive};
@@ -1095,7 +1096,13 @@ impl FilePathAddon {
             "#,
         )
         .map_err(|error| {
-            tracing::warn!("文件路径正则构建失败: {error}");
+            tracing::warn!(
+                "{}",
+                t!(
+                    "TerminalAddon.file_path_regex_failed",
+                    error = error.to_string()
+                )
+            );
             error
         })
         .ok();
@@ -1374,7 +1381,13 @@ fn file_path_to_url(path: &Path) -> Option<String> {
     let resolved = match path.canonicalize() {
         Ok(path) => path,
         Err(error) => {
-            tracing::warn!("无法打开本地路径: {error}");
+            tracing::warn!(
+                "{}",
+                t!(
+                    "TerminalAddon.open_local_path_failed",
+                    error = error.to_string()
+                )
+            );
             return None;
         }
     };

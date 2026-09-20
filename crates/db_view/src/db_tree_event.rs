@@ -1273,8 +1273,16 @@ impl DatabaseEventHandler {
         let connection_id = node.connection_id.clone();
         let database_type = node.database_type;
 
-        let editor_view =
-            create_database_editor_view_for_new(database_type, connection_id.clone(), window, cx);
+        let Some(editor_view) =
+            create_database_editor_view_for_new(database_type, connection_id.clone(), window, cx)
+        else {
+            // 已移除驱动的类型（存量 External 连接）无法构建编辑器，直接放弃
+            warn!(
+                "create_database_editor_view_for_new unsupported database type: {:?}",
+                database_type
+            );
+            return;
+        };
 
         let global_state_clone = global_state.clone();
         let connection_id_clone = connection_id.clone();
@@ -1399,13 +1407,20 @@ impl DatabaseEventHandler {
         let database_name = node.name.clone();
         let database_type = node.database_type;
 
-        let editor_view = create_database_editor_view_for_edit_type(
+        let Some(editor_view) = create_database_editor_view_for_edit_type(
             database_type,
             connection_id.clone(),
             database_name.clone(),
             window,
             cx,
-        );
+        ) else {
+            // 已移除驱动的类型（存量 External 连接）无法构建编辑器，直接放弃
+            warn!(
+                "create_database_editor_view_for_edit_type unsupported database type: {:?}",
+                database_type
+            );
+            return;
+        };
 
         let global_state_clone = global_state.clone();
         let connection_id_clone = connection_id.clone();

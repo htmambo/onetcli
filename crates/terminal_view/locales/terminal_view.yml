@@ -500,6 +500,14 @@ Settings:
     zh-CN: 通过 Shell 集成脚本自动将当前 SSH 工作目录同步到文件管理器。
     zh-HK: 透過 Shell 整合腳本自動將目前 SSH 工作目錄同步到文件管理器。
 
+  highlight_regex_empty:
+    en: Regex cannot be empty
+    zh-CN: 正则不能为空
+    zh-HK: 正則不能為空
+  highlight_color_required:
+    en: At least one color must be set
+    zh-CN: 至少设置一种颜色
+    zh-HK: 至少設定一種顏色
 CustomHighlight:
   title:
     en: Custom Highlights
@@ -767,6 +775,14 @@ TerminalAddon:
     zh-CN: "无法打开本地路径: %{error}"
     zh-HK: "無法打開本地路徑: %{error}"
 
+  file_path_regex_failed:
+    en: "Failed to build file path regex: %{error}"
+    zh-CN: "文件路径正则构建失败: %{error}"
+    zh-HK: "檔案路徑正則構建失敗: %{error}"
+  open_local_path_failed:
+    en: "Cannot open local path: %{error}"
+    zh-CN: "无法打开本地路径: %{error}"
+    zh-HK: "無法開啟本地路徑: %{error}"
 TerminalView:
   connecting:
     en: Connecting...
@@ -844,6 +860,23 @@ TerminalView:
     en: Paste preview
     zh-CN: 粘贴预览
     zh-HK: 貼上預覽
+  create_local_failed:
+    en: "Failed to create local terminal: %{error}"
+    zh-CN: "创建本地终端失败: %{error}"
+    zh-HK: "建立本地終端失敗: %{error}"
+  error_title:
+    en: Terminal Error
+    zh-CN: 终端错误
+    zh-HK: 終端錯誤
+  init_failed_window_not_ready:
+    en: "Local terminal initialization failed (window not ready): %{error}"
+    zh-CN: "本地终端初始化失败（窗口未就绪）: %{error}"
+    zh-HK: "本地終端初始化失敗（視窗未就緒）: %{error}"
+  live_attach_failed:
+    en: "Live attach failed, falling back to buffer restore: %{error}"
+    zh-CN: "live attach 失败，回退到 buffer 恢复: %{error}"
+    zh-HK: "live attach 失敗，回退到 buffer 恢復: %{error}"
+
 RunningState:
   terminal:
     activity:
@@ -876,6 +909,10 @@ TerminalSidebar:
     zh-CN: "粘贴到终端"
     zh-HK: "貼上到終端"
 
+  bridge_unavailable_fallback:
+    en: "[terminal_sidebar] Agent mode is on but terminal bridge is unavailable; falling back to plain chat"
+    zh-CN: "[terminal_sidebar] agent 模式已开启但终端桥接不可用，降级为纯聊天"
+    zh-HK: "[terminal_sidebar] agent 模式已開啟但終端橋接不可用，降級為純聊天"
 ServerMonitor:
   title:
     en: Server Monitor
@@ -1365,6 +1402,30 @@ FileManager:
     zh-CN: "创建文件夹失败: %{error}"
     zh-HK: "建立文件夾失敗: %{error}"
 
+  log_list_dir_failed:
+    en: "Failed to list directory: %{error}"
+    zh-CN: "列出目录失败: %{error}"
+    zh-HK: "列出目錄失敗: %{error}"
+  log_sftp_task_failed:
+    en: "SFTP task failed: %{error}"
+    zh-CN: "SFTP 任务失败: %{error}"
+    zh-HK: "SFTP 任務失敗: %{error}"
+  log_read_remote_dir_failed:
+    en: "Failed to read remote directory: %{error}"
+    zh-CN: "读取远程目录失败: %{error}"
+    zh-HK: "讀取遠端目錄失敗: %{error}"
+  log_remote_dir_task_failed:
+    en: "Remote directory check task failed: %{error}"
+    zh-CN: "远程目录检查任务失败: %{error}"
+    zh-HK: "遠端目錄檢查任務失敗: %{error}"
+  log_create_folder_failed:
+    en: "Failed to create remote folder: %{error}"
+    zh-CN: "创建远程文件夹失败: %{error}"
+    zh-HK: "建立遠端資料夾失敗: %{error}"
+  log_create_folder_task_failed:
+    en: "Remote create-folder task failed: %{error}"
+    zh-CN: "远程创建文件夹任务失败: %{error}"
+    zh-HK: "遠端建立資料夾任務失敗: %{error}"
 Dialog:
   file_conflict:
     en: File Conflict
@@ -1433,6 +1494,58 @@ AgentBridge:
     en: critical
     zh-CN: 严重
     zh-HK: 嚴重
+  registry_not_initialized:
+    en: Terminal registry is not initialized
+    zh-CN: 终端注册表未初始化
+    zh-HK: 終端註冊表未初始化
+  terminal_not_found:
+    en: "Terminal #%{id} does not exist or has been closed"
+    zh-CN: "终端 #%{id} 不存在或已关闭"
+    zh-HK: "終端 #%{id} 不存在或已關閉"
+  terminal_closed:
+    en: "Terminal #%{id} has been closed"
+    zh-CN: "终端 #%{id} 已关闭"
+    zh-HK: "終端 #%{id} 已關閉"
+  terminal_alt_screen:
+    en: "Terminal #%{id} is in fullscreen interactive mode; text output cannot be read"
+    zh-CN: "终端 #%{id} 正处于全屏交互模式，暂无法读取文本输出"
+    zh-HK: "終端 #%{id} 正處於全螢幕互動模式，暫無法讀取文字輸出"
+  terminal_closed_during_wait:
+    en: "Terminal #%{id} was closed while waiting"
+    zh-CN: "终端 #%{id} 在等待期间被关闭"
+    zh-HK: "終端 #%{id} 在等待期間被關閉"
+  risk_command_rejected:
+    en: The user rejected this risky command
+    zh-CN: 用户拒绝执行该高危命令
+    zh-HK: 使用者拒絕執行該高危命令
+  read_back_failed:
+    en: "(failed to read back output: %{error})"
+    zh-CN: "（回读输出失败：%{error}）"
+    zh-HK: "（回讀輸出失敗：%{error}）"
+  window_handle_unavailable:
+    en: "Window handle for terminal #%{id} is unavailable"
+    zh-CN: "终端 #%{id} 窗口句柄不可用"
+    zh-HK: "終端 #%{id} 視窗控制代碼不可用"
+  log_risk_command_rejected:
+    en: "[agent_bridge] Risky command rejected by user: %{command}"
+    zh-CN: "[agent_bridge] 高危命令被用户拒绝: %{command}"
+    zh-HK: "[agent_bridge] 高危命令被使用者拒絕: %{command}"
+  log_no_window_risk_rejected:
+    en: "[agent_bridge] No window available; risky command confirmation rejected: %{command}"
+    zh-CN: "[agent_bridge] 无可用窗口，高危命令确认请求被拒绝: %{command}"
+    zh-HK: "[agent_bridge] 無可用視窗，高危命令確認請求被拒絕: %{command}"
+  log_risk_dialog_open_failed:
+    en: "[agent_bridge] Failed to open risky command confirmation dialog: %{error}"
+    zh-CN: "[agent_bridge] 高危命令确认对话框打开失败: %{error}"
+    zh-HK: "[agent_bridge] 高危命令確認對話框開啟失敗: %{error}"
+  log_risk_confirm_timeout:
+    en: "[agent_bridge] Risky command confirmation timed out (120s); treated as rejected: %{command}"
+    zh-CN: "[agent_bridge] 高危命令确认超时（120s），按拒绝处理: %{command}"
+    zh-HK: "[agent_bridge] 高危命令確認超時（120s），按拒絕處理: %{command}"
+  log_wait_timeout:
+    en: "[agent_bridge] Terminal #%{id} wait timed out; the command may still be running or has entered interactive mode"
+    zh-CN: "[agent_bridge] 终端 #%{id} 等待超时，命令可能仍在运行或已进入交互模式"
+    zh-HK: "[agent_bridge] 終端 #%{id} 等待超時，命令可能仍在執行或已進入互動模式"
 TerminalAgent:
   provider_not_support_tools:
     en: The current model provider does not support tool calling. Please switch to an OpenAI-compatible provider in Settings.
@@ -1528,6 +1641,46 @@ TerminalAgent:
     zh-HK: "聚焦終端（%{id}）"
 
 # AI 工具调用卡片
+  log_serialize_tool_calls_failed:
+    en: "[terminal_agent] Failed to serialize tool_calls; skipping persistence: %{error}"
+    zh-CN: "[terminal_agent] 序列化 tool_calls 失败，跳过持久化: %{error}"
+    zh-HK: "[terminal_agent] 序列化 tool_calls 失敗，略過持久化: %{error}"
+  log_persist_tool_calls_failed:
+    en: "[terminal_agent] Failed to persist assistant tool_calls message: %{error}"
+    zh-CN: "[terminal_agent] 持久化 assistant tool_calls 消息失败: %{error}"
+    zh-HK: "[terminal_agent] 持久化 assistant tool_calls 訊息失敗: %{error}"
+  log_persist_tool_result_failed:
+    en: "[terminal_agent] Failed to persist tool result message: %{error}"
+    zh-CN: "[terminal_agent] 持久化 tool 结果消息失败: %{error}"
+    zh-HK: "[terminal_agent] 持久化 tool 結果訊息失敗: %{error}"
+  log_max_tokens_stop:
+    en: "[terminal_agent] Truncated by max_tokens; not continuing"
+    zh-CN: "[terminal_agent] max_tokens 截断；不续轮"
+    zh-HK: "[terminal_agent] max_tokens 截斷；不續輪"
+  log_content_filter_stop:
+    en: "[terminal_agent] Content filter triggered; terminating loop"
+    zh-CN: "[terminal_agent] 触发 content_filter；终止循环"
+    zh-HK: "[terminal_agent] 觸發 content_filter；終止循環"
+  log_unknown_finish_reason:
+    en: "[terminal_agent] Unrecognized finish_reason; fail-safe break"
+    zh-CN: "[terminal_agent] 遇到未识别的 finish_reason；按 fail-safe break 处理"
+    zh-HK: "[terminal_agent] 遇到未識別的 finish_reason；按 fail-safe break 處理"
+  log_reminder_injected:
+    en: "[terminal_agent] Reminder injected into this round"
+    zh-CN: "[terminal_agent] reminder 注入本轮循环"
+    zh-HK: "[terminal_agent] reminder 注入本輪循環"
+  log_premature_break:
+    en: "[terminal_agent] Premature termination break (%{cause})"
+    zh-CN: "[terminal_agent] 假性终结 break (%{cause})"
+    zh-HK: "[terminal_agent] 假性終結 break (%{cause})"
+  log_text_only_after_tool:
+    en: "[terminal_agent] Round %{round} returned text-only after tool_call (text=%{text_len}B, finish_reason=%{finish_reason}); the reported 'auto stop' likely follows this path"
+    zh-CN: "[terminal_agent] 第 %{round} 轮已执行过 tool_call 后返回 text-only (text=%{text_len}B, finish_reason=%{finish_reason})；用户报告的『自动停止』疑似本路径"
+    zh-HK: "[terminal_agent] 第 %{round} 輪已執行過 tool_call 後返回 text-only (text=%{text_len}B, finish_reason=%{finish_reason})；使用者報告的『自動停止』疑似本路徑"
+  log_event_channel_closed:
+    en: "[terminal_agent] Event channel closed; terminating Agent loop"
+    zh-CN: "[terminal_agent] 事件通道已关闭，终止 Agent 循环"
+    zh-HK: "[terminal_agent] 事件通道已關閉，終止 Agent 循環"
 AiChat:
   tool_call_detail_tool:
     en: "Tool:"
@@ -1549,3 +1702,11 @@ AiChat:
     en: Collapse
     zh-CN: 收起
     zh-HK: 收起
+  log_tool_args_parse_failed_summary:
+    en: Tool arguments JSON parse failed; summary falls back to empty object
+    zh-CN: 工具参数 JSON 解析失败，摘要回退为空对象
+    zh-HK: 工具參數 JSON 解析失敗，摘要回退為空物件
+  log_tool_args_parse_failed_action:
+    en: Tool arguments JSON parse failed; action summary falls back to tool name
+    zh-CN: 工具参数 JSON 解析失败，动作摘要回退到工具名
+    zh-HK: 工具參數 JSON 解析失敗，動作摘要回退到工具名

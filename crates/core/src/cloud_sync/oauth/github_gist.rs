@@ -13,6 +13,7 @@ use crate::cloud_sync::oauth::OAuthTokens;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
+use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -99,10 +100,13 @@ impl GithubGistVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if !response.status().is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "列出 gists 失败: HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "GitHubAuth.list_gists_failed",
+                    status = response.status().as_u16().to_string()
+                )
+                .to_string(),
+            ));
         }
 
         let mut bytes = Vec::new();
@@ -150,10 +154,13 @@ impl GithubGistVault {
             return Ok(None);
         }
         if !response.status().is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "获取 gist 失败: HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "GitHubAuth.get_gist_failed",
+                    status = response.status().as_u16().to_string()
+                )
+                .to_string(),
+            ));
         }
 
         let mut bytes = Vec::new();
@@ -218,10 +225,14 @@ impl GithubGistVault {
             let mut err_bytes = Vec::new();
             let _ = response.into_body().read_to_end(&mut err_bytes).await;
             let err_body = String::from_utf8_lossy(&err_bytes);
-            return Err(CloudApiError::ServerError(format!(
-                "更新 gist 失败: HTTP {} - {}",
-                status, err_body
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "GitHubAuth.update_gist_failed",
+                    status = status.to_string(),
+                    body = err_body.to_string()
+                )
+                .to_string(),
+            ));
         }
 
         Ok(())
@@ -246,10 +257,13 @@ impl GithubGistVault {
             .map_err(|e| CloudApiError::NetworkError(e.to_string()))?;
 
         if !response.status().is_success() && response.status() != StatusCode::NOT_FOUND {
-            return Err(CloudApiError::ServerError(format!(
-                "删除 gist 失败: HTTP {}",
-                response.status().as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!(
+                    "GitHubAuth.delete_gist_failed",
+                    status = response.status().as_u16().to_string()
+                )
+                .to_string(),
+            ));
         }
 
         Ok(())
@@ -265,13 +279,14 @@ impl BlobVault for GithubGistVault {
     /// 上传加密数据到 Gist（key 被忽略，所有数据存在同一 gist）
     async fn upload(&self, key: &str, data: Vec<u8>) -> Result<BlobMeta, CloudApiError> {
         let gist_id = self.gist_id.clone().ok_or_else(|| {
-            CloudApiError::AuthenticationFailed("尚未初始化 Gist，请先完成 GitHub 授权".to_string())
+            CloudApiError::AuthenticationFailed(t!("GitHubAuth.gist_not_initialized").to_string())
         })?;
         let tokens = self.tokens()?;
 
         // 加密数据本身就是安全的字符串，直接存储为 JSON 字符串
-        let content = String::from_utf8(data)
-            .map_err(|_| CloudApiError::DataFormatError("加密数据不是有效的 UTF-8".to_string()))?;
+        let content = String::from_utf8(data).map_err(|_| {
+            CloudApiError::DataFormatError(t!("GitHubAuth.invalid_utf8").to_string())
+        })?;
         self.update_gist(&gist_id, &content, tokens).await?;
 
         Ok(BlobMeta {
@@ -284,14 +299,13 @@ impl BlobVault for GithubGistVault {
     /// 下载 Gist 中的加密数据
     async fn download(&self, key: &str) -> Result<Blob, CloudApiError> {
         let gist_id = self.gist_id.clone().ok_or_else(|| {
-            CloudApiError::AuthenticationFailed("尚未初始化 Gist，请先完成 GitHub 授权".to_string())
+            CloudApiError::AuthenticationFailed(t!("GitHubAuth.gist_not_initialized").to_string())
         })?;
         let tokens = self.tokens()?;
 
-        let content = self
-            .get_gist(&gist_id, tokens)
-            .await?
-            .ok_or_else(|| CloudApiError::NotFound("vault gist 不存在".to_string()))?;
+        let content = self.get_gist(&gist_id, tokens).await?.ok_or_else(|| {
+            CloudApiError::NotFound(t!("GitHubAuth.vault_gist_not_found").to_string())
+        })?;
 
         Ok(Blob {
             key: key.to_string(),
@@ -302,7 +316,7 @@ impl BlobVault for GithubGistVault {
 
     async fn delete(&self, _key: &str) -> Result<(), CloudApiError> {
         let gist_id = self.gist_id.clone().ok_or_else(|| {
-            CloudApiError::AuthenticationFailed("尚未初始化 Gist，请先完成 GitHub 授权".to_string())
+            CloudApiError::AuthenticationFailed(t!("GitHubAuth.gist_not_initialized").to_string())
         })?;
         let tokens = self.tokens()?;
         self.delete_gist(&gist_id, tokens).await

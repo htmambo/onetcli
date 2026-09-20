@@ -45,10 +45,7 @@ impl NewConnectionFormPage for NewConnectionKind {
             Self::PortForwarding => build_port_forwarding_form(parent, window, cx),
             Self::Rdp => build_remote_desktop_form(parent, RemoteDesktopProtocol::Rdp, window, cx),
             Self::Vnc => build_remote_desktop_form(parent, RemoteDesktopProtocol::Vnc, window, cx),
-            Self::Database(db_type) => build_database_form(parent, db_type, None, window, cx),
-            Self::ExternalDatabase { driver_id, .. } => {
-                build_database_form(parent, DatabaseType::External, Some(driver_id), window, cx)
-            }
+            Self::Database(db_type) => build_database_form(parent, db_type, window, cx),
         }
     }
 }
@@ -69,7 +66,6 @@ fn open_terminal_tab(
 fn build_database_form(
     parent: Entity<HomePage>,
     db_type: DatabaseType,
-    external_driver_id: Option<String>,
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
@@ -84,7 +80,6 @@ fn build_database_form(
         home.editing_connection_id = None;
         Some(ConnectionFormWindowConfig {
             db_type,
-            external_driver_id: external_driver_id.clone(),
             editing_connection,
             workspaces: home.workspaces.clone(),
         })

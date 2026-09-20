@@ -25,7 +25,6 @@ use crate::table_data::filter_editor::{FilterEditorEvent, TableFilterEditor, Tab
 use crate::table_data::filter_types::IdentifierQuote;
 use crate::table_data::results_delegate::{EditorTableDelegate, RowChange};
 use chrono::Local;
-use db::ipc::EXTERNAL_DRIVER_ID_PARAM;
 use db::{
     ColumnInfo, ExecOptions, GlobalDbState, IndexInfo, QueryResult, SqlResult, TableCellChange,
     TableDataRequest, TableRowChange, TableSaveRequest,
@@ -35,13 +34,14 @@ use gpui_component::dialog::DialogButtonProps;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
-use one_core::storage::DatabaseType;
 use one_core::tab_container::TabContainer;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
 
 #[cfg(test)]
 use db::DbManager;
+#[cfg(test)]
+use one_core::storage::DatabaseType;
 
 actions!(data_grid, [Page100, Page200, Page300, Page500, Page1000]);
 
@@ -1724,22 +1724,12 @@ impl DataGrid {
 
     // ========== 复制为 SQL 语句 ==========
 
-    fn external_driver_id_for_copy(&self, cx: &App) -> Option<String> {
-        if self.config.database_type != DatabaseType::External {
-            return None;
-        }
-        cx.try_global::<GlobalDbState>()
-            .and_then(|state| state.get_config(&self.config.connection_id))
-            .and_then(|config| config.get_param(EXTERNAL_DRIVER_ID_PARAM).cloned())
-    }
-
     fn build_copy_sql_request(
         &self,
         columns_meta: Vec<db::ColumnInfo>,
         column_names: Vec<String>,
         rows_data: Vec<Vec<Option<String>>>,
         original_rows: Option<Vec<Vec<Option<String>>>>,
-        cx: &App,
     ) -> db::CopySqlRequest {
         use db::CopySqlRequest;
 
@@ -1751,9 +1741,6 @@ impl DataGrid {
         }
         if let Some(original_rows) = original_rows {
             request = request.with_original_rows(original_rows);
-        }
-        if let Some(driver_id) = self.external_driver_id_for_copy(cx) {
-            request = request.with_driver_id(driver_id);
         }
         request
     }
@@ -1770,7 +1757,7 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
+        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
@@ -1794,7 +1781,7 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
+        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
@@ -1819,13 +1806,8 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request = self.build_copy_sql_request(
-            columns_meta,
-            column_names,
-            rows_data,
-            Some(original_rows),
-            cx,
-        );
+        let request =
+            self.build_copy_sql_request(columns_meta, column_names, rows_data, Some(original_rows));
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
@@ -1849,7 +1831,7 @@ impl DataGrid {
 
         let column_names = delegate.column_names();
         let columns_meta = delegate.column_meta().to_vec();
-        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None, cx);
+        let request = self.build_copy_sql_request(columns_meta, column_names, rows_data, None);
 
         let global_state = cx.global::<GlobalDbState>().clone();
         match global_state
@@ -1977,14 +1959,6 @@ impl DataGrid {
             return None;
         }
 
-        let driver_id = if self.config.database_type == DatabaseType::External {
-            cx.try_global::<GlobalDbState>()
-                .and_then(|state| state.get_config(&self.config.connection_id))
-                .and_then(|config| config.get_param(EXTERNAL_DRIVER_ID_PARAM).cloned())
-        } else {
-            None
-        };
-
         Some(TableSaveRequest {
             database: self.config.database_name.clone(),
             schema: self.config.schema_name.clone(),
@@ -1992,7 +1966,8 @@ impl DataGrid {
             columns,
             index_infos,
             changes: table_changes,
-            driver_id,
+            // 外部驱动已移除，driver_id 恒为 None
+            driver_id: None,
         })
     }
 

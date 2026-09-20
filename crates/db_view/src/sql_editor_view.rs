@@ -1015,12 +1015,12 @@ impl SqlEditorTab {
         }
 
         let Ok(plugin) = DbManager::default().get_plugin(&self.database_type) else {
-            window.push_notification("未找到当前数据库插件".to_string(), cx);
+            window.push_notification(t!("SqlEditorView.db_plugin_not_found").to_string(), cx);
             return;
         };
 
         let Some(explain_sql) = plugin.build_explain_sql(&sql) else {
-            window.push_notification("EXPLAIN 仅支持查询语句".to_string(), cx);
+            window.push_notification(t!("SqlEditorView.explain_only_query").to_string(), cx);
             return;
         };
 

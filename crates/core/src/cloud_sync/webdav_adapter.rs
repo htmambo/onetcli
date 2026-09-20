@@ -7,6 +7,7 @@ use crate::cloud_sync::blob_vault::{Blob, BlobMeta, BlobVault};
 use crate::cloud_sync::client::CloudApiError;
 use futures::AsyncReadExt;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, StatusCode};
+use rust_i18n::t;
 use std::sync::Arc;
 
 /// WebDAV 认证方式
@@ -113,10 +114,9 @@ impl BlobVault for WebDavVault {
                 updated_at: now,
             })
         } else {
-            Err(CloudApiError::ServerError(format!(
-                "WebDAV 上传失败: HTTP {}",
-                status.as_u16()
-            )))
+            Err(CloudApiError::ServerError(
+                t!("CloudSync.webdav_upload_failed", status = status.as_u16()).to_string(),
+            ))
         }
     }
 
@@ -137,10 +137,9 @@ impl BlobVault for WebDavVault {
             return Err(CloudApiError::NotFound(key.to_string()));
         }
         if !status.is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "WebDAV 下载失败: HTTP {}",
-                status.as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!("CloudSync.webdav_download_failed", status = status.as_u16()).to_string(),
+            ));
         }
 
         Ok(Blob {
@@ -165,10 +164,9 @@ impl BlobVault for WebDavVault {
         if status.is_success() || status == StatusCode::NOT_FOUND {
             Ok(())
         } else {
-            Err(CloudApiError::ServerError(format!(
-                "WebDAV 删除失败: HTTP {}",
-                status.as_u16()
-            )))
+            Err(CloudApiError::ServerError(
+                t!("CloudSync.webdav_delete_failed", status = status.as_u16()).to_string(),
+            ))
         }
     }
 
@@ -213,10 +211,9 @@ impl BlobVault for WebDavVault {
         let (status, bytes) = self.send_and_read(req).await?;
 
         if !status.is_success() {
-            return Err(CloudApiError::ServerError(format!(
-                "WebDAV 列举失败: HTTP {}",
-                status.as_u16()
-            )));
+            return Err(CloudApiError::ServerError(
+                t!("CloudSync.webdav_list_failed", status = status.as_u16()).to_string(),
+            ));
         }
 
         let text = String::from_utf8_lossy(&bytes);

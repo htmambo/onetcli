@@ -5,6 +5,7 @@ use gpui::App;
 use gpui::Window;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use rust_i18n::t;
 
 use super::close_guard::{
     GlobalAppCloseState, request_app_close_without_window, request_main_window_close,
@@ -82,7 +83,15 @@ pub fn toggle_always_on_top(cx: &mut App) {
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn set_window_always_on_top(window: &Window, always_on_top: bool) -> anyhow::Result<()> {
     let handle = HasWindowHandle::window_handle(window)
-        .map_err(|err| anyhow::anyhow!("获取窗口句柄失败: {err:?}"))?
+        .map_err(|err| {
+            anyhow::anyhow!(
+                t!(
+                    "WindowActions.get_handle_failed",
+                    error = format!("{err:?}")
+                )
+                .to_string()
+            )
+        })?
         .as_raw();
     match handle {
         #[cfg(target_os = "macos")]
@@ -93,7 +102,9 @@ fn set_window_always_on_top(window: &Window, always_on_top: bool) -> anyhow::Res
         RawWindowHandle::Win32(handle) => {
             set_windows_always_on_top(handle.hwnd.get(), always_on_top)
         }
-        _ => Err(anyhow::anyhow!("当前平台暂不支持窗口置顶")),
+        _ => Err(anyhow::anyhow!(
+            t!("WindowActions.always_on_top_unsupported").to_string()
+        )),
     }
 }
 
@@ -105,7 +116,9 @@ fn set_macos_always_on_top(
     always_on_top: bool,
 ) -> anyhow::Result<()> {
     if ns_view.is_null() {
-        return Err(anyhow::anyhow!("获取 NSView 失败"));
+        return Err(anyhow::anyhow!(
+            t!("WindowActions.get_nsview_failed").to_string()
+        ));
     }
 
     type Id = *mut std::ffi::c_void;
@@ -131,7 +144,9 @@ fn set_macos_always_on_top(
     unsafe {
         let ns_window = objc_msg_send(ns_view.cast(), sel_register_name(window_selector.as_ptr()));
         if ns_window.is_null() {
-            return Err(anyhow::anyhow!("获取 NSWindow 失败"));
+            return Err(anyhow::anyhow!(
+                t!("WindowActions.get_nswindow_failed").to_string()
+            ));
         }
         objc_msg_send(
             ns_window,
