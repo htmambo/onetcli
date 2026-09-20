@@ -8,12 +8,22 @@ use gpui::{
     Action, AnyElement, App, AppContext, Bounds, Context, Corner, DismissEvent, Edges, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
     ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    WeakEntity, Window, anchored, div, point, prelude::FluentBuilder, px, rems,
+    WeakEntity, Window, anchored, div, prelude::FluentBuilder, px, rems,
 };
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
 use std::rc::Rc;
 
 const CONTEXT: &str = "PopupMenu";
+
+/// 子菜单与窗口边缘的最小间距。
+const SUBMENU_EDGE_PADDING: Pixels = px(4.);
+
+/// 由菜单项实测 bounds + 展开方向推出子菜单 anchored 的 position 点：
+/// 子菜单的 `anchor` 角会贴到该点上，因此水平方向要取菜单项的"另一侧"角
+/// （子菜单 anchor 为 TopLeft 即向右展开，position 取菜单项右上角）。
+fn submenu_position(anchor: Corner, item_bounds: Bounds<Pixels>) -> Point<Pixels> {
+    item_bounds.corner(anchor.other_side_corner_along(gpui::Axis::Horizontal))
+}
 
 /// Event emitted when menu needs to rebuild (for keep_open mode)
 #[derive(Clone, Default)]
@@ -291,8 +301,11 @@ pub struct PopupMenu {
     scrollable: bool,
     external_link_icon: bool,
     scroll_handle: ScrollHandle,
-    // This will update on render
-    submenu_anchor: (Corner, Pixels),
+    /// 子菜单展开方向（由 `update_submenu_menu_anchor` 每次 render 更新）
+    submenu_anchor: Corner,
+    /// 各 Submenu 菜单项的实测 bounds（窗口坐标），由 on_prepaint 每帧记录。
+    /// 子菜单挂在根容器渲染时以此定位，逃逸 scrollable 父菜单的 content mask。
+    submenu_item_bounds: std::collections::HashMap<usize, Bounds<Pixels>>,
     /// When true, clicking an item will not dismiss the menu
     keep_open: bool,
 
@@ -316,7 +329,8 @@ impl PopupMenu {
             scroll_handle: ScrollHandle::default(),
             external_link_icon: true,
             size: Size::default(),
-            submenu_anchor: (Corner::TopLeft, Pixels::ZERO),
+            submenu_anchor: Corner::TopLeft,
+            submenu_item_bounds: std::collections::HashMap::new(),
             keep_open: false,
             _subscriptions: vec![],
         }
@@ -379,7 +393,11 @@ impl PopupMenu {
     }
 
     /// Request the menu to rebuild itself (useful for keep_open mode to refresh item states)
-    pub fn request_rebuild(&self, cx: &mut Context<Self>) {
+    ///
+    /// 同步清空 `submenu_item_bounds`：重建后同一索引可能对应不同的菜单项，
+    /// 陈旧 bounds 会让挂根容器渲染的子菜单首帧定位到错误位置。
+    pub fn request_rebuild(&mut self, cx: &mut Context<Self>) {
+        self.submenu_item_bounds.clear();
         cx.emit(MenuRebuildEvent);
     }
 
@@ -770,7 +788,7 @@ impl PopupMenu {
 
                         if self.keep_open {
                             // Emit rebuild event to refresh menu items
-                            cx.emit(MenuRebuildEvent);
+                            self.request_rebuild(cx);
                             cx.notify();
                         } else {
                             self.dismiss(&Cancel, window, cx);
@@ -785,7 +803,7 @@ impl PopupMenu {
                             self.dispatch_confirm_action(action, window, cx);
                         }
                         if self.keep_open {
-                            cx.emit(MenuRebuildEvent);
+                            self.request_rebuild(cx);
                             cx.notify();
                         } else {
                             self.dismiss(&Cancel, window, cx);
@@ -859,7 +877,7 @@ impl PopupMenu {
     }
 
     fn select_left(&mut self, _: &SelectLeft, window: &mut Window, cx: &mut Context<Self>) {
-        let handled = if matches!(self.submenu_anchor.0, Corner::TopLeft | Corner::BottomLeft) {
+        let handled = if matches!(self.submenu_anchor, Corner::TopLeft | Corner::BottomLeft) {
             self._unselect_submenu(window, cx)
         } else {
             self._select_submenu(window, cx)
@@ -880,7 +898,7 @@ impl PopupMenu {
     }
 
     fn select_right(&mut self, _: &SelectRight, window: &mut Window, cx: &mut Context<Self>) {
-        let handled = if matches!(self.submenu_anchor.0, Corner::TopLeft | Corner::BottomLeft) {
+        let handled = if matches!(self.submenu_anchor, Corner::TopLeft | Corner::BottomLeft) {
             self._select_submenu(window, cx)
         } else {
             self._unselect_submenu(window, cx)
@@ -950,7 +968,7 @@ impl PopupMenu {
             return Side::Left;
         };
 
-        match parent.read(cx).submenu_anchor.0 {
+        match parent.read(cx).submenu_anchor {
             Corner::TopLeft | Corner::BottomLeft => Side::Left,
             Corner::TopRight | Corner::BottomRight => Side::Right,
         }
@@ -1054,21 +1072,24 @@ impl PopupMenu {
         self.max_width.unwrap_or(px(500.))
     }
 
-    /// Calculate the anchor corner and left offset for child submenu
+    /// Calculate the anchor corner for child submenu.
+    ///
+    /// 子菜单挂根容器渲染后，位置由菜单项实测 bounds + 本 corner 推出
+    /// （见 `submenu_position`），不再需要像素偏移量。
     fn update_submenu_menu_anchor(&mut self, window: &Window) {
         let bounds = self.bounds;
         let max_width = self.max_width();
-        let (anchor, left) = if max_width + bounds.origin.x > window.bounds().size.width {
-            (Corner::TopRight, -px(16.))
+        let anchor = if max_width + bounds.origin.x > window.bounds().size.width {
+            Corner::TopRight
         } else {
-            (Corner::TopLeft, bounds.size.width - px(8.))
+            Corner::TopLeft
         };
 
         let is_bottom_pos = bounds.origin.y + bounds.size.height > window.bounds().size.height;
         self.submenu_anchor = if is_bottom_pos {
-            (anchor.other_side_corner_along(gpui::Axis::Vertical), left)
+            anchor.other_side_corner_along(gpui::Axis::Vertical)
         } else {
-            (anchor, left)
+            anchor
         };
     }
 
@@ -1089,7 +1110,6 @@ impl PopupMenu {
         };
 
         let selected = self.selected_index == Some(ix);
-        const EDGE_PADDING: Pixels = px(4.);
         const INNER_PADDING: Pixels = px(8.);
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
@@ -1118,6 +1138,19 @@ impl PopupMenu {
 
                 cx.notify();
             }));
+
+        // Submenu 项每帧记录实测 bounds（窗口坐标）：子菜单改挂根容器渲染，
+        // 逃逸 scrollable 父菜单 overflow_y_scroll 的 content mask 裁切。
+        let this = if is_submenu {
+            let view = cx.entity().clone();
+            this.on_prepaint(move |bounds, _window, cx| {
+                view.update(cx, |this, _cx| {
+                    this.submenu_item_bounds.insert(ix, bounds);
+                });
+            })
+        } else {
+            this
+        };
 
         match item {
             PopupMenuItem::Separator => this
@@ -1239,7 +1272,7 @@ impl PopupMenu {
             PopupMenuItem::Submenu {
                 icon,
                 label,
-                menu,
+                menu: _,
                 disabled,
             } => this
                 .selected(selected)
@@ -1277,21 +1310,7 @@ impl PopupMenu {
                                         .text_color(cx.theme().muted_foreground),
                                 ),
                         ),
-                )
-                .when(selected, |this| {
-                    this.child({
-                        let (anchor, left) = self.submenu_anchor;
-                        let is_bottom_pos =
-                            matches!(anchor, Corner::BottomLeft | Corner::BottomRight);
-                        anchored()
-                            .anchor(anchor)
-                            // 偏移必须走 anchored().offset()：写在子元素 div 的 left 上
-                            // 会被当作普通 inset/margin，导致子菜单与父菜单重叠
-                            .offset(point(left, if is_bottom_pos { px(0.) } else { px(-1.) }))
-                            .child(div().id("submenu").occlude().child(menu.clone()))
-                            .snap_to_window_with_margin(Edges::all(EDGE_PADDING))
-                    })
-                }),
+                ),
         }
     }
 }
@@ -1383,8 +1402,62 @@ impl Render for PopupMenu {
                     .on_prepaint(move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds)),
             )
             .when(self.scrollable, |this| {
-                // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)
             })
+            // 子菜单挂根容器渲染（而非菜单项内）：scrollable 时 `overflow_y_scroll`
+            // 的 content mask 会把菜单项内的 anchored 子菜单裁掉；根容器无裁切。
+            // 位置由菜单项实测 bounds（on_prepaint 每帧记录）+ 展开方向推出。
+            .when_some(self.active_submenu(), |this, submenu| {
+                let Some(item_bounds) = self
+                    .selected_index
+                    .and_then(|ix| self.submenu_item_bounds.get(&ix).copied())
+                else {
+                    return this;
+                };
+                let anchor = self.submenu_anchor;
+                this.child(
+                    anchored()
+                        .anchor(anchor)
+                        .position(submenu_position(anchor, item_bounds))
+                        .child(div().id("submenu").occlude().child(submenu))
+                        .snap_to_window_with_margin(Edges::all(SUBMENU_EDGE_PADDING)),
+                )
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item_bounds() -> Bounds<Pixels> {
+        Bounds {
+            origin: gpui::point(px(100.), px(50.)),
+            size: gpui::size(px(200.), px(30.)),
+        }
+    }
+
+    #[test]
+    fn submenu_position_maps_anchor_to_opposite_side_corner() {
+        let bounds = item_bounds();
+        // 向右展开（子菜单左上角贴菜单项右上角）
+        assert_eq!(
+            submenu_position(Corner::TopLeft, bounds),
+            gpui::point(px(300.), px(50.))
+        );
+        // 向左展开（子菜单右上角贴菜单项左上角）
+        assert_eq!(
+            submenu_position(Corner::TopRight, bounds),
+            gpui::point(px(100.), px(50.))
+        );
+        // 垂直翻转后同理
+        assert_eq!(
+            submenu_position(Corner::BottomLeft, bounds),
+            gpui::point(px(300.), px(80.))
+        );
+        assert_eq!(
+            submenu_position(Corner::BottomRight, bounds),
+            gpui::point(px(100.), px(80.))
+        );
     }
 }
