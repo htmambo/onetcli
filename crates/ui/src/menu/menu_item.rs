@@ -1,8 +1,8 @@
-use crate::{ActiveTheme, Disableable, StyledExt, h_flex};
+use crate::{ActiveTheme, Disableable, ElementExt, StyledExt, h_flex};
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement,
-    Styled, Window, prelude::FluentBuilder as _,
+    AnyElement, App, Bounds, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement as _,
+    StyleRefinement, Styled, Window, prelude::FluentBuilder as _,
 };
 use smallvec::SmallVec;
 
@@ -15,6 +15,7 @@ pub(crate) struct MenuItemElement {
     selected: bool,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
+    on_prepaint: Option<Box<dyn FnOnce(Bounds<Pixels>, &mut Window, &mut App) + 'static>>,
     children: SmallVec<[AnyElement; 2]>,
 }
 
@@ -30,6 +31,7 @@ impl MenuItemElement {
             selected: false,
             on_click: None,
             on_hover: None,
+            on_prepaint: None,
             children: SmallVec::new(),
         }
     }
@@ -59,6 +61,18 @@ impl MenuItemElement {
     #[allow(unused)]
     pub fn on_hover(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_hover = Some(Box::new(handler));
+        self
+    }
+
+    /// Set a prepaint observer to capture the item's window-coordinate bounds.
+    ///
+    /// 用于 Submenu：父菜单 scrollable 时子菜单需挂到根容器渲染（逃逸滚动
+    /// content mask），定位依赖本项的实测 bounds。
+    pub(crate) fn on_prepaint(
+        mut self,
+        handler: impl FnOnce(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_prepaint = Some(Box::new(handler));
         self
     }
 }
@@ -98,6 +112,9 @@ impl RenderOnce for MenuItemElement {
             .refine_style(&self.style)
             .when_some(self.on_hover, |this, on_hover| {
                 this.on_hover(move |hovered, window, cx| (on_hover)(hovered, window, cx))
+            })
+            .when_some(self.on_prepaint, |this, on_prepaint| {
+                this.on_prepaint(on_prepaint)
             })
             .when(!self.disabled, |this| {
                 this.group_hover(self.group_name, |this| {

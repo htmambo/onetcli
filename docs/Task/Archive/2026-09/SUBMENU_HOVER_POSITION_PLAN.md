@@ -6,8 +6,9 @@
 `popover_style()` 内置 `overflow_hidden`，把 anchored 子菜单裁到父 bounds 内。
 `194d5f3d` 移除该 overflow_hidden（手写 bg/border/shadow/rounded 替代）+
 偏移改走 `anchored().offset()` 即修复，方案 A/B/C 证明不必要，dump_sql 扁平化
-（`4b345b5f`）同步撤销。残留限制：父菜单 scrollable（>20 项）时
-`overflow_y_scroll` content mask 仍会裁子菜单（`popup_menu.rs` 有 TODO）。
+（`4b345b5f`）同步撤销。scrollable 残留限制已于 2026-09-20 修复：子菜单改挂
+PopupMenu 根容器渲染（菜单项 on_prepaint 记录实测 bounds + 窗口坐标显式定位），
+逃逸 `overflow_y_scroll` 的 content mask。
 以下为当时的分析原文，保留备查。
 
 ## 背景与目标
