@@ -368,6 +368,18 @@ fn env_pairs_from_connection_config(
 ) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     for (env_key, config_path) in &driver.entry.env_from_config {
+        // B4 防御纵深：敏感字段永不进子进程环境变量。正常情况已被
+        // `IpcDriverManifest::validate` 拦截，此处兜住 `from_drivers`
+        // 等绕过校验的构造路径。
+        if crate::ipc::registry::is_sensitive_config_path(config_path) {
+            warn!(
+                driver_id = %driver.id,
+                env_key = %env_key,
+                config_path = %config_path,
+                "refusing to inject sensitive config field as driver env var"
+            );
+            continue;
+        }
         if let Some(value) = config_value(connection_config, config_path) {
             if !value.trim().is_empty() {
                 pairs.push((env_key.clone(), value));
@@ -785,6 +797,53 @@ mod tests {
         assert!(pairs.contains(&("DB_HOST".into(), "db.example".into())));
         assert!(pairs.contains(&("DB_PORT".into(), "9088".into())));
         assert!(!pairs.iter().any(|(k, _)| k == "EMPTY_SKIP"));
+    }
+
+    /// B4 防御纵深：即使 manifest 绕过 validate 构造（如 `from_drivers`），
+    /// 敏感字段也不得进入子进程环境变量。
+    #[test]
+    fn env_from_config_skips_sensitive_fields() {
+        let mut manifest = make_test_manifest("sock-sensitive");
+        manifest
+            .entry
+            .env_from_config
+            .insert("DB_PASS".into(), "password".into());
+        manifest
+            .entry
+            .env_from_config
+            .insert("SSH_KEY".into(), "extra_params.ssh_private_key".into());
+        manifest
+            .entry
+            .env_from_config
+            .insert("DB_HOST".into(), "host".into());
+
+        let mut config = DbConnectionConfig {
+            id: "1".into(),
+            database_type: one_core::storage::DatabaseType::External,
+            name: "saved".into(),
+            host: "db.example".into(),
+            port: 9088,
+            username: String::new(),
+            password: "top-secret".into(),
+            database: None,
+            service_name: None,
+            sid: None,
+            credential_ref: None,
+            ssh_tunnel_credential_ref: None,
+            workspace_id: None,
+            extra_params: Default::default(),
+        };
+        config
+            .extra_params
+            .insert("ssh_private_key".into(), "PRIVATE_KEY_DATA".into());
+
+        let pairs = env_pairs_from_connection_config(&manifest, &config);
+        assert!(!pairs.iter().any(|(k, _)| k == "DB_PASS"), "密码不得入 env");
+        assert!(!pairs.iter().any(|(k, _)| k == "SSH_KEY"), "私钥不得入 env");
+        assert!(
+            pairs.contains(&("DB_HOST".into(), "db.example".into())),
+            "非敏感字段应正常注入"
+        );
     }
 
     fn make_test_manifest(socket_name: &str) -> IpcDriverManifest {

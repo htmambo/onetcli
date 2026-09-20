@@ -366,8 +366,34 @@ impl IpcDriverManifest {
                 self.id
             )));
         }
+        // B4：敏感字段（密码/私钥等）禁止经环境变量注入子进程——
+        // env 会被 /proc/<pid>/environ 暴露并遗传给孙进程；密码应走
+        // local socket 的 JSON-RPC 协议载荷（见 ipc/AGENTS.md）。
+        for (env_key, config_path) in &self.entry.env_from_config {
+            if is_sensitive_config_path(config_path) {
+                return Err(DbError::connection(format!(
+                    "external driver '{id}' must not map sensitive field '{config_path}' \
+                     to env var '{env_key}'; pass secrets via the socket protocol instead",
+                    id = self.id,
+                )));
+            }
+        }
         Ok(())
     }
+}
+
+/// B4：判断 `env_from_config` 的配置路径是否指向敏感字段。
+///
+/// 顶层路径仅 `password` 敏感（`host` / `port` / `username` 等为常规连接参数）；
+/// `extra_params.*` 复用 one-core 的 `is_sensitive_field` 谓词，与落库加密
+/// 名单保持一致，避免两处名单漂移。
+pub(crate) fn is_sensitive_config_path(path: &str) -> bool {
+    if path == "password" {
+        return true;
+    }
+    path.strip_prefix("extra_params.")
+        .map(one_core::storage::models::is_sensitive_field)
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Debug)]
@@ -576,6 +602,43 @@ mod tests {
         manifest.manifest_dir = PathBuf::from(".");
 
         assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_env_from_config_mapping_password() {
+        let mut manifest: IpcDriverManifest = serde_json::from_str(
+            r#"{"id":"demo","name":"Demo","entry":{"command":"python3","env_from_config":{"DB_PASS":"password"}},"transport":{"name":"demo.sock"}}"#,
+        )
+        .unwrap();
+        manifest.manifest_dir = PathBuf::from(".");
+
+        let err = manifest.validate().expect_err("密码经 env 注入应被拒绝");
+        assert!(
+            err.to_string().contains("password"),
+            "错误应指明字段: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_env_from_config_mapping_sensitive_extra_param() {
+        let mut manifest: IpcDriverManifest = serde_json::from_str(
+            r#"{"id":"demo","name":"Demo","entry":{"command":"python3","env_from_config":{"SSH_KEY":"extra_params.ssh_private_key"}},"transport":{"name":"demo.sock"}}"#,
+        )
+        .unwrap();
+        manifest.manifest_dir = PathBuf::from(".");
+
+        assert!(manifest.validate().is_err(), "私钥经 env 注入应被拒绝");
+    }
+
+    #[test]
+    fn allows_env_from_config_for_non_sensitive_fields() {
+        let mut manifest: IpcDriverManifest = serde_json::from_str(
+            r#"{"id":"demo","name":"Demo","entry":{"command":"python3","env_from_config":{"DB_HOST":"host","JDK":"extra_params.jdk_home"}},"transport":{"name":"demo.sock"}}"#,
+        )
+        .unwrap();
+        manifest.manifest_dir = PathBuf::from(".");
+
+        assert!(manifest.validate().is_ok(), "非敏感字段 env 注入应放行");
     }
 
     #[test]

@@ -2936,6 +2936,28 @@ impl HomePage {
                         view_for_sync.update(cx, |this, cx| {
                             this.master_key_dialog_open = false;
                             if crypto::has_master_key() {
+                                // A1：主密钥就绪后对存量明文敏感字段做一次性重加密。
+                                // 幂等且无版本门（每次解锁都跑）：过渡期内老客户端
+                                // 仍可能经云同步把明文写回本地，重复扫描才能收敛。
+                                let storage = cx.global::<GlobalStorageState>().storage.clone();
+                                match one_core::storage::sensitive_migration::migrate_encrypt_existing_sensitive_fields(&storage) {
+                                    Ok((cert_n, conn_n)) => {
+                                        tracing::info!(
+                                            target: "sensitive_migration",
+                                            cert_rows = cert_n,
+                                            conn_rows = conn_n,
+                                            "A1 敏感字段迁移完成"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        // 迁移失败不阻塞解锁流程，下次解锁重试
+                                        tracing::error!(
+                                            target: "sensitive_migration",
+                                            error = %e,
+                                            "A1 敏感字段迁移失败"
+                                        );
+                                    }
+                                }
                                 // 密钥已就绪后刷新连接列表，修复启动时序导致的空密码回显
                                 this.load_connections(cx);
                                 if this.current_user.is_some() {

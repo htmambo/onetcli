@@ -1740,7 +1740,10 @@ pub(crate) fn decrypt_json_passwords(json_str: &str) -> String {
 /// 1. 在此函数追加命中规则
 /// 2. 在 `certificates` / `connections` 两表启动期迁移函数（见
 ///    `migrate_encrypt_existing_sensitive_fields`）覆盖存量明文
-pub(crate) fn is_sensitive_field(key: &str) -> bool {
+///
+/// 公开原因（B4）：`db` crate 的 IPC 驱动 manifest 校验需要复用同一谓词，
+/// 禁止驱动把密码类字段声明为子进程环境变量（防止经 `/proc/<pid>/environ` 泄漏）。
+pub fn is_sensitive_field(key: &str) -> bool {
     key == "password"
         || key == "passphrase"
         || key == "ssh_private_key"
