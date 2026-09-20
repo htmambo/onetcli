@@ -1,8 +1,14 @@
 # Submenu hover 展开在 PopupMenu 框架内的完整修复
 
-**Status**: 📋 待规划
+**Status**: ✅ 已完成（2026-09-13，commit `194d5f3d`）
 **创建时间**: 2026-09-13
-**前置依赖**: 无
+**补充说明（2026-09-20）**：实际根因并非下文所判的"架构限制"——父 PopupMenu 根容器的
+`popover_style()` 内置 `overflow_hidden`，把 anchored 子菜单裁到父 bounds 内。
+`194d5f3d` 移除该 overflow_hidden（手写 bg/border/shadow/rounded 替代）+
+偏移改走 `anchored().offset()` 即修复，方案 A/B/C 证明不必要，dump_sql 扁平化
+（`4b345b5f`）同步撤销。残留限制：父菜单 scrollable（>20 项）时
+`overflow_y_scroll` content mask 仍会裁子菜单（`popup_menu.rs` 有 TODO）。
+以下为当时的分析原文，保留备查。
 
 ## 背景与目标
 
