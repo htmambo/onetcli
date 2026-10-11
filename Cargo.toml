@@ -64,8 +64,7 @@ serde_ignored = "0.1"
 serde_repr = "0.1"
 smallvec = "1"
 smol = "2"
-tracing = "0.1.41"
-
+tracing = { version = "0.1.41", features = ["log"] }
 
 reqwest_client = { path = "crates/reqwest_client" }
 db = { path = "crates/db" }
