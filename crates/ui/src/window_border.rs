@@ -16,6 +16,18 @@ pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
 pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
 pub(crate) const BORDER_SIZE: Pixels = px(4.0);
 
+/// Wayland 会话下自绘外框的透明留白宽度。
+///
+/// Wayland 没有服务端装饰边距，这里留出透明区域承接圆角与自绘阴影。
+const WAYLAND_PADDING_SIZE: Pixels = px(2.0);
+
+/// Wayland 会话下的自绘缩放热区宽度。
+///
+/// 该值等于 [`WAYLAND_PADDING_SIZE`] + [`BORDER_SIZE`]，即完全盖住可见边框。
+/// Wayland 下合成器不提供任何缩放边距（`client_inset` 恒为 0），若热区沿用
+/// [`WAYLAND_PADDING_SIZE`]，就会出现"看得见边框却拖不动"的错位。
+const RESIZE_HIT_SIZE: Pixels = px(6.0);
+
 #[cfg(target_os = "linux")]
 fn linux_uses_wayland_session() -> bool {
     std::env::var("XDG_SESSION_TYPE")
@@ -107,7 +119,7 @@ impl RenderOnce for WindowBorder {
         #[cfg(not(target_os = "linux"))]
         let prefers_system_frame = matches!(decorations, Decorations::Server);
         let shadow_size = if cfg!(target_os = "linux") && linux_uses_wayland_session() {
-            px(2.0)
+            WAYLAND_PADDING_SIZE
         } else {
             match decorations {
                 Decorations::Client { tiling }
@@ -117,6 +129,13 @@ impl RenderOnce for WindowBorder {
                 }
                 _ => shadow_size,
             }
+        };
+        // 视觉边框宽度与命中热区解耦：若复用 shadow_size，Wayland 下热区会退化成
+        // 2px 透明留白，可见的 BORDER_SIZE 边框既拖不动也不显示缩放光标。
+        let resize_hit_size = if cfg!(target_os = "linux") && linux_uses_wayland_session() {
+            RESIZE_HIT_SIZE
+        } else {
+            shadow_size
         };
         let client_inset = if prefers_system_frame
             || (cfg!(target_os = "linux") && linux_uses_wayland_session())
@@ -171,7 +190,7 @@ impl RenderOnce for WindowBorder {
                                 if tiling.top && tiling.bottom && tiling.left && tiling.right {
                                     return;
                                 }
-                                let Some(edge) = resize_edge(mouse, shadow_size, size) else {
+                                let Some(edge) = resize_edge(mouse, resize_hit_size, size) else {
                                     return;
                                 };
                                 window.set_cursor_style(
@@ -222,7 +241,7 @@ impl RenderOnce for WindowBorder {
                         let size = window.window_bounds().get_bounds().size;
                         let pos = window.mouse_position();
 
-                        match resize_edge(pos, shadow_size, size) {
+                        match resize_edge(pos, resize_hit_size, size) {
                             Some(edge) => window.start_window_resize(edge),
                             None => {}
                         };
@@ -288,25 +307,100 @@ impl RenderOnce for WindowBorder {
     }
 }
 
-fn resize_edge(pos: Point<Pixels>, shadow_size: Pixels, size: Size<Pixels>) -> Option<ResizeEdge> {
-    let edge = if pos.y < shadow_size && pos.x < shadow_size {
+fn resize_edge(pos: Point<Pixels>, hit_size: Pixels, size: Size<Pixels>) -> Option<ResizeEdge> {
+    let edge = if pos.y < hit_size && pos.x < hit_size {
         ResizeEdge::TopLeft
-    } else if pos.y < shadow_size && pos.x > size.width - shadow_size {
+    } else if pos.y < hit_size && pos.x > size.width - hit_size {
         ResizeEdge::TopRight
-    } else if pos.y < shadow_size {
+    } else if pos.y < hit_size {
         ResizeEdge::Top
-    } else if pos.y > size.height - shadow_size && pos.x < shadow_size {
+    } else if pos.y > size.height - hit_size && pos.x < hit_size {
         ResizeEdge::BottomLeft
-    } else if pos.y > size.height - shadow_size && pos.x > size.width - shadow_size {
+    } else if pos.y > size.height - hit_size && pos.x > size.width - hit_size {
         ResizeEdge::BottomRight
-    } else if pos.y > size.height - shadow_size {
+    } else if pos.y > size.height - hit_size {
         ResizeEdge::Bottom
-    } else if pos.x < shadow_size {
+    } else if pos.x < hit_size {
         ResizeEdge::Left
-    } else if pos.x > size.width - shadow_size {
+    } else if pos.x > size.width - hit_size {
         ResizeEdge::Right
     } else {
         return None;
     };
     Some(edge)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BORDER_SIZE, RESIZE_HIT_SIZE, WAYLAND_PADDING_SIZE, resize_edge};
+    use gpui::{Pixels, ResizeEdge, Size, point, px, size};
+
+    fn window_size() -> Size<Pixels> {
+        size(px(1000.0), px(800.0))
+    }
+
+    #[test]
+    fn wayland_热区必须覆盖可见边框() {
+        // 热区小于"留白 + 可见边框"时，用户瞄准看得见的边框却拖不动窗口。
+        assert!(RESIZE_HIT_SIZE >= WAYLAND_PADDING_SIZE + BORDER_SIZE);
+    }
+
+    #[test]
+    fn 可见边框范围内可以触发缩放() {
+        let size = window_size();
+        let inside_border = BORDER_SIZE - px(1.0);
+        let mid_x = px(500.0);
+        let mid_y = px(400.0);
+
+        assert_eq!(
+            resize_edge(point(inside_border, mid_y), RESIZE_HIT_SIZE, size),
+            Some(ResizeEdge::Left)
+        );
+        assert_eq!(
+            resize_edge(
+                point(size.width - inside_border, mid_y),
+                RESIZE_HIT_SIZE,
+                size
+            ),
+            Some(ResizeEdge::Right)
+        );
+        assert_eq!(
+            resize_edge(point(mid_x, inside_border), RESIZE_HIT_SIZE, size),
+            Some(ResizeEdge::Top)
+        );
+        assert_eq!(
+            resize_edge(
+                point(mid_x, size.height - inside_border),
+                RESIZE_HIT_SIZE,
+                size
+            ),
+            Some(ResizeEdge::Bottom)
+        );
+    }
+
+    #[test]
+    fn 可见边框的四角可以触发对角缩放() {
+        let size = window_size();
+        let inside_border = BORDER_SIZE - px(1.0);
+        let near_right = size.width - inside_border;
+        let near_bottom = size.height - inside_border;
+
+        assert_eq!(
+            resize_edge(point(inside_border, inside_border), RESIZE_HIT_SIZE, size),
+            Some(ResizeEdge::TopLeft)
+        );
+        assert_eq!(
+            resize_edge(point(near_right, near_bottom), RESIZE_HIT_SIZE, size),
+            Some(ResizeEdge::BottomRight)
+        );
+    }
+
+    #[test]
+    fn 内容区域不触发缩放() {
+        let size = window_size();
+        assert_eq!(
+            resize_edge(point(px(500.0), px(400.0)), RESIZE_HIT_SIZE, size),
+            None
+        );
+    }
 }
