@@ -5754,17 +5754,50 @@ mod tests {
         assert!((merged.line_height_scale - 1.8).abs() < f32::EPSILON);
     }
 
+    /// RAII：持全局 HOME 锁 + 设置临时 HOME；Drop 时恢复原 HOME 并清理目录（panic 安全）。
+    #[cfg(target_os = "macos")]
+    struct TestHome {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        previous: Option<std::ffi::OsString>,
+        dir: std::path::PathBuf,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl TestHome {
+        fn acquire(tag: &str) -> Self {
+            let guard = one_core::home_env_test_lock();
+            let previous = std::env::var_os("HOME");
+            let dir = std::env::temp_dir().join(format!(
+                "omnihub-terminal-view-test-home-{tag}-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).expect("应创建测试 HOME 目录");
+            std::env::set_var("HOME", &dir);
+            Self {
+                _guard: guard,
+                previous,
+                dir,
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            if let Some(home) = &self.previous {
+                std::env::set_var("HOME", home);
+            } else {
+                std::env::remove_var("HOME");
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn local_terminal_view_reports_blocking_activity_after_keyboard_input() {
+        let _home = TestHome::acquire("keyboard");
         let mut cx = TestAppContext::single();
-        let previous_home = std::env::var_os("HOME");
-        let temp_home = std::env::temp_dir().join(format!(
-            "omnihub-terminal-view-test-home-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
-        std::env::set_var("HOME", &temp_home);
         cx.update(one_core::gpui_tokio::init);
         cx.update(one_core::storage::init);
         cx.update(gpui_component::init);
@@ -5811,25 +5844,13 @@ mod tests {
             .update(&mut cx, |view, _window, cx| view.shutdown_for_close(cx))
             .expect("应能关闭测试终端");
         cx.run_until_parked();
-
-        if let Some(home) = previous_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn local_terminal_view_reports_blocking_activity_after_top_command() {
+        let _home = TestHome::acquire("top");
         let mut cx = TestAppContext::single();
-        let previous_home = std::env::var_os("HOME");
-        let temp_home = std::env::temp_dir().join(format!(
-            "omnihub-terminal-view-top-test-home-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&temp_home).expect("应创建测试 HOME 目录");
-        std::env::set_var("HOME", &temp_home);
         cx.update(one_core::gpui_tokio::init);
         cx.update(one_core::storage::init);
         cx.update(gpui_component::init);
@@ -5883,11 +5904,5 @@ mod tests {
             .update(&mut cx, |view, _window, cx| view.shutdown_for_close(cx))
             .expect("应能关闭测试终端");
         cx.run_until_parked();
-
-        if let Some(home) = previous_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
     }
 }

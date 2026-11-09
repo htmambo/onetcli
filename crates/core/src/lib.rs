@@ -43,6 +43,18 @@ pub use crate::ai_chat::{
 };
 pub use serde_json;
 
+/// 测试专用：跨 crate 的进程级 `HOME` 环境变量锁。
+///
+/// 多个 crate 的测试会修改全局 `HOME`（隔离 shell / storage 配置），
+/// `cargo test --workspace` 并行运行不同 crate 的测试二进制时会互相竞态
+/// （典型症状：PTY 测试启动 shell 时读到被其他测试改写的 HOME 而偶发失败）。
+/// 所有修改 `HOME` 的测试都应持有此锁串行执行。
+#[doc(hidden)]
+pub fn home_env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub fn init(cx: &mut App) {
     gpui_tokio::init(cx);
     themes::init(cx);
