@@ -11,6 +11,7 @@ use crate::storage::{
 };
 use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use zeroize::Zeroizing;
 
 const CONNECTION_QUEUE_KEY: &str = "connection";
@@ -1388,6 +1389,8 @@ mod tests {
 
     #[test]
     fn remote_soft_deleted_connection_does_not_report_conflict_or_recreate_cloud_item() {
+        // 串行化全局主密钥槽：避免与其他 crypto/cloud_sync 测试并发覆盖 ENCRYPTION_KEY
+        let _guard = crate::crypto::lock_for_test();
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should be created");
         crate::crypto::test_support::set_master_key("test-master-key");
         runtime.block_on(async {

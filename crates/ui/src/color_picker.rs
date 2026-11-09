@@ -148,7 +148,8 @@ impl ColorPickerState {
     /// Create a new [`ColorPickerState`].
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let state = cx.new(|cx| {
-            InputState::new(window, cx).pattern(regex::Regex::new(r"^#[0-9a-fA-F]{0,8}$").unwrap())
+            InputState::new(window, cx)
+                .pattern(regex::Regex::new(r"^#[0-9a-fA-F]{0,8}$").expect("valid regex"))
         });
         let hsla_sliders = HslaSliders::new(cx);
 

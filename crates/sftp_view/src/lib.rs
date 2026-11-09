@@ -433,8 +433,6 @@ fn join_remote_path(base: &str, name: &str) -> String {
 #[derive(Clone)]
 pub(crate) struct ActiveExtract {
     name: String,
-    #[allow(dead_code)]
-    path: String,
 }
 
 struct RemoteCommandOutput {
@@ -1259,9 +1257,9 @@ impl SftpView {
     fn on_remote_item_double_click(
         &mut self,
         name: String,
-        full_path: String,
+        _full_path: String,
         is_dir: bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if name == ".." {

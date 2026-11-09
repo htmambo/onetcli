@@ -28,6 +28,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(test)]
 use zeroize::Zeroizing;
 
 pub type SyncFuture<'a> = Pin<Box<dyn Future<Output = Result<SyncResult, SyncError>> + Send + 'a>>;
@@ -646,6 +647,8 @@ mod tests {
         let _lock = test_env_lock()
             .lock()
             .expect("test env mutex should not be poisoned");
+        // 串行化全局主密钥槽：锁外 set/clear_master_key 会与 crypto 单测并发污染 ENCRYPTION_KEY
+        let _key_guard = crate::crypto::test_support::lock();
 
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -711,8 +714,7 @@ mod tests {
             let mut service = crate::cloud_sync::CloudSyncService::new();
             service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
-            // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
-            let _key_guard = crate::crypto::test_support::lock();
+            // 仅设 service 层密钥不够；全局锁在测试开头统一持有，避免与 crypto 单测竞态
             crate::crypto::test_support::set_master_key("test-master-key");
             service.set_logged_in("user-1".to_string());
 
@@ -765,6 +767,8 @@ mod tests {
         let _lock = test_env_lock()
             .lock()
             .expect("test env mutex should not be poisoned");
+        // 串行化全局主密钥槽：锁外 set/clear_master_key 会与 crypto 单测并发污染 ENCRYPTION_KEY
+        let _key_guard = crate::crypto::test_support::lock();
 
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -820,8 +824,7 @@ mod tests {
             let mut service = crate::cloud_sync::CloudSyncService::new();
             service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
-            // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
-            let _key_guard = crate::crypto::test_support::lock();
+            // 仅设 service 层密钥不够；全局锁在测试开头统一持有，避免与 crypto 单测竞态
             crate::crypto::test_support::set_master_key("test-master-key");
             service.set_logged_in("user-1".to_string());
 
@@ -876,6 +879,8 @@ mod tests {
         let _lock = test_env_lock()
             .lock()
             .expect("test env mutex should not be poisoned");
+        // 串行化全局主密钥槽：锁外 set/clear_master_key 会与 crypto 单测并发污染 ENCRYPTION_KEY
+        let _key_guard = crate::crypto::test_support::lock();
 
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -921,8 +926,7 @@ mod tests {
             let mut service = crate::cloud_sync::CloudSyncService::new();
             service.set_master_key_directly(Zeroizing::new("test-master-key".to_string()));
             // SyncEngine 走全局 crypto 主密钥（crypto::get_raw_master_key），
-            // 仅设 service 层密钥不够；挂内存后端 + 全局锁避免与 crypto 单测竞态
-            let _key_guard = crate::crypto::test_support::lock();
+            // 仅设 service 层密钥不够；全局锁在测试开头统一持有，避免与 crypto 单测竞态
             crate::crypto::test_support::set_master_key("test-master-key");
             service.set_logged_in("user-1".to_string());
 

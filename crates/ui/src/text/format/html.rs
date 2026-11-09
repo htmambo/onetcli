@@ -219,7 +219,7 @@ fn parse_table_cell(
 ///
 /// - Before: " \r\n Hello world \t "
 /// - After: " Hello world "
-#[allow(dead_code)]
+#[cfg(test)]
 fn trim_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
 

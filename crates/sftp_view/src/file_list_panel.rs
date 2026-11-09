@@ -943,7 +943,7 @@ impl FileListPanel {
         let path_for_rename = full_path.to_string();
         let name_for_download = name.to_string();
         let path_for_download = full_path.to_string();
-        let path_for_edit = full_path.to_string();
+        let _path_for_edit = full_path.to_string();
         let name_for_permissions = name.to_string();
         let path_for_permissions = full_path.to_string();
         let path_for_terminal = full_path.to_string();
@@ -956,7 +956,7 @@ impl FileListPanel {
         let view_terminal_current = view.clone();
         let view_rename = view.clone();
         let view_download = view.clone();
-        let view_edit = view.clone();
+        let _view_edit = view.clone();
         let view_upload = view.clone();
         let view_permissions = view.clone();
         let view_terminal_at = view.clone();

@@ -411,10 +411,6 @@ impl TerminalOperatorHandle {
     pub fn last_write_line_count(&self, terminal_id: u64) -> Option<usize> {
         self.last_write_lines.get(terminal_id)
     }
-    /// 写入命令成功后由 pump 调用，记录"当前总行数"作为下次 read 的起点。
-    pub(crate) fn record_last_write_line_count(&self, terminal_id: u64, line_count: usize) {
-        self.last_write_lines.set(terminal_id, line_count);
-    }
 }
 
 impl TerminalOperatorHandle {

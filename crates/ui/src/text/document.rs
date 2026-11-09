@@ -41,7 +41,7 @@ impl ParsedDocument {
     /// Converts the node to markdown format.
     ///
     /// This is used to generate markdown for test.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn to_markdown(&self) -> String {
         self.blocks
             .iter()

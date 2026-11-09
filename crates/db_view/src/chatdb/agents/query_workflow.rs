@@ -17,7 +17,8 @@ use std::sync::LazyLock;
 pub const TABLE_COUNT_THRESHOLD: usize = 30;
 
 /// 匹配 JSON 数组的正则（模块级共享）
-static JSON_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[[\s\S]*?\]"#).unwrap());
+static JSON_ARRAY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\[[\s\S]*?\]"#).expect("valid regex"));
 
 // ============================================================================
 // 数据结构
@@ -127,7 +128,7 @@ pub struct ParsedInput {
 /// - @"表名" （双引号内可包含中文和空格）
 pub fn parse_user_input(input: &str) -> ParsedInput {
     static TABLE_MENTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"@(?:`([^`]+)`|"([^"]+)"|([\p{L}_][\p{L}\p{N}_]*))"#).unwrap()
+        Regex::new(r#"@(?:`([^`]+)`|"([^"]+)"|([\p{L}_][\p{L}\p{N}_]*))"#).expect("valid regex")
     });
 
     let mut mentioned_tables = Vec::new();
@@ -286,7 +287,8 @@ pub fn parse_table_selection_response(response: &str) -> Vec<String> {
     }
 
     // 备选：尝试提取反引号中的表名
-    static BACKTICK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
+    static BACKTICK_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"`([^`]+)`").expect("valid regex"));
 
     BACKTICK_RE
         .captures_iter(response)
@@ -308,7 +310,7 @@ pub fn is_followup_question(question: &str) -> bool {
     static FOLLOWUP_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)继续|再[查加改删建]|还[要需]|补充|加[上个]|修改|改[成为下]|上[面一]|刚才|之前|同样|同一|那[个张]表|这[个张]表|上述|前面|接着|然后|顺便|continue|also|additionally|same\s+table|previous|above|moreover"
-        ).unwrap()
+        ).expect("valid regex")
     });
     FOLLOWUP_RE.is_match(question)
 }
@@ -319,8 +321,9 @@ pub fn is_followup_question(question: &str) -> bool {
 /// 并解析后续的 JSON 数组，返回已选表名列表。
 pub fn extract_tables_from_history(chat_history: &[Message]) -> Option<Vec<String>> {
     // 匹配 "**相关表**" 或 "**Related Tables**" 标记
-    static RELATED_TABLES_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?:\*\*相关表\*\*|\*\*Related Tables\*\*)").unwrap());
+    static RELATED_TABLES_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?:\*\*相关表\*\*|\*\*Related Tables\*\*)").expect("valid regex")
+    });
 
     // 从后往前找最近一条 Assistant 消息
     let last_assistant = chat_history

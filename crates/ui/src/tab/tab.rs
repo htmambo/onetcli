@@ -380,7 +380,6 @@ impl TabVariant {
     }
 }
 
-#[allow(dead_code)]
 struct TabStyle {
     borders: Edges<Pixels>,
     border_color: Hsla,

@@ -2614,8 +2614,7 @@ impl TerminalView {
         cx.emit(TerminalViewEvent::Close);
     }
 
-    #[allow(unused_variables)]
-    fn request_close_from_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn request_close_from_event(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         cx.emit(TerminalViewEvent::Close);
     }
 
@@ -4422,7 +4421,7 @@ impl TabContent for TerminalView {
         }
     }
 
-    fn icon(&self, cx: &App) -> Option<Icon> {
+    fn icon(&self, _cx: &App) -> Option<Icon> {
         Some(IconName::TerminalColor.color())
     }
 

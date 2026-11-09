@@ -1207,9 +1207,8 @@ where
         let input = self
             .delegate
             .build_input(row_ix, delegate_col_ix, window, cx);
-        if input.is_some() {
+        if let Some((input, subscriptions)) = input {
             self.editing_cell = Some((row_ix, col_ix));
-            let (input, subscriptions) = input.unwrap();
             self.editing_input = Some(input);
             self._subscriptions = subscriptions;
             cx.emit(EditTableEvent::CellEditing(row_ix, col_ix));
@@ -1879,11 +1878,10 @@ where
         }
 
         let sort = self.col_groups.get(col_ix).and_then(|g| g.column.sort);
-        if sort.is_none() {
+        let Some(sort) = sort else {
             return;
-        }
+        };
 
-        let sort = sort.unwrap();
         let sort = match sort {
             ColumnSort::Ascending => ColumnSort::Default,
             ColumnSort::Descending => ColumnSort::Ascending,
@@ -2028,7 +2026,7 @@ where
         // 旧的单选逻辑（向后兼容）
         let is_select_cell = match self.selected_cell {
             None => false,
-            Some(cell) => row_ix.is_some() && row_ix.unwrap() == cell.0 && col_ix == cell.1,
+            Some(cell) => row_ix == Some(cell.0) && col_ix == cell.1,
         };
 
         let col_width = col_group.width;
@@ -2055,7 +2053,7 @@ where
             None => ("cell-header", col_ix),
         };
 
-        let is_editing = row_ix.is_some() && self.editing_cell == Some((row_ix.unwrap(), col_ix));
+        let is_editing = row_ix.is_some_and(|r| self.editing_cell == Some((r, col_ix)));
         let selection_border_color = cx.theme().table_active_border;
 
         let is_single_select_active =

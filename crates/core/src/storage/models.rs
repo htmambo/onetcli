@@ -1902,7 +1902,6 @@ mod serial_tests {
     }
 
     #[test]
-    #[test]
     fn stored_connection_port_forwarding_roundtrip() {
         let params = PortForwardingParams {
             ssh_connection_id: 7,

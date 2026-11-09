@@ -20,7 +20,8 @@ mod http_client_tls;
 
 const DEFAULT_CAPACITY: usize = 4096;
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-static REDACT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"key=[^&]+").unwrap());
+static REDACT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"key=[^&]+").expect("valid regex"));
 
 pub struct ReqwestClient {
     client: reqwest::Client,

@@ -20,7 +20,6 @@ mod update;
 
 use crate::omnihub_app::OmniHubApp;
 use crate::setting_tab::HotkeyMigration;
-use db::GlobalDbState;
 use gpui::*;
 use gpui_component::notification::Notification;
 use gpui_component::{Root, WindowExt};

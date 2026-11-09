@@ -536,14 +536,6 @@ impl RedisConnectionImpl {
         })
     }
 
-    #[allow(dead_code)]
-    async fn open_connection_for_db(
-        config: &RedisConnectionConfig,
-        db: u8,
-    ) -> Result<(Client, ConnectionManager), RedisError> {
-        Self::open_connection_for_endpoint(config, db, &config.host, config.port).await
-    }
-
     fn connection_timeout_duration(config: &RedisConnectionConfig) -> Duration {
         let timeout = if config.timeout == 0 {
             DEFAULT_CONNECTION_TIMEOUT_SECONDS

@@ -11,7 +11,7 @@ use ssh::{
     ChannelEvent, PtyConfig, ShellIntegrationSetup, SshChannel, SshClient, SshSessionManager,
 };
 
-use crate::osc::{OscBuffer, OscEvent, extract_osc_events};
+use crate::osc::{OscBuffer, OscEvent};
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
 use crate::shell_integration::{
     embedded_shell_integration_script, normalized_shell_integration_script,
@@ -610,7 +610,7 @@ impl SshBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::osc::parse_osc_payload;
+    use crate::osc::{extract_osc_events, parse_osc_payload};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use ssh::SshConnectConfig;

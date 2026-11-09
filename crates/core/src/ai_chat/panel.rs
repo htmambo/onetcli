@@ -1287,7 +1287,7 @@ impl AiChatPanel {
             // registry / affinity / ctx_agent 均为 owned 且 Send，可安全跨线程 move。
             // 返回的 mpsc::Receiver<AgentEvent> 是 Send，回传主线程消费即可。
             let dispatch_task = Tokio::spawn(cx, async move {
-                let mut rx = AgentDispatcher::dispatch(ctx_agent, &registry, &mut affinity).await;
+                let rx = AgentDispatcher::dispatch(ctx_agent, &registry, &mut affinity).await;
                 (rx, affinity)
             });
 

@@ -33,7 +33,6 @@ use one_core::cloud_sync::{
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
-use one_core::key_storage;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::RemoteDesktopProtocol;
 use one_core::storage::traits::Repository;
@@ -2196,7 +2195,7 @@ impl HomePage {
                         cx.notify();
                     });
                 }
-                Err(e) => {
+                Err(_e) => {
                     tracing::error!("{}", t!("HomeSession.connection_repo_not_found"));
                 }
             }

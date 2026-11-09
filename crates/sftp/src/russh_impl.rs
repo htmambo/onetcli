@@ -339,11 +339,9 @@ impl RusshSftpClient {
                 let offset = i * chunk_size;
                 let len = std::cmp::min(PIPELINE_CHUNK_SIZE, (total_size - offset) as u32);
 
-                let permit = semaphore.clone().acquire_owned().await;
-                if permit.is_err() {
+                let Ok(permit) = semaphore.clone().acquire_owned().await else {
                     break;
-                }
-                let permit = permit.unwrap();
+                };
 
                 let raw = Arc::clone(&raw_for_producer);
                 let handle = handle_for_producer.clone();
@@ -504,11 +502,9 @@ impl RusshSftpClient {
                 let offset = i * chunk_size;
                 let len = std::cmp::min(PIPELINE_CHUNK_SIZE, (total_size - offset) as u32);
 
-                let permit = semaphore.clone().acquire_owned().await;
-                if permit.is_err() {
+                let Ok(permit) = semaphore.clone().acquire_owned().await else {
                     break;
-                }
-                let permit = permit.unwrap();
+                };
 
                 let raw = Arc::clone(&raw_for_producer);
                 let handle = handle_for_producer.clone();

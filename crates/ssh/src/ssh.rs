@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -905,20 +904,6 @@ async fn request_keyboard_interactive_responses(
         .context(t!("Ssh.auth_keyboard_interactive_cancelled").to_string())
 }
 
-pub fn discover_default_private_keys() -> Vec<String> {
-    let Some(home_dir) = dirs::home_dir() else {
-        return Vec::new();
-    };
-
-    let ssh_dir = home_dir.join(".ssh");
-    ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]
-        .into_iter()
-        .map(|file_name| ssh_dir.join(file_name))
-        .filter(|path| path.is_file())
-        .map(path_to_string)
-        .collect()
-}
-
 pub fn expand_auto_publickey_auth() -> Vec<SshAuth> {
     let mut auth_candidates = vec![SshAuth::Agent];
     let Some(home_dir) = dirs::home_dir() else {
@@ -1008,10 +993,6 @@ fn build_auto_publickey_failure_message(
     }
     parts.push(messages.auto_publickey_next_step.clone());
     parts.join(": ")
-}
-
-fn path_to_string(path: PathBuf) -> String {
-    path.to_string_lossy().to_string()
 }
 
 pub async fn authenticate_with_strategy<H>(
@@ -1176,6 +1157,8 @@ where
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    #[cfg(unix)]
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex as StdMutex};
     #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
@@ -1259,52 +1242,6 @@ mod tests {
         assert!(
             err.to_string().contains("agent_connect"),
             "错误信息应包含 agent 连接失败上下文"
-        );
-    }
-
-    #[test]
-    fn discover_default_private_keys_returns_expected_order() {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let env_lock = ENV_LOCK.get_or_init(|| Mutex::new(()));
-        let _guard = env_lock.lock().expect("环境锁不应中毒");
-
-        let temp_home = std::env::temp_dir().join(format!(
-            "omnihub-ssh-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("系统时间应晚于 unix epoch")
-                .as_nanos()
-        ));
-        let ssh_dir = temp_home.join(".ssh");
-        std::fs::create_dir_all(&ssh_dir).expect("应可创建临时 ssh 目录");
-        std::fs::write(ssh_dir.join("id_rsa"), "rsa").expect("应可写入 id_rsa");
-        std::fs::write(ssh_dir.join("id_ed25519"), "ed25519").expect("应可写入 id_ed25519");
-
-        let env_key = home_dir_env_key();
-        let previous = std::env::var(env_key).ok();
-        unsafe {
-            std::env::set_var(env_key, &temp_home);
-        }
-
-        let discovered = discover_default_private_keys();
-
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var(env_key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(env_key);
-            },
-        }
-
-        std::fs::remove_dir_all(&temp_home).expect("应可清理临时目录");
-
-        assert_eq!(
-            discovered,
-            vec![
-                ssh_dir.join("id_ed25519").to_string_lossy().to_string(),
-                ssh_dir.join("id_rsa").to_string_lossy().to_string(),
-            ]
         );
     }
 

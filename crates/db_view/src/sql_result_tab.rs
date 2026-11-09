@@ -998,8 +998,10 @@ impl SqlResultTabContainer {
         idx: usize,
         _cx: &Context<Self>,
     ) -> impl IntoElement {
-        if item.is_error && item.full_error_message.is_some() {
-            let error_msg = item.full_error_message.as_ref().unwrap().clone();
+        if item.is_error
+            && let Some(full_error_message) = item.full_error_message.as_ref()
+        {
+            let error_msg = full_error_message.clone();
             let sql = item.sql.clone();
 
             Popover::new(("error-popover", idx))

@@ -237,13 +237,12 @@ impl DecorationManager {
     /// addons（特别是 CustomHighlightAddon）已在其 `on_frame` 中按 dirty_lines
     /// 增量维护自身状态；本方法只需重新聚合 `provide_decorations` 输出
     /// （O(addons × visible_lines) 聚合；addons 内部是 O(dirty_lines)）。
-    #[allow(unused_variables)]
     pub fn refresh_for_lines(
         &mut self,
         addon_manager: &AddonManager,
         visible_lines: Range<usize>,
         display_offset: usize,
-        dirty_lines: &[usize],
+        _dirty_lines: &[usize],
     ) {
         self.collect_from_addons(addon_manager, visible_lines, display_offset);
     }

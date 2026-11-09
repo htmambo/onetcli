@@ -3103,14 +3103,12 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ConnectionState, SshProcessState, Terminal, TerminalConnectionKind, TerminalMfaPrompt,
-        TerminalMfaRequest, TerminalMfaResponder, apply_term_escape_sequence, build_cd_command,
-        build_ssh_base_init_commands, build_ssh_init_commands, compose_ssh_init_commands,
-        format_connection_error, is_osc_palette_line, keyboard_interactive_answers_for_terminal,
+        ConnectionState, SshProcessState, Terminal, TerminalConnectionKind,
+        apply_term_escape_sequence, build_cd_command, build_ssh_base_init_commands,
+        build_ssh_init_commands, format_connection_error, is_osc_palette_line,
         resolve_default_windows_shell_from_env, resolve_local_working_dir,
         sanitize_recovery_content, shell_escape_arg, should_report_ssh_running_processes,
     };
-    use crate::TerminalEvent;
     use crate::history::{
         HistoryEntry, ShellHistoryFormat, collect_history_suggestions, normalize_history_command,
         parse_shell_history, push_history_entry,

@@ -21,10 +21,6 @@ const LOG_TAG: &str = "[TRS]";
 /// 单行显示宽度预算：ASCII 计 1 单位，其余计 2（日志区约 850px，text_xs 下足够容纳）
 const LOG_WRAP_UNITS: usize = 110;
 
-fn display_units(text: &str) -> usize {
-    text.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
-}
-
 /// 把一条日志折成多行：先按换行符拆分，再按显示宽度贪心折行，保证长错误信息完整可见
 fn wrap_log_lines(text: &str) -> Vec<String> {
     let mut lines = Vec::new();
@@ -272,6 +268,10 @@ impl DataTransferWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn display_units(text: &str) -> usize {
+        text.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+    }
 
     #[test]
     fn wrap_log_lines_keeps_short_text_single_line() {

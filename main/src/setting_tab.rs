@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
 use std::process::Command;
 use std::sync::Arc;
@@ -8,7 +6,7 @@ use db_view::set_db_view_settings;
 use gpui::{
     App, AppContext, Axis, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
-    StyleRefinement, Styled, Window, WindowAppearance, div,
+    StyleRefinement, Styled, Window, div,
 };
 use gpui_component::button::Button;
 #[cfg(target_os = "linux")]
@@ -35,7 +33,7 @@ use terminal_view::{
     MAX_LINE_HEIGHT_SCALE, MAX_RECOVERY_SCROLLBACK_LINES, MIN_LINE_HEIGHT_SCALE, TerminalTheme,
 };
 
-use crate::app_init::is_valid_system_hotkey;
+use crate::app_init::{is_valid_system_hotkey, refresh_system_hotkey};
 use crate::auth::get_auth_service;
 use crate::omnihub_app::GlobalHomePage;
 use crate::settings::{github_auth_dialog::GithubAuthDialog, llm_providers_view::LlmProvidersView};
@@ -61,10 +59,7 @@ mod types;
 // 用 `#[path]` 直接指向子目录文件，绕过同名 setting_tab.rs / mod.rs 冲突。
 #[path = "setting_tab/_fonts.rs"]
 mod _fonts;
-use _fonts::{
-    import_custom_font_paths, is_supported_font_file, load_custom_font_path, load_custom_fonts,
-    mono_font_options_with_custom, monospace_font_options,
-};
+use _fonts::{import_custom_font_paths, load_custom_fonts, mono_font_options_with_custom};
 
 use about::render_about_section;
 pub(crate) use app_settings::AppSettings;
@@ -75,15 +70,13 @@ use global_user::PendingSettingsPanelPage;
 pub(crate) use hotkey::{DEFAULT_SYSTEM_HOTKEY_MACOS, DEFAULT_SYSTEM_HOTKEY_OTHER};
 pub(crate) use migrations::HotkeyMigration;
 pub(crate) use proxy::GlobalProxySettings;
-// `ProxyType` 仅供同模块测试用，加 `#[allow]` 规避非测试构建下的
-// `unused_imports` 告警（轮 9d 抽取 proxy_view 后主代码不再直接引用）。
-#[allow(unused_imports)]
+// `ProxyType` 仅供同模块测试用，用 `#[cfg(test)]` 门控避免非测试构建下的 unused_imports。
+#[cfg(test)]
 pub(crate) use proxy::ProxyType;
 use proxy_view::render_global_proxy_settings_item;
 pub(crate) use saved_window::SavedWindowBounds;
-// `SavedWindowDisplayState` 仅供同模块测试用，加 `#[allow]` 规避非测试构建下的
-// `unused_imports` 告警。
-#[allow(unused_imports)]
+// `SavedWindowDisplayState` 仅供同模块测试用，用 `#[cfg(test)]` 门控避免非测试构建下的 unused_imports。
+#[cfg(test)]
 pub(crate) use saved_window::SavedWindowDisplayState;
 use shortcuts::render_shortcuts_section;
 pub(crate) use types::{
@@ -1969,6 +1962,7 @@ impl SettingsPanel {
                                                 DEFAULT_SYSTEM_HOTKEY_OTHER.to_string();
                                         }
                                         settings.save();
+                                        refresh_system_hotkey(cx);
                                         return;
                                     }
 
@@ -1986,6 +1980,7 @@ impl SettingsPanel {
                                         settings.system_hotkey_other = spec;
                                     }
                                     settings.save();
+                                    refresh_system_hotkey(cx);
                                 },
                             )
                             .default_value(SharedString::from(default_system_hotkey)),
@@ -2023,13 +2018,12 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::parse_deepin_theme_appearance;
     use super::saved_window::centered_window_bounds_within_visible_area;
-    use super::theme_utils::clamp_ui_surface_opacity;
     use super::{
         AppSettings, GlobalProxySettings, ProxyType, SavedWindowBounds, SavedWindowDisplayState,
     };
-    use gpui::{Bounds, WindowBackgroundAppearance, WindowBounds, point, px, size};
+    use gpui::{Bounds, WindowBounds, point, px, size};
     use gpui::{WindowAppearance, WindowAppearance::*};
-    use gpui_component::{MAX_GLASS_OPACITY, MIN_GLASS_OPACITY, ThemeMode};
+    use gpui_component::ThemeMode;
     use rust_i18n::t;
 
     #[test]

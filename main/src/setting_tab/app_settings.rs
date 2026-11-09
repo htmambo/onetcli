@@ -363,30 +363,30 @@ impl AppSettings {
         // 毛玻璃开关仅控制应用层 UI 颜色的 frosted 效果
         #[cfg(target_os = "macos")]
         {
-            return WindowBackgroundAppearance::Blurred;
+            WindowBackgroundAppearance::Blurred
         }
-
-        if !self.enable_glass_effect {
-            return WindowBackgroundAppearance::Opaque;
-        }
-
-        #[cfg(target_os = "linux")]
+        #[cfg(not(target_os = "macos"))]
         {
-            return WindowBackgroundAppearance::Blurred;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            // 使用 Blurred (Acrylic) 而非 MicaAltBackdrop：
-            // - Acrylic 通过 SetWindowCompositionAttribute 实现，兼容性更广
-            // - MicaAltBackdrop 在某些 Windows 环境下可能静默失败
-            // - Blurred 与 macOS/Linux 的透明+模糊行为更一致
-            return WindowBackgroundAppearance::Blurred;
-        }
-
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        {
-            return WindowBackgroundAppearance::Opaque;
+            if !self.enable_glass_effect {
+                WindowBackgroundAppearance::Opaque
+            } else {
+                #[cfg(target_os = "linux")]
+                {
+                    WindowBackgroundAppearance::Blurred
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    // 使用 Blurred (Acrylic) 而非 MicaAltBackdrop：
+                    // - Acrylic 通过 SetWindowCompositionAttribute 实现，兼容性更广
+                    // - MicaAltBackdrop 在某些 Windows 环境下可能静默失败
+                    // - Blurred 与 macOS/Linux 的透明+模糊行为更一致
+                    WindowBackgroundAppearance::Blurred
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+                {
+                    WindowBackgroundAppearance::Opaque
+                }
+            }
         }
     }
 

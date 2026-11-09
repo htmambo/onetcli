@@ -276,13 +276,13 @@ fn default_font_fallbacks() -> Vec<SharedString> {
 
 /// 预计算的字体变体
 #[derive(Clone)]
-pub struct CliFont {
-    pub normal: Font,
-    pub bold: Font,
+struct CliFont {
+    normal: Font,
+    bold: Font,
 }
 
 impl CliFont {
-    pub fn new(family: SharedString, fallbacks: Vec<SharedString>) -> Self {
+    fn new(family: SharedString, fallbacks: Vec<SharedString>) -> Self {
         let features = FontFeatures(Arc::new(vec![("calt".to_string(), 0)]));
         let fallbacks = if fallbacks.is_empty() {
             None
@@ -828,7 +828,7 @@ pub fn char_index_for_cell_column(text: &str, column: usize) -> usize {
     index
 }
 
-pub fn expand_text_for_cells(text: &str) -> String {
+fn expand_text_for_cells(text: &str) -> String {
     let mut expanded = String::with_capacity(text.len());
     for ch in text.chars() {
         expanded.push(ch);

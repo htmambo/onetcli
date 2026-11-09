@@ -402,14 +402,6 @@ fn key_salt_path() -> Option<PathBuf> {
     get_data_dir().map(|p| p.join(KEY_SALT_FILE))
 }
 
-/// 确保 `key_salt` 目录存在（供测试或管理员调试使用）。
-#[allow(dead_code)]
-fn ensure_key_salt_parent(path: &Path) {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

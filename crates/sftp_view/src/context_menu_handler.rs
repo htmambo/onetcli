@@ -178,7 +178,7 @@ impl SftpView {
     fn start_extract_archive(
         &mut self,
         name: String,
-        full_path: String,
+        _full_path: String,
         command: String,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -188,10 +188,7 @@ impl SftpView {
             return;
         }
 
-        self.active_extract = Some(ActiveExtract {
-            name: name.clone(),
-            path: full_path.clone(),
-        });
+        self.active_extract = Some(ActiveExtract { name: name.clone() });
         cx.notify();
 
         let session_manager = Arc::new(SshSessionManager::new(self.sftp_config.clone()));

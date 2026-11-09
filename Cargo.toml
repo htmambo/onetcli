@@ -242,7 +242,7 @@ alacritty_terminal = { opt-level = 3 }
 mongodb = { opt-level = 3 }
 # S5：dev profile 补充重依赖 opt-level=3，缩短冷启动 + 提升调试时单步响应
 mysql_async = { opt-level = 3 }
-redis_client = { opt-level = 3 }
+redis = { opt-level = 3 }
 tokio-postgres = { opt-level = 3 }
 tokio-postgres-rustls = { opt-level = 3 }
 serde_json = { opt-level = 3 }

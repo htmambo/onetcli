@@ -7,7 +7,6 @@
 //!
 //! **不持久化**: reasoning 仅在当前对话 (in-memory) 展示，不写入 chat_messages 表。
 
-use gpui::prelude::FluentBuilder;
 use gpui::{App, Component, IntoElement, ParentElement, SharedString, Styled, Window};
 use gpui_component::{
     ActiveTheme, IconName, Sizable,

@@ -53,7 +53,6 @@ impl Default for InputMode {
     }
 }
 
-#[allow(unused)]
 impl InputMode {
     /// Create a plain input mode with default settings.
     pub(super) fn plain_text() -> Self {
@@ -163,7 +162,7 @@ impl InputMode {
     }
 
     /// At least 1 row be return.
-    #[allow(unused)]
+    #[cfg(test)]
     pub(super) fn min_rows(&self) -> usize {
         match self {
             InputMode::AutoGrow { min_rows, .. } => *min_rows,
@@ -172,7 +171,6 @@ impl InputMode {
         .max(1)
     }
 
-    #[allow(unused)]
     pub(super) fn max_rows(&self) -> usize {
         if !self.is_multi_line() {
             return 1;
@@ -185,7 +183,6 @@ impl InputMode {
     }
 
     /// Return false if the mode is not [`InputMode::CodeEditor`].
-    #[allow(unused)]
     #[inline]
     pub(super) fn line_number(&self) -> bool {
         match self {
@@ -207,7 +204,7 @@ impl InputMode {
         text: &Rope,
         new_text: &str,
         force: bool,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> Option<PendingBackgroundParse> {
         match &self {
             InputMode::CodeEditor {
@@ -274,7 +271,6 @@ impl InputMode {
         }
     }
 
-    #[allow(unused)]
     pub(super) fn diagnostics(&self) -> Option<&DiagnosticSet> {
         match self {
             InputMode::CodeEditor { diagnostics, .. } => Some(diagnostics),

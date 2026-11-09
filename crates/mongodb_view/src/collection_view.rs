@@ -987,7 +987,9 @@ impl CollectionView {
     fn set_error(&mut self, message: String, cx: &mut Context<Self>) {
         self.error_message = Some(message);
         self.is_loading = false;
-        Self::notify_error(self.error_message.as_ref().unwrap(), cx);
+        if let Some(error) = self.error_message.as_ref() {
+            Self::notify_error(error, cx);
+        }
         cx.notify();
     }
 

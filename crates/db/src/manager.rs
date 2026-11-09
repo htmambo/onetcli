@@ -782,7 +782,7 @@ const _ASSERT_NOT_CLONE: fn() = || {
 /// Err 写回语义（方案 B：override 视为最新意图）详见
 /// [`SessionGuard::perform_release`] 处的权威 doc，本 enum 不重复定义。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReleaseIntent {
+pub(crate) enum ReleaseIntent {
     /// `finish()`：使用 session 存储的 action
     Finish,
     /// `finish_with(action)`：调用方 override
@@ -1345,14 +1345,14 @@ impl SessionGuard {
     }
 }
 
-/// 测试 mock 存储（Round 26）：允许测试通过 `set_test_release_result` 注入
-/// 下一次 `release_session` 调用的返回值（一次性的）。mock 注入生产构建下
-/// 编译期擦除——零运行开销。
-///
-/// **设计选择**：
-/// - 一次性（take 而非持久）：避免测试间相互污染——每次 mock 调用都需重设
-/// - thread-local：tokio 多线程 runtime 下，每个测试线程独立持有 mock
-/// - 仅 cfg(test)：生产代码路径不受任何影响
+// 测试 mock 存储（Round 26）：允许测试通过 `set_test_release_result` 注入
+// 下一次 `release_session` 调用的返回值（一次性的）。mock 注入生产构建下
+// 编译期擦除——零运行开销。
+//
+// **设计选择**：
+// - 一次性（take 而非持久）：避免测试间相互污染——每次 mock 调用都需重设
+// - thread-local：tokio 多线程 runtime 下，每个测试线程独立持有 mock
+// - 仅 cfg(test)：生产代码路径不受任何影响
 #[cfg(test)]
 thread_local! {
     static TEST_RELEASE_RESULT: std::cell::RefCell<Option<Result<(), crate::connection::DbError>>> =
@@ -4074,7 +4074,7 @@ mod tests {
         // Drop 兜底能重试 release。
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
-        let config = test_config("mysql-guard-err");
+        let _config = test_config("mysql-guard-err");
         // 不插入任何 session：finish(close) 会返回 session not found
         // → release_session helper 把 NotFound 视为 Ok(())，session 清空
 
@@ -4265,7 +4265,6 @@ mod tests {
     /// 验证 verify 失败时计数器递增，并支持多线程累加。
     #[tokio::test]
     async fn verify_failure_count_increments_on_verify_error() {
-        use std::sync::atomic::Ordering;
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
         let config = test_config("mysql-verify-metric");
@@ -5067,7 +5066,7 @@ mod tests {
     /// 即便 await 取消，Drop 仍可读到 stored_action 走 best-effort release。
     #[tokio::test]
     async fn perform_release_cancel_safety_preserves_session() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::AtomicUsize;
 
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
@@ -5142,7 +5141,7 @@ mod tests {
 
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
-        let config = test_config("mysql-mock-err");
+        let _config = test_config("mysql-mock-err");
         // 真实 session 不入池——mock 接管 release_session 行为
         // （mock 注入覆盖所有释放路径，无需真实 session）
 
@@ -5186,7 +5185,7 @@ mod tests {
 
         let manager =
             ConnectionManager::with_config(Duration::from_secs(300), Duration::from_secs(1800));
-        let config = test_config("mysql-mock-retry");
+        let _config = test_config("mysql-mock-retry");
 
         let mut guard = SessionGuard::new(
             manager.clone(),

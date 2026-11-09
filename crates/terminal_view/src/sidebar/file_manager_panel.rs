@@ -600,8 +600,6 @@ async fn delete_targets_with_progress(
 
 struct ActiveExtract {
     name: String,
-    #[allow(dead_code)]
-    path: String,
 }
 
 struct RemoteCommandOutput {
@@ -2737,7 +2735,7 @@ impl FileManagerPanel {
     fn start_extract_archive(
         &mut self,
         name: String,
-        path: String,
+        _path: String,
         command: String,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2747,10 +2745,7 @@ impl FileManagerPanel {
             return;
         }
 
-        self.active_extract = Some(ActiveExtract {
-            name: name.clone(),
-            path: path.clone(),
-        });
+        self.active_extract = Some(ActiveExtract { name: name.clone() });
         cx.notify();
 
         let session_manager = self.session_manager.clone();
@@ -3689,7 +3684,7 @@ impl FileManagerPanel {
         let name_for_copy = name.to_string();
         let path_for_download = full_path.to_string();
         let is_dir_for_download = is_dir;
-        let path_for_edit = full_path.to_string();
+        let _path_for_edit = full_path.to_string();
         let path_for_favorite = full_path.to_string();
         let name_for_delete = name.to_string();
         let path_for_delete = full_path.to_string();
@@ -4240,7 +4235,7 @@ impl FileManagerPanel {
                                                     )
                                                     .on_double_click(cx.listener({
                                                         let fp = full_path.clone();
-                                                        move |this, _, window, cx| {
+                                                        move |this, _, _window, cx| {
                                                             if is_dir {
                                                                 this.navigate_to(
                                                                     fp.clone(),

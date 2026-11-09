@@ -1,10 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{
-    AnyWindowHandle, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement, Render, Styled, Task, Window, actions, div, px,
-};
+use gpui::{AnyWindowHandle, App, Entity, ParentElement, Styled, Window, div};
 use gpui_component::{ActiveTheme, Icon, IconName, h_flex};
 use one_core::tab_container::TabContainer;
 use one_core::tab_persistence::save_tab_state;
@@ -15,9 +12,7 @@ use terminal_view::with_recovery_snapshot_overrides;
 use crate::setting_tab::AppSettings;
 
 use super::{GlobalTabContainer, WINDOW_CLOSE_TERMINAL_RECOVERY_MAX_CHARS, collect_running_states};
-#[cfg(target_os = "macos")]
-use gpui::{Menu, MenuItem};
-use gpui_component::{WindowExt, WindowsSurfaceLayer, layered_level_surface_color};
+use gpui_component::WindowExt;
 
 #[derive(Clone)]
 pub(super) struct GlobalAppCloseState {

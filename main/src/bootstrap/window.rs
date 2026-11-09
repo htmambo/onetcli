@@ -1,7 +1,5 @@
 use db::GlobalDbState;
-use gpui::{
-    App, AppContext, Bounds, Pixels, Size, WindowDecorations, WindowKind, WindowOptions, px, size,
-};
+use gpui::{App, Bounds, Pixels, Size, WindowKind, WindowOptions, px, size};
 
 use crate::setting_tab::AppSettings;
 

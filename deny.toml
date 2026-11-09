@@ -39,6 +39,13 @@ highlight = "all"
 skip = []
 skip-tree = []
 
+# 已知 pre-release 依赖（russh 0.60.3 传递引入，无法消除，此处登记跟踪）：
+#   ed25519-dalek 3.0.0-pre.6 / pkcs5 0.8.0-rc.13 / pkcs8 0.11.0-rc.11
+#   aes-gcm 0.11.0-rc.3 / aead 0.6.0-rc.10
+# 来源链：russh -> internal-russh-forked-ssh-key -> ed25519-dalek(pre) -> pkcs*/aes-gcm(rc)
+# 处理：不加 bans.deny（会破坏 security-audit CI），multiple-versions 保持 warn；
+#       待 russh 上游稳定化后，此段 pre-release 链应随依赖升级自然消除。
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

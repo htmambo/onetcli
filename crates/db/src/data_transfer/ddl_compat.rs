@@ -633,19 +633,19 @@ mod tests {
     fn verdicts_flag_lossy_cases() {
         let m = DatabaseType::MySQL;
         let p = DatabaseType::PostgreSQL;
-        rust_i18n::set_locale("zh-CN");
-        assert_eq!(
+        // 变体断言而非 locale 文案：避免 set_locale 与并行测试竞态
+        assert!(matches!(
             column_verdict(&spec("uuid", p), m),
-            TypeVerdict::Lossy(t!("DataTransfer.precheck_uuid_lossy").to_string())
-        );
-        assert_eq!(
+            TypeVerdict::Lossy(_)
+        ));
+        assert!(matches!(
             column_verdict(&spec("bigint(20) unsigned", m), p),
-            TypeVerdict::Lossy(t!("DataTransfer.precheck_unsigned_lossy").to_string())
-        );
-        assert_eq!(
+            TypeVerdict::Lossy(_)
+        ));
+        assert!(matches!(
             column_verdict(&spec("json", m), DatabaseType::SQLite),
-            TypeVerdict::Lossy(t!("DataTransfer.precheck_json_sqlite").to_string())
-        );
+            TypeVerdict::Lossy(_)
+        ));
         assert_eq!(column_verdict(&spec("int", m), p), TypeVerdict::Compatible);
     }
 
