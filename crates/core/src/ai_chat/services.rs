@@ -301,10 +301,9 @@ pub fn extract_session_name(content: &str) -> String {
     }
 
     // 2. 去掉 @表名 提及语法
-    let re = regex::Regex::new(r"@\w+\b").ok();
-    if let Some(re) = re {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
+    static MENTION_RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"@\w+\b").expect("valid regex"));
+    cleaned = MENTION_RE.replace_all(&cleaned, "").to_string();
 
     // 3. 合并多余空白
     let clean_content = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");

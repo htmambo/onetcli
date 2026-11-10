@@ -1,8 +1,8 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/STACK:8000000"]
 
-# P0-C 优化：启用共享编译缓存（sccache）。
-# 安装：cargo install sccache --locked
-# 取消注释后所有 cargo 调用都会通过 sccache，对 rustc 输出确定性安全。
-[build]
-rustc-wrapper = "/Users/hoping/.cargo/bin/sccache"
+# 共享编译缓存 sccache 不放仓库级配置：rustc-wrapper 必须是各机器都存在的
+# 可执行文件，写死本机绝对路径会让 CI runner / 其他开发者的 cargo 在调用
+# rustc 前直接失败（实测：No such file or directory）。
+# - 本机：~/.cargo/config.toml（全局、不提交）配置 build.rustc-wrapper
+# - CI：RUSTC_WRAPPER 环境变量（优先级高于本文件）

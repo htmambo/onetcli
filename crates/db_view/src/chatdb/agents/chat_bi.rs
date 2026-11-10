@@ -376,13 +376,16 @@ impl ChatBiAgent {
 }
 
 fn contains_chart_json_code_block(content: &str) -> bool {
-    let re = Regex::new(r"(?s)```json\s*\{.*?\}\s*```").expect("valid regex");
-    re.is_match(content) && content.contains("\"chart_type\"")
+    static CHART_JSON_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?s)```json\s*\{.*?\}\s*```").expect("valid regex")
+    });
+    CHART_JSON_RE.is_match(content) && content.contains("\"chart_type\"")
 }
 
 fn extract_sql_from_response(response: &str) -> Option<String> {
-    let re = Regex::new(r"(?s)```sql\s*(.*?)\s*```").ok()?;
-    if let Some(caps) = re.captures(response) {
+    static SQL_BLOCK_RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?s)```sql\s*(.*?)\s*```").expect("valid regex"));
+    if let Some(caps) = SQL_BLOCK_RE.captures(response) {
         return caps.get(1).map(|m| m.as_str().trim().to_string());
     }
 

@@ -45,6 +45,9 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: test-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          # Cargo.lock 变化时回退到同 target 的最近缓存，避免 1135 个依赖全量重编
+          restore-keys: |
+            test-cargo-${{ matrix.target }}-
       - name: Lint
         if: ${{ matrix.run_on == 'macos-latest' }}
         run: |

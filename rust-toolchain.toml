@@ -1,0 +1,5 @@
+# 统一本地与 CI 三平台的 rust 通道，避免 stable/nightly 漂移导致缓存与编译结果不一致。
+# 精确锁定可改为 channel = "1.92.0"，但那要求所有环境预装该 toolchain，
+# 否则 rustup 会在首次 cargo 调用时自动下载，故此处先用 stable。
+[toolchain]
+channel = "stable"
