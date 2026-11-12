@@ -869,6 +869,12 @@ impl MacWindow {
                         let _: () =
                             msg_send![parent, beginSheet: native_window completionHandler: nil];
                         sheet_parent = Some(parent);
+                    } else {
+                        // 启动阶段应用可能尚未激活，此时 NSApp.mainWindow 为空，无法挂载
+                        // sheet。退化为应用级浮层：保持在普通窗口之上，并在应用失活时隐藏，
+                        // 避免启动提示弹窗被主窗口覆盖，同时不遮挡其他应用。
+                        native_window.setLevel_(NSFloatingWindowLevel);
+                        let _: () = msg_send![native_window, setHidesOnDeactivate: YES];
                     }
                 }
             }

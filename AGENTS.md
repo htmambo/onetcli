@@ -467,6 +467,13 @@
 - **验证方式**：`cargo test -p ssh --lib`（含 trust 写入 + 一次性消费用例）；手工用 known_hosts 外的主机连一次终端/SFTP。
 - **适用范围**：`crates/ssh` 主机密钥校验、终端/SFTP 连接错误覆盖层；其他需要"异步底层 + UI 确认"的场景可复刻该模式。
 
+- **标题**：macOS 下启动期弹窗被主窗口覆盖时，先查 `NSApp.mainWindow` 是否为空，不要先调 z-order。
+- **触发信号**：启动阶段弹出的 Dialog（如「恢复连接」）表现为普通窗口，点击主窗口后被盖住，但 Esc 可关闭；其他用户主动打开的弹窗行为正常。
+- **根因 / 约束**：`vendor/zed/crates/gpui/src/platform/mac/window.rs` 的 `WindowKind::Dialog` 分支只有 `NSApp.mainWindow` 非空时才 `beginSheet`；应用尚未激活或没有 key window 时该值为 null，窗口停留在 `NSNormalWindowLevel`，因此可被主窗口覆盖。`window.activate_window()` 不可依赖：mac 的 `activate()` 经 foreground executor 异步投递 `makeKeyAndOrderFront`，无法保证在创建弹窗前完成，且应用未激活时也不会设置 `mainWindow`。
+- **正确做法**：Dialog 在无主窗口时退化为应用级浮层：`setLevel_(NSFloatingWindowLevel)` + `setHidesOnDeactivate:YES`，既保证在应用内始终置顶，又避免遮挡其他应用；有主窗口时保持原有 sheet 行为。
+- **验证方式**：`cargo check -p main`；启动应用后不先点击主窗口，确认恢复连接弹窗始终在主窗口之上，切到其他应用时自动隐藏、切回后恢复。
+- **适用范围**：所有启动早期通过 `open_popup_window` 打开的 `WindowKind::Dialog` 弹窗（恢复连接、启动期提示等）。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
