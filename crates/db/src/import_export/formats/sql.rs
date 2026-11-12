@@ -14,6 +14,73 @@ use crate::{DatabasePlugin, DbError, SqlSource};
 
 pub struct SqlFormatHandler;
 
+/// 开启 DROP 时在首块输出的警示注释。
+const DROP_WARNING: &str = "-- DROP TABLE enabled: replaying this file replaces existing tables; \
+tables referenced by foreign keys may block replay.\n";
+
+/// 结构块输出器：用"已输出的块"而非"遍历到的表"判定首块，
+/// 保证首表结构为空时警示注释顺延到实际写出的第一块。
+struct StructureBlockBuilder {
+    emitted: bool,
+}
+
+impl StructureBlockBuilder {
+    fn new() -> Self {
+        Self { emitted: false }
+    }
+
+    fn next(
+        &mut self,
+        plugin: &dyn DatabasePlugin,
+        config: &ExportConfig,
+        table: &str,
+        schema_sql: &str,
+    ) -> String {
+        let block = build_structure_block(plugin, config, table, schema_sql, !self.emitted);
+        if !block.is_empty() {
+            self.emitted = true;
+        }
+        block
+    }
+}
+
+fn build_structure_block(
+    plugin: &dyn DatabasePlugin,
+    config: &ExportConfig,
+    table: &str,
+    schema_sql: &str,
+    is_first_emitted: bool,
+) -> String {
+    if schema_sql.is_empty() {
+        // 没有 CREATE 时不输出 DROP，避免"只删不建"。
+        return String::new();
+    }
+
+    let include_drop = config.include_schema && config.drop_before_create;
+    let mut output = String::new();
+    if include_drop && is_first_emitted {
+        output.push_str(DROP_WARNING);
+    }
+    output.push_str("-- Table structure for ");
+    output.push_str(table);
+    output.push('\n');
+
+    if include_drop {
+        // 与导出 CREATE 使用同一表名限定，避免跨库回放误删其他库的表。
+        output.push_str("DROP TABLE IF EXISTS ");
+        output.push_str(&plugin.format_export_table_reference(
+            &config.database,
+            config.schema.as_deref(),
+            table,
+        ));
+        output.push_str(";\n");
+    }
+
+    output.push_str(schema_sql);
+    output.push_str(";\n\n");
+    output
+}
+
 #[async_trait]
 impl FormatHandler for SqlFormatHandler {
     async fn import(
@@ -302,6 +369,7 @@ impl FormatHandler for SqlFormatHandler {
                 let _ = tx.send(event);
             }
         };
+        let mut structure_blocks = StructureBlockBuilder::new();
 
         for (index, table) in config.tables.iter().enumerate() {
             send_progress(ExportProgressEvent::TableStart {
@@ -325,14 +393,8 @@ impl FormatHandler for SqlFormatHandler {
                     .await
                 {
                     Ok(schema_sql) => {
-                        let mut schema_output = String::new();
-                        if !schema_sql.is_empty() {
-                            schema_output.push_str("-- Table structure for ");
-                            schema_output.push_str(table);
-                            schema_output.push('\n');
-                            schema_output.push_str(&schema_sql);
-                            schema_output.push_str(";\n\n");
-                        }
+                        let mut schema_output =
+                            structure_blocks.next(plugin, config, table, &schema_sql);
                         let progress_data = if is_streaming {
                             std::mem::take(&mut schema_output)
                         } else {
@@ -434,5 +496,135 @@ impl FormatHandler for SqlFormatHandler {
             rows_exported: total_rows,
             elapsed_ms,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DROP_WARNING, StructureBlockBuilder, build_structure_block};
+    use crate::import_export::ExportConfig;
+    use crate::mysql::MySqlPlugin;
+    use crate::postgresql::PostgresPlugin;
+    use crate::{DataFormat, DatabasePlugin};
+
+    fn config(
+        include_schema: bool,
+        drop_before_create: bool,
+        schema: Option<&str>,
+    ) -> ExportConfig {
+        ExportConfig {
+            format: DataFormat::Sql,
+            database: "shop".to_string(),
+            schema: schema.map(str::to_string),
+            tables: vec!["users".to_string()],
+            columns: None,
+            include_schema,
+            include_data: true,
+            drop_before_create,
+            where_clause: None,
+            limit: None,
+            csv_config: None,
+        }
+    }
+
+    #[test]
+    fn drop_disabled_keeps_current_output() {
+        let plugin = MySqlPlugin::new();
+        let block = build_structure_block(
+            &plugin,
+            &config(true, false, None),
+            "users",
+            "CREATE TABLE `users` (`id` INT)",
+            true,
+        );
+
+        assert_eq!(
+            block,
+            "-- Table structure for users\nCREATE TABLE `users` (`id` INT);\n\n"
+        );
+
+        // 空 CREATE 在关闭开关时与旧实现一致：整块输出为空。
+        let empty = build_structure_block(&plugin, &config(true, false, None), "users", "", true);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn drop_enabled_uses_unqualified_mysql_reference() {
+        let plugin = MySqlPlugin::new();
+        let block = build_structure_block(
+            &plugin,
+            &config(true, true, None),
+            "users",
+            "CREATE TABLE `users` (`id` INT)",
+            false,
+        );
+
+        assert_eq!(
+            block,
+            "-- Table structure for users\nDROP TABLE IF EXISTS `users`;\nCREATE TABLE `users` (`id` INT);\n\n"
+        );
+    }
+
+    #[test]
+    fn drop_reference_matches_postgres_create_reference() {
+        let plugin = PostgresPlugin::new();
+        let table_ref = plugin.format_export_table_reference("shop", Some("public"), "users");
+        let create_sql = format!("CREATE TABLE {table_ref} (id INT)");
+        let block = build_structure_block(
+            &plugin,
+            &config(true, true, Some("public")),
+            "users",
+            &create_sql,
+            false,
+        );
+
+        assert!(block.contains(&format!("DROP TABLE IF EXISTS {table_ref};")));
+        assert!(block.contains(&format!("CREATE TABLE {table_ref}")));
+    }
+
+    #[test]
+    fn empty_create_never_emits_drop() {
+        let plugin = MySqlPlugin::new();
+        let block = build_structure_block(&plugin, &config(true, true, None), "users", "", true);
+
+        assert!(block.is_empty());
+    }
+
+    #[test]
+    fn data_only_never_emits_drop() {
+        let plugin = MySqlPlugin::new();
+        let block = build_structure_block(
+            &plugin,
+            &config(false, true, None),
+            "users",
+            "CREATE TABLE `users` (`id` INT)",
+            true,
+        );
+
+        assert!(!block.contains("DROP TABLE"));
+        assert!(!block.contains(DROP_WARNING));
+    }
+
+    #[test]
+    fn warning_only_on_first_emitted_block() {
+        let plugin = MySqlPlugin::new();
+        let config = config(true, true, None);
+        let mut builder = StructureBlockBuilder::new();
+
+        // 首表结构为空时整块跳过，警示注释顺延到下一块。
+        assert!(builder.next(&plugin, &config, "broken", "").is_empty());
+
+        let second = builder.next(&plugin, &config, "users", "CREATE TABLE `users` (`id` INT)");
+        assert!(second.starts_with(DROP_WARNING));
+        assert_eq!(second.matches("-- DROP TABLE enabled").count(), 1);
+
+        let third = builder.next(
+            &plugin,
+            &config,
+            "orders",
+            "CREATE TABLE `orders` (`id` INT)",
+        );
+        assert!(!third.contains("-- DROP TABLE enabled"));
+        assert!(third.contains("DROP TABLE IF EXISTS `orders`;"));
     }
 }

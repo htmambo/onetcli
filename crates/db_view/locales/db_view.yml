@@ -2450,6 +2450,14 @@ SqlDump:
     en: Close
     zh-CN: 关闭
     zh-HK: 關閉
+  include_drop_label:
+    en: Drop existing tables before creating
+    zh-CN: 建表前先删除已有表
+    zh-HK: 建表前先刪除已有表
+  include_drop_hint:
+    en: Replaying replaces existing tables; tables referenced by foreign keys may block the drop.
+    zh-CN: 回放会替换已有表；被外键引用的表可能导致删除失败。
+    zh-HK: 回放會替換已有表；被外鍵引用的表可能導致刪除失敗。
 SqlEditorView:
   create_dir_failed:
     en: "Failed to create directory %{path}: %{error}"

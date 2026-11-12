@@ -6,6 +6,7 @@ use gpui::{
 use gpui_component::{
     ActiveTheme, TitleBar, VirtualListScrollHandle,
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex, v_flex, v_virtual_list,
 };
 use std::rc::Rc;
@@ -45,6 +46,8 @@ pub struct SqlDumpView {
 
     is_running: Entity<bool>,
     is_finished: Entity<bool>,
+    /// 结构导出时是否在建表前输出 DROP TABLE。
+    include_drop: Entity<bool>,
     start_time: Option<Instant>,
 
     focus_handle: FocusHandle,
@@ -82,6 +85,7 @@ impl SqlDumpView {
 
             is_running: cx.new(|_| false),
             is_finished: cx.new(|_| false),
+            include_drop: cx.new(|_| false),
             start_time: None,
 
             focus_handle: cx.focus_handle(),
@@ -127,6 +131,14 @@ impl SqlDumpView {
         !is_running
     }
 
+    /// 只有包含结构的转储模式才允许 DROP，纯数据模式不提供该选项。
+    fn mode_includes_structure(mode: &SqlDumpMode) -> bool {
+        matches!(
+            mode,
+            SqlDumpMode::StructureOnly | SqlDumpMode::StructureAndData
+        )
+    }
+
     fn start_dump(&mut self, _window: &mut Window, cx: &mut App) {
         if *self.is_running.read(cx) {
             return;
@@ -150,6 +162,7 @@ impl SqlDumpView {
         let single_table = self.table.clone();
         let output_path = self.output_path.clone();
         let mode = self.mode.clone();
+        let include_drop = *self.include_drop.read(cx) && Self::mode_includes_structure(&mode);
 
         let logs = self.logs.clone();
         let scroll_handle = self.scroll_handle.clone();
@@ -254,6 +267,7 @@ impl SqlDumpView {
                 columns: None,
                 include_schema: include_structure,
                 include_data,
+                drop_before_create: include_drop,
                 where_clause: None,
                 limit: None,
                 csv_config: None,
@@ -510,6 +524,7 @@ impl Clone for SqlDumpView {
             progress: self.progress.clone(),
             is_running: self.is_running.clone(),
             is_finished: self.is_finished.clone(),
+            include_drop: self.include_drop.clone(),
             start_time: self.start_time,
             focus_handle: self.focus_handle.clone(),
         }
@@ -569,6 +584,32 @@ impl Render for SqlDumpView {
                             .child(div().child(self.output_path.display().to_string())),
                     ),
             )
+            .when(Self::mode_includes_structure(&self.mode), |this| {
+                this.child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            Checkbox::new("dump-include-drop")
+                                .label(t!("SqlDump.include_drop_label").to_string())
+                                .checked(*self.include_drop.read(cx))
+                                .on_click({
+                                    let include_drop = self.include_drop.clone();
+                                    move |checked, _, cx| {
+                                        include_drop.update(cx, |value, cx| {
+                                            *value = *checked;
+                                            cx.notify();
+                                        });
+                                    }
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(t!("SqlDump.include_drop_hint").to_string()),
+                        ),
+                )
+            })
             .child(div().h_px().bg(cx.theme().border))
             .child(
                 h_flex()
@@ -699,6 +740,18 @@ impl Render for SqlDumpView {
                     .pt_2()
                     .gap_2()
                     .justify_end()
+                    // 关闭按钮始终可见：开始前是"取消"，结束后是"关闭"。
+                    .child(
+                        Button::new("close")
+                            .child(if is_finished {
+                                t!("SqlDump.close").to_string()
+                            } else {
+                                t!("Common.cancel").to_string()
+                            })
+                            .on_click(|_, window, _cx| {
+                                window.remove_window();
+                            }),
+                    )
                     .when(Self::should_show_start_button(is_running), |this| {
                         this.child(
                             Button::new("start")
@@ -717,15 +770,6 @@ impl Render for SqlDumpView {
                             Button::new("running")
                                 .loading(true)
                                 .child(t!("SqlDump.exporting").to_string()),
-                        )
-                    })
-                    .when(is_finished, |this| {
-                        this.child(
-                            Button::new("close")
-                                .child(t!("SqlDump.close").to_string())
-                                .on_click(|_, window, _cx| {
-                                    window.remove_window();
-                                }),
                         )
                     }),
             );
@@ -750,5 +794,18 @@ mod tests {
     #[test]
     fn start_button_is_hidden_while_sql_dump_is_running() {
         assert!(!SqlDumpView::should_show_start_button(true));
+    }
+
+    #[test]
+    fn drop_option_only_available_for_structure_modes() {
+        assert!(SqlDumpView::mode_includes_structure(
+            &SqlDumpMode::StructureOnly
+        ));
+        assert!(SqlDumpView::mode_includes_structure(
+            &SqlDumpMode::StructureAndData
+        ));
+        assert!(!SqlDumpView::mode_includes_structure(
+            &SqlDumpMode::DataOnly
+        ));
     }
 }

@@ -120,6 +120,8 @@ pub struct ExportConfig {
     pub columns: Option<Vec<String>>,
     pub include_schema: bool,
     pub include_data: bool,
+    /// 结构导出时是否在建表前输出 `DROP TABLE IF EXISTS`。
+    pub drop_before_create: bool,
     pub where_clause: Option<String>,
     pub limit: Option<usize>,
     pub csv_config: Option<CsvExportConfig>,
@@ -135,6 +137,7 @@ impl Default for ExportConfig {
             columns: None,
             include_schema: true,
             include_data: true,
+            drop_before_create: false,
             where_clause: None,
             limit: None,
             csv_config: None,

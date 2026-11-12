@@ -594,6 +594,8 @@ impl DataExportView {
                 columns: Some(selected_columns),
                 include_schema: false,
                 include_data: true,
+                // 仅数据导出不支持 DROP。
+                drop_before_create: false,
                 where_clause: None,
                 limit: None,
                 csv_config,
