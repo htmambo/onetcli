@@ -6,6 +6,9 @@
 
 ## 已完成任务 (Archive)
 
+### 2026-11
+- ✅ [SFTP 下载保留远程时间戳](Archive/2026-11/SFTP_PRESERVE_TIMESTAMPS_PLAN.md) - 完成于 2026-11-12（新增 `file_times.rs`：`RemoteTimes` 转换 + `apply_to_path`（失败仅 warn）+ `apply_dir_times`（全部子项写完后按深度倒序）；`FileEntry` 增加 `atime: Option<SystemTime>`；单文件 serial/流水线与递归目录下载在 `flush` + `sync_all` 后恢复 mtime/atime；`filetime` 提升为直接依赖（Windows 目录句柄需要 `FILE_FLAG_BACKUP_SEMANTICS`）；创建时间不在 SFTP v3 协议内，明确不保留；13 个单测通过；三轮外部评审 APPROVED；用户实测下载文件 mtime 与远程一致）
+
 ### 2026-09
 - ✅ [LLM 提供商云同步接入](Archive/2026-09/LLM_PROVIDER_SYNC_PLAN.md) - 归档于 2026-09-20（审计确认 §10 全部 10 步已落地：llm_providers 三同步列 + `SyncableItem for ProviderConfig` + repository 云同步方法（含 pending_cloud_deletions 墓碑）+ `data_type::LLM_PROVIDER` + service upload/decrypt + `LlmProviderSyncType` handler 注册 engine.rs:98 + 可选 Web 端 syncItemType.ts/syncPayloadTable.ts 均已支持）
 - ✅ [修复 Round 01：安全 & 性能 16 项](Archive/2026-09/FIX_ROUND_01_PLAN.md) - 完成于 2026-09-20（A1 SSH 私钥字段级加密（方案 A 推迟自动迁移）+ A2/A3 文件权限 0600 + B1 MySQL NO_BACKSLASH_ESCAPES + B2 过滤器列名加引号（IdentifierQuote）+ B3 SSH 首次连接 TOFU 确认（哨兵 + 暂存表 + 覆盖层按钮）+ B4 IPC 密码 env 通路收敛（双重闸门，随后随子系统整体移除）+ B5 SFTP 路径越界校验 + B6 TLS 风险提示 + P1-P6 性能项；分支 `fix/round-01-security-and-perf`，commit `73b03a6e` → `c8eb6a8c`；遗留：A1 迁移函数接入窗口期约 2026-11 中旬）

@@ -97,3 +97,7 @@ Sftp:
     en: "SFTP file entry contains `..`, skipping to prevent path traversal: %{path}"
     zh-CN: "SFTP 文件条目相对路径含 `..`，跳过以防越界：%{path}"
     zh-HK: "SFTP 檔案條目相對路徑含 `..`，跳過以防越界：%{path}"
+  apply_times_failed:
+    en: "Failed to apply remote timestamps to %{path}: %{error}"
+    zh-CN: "恢复远程时间戳到 %{path} 失败：%{error}"
+    zh-HK: "恢復遠端時間戳到 %{path} 失敗：%{error}"

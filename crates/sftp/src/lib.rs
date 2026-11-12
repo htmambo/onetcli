@@ -1,5 +1,6 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod file_times;
 mod russh_impl;
 
 use anyhow::{Result, anyhow};
@@ -16,7 +17,10 @@ pub struct FileEntry {
     pub name: String,
     pub path: String,
     pub size: u64,
+    /// 远端 mtime；服务端未提供（或返回 0 哨兵）时回退为本次列表时刻。
     pub modified: SystemTime,
+    /// 远端 atime；服务端未提供时为 `None`。
+    pub atime: Option<SystemTime>,
     pub is_dir: bool,
     pub permissions: u32,
 }

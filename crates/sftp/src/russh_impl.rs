@@ -1,3 +1,4 @@
+use crate::file_times::{RemoteTimes, apply_dir_times, unix_secs_to_system_time};
 use crate::{
     FileEntry, ProgressCallback, SftpClient, TransferCancelled, TransferProgress,
     validate_read_size,
@@ -17,9 +18,10 @@ use ssh::{
     authenticate_with_strategy,
 };
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
@@ -306,6 +308,7 @@ impl RusshSftpClient {
         total_size: u64,
         cancelled: Arc<AtomicBool>,
         progress: &(dyn Fn(TransferProgress) + Send + Sync),
+        times: RemoteTimes,
     ) -> Result<()> {
         // 打开远程文件
         let handle_result = raw_session
@@ -450,6 +453,9 @@ impl RusshSftpClient {
             .await
             .map_err(|e| anyhow!("Failed to sync local file: {}", e))?;
 
+        // 句柄已关闭，此时恢复远程时间戳
+        times.apply_to_path(Path::new(local_path));
+
         // 关闭远程文件 handle
         let _ = raw_session.close(file_handle).await;
 
@@ -470,6 +476,7 @@ impl RusshSftpClient {
         start_time: Instant,
         cancelled: Arc<AtomicBool>,
         progress: &(dyn Fn(TransferProgress) + Send + Sync),
+        times: RemoteTimes,
     ) -> Result<()> {
         let handle_result = raw_session
             .open(remote_path, OpenFlags::READ, FileAttributes::default())
@@ -585,6 +592,9 @@ impl RusshSftpClient {
             .await
             .map_err(|e| anyhow!("Failed to sync local file: {}", e))?;
 
+        // 句柄已关闭，此时恢复远程时间戳
+        times.apply_to_path(Path::new(local_path));
+
         let _ = raw_session.close(file_handle).await;
 
         Ok(())
@@ -598,6 +608,7 @@ impl RusshSftpClient {
         total_size: u64,
         cancelled: Arc<AtomicBool>,
         progress: ProgressCallback,
+        times: RemoteTimes,
     ) -> Result<()> {
         let mut remote_file = self
             .sftp
@@ -676,6 +687,9 @@ impl RusshSftpClient {
             .sync_all()
             .await
             .map_err(|e| anyhow!("Failed to sync local file: {}", e))?;
+
+        // 句柄已关闭，此时恢复远程时间戳
+        times.apply_to_path(Path::new(local_path));
 
         Ok(())
     }
@@ -872,16 +886,23 @@ impl SftpClient for RusshSftpClient {
             let is_dir = metadata.is_dir();
             let permissions = metadata.permissions.unwrap_or(0);
 
+            // 部分服务端用 0 表示"未知时间"，与缺失一并回退到列表时刻。
             let modified = metadata
                 .mtime
-                .and_then(|mtime| UNIX_EPOCH.checked_add(Duration::from_secs(mtime as u64)))
+                .filter(|mtime| *mtime != 0)
+                .map(unix_secs_to_system_time)
                 .unwrap_or_else(SystemTime::now);
+            let atime = metadata
+                .atime
+                .filter(|atime| *atime != 0)
+                .map(unix_secs_to_system_time);
 
             entries.push(FileEntry {
                 name: file_name.clone(),
                 path: file_name,
                 size,
                 modified,
+                atime,
                 is_dir,
                 permissions,
             });
@@ -914,6 +935,7 @@ impl SftpClient for RusshSftpClient {
             .map_err(|e| anyhow!("Failed to get remote file metadata: {}", e))?;
 
         let total_size = metadata.size.unwrap_or(0);
+        let times = RemoteTimes::from_sftp_attrs(metadata.atime, metadata.mtime);
 
         // 大文件走流水线下载
         if total_size > PIPELINE_THRESHOLD {
@@ -932,6 +954,7 @@ impl SftpClient for RusshSftpClient {
                             total_size,
                             cancelled,
                             progress,
+                            times,
                         )
                         .await;
                 }
@@ -944,6 +967,7 @@ impl SftpClient for RusshSftpClient {
                 total_size,
                 Arc::clone(&cancelled),
                 &progress,
+                times,
             )
             .await;
 
@@ -955,8 +979,15 @@ impl SftpClient for RusshSftpClient {
             return result;
         }
 
-        self.serial_download_file(remote_path, local_path, total_size, cancelled, progress)
-            .await
+        self.serial_download_file(
+            remote_path,
+            local_path,
+            total_size,
+            cancelled,
+            progress,
+            times,
+        )
+        .await
     }
 
     async fn upload_with_progress(
@@ -1281,6 +1312,7 @@ impl SftpClient for RusshSftpClient {
                     path: full_path,
                     size: entry.size,
                     modified: entry.modified,
+                    atime: entry.atime,
                     is_dir: entry.is_dir,
                     permissions: entry.permissions,
                 });
@@ -1300,6 +1332,18 @@ impl SftpClient for RusshSftpClient {
         let entries = self
             .list_dir_recursive(remote_path, cancelled.clone())
             .await?;
+        // 根目录自身不在 entries 中，单独取一次时间，等全部子项写完后再应用。
+        let root_times = match self.sftp.metadata(remote_path).await {
+            Ok(attrs) => RemoteTimes::from_sftp_attrs(attrs.atime, attrs.mtime),
+            Err(error) => {
+                tracing::debug!(
+                    "Failed to read metadata for remote directory {}: {}",
+                    remote_path,
+                    error
+                );
+                RemoteTimes::default()
+            }
+        };
 
         let total_size: u64 = entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
         let mut transferred: u64 = 0;
@@ -1312,6 +1356,7 @@ impl SftpClient for RusshSftpClient {
 
         let mut dirs: Vec<&FileEntry> = entries.iter().filter(|e| e.is_dir).collect();
         dirs.sort_by_key(|dir| dir.path.len());
+        let mut dir_times: Vec<(std::path::PathBuf, RemoteTimes)> = Vec::new();
         for dir_entry in dirs {
             ensure_not_cancelled(&cancelled)?;
             let relative = dir_entry
@@ -1334,6 +1379,7 @@ impl SftpClient for RusshSftpClient {
             let local_dir = base_local.join(relative);
             std::fs::create_dir_all(&local_dir)
                 .map_err(|e| anyhow!("Failed to create directory {:?}: {}", local_dir, e))?;
+            dir_times.push((local_dir, RemoteTimes::from_file_entry(dir_entry)));
         }
 
         let files: Vec<&FileEntry> = entries.iter().filter(|e| !e.is_dir).collect();
@@ -1403,6 +1449,7 @@ impl SftpClient for RusshSftpClient {
                         start_time,
                         Arc::clone(&cancelled),
                         &progress,
+                        RemoteTimes::from_file_entry(file_entry),
                     )
                     .await;
 
@@ -1474,7 +1521,13 @@ impl SftpClient for RusshSftpClient {
                 .sync_all()
                 .await
                 .map_err(|e| anyhow!("Failed to sync local file: {}", e))?;
+
+            RemoteTimes::from_file_entry(file_entry).apply_to_path(&local_file);
         }
+
+        // 全部文件写完后再恢复目录时间，避免子项写入刷新父目录 mtime。
+        dir_times.push((base_local.to_path_buf(), root_times));
+        apply_dir_times(dir_times);
 
         progress(TransferProgress {
             transferred,
