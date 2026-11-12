@@ -300,6 +300,7 @@ impl DatabaseEventHandler {
                                 node,
                                 global_state,
                                 tree_view.clone(),
+                                Some(objects_panel.clone()),
                                 window,
                                 cx,
                             );
@@ -323,6 +324,7 @@ impl DatabaseEventHandler {
                                 node,
                                 global_state,
                                 tree_view.clone(),
+                                Some(objects_panel.clone()),
                                 window,
                                 cx,
                             );
@@ -485,6 +487,48 @@ impl DatabaseEventHandler {
                             window,
                             cx,
                         );
+                    }
+                    DatabaseObjectsEvent::RenameTable { node } => {
+                        Self::handle_rename_table(
+                            node.clone(),
+                            global_state,
+                            tree_view,
+                            Some(objects_panel.clone()),
+                            window,
+                            cx,
+                        );
+                    }
+                    DatabaseObjectsEvent::CopyTable { node } => {
+                        Self::handle_copy_table(
+                            node.clone(),
+                            global_state,
+                            tree_view,
+                            objects_panel.clone(),
+                            window,
+                            cx,
+                        );
+                    }
+                    DatabaseObjectsEvent::TruncateTable { node } => {
+                        Self::handle_truncate_table(
+                            node.clone(),
+                            global_state,
+                            tree_view,
+                            Some(objects_panel.clone()),
+                            window,
+                            cx,
+                        );
+                    }
+                    DatabaseObjectsEvent::DumpSql { node, mode } => {
+                        Self::handle_dump_sql_file(node.clone(), *mode, global_state, window, cx);
+                    }
+                    DatabaseObjectsEvent::ImportData { node } => {
+                        Self::handle_import_data(node.clone(), window, cx);
+                    }
+                    DatabaseObjectsEvent::ExportData { node } => {
+                        Self::handle_export_data(node.clone(), global_state, window, cx);
+                    }
+                    DatabaseObjectsEvent::DataTransfer { node } => {
+                        Self::handle_data_transfer(node.clone(), global_state, window, cx);
                     }
                     DatabaseObjectsEvent::OpenViewData { node } => {
                         Self::handle_open_view_data(node.clone(), tab_container, window, cx);
@@ -2806,6 +2850,7 @@ impl DatabaseEventHandler {
         node: DbNode,
         global_state: GlobalDbState,
         tree_view: Entity<DbTreeView>,
+        objects_panel: Option<Entity<DatabaseObjectsPanel>>,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -2833,6 +2878,7 @@ impl DatabaseEventHandler {
             let state = global_state.clone();
             let input = input_state.clone();
             let tree = tree_view.clone();
+            let panel = objects_panel.clone();
 
             dialog
                 .overlay(false)
@@ -2876,6 +2922,7 @@ impl DatabaseEventHandler {
                     let meta = meta.clone();
                     let state = state.clone();
                     let tree = tree.clone();
+                    let panel = panel.clone();
 
                     cx.spawn(async move |cx: &mut AsyncApp| {
                         let old_name_log = old_name.clone();
@@ -2902,6 +2949,13 @@ impl DatabaseEventHandler {
                                     tree.update(cx, |tree, cx| {
                                         tree.refresh_tree(db_node_id, cx);
                                     });
+                                    // 表列表页也需同步新名称
+                                    if let Some(panel) = panel.clone() {
+                                        let state_for_refresh = state.clone();
+                                        panel.update(cx, |panel, cx| {
+                                            panel.refresh(state_for_refresh, cx);
+                                        });
+                                    }
                                     Self::show_success_async(
                                         cx,
                                         t!(
@@ -3125,6 +3179,7 @@ impl DatabaseEventHandler {
         node: DbNode,
         global_state: GlobalDbState,
         _tree_view: Entity<DbTreeView>,
+        objects_panel: Option<Entity<DatabaseObjectsPanel>>,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -3138,6 +3193,7 @@ impl DatabaseEventHandler {
             let meta = metadata.clone();
             let state = global_state.clone();
             let tbl_name_display = table_name.clone();
+            let panel = objects_panel.clone();
 
             dialog
                 .overlay(false)
@@ -3161,6 +3217,7 @@ impl DatabaseEventHandler {
                     let meta = meta.clone();
                     let state = state.clone();
                     let tbl_name_log = tbl_name.clone();
+                    let panel = panel.clone();
 
                     cx.spawn(async move |cx: &mut AsyncApp| {
                         let database = meta
@@ -3181,6 +3238,13 @@ impl DatabaseEventHandler {
                         match task {
                             Ok(_) => {
                                 let _ = cx.update(|cx| {
+                                    // 列表中的行数等统计随之更新
+                                    if let Some(panel) = panel.clone() {
+                                        let state_for_refresh = state.clone();
+                                        panel.update(cx, |panel, cx| {
+                                            panel.refresh(state_for_refresh, cx);
+                                        });
+                                    }
                                     Self::show_success_async(
                                         cx,
                                         t!(

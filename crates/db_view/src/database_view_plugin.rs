@@ -1,12 +1,12 @@
-use db::DbNodeType;
 use db::plugin::DatabasePlugin;
 use db::plugin_manifest::{
     DatabaseActionDescriptor, DatabaseActionId, DatabaseActionPlacement,
     DatabaseActionToolbarScope, DatabaseCapabilities, DatabaseFormKind, DatabaseUiManifest,
 };
+use db::{DbNode, DbNodeType};
 use gpui::{App, AppContext, Entity, Window};
 use gpui_component::IconName;
-use one_core::storage::DatabaseType;
+use one_core::storage::{ActiveConnections, DatabaseType};
 
 use crate::common::db_connection_form::DbConnectionForm;
 use crate::common::manifest_bridge::{
@@ -613,6 +613,22 @@ pub fn create_schema_editor_view_for(
         window,
         cx,
     )
+}
+
+/// 连接是否处于激活状态。树菜单与对象列表右键菜单共用，保证禁用态一致。
+pub(crate) fn is_connection_active(node: &DbNode, cx: &impl AppContext) -> bool {
+    match node.connection_id.parse::<i64>() {
+        Ok(conn_id) => {
+            cx.read_global::<ActiveConnections, _>(|active, _| active.is_active(conn_id))
+        }
+        Err(_) => {
+            tracing::debug!(
+                "non-numeric connection id, treating as inactive: {}",
+                node.connection_id
+            );
+            false
+        }
+    }
 }
 
 pub fn build_context_menu_for(

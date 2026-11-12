@@ -1,5 +1,8 @@
-use crate::database_view_plugin::{ToolbarButtonType, build_toolbar_buttons_for};
-use crate::db_tree_view::get_icon_for_node_type;
+use crate::database_view_plugin::{
+    ContextMenuEvent, ContextMenuItem, ToolbarButtonType, build_context_menu_for,
+    build_toolbar_buttons_for, is_connection_active,
+};
+use crate::db_tree_view::{DbTreeViewEvent, SqlDumpMode, get_icon_for_node_type};
 use crate::search_shortcut::{
     DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
 };
@@ -14,6 +17,7 @@ use gpui_component::WindowExt;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::label::Label;
+use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::table::{Table, TableDelegate, TableEvent, TableState};
 use gpui_component::{
@@ -31,6 +35,25 @@ use rust_i18n::t;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// 可见行号 → 底层行号。`build_node_for_row`、`render_td` 与右键菜单必须共用
+/// 这一映射，保证过滤生效时菜单仍指向正确的行。
+fn original_row_for_visible(filtered_rows: &[usize], row_ix: usize) -> Option<usize> {
+    filtered_rows.get(row_ix).copied()
+}
+
+/// 在完整的行数据中查找节点，忽略搜索过滤条件。
+fn node_in_rows(
+    node_id: &str,
+    db_node_type: DbNodeType,
+    current_node: Option<&DbNode>,
+    rows: &[Vec<String>],
+) -> bool {
+    rows.iter().any(|row| {
+        DatabaseObjects::build_node_from_object_row(db_node_type, current_node, row)
+            .is_some_and(|node| node.id == node_id)
+    })
+}
 
 fn format_timestamp(ts: i64) -> String {
     use chrono::{DateTime, Local};
@@ -72,8 +95,29 @@ pub enum DatabaseObjectsEvent {
     /// 设计表（新建或编辑）
     DesignTable { node: DbNode },
 
+    /// 重命名表
+    RenameTable { node: DbNode },
+
+    /// 复制表
+    CopyTable { node: DbNode },
+
+    /// 清空表
+    TruncateTable { node: DbNode },
+
     /// 删除表
     DeleteTable { node: DbNode },
+
+    /// 转储 SQL
+    DumpSql { node: DbNode, mode: SqlDumpMode },
+
+    /// 导入数据
+    ImportData { node: DbNode },
+
+    /// 导出表数据
+    ExportData { node: DbNode },
+
+    /// 数据传输
+    DataTransfer { node: DbNode },
 
     /// 打开视图数据
     OpenViewData { node: DbNode },
@@ -123,6 +167,9 @@ pub struct DatabaseObjectsTableDelegate {
     pub rows: Vec<Vec<String>>,
     pub filtered_rows: Vec<usize>,
     pub db_node_type: DbNodeType,
+    /// 宿主对象列表页，右键菜单通过它按需取节点并派发操作。
+    /// 只持弱引用，避免 delegate 与页面互相持有。
+    pub objects: Option<WeakEntity<DatabaseObjects>>,
 }
 
 impl Default for DatabaseObjectsTableDelegate {
@@ -132,6 +179,7 @@ impl Default for DatabaseObjectsTableDelegate {
             rows: vec![],
             filtered_rows: vec![],
             db_node_type: DbNodeType::default(),
+            objects: None,
         }
     }
 }
@@ -193,7 +241,7 @@ impl TableDelegate for DatabaseObjectsTableDelegate {
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        let Some(&original_row) = self.filtered_rows.get(row_ix) else {
+        let Some(original_row) = original_row_for_visible(&self.filtered_rows, row_ix) else {
             return div().size_full().into_any_element();
         };
         let Some(row_values) = self.rows.get(original_row) else {
@@ -226,6 +274,205 @@ impl TableDelegate for DatabaseObjectsTableDelegate {
             div().size_full().child(cell_value).into_any_element()
         }
     }
+
+    /// 表列表行右键菜单，内容与左侧树 Table 节点一致。
+    ///
+    /// `row_ix` 是过滤后的可见行号（`rows_count == filtered_rows.len()`），
+    /// 与 `render_td` 一样通过 `original_row_for_visible` 映射到 delegate 自身
+    /// 的数据，避免实体已刷新而画面尚未重绘时指向错误的表。
+    /// 若未来实现 `perform_sort`，排序索引也必须在此处参与映射。
+    fn context_menu(
+        &mut self,
+        row_ix: usize,
+        menu: PopupMenu,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> PopupMenu {
+        // 仅表列表提供该菜单；其他对象列表与无宿主持有时原样返回。
+        if self.db_node_type != DbNodeType::Table {
+            return menu;
+        }
+        let Some(host) = self.objects.as_ref().and_then(WeakEntity::upgrade) else {
+            return menu;
+        };
+
+        // 目标行必须从 delegate 自身数据解析，与 render_td 同源。
+        let Some(original_row) = original_row_for_visible(&self.filtered_rows, row_ix) else {
+            return menu;
+        };
+        let Some(row) = self.rows.get(original_row) else {
+            return menu;
+        };
+
+        // 父节点（数据库 / schema）上下文来自实体。
+        let Some(parent) = host.read(cx).current_node.clone() else {
+            return menu;
+        };
+        let Some(node) =
+            DatabaseObjects::build_node_from_object_row(self.db_node_type, Some(&parent), row)
+        else {
+            return menu;
+        };
+
+        let is_active = is_connection_active(&node, cx);
+        let menu = append_context_menu_items(
+            menu,
+            build_context_menu_for(node.database_type, &node.id, DbNodeType::Table, cx),
+            &node,
+            is_active,
+            window,
+            cx,
+            host.downgrade(),
+        );
+
+        // 与树菜单一致：末尾提供刷新。刷新的是整个列表的父节点。
+        menu.item(PopupMenuItem::new(t!("Common.refresh")).on_click({
+            let host = host.downgrade();
+            move |_, _, cx| {
+                let Some(host) = host.upgrade() else {
+                    return;
+                };
+                host.update(cx, |host, cx| {
+                    if let Some(node) = host.current_node.clone() {
+                        cx.emit(DatabaseObjectsEvent::Refresh { node });
+                    } else {
+                        tracing::debug!("refresh requested without a current node");
+                    }
+                });
+            }
+        }))
+    }
+}
+
+/// 把树菜单项渲染为 PopupMenu；事件统一转换为携带当前行节点的
+/// `DatabaseObjectsEvent`，由宿主页签派发。
+fn append_context_menu_items(
+    mut menu: PopupMenu,
+    items: Vec<ContextMenuItem>,
+    node: &DbNode,
+    is_active: bool,
+    window: &mut Window,
+    cx: &mut App,
+    host: WeakEntity<DatabaseObjects>,
+) -> PopupMenu {
+    for item in items {
+        match item {
+            ContextMenuItem::Item {
+                label,
+                event,
+                requires_active,
+            } => {
+                let ContextMenuEvent::TreeEvent(tree_event) = event else {
+                    continue;
+                };
+                let Some(objects_event) = objects_event_for_tree_event(node, tree_event) else {
+                    tracing::debug!("unmapped tree event skipped in objects row menu");
+                    continue;
+                };
+                let node_id = node.id.clone();
+                let host = host.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(label)
+                        .disabled(requires_active && !is_active)
+                        .on_click(move |_, _, cx| {
+                            let Some(host) = host.upgrade() else {
+                                return;
+                            };
+                            host.update(cx, |host, cx| {
+                                // 菜单打开期间列表可能已刷新；目标节点不存在时忽略，
+                                // 避免对已被改名/删除的表执行破坏性操作。
+                                if !host.contains_node(&node_id) {
+                                    tracing::debug!(
+                                        "context menu target no longer exists: {}",
+                                        node_id
+                                    );
+                                    return;
+                                }
+                                cx.emit(objects_event.clone());
+                            });
+                        }),
+                );
+            }
+            ContextMenuItem::Separator => {
+                menu = menu.separator();
+            }
+            ContextMenuItem::Submenu {
+                label,
+                items,
+                requires_active,
+            } => {
+                let submenu = PopupMenu::build(window, cx, {
+                    let node = node.clone();
+                    let host = host.clone();
+                    move |submenu, window, cx| {
+                        append_context_menu_items(
+                            submenu, items, &node, is_active, window, cx, host,
+                        )
+                    }
+                });
+                menu = menu.item(
+                    PopupMenuItem::submenu(label, submenu).disabled(requires_active && !is_active),
+                );
+            }
+        }
+    }
+    menu
+}
+
+/// 树菜单事件到对象列表事件的映射。只映射表相关动作，
+/// 其余变体显式返回 None，新增变体时由编译器强制在此同步处理。
+fn objects_event_for_tree_event(
+    node: &DbNode,
+    event: DbTreeViewEvent,
+) -> Option<DatabaseObjectsEvent> {
+    Some(match event {
+        DbTreeViewEvent::OpenTableData { .. } => {
+            DatabaseObjectsEvent::OpenTableData { node: node.clone() }
+        }
+        DbTreeViewEvent::DesignTable { .. } => {
+            DatabaseObjectsEvent::DesignTable { node: node.clone() }
+        }
+        DbTreeViewEvent::RenameTable { .. } => {
+            DatabaseObjectsEvent::RenameTable { node: node.clone() }
+        }
+        DbTreeViewEvent::CopyTable { .. } => DatabaseObjectsEvent::CopyTable { node: node.clone() },
+        DbTreeViewEvent::TruncateTable { .. } => {
+            DatabaseObjectsEvent::TruncateTable { node: node.clone() }
+        }
+        DbTreeViewEvent::DeleteTable { .. } => {
+            DatabaseObjectsEvent::DeleteTable { node: node.clone() }
+        }
+        DbTreeViewEvent::ImportData { .. } => {
+            DatabaseObjectsEvent::ImportData { node: node.clone() }
+        }
+        DbTreeViewEvent::ExportData { .. } => {
+            DatabaseObjectsEvent::ExportData { node: node.clone() }
+        }
+        DbTreeViewEvent::DataTransfer { .. } => {
+            DatabaseObjectsEvent::DataTransfer { node: node.clone() }
+        }
+        DbTreeViewEvent::DumpSqlFile { mode, .. } => DatabaseObjectsEvent::DumpSql {
+            node: node.clone(),
+            mode,
+        },
+        DbTreeViewEvent::CloseConnection { .. }
+        | DbTreeViewEvent::DeleteConnection { .. }
+        | DbTreeViewEvent::CreateDatabase { .. }
+        | DbTreeViewEvent::EditDatabase { .. }
+        | DbTreeViewEvent::CloseDatabase { .. }
+        | DbTreeViewEvent::DeleteDatabase { .. }
+        | DbTreeViewEvent::CreateSchema { .. }
+        | DbTreeViewEvent::DeleteSchema { .. }
+        | DbTreeViewEvent::OpenViewData { .. }
+        | DbTreeViewEvent::DeleteView { .. }
+        | DbTreeViewEvent::CreateNewQuery { .. }
+        | DbTreeViewEvent::OpenNamedQuery { .. }
+        | DbTreeViewEvent::RenameQuery { .. }
+        | DbTreeViewEvent::DeleteQuery { .. }
+        | DbTreeViewEvent::RunSqlFile { .. }
+        | DbTreeViewEvent::NodeSelected { .. }
+        | DbTreeViewEvent::LocateActiveTab => return None,
+    })
 }
 
 pub struct DatabaseObjects {
@@ -489,11 +736,13 @@ impl DatabaseObjects {
 
     /// 同步 Table delegate 数据并刷新列组
     fn sync_table_delegate(&mut self, cx: &mut Context<Self>) {
+        let objects = cx.entity().downgrade();
         self.table.update(cx, |state, cx| {
             state.delegate_mut().columns = self.columns.clone();
             state.delegate_mut().rows = self.rows.clone();
             state.delegate_mut().filtered_rows = self.filtered_rows.clone();
             state.delegate_mut().db_node_type = self.db_node_type.clone();
+            state.delegate_mut().objects = Some(objects);
             state.refresh(cx);
         });
     }
@@ -642,10 +891,21 @@ impl DatabaseObjects {
 
     fn build_node_for_row(&self, row_ix: usize) -> Option<DbNode> {
         let db_node_type = self.db_node_type.clone();
-        let original_row = self.filtered_rows.get(row_ix).copied()?;
+        let original_row = original_row_for_visible(&self.filtered_rows, row_ix)?;
         let row_data = self.rows.get(original_row)?;
 
         Self::build_node_from_object_row(db_node_type, self.current_node.as_ref(), row_data)
+    }
+
+    /// 在**未过滤**的完整列表中确认节点仍然存在。
+    /// 右键菜单点击时用它兜底：菜单打开期间列表可能已被刷新或搜索条件变化。
+    fn contains_node(&self, node_id: &str) -> bool {
+        node_in_rows(
+            node_id,
+            self.db_node_type,
+            self.current_node.as_ref(),
+            &self.rows,
+        )
     }
 
     fn build_node_from_object_row(
@@ -1051,11 +1311,13 @@ impl Render for DatabaseObjects {
         );
 
         // Update delegate with current data (no refresh here, only when data actually changes)
+        let objects = cx.entity().downgrade();
         self.table.update(cx, |state, _cx| {
             state.delegate_mut().columns = self.columns.clone();
             state.delegate_mut().rows = self.rows.clone();
             state.delegate_mut().filtered_rows = self.filtered_rows.clone();
             state.delegate_mut().db_node_type = self.db_node_type.clone();
+            state.delegate_mut().objects = Some(objects);
         });
 
         v_flex()
@@ -1308,6 +1570,111 @@ mod object_row_tests {
             Some("users"),
             node.metadata.get("table").map(String::as_str)
         );
+    }
+
+    fn table_node() -> DbNode {
+        let mut metadata = HashMap::new();
+        metadata.insert("database".to_string(), "app_db".to_string());
+        metadata.insert("schema".to_string(), "public".to_string());
+        metadata.insert("table".to_string(), "users".to_string());
+        DbNode::new(
+            "conn1:app_db:public:users",
+            "users",
+            DbNodeType::Table,
+            "conn1".to_string(),
+            DatabaseType::PostgreSQL,
+        )
+        .with_metadata(metadata)
+    }
+
+    #[test]
+    fn visible_row_maps_through_filter() {
+        let filtered_rows = vec![2, 0, 1];
+
+        assert_eq!(original_row_for_visible(&filtered_rows, 0), Some(2));
+        assert_eq!(original_row_for_visible(&filtered_rows, 2), Some(1));
+        assert_eq!(original_row_for_visible(&filtered_rows, 3), None);
+    }
+
+    #[test]
+    fn node_presence_check_uses_unfiltered_rows() {
+        let parent = database_node();
+        let rows = vec![vec!["users".to_string()], vec!["orders".to_string()]];
+
+        assert!(node_in_rows(
+            "conn1:app_db:table_folder:users",
+            DbNodeType::Table,
+            Some(&parent),
+            &rows
+        ));
+        assert!(!node_in_rows(
+            "conn1:app_db:table_folder:ghost",
+            DbNodeType::Table,
+            Some(&parent),
+            &rows
+        ));
+        // 行被移除后节点不再存在（等价于列表刷新后目标已消失）
+        assert!(!node_in_rows(
+            "conn1:app_db:table_folder:users",
+            DbNodeType::Table,
+            Some(&parent),
+            &rows[1..]
+        ));
+    }
+
+    #[test]
+    fn tree_table_actions_map_to_objects_events() {
+        let node = table_node();
+
+        let rename = objects_event_for_tree_event(
+            &node,
+            DbTreeViewEvent::RenameTable {
+                node_id: node.id.clone(),
+            },
+        );
+        assert!(matches!(
+            rename,
+            Some(DatabaseObjectsEvent::RenameTable { node: mapped }) if mapped.id == node.id
+        ));
+
+        let dump = objects_event_for_tree_event(
+            &node,
+            DbTreeViewEvent::DumpSqlFile {
+                node_id: node.id.clone(),
+                mode: SqlDumpMode::StructureAndData,
+            },
+        );
+        assert!(matches!(
+            dump,
+            Some(DatabaseObjectsEvent::DumpSql {
+                node: mapped,
+                mode: SqlDumpMode::StructureAndData,
+            }) if mapped.id == node.id
+        ));
+
+        let transfer = objects_event_for_tree_event(
+            &node,
+            DbTreeViewEvent::DataTransfer {
+                node_id: node.id.clone(),
+            },
+        );
+        assert!(matches!(
+            transfer,
+            Some(DatabaseObjectsEvent::DataTransfer { node: mapped }) if mapped.id == node.id
+        ));
+    }
+
+    #[test]
+    fn non_table_tree_events_are_not_mapped() {
+        let node = table_node();
+        let event = objects_event_for_tree_event(
+            &node,
+            DbTreeViewEvent::DeleteView {
+                node_id: node.id.clone(),
+            },
+        );
+
+        assert!(event.is_none());
     }
 
     #[test]

@@ -33,7 +33,7 @@ use rust_i18n::t;
 use tracing::log::{error, info, trace, warn};
 
 // 3. 当前 crate 导入（按模块分组）
-use crate::database_view_plugin::build_context_menu_for;
+use crate::database_view_plugin::{build_context_menu_for, is_connection_active};
 use crate::search_shortcut::{
     DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
 };
@@ -2866,12 +2866,7 @@ impl DbTreeView {
         // 判断节点是否处于可操作状态：
         // - 连接必须激活
         // - 非 Connection 节点还需要 children_loaded（即节点已展开加载过）
-        let conn_active = node
-            .connection_id
-            .parse::<i64>()
-            .ok()
-            .map(|conn_id| cx.global::<ActiveConnections>().is_active(conn_id))
-            .unwrap_or(false);
+        let conn_active = is_connection_active(node, cx);
         let is_active =
             conn_active && (node.node_type != DbNodeType::Database || node.children_loaded);
 
