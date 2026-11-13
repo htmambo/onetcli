@@ -19,7 +19,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
     h_flex,
-    input::{Input, InputState},
+    input::{Escape, Input, InputState},
     notification::Notification,
     progress::Progress,
     spinner::Spinner,
@@ -777,6 +777,9 @@ pub struct SftpView {
 
     remote_loading: bool,
 
+    /// 最近一次成功列举并展示的远程目录，用于列举失败时回退路径栏
+    remote_last_listed_path: Option<String>,
+
     progress_refresh_task: Option<gpui::Task<()>>,
     _subscriptions: Vec<gpui::Subscription>,
 
@@ -955,6 +958,7 @@ impl SftpView {
             is_dragging_over_local: false,
             is_dragging_over_remote: false,
             remote_loading: false,
+            remote_last_listed_path: None,
             progress_refresh_task: None,
             _subscriptions: subscriptions,
             connection_name: conn.name,
@@ -1214,6 +1218,7 @@ impl SftpView {
                         .collect();
                     let _ = view.update(cx, |this, cx| {
                         if should_apply_remote_listing(&this.remote_current_path, &listed_path) {
+                            this.remote_last_listed_path = Some(listed_path.clone());
                             let _ = remote_panel.update(cx, |panel, cx| {
                                 panel.set_items(items, cx);
                             });
@@ -1221,16 +1226,26 @@ impl SftpView {
                     });
                 }
                 Ok(Err(e)) => {
-                    let _ = view.update(cx, |this, _cx| {
+                    let _ = view.update(cx, |this, cx| {
                         if should_apply_remote_listing(&this.remote_current_path, &listed_path) {
                             tracing::error!("Failed to list remote directory: {}", e);
+                            this.revert_remote_path_after_listing_failure(&listed_path, cx);
+                            this.push_notification(
+                                Notification::error(t!("Error.read_dir_failed", error = e)),
+                                cx,
+                            );
                         }
                     });
                 }
                 Err(e) => {
-                    let _ = view.update(cx, |this, _cx| {
+                    let _ = view.update(cx, |this, cx| {
                         if should_apply_remote_listing(&this.remote_current_path, &listed_path) {
                             tracing::error!("Task error: {}", e);
+                            this.revert_remote_path_after_listing_failure(&listed_path, cx);
+                            this.push_notification(
+                                Notification::error(t!("Error.read_dir_failed", error = e)),
+                                cx,
+                            );
                         }
                     });
                 }
@@ -1241,6 +1256,43 @@ impl SftpView {
             });
         })
         .detach();
+    }
+
+    /// 列举失败时回退到最近一次成功展示的路径，
+    /// 避免路径栏停留在不可达目录、而文件列表仍显示旧内容。
+    fn revert_remote_path_after_listing_failure(
+        &mut self,
+        failed_path: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.remote_current_path != failed_path {
+            return;
+        }
+        let Some(last_listed) = self.remote_last_listed_path.clone() else {
+            return;
+        };
+
+        self.remote_current_path = last_listed.clone();
+        match self
+            .remote_history
+            .iter()
+            .rposition(|path| path == &last_listed)
+        {
+            Some(pos) => {
+                self.remote_history.truncate(pos + 1);
+                self.remote_history_index = pos;
+            }
+            None => {
+                // 历史中已不含该路径（如导航结果乱序），丢弃失败项后补回
+                self.remote_history.truncate(self.remote_history_index);
+                self.remote_history.push(last_listed.clone());
+                self.remote_history_index = self.remote_history.len() - 1;
+            }
+        }
+        self.remote_panel.update(cx, |panel, cx| {
+            panel.set_current_path(last_listed, cx);
+        });
+        cx.notify();
     }
 
     fn on_local_item_double_click(&mut self, name: String, is_dir: bool, cx: &mut Context<Self>) {
@@ -3875,6 +3927,15 @@ impl SftpView {
                             .items_center()
                             .bg(cx.theme().secondary)
                             .rounded_md()
+                            // 输入框未启用 clean_on_escape 时会把 Escape 冒泡到这里，用于退出编辑态
+                            .on_action(cx.listener(|this, _: &Escape, _window, cx| {
+                                this.cancel_local_path_editing(cx);
+                            }))
+                            // 面板内多数区域没有 track_focus，点击不会转移焦点也不会触发 Blur，
+                            // 因此显式监听点击外部以退出编辑态
+                            .on_mouse_down_out(cx.listener(|this, _, _window, cx| {
+                                this.cancel_local_path_editing(cx);
+                            }))
                             .child(
                                 Input::new(&local_path_input)
                                     .small()
@@ -4021,6 +4082,15 @@ impl SftpView {
                             .items_center()
                             .bg(cx.theme().secondary)
                             .rounded_md()
+                            // 输入框未启用 clean_on_escape 时会把 Escape 冒泡到这里，用于退出编辑态
+                            .on_action(cx.listener(|this, _: &Escape, _window, cx| {
+                                this.cancel_remote_path_editing(cx);
+                            }))
+                            // 面板内多数区域没有 track_focus，点击不会转移焦点也不会触发 Blur，
+                            // 因此显式监听点击外部以退出编辑态
+                            .on_mouse_down_out(cx.listener(|this, _, _window, cx| {
+                                this.cancel_remote_path_editing(cx);
+                            }))
                             .child(
                                 Input::new(&remote_path_input)
                                     .small()
