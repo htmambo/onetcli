@@ -5,6 +5,8 @@ use gpui::App;
 use gpui::Window;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+// `t!` 仅在 Windows/macOS 的置顶窗口错误提示中使用，导入需与使用处保持同一 cfg 门控。
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use rust_i18n::t;
 
 use super::close_guard::{

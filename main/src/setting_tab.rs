@@ -8,6 +8,9 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
     StyleRefinement, Styled, Window, div,
 };
+// 仅 Linux（Deepin 主题探测）分支使用，导入需与使用处保持同一 cfg 门控。
+#[cfg(target_os = "linux")]
+use gpui::WindowAppearance;
 use gpui_component::button::Button;
 #[cfg(target_os = "linux")]
 use gpui_component::linux_prefers_system_window_controls;

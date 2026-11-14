@@ -1,5 +1,9 @@
 use db::GlobalDbState;
 use gpui::{App, Bounds, Pixels, Size, WindowKind, WindowOptions, px, size};
+// 仅 Linux 分支使用 `window_decorations`（客户端装饰），导入必须与使用处保持同一 cfg 门控，
+// 否则在 macOS/Windows 上会被判定为未使用导入而被清理掉。
+#[cfg(target_os = "linux")]
+use gpui::WindowDecorations;
 
 use crate::setting_tab::AppSettings;
 
