@@ -832,6 +832,7 @@ impl PopupMenu {
     fn set_selected_index(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.selected_index != Some(ix) {
             self.selected_index = Some(ix);
+            self.link_active_submenu_parent(cx);
             self.scroll_handle.scroll_to_item(ix);
             cx.notify();
         }
@@ -975,9 +976,10 @@ impl PopupMenu {
     }
 
     fn dismiss(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_submenu().is_some() {
-            return;
-        }
+        // 关闭前清掉子菜单选择态：子菜单项 hover 展开后 selected_index 不会
+        // 自动复位（见 render_item 的 TODO），若因此早退，Esc 与点击外部关闭
+        // 会被永久吞掉，菜单再也关不上。
+        self.selected_index = None;
 
         cx.emit(DismissEvent);
 
@@ -986,15 +988,44 @@ impl PopupMenu {
             window.focus(action_context, cx);
         }
 
-        let Some(parent_menu) = self.parent_menu.clone() else {
+        // Dismiss parent menu, when this menu is dismissed.
+        // take() 断链：防止实体复用时残留指向已释放父菜单的弱引用，
+        // 同时保证异常成环时递归也能终止。
+        let Some(parent_menu) = self.parent_menu.take() else {
             return;
         };
-
-        // Dismiss parent menu, when this menu is dismissed
         _ = parent_menu.update(cx, |view, cx| {
-            view.selected_index = None;
             view.dismiss(&Cancel, window, cx);
         });
+    }
+
+    /// 选中子菜单项时补全其 parent 链（覆写，不判空）。
+    ///
+    /// 外部通过 `PopupMenuItem::submenu(label, entity)` 直接挂载的子菜单未经
+    /// `submenu_with_icon` 建立 parent 链；且实体可能被调用方缓存复用，
+    /// 覆写可自愈上次挂载留下的陈旧指向。
+    fn link_active_submenu_parent(&mut self, cx: &mut Context<Self>) {
+        if let Some(submenu) = self.active_submenu() {
+            let parent_menu = cx.entity().downgrade();
+            submenu.update(cx, |view, _| view.parent_menu = Some(parent_menu));
+        }
+    }
+
+    /// 点击位置是否落在本菜单任一已展开的（含嵌套）子菜单内。
+    fn is_click_in_open_submenu(&self, position: &Point<Pixels>, cx: &App) -> bool {
+        const MAX_SUBMENU_DEPTH: usize = 16;
+
+        let mut submenu = self.active_submenu();
+        for _ in 0..MAX_SUBMENU_DEPTH {
+            let Some(menu) = submenu else { return false };
+            let view = menu.read(cx);
+            // 首帧 on_prepaint 尚未写入时 bounds 为零值，跳过避免误判
+            if view.bounds.size.width > px(0.) && view.bounds.contains(position) {
+                return true;
+            }
+            submenu = view.active_submenu();
+        }
+        false
     }
 
     fn handle_dismiss(
@@ -1003,6 +1034,13 @@ impl PopupMenu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 点击落在任一已展开的（嵌套）子菜单内：保持本菜单打开。
+        // 原先由 dismiss 的 active_submenu 早退间接兜底，早退移除后
+        // 改为沿子菜单链做显式 bounds 判断。
+        if self.is_click_in_open_submenu(position, cx) {
+            return;
+        }
+
         // Do not dismiss, if click inside the parent menu
         if let Some(parent) = self.parent_menu.as_ref() {
             if let Some(parent) = parent.upgrade() {
@@ -1130,7 +1168,7 @@ impl PopupMenu {
             .selected(selected)
             .on_hover(cx.listener(move |this, hovered, _, cx| {
                 if *hovered {
-                    this.selected_index = Some(ix);
+                    this.set_selected_index(ix, cx);
                 } else if !is_submenu && this.selected_index == Some(ix) {
                     // TODO: Better handle the submenu unselection when hover out
                     this.selected_index = None;
