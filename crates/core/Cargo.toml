@@ -41,3 +41,4 @@ ssh.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+gpui = { workspace = true, features = ["test-support"] }

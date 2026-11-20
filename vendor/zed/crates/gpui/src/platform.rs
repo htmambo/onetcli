@@ -1249,6 +1249,17 @@ pub struct WindowOptions {
     /// The kind of window to create
     pub kind: WindowKind,
 
+    /// 显式指定的父窗口。
+    ///
+    /// Linux（X11/Wayland）据此建立 transient / modal 关系：X11 设置
+    /// `WM_TRANSIENT_FOR`，Wayland 设置 `xdg_toplevel.set_parent` + `xdg_dialog`。
+    /// 合成器据此保证子窗口位于父窗口之上，并阻断父窗口输入。
+    ///
+    /// `None` 表示沿用平台默认行为（当前为"当前键盘焦点窗口"）。应用启动期
+    /// 主窗口可能尚未获得键盘焦点，此时必须显式指定父窗口，否则弹窗会退化成
+    /// 独立顶层窗口并被主窗口覆盖。
+    pub parent_window: Option<AnyWindowHandle>,
+
     /// Whether the window should be movable by the user
     pub is_movable: bool,
 
@@ -1298,6 +1309,15 @@ pub(crate) struct WindowParams {
     /// The kind of window to create
     #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
     pub kind: WindowKind,
+
+    /// 显式指定的父窗口，仅 Linux（X11/Wayland）读取。
+    ///
+    /// 其他平台自行推导父窗口，该字段在这些平台不被使用。
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "freebsd")),
+        allow(dead_code)
+    )]
+    pub parent_window: Option<AnyWindowHandle>,
 
     /// Whether the window should be movable by the user
     #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
@@ -1381,6 +1401,7 @@ impl Default for WindowOptions {
             focus: true,
             show: true,
             kind: WindowKind::Normal,
+            parent_window: None,
             is_movable: true,
             is_resizable: true,
             is_minimizable: true,

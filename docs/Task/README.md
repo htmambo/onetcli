@@ -7,6 +7,7 @@
 ## 已完成任务 (Archive)
 
 ### 2026-11
+- ✅ [Linux 弹窗显式父窗口（修复启动期「恢复连接」弹窗被主窗口覆盖）](Archive/2026-11/LINUX_DIALOG_PARENT_WINDOW_PLAN.md) - 完成于 2026-11-20（根因：Linux 平台 Dialog 父窗口从「键盘焦点窗口」隐式推断，应用启动期主窗口尚无焦点 → parent 为 None → Wayland 不设 `xdg_toplevel.set_parent`、X11 不设 `WM_TRANSIENT_FOR`，弹窗退化为独立顶层窗口；方案 A：GPUI 新增 `WindowOptions/WindowParams.parent_window`，X11/Wayland 优先按句柄反查父窗口、查不到回退焦点推断，应用侧 `popup_window/options.rs` 显式填父窗口；实机 KWin 验证弹窗 `modal=true` 且 `transientFor` 指向主窗口；one-core 236 单测通过、clippy 无新增告警）
 - ✅ [SFTP 下载保留远程时间戳](Archive/2026-11/SFTP_PRESERVE_TIMESTAMPS_PLAN.md) - 完成于 2026-11-12（新增 `file_times.rs`：`RemoteTimes` 转换 + `apply_to_path`（失败仅 warn）+ `apply_dir_times`（全部子项写完后按深度倒序）；`FileEntry` 增加 `atime: Option<SystemTime>`；单文件 serial/流水线与递归目录下载在 `flush` + `sync_all` 后恢复 mtime/atime；`filetime` 提升为直接依赖（Windows 目录句柄需要 `FILE_FLAG_BACKUP_SEMANTICS`）；创建时间不在 SFTP v3 协议内，明确不保留；13 个单测通过；三轮外部评审 APPROVED；用户实测下载文件 mtime 与远程一致）
 
 ### 2026-09

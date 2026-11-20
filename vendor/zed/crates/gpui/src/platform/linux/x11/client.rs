@@ -1688,10 +1688,35 @@ impl LinuxClient for X11Client {
         params: WindowParams,
     ) -> anyhow::Result<Box<dyn PlatformWindow>> {
         let mut state = self.0.borrow_mut();
-        let parent_window = state
-            .keyboard_focused_window
-            .and_then(|focused_window| state.windows.get(&focused_window))
-            .map(|w| w.window.clone());
+        // 优先使用显式指定的父窗口：应用启动期主窗口可能尚未拿到键盘焦点，
+        // 沿用「键盘焦点窗口」会得到 None，弹窗将退化成独立窗口并被主窗口覆盖。
+        // 线性扫描成本可忽略：窗口数量为个位数，且窗口创建是低频操作。
+        let explicit_parent = match params.parent_window {
+            Some(requested) => {
+                let found = state
+                    .windows
+                    .values()
+                    .find(|window_ref| {
+                        let window_state = window_ref.window.state.borrow();
+                        !window_state.destroyed && window_state.handle == requested
+                    })
+                    .map(|window_ref| window_ref.window.clone());
+                if found.is_none() {
+                    log::warn!(
+                        "explicit parent window {requested:?} not found or destroyed, \
+                         falling back to the keyboard focused window"
+                    );
+                }
+                found
+            }
+            None => None,
+        };
+        let parent_window = explicit_parent.or_else(|| {
+            state
+                .keyboard_focused_window
+                .and_then(|focused_window| state.windows.get(&focused_window))
+                .map(|w| w.window.clone())
+        });
         let x_window = state
             .xcb_connection
             .generate_id()

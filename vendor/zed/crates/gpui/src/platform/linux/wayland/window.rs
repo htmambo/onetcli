@@ -543,6 +543,14 @@ impl WaylandWindowStatePtr {
         self.state.borrow().handle
     }
 
+    /// 返回窗口句柄与销毁标志，单次借用读取。
+    ///
+    /// 销毁中的窗口不能再被用作 transient 父窗口。
+    pub fn handle_and_destroyed(&self) -> (AnyWindowHandle, bool) {
+        let state = self.state.borrow();
+        (state.handle, state.destroyed)
+    }
+
     pub fn surface(&self) -> wl_surface::WlSurface {
         self.state.borrow().surface.clone()
     }

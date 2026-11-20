@@ -3,12 +3,15 @@ use std::sync::Arc;
 use gpui::{
     AnyView, App, AppContext, Bounds, Context, FocusHandle, Focusable, InteractiveElement,
     IntoElement, KeyBinding, ParentElement, Render, SharedString, Size, Styled, Subscription,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, actions, div, px,
-    size,
+    Window, WindowBackgroundAppearance, WindowKind, actions, div, px, size,
 };
 use gpui_component::{
-    ActiveTheme as _, FocusTrapElement, Root, TitleBar, app_style, modal_surface_palette, v_flex,
+    ActiveTheme as _, FocusTrapElement, Root, app_style, modal_surface_palette, v_flex,
 };
+
+mod options;
+
+use options::{PopupWindowConfig, popup_window_options};
 
 actions!(popup_window, [CancelPopup]);
 
@@ -331,24 +334,13 @@ pub fn open_popup_window_with_should_close<F, E, H>(
         let _ = parent_window_handle.update(cx, |_, window, _| {
             window.activate_window();
         });
-        let window_opts = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(window_bounds)),
-            // Dialog windows on macOS are created as sheets (beginSheet) which
-            // don't have standard window buttons — passing a titlebar with
-            // traffic_light_position causes a nil pointer dereference in
-            // MacWindowState::move_traffic_light.
-            titlebar: if matches!(kind, WindowKind::Dialog) {
-                None
-            } else {
-                Some(TitleBar::title_bar_options())
-            },
-            window_min_size: Some(min_size),
+        let window_opts = popup_window_options(PopupWindowConfig {
             kind,
+            bounds: window_bounds,
+            min_size,
             window_background,
-            #[cfg(target_os = "linux")]
-            window_decorations: Some(gpui::WindowDecorations::Client),
-            ..Default::default()
-        };
+            parent_window: parent_window_handle,
+        });
 
         let window = cx.open_window(window_opts, move |window, cx| {
             let on_should_close = Arc::clone(&on_should_close);

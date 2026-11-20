@@ -749,7 +749,30 @@ impl LinuxClient for WaylandClient {
     ) -> anyhow::Result<Box<dyn PlatformWindow>> {
         let mut state = self.0.borrow_mut();
 
-        let parent = state.keyboard_focused_window.clone();
+        // 优先使用显式指定的父窗口：应用启动期主窗口可能尚未拿到键盘焦点，
+        // 沿用「键盘焦点窗口」会得到 None，弹窗将退化成独立窗口并被主窗口覆盖。
+        // 线性扫描成本可忽略：窗口数量为个位数，且窗口创建是低频操作。
+        let explicit_parent = match params.parent_window {
+            Some(requested) => {
+                let found = state
+                    .windows
+                    .values()
+                    .find(|window| {
+                        let (handle, destroyed) = window.handle_and_destroyed();
+                        !destroyed && handle == requested
+                    })
+                    .cloned();
+                if found.is_none() {
+                    log::warn!(
+                        "explicit parent window {requested:?} not found or destroyed, \
+                         falling back to the keyboard focused window"
+                    );
+                }
+                found
+            }
+            None => None,
+        };
+        let parent = explicit_parent.or_else(|| state.keyboard_focused_window.clone());
 
         let (window, surface_id) = WaylandWindow::new(
             handle,

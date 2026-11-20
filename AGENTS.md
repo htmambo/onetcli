@@ -474,6 +474,13 @@
 - **验证方式**：`cargo check -p main`；启动应用后不先点击主窗口，确认恢复连接弹窗始终在主窗口之上，切到其他应用时自动隐藏、切回后恢复。
 - **适用范围**：所有启动早期通过 `open_popup_window` 打开的 `WindowKind::Dialog` 弹窗（恢复连接、启动期提示等）。
 
+- **标题**：Linux（Wayland/X11）弹窗被主窗口覆盖时，先查弹窗的 transient 父窗口有没有被解析出来，不要先调 z-order。
+- **触发信号**：Linux 下弹窗（如「恢复连接」）点击主窗口后被盖住，而同一问题在 macOS 已通过 sheet / 浮层修复、只在 Linux 复现；或同一弹窗"用户手动打开时正常、启动时异常"。
+- **根因 / 约束**：Linux 平台的 Dialog 父窗口不是显式传入，而是从「当前键盘焦点窗口」推断——`vendor/zed/crates/gpui/src/platform/linux/wayland/client.rs` 与 `x11/client.rs` 的 `open_window` 都取 `keyboard_focused_window`，而该值只在收到 `wl_keyboard::Enter` 后才赋值。应用启动阶段主窗口尚未获得键盘焦点，推断结果为 `None`：Wayland 因此不会调用 `xdg_toplevel.set_parent`，`xdg_dialog` 的 modal 缺父 toplevel 而失效；X11 因此不会设置 `WM_TRANSIENT_FOR`。弹窗退化为独立顶层窗口，主窗口 raise 后即覆盖它。Wayland 本身没有 z-order 接口；X11 的 `add_child` 只做输入阻断与联动关闭，不做 stacking。
+- **正确做法**：显式传父窗口，不要依赖焦点推断。`WindowOptions.parent_window`（本仓 vendor 补丁）→ `WindowParams` → 平台层优先按句柄反查父窗口、查不到再回退焦点推断；应用侧在 `crates/core/src/popup_window.rs` 构造窗口选项时填 `parent_window: Some(parent_window_handle)`。父窗口建立 transient/modal 后，合成器负责保证子窗口在父窗口之上并阻断父窗口输入。
+- **验证方式**：`cargo build -p main`；实机启动应用确认弹窗恒在主窗口之上；用 KWin 脚本枚举窗口验证合成器侧关系：`qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript <js>` 后调用 `org.kde.kwin.Scripting.start`，脚本内 `print()` 输出到 `journalctl --user`，确认弹窗 `modal=true` 且 `transientFor` 指向主窗口。
+- **适用范围**：所有通过 `one_core::popup_window::open_popup_window` 打开的独立弹窗（恢复连接、新建连接、LLM 提供商、凭证、数据传输向导等）；Wayland 与 X11 两个后端。
+
 ### 执行原则
 
 1. 先澄清，再实现；先缩小边界，再扩展范围。
