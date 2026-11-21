@@ -1,0 +1,4 @@
+# clippy 差异门禁的豁免名单
+# 每行一个 lint code（不含前缀的 rustc lint 用裸名称，如 dead_code）
+# 例：
+# clippy::expect_used

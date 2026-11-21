@@ -411,6 +411,34 @@
 - **验证方式**：`cargo test -p one-core --lib ai_chat` 全绿。
 - **适用范围**：`crates/core` 所有基于 `created_at` 排序的 repository 查询（已修 `MessageRepository::list_by_session` / `list_recent`）。
 
+- **标题**：GPUI 渲染函数可以借用 `&self`，不必为每帧渲染克隆视图数据。
+- **触发信号**：每帧重建视图时出现大量 `clone()`（深克隆列表、深克隆节点树、每单元格克隆全局设置），怀疑"GPUI 渲染函数必须拥有 `'static` 数据所以只能克隆"。
+- **根因 / 约束**：`IntoElement` 对 `Self` **没有** `'static` 约束，只有 `Self::Element` 要求 `'static`；只要闭包捕获的数据本身是 `'static`（拥有所有权，如 `Arc`/`String`/`Entity`），返回的元素就可以借用 `&self` 的字段。另外 `Entity<T>` 内部是 `AnyEntity + PhantomData<fn(T) -> T>`，因此**无条件** `Send`/`Sync`，实体内部状态里放 `Rc` 是安全的。
+- **正确做法**：把"派生数据"（JSON 反序列化、字幕、搜索字段、元素 id 等）与"视图数据"分离——派生数据在数据变更时算好并缓存到实体字段，渲染时按 `&self` 借用读取；点击回调里需要最新数据时用 `find_connection(id)` 之类的方法回查实体，而不是在闭包里克隆快照。`Cow<'_, T>` 可用于"缓存命中就借用、未命中才拥有"的场景（注意 `Cow` 要求 `T: Clone`）。
+- **验证方式**：`cargo check -p <crate>` 通过；渲染路径上的 `clone()` 数量显著下降；交互行为用回归测试覆盖（缓存命中/失效、点击回查）。
+- **适用范围**：本仓所有 `Render` 实现中每帧克隆数据的场景（首页连接卡片、树形视图、表格、Redis 明细）。
+
+- **标题**：多数据库驱动共用同一组 `ExecOptions` 时，必须逐个驱动核对语义是否真的实现。
+- **触发信号**：表格多行保存"有时原子、有时部分落库"；不同数据库类型行为不一致；`ExecOptions.transactional` 设为 true 但 SQLite 下仍是部分生效。
+- **根因 / 约束**：`ExecOptions` 是跨驱动的统一结构，但各驱动实现程度不同：PostgreSQL / MySQL 的 `execute` 有 `transactional` 分支（driver 级 `client.transaction()`），而 SQLite 的 `execute` 当时**完全没有** `transactional` 分支（只有 `execute_streaming` 有），于是同一个选项在 SQLite 下被静默忽略，表现为多行保存时前面的行已落库、后面的行失败。
+- **正确做法**：新增或修改跨驱动选项时，先 `rg -n "<option_name>" crates/db/src/*/connection.rs` 逐个驱动确认分支存在，缺的补齐（SQLite 用 `conn.execute("BEGIN"/"COMMIT"/"ROLLBACK")` + `is_autocommit()` 判断事务态）；语义差异写进注释。SQLite 补齐后，事务分支与 PostgreSQL / MySQL 对齐：首条出错即中止并回滚。
+- **验证方式**：`cargo check -p db`；对每个支持的事务语义做一次"第二条语句失败 → 第一条不应落库"的验证；`cargo test -p db`。
+- **适用范围**：`crates/db` 下所有 `crates/db/src/*/connection.rs` 的驱动实现，新增 `ExecOptions` 字段时同样适用。
+
+- **标题**：rusqlite 没有 `is_in_transaction`，判断事务态要用 `is_autocommit()`。
+- **触发信号**：需要知道"当前连接是否处于事务中"以决定要不要发 `ROLLBACK`；在 rusqlite 上找 `is_in_transaction` 找不到。
+- **根因 / 约束**：rusqlite 0.38 未暴露 `is_in_transaction`；但它提供 `Connection::is_autocommit()`——autocommit 为 false 即表示连接处于显式事务中（`BEGIN` 之后、`COMMIT`/`ROLLBACK` 之前）。rustsql 连接本身还包在 `Arc<Mutex<Option<Connection>>>` 里，读取状态必须 `spawn_blocking` 拿到锁后调用，不能在异步上下文里同步阻塞。
+- **正确做法**：`spawn_blocking(move || { let guard = conn.lock()...; !conn.is_autocommit() }).await`，并为"取不到连接"等情况保守返回 `true`（宁可多回滚一次，也不要留下脏事务）；驱动侧若需要跟踪脚本里的显式 `BEGIN`/`COMMIT`，用 `AtomicBool` 记录，脚本里最后一次事务控制语句的语义为准。
+- **验证方式**：`cargo test -p db`（含事务状态推断的用例）；对照 PostgreSQL / MySQL 驱动实现确认语义一致。
+- **适用范围**：`crates/db/src/sqlite/connection.rs` 及任何需要判断"是否存在活动事务"的场景。
+
+- **标题**：仓库已有大量历史 clippy 告警时，用"改动行 + 基线"做门禁，不要整体 `-D warnings`。
+- **触发信号**：`cargo clippy --workspace --all-targets` 输出上百条告警；直接加 `-D warnings` 会让 CI 立刻变红，门禁形同虚设。
+- **根因 / 约束**：`Cargo.toml` 的 `[workspace.lints.clippy]` 把 `unwrap_used` / `expect_used` 等设为 `warn`，历史代码存量很大；而 clippy 一次运行会输出全部 crate 的告警，无法按"本次 PR 引入"筛选。
+- **正确做法**：(1) 用 `cargo clippy --workspace --all-targets --message-format=json` 取结构化输出；(2) 用 `git diff -U0 <base>...HEAD` 解析出每个文件的改动行号集合；(3) 把告警的主 span 行号映射回文件，命中改动行才算新增；(4) 存量告警按「文件 + lint code」记入 `scripts/clippy-baseline.txt`；(5) 门禁只覆盖 `main/` 与 `crates/`，排除 `vendor/`。CI 侧 `actions/checkout` 需 `fetch-depth: 0`，否则拿不到 merge base，三点语法会失真。
+- **验证方式**：`python3 scripts/check_clippy_diff.py clippy.json` 对存量分支返回 0、对新增告警返回 1；改动行上的告警修复后门禁转绿。
+- **适用范围**：本仓 CI 的 clippy 门禁（`.github/workflows/ci.yml` 的 "Lint (diff-scoped gate)" 步骤），以及任何"存量告警很多但仍想拦住新增告警"的 Rust 仓库。
+
 - **标题**：工作区出现"成片回退已提交代码"的未提交改动时，优先怀疑文件级同步覆盖，用 reflog + mtime + `git diff <旧提交>` 取证。
 - **触发信号**：`git status` 大量删除且内容恰好等于某个旧提交；被"改"文件的 mtime 全部早于缺失提交的时间；reflog 显示 HEAD 由 checkout/pull 移动。
 - **根因 / 约束**：跨机文件同步（rsync 类、保留 mtime）发生在 git checkout/fast-forward 之后时，会用旧副本覆盖工作区并伪装成"未提交改动"；此时按 diff 直觉提交会抹掉真机上的修复。

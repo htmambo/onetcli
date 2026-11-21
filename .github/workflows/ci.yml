@@ -26,7 +26,11 @@ jobs:
             run_on: windows-latest
     runs-on: ${{ matrix.run_on }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 差异作用域的 clippy 门禁需要 merge base，必须完整克隆
+          fetch-depth: 0
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
@@ -51,7 +55,14 @@ jobs:
       - name: Lint
         if: ${{ matrix.run_on == 'macos-latest' }}
         run: |
-          cargo clippy --workspace --all-targets
+          cargo clippy --workspace --all-targets --message-format=json-diagnostic-rendered-ansi > clippy.json
+      - name: Lint (diff-scoped gate)
+        # 只对本次改动行上的新增 clippy 告警亮红，历史存量告警见 scripts/clippy-baseline.txt
+        if: ${{ matrix.run_on == 'macos-latest' }}
+        env:
+          CLIPPY_DIFF_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python3 scripts/check_clippy_diff.py clippy.json
       - name: Focused checks (macOS)
         if: ${{ matrix.run_on == 'macos-latest' }}
         run: |
