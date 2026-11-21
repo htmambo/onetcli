@@ -13,6 +13,7 @@ use crate::plugin_manifest::{
     ReferenceDataKind,
 };
 use crate::streaming_parser::StreamingSqlParser;
+use crate::table_count_cache::{TableCountCache, table_count_cache_key};
 use crate::types::*;
 use anyhow::{Error, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -322,6 +323,15 @@ pub(crate) fn default_generate_copy_delete_sql<P: DatabasePlugin + ?Sized>(
 #[async_trait]
 pub trait DatabasePlugin: Send + Sync {
     fn name(&self) -> DatabaseType;
+
+    /// 表行数缓存（可选）。
+    ///
+    /// 默认无缓存：每次翻页都重新执行 `COUNT(*)`。
+    /// 持有 [`TableCountCache`] 的实现可以复用计数结果，避免大表翻页反复全表统计；
+    /// 写操作后需要清空缓存（见 [`TableCountCache::clear`]）。
+    fn table_count_cache(&self) -> Option<&TableCountCache> {
+        None
+    }
 
     /// Quote an identifier (table name, column name, etc.) according to database syntax
     fn quote_identifier(&self, identifier: &str) -> String;
@@ -1654,16 +1664,46 @@ pub trait DatabasePlugin: Send + Sync {
         // Build count query
         let count_sql = format!("SELECT COUNT(*) FROM {}{}", table_ref, where_clause);
 
+        // 复用上一次的行数统计：翻页时 COUNT(*) 在大表上是主要耗时来源
+        let count_cache_key = table_count_cache_key(
+            connection.config(),
+            &request.database,
+            request.schema.as_deref(),
+            &request.table,
+            request.where_clause.as_deref(),
+        );
+        let cached_count = self
+            .table_count_cache()
+            .and_then(|cache| cache.get(&count_cache_key));
+
         // Get total count
-        let total_count = match connection.query(&count_sql).await? {
-            SqlResult::Query(result) => result
-                .rows
-                .first()
-                .and_then(|r| r.first())
-                .and_then(|v| v.as_ref())
-                .and_then(|s| s.parse::<usize>().ok())
-                .unwrap_or(0),
-            _ => 0,
+        let total_count = match cached_count {
+            Some(count) => count,
+            None => {
+                // 统计值解析不出来时按 0 处理（与改动前一致），
+                // 但不写进缓存——否则一次解析失败会被缓存成"表是空的"。
+                let parsed = match connection.query(&count_sql).await? {
+                    SqlResult::Query(result) => result
+                        .rows
+                        .first()
+                        .and_then(|r| r.first())
+                        .and_then(|v| v.as_ref())
+                        .and_then(|s| s.parse::<usize>().ok()),
+                    _ => None,
+                };
+                let count = parsed.unwrap_or(0);
+                if let Some(cache) = self.table_count_cache() {
+                    if parsed.is_some() {
+                        cache.put(count_cache_key, count);
+                    } else {
+                        tracing::warn!(
+                            "[{:?}] COUNT(*) 结果无法解析为行数，按 0 处理且不写入缓存",
+                            self.name()
+                        );
+                    }
+                }
+                count
+            }
         };
 
         // Query with pagination, include rowid if supported

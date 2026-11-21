@@ -63,6 +63,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260624000001",
         include_str!("../../migrations/20260624000001_chat_message_tool_calls.sql"),
     ),
+    (
+        "20261121000001",
+        include_str!("../../migrations/20261121000001_chat_message_indexes.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {

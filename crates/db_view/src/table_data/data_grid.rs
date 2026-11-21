@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
@@ -35,6 +37,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::tab_container::TabContainer;
+use one_core::utils::debouncer::Debouncer;
 use one_ui::edit_table::ColumnSort;
 use std::path::PathBuf;
 
@@ -372,6 +375,8 @@ pub struct DataGrid {
     search_input: Entity<InputState>,
     /// 搜索框事件订阅
     _search_sub: Option<Subscription>,
+    /// 本地搜索防抖器
+    search_debouncer: Arc<Debouncer>,
     /// 隐藏的列（本地持久化）
     hidden_columns: HashSet<SharedString>,
     /// 列可见性是否已加载
@@ -431,6 +436,7 @@ impl DataGrid {
             _filter_sub: None,
             search_input,
             _search_sub: None,
+            search_debouncer: Arc::new(Debouncer::new(Duration::from_millis(250))),
             hidden_columns: HashSet::new(),
             column_visibility_loaded: false,
             is_large_text_editor_sidebar_open: false,
@@ -484,7 +490,19 @@ impl DataGrid {
             |this: &mut DataGrid, input, evt: &InputEvent, _window, cx| {
                 if let InputEvent::Change = evt {
                     let query = input.read(cx).text().to_string();
-                    this.apply_row_search_query(query, cx);
+
+                    // 本地搜索会全表重算筛选索引（O(行数 × 列数)），
+                    // 逐键触发会拖慢 UI，这里按 250ms 防抖后再应用。
+                    let debouncer = Arc::clone(&this.search_debouncer);
+
+                    cx.spawn(async move |view, cx| {
+                        if debouncer.debounce(cx).await {
+                            _ = view.update(cx, |this, cx| {
+                                this.apply_row_search_query(query, cx);
+                            });
+                        }
+                    })
+                    .detach();
                 }
             },
         );
@@ -3064,6 +3082,7 @@ impl Clone for DataGrid {
             _filter_sub: None,
             search_input: self.search_input.clone(),
             _search_sub: None,
+            search_debouncer: Arc::clone(&self.search_debouncer),
             hidden_columns: self.hidden_columns.clone(),
             column_visibility_loaded: self.column_visibility_loaded,
             is_large_text_editor_sidebar_open: self.is_large_text_editor_sidebar_open,

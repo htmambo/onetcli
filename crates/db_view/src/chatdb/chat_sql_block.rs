@@ -53,29 +53,10 @@ impl SqlBlockResultState {
         if !container.has_results(cx) {
             return None;
         }
-        // 从容器获取结果统计
-        let results = container.all_results.read(cx);
-        if results.is_empty() {
+        // 从容器获取结果统计（语句列表已保存轻量摘要，无需持有全量结果）
+        let (success_count, error_count, total_rows) = container.statement_stats(cx);
+        if success_count + error_count == 0 {
             return None;
-        }
-
-        let mut total_rows = 0usize;
-        let mut success_count = 0usize;
-        let mut error_count = 0usize;
-
-        for result in results.iter() {
-            match result {
-                db::SqlResult::Query(q) => {
-                    success_count += 1;
-                    total_rows += q.rows.len();
-                }
-                db::SqlResult::Exec(_) => {
-                    success_count += 1;
-                }
-                db::SqlResult::Error(_) => {
-                    error_count += 1;
-                }
-            }
         }
 
         if error_count > 0 {

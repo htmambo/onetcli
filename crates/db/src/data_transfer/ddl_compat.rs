@@ -533,11 +533,11 @@ mod tests {
             "text"
         );
         assert_eq!(render_type(&spec("text[]", p), p), "text[]");
-        rust_i18n::set_locale("zh-CN");
-        assert_eq!(
+        // 变体断言而非 locale 文案：避免 set_locale 与并行测试竞态
+        assert!(matches!(
             column_verdict(&spec("text[]", p), DatabaseType::MySQL),
-            TypeVerdict::Unsupported(t!("DataTransfer.precheck_array_unsupported").to_string())
-        );
+            TypeVerdict::Unsupported(_)
+        ));
     }
 
     #[test]
@@ -606,14 +606,14 @@ mod tests {
             ),
             "numeric(65,30)"
         );
-        rust_i18n::set_locale("zh-CN");
-        assert_eq!(
+        // 变体断言而非 locale 文案：避免 set_locale 与并行测试竞态
+        assert!(matches!(
             column_verdict(
                 &normalize_type("numeric", DatabaseType::PostgreSQL),
                 DatabaseType::MySQL
             ),
-            TypeVerdict::Lossy(t!("DataTransfer.precheck_decimal_precision_fallback").to_string())
-        );
+            TypeVerdict::Lossy(_)
+        ));
     }
 
     #[test]

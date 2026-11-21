@@ -279,10 +279,20 @@ pub trait DbConnection: Sync + Send {
         sender: mpsc::Sender<StreamingProgress>,
     ) -> Result<(), DbError>;
 
+    /// 连接上是否存在活动事务。
+    ///
+    /// 默认返回 `true`（保守策略：仍然发送 ROLLBACK）。
+    /// 能可靠判断事务状态的实现可覆写为 `false`，
+    /// 省掉一次无谓的 ROLLBACK 往返（远程库上这是一次完整网络往返）。
+    async fn has_active_transaction(&self) -> bool {
+        true
+    }
+
     /// Best-effort rollback of any active transaction.
     ///
-    /// 默认实现：对连接执行 `ROLLBACK` 语句。MySQL/PostgreSQL/SQLite/Oracle
-    /// 均支持 ROLLBACK；非事务上下文下通常无副作用或仅发 warning。
+    /// 默认实现：连接上没有活动事务时直接返回，否则对连接执行 `ROLLBACK` 语句。
+    /// MySQL/PostgreSQL/SQLite/Oracle 均支持 ROLLBACK；
+    /// 非事务上下文下通常无副作用或仅发 warning。
     ///
     /// **用途**：在 release_session / close_session 前调用，防止未提交事务
     /// 状态泄漏到下一个使用者（脏连接复用）。
@@ -290,6 +300,9 @@ pub trait DbConnection: Sync + Send {
     /// **错误处理**：失败仅记录 warn，不阻塞 release 流程（连接可能本身已
     /// 损坏或不支持 ROLLBACK）。
     async fn rollback_if_active(&self) -> Result<(), DbError> {
+        if !self.has_active_transaction().await {
+            return Ok(());
+        }
         match self.query("ROLLBACK").await {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -301,5 +314,94 @@ pub trait DbConnection: Sync + Send {
                 Err(e)
             }
         }
+    }
+}
+
+/// 去掉语句开头的注释，便于判断语句类型。
+///
+/// 只处理行注释（`--`）与块注释（`/* */`），够用于"这条语句是不是
+/// 事务控制语句 / 写语句"的判断。
+fn strip_leading_comments(statement: &str) -> &str {
+    let mut rest = statement.trim_start();
+    loop {
+        if let Some(after) = rest.strip_prefix("--") {
+            // 行注释到行尾结束
+            match after.find('\n') {
+                Some(idx) => rest = after[idx + 1..].trim_start(),
+                None => return "",
+            }
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            match after.find("*/") {
+                Some(idx) => rest = after[idx + 2..].trim_start(),
+                None => return "",
+            }
+        } else {
+            return rest;
+        }
+    }
+}
+
+/// 推断脚本执行完毕后是否仍有活动事务。
+///
+/// 输入必须是**已按 SQL 方言切分好的语句**（驱动解析后的结果），
+/// 不能直接对原始脚本文本做 `split(';')`——字符串字面量里的分号会把
+/// 一条语句切成两半，`INSERT ... VALUES ('BEGIN; ROLLBACK;')` 这类内容
+/// 会被误判成事务控制语句，进而跳过必要的 ROLLBACK。
+///
+/// 只认显式的 `BEGIN`/`START TRANSACTION` 与 `COMMIT`/`ROLLBACK`；
+/// 以最后一条事务控制语句为准。判断不出来时返回 `None`，
+/// 调用方按"可能有事务"的保守策略处理。
+pub fn infer_transaction_state(statements: &[String]) -> Option<bool> {
+    let mut state = None;
+    for statement in statements {
+        let trimmed = strip_leading_comments(statement).to_ascii_uppercase();
+        if trimmed.starts_with("BEGIN") || trimmed.starts_with("START TRANSACTION") {
+            state = Some(true);
+        } else if trimmed.starts_with("COMMIT") || trimmed.starts_with("ROLLBACK") {
+            state = Some(false);
+        }
+    }
+    state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::infer_transaction_state;
+
+    #[test]
+    fn infer_transaction_state_识别显式事务控制语句() {
+        let stmts =
+            |items: &[&str]| -> Vec<String> { items.iter().map(|s| s.to_string()).collect() };
+
+        // 没有事务控制语句时判断不出来
+        assert_eq!(infer_transaction_state(&stmts(&["SELECT 1"])), None);
+        // 显式开启事务
+        assert_eq!(infer_transaction_state(&stmts(&["BEGIN"])), Some(true));
+        assert_eq!(
+            infer_transaction_state(&stmts(&["START TRANSACTION"])),
+            Some(true)
+        );
+        assert_eq!(
+            infer_transaction_state(&stmts(&["BEGIN", "INSERT INTO t VALUES (1)"])),
+            Some(true)
+        );
+        // 以最后一条事务控制语句为准
+        assert_eq!(
+            infer_transaction_state(&stmts(&["BEGIN", "INSERT INTO t VALUES (1)", "COMMIT"])),
+            Some(false)
+        );
+        assert_eq!(infer_transaction_state(&stmts(&["ROLLBACK"])), Some(false));
+        // 注释不影响判断
+        assert_eq!(
+            infer_transaction_state(&stmts(&["-- 说明\nBEGIN", "COMMIT"])),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn infer_transaction_state_不受字符串字面量干扰() {
+        // 语句已由方言解析器切分，字面量里的 BEGIN/COMMIT 不应被当成事务控制语句
+        let statements = vec!["INSERT INTO t VALUES ('BEGIN; ROLLBACK;')".to_string()];
+        assert_eq!(infer_transaction_state(&statements), None);
     }
 }

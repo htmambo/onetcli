@@ -19,6 +19,7 @@ use crate::plugin_manifest::{
     DatabaseUiCapabilities, DatabaseUiManifest,
 };
 use crate::sqlite::SqliteDbConnection;
+use crate::table_count_cache::TableCountCache;
 use crate::types::*;
 
 /// SQLite data types (name, description)
@@ -34,13 +35,18 @@ pub const SQLITE_DATA_TYPES: &[(&str, &str)] = &[
 ];
 
 /// SQLite database plugin implementation
-pub struct SqlitePlugin;
+pub struct SqlitePlugin {
+    /// 表行数缓存：翻页时复用 `COUNT(*)` 结果
+    count_cache: TableCountCache,
+}
 
 static SQLITE_UI_MANIFEST: LazyLock<DatabaseUiManifest> = LazyLock::new(build_sqlite_ui_manifest);
 
 impl SqlitePlugin {
     pub fn new() -> Self {
-        Self
+        Self {
+            count_cache: TableCountCache::default(),
+        }
     }
 
     fn build_sqlite_simple_alter_sql(&self, original: &TableDesign, new: &TableDesign) -> String {
@@ -574,6 +580,10 @@ fn sqlite_action_manifest() -> DatabaseActionManifest {
 
 #[async_trait]
 impl DatabasePlugin for SqlitePlugin {
+    fn table_count_cache(&self) -> Option<&TableCountCache> {
+        Some(&self.count_cache)
+    }
+
     fn name(&self) -> DatabaseType {
         DatabaseType::SQLite
     }

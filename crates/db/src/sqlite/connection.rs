@@ -202,6 +202,26 @@ impl SqliteDbConnection {
 
 #[async_trait]
 impl DbConnection for SqliteDbConnection {
+    /// SQLite 能直接读出事务状态（autocommit 关闭即处于事务中）。
+    ///
+    /// 非事务上下文下发送 ROLLBACK 会直接报错，这里先判断一次，
+    /// 省掉一次无谓的语句执行与告警。
+    async fn has_active_transaction(&self) -> bool {
+        let connection = Arc::clone(&self.connection);
+        spawn_blocking(move || {
+            let Ok(guard) = connection.lock() else {
+                // 锁中毒时按保守策略处理，仍然发送 ROLLBACK
+                return true;
+            };
+            match guard.as_ref() {
+                Some(conn) => !conn.is_autocommit(),
+                None => false,
+            }
+        })
+        .await
+        .unwrap_or(true)
+    }
+
     fn config(&self) -> &DbConnectionConfig {
         &self.config
     }
@@ -310,6 +330,29 @@ impl DbConnection for SqliteDbConnection {
             .collect();
         debug!("[SQLite] Split into {} statement(s)", statements.len());
         let mut results = Vec::new();
+        let transactional = options.transactional;
+        // 语句执行过程中的致命错误（锁中毒 / 连接丢失 / 任务 panic）
+        let mut exec_error: Option<DbError> = None;
+
+        if transactional {
+            debug!("[SQLite] Starting transaction...");
+            let connection = Arc::clone(&self.connection);
+            spawn_blocking(move || {
+                let guard = connection
+                    .lock()
+                    .map_err(|e| DbError::Internal(format!("lock poisoned: {}", e)))?;
+                let conn = guard.as_ref().ok_or(DbError::NotConnected)?;
+                conn.execute("BEGIN", []).map_err(|e| {
+                    DbError::transaction_with_source("failed to begin transaction", e)
+                })?;
+                Ok::<_, DbError>(())
+            })
+            .await
+            .map_err(|e| {
+                error!("[SQLite] Task join error: {}", e);
+                DbError::Internal(format!("task join error: {}", e))
+            })??;
+        }
 
         for (idx, sql) in statements.iter().enumerate() {
             let sql = sql.trim();
@@ -332,7 +375,10 @@ impl DbConnection for SqliteDbConnection {
             .into_owned();
             let connection = Arc::clone(&self.connection);
 
-            let result = spawn_blocking(move || {
+            // 语句执行失败时不能提前返回：事务已经开启，
+            // 直接返回会把连接留在"事务未结束"的状态。
+            // 这里把错误记下来，交由事务收尾逻辑统一处理。
+            let result = match spawn_blocking(move || {
                 let guard = connection
                     .lock()
                     .map_err(|e| DbError::Internal(format!("lock poisoned: {}", e)))?;
@@ -341,10 +387,18 @@ impl DbConnection for SqliteDbConnection {
                 Ok(Self::execute_statement(conn, &sql_owned, start))
             })
             .await
-            .map_err(|e| {
-                error!("[SQLite] Task join error: {}", e);
-                DbError::Internal(format!("task join error: {}", e))
-            })??;
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(e)) => {
+                    exec_error = Some(e);
+                    break;
+                }
+                Err(e) => {
+                    error!("[SQLite] Task join error: {}", e);
+                    exec_error = Some(DbError::Internal(format!("task join error: {}", e)));
+                    break;
+                }
+            };
 
             let is_error = result.is_error();
             if is_error {
@@ -356,10 +410,41 @@ impl DbConnection for SqliteDbConnection {
             }
             results.push(result);
 
-            if is_error && options.stop_on_error {
-                debug!("[SQLite] Stopping execution due to error (stop_on_error=true)");
+            // 事务模式下与 PostgreSQL / MySQL 保持一致：首条出错即中止并回滚
+            if is_error && (options.stop_on_error || transactional) {
+                debug!("[SQLite] Stopping execution due to error");
                 break;
             }
+        }
+
+        if transactional {
+            // 出错时（含致命错误）一律回滚，保证连接不会停留在未结束的事务里
+            let has_error = exec_error.is_some() || results.iter().any(|r| r.is_error());
+            let command = if has_error { "ROLLBACK" } else { "COMMIT" };
+            debug!("[SQLite] Finishing transaction with {}", command);
+            let connection = Arc::clone(&self.connection);
+            spawn_blocking(move || {
+                let guard = connection
+                    .lock()
+                    .map_err(|e| DbError::Internal(format!("lock poisoned: {}", e)))?;
+                let conn = guard.as_ref().ok_or(DbError::NotConnected)?;
+                conn.execute(command, []).map_err(|e| {
+                    DbError::transaction_with_source(
+                        format!("failed to {}", command.to_lowercase()),
+                        e,
+                    )
+                })?;
+                Ok::<_, DbError>(())
+            })
+            .await
+            .map_err(|e| {
+                error!("[SQLite] Task join error: {}", e);
+                DbError::Internal(format!("task join error: {}", e))
+            })??;
+        }
+
+        if let Some(e) = exec_error {
+            return Err(e);
         }
 
         debug!(

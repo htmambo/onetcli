@@ -1018,26 +1018,24 @@ impl AiChatPanel {
             let messages: Vec<Message> = {
                 let mut messages = if let Some(sid) = session_id {
                     if let Some(message_repo) = storage_manager.get::<MessageRepository>() {
-                        match message_repo.list_by_session(sid) {
-                            Ok(messages) => {
-                                let mut msgs: Vec<Message> = messages
-                                    .iter()
-                                    .map(|msg| {
-                                        let role = match msg.role.as_str() {
-                                            "user" => Role::User,
-                                            "assistant" => Role::Assistant,
-                                            "system" => Role::System,
-                                            _ => Role::User,
-                                        };
-                                        Message::text(role, &msg.content)
-                                    })
-                                    .collect();
-                                // 限制历史条数
-                                if msgs.len() > history_count {
-                                    msgs = msgs.split_off(msgs.len() - history_count);
-                                }
-                                msgs
-                            }
+                        // 下推 LIMIT：只取最近 history_count 条，
+                        // 避免把整段会话读进内存后再截断
+                        match message_repo.list_by_session_limit(
+                            sid,
+                            i32::try_from(history_count).unwrap_or(i32::MAX),
+                        ) {
+                            Ok(messages) => messages
+                                .iter()
+                                .map(|msg| {
+                                    let role = match msg.role.as_str() {
+                                        "user" => Role::User,
+                                        "assistant" => Role::Assistant,
+                                        "system" => Role::System,
+                                        _ => Role::User,
+                                    };
+                                    Message::text(role, &msg.content)
+                                })
+                                .collect(),
                             Err(_) => vec![Message::text(Role::User, &content)],
                         }
                     } else {
@@ -1524,18 +1522,20 @@ impl AiChatPanel {
     ) -> Vec<Message> {
         let mut messages: Vec<Message> = match session_id {
             Some(sid) => match storage_manager.get::<MessageRepository>() {
-                Some(repo) => match repo.list_by_session(sid) {
-                    Ok(rows) => rows.iter().map(chat_message_to_llm_message).collect(),
-                    Err(_) => vec![Message::text(Role::User, content)],
-                },
+                Some(repo) => {
+                    // 下推 LIMIT：只取最近 history_count 条（0 表示不携带历史）
+                    match repo.list_by_session_limit(
+                        sid,
+                        i32::try_from(history_count).unwrap_or(i32::MAX),
+                    ) {
+                        Ok(rows) => rows.iter().map(chat_message_to_llm_message).collect(),
+                        Err(_) => vec![Message::text(Role::User, content)],
+                    }
+                }
                 None => vec![Message::text(Role::User, content)],
             },
             None => vec![Message::text(Role::User, content)],
         };
-
-        // 从头部截断到 history_count 条（0 表示不携带历史）
-        let keep_from = messages.len().saturating_sub(history_count);
-        messages = messages.split_off(keep_from);
         // 去掉末尾与当前输入重复的用户消息（user_input 由 AgentContext 单独携带）
         if messages
             .last()

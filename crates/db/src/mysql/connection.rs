@@ -6,6 +6,7 @@ use one_core::storage::DbConnectionConfig;
 use rust_i18n::t;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -30,6 +31,8 @@ pub struct MysqlDbConnection {
     config: DbConnectionConfig,
     conn: Arc<Mutex<Option<Conn>>>,
     tunnel: Option<LocalPortForwardTunnel>,
+    /// 连接上是否有活动事务（由脚本里的 BEGIN/COMMIT/ROLLBACK 推导）
+    transaction_active: AtomicBool,
 }
 
 impl MysqlDbConnection {
@@ -38,6 +41,16 @@ impl MysqlDbConnection {
             config,
             conn: Arc::new(Mutex::new(None)),
             tunnel: None,
+            transaction_active: AtomicBool::new(false),
+        }
+    }
+
+    /// 依据脚本里的事务控制语句更新事务状态。
+    ///
+    /// 入参必须是驱动解析器切分后的语句，不能是原始脚本文本。
+    fn update_transaction_state(&self, statements: &[String]) {
+        if let Some(active) = crate::connection::infer_transaction_state(statements) {
+            self.transaction_active.store(active, Ordering::Relaxed);
         }
     }
 
@@ -350,6 +363,12 @@ impl MysqlDbConnection {
 
 #[async_trait]
 impl DbConnection for MysqlDbConnection {
+    /// 事务状态由脚本里的 BEGIN/COMMIT/ROLLBACK 推导：
+    /// 没有显式开启事务时无需在会话释放时再发一次 ROLLBACK。
+    async fn has_active_transaction(&self) -> bool {
+        self.transaction_active.load(Ordering::Relaxed)
+    }
+
     fn config(&self) -> &DbConnectionConfig {
         &self.config
     }
@@ -607,6 +626,14 @@ impl DbConnection for MysqlDbConnection {
                     break;
                 }
             }
+        }
+
+        // 记录脚本执行完毕后的事务状态，供会话释放时判断是否需要 ROLLBACK。
+        // 驱动事务模式（options.transactional）由驱动自己提交/回滚，结束后没有活动事务。
+        if options.transactional {
+            self.transaction_active.store(false, Ordering::Relaxed);
+        } else {
+            self.update_transaction_state(&statements);
         }
 
         debug!(

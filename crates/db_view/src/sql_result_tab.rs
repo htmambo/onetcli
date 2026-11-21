@@ -38,7 +38,6 @@ use rust_i18n::t;
 #[derive(Clone)]
 pub struct SqlResultTab {
     pub sql: String,
-    pub result: SqlResult,
     pub execution_time: String,
     pub rows_count: String,
     pub data_grid: Option<Entity<DataGrid>>,
@@ -62,21 +61,27 @@ pub struct StatementListItem {
     pub status_text: String,
     pub full_error_message: Option<String>,
     pub truncated_sql: Option<String>,
+    /// 查询返回的行数（非查询结果为 0）
+    pub rows: usize,
 }
 
 /// 语句列表数据
+///
+/// `items` 与筛选结果都用 `Arc` 持有：渲染路径每帧都会取一次筛选结果，
+/// 用 `Arc` 克隆只是加一个引用计数，避免每帧深拷贝整个列表。
 pub struct StatementListData {
-    items: Vec<StatementListItem>,
+    items: Arc<Vec<StatementListItem>>,
     show_errors_only: bool,
-    cached_filtered_items: Vec<StatementListItem>,
+    /// 仅在"只看错误"开启时存在；否则筛选结果就是 `items` 本身
+    cached_filtered_items: Option<Arc<Vec<StatementListItem>>>,
 }
 
 impl StatementListData {
     pub fn new() -> Self {
         Self {
-            items: Vec::new(),
+            items: Arc::new(Vec::new()),
             show_errors_only: false,
-            cached_filtered_items: Vec::new(),
+            cached_filtered_items: None,
         }
     }
 
@@ -94,37 +99,72 @@ impl StatementListData {
         }
     }
 
-    pub fn set_items(&mut self, results: &[SqlResult]) {
-        self.items = results
-            .iter()
-            .map(|result| match result {
-                SqlResult::Query(q) => StatementListItem {
-                    sql: q.sql.clone(),
-                    elapsed_ms: q.elapsed_ms,
-                    is_error: false,
-                    status_text: format!("{} rows", q.rows.len()),
-                    full_error_message: None,
-                    truncated_sql: Some(Self::truncate_text(&q.sql, 50, true)),
-                },
-                SqlResult::Exec(e) => StatementListItem {
-                    sql: e.sql.clone(),
-                    elapsed_ms: e.elapsed_ms,
-                    is_error: false,
-                    status_text: format!("{} rows affected", e.rows_affected),
-                    full_error_message: None,
-                    truncated_sql: Some(Self::truncate_text(&e.sql, 50, true)),
-                },
-                SqlResult::Error(e) => StatementListItem {
-                    sql: e.sql.clone(),
-                    elapsed_ms: 0,
-                    is_error: true,
-                    status_text: Self::truncate_text(&e.message, 50, false),
-                    full_error_message: Some(e.message.clone()),
-                    truncated_sql: Some(Self::truncate_text(&e.sql, 50, true)),
-                },
-            })
-            .collect();
+    /// 把执行结果投影成语句列表项。
+    ///
+    /// 只保留摘要信息（SQL 文本、耗时、行数、错误信息），
+    /// 不保留全量行数据——语句列表不需要这些数据，
+    /// 留着会让每批结果都多占一份内存。
+    pub fn item_from_result(result: &SqlResult) -> StatementListItem {
+        match result {
+            SqlResult::Query(q) => StatementListItem {
+                sql: q.sql.clone(),
+                elapsed_ms: q.elapsed_ms,
+                is_error: false,
+                status_text: format!("{} rows", q.rows.len()),
+                full_error_message: None,
+                truncated_sql: Some(Self::truncate_text(&q.sql, 50, true)),
+                rows: q.rows.len(),
+            },
+            SqlResult::Exec(e) => StatementListItem {
+                sql: e.sql.clone(),
+                elapsed_ms: e.elapsed_ms,
+                is_error: false,
+                status_text: format!("{} rows affected", e.rows_affected),
+                full_error_message: None,
+                truncated_sql: Some(Self::truncate_text(&e.sql, 50, true)),
+                rows: 0,
+            },
+            SqlResult::Error(e) => StatementListItem {
+                sql: e.sql.clone(),
+                elapsed_ms: 0,
+                is_error: true,
+                status_text: Self::truncate_text(&e.message, 50, false),
+                full_error_message: Some(e.message.clone()),
+                truncated_sql: Some(Self::truncate_text(&e.sql, 50, true)),
+                rows: 0,
+            },
+        }
+    }
+
+    /// 追加一批语句（增量执行时使用）
+    pub fn append_items(&mut self, items: Vec<StatementListItem>) {
+        if items.is_empty() {
+            return;
+        }
+        // `Arc::make_mut` 在没有其他持有者时原地追加，避免整表拷贝
+        Arc::make_mut(&mut self.items).extend(items);
         self.invalidate_cache();
+    }
+
+    /// 语句总数
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// 是否没有任何语句
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// 全部语句项
+    pub fn items(&self) -> &[StatementListItem] {
+        self.items.as_slice()
+    }
+
+    /// 成功与失败的语句数
+    pub fn success_error_counts(&self) -> (usize, usize) {
+        let success = self.items.iter().filter(|item| !item.is_error).count();
+        (success, self.items.len() - success)
     }
 
     pub fn set_show_errors_only(&mut self, show_errors_only: bool) {
@@ -133,22 +173,32 @@ impl StatementListData {
     }
 
     fn invalidate_cache(&mut self) {
-        self.cached_filtered_items = self
-            .items
-            .iter()
-            .filter(|item| !self.show_errors_only || item.is_error)
-            .cloned()
-            .collect();
+        // 未开启"只看错误"时，筛选结果就是全部语句，无需额外副本
+        self.cached_filtered_items = if self.show_errors_only {
+            Some(Arc::new(
+                self.items
+                    .iter()
+                    .filter(|item| item.is_error)
+                    .cloned()
+                    .collect(),
+            ))
+        } else {
+            None
+        };
     }
 
     pub fn clear(&mut self) {
-        self.items.clear();
-        self.cached_filtered_items.clear();
+        self.items = Arc::new(Vec::new());
+        self.cached_filtered_items = None;
         self.show_errors_only = false;
     }
 
-    pub fn filtered_items(&self) -> &[StatementListItem] {
-        &self.cached_filtered_items
+    /// 筛选后的语句列表（`Arc` 克隆，调用方持有即可跨帧使用）
+    pub fn filtered_items(&self) -> Arc<Vec<StatementListItem>> {
+        match &self.cached_filtered_items {
+            Some(items) => Arc::clone(items),
+            None => Arc::clone(&self.items),
+        }
     }
 }
 
@@ -156,7 +206,6 @@ impl StatementListData {
 pub struct SqlResultTabContainer {
     pub result_tabs: Entity<Vec<SqlResultTab>>,
     pub active_result_tab: Entity<usize>,
-    pub all_results: Entity<Vec<SqlResult>>,
     pub is_visible: Entity<bool>,
     pub execution_state: Entity<ExecutionState>,
     pub statement_list: Entity<StatementListData>,
@@ -174,7 +223,6 @@ impl SqlResultTabContainer {
     pub(crate) fn new(_window: &mut Window, cx: &mut Context<Self>) -> SqlResultTabContainer {
         let result_tabs = cx.new(|_| vec![]);
         let active_result_tab = cx.new(|_| 0);
-        let all_results = cx.new(|_| vec![]);
         let is_visible = cx.new(|_| false);
         let execution_state = cx.new(|_| ExecutionState::Idle);
         let statement_list = cx.new(|_| StatementListData::new());
@@ -187,7 +235,6 @@ impl SqlResultTabContainer {
         SqlResultTabContainer {
             result_tabs,
             active_result_tab,
-            all_results,
             is_visible,
             execution_state,
             statement_list,
@@ -443,10 +490,6 @@ impl SqlResultTabContainer {
             tabs.clear();
             cx.notify();
         });
-        self.all_results.update(cx, |results, cx| {
-            results.clear();
-            cx.notify();
-        });
         self.statement_list.update(cx, |list, cx| {
             list.clear();
             cx.notify();
@@ -504,7 +547,7 @@ impl SqlResultTabContainer {
         _window: &mut Window,
         cx: &mut App,
     ) {
-        let mut new_all_results = Vec::new();
+        let mut new_items: Vec<StatementListItem> = Vec::with_capacity(results.len());
         let mut new_tabs = Vec::new();
 
         let global_state = cx.global::<GlobalDbState>().clone();
@@ -512,7 +555,7 @@ impl SqlResultTabContainer {
         let db_name = database.as_ref().map_or(String::new(), |s| s.clone());
 
         for result in results {
-            new_all_results.push(result.clone());
+            new_items.push(StatementListData::item_from_result(&result));
 
             if let SqlResult::Query(query_result) = result {
                 let (editable, table_name) = if let Some(ref plugin) = plugin {
@@ -546,11 +589,9 @@ impl SqlResultTabContainer {
                     .iter()
                     .map(|h| Column::new(h.clone(), h.clone()))
                     .collect();
-                let rows: Vec<Vec<Option<String>>> = query_result
-                    .rows
-                    .iter()
-                    .map(|row| row.iter().cloned().collect())
-                    .collect();
+                // 行数据直接移交表格，不再额外克隆一份
+                let rows = query_result.rows;
+                let rows_count = rows.len();
 
                 data_grid.update(cx, |this, cx| {
                     this.update_data(columns, rows, vec![], cx);
@@ -559,9 +600,8 @@ impl SqlResultTabContainer {
 
                 let tab = SqlResultTab {
                     sql: query_result.sql.clone(),
-                    result: SqlResult::Query(query_result.clone()),
                     execution_time: format!("{}ms", query_result.elapsed_ms),
-                    rows_count: format!("{} rows", query_result.rows.len()),
+                    rows_count: format!("{} rows", rows_count),
                     data_grid: Some(data_grid),
                     content: Some(content),
                 };
@@ -570,18 +610,13 @@ impl SqlResultTabContainer {
             }
         }
 
-        self.all_results.update(cx, |all_results, _cx| {
-            all_results.extend(new_all_results);
-        });
-
         self.result_tabs.update(cx, |tabs, _cx| {
             tabs.extend(new_tabs);
         });
 
-        let all_results_for_update: Vec<SqlResult> = self.all_results.read(cx).clone();
         let statement_list = self.statement_list.clone();
         statement_list.update(cx, |list, cx| {
-            list.set_items(&all_results_for_update);
+            list.append_items(new_items);
             cx.notify();
         });
         self.scroll_handle.scroll_to_bottom();
@@ -613,7 +648,15 @@ impl SqlResultTabContainer {
 
     /// 检查是否有结果数据
     pub fn has_results(&self, cx: &App) -> bool {
-        !self.all_results.read(cx).is_empty()
+        !self.statement_list.read(cx).is_empty()
+    }
+
+    /// 语句统计：(成功数, 失败数, 查询返回行数合计)
+    pub fn statement_stats(&self, cx: &App) -> (usize, usize, usize) {
+        let list = self.statement_list.read(cx);
+        let (success, error) = list.success_error_counts();
+        let rows = list.items().iter().map(|item| item.rows).sum();
+        (success, error, rows)
     }
 
     /// 检查面板是否可见
@@ -631,7 +674,7 @@ impl SqlResultTabContainer {
 
     fn render_stats_row(
         &self,
-        all_results: &[SqlResult],
+        total_count: usize,
         success_count: usize,
         error_count: usize,
         total_elapsed_ms: f64,
@@ -660,7 +703,7 @@ impl SqlResultTabContainer {
                                 div()
                                     .text_lg()
                                     .font_semibold()
-                                    .child(format!("{}", all_results.len())),
+                                    .child(format!("{}", total_count)),
                             ),
                     )
                     .child(
@@ -805,7 +848,7 @@ impl SqlResultTabContainer {
 
     fn render_statement_list(
         &self,
-        filtered_items: Vec<StatementListItem>,
+        filtered_items: Arc<Vec<StatementListItem>>,
         is_executing: bool,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -865,7 +908,7 @@ impl SqlResultTabContainer {
                 item_count,
                 cx.processor(
                     move |view: &mut Self, visible_range: Range<usize>, _window, cx| {
-                        let items = view.statement_list.read(cx).filtered_items().to_vec();
+                        let items = view.statement_list.read(cx).filtered_items();
                         visible_range
                             .into_iter()
                             .filter_map(|idx| {
@@ -1083,23 +1126,15 @@ impl SqlResultTabContainer {
 
     fn render_summary_panel(
         &self,
-        all_results: &[SqlResult],
         execution_state: ExecutionState,
         show_errors_only: bool,
         total_elapsed_ms: f64,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let filtered_items: Vec<StatementListItem> =
-            self.statement_list.read(cx).filtered_items().to_vec();
+        let filtered_items = self.statement_list.read(cx).filtered_items();
 
-        let mut success_count = 0;
-        let mut error_count = 0;
-        for result in all_results.iter() {
-            match result {
-                SqlResult::Query(_) | SqlResult::Exec(_) => success_count += 1,
-                SqlResult::Error(_) => error_count += 1,
-            }
-        }
+        let (success_count, error_count) = self.statement_list.read(cx).success_error_counts();
+        let total_count = self.statement_list.read(cx).len();
 
         let is_executing = matches!(execution_state, ExecutionState::Executing { .. });
         let (current, total) = match &execution_state {
@@ -1120,7 +1155,7 @@ impl SqlResultTabContainer {
                     .size_full()
                     .min_h_0()
                     .child(self.render_stats_row(
-                        all_results,
+                        total_count,
                         success_count,
                         error_count,
                         total_elapsed_ms,
@@ -1156,7 +1191,6 @@ impl Render for SqlResultTabContainer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let clone_self = self.clone();
         let query_tabs = self.result_tabs.read(cx);
-        let all_results = self.all_results.read(cx);
         let active_idx = *self.active_result_tab.read(cx);
         let execution_state = self.execution_state.read(cx).clone();
         let show_errors_only = *self.show_errors_only.read(cx);
@@ -1222,16 +1256,98 @@ impl Render for SqlResultTabContainer {
                 ),
             )
             .child(if active_idx == 0 {
-                self.render_summary_panel(
-                    all_results,
-                    execution_state,
-                    show_errors_only,
-                    total_elapsed_ms,
-                    cx,
-                )
-                .into_any_element()
+                self.render_summary_panel(execution_state, show_errors_only, total_elapsed_ms, cx)
+                    .into_any_element()
             } else {
                 self.render_result_tab(active_idx, cx).into_any_element()
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StatementListData;
+    use db::SqlResult;
+    use db::executor::{ExecResult, QueryColumnMeta, QueryResult, SqlErrorInfo};
+
+    fn query_result(sql: &str, rows: usize) -> SqlResult {
+        SqlResult::Query(QueryResult {
+            sql: sql.to_string(),
+            columns: vec!["id".to_string()],
+            column_meta: Vec::<QueryColumnMeta>::new(),
+            rows: vec![vec![Some("1".to_string())]; rows],
+            elapsed_ms: 12,
+        })
+    }
+
+    /// 查询结果投影出行数与摘要
+    #[test]
+    fn item_from_result_查询保留行数() {
+        let item = StatementListData::item_from_result(&query_result("SELECT 1", 3));
+        assert_eq!(item.rows, 3);
+        assert!(!item.is_error);
+        assert_eq!(item.status_text, "3 rows");
+    }
+
+    /// 写语句不计入"返回行数"
+    #[test]
+    fn item_from_result_写语句行数为零() {
+        let item = StatementListData::item_from_result(&SqlResult::Exec(ExecResult {
+            sql: "UPDATE t SET a = 1".to_string(),
+            rows_affected: 7,
+            elapsed_ms: 5,
+            message: None,
+        }));
+        assert_eq!(item.rows, 0);
+        assert!(!item.is_error);
+        assert_eq!(item.status_text, "7 rows affected");
+    }
+
+    /// 错误语句被标记为错误
+    #[test]
+    fn item_from_result_错误语句标记为错误() {
+        let item = StatementListData::item_from_result(&SqlResult::Error(SqlErrorInfo {
+            sql: "SELECT bad".to_string(),
+            message: "语法错误".to_string(),
+        }));
+        assert!(item.is_error);
+        assert_eq!(item.rows, 0);
+        assert_eq!(item.full_error_message.as_deref(), Some("语法错误"));
+    }
+
+    /// 追加语句后统计与筛选结果同步更新
+    #[test]
+    fn append_items_累计并按错误筛选() {
+        let mut list = StatementListData::new();
+        assert!(list.is_empty());
+
+        list.append_items(vec![StatementListData::item_from_result(&query_result(
+            "SELECT 1", 1,
+        ))]);
+        list.append_items(vec![StatementListData::item_from_result(
+            &SqlResult::Error(SqlErrorInfo {
+                sql: "SELECT bad".to_string(),
+                message: "语法错误".to_string(),
+            }),
+        )]);
+
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.success_error_counts(), (1, 1));
+        assert_eq!(list.filtered_items().len(), 2);
+
+        // 开启"只看错误"后只保留错误项
+        list.set_show_errors_only(true);
+        let filtered = list.filtered_items();
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0].is_error);
+    }
+
+    /// 空批次追加不会改变统计
+    #[test]
+    fn append_items_空批次无副作用() {
+        let mut list = StatementListData::new();
+        list.append_items(Vec::new());
+        assert!(list.is_empty());
+        assert_eq!(list.success_error_counts(), (0, 0));
     }
 }

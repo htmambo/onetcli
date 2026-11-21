@@ -1882,6 +1882,17 @@ pub struct GlobalDbState {
     connections: Arc<DashMap<String, DbConnectionConfig>>,
 }
 
+/// 判断一次执行结果里是否可能发生了写操作。
+///
+/// 只有查询（`SqlResult::Query`）不会影响表的行数；
+/// 出现 `Exec`（INSERT/UPDATE/DELETE/DDL 等）或 `Error`（语句可能已部分生效）
+/// 时都按"可能写入了"处理，宁可多清一次缓存，也不要展示过期行数。
+fn results_may_have_written(results: &[SqlResult]) -> bool {
+    results
+        .iter()
+        .any(|result| !matches!(result, SqlResult::Query(_)))
+}
+
 impl GlobalDbState {
     pub fn new() -> Self {
         let manager = ConnectionManager::new();
@@ -2222,6 +2233,14 @@ impl GlobalDbState {
 
                 conn.execute(plugin.as_ref(), &script, opts.clone()).await?
             };
+
+            // 只有真的执行了写语句才清空行数缓存；
+            // 纯查询脚本（SQL 编辑器里跑 SELECT）不该让表格翻页重新统计。
+            if results_may_have_written(&result) {
+                if let Some(count_cache) = plugin.table_count_cache() {
+                    count_cache.clear();
+                }
+            }
 
             opts.truncate_results(&mut result);
 
@@ -2606,32 +2625,55 @@ impl GlobalDbState {
             let mut success_count = 0;
             let mut errors = Vec::new();
 
-            for change in &request.changes {
-                let Some(sql) = plugin.build_table_change_sql(&request, change) else {
-                    continue;
-                };
+            // 汇总成单条脚本 + 单个事务：一次往返，且任意一条失败整批回滚
+            let statements: Vec<String> = request
+                .changes
+                .iter()
+                .filter_map(|change| plugin.build_table_change_sql(&request, change))
+                .collect();
 
-                match conn
-                    .execute(plugin.as_ref(), &sql, ExecOptions::default())
-                    .await
-                {
-                    Ok(results) => {
-                        for result in results {
-                            match result {
-                                SqlResult::Exec(_) => {
+            if statements.is_empty() {
+                return anyhow::Ok(TableSaveResponse {
+                    success_count,
+                    errors,
+                });
+            }
+
+            let script = statements.join(";\n") + ";";
+            let options = ExecOptions {
+                stop_on_error: true,
+                transactional: true,
+                max_rows: None,
+                streaming: false,
+            };
+
+            match conn.execute(plugin.as_ref(), &script, options).await {
+                Ok(results) => {
+                    // 事务模式下任意一条失败都会整批回滚，
+                    // 此时前面的"成功"并没有真正落库，不能计入成功数。
+                    let rolled_back = results.iter().any(|r| r.is_error());
+                    for result in results {
+                        match result {
+                            SqlResult::Exec(_) => {
+                                if !rolled_back {
                                     success_count += 1;
                                 }
-                                SqlResult::Error(err) => {
-                                    errors.push(err.message);
-                                }
-                                _ => {}
                             }
+                            SqlResult::Error(err) => {
+                                errors.push(err.message);
+                            }
+                            _ => {}
                         }
                     }
-                    Err(e) => {
-                        errors.push(e.to_string());
-                    }
                 }
+                Err(e) => {
+                    errors.push(e.to_string());
+                }
+            }
+
+            // 写操作后清空表行数缓存，避免翻页时复用过期行数
+            if let Some(count_cache) = plugin.table_count_cache() {
+                count_cache.clear();
             }
 
             anyhow::Ok(TableSaveResponse {
@@ -3572,7 +3614,18 @@ impl GlobalDbState {
                     .map_err(|e| anyhow::anyhow!("Failed to switch schema: {}", e))?;
             }
 
-            conn.execute(plugin.as_ref(), script, opts.clone()).await
+            let result = conn.execute(plugin.as_ref(), script, opts.clone()).await;
+
+            // 只有真的执行了写语句才清空行数缓存
+            if let Ok(ref results) = result {
+                if results_may_have_written(results) {
+                    if let Some(count_cache) = plugin.table_count_cache() {
+                        count_cache.clear();
+                    }
+                }
+            }
+
+            result
         };
 
         self.connection_manager.close_session(&session_id).await?;
@@ -3597,6 +3650,7 @@ impl Global for GlobalDbState {}
 mod tests {
     use super::*;
     use crate::connection::DbConnection;
+    use crate::executor::QueryResult;
     use crate::executor::{ExecOptions, ExecResult, SqlErrorInfo, SqlSource};
     use async_trait::async_trait;
     use one_core::storage::DatabaseType;
@@ -5874,5 +5928,36 @@ mod tests {
         ) -> Result<(), DbError> {
             Ok(())
         }
+    }
+
+    /// 只有查询结果时不需要清空表行数缓存
+    #[test]
+    fn results_may_have_written_纯查询返回false() {
+        let results = vec![SqlResult::Query(QueryResult {
+            sql: "SELECT 1".to_string(),
+            columns: vec![],
+            column_meta: vec![],
+            rows: vec![],
+            elapsed_ms: 1,
+        })];
+        assert!(!results_may_have_written(&results));
+    }
+
+    /// 出现写语句或错误语句时按"可能写入"处理
+    #[test]
+    fn results_may_have_written_写语句与错误返回true() {
+        let exec = vec![SqlResult::Exec(ExecResult {
+            sql: "UPDATE t SET a = 1".to_string(),
+            rows_affected: 1,
+            elapsed_ms: 1,
+            message: None,
+        })];
+        assert!(results_may_have_written(&exec));
+
+        let error = vec![SqlResult::Error(SqlErrorInfo {
+            sql: "INSERT INTO t VALUES (1)".to_string(),
+            message: "违反约束".to_string(),
+        })];
+        assert!(results_may_have_written(&error));
     }
 }

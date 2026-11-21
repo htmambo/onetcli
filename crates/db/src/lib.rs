@@ -16,6 +16,7 @@ pub mod rustls_provider;
 pub mod sql_format;
 pub mod ssh_tunnel;
 pub mod streaming_parser;
+pub mod table_count_cache;
 pub mod types;
 
 // Database implementations
@@ -40,6 +41,7 @@ pub use rustls_provider::*;
 pub use sql_format::*;
 pub use ssh_tunnel::*;
 pub use streaming_parser::*;
+pub use table_count_cache::*;
 pub use types::*;
 
 pub fn translate_or_raw_for_locale(locale: &str, key_or_text: &str) -> String {

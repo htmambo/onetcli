@@ -25,6 +25,7 @@ use crate::plugin_manifest::{
     DatabaseUiCapabilities, DatabaseUiManifest,
 };
 use crate::postgresql::connection::PostgresDbConnection;
+use crate::table_count_cache::TableCountCache;
 use crate::types::*;
 
 /// PostgreSQL data types (name, description)
@@ -79,14 +80,19 @@ pub const POSTGRESQL_DATA_TYPES: &[(&str, &str)] = &[
 ];
 
 /// PostgreSQL database plugin implementation (stateless)
-pub struct PostgresPlugin;
+pub struct PostgresPlugin {
+    /// 表行数缓存：翻页时复用 `COUNT(*)` 结果
+    count_cache: TableCountCache,
+}
 
 static POSTGRESQL_UI_MANIFEST: LazyLock<DatabaseUiManifest> =
     LazyLock::new(build_postgresql_ui_manifest);
 
 impl PostgresPlugin {
     pub fn new() -> Self {
-        Self
+        Self {
+            count_cache: TableCountCache::default(),
+        }
     }
 
     fn normalize_type_name(type_name: &str) -> String {
@@ -677,6 +683,10 @@ fn postgresql_action_manifest() -> DatabaseActionManifest {
 
 #[async_trait]
 impl DatabasePlugin for PostgresPlugin {
+    fn table_count_cache(&self) -> Option<&TableCountCache> {
+        Some(&self.count_cache)
+    }
+
     fn name(&self) -> DatabaseType {
         DatabaseType::PostgreSQL
     }

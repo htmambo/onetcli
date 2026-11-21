@@ -22,7 +22,161 @@ use gpui_component::{
     v_flex,
 };
 use rust_i18n::t;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// 解析结果缓存的最大条目数，超出后淘汰最久未使用的条目
+const PARSED_CONTENT_CACHE_CAPACITY: usize = 64;
+
+/// 内容摘要：长度 + 128 位哈希
+///
+/// 使用 128 位摘要而非 64 位，是为了把碰撞概率压到可忽略的量级——
+/// 哈希碰撞会让不同内容共享同一条缓存记录，从而**静默**渲染出错误正文。
+type ContentDigest = (usize, u128);
+
+/// 消息内容解析结果的缓存条目
+///
+/// 与 `split_thinking_blocks` 的返回结果一一对应，唯一的差别是正文以
+/// `SharedString` 保存：命中缓存时克隆只是引用计数递增，正文不会被再次拷贝。
+struct ParsedContentCacheEntry {
+    /// 剥离思考块后的正文
+    body: SharedString,
+    /// 合并后的思考内容
+    ///
+    /// 保持 `String` 而非 `SharedString`：`ThinkingPanel::new` 的入参是
+    /// `impl Into<String>`，最终必然要产出一份拥有所有权的 `String`，
+    /// 缓存里存 `String` 可以少一次 `Arc` → `String` → `Arc` 的往返转换。
+    thinking: Option<String>,
+    /// 最近一次访问序号，用于 LRU 淘汰
+    last_used: u64,
+}
+
+/// 按内容摘要缓存解析结果的容器
+#[derive(Default)]
+struct ParsedContentCache {
+    entries: HashMap<ContentDigest, ParsedContentCacheEntry>,
+    /// 单调递增的访问序号
+    clock: u64,
+}
+
+impl ParsedContentCache {
+    /// 取出缓存条目并刷新其访问序号
+    fn get(&mut self, digest: ContentDigest) -> Option<(SharedString, Option<String>)> {
+        // 先确认命中，再推进逻辑时钟——未命中不应消耗时钟
+        let entry = self.entries.get_mut(&digest)?;
+        let clock = self.clock.wrapping_add(1);
+        self.clock = clock;
+        entry.last_used = clock;
+        Some((entry.body.clone(), entry.thinking.clone()))
+    }
+
+    /// 写入缓存条目，容量超限时淘汰最久未使用的条目
+    fn insert(&mut self, digest: ContentDigest, body: SharedString, thinking: Option<String>) {
+        let clock = self.clock.wrapping_add(1);
+        self.clock = clock;
+
+        // 已存在同一条摘要时直接覆盖，避免误淘汰其它仍然有效的条目
+        if let Some(entry) = self.entries.get_mut(&digest) {
+            entry.body = body;
+            entry.thinking = thinking;
+            entry.last_used = clock;
+            return;
+        }
+
+        if self.entries.len() >= PARSED_CONTENT_CACHE_CAPACITY {
+            // 先取出最久未使用的键（复制出来，避免迭代器借用与后续 remove 冲突）
+            // 容量固定为 64，O(n) 扫描的开销可以忽略
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| *key);
+            if let Some(oldest) = oldest {
+                self.entries.remove(&oldest);
+            }
+        }
+
+        self.entries.insert(
+            digest,
+            ParsedContentCacheEntry {
+                body,
+                thinking,
+                last_used: clock,
+            },
+        );
+    }
+}
+
+thread_local! {
+    /// 按内容摘要缓存 `` 块的解析结果
+    ///
+    /// 放在 `thread_local` 中：UI 渲染集中在主线程，无需加锁避免争用；
+    /// 不同线程各自持有独立缓存，互不影响（含测试线程之间的隔离）。
+    ///
+    /// 注意：`split_thinking_blocks` 内部不得再回调本缓存，否则 `RefCell`
+    /// 会在同一线程上被重复借用而 panic。
+    static PARSED_CONTENT_CACHE: RefCell<ParsedContentCache> =
+        RefCell::new(ParsedContentCache::default());
+}
+
+/// 计算内容摘要：长度 + FNV-1a 128
+///
+/// 摘要只占固定大小，不会像完整内容那样在缓存中长期驻留大字符串。
+///
+/// 采用 128 位摘要而非 64 位，是为了把碰撞概率压到可忽略的量级——
+/// 哈希碰撞会让不同内容共享同一条缓存记录，从而**静默**渲染出错误正文。
+/// 单趟扫描即可算出全部 128 位，比"两个 64 位哈希"少一次全文遍历。
+fn content_digest(content: &str) -> ContentDigest {
+    (content.len(), fnv1a_128(content.as_bytes()))
+}
+
+/// FNV-1a 128 位哈希
+///
+/// 单趟扫描、无额外依赖；输出 128 位，用作缓存键的碰撞概率可忽略。
+fn fnv1a_128(bytes: &[u8]) -> u128 {
+    const FNV_OFFSET_BASIS: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const FNV_PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u128::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+/// 按内容摘要获取 `` 块的解析结果
+///
+/// 命中缓存时直接复用已解析的正文与思考内容，未命中时才做一次全文扫描，
+/// 避免 AI 流式输出期间每帧都为每条消息重新扫描并分配字符串。
+///
+/// **命中率的来源**：消息列表每帧会整体重绘（历史消息内容不变），
+/// 因此绝大多数消息每帧都命中缓存；只有正在流式输出的那一条内容在变，
+/// 每帧必然未命中——这部分开销无法避免，因为内容确实变了。
+///
+/// 摘要在此处内部计算，调用方无需关心摘要与内容的对应关系。
+fn cached_split_thinking_blocks(content: &str) -> (SharedString, Option<String>) {
+    let digest = content_digest(content);
+    PARSED_CONTENT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+
+        // 命中：直接复用，不再重新扫描与分配
+        if let Some(hit) = cache.get(digest) {
+            return hit;
+        }
+
+        // 未命中：重新解析并写入缓存
+        let parsed = split_thinking_blocks(content);
+        let body = SharedString::from(parsed.body);
+        let thinking = parsed.thinking;
+
+        // 缓存里存一份副本，自身这份留给本次渲染使用
+        cache.insert(digest, body.clone(), thinking.clone());
+
+        (body, thinking)
+    })
+}
 
 /// 共享消息渲染器
 pub struct ChatMessageRenderer;
@@ -284,9 +438,8 @@ impl ChatMessageRenderer {
     ) -> AnyElement {
         let view_id = SharedString::from(format!("ai-msg-{}", msg.id));
         // 从 msg.content 提取 `` 块（兼容 provider 把 `` 写入 content 字段的场景）
-        let parsed = split_thinking_blocks(&msg.content);
-        let body_content = parsed.body.clone();
-        let thinking_content = parsed.thinking.clone();
+        // 解析结果按内容摘要缓存，流式输出期间可避免每帧重复全文扫描与分配
+        let (body_content, thinking_content) = cached_split_thinking_blocks(&msg.content);
 
         let container = v_flex().w_full().gap_1();
         let container = if let Some(thinking) = thinking_content {
@@ -421,4 +574,54 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     let mut out: String = text.chars().take(max_chars).collect();
     out.push_str("...");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_split_returns_same_result_as_direct_split() {
+        let content = "<think>reasoning</think>body";
+        let (body, thinking) = cached_split_thinking_blocks(content);
+        assert_eq!(body.as_str(), "body");
+        assert_eq!(thinking.as_deref(), Some("reasoning"));
+    }
+
+    #[test]
+    fn cache_hit_reuses_parsed_result() {
+        let content = "<think>a</think>b";
+        let first = cached_split_thinking_blocks(content);
+        let second = cached_split_thinking_blocks(content);
+        assert_eq!(first.0.as_str(), second.0.as_str());
+        assert_eq!(first.1.as_deref(), second.1.as_deref());
+    }
+
+    #[test]
+    fn different_content_yields_different_digest() {
+        assert_ne!(content_digest("abc"), content_digest("abd"));
+        assert_ne!(content_digest("abc"), content_digest("abcd"));
+    }
+
+    #[test]
+    fn changed_content_is_not_served_from_cache() {
+        // 同一份摘要契约下，内容变化必须得到不同的解析结果
+        let (body_a, _) = cached_split_thinking_blocks("<think>a</think>body-a");
+        let (body_b, _) = cached_split_thinking_blocks("<think>b</think>body-b");
+        assert_eq!(body_a.as_str(), "body-a");
+        assert_eq!(body_b.as_str(), "body-b");
+    }
+
+    #[test]
+    fn cache_evicts_when_capacity_exceeded() {
+        // 写入超过容量的条目后，最旧的条目应被淘汰
+        for i in 0..(PARSED_CONTENT_CACHE_CAPACITY + 10) {
+            let content = format!("content-{}", i);
+            let _ = cached_split_thinking_blocks(&content);
+        }
+        PARSED_CONTENT_CACHE.with(|cache| {
+            let cache = cache.borrow();
+            assert!(cache.entries.len() <= PARSED_CONTENT_CACHE_CAPACITY);
+        });
+    }
 }

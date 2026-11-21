@@ -434,6 +434,54 @@ impl MessageRepository {
         })
     }
 
+    /// 按会话读取最近 N 条消息（按时间升序返回）。
+    ///
+    /// 先按时间倒序取最近 N 条再在内存里翻转，
+    /// 避免"全量读入后再截断"在长会话上把整段历史都拉进内存。
+    /// 复合索引 `idx_chat_messages_session_created` 让倒序扫描同样走索引。
+    pub fn list_by_session_limit(&self, session_id: i64, limit: i32) -> Result<Vec<ChatMessage>> {
+        if limit <= 0 {
+            return Ok(Vec::new());
+        }
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages WHERE session_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2")?;
+            let rows = stmt.query_map(params![session_id, limit], ChatMessage::from_row)?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?);
+            }
+            // 数据库按倒序返回，翻回时间升序与 list_by_session 保持一致
+            results.reverse();
+            Ok(results)
+        })
+    }
+
+    /// 按会话分页读取消息（按时间升序）。
+    ///
+    /// `offset`/`limit` 会下推到 SQL，避免把整个会话读进内存再切片。
+    pub fn list_by_session_paged(
+        &self,
+        session_id: i64,
+        offset: i32,
+        limit: i32,
+    ) -> Result<Vec<ChatMessage>> {
+        if limit <= 0 {
+            return Ok(Vec::new());
+        }
+        let offset = offset.max(0);
+        self.conn.with_connection(|conn| {
+            let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages WHERE session_id = ?1 ORDER BY created_at ASC, id ASC LIMIT ?2 OFFSET ?3")?;
+            let rows = stmt.query_map(params![session_id, limit, offset], |row| {
+                ChatMessage::from_row(row)
+            })?;
+            let mut results = Vec::new();
+            for row in rows {
+                results.push(row?);
+            }
+            Ok(results)
+        })
+    }
+
     pub fn list_recent(&self, limit: i32) -> Result<Vec<ChatMessage>> {
         self.conn.with_connection(|conn| {
             let mut stmt = conn.prepare("SELECT id, session_id, role, content, created_at, tool_call_id, tool_calls_json FROM chat_messages ORDER BY created_at DESC, id DESC LIMIT ?1")?;
@@ -494,5 +542,83 @@ impl MessageRepository {
             )?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChatMessage, ChatSession, MessageRepository, SessionRepository};
+    use crate::storage::StorageManager;
+    use crate::storage::traits::Repository;
+
+    fn temp_storage() -> StorageManager {
+        let path = std::env::temp_dir().join(format!(
+            "omnihub-chat-history-test-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let storage = StorageManager::with_path(&path).expect("创建测试存储失败");
+        storage.register(SessionRepository::new(storage.connection()));
+        storage.register(MessageRepository::new(storage.connection()));
+        storage
+    }
+
+    /// 会话历史下推 LIMIT：只返回最近 N 条，且仍按时间升序
+    #[test]
+    fn list_by_session_limit_returns_latest_in_ascending_order() {
+        let storage = temp_storage();
+        let session_repo = storage.get::<SessionRepository>().expect("会话仓库不可用");
+        let message_repo = storage.get::<MessageRepository>().expect("消息仓库不可用");
+
+        let mut session = ChatSession::new("测试会话".to_string(), "provider".to_string());
+        let session_id = session_repo.insert(&mut session).expect("创建会话失败");
+
+        for index in 0..5 {
+            let mut message =
+                ChatMessage::new(session_id, "user".to_string(), format!("消息{index}"));
+            message_repo.insert(&mut message).expect("写入消息失败");
+        }
+
+        let limited = message_repo
+            .list_by_session_limit(session_id, 2)
+            .expect("查询最近消息失败");
+        assert_eq!(limited.len(), 2);
+        assert_eq!(limited[0].content, "消息3");
+        assert_eq!(limited[1].content, "消息4");
+
+        // limit 非正数时返回空集合
+        assert!(
+            message_repo
+                .list_by_session_limit(session_id, 0)
+                .expect("查询最近消息失败")
+                .is_empty()
+        );
+    }
+
+    /// 分页读取：LIMIT/OFFSET 下推到 SQL，结果与全量切片一致
+    #[test]
+    fn list_by_session_paged_matches_full_slice() {
+        let storage = temp_storage();
+        let session_repo = storage.get::<SessionRepository>().expect("会话仓库不可用");
+        let message_repo = storage.get::<MessageRepository>().expect("消息仓库不可用");
+
+        let mut session = ChatSession::new("测试会话".to_string(), "provider".to_string());
+        let session_id = session_repo.insert(&mut session).expect("创建会话失败");
+
+        for index in 0..5 {
+            let mut message =
+                ChatMessage::new(session_id, "user".to_string(), format!("消息{index}"));
+            message_repo.insert(&mut message).expect("写入消息失败");
+        }
+
+        let all = message_repo
+            .list_by_session(session_id)
+            .expect("查询全部消息失败");
+        let page = message_repo
+            .list_by_session_paged(session_id, 1, 2)
+            .expect("分页查询失败");
+
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].content, all[1].content);
+        assert_eq!(page[1].content, all[2].content);
     }
 }

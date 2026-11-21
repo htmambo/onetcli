@@ -148,6 +148,62 @@ fn apply_redis_context_menu_target(
     *context_menu_node_id = Some(node_id.to_string());
 }
 
+/// 子节点合并索引：把逐项线性扫描的查重与命名空间定位降到 O(1)。
+struct ChildIndex {
+    /// 已存在的节点 ID
+    ids: HashSet<String>,
+    /// 命名空间名称 -> 在子节点列表中的位置
+    namespaces: HashMap<String, usize>,
+}
+
+impl ChildIndex {
+    fn build(children: &[RedisNode]) -> Self {
+        let mut ids = HashSet::with_capacity(children.len());
+        let mut namespaces = HashMap::new();
+        for (index, child) in children.iter().enumerate() {
+            ids.insert(child.id.clone());
+            if matches!(child.node_type, RedisNodeType::Namespace) {
+                namespaces.entry(child.name.clone()).or_insert(index);
+            }
+        }
+        Self { ids, namespaces }
+    }
+}
+
+/// 把 incoming 合并进子节点列表。
+///
+/// 同名命名空间递归合并子节点，同 ID 的键直接跳过，避免重复追加同一条目。
+fn merge_child_node(existing: &mut Vec<RedisNode>, index: &mut ChildIndex, incoming: RedisNode) {
+    match incoming.node_type {
+        RedisNodeType::Namespace => {
+            if let Some(position) = index.namespaces.get(&incoming.name).copied() {
+                let target = &mut existing[position];
+                let mut merged_children = target.children.clone();
+                let mut child_index = ChildIndex::build(&merged_children);
+                for child in incoming.children {
+                    merge_child_node(&mut merged_children, &mut child_index, child);
+                }
+                target.children = merged_children;
+                target.children_loaded = true;
+            } else {
+                index.ids.insert(incoming.id.clone());
+                index
+                    .namespaces
+                    .insert(incoming.name.clone(), existing.len());
+                existing.push(incoming);
+            }
+        }
+        RedisNodeType::Key(_) => {
+            if index.ids.insert(incoming.id.clone()) {
+                existing.push(incoming);
+            }
+        }
+        RedisNodeType::LoadMore | RedisNodeType::Database(_) | RedisNodeType::Connection => {
+            // 不应出现在键子节点中，忽略
+        }
+    }
+}
+
 /// Redis 树形视图
 pub struct RedisTreeView {
     /// 节点映射
@@ -1267,38 +1323,9 @@ impl RedisTreeView {
         let mut existing = node.children.clone();
         Self::remove_load_more_child(&mut existing);
 
-        fn merge_into(existing: &mut Vec<RedisNode>, incoming: RedisNode) {
-            match incoming.node_type {
-                RedisNodeType::Namespace => {
-                    if let Some(target) = existing.iter_mut().find(|n| {
-                        matches!(n.node_type, RedisNodeType::Namespace) && n.name == incoming.name
-                    }) {
-                        let mut merged_children = target.children.clone();
-                        for child in incoming.children {
-                            merge_into(&mut merged_children, child);
-                        }
-                        target.children = merged_children;
-                        target.children_loaded = true;
-                    } else {
-                        existing.push(incoming);
-                    }
-                }
-                RedisNodeType::Key(_) => {
-                    let incoming_id = incoming.id.clone();
-                    if !existing.iter().any(|n| n.id == incoming_id) {
-                        existing.push(incoming);
-                    }
-                }
-                RedisNodeType::LoadMore
-                | RedisNodeType::Database(_)
-                | RedisNodeType::Connection => {
-                    // 不应出现在键子节点中，忽略
-                }
-            }
-        }
-
+        let mut index = ChildIndex::build(&existing);
         for child in new_children {
-            merge_into(&mut existing, child);
+            merge_child_node(&mut existing, &mut index, child);
         }
 
         node.children = existing;
