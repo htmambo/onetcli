@@ -2645,6 +2645,9 @@ where
         let mut header = self.delegate_mut().render_header(window, cx);
         let style = header.style().clone();
 
+        // 只取长度，避免克隆整个 col_groups（每列含多个 SharedString）
+        let total_columns_count = self.col_groups.len();
+
         header
             .h_flex()
             .w_full()
@@ -2662,12 +2665,9 @@ where
                         .h_full()
                         .bg(cx.theme().table_head)
                         .children(
-                            self.col_groups
-                                .clone()
-                                .into_iter()
-                                .filter(|col| col.column.fixed == Some(ColumnFixed::Left))
-                                .enumerate()
-                                .map(|(col_ix, _)| self.render_th(col_ix, window, cx)),
+                            // 左固定列位于 col_groups 的前 N 列，与原 filter+enumerate 行为一致
+                            (0..left_columns_count)
+                                .map(|col_ix| self.render_th(col_ix, window, cx)),
                         )
                         .child(
                             div()
@@ -2704,14 +2704,8 @@ where
                         h_flex()
                             .relative()
                             .children(
-                                self.col_groups
-                                    .clone()
-                                    .into_iter()
-                                    .skip(left_columns_count)
-                                    .enumerate()
-                                    .map(|(col_ix, _)| {
-                                        self.render_th(left_columns_count + col_ix, window, cx)
-                                    }),
+                                (left_columns_count..total_columns_count)
+                                    .map(|col_ix| self.render_th(col_ix, window, cx)),
                             )
                             .child(self.delegate.render_last_empty_col(window, cx)),
                     ),

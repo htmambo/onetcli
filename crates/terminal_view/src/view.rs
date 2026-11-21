@@ -4681,14 +4681,9 @@ impl Render for TerminalView {
         // 单次快照捕获所有渲染所需的终端状态，避免多次独立加锁
         let render_snapshot = self.terminal.read(cx).render_snapshot();
         let has_selection = render_snapshot.has_selection;
-        // P4（最小化）：保留 selection_text 字符串化但限定在"右键菜单构造时"，
-        // render 阶段不再触发。完整的懒查询改造（用户右键时取）涉及 context_menu
-        // 闭包类型系统改造，留给后续 PR。
-        let selection_text = if has_selection {
-            self.terminal.read(cx).selection_text()
-        } else {
-            None
-        };
+        // 注意：`selection_text` 不在此处获取。
+        // 它会把整个选中区拼成一个 String（拖选大缓冲时可达 MB 级），
+        // 必须在右键菜单真正打开时才取，见下方 `context_menu` 闭包。
         let terminal_mode = render_snapshot.mode;
         let history_size = render_snapshot.history_size;
         let sidebar_visible = self.sidebar.read(cx).is_visible();
@@ -4812,10 +4807,17 @@ impl Render for TerminalView {
                                 this.child(overlay)
                             })
                             .context_menu(move |menu, window, cx| {
+                                // 选中区文本在右键时才取：render 阶段每次都拼接整个
+                                // 选中区会造成每帧 MB 级字符串分配。
+                                let selection_text = if has_selection {
+                                    view.read(cx).terminal.read(cx).selection_text()
+                                } else {
+                                    None
+                                };
                                 Self::build_context_menu(
                                     menu,
                                     has_selection,
-                                    selection_text.clone(),
+                                    selection_text,
                                     &view,
                                     &sidebar,
                                     window,

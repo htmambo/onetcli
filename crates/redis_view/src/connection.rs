@@ -1255,8 +1255,10 @@ impl RedisConnection for RedisConnectionImpl {
                 e,
             )
         })?;
+        // 与其它集合读取保持一致：单次最多返回 MAX_COLLECTION_ELEMENTS 条，避免超大 Hash 撑爆内存
         Ok(result
             .into_iter()
+            .take(MAX_COLLECTION_ELEMENTS as usize)
             .map(|(field, value)| HashField { field, value })
             .collect())
     }

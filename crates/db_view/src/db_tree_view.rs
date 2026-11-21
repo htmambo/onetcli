@@ -38,7 +38,7 @@ use crate::search_shortcut::{
     DB_SEARCH_CONTEXT, FocusSearchInput, OpenSelectedTableQuery, focus_search_input,
 };
 use db::{DbNode, DbNodeType, GlobalDbState};
-use gpui_component::label::Label;
+use gpui_component::label::{HighlightsMatch, Label};
 use gpui_component::menu::PopupMenu;
 use one_core::storage::{DatabaseType, DbConnectionConfig};
 use one_core::utils::debouncer::Debouncer;
@@ -897,19 +897,34 @@ impl DbTreeView {
 
     /// 获取选中的数据库数量
     pub fn get_selected_database_count(&self, connection_id: &str) -> (usize, usize) {
-        let databases = self.get_databases_for_connection(connection_id);
-        let total = databases.len();
+        // 直接统计子节点，避免为计数构造中间 Vec<(String, String)>
+        let selected = match self.selected_databases.get(connection_id) {
+            Some(Some(selected)) => Some(selected),
+            _ => None,
+        };
+
+        let mut total = 0usize;
+        let mut selected_count = 0usize;
+        if let Some(conn) = self.db_nodes.get(connection_id) {
+            for child in &conn.children {
+                // Database 节点或者是 Connection 直接子节点的 Schema（Oracle）
+                if child.node_type != DbNodeType::Database && child.node_type != DbNodeType::Schema
+                {
+                    continue;
+                }
+                total += 1;
+                if let Some(selected) = selected {
+                    if selected.contains(&child.name) {
+                        selected_count += 1;
+                    }
+                }
+            }
+        }
 
         match self.selected_databases.get(connection_id) {
-            None => (total, total),
-            Some(None) => (total, total),
-            Some(Some(selected)) => {
-                let count = databases
-                    .iter()
-                    .filter(|(_, name)| selected.contains(name))
-                    .count();
-                (count, total)
-            }
+            // 未做筛选或全部选中：计数等于总数
+            None | Some(None) => (total, total),
+            Some(Some(_)) => (selected_count, total),
         }
     }
 
@@ -2435,6 +2450,8 @@ impl DbTreeView {
                     cx.processor(
                         move |this: &mut Self, visible_range: Range<usize>, window, cx| {
                             let view = cx.entity();
+                            // 搜索高亮每帧只构造一次，避免每个可见条目重复克隆字符串
+                            let search_highlight = HighlightsMatch::from(this.search_query.clone());
                             let mut items = Vec::with_capacity(visible_range.len());
                             for ix in visible_range {
                                 if let Some(entry) = this.flat_entries.get(ix).cloned() {
@@ -2443,6 +2460,7 @@ impl DbTreeView {
                                         ix,
                                         entry,
                                         is_selected,
+                                        search_highlight.clone(),
                                         view.clone(),
                                         window,
                                         cx,
@@ -2466,63 +2484,63 @@ impl DbTreeView {
         ix: usize,
         entry: FlatDbEntry,
         is_selected: bool,
+        search_highlight: HighlightsMatch,
         view: Entity<Self>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let node_id = entry.node_id.clone();
+        // 直接移动 node_id，避免再次克隆字符串
+        let node_id = entry.node_id;
         let depth = entry.depth;
 
-        // 获取节点信息
-        let node = self.db_nodes.get(&node_id).cloned();
+        // 裁剪式读取：只提取渲染真正需要的字段，避免克隆整棵子树
+        // （DbNode.children 是递归子树、metadata 是 HashMap，整体克隆代价很高）
+        let (node_type, database_type, label_text, label_comment) =
+            match self.db_nodes.get(&node_id) {
+                Some(n) => {
+                    let name: SharedString = if matches!(
+                        n.node_type,
+                        DbNodeType::TablesFolder
+                            | DbNodeType::ViewsFolder
+                            | DbNodeType::FunctionsFolder
+                            | DbNodeType::ProceduresFolder
+                            | DbNodeType::SequencesFolder
+                            | DbNodeType::QueriesFolder
+                            | DbNodeType::ColumnsFolder
+                            | DbNodeType::IndexesFolder
+                            | DbNodeType::ForeignKeysFolder
+                            | DbNodeType::TriggersFolder
+                            | DbNodeType::ChecksFolder
+                    ) {
+                        // 文件夹名称走 i18n 动态翻译
+                        SharedString::from(t!(&n.name).to_string())
+                    } else {
+                        // 直接共享名称字符串，避免额外的 String 拷贝
+                        SharedString::new(Arc::<str>::from(n.name.as_str()))
+                    };
+                    let comment = if n.node_type == DbNodeType::Table {
+                        n.metadata.get("comment").cloned()
+                    } else {
+                        None
+                    };
+                    (Some(n.node_type), Some(n.database_type), name, comment)
+                }
+                None => (None, None, SharedString::default(), None),
+            };
         let is_expanded = self.expanded_nodes.contains(&node_id);
         let is_loading = self.loading_nodes.contains(&node_id);
         let error_msg = self.error_nodes.get(&node_id).cloned();
         let has_children = self.node_has_children(&node_id);
-        let search_query = self.search_query.clone();
 
         // 获取图标
         let icon = self.get_icon_for_node(&node_id, is_expanded, cx).color();
 
-        // 获取节点名称和备注
-        let (label_text, label_comment) = node
-            .as_ref()
-            .map(|n| {
-                let name = if matches!(
-                    n.node_type,
-                    DbNodeType::TablesFolder
-                        | DbNodeType::ViewsFolder
-                        | DbNodeType::FunctionsFolder
-                        | DbNodeType::ProceduresFolder
-                        | DbNodeType::SequencesFolder
-                        | DbNodeType::QueriesFolder
-                        | DbNodeType::ColumnsFolder
-                        | DbNodeType::IndexesFolder
-                        | DbNodeType::ForeignKeysFolder
-                        | DbNodeType::TriggersFolder
-                        | DbNodeType::ChecksFolder
-                ) {
-                    t!(&n.name).to_string()
-                } else {
-                    n.name.clone()
-                };
-                let comment = if n.node_type == DbNodeType::Table {
-                    n.metadata.get("comment").cloned()
-                } else {
-                    None
-                };
-                (name, comment)
-            })
-            .unwrap_or_default();
-        let label_for_tooltip = if let Some(ref error) = error_msg {
-            error.clone()
+        let label_for_tooltip: SharedString = if let Some(ref error) = error_msg {
+            SharedString::new(Arc::<str>::from(error.as_str()))
         } else {
             label_text.clone()
         };
 
-        // 获取节点类型相关信息
-        let node_type = node.as_ref().map(|n| n.node_type.clone());
-        let database_type = node.as_ref().map(|n| n.database_type.clone());
         // 判断是否是分组类型（Folder 类型）
         let is_folder_type = matches!(
             node_type,
@@ -2701,7 +2719,7 @@ impl DbTreeView {
                                             .text_ellipsis()
                                             .child(
                                                 Label::new(label_text)
-                                                    .highlights(search_query.clone())
+                                                    .highlights(search_highlight.clone())
                                                     .into_any_element(),
                                             ),
                                     )
@@ -2714,7 +2732,7 @@ impl DbTreeView {
                                                 .text_ellipsis()
                                                 .child(
                                                     Label::new(comment)
-                                                        .highlights(search_query)
+                                                        .highlights(search_highlight)
                                                         .text_color(cx.theme().muted_foreground)
                                                         .into_any_element(),
                                                 ),

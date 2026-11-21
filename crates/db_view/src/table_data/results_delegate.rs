@@ -4,9 +4,9 @@ use super::copy_format::{CopyFormat, CopyFormatter, TableMetadata};
 use super::data_grid::DataGrid;
 use db::{ColumnInfo, FieldType};
 use gpui::{
-    App, AppContext, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder, px,
+    App, AppContext, ClipboardItem, Context, Div, InteractiveElement, IntoElement,
+    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
+    WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 use gpui_component::IndexPath;
 use gpui_component::calendar::Date;
@@ -190,6 +190,8 @@ pub struct EditorTableDelegate {
     undo_stack_size: usize,
     /// Visible column mapping: UI column index -> original column index
     visible_column_indices: Vec<usize>,
+    /// 表格预览字体族缓存：每个渲染批次刷新一次，渲染单元格时直接读取
+    preview_font_family: SharedString,
 }
 
 fn parse_primary_order_by_clause(order_by_clause: &str) -> Option<(String, ColumnSort)> {
@@ -278,6 +280,7 @@ impl Clone for EditorTableDelegate {
             undo_stack: self.undo_stack.clone(),
             undo_stack_size: self.undo_stack_size,
             visible_column_indices: self.visible_column_indices.clone(),
+            preview_font_family: self.preview_font_family.clone(),
         }
     }
 }
@@ -333,7 +336,7 @@ impl EditorTableDelegate {
         editable: bool,
         database_type: DatabaseType,
         _window: &mut Window,
-        _cx: &mut Context<EditTableState<Self>>,
+        cx: &mut Context<EditTableState<Self>>,
     ) -> Self {
         let row_count = rows.len();
         let row_index_map: HashMap<usize, usize> = (0..row_count).map(|i| (i, i)).collect();
@@ -364,6 +367,7 @@ impl EditorTableDelegate {
             undo_stack: Vec::new(),
             undo_stack_size: 50, // 默认值
             visible_column_indices: Vec::new(),
+            preview_font_family: crate::settings::current_table_preview_font_family(cx),
         }
     }
 
@@ -869,7 +873,7 @@ impl EditorTableDelegate {
         columns: Vec<Column>,
         rows: Vec<Vec<Option<String>>>,
         rowids: Vec<String>,
-        _cx: &mut App,
+        cx: &mut App,
     ) {
         const MIN_WIDTH: usize = 80;
         const MAX_WIDTH: usize = 400;
@@ -898,6 +902,9 @@ impl EditorTableDelegate {
 
         // Clear all change tracking
         self.clear_changes();
+
+        // 数据变化时刷新字体缓存（渲染批次开始时也会刷新一次）
+        self.preview_font_family = crate::settings::current_table_preview_font_family(cx);
     }
 
     pub fn apply_order_by_clause(&mut self, order_by_clause: &str) {
@@ -1439,6 +1446,19 @@ impl EditTableDelegate for EditorTableDelegate {
         });
     }
 
+    /// 每个渲染批次开始时刷新一次预览字体缓存。
+    ///
+    /// 这样用户修改字体设置后能立即生效，
+    /// 同时避免每个可见单元格都去读一次全局设置（每帧 1 次而非每格 1 次）。
+    fn render_header(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<EditTableState<Self>>,
+    ) -> Stateful<Div> {
+        self.preview_font_family = crate::settings::current_table_preview_font_family(cx);
+        div().id("header")
+    }
+
     fn render_th(
         &mut self,
         col_ix: usize,
@@ -1949,10 +1969,11 @@ impl EditTableDelegate for EditorTableDelegate {
                 .flatten()
         });
 
-        let font_family = crate::settings::current_table_preview_font_family(cx);
+        // 直接读取缓存的字体族，避免每个可见单元格都去读全局设置
+        let font_family = self.preview_font_family.clone();
         match value {
             None => div()
-                .font_family(font_family.clone())
+                .font_family(font_family)
                 .text_color(cx.theme().muted_foreground.opacity(0.5))
                 .italic()
                 .child("NULL"),
@@ -2881,6 +2902,7 @@ mod tests {
             undo_stack: Vec::new(),
             undo_stack_size: 50,
             visible_column_indices: Vec::new(),
+            preview_font_family: SharedString::default(),
         }
     }
 

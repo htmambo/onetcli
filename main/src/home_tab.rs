@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
@@ -205,6 +207,317 @@ struct ConnectionWorkspaceMovePlan {
     target_connection_ids: Vec<i64>,
 }
 
+/// 首页连接列表的派生渲染数据。
+///
+/// 首页每次重绘都会遍历全部连接：若每帧都反序列化 `params` JSON、深拷贝连接对象
+/// 并 `format!` 生成元素 ID，连接数量一多就会成为帧率瓶颈。
+/// 这里把解析结果与预生成的 ID 缓存在 [`HomePage::connection_render_cache`] 中，
+/// 只在连接名称、类型或参数发生变化时重建。
+#[derive(Clone)]
+struct ConnectionRenderEntry {
+    /// `connection_type` + `name` + `params` 的指纹，用于判断缓存是否过期
+    fingerprint: u64,
+    /// 连接名称
+    name: SharedString,
+    /// 卡片副标题（`DatabaseType::External` 的文案随语言变化，渲染时再生成）
+    subtitle: Option<SharedString>,
+    /// 数据库类型（仅数据库连接有效），用于渲染图标
+    database_type: Option<DatabaseType>,
+    /// 搜索匹配用的小写字段
+    search_fields: Vec<String>,
+    /// 预生成的元素 ID
+    element_ids: ConnectionElementIds,
+}
+
+/// 预生成的连接元素 ID，避免每帧 `format!` 分配字符串。
+#[derive(Clone)]
+struct ConnectionElementIds {
+    card: SharedString,
+    name: SharedString,
+    info: SharedString,
+    group: SharedString,
+    sftp: SharedString,
+    edit: SharedString,
+    duplicate: SharedString,
+    remove: SharedString,
+    list_item: SharedString,
+    list_sftp: SharedString,
+    list_edit: SharedString,
+    list_duplicate: SharedString,
+    list_remove: SharedString,
+}
+
+/// 快速 64 位哈希（分块处理，接近 FxHash 的吞吐）。
+///
+/// 仅用于判断连接参数是否发生变化，不参与任何安全用途。
+fn fast_hash_bytes(seed: u64, bytes: &[u8]) -> u64 {
+    const MULTIPLIER: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+    let mut hash = seed;
+    let mut chunks = bytes.chunks_exact(8);
+    for chunk in chunks.by_ref() {
+        // chunks_exact(8) 保证每块长度恒为 8，直接拷贝避免 unwrap
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(chunk);
+        let value = u64::from_le_bytes(buf);
+        hash = (hash.rotate_left(5) ^ value).wrapping_mul(MULTIPLIER);
+    }
+    for &byte in chunks.remainder() {
+        hash = (hash ^ byte as u64).wrapping_mul(MULTIPLIER);
+    }
+    hash
+}
+
+/// 计算连接派生数据的指纹。
+///
+/// 名称、类型或参数（`params` JSON）任一变化时指纹随之变化，
+/// 据此在重绘时判断缓存是否需要重建。
+///
+/// 各字段长度混入哈希，避免 `name` 与 `params` 的边界产生歧义
+/// （例如 name="ab" + params="cd" 与 name="abcd" + params="" 会得到同一串字节）。
+fn connection_render_fingerprint(conn: &StoredConnection) -> u64 {
+    const MULTIPLIER: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+    let mut hash: u64 = 0x9e37_79b9_7f4a_7c15;
+    hash = hash
+        .wrapping_mul(MULTIPLIER)
+        .wrapping_add(conn.name.len() as u64);
+    hash = fast_hash_bytes(hash, conn.name.as_bytes());
+    hash = hash
+        .wrapping_mul(MULTIPLIER)
+        .wrapping_add(conn.params.len() as u64);
+    hash = fast_hash_bytes(hash, conn.params.as_bytes());
+    hash.wrapping_mul(MULTIPLIER)
+        .wrapping_add(conn.connection_type as u64)
+}
+
+/// 解析连接参数并生成首页渲染所需的派生数据。
+///
+/// 这里只做一次 `params` 反序列化，副标题、图标类型与搜索字段都从同一份解析结果推导，
+/// 避免首页每帧对同一个连接重复解析。
+fn build_connection_render_entry(conn: &StoredConnection) -> ConnectionRenderEntry {
+    let mut subtitle: Option<SharedString> = None;
+    let mut database_type: Option<DatabaseType> = None;
+    // 搜索字段统一转成小写，匹配时直接做子串比较
+    let mut search_fields: Vec<String> = vec![conn.name.to_lowercase()];
+
+    match conn.connection_type {
+        ConnectionType::Database => {
+            if let Ok(params) = conn.to_db_connection() {
+                database_type = Some(params.database_type);
+                // 外部驱动已移除：存量 External 连接显示停止支持提示（文案随语言变化，渲染时生成）
+                if !matches!(params.database_type, DatabaseType::External) {
+                    subtitle = Some(
+                        if matches!(params.database_type, DatabaseType::SQLite) {
+                            params.host.clone()
+                        } else {
+                            let database = match params.database.as_ref() {
+                                Some(database) => format!("/{}", database),
+                                None => String::new(),
+                            };
+                            format!(
+                                "{}@{}:{}{}",
+                                params.username, params.host, params.port, database
+                            )
+                        }
+                        .into(),
+                    );
+                }
+                search_fields.push(params.host.to_lowercase());
+                search_fields.push(params.port.to_string());
+                search_fields.push(params.username.to_lowercase());
+                if let Some(database) = params.database.as_ref() {
+                    search_fields.push(database.to_lowercase());
+                }
+                search_fields.push(
+                    format!("{}@{}:{}", params.username, params.host, params.port).to_lowercase(),
+                );
+            }
+        }
+        ConnectionType::SshSftp => {
+            if let Ok(params) = conn.to_ssh_params() {
+                subtitle =
+                    Some(format!("{}@{}:{}", params.username, params.host, params.port).into());
+                search_fields.push(params.host.to_lowercase());
+                search_fields.push(params.port.to_string());
+                search_fields.push(params.username.to_lowercase());
+                search_fields.push(
+                    format!("{}@{}:{}", params.username, params.host, params.port).to_lowercase(),
+                );
+            }
+        }
+        ConnectionType::Redis => {
+            if let Ok(params) = conn.to_redis_params() {
+                subtitle = Some(
+                    match params.mode {
+                        RedisMode::Standalone => {
+                            format!("{}:{}/{}", params.host, params.port, params.db_index)
+                        }
+                        RedisMode::Sentinel => {
+                            let (master_name, sentinel_count) = params
+                                .sentinel
+                                .as_ref()
+                                .map(|sentinel| {
+                                    (sentinel.master_name.as_str(), sentinel.sentinels.len())
+                                })
+                                .unwrap_or(("sentinel", 0));
+                            format!("{} (sentinel:{})", master_name, sentinel_count)
+                        }
+                        RedisMode::Cluster => {
+                            let node_count = params
+                                .cluster
+                                .as_ref()
+                                .map(|cluster| cluster.nodes.len())
+                                .unwrap_or(0);
+                            format!("cluster ({} nodes)", node_count)
+                        }
+                    }
+                    .into(),
+                );
+                search_fields.push(params.host.to_lowercase());
+                search_fields.push(params.port.to_string());
+                if let Some(username) = params.username.as_ref() {
+                    search_fields.push(username.to_lowercase());
+                }
+            }
+        }
+        ConnectionType::MongoDB => {
+            if let Ok(params) = conn.to_mongodb_params() {
+                subtitle = Some(
+                    if !params.host.is_empty() {
+                        if let Some(port) = params.port {
+                            format!("{}:{}", params.host, port)
+                        } else {
+                            params.host.clone()
+                        }
+                    } else if !params.connection_string.is_empty() {
+                        params.connection_string.clone()
+                    } else {
+                        "MongoDB".to_string()
+                    }
+                    .into(),
+                );
+                search_fields.push(params.host.to_lowercase());
+                if let Some(port) = params.port {
+                    search_fields.push(port.to_string());
+                }
+                if let Some(username) = params.username.as_ref() {
+                    search_fields.push(username.to_lowercase());
+                }
+                if let Some(database) = params.database.as_ref() {
+                    search_fields.push(database.to_lowercase());
+                }
+                search_fields.push(params.connection_string.to_lowercase());
+            }
+        }
+        ConnectionType::PortForwarding => {
+            if let Ok(params) = conn.to_port_forwarding_params() {
+                subtitle = Some(
+                    match params.kind {
+                        one_core::storage::PortForwardingKind::Local => format!(
+                            "{}:{} -> {}:{}",
+                            params.bind_host,
+                            params.bind_port,
+                            params.target_host,
+                            params.target_port
+                        ),
+                        one_core::storage::PortForwardingKind::Dynamic => {
+                            format!("SOCKS {}:{}", params.bind_host, params.bind_port)
+                        }
+                    }
+                    .into(),
+                );
+            }
+        }
+        ConnectionType::Rdp | ConnectionType::Vnc => {
+            if let Ok(params) = conn.to_remote_desktop_params() {
+                subtitle = Some(format!("{}:{}", params.host, params.port).into());
+            }
+        }
+        _ => {}
+    }
+
+    let id = conn.id.unwrap_or(0);
+    ConnectionRenderEntry {
+        fingerprint: connection_render_fingerprint(conn),
+        name: SharedString::from(conn.name.clone()),
+        subtitle,
+        database_type,
+        search_fields,
+        element_ids: ConnectionElementIds {
+            card: SharedString::from(format!("conn-card-{}", id)),
+            name: SharedString::from(format!("conn-name-{}", id)),
+            info: SharedString::from(format!("conn-info-{}", id)),
+            group: SharedString::from(format!("conn-card-group-{}", id)),
+            sftp: SharedString::from(format!("sftp-conn-{}", id)),
+            edit: SharedString::from(format!("edit-conn-{}", id)),
+            duplicate: SharedString::from(format!("duplicate-conn-{}", id)),
+            remove: SharedString::from(format!("delete-conn-{}", id)),
+            list_item: SharedString::from(format!("conn-list-item-{}", id)),
+            list_sftp: SharedString::from(format!("list-sftp-conn-{}", id)),
+            list_edit: SharedString::from(format!("list-edit-conn-{}", id)),
+            list_duplicate: SharedString::from(format!("list-duplicate-conn-{}", id)),
+            list_remove: SharedString::from(format!("list-delete-conn-{}", id)),
+        },
+    }
+}
+
+/// 连接卡片副标题。
+///
+/// 解析结果来自派生数据缓存，不再每帧反序列化 `params` JSON。
+fn connection_subtitle(entry: &ConnectionRenderEntry) -> Option<SharedString> {
+    // 外部驱动已移除：存量 External 连接显示停止支持提示（文案随语言变化，渲染时生成）
+    if entry.database_type == Some(DatabaseType::External) {
+        return Some(SharedString::from(
+            t!("Home.external_driver_subtitle").to_string(),
+        ));
+    }
+    entry.subtitle.clone()
+}
+
+/// 渲染连接图标。
+fn render_connection_icon(
+    connection_type: ConnectionType,
+    database_type: Option<DatabaseType>,
+    size: f32,
+) -> AnyElement {
+    let icon = match connection_type {
+        ConnectionType::Database => database_type
+            .map(|database_type| database_type.as_icon())
+            .unwrap_or_else(|| IconName::Database.color())
+            .with_size(px(size))
+            .text_color(gpui::white()),
+        ConnectionType::SshSftp => IconName::TerminalColor
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::rgb(0x8b5cf6)),
+        ConnectionType::Redis => IconName::Redis
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::white()),
+        ConnectionType::MongoDB => IconName::MongoDB
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::white()),
+        ConnectionType::PortForwarding => IconName::PortForwardingColor
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::white()),
+        ConnectionType::Rdp => IconName::Rdp
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::white()),
+        ConnectionType::Vnc => IconName::Vnc
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::white()),
+        _ => IconName::Server
+            .color()
+            .with_size(px(size))
+            .text_color(gpui::white()),
+    };
+
+    icon.into_any_element()
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         #[cfg(target_os = "macos")]
@@ -258,6 +571,10 @@ pub struct HomePage {
     connection_card_drag_preview_sizes: HashMap<i64, DragPreviewSize>,
     /// 连接卡片最近一次渲染的实际边界
     connection_card_bounds: HashMap<i64, Bounds<Pixels>>,
+    /// 首页连接列表的派生渲染数据缓存（副标题、图标类型、搜索字段、元素 ID）
+    connection_render_cache: HashMap<i64, ConnectionRenderEntry>,
+    /// 刷新派生数据缓存时复用的存活连接 ID 缓冲区
+    live_connection_ids: HashSet<i64>,
     /// 各工作区连接卡片网格最近一次渲染的实际边界
     connection_grid_bounds: HashMap<Option<i64>, Bounds<Pixels>>,
     /// 是否正在同步
@@ -352,6 +669,8 @@ impl HomePage {
             connection_list_drag_preview_sizes: HashMap::new(),
             connection_card_drag_preview_sizes: HashMap::new(),
             connection_card_bounds: HashMap::new(),
+            connection_render_cache: HashMap::new(),
+            live_connection_ids: HashSet::new(),
             connection_grid_bounds: HashMap::new(),
             syncing: false,
             sync_requested: false,
@@ -478,12 +797,19 @@ impl HomePage {
     fn load_workspaces(&mut self, cx: &mut Context<Self>) {
         let storage = cx.global::<GlobalStorageState>().storage.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let result = (|| {
+            use one_core::gpui_tokio::Tokio;
+            use one_core::storage::WorkspaceRepository;
+            use one_core::storage::traits::Repository;
+
+            // 同步 SQLite 查询放到 tokio 线程池，避免阻塞 UI 线程
+            // （WAL 模式下单次查询虽快，但写锁竞争时 busy_timeout 可达 5 秒）。
+            let result = Tokio::spawn_result(cx, async move {
                 let repo = storage
                     .get::<WorkspaceRepository>()
                     .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
                 repo.list()
-            })();
+            })
+            .await;
 
             match result {
                 Ok(workspaces) => {
@@ -511,12 +837,19 @@ impl HomePage {
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let result = (|| {
+            use one_core::gpui_tokio::Tokio;
+            use one_core::storage::ConnectionRepository;
+            use one_core::storage::traits::Repository;
+
+            // 同步 SQLite 查询 + 逐条参数解密放到 tokio 线程池：
+            // 连接数较多时解密本身即是毫秒级 CPU 占用，不应占用 UI 线程。
+            let result = Tokio::spawn_result(cx, async move {
                 let repo = storage
                     .get::<ConnectionRepository>()
                     .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
                 repo.list()
-            })();
+            })
+            .await;
 
             match result {
                 Ok(connections) => {
@@ -1247,7 +1580,11 @@ impl HomePage {
         }
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
-        self.log_sync_decrypt_health(&storage, &t!("HomeSync.scene_routine_sync").to_string());
+        Self::spawn_sync_decrypt_health_log(
+            &storage,
+            t!("HomeSync.scene_routine_sync").to_string(),
+            cx,
+        );
 
         if self.syncing {
             self.sync_requested = true;
@@ -1368,8 +1705,23 @@ impl HomePage {
     }
 
     /// 同步前记录本地连接解密状态，用于提示哪些连接会被引擎按连接粒度跳过。
-    fn log_sync_decrypt_health(&self, storage: &one_core::storage::StorageManager, scene: &str) {
-        if let Some(repo) = storage.get::<ConnectionRepository>() {
+    ///
+    /// 该检查会全表扫描并逐条试解密，连接数多时是百毫秒级 CPU 开销，
+    /// 因此放到后台线程执行，不占用 UI 线程。
+    fn spawn_sync_decrypt_health_log(
+        storage: &one_core::storage::StorageManager,
+        scene: String,
+        cx: &mut Context<Self>,
+    ) {
+        let storage = storage.clone();
+        cx.background_spawn(async move {
+            let Some(repo) = storage.get::<ConnectionRepository>() else {
+                tracing::warn!(
+                    "{}",
+                    t!("HomeSync.trace_decryption_health_no_repo", scene = scene)
+                );
+                return;
+            };
             match repo.list_sync_decrypt_failures() {
                 Ok(failures) if !failures.is_empty() => {
                     let preview = failures
@@ -1399,12 +1751,8 @@ impl HomePage {
                     );
                 }
             }
-        } else {
-            tracing::warn!(
-                "{}",
-                t!("HomeSync.trace_decryption_health_no_repo", scene = scene)
-            );
-        }
+        })
+        .detach();
     }
 
     /// 显示冲突解决对话框
@@ -1712,9 +2060,10 @@ impl HomePage {
         }
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
-        self.log_sync_decrypt_health(
+        Self::spawn_sync_decrypt_health_log(
             &storage,
-            &t!("HomeSync.scene_individual_conflict").to_string(),
+            t!("HomeSync.scene_individual_conflict").to_string(),
+            cx,
         );
         self.syncing = true;
         self.sync_requested = false;
@@ -2171,12 +2520,19 @@ impl HomePage {
             .and_then(|c| c.cloud_id.clone());
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let result = (|| {
-                let repo = storage
+            use one_core::gpui_tokio::Tokio;
+            use one_core::storage::traits::Repository;
+
+            // 同步 SQLite 写放到 tokio 线程池：写锁竞争时 busy_timeout 可达 5 秒，
+            // 不能占用 UI 线程。
+            let storage_for_task = storage.clone();
+            let result = Tokio::spawn_result(cx, async move {
+                let repo = storage_for_task
                     .get::<ConnectionRepository>()
                     .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
                 repo.delete(conn_id)
-            })();
+            })
+            .await;
 
             match result {
                 Ok(_) => {
@@ -2314,56 +2670,64 @@ impl HomePage {
             Workspace::new(name)
         };
 
-        let result: anyhow::Result<Workspace> = (|| {
-            let repo = storage
-                .get::<WorkspaceRepository>()
-                .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
+        let editing_id_for_task = editing_id;
+        cx.spawn(async move |this, cx| {
+            use one_core::gpui_tokio::Tokio;
+            use one_core::storage::traits::Repository;
 
-            if editing_id.is_some() {
-                repo.update(&mut workspace)?;
-            } else {
-                repo.insert(&mut workspace)?;
-            }
+            // 同步 SQLite 写放到 tokio 线程池，避免 UI 线程在写锁竞争时阻塞。
+            let result = Tokio::spawn_result(cx, async move {
+                let repo = storage
+                    .get::<WorkspaceRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
 
-            Ok(workspace)
-        })();
+                if editing_id_for_task.is_some() {
+                    repo.update(&mut workspace)?;
+                } else {
+                    repo.insert(&mut workspace)?;
+                }
 
-        cx.spawn(async move |this, cx| match result {
-            Ok(workspace) => {
-                _ = this.update(cx, |this, cx| {
-                    let workspace_id = workspace.id.unwrap_or(0);
-                    if let Some(editing_id) = editing_id {
-                        if let Some(pos) = this
-                            .workspaces
-                            .iter()
-                            .position(|w| w.id == Some(editing_id))
-                        {
-                            this.workspaces[pos] = workspace;
+                Ok(workspace)
+            })
+            .await;
+
+            match result {
+                Ok(workspace) => {
+                    _ = this.update(cx, |this, cx| {
+                        let workspace_id = workspace.id.unwrap_or(0);
+                        if let Some(editing_id) = editing_id {
+                            if let Some(pos) = this
+                                .workspaces
+                                .iter()
+                                .position(|w| w.id == Some(editing_id))
+                            {
+                                this.workspaces[pos] = workspace;
+                            }
+                            emit_connection_event(
+                                ConnectionDataEvent::WorkspaceUpdated { workspace_id },
+                                cx,
+                            );
+                        } else {
+                            this.workspaces.push(workspace);
+                            emit_connection_event(
+                                ConnectionDataEvent::WorkspaceCreated { workspace_id },
+                                cx,
+                            );
                         }
-                        emit_connection_event(
-                            ConnectionDataEvent::WorkspaceUpdated { workspace_id },
-                            cx,
-                        );
-                    } else {
-                        this.workspaces.push(workspace);
-                        emit_connection_event(
-                            ConnectionDataEvent::WorkspaceCreated { workspace_id },
-                            cx,
-                        );
-                    }
-                    // 兜底触发一次自动同步，避免当前页对自身工作区事件未回流时漏同步。
-                    if this.current_user.is_some() && crypto::has_master_key() {
-                        tracing::info!("{}", t!("HomeSession.workspace_saved_auto_sync"));
-                        this.trigger_sync(cx);
-                    }
-                    cx.notify();
-                });
-            }
-            Err(e) => {
-                tracing::error!(
-                    "{}",
-                    t!("HomeSession.workspace_save_failed", error = e.to_string())
-                );
+                        // 兜底触发一次自动同步，避免当前页对自身工作区事件未回流时漏同步。
+                        if this.current_user.is_some() && crypto::has_master_key() {
+                            tracing::info!("{}", t!("HomeSession.workspace_saved_auto_sync"));
+                            this.trigger_sync(cx);
+                        }
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "{}",
+                        t!("HomeSession.workspace_save_failed", error = e.to_string())
+                    );
+                }
             }
         })
         .detach();
@@ -2469,40 +2833,54 @@ impl HomePage {
             .collect();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let Some(connection_repo) = storage.get::<ConnectionRepository>() else {
-                tracing::error!("{}", t!("HomeSession.connection_repository_missing"));
-                return;
-            };
-            let Some(workspace_repo) = storage.get::<WorkspaceRepository>() else {
-                tracing::error!("{}", t!("HomeSession.workspace_repository_missing"));
-                return;
-            };
+            use one_core::gpui_tokio::Tokio;
+            use one_core::storage::traits::Repository;
 
-            let mut updated_connections = Vec::new();
-            for connection in &workspace_connections {
-                let mut updated_connection = connection.clone();
-                updated_connection.workspace_id = None;
-                updated_connection.sort_order = None;
-                if let Err(e) = connection_repo.update(&updated_connection) {
-                    tracing::error!(
-                        "{}",
-                        t!(
+            // 逐条更新连接 + 删除工作区都是同步 SQLite 写，放到 tokio 线程池：
+            // 写锁竞争时 busy_timeout 可达 5 秒，不能占用 UI 线程。
+            let storage_for_task = storage.clone();
+            let connections_for_task = workspace_connections.clone();
+            let result = Tokio::spawn_result(cx, async move {
+                let connection_repo = storage_for_task
+                    .get::<ConnectionRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
+                let workspace_repo = storage_for_task
+                    .get::<WorkspaceRepository>()
+                    .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
+
+                let mut updated_connections = Vec::new();
+                for connection in &connections_for_task {
+                    let mut updated_connection = connection.clone();
+                    updated_connection.workspace_id = None;
+                    updated_connection.sort_order = None;
+                    connection_repo.update(&updated_connection).map_err(|e| {
+                        anyhow::anyhow!(t!(
                             "HomeSession.workspace_delete_move_failed",
                             error = e.to_string()
-                        )
-                    );
+                        ))
+                    })?;
+                    updated_connections.push(updated_connection);
+                }
+
+                workspace_repo.delete(workspace_id).map_err(|e| {
+                    anyhow::anyhow!(t!(
+                        "HomeSession.workspace_delete_failed",
+                        error = e.to_string()
+                    ))
+                })?;
+
+                Ok(updated_connections)
+            })
+            .await;
+
+            let updated_connections = match result {
+                Ok(updated_connections) => updated_connections,
+                Err(e) => {
+                    tracing::error!("{}", e);
                     return;
                 }
-                updated_connections.push(updated_connection);
-            }
+            };
 
-            if let Err(e) = workspace_repo.delete(workspace_id) {
-                tracing::error!(
-                    "{}",
-                    t!("HomeSession.workspace_delete_failed", error = e.to_string())
-                );
-                return;
-            }
             Self::queue_pending_workspace_deletion(&storage, &workspace, &workspace_connections);
 
             _ = this.update(cx, |this, cx| {
@@ -2989,31 +3367,45 @@ impl HomePage {
                             match crypto::change_master_key(&old_key, &input_key, &input_key) {
                                 Ok(()) => {
                                     let storage = cx.global::<GlobalStorageState>().storage.clone();
-                                    match re_encrypt_all_connections(&storage) {
-                                        Ok(count) => {
-                                            tracing::info!(
-                                                "{}",
-                                                t!(
-                                                    "HomeSession.re_encrypt_local_connections_succeeded",
-                                                    count = count
-                                                )
-                                            );
+                                    // 重加密全部连接 = 逐条解密 + 重加密 + DB 写，
+                                    // 连接数多时是秒级开销，放到 tokio 线程池执行。
+                                    let error_msg_for_task = error_msg_ok.clone();
+                                    cx.spawn(async move |cx| {
+                                        use one_core::gpui_tokio::Tokio;
+
+                                        let result =
+                                            Tokio::spawn_result(cx, async move {
+                                                re_encrypt_all_connections(&storage)
+                                            })
+                                            .await;
+                                        match result {
+                                            Ok(count) => {
+                                                tracing::info!(
+                                                    "{}",
+                                                    t!(
+                                                        "HomeSession.re_encrypt_local_connections_succeeded",
+                                                        count = count
+                                                    )
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "{}",
+                                                    t!(
+                                                        "HomeSession.re_encrypt_local_connections_failed",
+                                                        error = e.to_string()
+                                                    )
+                                                );
+                                                cx.update(|cx| {
+                                                    error_msg_for_task.update(cx, |msg, cx| {
+                                                        *msg = Some(e.to_string());
+                                                        cx.notify();
+                                                    });
+                                                });
+                                            }
                                         }
-                                        Err(e) => {
-                                            tracing::error!(
-                                                "{}",
-                                                t!(
-                                                    "HomeSession.re_encrypt_local_connections_failed",
-                                                    error = e.to_string()
-                                                )
-                                            );
-                                            error_msg_ok.update(cx, |msg, cx| {
-                                                *msg = Some(e.to_string());
-                                                cx.notify();
-                                            });
-                                            return false;
-                                        }
-                                    }
+                                    })
+                                    .detach();
                                 }
                                 Err(e) => {
                                     error_msg_ok.update(cx, |msg, cx| {
@@ -3824,121 +4216,93 @@ impl HomePage {
         }
     }
 
-    fn match_connection(&self, conn: &StoredConnection, query: &str) -> bool {
-        if query.is_empty() {
+    /// 刷新连接派生数据缓存：移除已删除的连接，重建名称/类型/参数发生变化的连接。
+    ///
+    /// 每帧重绘前调用一次，指纹比对是纯内存操作，远快于重新解析 `params` JSON。
+    fn refresh_connection_render_cache(&mut self) {
+        // 复用缓冲区，避免每帧新建 HashSet
+        self.live_connection_ids.clear();
+        self.live_connection_ids
+            .extend(self.connections.iter().filter_map(|conn| conn.id));
+        self.connection_render_cache
+            .retain(|id, _| self.live_connection_ids.contains(id));
+
+        for conn in self.connections.iter() {
+            let Some(id) = conn.id else {
+                continue;
+            };
+            let fingerprint = connection_render_fingerprint(conn);
+            let expired = self
+                .connection_render_cache
+                .get(&id)
+                .map(|entry| entry.fingerprint != fingerprint)
+                .unwrap_or(true);
+            if expired {
+                self.connection_render_cache
+                    .insert(id, build_connection_render_entry(conn));
+            }
+        }
+    }
+
+    /// 取连接的派生渲染数据；缓存缺失时即时构建。
+    ///
+    /// 缓存由 [`HomePage::refresh_connection_render_cache`] 在每次重绘前刷新，
+    /// 因此这里直接命中即可。
+    fn connection_render_entry(&self, conn: &StoredConnection) -> Cow<'_, ConnectionRenderEntry> {
+        if let Some(id) = conn.id {
+            if let Some(entry) = self.connection_render_cache.get(&id) {
+                return Cow::Borrowed(entry);
+            }
+        }
+        Cow::Owned(build_connection_render_entry(conn))
+    }
+
+    /// 按 ID 回查连接。
+    ///
+    /// 渲染期不深拷贝连接对象，需要完整连接数据的交互（打开、复制、编辑）
+    /// 在点击时回查即可。
+    fn find_connection(&self, id: Option<i64>) -> Option<StoredConnection> {
+        let id = id?;
+        self.connections
+            .iter()
+            .find(|conn| conn.id == Some(id))
+            .cloned()
+    }
+
+    /// 连接搜索匹配。
+    ///
+    /// `query_lower` 必须已转成小写（调用方在 [`HomePage::render_content_area`] 统一处理），
+    /// 缓存中的 `search_fields` 同样已是小写，直接做子串比较即可。
+    fn match_connection(&self, conn: &StoredConnection, query_lower: &str) -> bool {
+        if query_lower.is_empty() {
             return true;
         }
 
-        // 匹配连接名称
-        if conn.name.to_lowercase().contains(query) {
-            return true;
-        }
-
-        // 根据连接类型解析对应参数进行匹配
-        match conn.connection_type {
-            ConnectionType::Database => {
-                if let Ok(params) = conn.to_db_connection() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.to_string().contains(query) {
-                        return true;
-                    }
-                    if params.username.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params
-                        .database
-                        .as_ref()
-                        .map_or(false, |db| db.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                    let conn_str = format!("{}@{}:{}", params.username, params.host, params.port);
-                    if conn_str.to_lowercase().contains(query) {
-                        return true;
-                    }
-                }
-            }
-            ConnectionType::SshSftp => {
-                if let Ok(params) = conn.to_ssh_params() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.to_string().contains(query) {
-                        return true;
-                    }
-                    if params.username.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    let conn_str = format!("{}@{}:{}", params.username, params.host, params.port);
-                    if conn_str.to_lowercase().contains(query) {
-                        return true;
-                    }
-                }
-            }
-            ConnectionType::Redis => {
-                if let Ok(params) = conn.to_redis_params() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.to_string().contains(query) {
-                        return true;
-                    }
-                    if params
-                        .username
-                        .as_ref()
-                        .map_or(false, |u| u.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                }
-            }
-            ConnectionType::MongoDB => {
-                if let Ok(params) = conn.to_mongodb_params() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.map_or(false, |p| p.to_string().contains(query)) {
-                        return true;
-                    }
-                    if params
-                        .username
-                        .as_ref()
-                        .map_or(false, |u| u.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                    if params
-                        .database
-                        .as_ref()
-                        .map_or(false, |db| db.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                    if params.connection_string.to_lowercase().contains(query) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        false
+        // 名称与各类型参数的关键字段已在缓存中转成小写，直接做子串比较
+        let entry = self.connection_render_entry(conn);
+        entry
+            .search_fields
+            .iter()
+            .any(|field| field.contains(query_lower))
     }
 
     fn render_content_area(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // 先刷新派生数据缓存，后续渲染直接命中，避免每帧重复解析 `params` JSON
+        self.refresh_connection_render_cache();
         let search_query = self.search_query.read(cx).to_lowercase();
         let selected_id = self.selected_connection_id;
         self.render_workspace_view(&search_query, selected_id, cx)
             .into_any_element()
     }
 
-    fn sort_connections_for_display(
+    /// 按当前排序设置对连接排序。
+    ///
+    /// 只排序引用，不复制连接对象。
+    fn sort_connections_for_display<'a>(
         &self,
-        mut connections: Vec<StoredConnection>,
+        mut connections: Vec<&'a StoredConnection>,
         cx: &App,
-    ) -> Vec<StoredConnection> {
+    ) -> Vec<&'a StoredConnection> {
         let sort_field = Self::connection_list_sort_field(cx);
         let sort_order = Self::connection_list_sort_order(cx);
         connections.sort_by(|a, b| compare_connections(a, b, sort_field, sort_order));
@@ -4349,12 +4713,16 @@ impl HomePage {
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let result = (|| {
-                let repo = storage
+            use one_core::gpui_tokio::Tokio;
+
+            let storage_for_task = storage.clone();
+            let result = Tokio::spawn_result(cx, async move {
+                let repo = storage_for_task
                     .get::<WorkspaceRepository>()
                     .ok_or_else(|| anyhow::anyhow!("WorkspaceRepository not found"))?;
                 repo.reorder(&ordered_workspace_ids)
-            })();
+            })
+            .await;
 
             match result {
                 Ok(()) => {
@@ -4435,12 +4803,16 @@ impl HomePage {
 
         let storage = cx.global::<GlobalStorageState>().storage.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let result = (|| {
-                let repo = storage
+            use one_core::gpui_tokio::Tokio;
+
+            let storage_for_task = storage.clone();
+            let result = Tokio::spawn_result(cx, async move {
+                let repo = storage_for_task
                     .get::<ConnectionRepository>()
                     .ok_or_else(|| anyhow::anyhow!("ConnectionRepository not found"))?;
                 repo.reorder_within_workspace(workspace_id, &ordered_connection_ids)
-            })();
+            })
+            .await;
 
             match result {
                 Ok(()) => {
@@ -4607,162 +4979,40 @@ impl HomePage {
         );
     }
 
-    fn connection_subtitle(&self, conn: &StoredConnection) -> Option<String> {
-        match conn.connection_type {
-            ConnectionType::Database => conn.to_db_connection().ok().map(|params| {
-                // 外部驱动已移除：存量 External 连接显示停止支持提示
-                if matches!(params.database_type, DatabaseType::External) {
-                    return t!("Home.external_driver_subtitle").to_string();
-                }
-                if matches!(params.database_type, DatabaseType::SQLite) {
-                    params.host
-                } else {
-                    let database = match params.database {
-                        Some(database) => format!("/{}", database),
-                        None => String::new(),
-                    };
-                    format!(
-                        "{}@{}:{}{}",
-                        params.username, params.host, params.port, database
-                    )
-                }
-            }),
-            ConnectionType::SshSftp => conn
-                .to_ssh_params()
-                .ok()
-                .map(|params| format!("{}@{}:{}", params.username, params.host, params.port)),
-            ConnectionType::Redis => conn.to_redis_params().ok().map(|params| match params.mode {
-                RedisMode::Standalone => {
-                    format!("{}:{}/{}", params.host, params.port, params.db_index)
-                }
-                RedisMode::Sentinel => {
-                    let (master_name, sentinel_count) = params
-                        .sentinel
-                        .as_ref()
-                        .map(|sentinel| (sentinel.master_name.as_str(), sentinel.sentinels.len()))
-                        .unwrap_or(("sentinel", 0));
-                    format!("{} (sentinel:{})", master_name, sentinel_count)
-                }
-                RedisMode::Cluster => {
-                    let node_count = params
-                        .cluster
-                        .as_ref()
-                        .map(|cluster| cluster.nodes.len())
-                        .unwrap_or(0);
-                    format!("cluster ({} nodes)", node_count)
-                }
-            }),
-            ConnectionType::MongoDB => conn.to_mongodb_params().ok().map(|params| {
-                if !params.host.is_empty() {
-                    if let Some(port) = params.port {
-                        format!("{}:{}", params.host, port)
-                    } else {
-                        params.host
-                    }
-                } else if !params.connection_string.is_empty() {
-                    params.connection_string
-                } else {
-                    "MongoDB".to_string()
-                }
-            }),
-            ConnectionType::PortForwarding => {
-                conn.to_port_forwarding_params()
-                    .ok()
-                    .map(|params| match params.kind {
-                        one_core::storage::PortForwardingKind::Local => format!(
-                            "{}:{} -> {}:{}",
-                            params.bind_host,
-                            params.bind_port,
-                            params.target_host,
-                            params.target_port
-                        ),
-                        one_core::storage::PortForwardingKind::Dynamic => {
-                            format!("SOCKS {}:{}", params.bind_host, params.bind_port)
-                        }
-                    })
-            }
-            ConnectionType::Rdp | ConnectionType::Vnc => conn
-                .to_remote_desktop_params()
-                .ok()
-                .map(|params| format!("{}:{}", params.host, params.port)),
-            _ => None,
-        }
-    }
-
-    fn render_connection_icon(&self, conn: &StoredConnection, size: f32) -> AnyElement {
-        let icon = match conn.connection_type {
-            ConnectionType::Database => conn
-                .to_db_connection()
-                .map(|c| c.database_type.as_icon())
-                .unwrap_or_else(|_| IconName::Database.color())
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            ConnectionType::SshSftp => IconName::TerminalColor
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::rgb(0x8b5cf6)),
-            ConnectionType::Redis => IconName::Redis
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            ConnectionType::MongoDB => IconName::MongoDB
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            ConnectionType::PortForwarding => IconName::PortForwardingColor
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            ConnectionType::Rdp => IconName::Rdp
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            ConnectionType::Vnc => IconName::Vnc
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-            _ => IconName::Server
-                .color()
-                .with_size(px(size))
-                .text_color(gpui::white()),
-        };
-
-        icon.into_any_element()
-    }
-
     fn render_workspace_view(
         &self,
-        search_query: &str,
+        search_query_lower: &str,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         const WORKSPACE_GAP_HEIGHT: f32 = 12.0;
         let manual_sort_mode = Self::is_manual_sort_mode(cx);
-        let workspaces_with_connections: Vec<_> = self
-            .workspaces
-            .iter()
-            .filter(|ws| {
-                if self.filtered_workspace_ids.is_empty() {
-                    return true;
-                }
-                match ws.id {
-                    Some(id) => self.filtered_workspace_ids.contains(&id),
-                    None => true,
-                }
-            })
-            .map(|ws| {
-                let conn_list: Vec<_> = self
-                    .connections
-                    .iter()
-                    .filter(|conn| conn.workspace_id == ws.id)
-                    .filter(|conn| self.match_connection(conn, search_query))
-                    .filter(|conn| self.match_connection_type(conn))
-                    .cloned()
-                    .collect();
-                let conn_list = self.sort_connections_for_display(conn_list, cx);
-                (ws.clone(), conn_list)
-            })
-            .collect();
+        let mut workspaces_with_connections: Vec<(&Workspace, Vec<&StoredConnection>)> =
+            Vec::with_capacity(self.workspaces.len());
+        workspaces_with_connections.extend(
+            self.workspaces
+                .iter()
+                .filter(|ws| {
+                    if self.filtered_workspace_ids.is_empty() {
+                        return true;
+                    }
+                    match ws.id {
+                        Some(id) => self.filtered_workspace_ids.contains(&id),
+                        None => true,
+                    }
+                })
+                .map(|ws| {
+                    let conn_list: Vec<&StoredConnection> = self
+                        .connections
+                        .iter()
+                        .filter(|conn| conn.workspace_id == ws.id)
+                        .filter(|conn| self.match_connection(conn, search_query_lower))
+                        .filter(|conn| self.match_connection_type(conn))
+                        .collect();
+                    let conn_list = self.sort_connections_for_display(conn_list, cx);
+                    (ws, conn_list)
+                }),
+        );
 
         let sort_field = Self::connection_list_sort_field(cx);
         let sort_order = Self::connection_list_sort_order(cx);
@@ -4781,9 +5031,8 @@ impl HomePage {
             self.connections
                 .iter()
                 .filter(|conn| conn.workspace_id.is_none())
-                .filter(|conn| self.match_connection(conn, search_query))
+                .filter(|conn| self.match_connection(conn, search_query_lower))
                 .filter(|conn| self.match_connection_type(conn))
-                .cloned()
                 .collect(),
             cx,
         );
@@ -4797,9 +5046,7 @@ impl HomePage {
             .child({
                 let mut container = v_flex().gap_0().w_full();
 
-                for (index, (workspace, connections)) in
-                    visible_workspaces.iter().cloned().enumerate()
-                {
+                for (index, (workspace, connections)) in visible_workspaces.iter().enumerate() {
                     if index > 0 {
                         if manual_sort_mode {
                             let target_workspace_id =
@@ -4960,13 +5207,13 @@ impl HomePage {
                             container = container.child(div().w_full().h(px(WORKSPACE_GAP_HEIGHT)));
                         }
                         container = container.child(self.render_unassigned_section(
-                            unassigned_connections,
+                            &unassigned_connections,
                             selected_id,
                             cx,
                         ));
                     } else {
                         container = container.child(self.render_connections_collection(
-                            unassigned_connections,
+                            &unassigned_connections,
                             None,
                             selected_id,
                             cx,
@@ -4980,8 +5227,8 @@ impl HomePage {
 
     fn render_workspace_section(
         &self,
-        workspace: Workspace,
-        connections: Vec<StoredConnection>,
+        workspace: &Workspace,
+        connections: &[&StoredConnection],
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -5355,7 +5602,7 @@ impl HomePage {
 
     fn render_connections_collection(
         &self,
-        connections: Vec<StoredConnection>,
+        connections: &[&StoredConnection],
         workspace_id: Option<i64>,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
@@ -5372,7 +5619,7 @@ impl HomePage {
 
     fn render_connections_list(
         &self,
-        connections: Vec<StoredConnection>,
+        connections: &[&StoredConnection],
         workspace_id: Option<i64>,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
@@ -5382,7 +5629,7 @@ impl HomePage {
         let last_connection_id = connections.last().and_then(|connection| connection.id);
         let mut container = v_flex().w_full().gap_0();
 
-        for (index, conn) in connections.into_iter().enumerate() {
+        for (index, conn) in connections.iter().copied().enumerate() {
             if index > 0 {
                 if manual_sort_mode {
                     let target_connection_id = conn.id.expect("连接排序占位目标必须存在连接 ID");
@@ -5618,7 +5865,7 @@ impl HomePage {
 
     fn render_connection_list_item(
         &self,
-        conn: StoredConnection,
+        conn: &StoredConnection,
         workspace_id: Option<i64>,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
@@ -5639,19 +5886,21 @@ impl HomePage {
             2,
             WindowsSurfaceLayer::ContentSection,
         );
+        let entry = self.connection_render_entry(conn);
+        let element_ids = &entry.element_ids;
         let conn_id = conn.id;
-        let clone_conn = conn.clone();
-        let sftp_hover_conn = conn.clone();
-        let edit_conn = conn.clone();
-        let edit_conn_type = conn.connection_type;
-        let edit_conn_name = conn.name.clone();
-        let duplicate_conn = conn.clone();
-        let delete_conn_id = conn.id;
-        let delete_conn_name = conn.name.clone();
+        let conn_type = conn.connection_type;
+        let conn_name = entry.name.clone();
         let is_selected = selected_id == conn.id;
-        let subtitle = self.connection_subtitle(&conn);
-        let workspace =
-            workspace_id.and_then(|id| self.workspaces.iter().find(|w| w.id == Some(id)).cloned());
+        let subtitle = connection_subtitle(&entry);
+        // 类型标签随语言变化，不能进缓存
+        let list_type_label = format!("({})", conn.connection_type.label());
+        // 连接 ID 缺失时无法按 ID 回查，保留一份快照兜底（用 Rc 共享，避免多次深拷贝）
+        let conn_snapshot: Option<Rc<StoredConnection>> = if conn_id.is_some() {
+            None
+        } else {
+            Some(Rc::new(conn.clone()))
+        };
 
         let is_active = conn
             .id
@@ -5660,7 +5909,7 @@ impl HomePage {
         let view = cx.entity().clone();
         let drag_connection_id = conn.id;
         let drag_workspace_id = workspace_id;
-        let drag_connection_name: SharedString = conn.name.clone().into();
+        let drag_connection_name = conn_name.clone();
         let list_preview_size = drag_connection_id.and_then(|connection_id| {
             self.connection_list_drag_preview_sizes
                 .get(&connection_id)
@@ -5677,14 +5926,17 @@ impl HomePage {
             })
             .filter(|_| manual_sort_mode && cx.has_active_drag());
 
+        // 快照仅在连接缺少 ID 时有值，分别复制给各交互闭包使用
+        let conn_snapshot_for_open = conn_snapshot.clone();
+        let conn_snapshot_for_sftp = conn_snapshot.clone();
+        let conn_snapshot_for_duplicate = conn_snapshot.clone();
+        let delete_conn_name = conn_name.clone();
+
         h_flex()
             .justify_between()
             .items_center()
             .gap_3()
-            .id(SharedString::from(format!(
-                "conn-list-item-{}",
-                conn.id.unwrap_or(0)
-            )))
+            .id(element_ids.list_item.clone())
             .w_full()
             .min_h(px(38.0))
             .px_3()
@@ -5841,8 +6093,19 @@ impl HomePage {
                     return;
                 }
 
-                let strategy =
-                    build_connection_open_strategy(clone_conn.clone(), workspace.clone());
+                let Some(conn) = this
+                    .find_connection(conn_id)
+                    .or_else(|| conn_snapshot_for_open.clone().map(|conn| (*conn).clone()))
+                else {
+                    return;
+                };
+                let workspace = drag_workspace_id.and_then(|id| {
+                    this.workspaces
+                        .iter()
+                        .find(|workspace| workspace.id == Some(id))
+                        .cloned()
+                });
+                let strategy = build_connection_open_strategy(conn, workspace);
                 strategy.open(this, window, cx);
                 cx.notify();
             }))
@@ -5864,7 +6127,7 @@ impl HomePage {
                             .items_center()
                             .justify_center()
                             .bg(item_icon_bg)
-                            .child(self.render_connection_icon(&conn, 20.0)),
+                            .child(render_connection_icon(conn_type, entry.database_type, 20.0)),
                     )
                     .child(
                         h_flex()
@@ -5882,14 +6145,14 @@ impl HomePage {
                                     .overflow_hidden()
                                     .text_ellipsis()
                                     .whitespace_nowrap()
-                                    .child(conn.name.clone())
+                                    .child(conn_name.clone())
                             })
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .flex_shrink_0()
-                                    .child(format!("({})", conn.connection_type.label())),
+                                    .child(list_type_label.clone()),
                             )
                             .when_some(subtitle, |this, subtitle| {
                                 this.child(
@@ -5912,124 +6175,120 @@ impl HomePage {
                     .gap_1()
                     .flex_shrink_0()
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .when(conn.connection_type == ConnectionType::SshSftp, |this| {
+                    .when(conn_type == ConnectionType::SshSftp, |this| {
                         this.child(
-                            Button::new(SharedString::from(format!(
-                                "list-sftp-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Folder1.color())
-                            .with_size(Size::Small)
-                            .primary()
-                            .tooltip(t!("Home.open_sftp"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
+                            Button::new(element_ids.list_sftp.clone())
+                                .icon(IconName::Folder1.color())
+                                .with_size(Size::Small)
+                                .primary()
+                                .tooltip(t!("Home.open_sftp"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
-                                    this.open_sftp_view(sftp_hover_conn.clone(), window, cx);
-                                },
-                            )),
+                                    let Some(conn) = this.find_connection(conn_id).or_else(|| {
+                                        conn_snapshot_for_sftp.clone().map(|conn| (*conn).clone())
+                                    }) else {
+                                        return;
+                                    };
+                                    this.open_sftp_view(conn, window, cx);
+                                })),
                         )
                     })
                     .child(
-                        Button::new(SharedString::from(format!(
-                            "list-edit-conn-{}",
-                            conn.id.unwrap_or(0)
-                        )))
-                        .icon(IconName::Edit)
-                        .with_size(Size::Small)
-                        .primary()
-                        .tooltip(t!("Home.edit_connection"))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        Button::new(element_ids.list_edit.clone())
+                            .icon(IconName::Edit)
+                            .with_size(Size::Small)
+                            .primary()
+                            .tooltip(t!("Home.edit_connection"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                if let Some(conn_id) = edit_conn.id {
-                                    let conn_name = edit_conn_name.clone();
-                                    match edit_conn_type {
-                                        ConnectionType::SshSftp => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_ssh_form(window, cx);
-                                        }
-                                        ConnectionType::Database => {
-                                            let db_type = edit_conn
-                                                .to_db_connection()
-                                                .ok()
-                                                .map(|p| p.database_type);
-                                            this.confirm_edit_connection(
-                                                conn_id, conn_name, db_type, window, cx,
-                                            );
-                                        }
-                                        ConnectionType::Redis => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_redis_form(window, cx);
-                                        }
-                                        ConnectionType::MongoDB => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_mongodb_form(window, cx);
-                                        }
-                                        ConnectionType::PortForwarding => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_port_forwarding_form(window, cx);
-                                        }
-                                        ConnectionType::Rdp => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_remote_desktop_form(
-                                                RemoteDesktopProtocol::Rdp,
-                                                window,
-                                                cx,
-                                            );
-                                        }
-                                        ConnectionType::Vnc => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_remote_desktop_form(
-                                                RemoteDesktopProtocol::Vnc,
-                                                window,
-                                                cx,
-                                            );
-                                        }
-                                        _ => {}
+                                let Some(conn_id) = conn_id else {
+                                    return;
+                                };
+                                let Some(conn) = this.find_connection(Some(conn_id)) else {
+                                    return;
+                                };
+                                // 用回查到的实时名称，避免重命名后对话框显示旧名
+                                let conn_name = conn.name.clone();
+                                match conn.connection_type {
+                                    ConnectionType::SshSftp => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_ssh_form(window, cx);
                                     }
+                                    ConnectionType::Database => {
+                                        let db_type =
+                                            conn.to_db_connection().ok().map(|p| p.database_type);
+                                        this.confirm_edit_connection(
+                                            conn_id, conn_name, db_type, window, cx,
+                                        );
+                                    }
+                                    ConnectionType::Redis => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_redis_form(window, cx);
+                                    }
+                                    ConnectionType::MongoDB => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_mongodb_form(window, cx);
+                                    }
+                                    ConnectionType::PortForwarding => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_port_forwarding_form(window, cx);
+                                    }
+                                    ConnectionType::Rdp => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_remote_desktop_form(
+                                            RemoteDesktopProtocol::Rdp,
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                    ConnectionType::Vnc => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_remote_desktop_form(
+                                            RemoteDesktopProtocol::Vnc,
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                    _ => {}
                                 }
-                            },
-                        )),
+                            })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!(
-                            "list-duplicate-conn-{}",
-                            conn.id.unwrap_or(0)
-                        )))
-                        .icon(IconName::Copy)
-                        .with_size(Size::Small)
-                        .primary()
-                        .tooltip(t!("Home.duplicate_connection"))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        Button::new(element_ids.list_duplicate.clone())
+                            .icon(IconName::Copy)
+                            .with_size(Size::Small)
+                            .primary()
+                            .tooltip(t!("Home.duplicate_connection"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                this.duplicate_connection_and_open_editor(
-                                    &duplicate_conn,
-                                    window,
-                                    cx,
-                                );
-                            },
-                        )),
+                                let Some(conn) = this.find_connection(conn_id).or_else(|| {
+                                    conn_snapshot_for_duplicate
+                                        .clone()
+                                        .map(|conn| (*conn).clone())
+                                }) else {
+                                    return;
+                                };
+                                this.duplicate_connection_and_open_editor(&conn, window, cx);
+                            })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!(
-                            "list-delete-conn-{}",
-                            conn.id.unwrap_or(0)
-                        )))
-                        .icon(IconName::Remove)
-                        .with_size(Size::Small)
-                        .danger()
-                        .tooltip(t!("Home.delete_connection"))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        Button::new(element_ids.list_remove.clone())
+                            .icon(IconName::Remove)
+                            .with_size(Size::Small)
+                            .danger()
+                            .tooltip(t!("Home.delete_connection"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                if let Some(conn_id) = delete_conn_id {
-                                    let conn_name = delete_conn_name.clone();
-                                    this.confirm_delete_connection(conn_id, conn_name, window, cx);
-                                }
-                            },
-                        )),
+                                let Some(conn_id) = conn_id else {
+                                    return;
+                                };
+                                // 优先用回查到的实时名称，避免重命名后对话框显示旧名
+                                let conn_name = this
+                                    .find_connection(Some(conn_id))
+                                    .map(|conn| conn.name)
+                                    .unwrap_or_else(|| delete_conn_name.to_string());
+                                this.confirm_delete_connection(conn_id, conn_name, window, cx);
+                            })),
                     ),
             )
             .when(is_active, |this| {
@@ -6050,7 +6309,7 @@ impl HomePage {
 
     fn render_connections_grid(
         &self,
-        connections: Vec<StoredConnection>,
+        connections: &[&StoredConnection],
         workspace_id: Option<i64>,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
@@ -6162,7 +6421,7 @@ impl HomePage {
                 ))
             });
 
-        for conn in connections {
+        for conn in connections.iter().copied() {
             let should_render_placeholder = should_render_dragging_connection_placeholder(
                 manual_sort_mode,
                 cx.has_active_drag(),
@@ -6308,7 +6567,7 @@ impl HomePage {
 
     fn render_unassigned_section(
         &self,
-        connections: Vec<StoredConnection>,
+        connections: &[&StoredConnection],
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -6345,7 +6604,7 @@ impl HomePage {
 
     fn render_connection_card(
         &self,
-        conn: StoredConnection,
+        conn: &StoredConnection,
         workspace_id: Option<i64>,
         selected_id: Option<i64>,
         cx: &mut Context<Self>,
@@ -6366,17 +6625,19 @@ impl HomePage {
             5,
             WindowsSurfaceLayer::ContentSection,
         );
+        let entry = self.connection_render_entry(conn);
+        let element_ids = &entry.element_ids;
         let conn_id = conn.id;
-        let clone_conn = conn.clone();
-        let sftp_hover_conn = conn.clone();
-        let edit_conn = conn.clone();
-        let edit_conn_type = conn.connection_type;
-        let edit_conn_name = conn.name.clone();
-        let duplicate_conn = conn.clone();
-        let delete_conn_id = conn.id;
-        let delete_conn_name = conn.name.clone();
+        let conn_type = conn.connection_type;
+        let conn_name = entry.name.clone();
         let is_selected = selected_id == conn.id;
-        let subtitle = self.connection_subtitle(&conn);
+        let subtitle = connection_subtitle(&entry);
+        // 连接 ID 缺失时无法按 ID 回查，保留一份快照兜底（用 Rc 共享，避免多次深拷贝）
+        let conn_snapshot: Option<Rc<StoredConnection>> = if conn_id.is_some() {
+            None
+        } else {
+            Some(Rc::new(conn.clone()))
+        };
 
         let is_active = conn
             .id
@@ -6386,7 +6647,7 @@ impl HomePage {
         let view = cx.entity().clone();
         let drag_connection_id = conn.id;
         let drag_workspace_id = workspace_id;
-        let drag_connection_name: SharedString = conn.name.clone().into();
+        let drag_connection_name = conn_name.clone();
         let card_preview_size = drag_connection_id.and_then(|connection_id| {
             self.connection_card_drag_preview_sizes
                 .get(&connection_id)
@@ -6406,13 +6667,15 @@ impl HomePage {
                     && cx.has_active_drag()
                     && Self::connection_list_view_mode(cx) != ConnectionListViewMode::Card
             });
-        let group_name: SharedString = format!("conn-card-group-{}", conn.id.unwrap_or(0)).into();
+        let group_name = element_ids.group.clone();
+        // 快照仅在连接缺少 ID 时有值，分别复制给各交互闭包使用
+        let conn_snapshot_for_open = conn_snapshot.clone();
+        let conn_snapshot_for_sftp = conn_snapshot.clone();
+        let conn_snapshot_for_duplicate = conn_snapshot.clone();
+        let delete_conn_name = conn_name.clone();
         let card = v_flex()
             .justify_center()
-            .id(SharedString::from(format!(
-                "conn-card-{}",
-                conn.id.unwrap_or(0)
-            )))
+            .id(element_ids.card.clone())
             .w_full()
             .h(px(60.))
             .rounded(Radius::Lg.px())
@@ -6554,7 +6817,13 @@ impl HomePage {
                 this.child(Self::render_manual_drop_indicator_for_edge(edge, cx))
             })
             .on_double_click(cx.listener(move |this, _, w, cx| {
-                this.open_connection_from_quick(&clone_conn, w, cx);
+                let Some(conn) = this
+                    .find_connection(conn_id)
+                    .or_else(|| conn_snapshot_for_open.clone().map(|conn| (*conn).clone()))
+                else {
+                    return;
+                };
+                this.open_connection_from_quick(&conn, w, cx);
                 cx.notify()
             }))
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -6573,7 +6842,7 @@ impl HomePage {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(self.render_connection_icon(&conn, 40.0)),
+                            .child(render_connection_icon(conn_type, entry.database_type, 40.0)),
                     )
                     .child(
                         v_flex()
@@ -6582,13 +6851,10 @@ impl HomePage {
                             .gap_0p5()
                             .overflow_hidden()
                             .child({
-                                let name_tooltip: SharedString = conn.name.clone().into();
+                                let name_tooltip = conn_name.clone();
                                 h_flex().gap_1().overflow_hidden().child(
                                     div()
-                                        .id(SharedString::from(format!(
-                                            "conn-name-{}",
-                                            conn.id.unwrap_or(0)
-                                        )))
+                                        .id(element_ids.name.clone())
                                         .text_sm()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(cx.theme().foreground)
@@ -6600,17 +6866,14 @@ impl HomePage {
                                         .tooltip(move |window, cx| {
                                             Tooltip::new(name_tooltip.clone()).build(window, cx)
                                         })
-                                        .child(conn.name.clone()),
+                                        .child(conn_name.clone()),
                                 )
                             })
                             .when_some(subtitle, |this, subtitle| {
-                                let tooltip_text: SharedString = subtitle.clone().into();
+                                let tooltip_text = subtitle.clone();
                                 this.child(
                                     div()
-                                        .id(SharedString::from(format!(
-                                            "conn-info-{}",
-                                            conn.id.unwrap_or(0)
-                                        )))
+                                        .id(element_ids.info.clone())
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
                                         .overflow_hidden()
@@ -6641,128 +6904,124 @@ impl HomePage {
                     .shadow_sm()
                     .cursor_pointer()
                     .opacity(0.0)
-                    .when(conn.connection_type == ConnectionType::SshSftp, |this| {
+                    .when(conn_type == ConnectionType::SshSftp, |this| {
                         this.child(
-                            Button::new(SharedString::from(format!(
-                                "sftp-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Folder1.color())
-                            .with_size(Size::Small)
-                            // .primary()
-                            .cursor_pointer()
-                            .tooltip(t!("Home.open_sftp"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
+                            Button::new(element_ids.sftp.clone())
+                                .icon(IconName::Folder1.color())
+                                .with_size(Size::Small)
+                                // .primary()
+                                .cursor_pointer()
+                                .tooltip(t!("Home.open_sftp"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
-                                    this.open_sftp_view(sftp_hover_conn.clone(), window, cx);
-                                },
-                            )),
+                                    let Some(conn) = this.find_connection(conn_id).or_else(|| {
+                                        conn_snapshot_for_sftp.clone().map(|conn| (*conn).clone())
+                                    }) else {
+                                        return;
+                                    };
+                                    this.open_sftp_view(conn, window, cx);
+                                })),
                         )
                     })
                     .child(
-                        Button::new(SharedString::from(format!(
-                            "edit-conn-{}",
-                            conn.id.unwrap_or(0)
-                        )))
-                        .icon(IconName::Edit)
-                        .with_size(Size::Small)
-                        // .primary()
-                        .cursor_pointer()
-                        .tooltip(t!("Home.edit_connection"))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        Button::new(element_ids.edit.clone())
+                            .icon(IconName::Edit)
+                            .with_size(Size::Small)
+                            // .primary()
+                            .cursor_pointer()
+                            .tooltip(t!("Home.edit_connection"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                if let Some(conn_id) = edit_conn.id {
-                                    let conn_name = edit_conn_name.clone();
-                                    match edit_conn_type {
-                                        ConnectionType::SshSftp => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_ssh_form(window, cx);
-                                        }
-                                        ConnectionType::Database => {
-                                            let db_type = edit_conn
-                                                .to_db_connection()
-                                                .ok()
-                                                .map(|p| p.database_type);
-                                            this.confirm_edit_connection(
-                                                conn_id, conn_name, db_type, window, cx,
-                                            );
-                                        }
-                                        ConnectionType::Redis => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_redis_form(window, cx);
-                                        }
-                                        ConnectionType::MongoDB => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_mongodb_form(window, cx);
-                                        }
-                                        ConnectionType::PortForwarding => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_port_forwarding_form(window, cx);
-                                        }
-                                        ConnectionType::Rdp => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_remote_desktop_form(
-                                                RemoteDesktopProtocol::Rdp,
-                                                window,
-                                                cx,
-                                            );
-                                        }
-                                        ConnectionType::Vnc => {
-                                            this.editing_connection_id = Some(conn_id);
-                                            this.show_remote_desktop_form(
-                                                RemoteDesktopProtocol::Vnc,
-                                                window,
-                                                cx,
-                                            );
-                                        }
-                                        _ => {}
+                                let Some(conn_id) = conn_id else {
+                                    return;
+                                };
+                                let Some(conn) = this.find_connection(Some(conn_id)) else {
+                                    return;
+                                };
+                                // 用回查到的实时名称，避免重命名后对话框显示旧名
+                                let conn_name = conn.name.clone();
+                                match conn.connection_type {
+                                    ConnectionType::SshSftp => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_ssh_form(window, cx);
                                     }
+                                    ConnectionType::Database => {
+                                        let db_type =
+                                            conn.to_db_connection().ok().map(|p| p.database_type);
+                                        this.confirm_edit_connection(
+                                            conn_id, conn_name, db_type, window, cx,
+                                        );
+                                    }
+                                    ConnectionType::Redis => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_redis_form(window, cx);
+                                    }
+                                    ConnectionType::MongoDB => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_mongodb_form(window, cx);
+                                    }
+                                    ConnectionType::PortForwarding => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_port_forwarding_form(window, cx);
+                                    }
+                                    ConnectionType::Rdp => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_remote_desktop_form(
+                                            RemoteDesktopProtocol::Rdp,
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                    ConnectionType::Vnc => {
+                                        this.editing_connection_id = Some(conn_id);
+                                        this.show_remote_desktop_form(
+                                            RemoteDesktopProtocol::Vnc,
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                    _ => {}
                                 }
-                            },
-                        )),
+                            })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!(
-                            "duplicate-conn-{}",
-                            conn.id.unwrap_or(0)
-                        )))
-                        .icon(IconName::Copy)
-                        .with_size(Size::Small)
-                        // .primary()
-                        .cursor_pointer()
-                        .tooltip(t!("Home.duplicate_connection"))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        Button::new(element_ids.duplicate.clone())
+                            .icon(IconName::Copy)
+                            .with_size(Size::Small)
+                            // .primary()
+                            .cursor_pointer()
+                            .tooltip(t!("Home.duplicate_connection"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                this.duplicate_connection_and_open_editor(
-                                    &duplicate_conn,
-                                    window,
-                                    cx,
-                                );
-                            },
-                        )),
+                                let Some(conn) = this.find_connection(conn_id).or_else(|| {
+                                    conn_snapshot_for_duplicate
+                                        .clone()
+                                        .map(|conn| (*conn).clone())
+                                }) else {
+                                    return;
+                                };
+                                this.duplicate_connection_and_open_editor(&conn, window, cx);
+                            })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!(
-                            "delete-conn-{}",
-                            conn.id.unwrap_or(0)
-                        )))
-                        .icon(IconName::Remove)
-                        .with_size(Size::Small)
-                        .danger()
-                        .cursor_pointer()
-                        .tooltip(t!("Home.delete_connection"))
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
+                        Button::new(element_ids.remove.clone())
+                            .icon(IconName::Remove)
+                            .with_size(Size::Small)
+                            .danger()
+                            .cursor_pointer()
+                            .tooltip(t!("Home.delete_connection"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                if let Some(conn_id) = delete_conn_id {
-                                    let conn_name = delete_conn_name.clone();
-                                    this.confirm_delete_connection(conn_id, conn_name, window, cx);
-                                }
-                            },
-                        )),
+                                let Some(conn_id) = conn_id else {
+                                    return;
+                                };
+                                // 优先用回查到的实时名称，避免重命名后对话框显示旧名
+                                let conn_name = this
+                                    .find_connection(Some(conn_id))
+                                    .map(|conn| conn.name)
+                                    .unwrap_or_else(|| delete_conn_name.to_string());
+                                this.confirm_delete_connection(conn_id, conn_name, window, cx);
+                            })),
                     ),
             )
             .when(is_active, |this| {
@@ -8015,9 +8274,165 @@ fn re_encrypt_all_connections(
 
 #[cfg(test)]
 mod tests {
-    use super::{HomePage, SyncFeedbackLevel};
+    use super::{
+        HomePage, SyncFeedbackLevel, build_connection_render_entry, connection_render_fingerprint,
+    };
     use one_core::cloud_sync::SyncResult;
+    use one_core::storage::{ConnectionType, DatabaseType, StoredConnection};
     use rust_i18n::t;
+
+    fn stored_connection(
+        id: i64,
+        name: &str,
+        connection_type: ConnectionType,
+        params: &str,
+    ) -> StoredConnection {
+        StoredConnection {
+            id: Some(id),
+            name: name.to_string(),
+            connection_type,
+            params: params.to_string(),
+            sort_order: None,
+            workspace_id: None,
+            selected_databases: None,
+            remark: None,
+            sync_enabled: true,
+            cloud_id: None,
+            last_synced_at: None,
+            created_at: None,
+            updated_at: None,
+            owner_id: None,
+        }
+    }
+
+    #[test]
+    fn connection_render_fingerprint_随名称类型与参数变化() {
+        let base = stored_connection(1, "本地库", ConnectionType::Database, "{}");
+        let renamed = stored_connection(1, "远程库", ConnectionType::Database, "{}");
+        let retyped = stored_connection(1, "本地库", ConnectionType::Redis, "{}");
+        let reparamed = stored_connection(1, "本地库", ConnectionType::Database, "{\"port\":1}");
+
+        let fingerprint = connection_render_fingerprint(&base);
+        assert_eq!(fingerprint, connection_render_fingerprint(&base));
+        assert_ne!(fingerprint, connection_render_fingerprint(&renamed));
+        assert_ne!(fingerprint, connection_render_fingerprint(&retyped));
+        assert_ne!(fingerprint, connection_render_fingerprint(&reparamed));
+    }
+
+    #[test]
+    fn connection_render_fingerprint_区分名称与参数边界() {
+        // 边界歧义回归：拼接后再哈希会让这两种组合得到相同指纹
+        let split = stored_connection(1, "ab", ConnectionType::Database, "cd");
+        let joined = stored_connection(1, "abcd", ConnectionType::Database, "");
+
+        assert_ne!(
+            connection_render_fingerprint(&split),
+            connection_render_fingerprint(&joined)
+        );
+    }
+
+    #[test]
+    fn build_connection_render_entry_数据库连接生成副标题与搜索字段() {
+        let conn = stored_connection(
+            1,
+            "生产库",
+            ConnectionType::Database,
+            r#"{"database_type":"PostgreSQL","host":"db.example.com","port":5432,"username":"alice","password":"secret"}"#,
+        );
+
+        let entry = build_connection_render_entry(&conn);
+
+        assert_eq!(entry.database_type, Some(DatabaseType::PostgreSQL));
+        assert_eq!(
+            entry.subtitle.as_ref().map(|subtitle| subtitle.as_str()),
+            Some("alice@db.example.com:5432")
+        );
+        assert!(
+            entry
+                .search_fields
+                .iter()
+                .any(|field| field.contains("db.example.com"))
+        );
+        assert!(
+            entry
+                .search_fields
+                .iter()
+                .any(|field| field.contains("alice@db.example.com:5432"))
+        );
+        assert!(
+            entry
+                .search_fields
+                .iter()
+                .any(|field| field.contains("生产库"))
+        );
+    }
+
+    #[test]
+    fn build_connection_render_entry_sqlite_连接以文件路径作为副标题() {
+        let conn = stored_connection(
+            2,
+            "本地文件",
+            ConnectionType::Database,
+            r#"{"database_type":"SQLite","host":"/tmp/demo.db","port":0,"username":"","password":""}"#,
+        );
+
+        let entry = build_connection_render_entry(&conn);
+
+        assert_eq!(entry.database_type, Some(DatabaseType::SQLite));
+        assert_eq!(
+            entry.subtitle.as_ref().map(|subtitle| subtitle.as_str()),
+            Some("/tmp/demo.db")
+        );
+    }
+
+    #[test]
+    fn build_connection_render_entry_外部驱动连接不生成副标题() {
+        let conn = stored_connection(
+            3,
+            "历史连接",
+            ConnectionType::Database,
+            r#"{"database_type":"DuckDB","host":"localhost","port":0,"username":"","password":""}"#,
+        );
+
+        let entry = build_connection_render_entry(&conn);
+
+        assert_eq!(entry.database_type, Some(DatabaseType::External));
+        assert!(entry.subtitle.is_none());
+    }
+
+    #[test]
+    fn build_connection_render_entry_redis_连接按模式生成副标题() {
+        let conn = stored_connection(
+            4,
+            "缓存",
+            ConnectionType::Redis,
+            r#"{"host":"127.0.0.1","port":6379,"db_index":2}"#,
+        );
+
+        let entry = build_connection_render_entry(&conn);
+
+        assert_eq!(
+            entry.subtitle.as_ref().map(|subtitle| subtitle.as_str()),
+            Some("127.0.0.1:6379/2")
+        );
+        assert!(
+            entry
+                .search_fields
+                .iter()
+                .any(|field| field.contains("127.0.0.1"))
+        );
+    }
+
+    #[test]
+    fn build_connection_render_entry_element_ids_by_connection_id() {
+        let conn = stored_connection(42, "命名", ConnectionType::Redis, "{}");
+
+        let entry = build_connection_render_entry(&conn);
+
+        assert_eq!(entry.element_ids.card.as_str(), "conn-card-42");
+        assert_eq!(entry.element_ids.list_item.as_str(), "conn-list-item-42");
+        assert_eq!(entry.element_ids.group.as_str(), "conn-card-group-42");
+    }
 
     #[test]
     fn summarize_sync_result_returns_info_when_nothing_changed() {

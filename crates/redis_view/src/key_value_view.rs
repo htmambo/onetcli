@@ -1,12 +1,15 @@
 //! Redis 键值视图
 
+use std::ops::Range;
+
 use crate::{
     GlobalRedisState, HashField, KeyInfo, KeyValueContent, KeyValueDetail, RedisKeyType, ZSetMember,
 };
 use gpui::{
-    App, AppContext, AsyncApp, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    AnyElement, App, AppContext, AsyncApp, ClipboardItem, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Task, Window, div, prelude::FluentBuilder, px, relative,
+    uniform_list,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, IndexPath, Sizable, Size, WindowExt as _, WindowsSurfaceLayer,
@@ -134,6 +137,180 @@ pub enum ZSetSortBy {
     Member,
 }
 
+/// 明细视图的筛选/排序结果缓存。
+///
+/// Redis 明细最多可达上千个成员，每帧重新筛选、排序并克隆会明显拖慢渲染。
+/// 这里按（内容版本、筛选条件、排序条件）缓存结果，条件不变时直接复用。
+#[derive(Default)]
+struct FilteredContent {
+    /// 缓存对应的内容版本
+    content_version: u64,
+    /// 缓存对应的筛选文本
+    filter_text: String,
+    /// 缓存对应的精确匹配开关
+    filter_exact_match: bool,
+    /// 缓存对应的 ZSet 排序字段
+    zset_sort_by: ZSetSortBy,
+    /// 缓存对应的排序方向
+    sort_order: SortOrder,
+    /// 列表筛选结果
+    list: Vec<(usize, String)>,
+    /// 集合筛选结果
+    set: Vec<(usize, String)>,
+    /// ZSet 筛选与排序结果
+    zset: Vec<(usize, ZSetMember)>,
+    /// Hash 筛选结果
+    hash: Vec<(usize, HashField)>,
+    /// ZSet 分数范围（用于可视化柱状图），随筛选结果一起缓存
+    zset_score_range: (f64, f64),
+}
+
+/// 计算 ZSet 分数范围，用于可视化柱状图
+fn zset_score_range(members: &[(usize, ZSetMember)]) -> (f64, f64) {
+    if members.is_empty() {
+        return (0.0, 1.0);
+    }
+    let min = members
+        .iter()
+        .map(|(_, member)| member.score)
+        .fold(f64::INFINITY, f64::min);
+    let max = members
+        .iter()
+        .map(|(_, member)| member.score)
+        .fold(f64::NEG_INFINITY, f64::max);
+    if (max - min).abs() < f64::EPSILON {
+        (min - 1.0, max + 1.0)
+    } else {
+        (min, max)
+    }
+}
+
+/// 生成筛选用的查询串。
+///
+/// 精确匹配保留原文，模糊匹配统一转小写，与筛选框的既有语义一致。
+fn filter_query(filter_text: &str, filter_exact_match: bool) -> String {
+    if filter_exact_match {
+        filter_text.to_string()
+    } else {
+        filter_text.to_lowercase()
+    }
+}
+
+/// 应用筛选到字符串列表
+fn filter_strings(
+    items: &[String],
+    filter_text: &str,
+    filter_exact_match: bool,
+) -> Vec<(usize, String)> {
+    if filter_text.is_empty() {
+        return items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| (idx, item.clone()))
+            .collect();
+    }
+    let query = filter_query(filter_text, filter_exact_match);
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            if filter_exact_match {
+                item.contains(&query)
+            } else {
+                item.to_lowercase().contains(&query)
+            }
+        })
+        .map(|(idx, item)| (idx, item.clone()))
+        .collect()
+}
+
+/// 应用筛选到 Hash 字段
+fn filter_hash_fields(
+    items: &[HashField],
+    filter_text: &str,
+    filter_exact_match: bool,
+) -> Vec<(usize, HashField)> {
+    if filter_text.is_empty() {
+        return items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| (idx, item.clone()))
+            .collect();
+    }
+    let query = filter_query(filter_text, filter_exact_match);
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            let search_text = format!("{} {}", item.field, item.value);
+            if filter_exact_match {
+                search_text.contains(&query)
+            } else {
+                search_text.to_lowercase().contains(&query)
+            }
+        })
+        .map(|(idx, item)| (idx, item.clone()))
+        .collect()
+}
+
+/// 应用筛选到 ZSet 成员
+fn filter_zset_members(
+    items: &[ZSetMember],
+    filter_text: &str,
+    filter_exact_match: bool,
+    zset_sort_by: ZSetSortBy,
+    sort_order: SortOrder,
+) -> Vec<(usize, ZSetMember)> {
+    let mut filtered: Vec<(usize, ZSetMember)> = if filter_text.is_empty() {
+        items
+            .iter()
+            .enumerate()
+            .map(|(idx, member)| (idx, member.clone()))
+            .collect()
+    } else {
+        let query = filter_query(filter_text, filter_exact_match);
+        items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                if filter_exact_match {
+                    item.member.contains(&query)
+                } else {
+                    item.member.to_lowercase().contains(&query)
+                }
+            })
+            .map(|(idx, member)| (idx, member.clone()))
+            .collect()
+    };
+
+    // 应用排序
+    match zset_sort_by {
+        ZSetSortBy::Score => {
+            filtered.sort_by(|a, b| {
+                if sort_order == SortOrder::Asc {
+                    a.1.score
+                        .partial_cmp(&b.1.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                } else {
+                    b.1.score
+                        .partial_cmp(&a.1.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }
+            });
+        }
+        ZSetSortBy::Member => {
+            filtered.sort_by(|a, b| {
+                if sort_order == SortOrder::Asc {
+                    a.1.member.cmp(&b.1.member)
+                } else {
+                    b.1.member.cmp(&a.1.member)
+                }
+            });
+        }
+    }
+    filtered
+}
+
 /// 键值视图
 pub struct KeyValueView {
     /// 当前连接 ID
@@ -146,6 +323,10 @@ pub struct KeyValueView {
     key_info: Option<KeyInfo>,
     /// 键值内容
     value_content: Option<KeyValueContent>,
+    /// 键值内容版本号，内容变化时递增（用于失效筛选结果缓存）
+    value_content_version: u64,
+    /// 筛选/排序结果缓存
+    filtered_content: FilteredContent,
     /// 加载状态
     load_state: LoadState,
     /// 焦点句柄
@@ -230,6 +411,8 @@ impl KeyValueView {
             current_key: None,
             key_info: None,
             value_content: None,
+            value_content_version: 0,
+            filtered_content: FilteredContent::default(),
             load_state: LoadState::Empty,
             focus_handle: cx.focus_handle(),
             is_dirty: false,
@@ -291,94 +474,67 @@ impl KeyValueView {
         }
     }
 
-    /// 应用筛选到字符串列表
-    fn apply_filter(&self, items: &[String]) -> Vec<(usize, String)> {
-        items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| {
-                if self.filter_text.is_empty() {
-                    return true;
-                }
-                if self.filter_exact_match {
-                    item.contains(&self.filter_text)
-                } else {
-                    item.to_lowercase()
-                        .contains(&self.filter_text.to_lowercase())
-                }
-            })
-            .map(|(idx, s)| (idx, s.clone()))
-            .collect()
-    }
-
-    /// 应用筛选到 Hash 字段
-    fn apply_filter_hash(&self, items: &[HashField]) -> Vec<(usize, HashField)> {
-        items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| {
-                if self.filter_text.is_empty() {
-                    return true;
-                }
-                let search_text = format!("{} {}", item.field, item.value);
-                if self.filter_exact_match {
-                    search_text.contains(&self.filter_text)
-                } else {
-                    search_text
-                        .to_lowercase()
-                        .contains(&self.filter_text.to_lowercase())
-                }
-            })
-            .map(|(idx, f)| (idx, f.clone()))
-            .collect()
-    }
-
-    /// 应用筛选到 ZSet 成员
-    fn apply_filter_zset(&self, items: &[ZSetMember]) -> Vec<(usize, ZSetMember)> {
-        let mut filtered: Vec<(usize, ZSetMember)> = items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| {
-                if self.filter_text.is_empty() {
-                    return true;
-                }
-                if self.filter_exact_match {
-                    item.member.contains(&self.filter_text)
-                } else {
-                    item.member
-                        .to_lowercase()
-                        .contains(&self.filter_text.to_lowercase())
-                }
-            })
-            .map(|(idx, m)| (idx, m.clone()))
-            .collect();
-
-        // 应用排序
-        match self.zset_sort_by {
-            ZSetSortBy::Score => {
-                filtered.sort_by(|a, b| {
-                    if self.sort_order == SortOrder::Asc {
-                        a.1.score
-                            .partial_cmp(&b.1.score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    } else {
-                        b.1.score
-                            .partial_cmp(&a.1.score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    }
-                });
-            }
-            ZSetSortBy::Member => {
-                filtered.sort_by(|a, b| {
-                    if self.sort_order == SortOrder::Asc {
-                        a.1.member.cmp(&b.1.member)
-                    } else {
-                        b.1.member.cmp(&a.1.member)
-                    }
-                });
-            }
+    /// 刷新筛选/排序结果缓存。
+    ///
+    /// 只有内容版本、筛选条件或排序条件变化时才重新筛选，
+    /// 否则直接复用上一次的结果，避免每帧遍历并克隆全部成员。
+    fn refresh_filtered_content(&mut self) {
+        // 先做命中检查（不复制字符串），避免每帧产生一次无谓分配
+        if self.filtered_content.content_version == self.value_content_version
+            && self.filtered_content.filter_text == self.filter_text
+            && self.filtered_content.filter_exact_match == self.filter_exact_match
+            && self.filtered_content.zset_sort_by == self.zset_sort_by
+            && self.filtered_content.sort_order == self.sort_order
+        {
+            return;
         }
-        filtered
+
+        let filter_text = self.filter_text.clone();
+        let filter_exact_match = self.filter_exact_match;
+        let zset_sort_by = self.zset_sort_by;
+        let sort_order = self.sort_order;
+        let content_version = self.value_content_version;
+
+        // 拆分借用：内容只读，缓存可写
+        let Self {
+            value_content,
+            filtered_content,
+            ..
+        } = self;
+        filtered_content.content_version = content_version;
+        filtered_content.filter_text = filter_text.clone();
+        filtered_content.filter_exact_match = filter_exact_match;
+        filtered_content.zset_sort_by = zset_sort_by;
+        filtered_content.sort_order = sort_order;
+        // 只保留当前类型的筛选结果，避免切换键后旧类型数据滞留
+        filtered_content.list.clear();
+        filtered_content.set.clear();
+        filtered_content.zset.clear();
+        filtered_content.hash.clear();
+
+        match value_content {
+            Some(KeyValueContent::List(items)) => {
+                filtered_content.list = filter_strings(items, &filter_text, filter_exact_match);
+            }
+            Some(KeyValueContent::Set(items)) => {
+                filtered_content.set = filter_strings(items, &filter_text, filter_exact_match);
+            }
+            Some(KeyValueContent::ZSet(items)) => {
+                filtered_content.zset = filter_zset_members(
+                    items,
+                    &filter_text,
+                    filter_exact_match,
+                    zset_sort_by,
+                    sort_order,
+                );
+                let range = zset_score_range(&filtered_content.zset);
+                filtered_content.zset_score_range = range;
+            }
+            Some(KeyValueContent::Hash(items)) => {
+                filtered_content.hash = filter_hash_fields(items, &filter_text, filter_exact_match);
+            }
+            _ => {}
+        }
     }
 
     /// 切换排序方向
@@ -517,6 +673,8 @@ impl KeyValueView {
                         }
                         view.key_info = Some(detail.key_info);
                         view.value_content = Some(detail.value);
+                        // 内容变化后筛选结果缓存失效
+                        view.value_content_version = view.value_content_version.wrapping_add(1);
                         view.load_state = LoadState::Loaded;
                     }
                     Err(e) => {
@@ -2276,7 +2434,7 @@ impl KeyValueView {
 
     /// 渲染值编辑器
     fn render_value_editor(
-        &self,
+        &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -2292,10 +2450,10 @@ impl KeyValueView {
 
         match content {
             KeyValueContent::String(_) => self.render_string_editor(cx).into_any_element(),
-            KeyValueContent::List(items) => self.render_list_view(items, cx).into_any_element(),
-            KeyValueContent::Set(items) => self.render_set_view(items, cx).into_any_element(),
-            KeyValueContent::ZSet(items) => self.render_zset_view(items, cx).into_any_element(),
-            KeyValueContent::Hash(items) => self.render_hash_view(items, cx).into_any_element(),
+            KeyValueContent::List(_) => self.render_list_view(cx).into_any_element(),
+            KeyValueContent::Set(_) => self.render_set_view(cx).into_any_element(),
+            KeyValueContent::ZSet(_) => self.render_zset_view(cx).into_any_element(),
+            KeyValueContent::Hash(_) => self.render_hash_view(cx).into_any_element(),
             KeyValueContent::Stream(entries) => {
                 self.render_stream_view(entries, cx).into_any_element()
             }
@@ -2389,15 +2547,12 @@ impl KeyValueView {
     }
 
     /// 渲染 List 视图
-    fn render_list_view(&self, items: &[String], cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity().clone();
-        // 应用筛选
-        let items = self.apply_filter(items);
+    fn render_list_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let row_count = self.filtered_content.list.len();
 
         v_flex()
             .id("list-value-scroll")
             .size_full()
-            .overflow_scroll()
             .child(self.render_table_header(
                 vec![
                     (t!("KeyValueView.column_index").to_string(), 60.0),
@@ -2406,133 +2561,147 @@ impl KeyValueView {
                 ],
                 cx,
             ))
-            .children(items.into_iter().map({
-                let view = view.clone();
-                move |(idx, item)| {
-                    let view = view.clone();
-                    let value_for_copy = item.clone();
-                    let value_for_edit = item.clone();
-                    let value_for_preview = item.clone();
-                    let preview_title =
-                        large_text_preview_title("List item", Some(&format!("#{}", idx + 1)));
+            .child(
+                uniform_list(
+                    "list-value-rows",
+                    row_count,
+                    cx.processor(
+                        move |this: &mut Self, visible_range: Range<usize>, _window, cx| {
+                            visible_range
+                                .map(|ix| this.render_list_row(ix, cx))
+                                .collect()
+                        },
+                    ),
+                )
+                .flex_1()
+                .size_full(),
+            )
+    }
 
-                    h_flex()
-                        .id(("list-row", idx))
-                        .group("list-row")
-                        .w_full()
-                        .min_h(px(40.0))
-                        .px_2()
-                        .items_center()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
-                        .hover(|this| this.bg(cx.theme().muted))
-                        .child(
-                            div()
-                                .w(px(60.0))
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(format!("{}", idx + 1)),
-                        )
-                        .child(
-                            h_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_1()
-                                .items_center()
-                                .child(div().flex_1().text_base().truncate().child(item.clone()))
-                                .child(
-                                    Button::new(("preview-list", idx))
-                                        .icon(IconName::Maximize)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .tooltip(t!("KeyValueView.view_full_value_tooltip"))
-                                        .on_click({
-                                            let view = view.clone();
-                                            let title = preview_title.clone();
-                                            let value = value_for_preview.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_large_text_preview_dialog(
-                                                        title.clone(),
-                                                        value.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .w(px(120.0))
-                                .justify_end()
-                                .gap_1()
-                                .opacity(0.)
-                                .group_hover("list-row", |this| this.opacity(1.))
-                                .child(
-                                    Button::new(("copy-list", idx))
-                                        .icon(IconName::Copy)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let value = value_for_copy.clone();
-                                            move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    value.clone(),
-                                                ));
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("edit-list", idx))
-                                        .icon(IconName::Edit)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let value = value_for_edit.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_list_edit_dialog(
-                                                        idx,
-                                                        value.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("delete-list", idx))
-                                        .icon(IconName::Remove)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            move |_, _, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.delete_list_element(idx, cx);
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                }
-            }))
+    /// 渲染 List 单行
+    fn render_list_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity().clone();
+        let Some((idx, item)) = self.filtered_content.list.get(ix) else {
+            return div().into_any_element();
+        };
+        let idx = *idx;
+        // SharedString 的克隆只是引用计数，值本身只拷贝一次
+        let item = SharedString::from(item.clone());
+        let value_for_copy = item.clone();
+        let value_for_edit = item.clone();
+        let value_for_preview = item.clone();
+
+        h_flex()
+            .id(("list-row", idx))
+            .group("list-row")
+            .w_full()
+            .min_h(px(40.0))
+            .px_2()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .hover(|this| this.bg(cx.theme().muted))
+            .child(
+                div()
+                    .w(px(60.0))
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{}", idx + 1)),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1()
+                    .items_center()
+                    .child(div().flex_1().text_base().truncate().child(item.clone()))
+                    .child(
+                        Button::new(("preview-list", idx))
+                            .icon(IconName::Maximize)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .tooltip(t!("KeyValueView.view_full_value_tooltip"))
+                            .on_click({
+                                let view = view.clone();
+                                let value = value_for_preview.clone();
+                                move |_, window, cx| {
+                                    let title = large_text_preview_title(
+                                        "List item",
+                                        Some(&format!("#{}", idx + 1)),
+                                    );
+                                    view.update(cx, |v, cx| {
+                                        v.show_large_text_preview_dialog(
+                                            title,
+                                            value.to_string(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w(px(120.0))
+                    .justify_end()
+                    .gap_1()
+                    .opacity(0.)
+                    .group_hover("list-row", |this| this.opacity(1.))
+                    .child(
+                        Button::new(("copy-list", idx))
+                            .icon(IconName::Copy)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let value = value_for_copy.clone();
+                                move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        value.to_string(),
+                                    ));
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("edit-list", idx))
+                            .icon(IconName::Edit)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let value = value_for_edit.clone();
+                                move |_, window, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.show_list_edit_dialog(idx, value.to_string(), window, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("delete-list", idx))
+                            .icon(IconName::Remove)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.delete_list_element(idx, cx);
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// 渲染 Set 视图
-    fn render_set_view(&self, items: &[String], cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity().clone();
-        // 应用筛选
-        let items = self.apply_filter(items);
+    fn render_set_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let row_count = self.filtered_content.set.len();
 
         v_flex()
             .id("set-value-scroll")
             .size_full()
-            .overflow_scroll()
             .child(self.render_table_header(
                 vec![
                     (t!("KeyValueView.column_member").to_string(), 0.0),
@@ -2540,150 +2709,145 @@ impl KeyValueView {
                 ],
                 cx,
             ))
-            .children(items.into_iter().map({
-                let view = view.clone();
-                move |(idx, item)| {
-                    let view = view.clone();
-                    let value_for_copy = item.clone();
-                    let value_for_delete = item.clone();
-                    let value_for_edit = item.clone();
-                    let value_for_preview = item.clone();
-                    let preview_title = large_text_preview_title("Set member", None);
+            .child(
+                uniform_list(
+                    "set-value-rows",
+                    row_count,
+                    cx.processor(
+                        move |this: &mut Self, visible_range: Range<usize>, _window, cx| {
+                            visible_range
+                                .map(|ix| this.render_set_row(ix, cx))
+                                .collect()
+                        },
+                    ),
+                )
+                .flex_1()
+                .size_full(),
+            )
+    }
 
-                    h_flex()
-                        .id(("set-row", idx))
-                        .group("set-row")
-                        .w_full()
-                        .min_h(px(40.0))
-                        .px_2()
-                        .items_center()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
-                        .hover(|this| this.bg(cx.theme().muted))
-                        .child(
-                            h_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    Icon::new(IconName::Minus)
-                                        .with_size(Size::Small)
-                                        .text_color(cx.theme().muted_foreground),
-                                )
-                                .child(div().flex_1().text_base().truncate().child(item.clone()))
-                                .child(
-                                    Button::new(("preview-set", idx))
-                                        .icon(IconName::Maximize)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .tooltip(t!("KeyValueView.view_full_value_tooltip"))
-                                        .on_click({
-                                            let view = view.clone();
-                                            let title = preview_title.clone();
-                                            let value = value_for_preview.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_large_text_preview_dialog(
-                                                        title.clone(),
-                                                        value.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .w(px(120.0))
-                                .justify_end()
-                                .gap_1()
-                                .opacity(0.)
-                                .group_hover("set-row", |this| this.opacity(1.))
-                                .child(
-                                    Button::new(("copy-set", idx))
-                                        .icon(IconName::Copy)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let value = value_for_copy.clone();
-                                            move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    value.clone(),
-                                                ));
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("edit-set", idx))
-                                        .icon(IconName::Edit)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let member = value_for_edit.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_set_edit_dialog(
-                                                        member.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("delete-set", idx))
-                                        .icon(IconName::Remove)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let member = value_for_delete.clone();
-                                            move |_, _, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.delete_set_element(member.clone(), cx);
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                }
-            }))
+    /// 渲染 Set 单行
+    fn render_set_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity().clone();
+        let Some((idx, item)) = self.filtered_content.set.get(ix) else {
+            return div().into_any_element();
+        };
+        let idx = *idx;
+        // SharedString 的克隆只是引用计数，值本身只拷贝一次
+        let item = SharedString::from(item.clone());
+        let value_for_copy = item.clone();
+        let value_for_delete = item.clone();
+        let value_for_edit = item.clone();
+        let value_for_preview = item.clone();
+
+        h_flex()
+            .id(("set-row", idx))
+            .group("set-row")
+            .w_full()
+            .min_h(px(40.0))
+            .px_2()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .hover(|this| this.bg(cx.theme().muted))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::Minus)
+                            .with_size(Size::Small)
+                            .text_color(cx.theme().muted_foreground),
+                    )
+                    .child(div().flex_1().text_base().truncate().child(item.clone()))
+                    .child(
+                        Button::new(("preview-set", idx))
+                            .icon(IconName::Maximize)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .tooltip(t!("KeyValueView.view_full_value_tooltip"))
+                            .on_click({
+                                let view = view.clone();
+                                let value = value_for_preview.clone();
+                                move |_, window, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.show_large_text_preview_dialog(
+                                            large_text_preview_title("Set member", None),
+                                            value.to_string(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w(px(120.0))
+                    .justify_end()
+                    .gap_1()
+                    .opacity(0.)
+                    .group_hover("set-row", |this| this.opacity(1.))
+                    .child(
+                        Button::new(("copy-set", idx))
+                            .icon(IconName::Copy)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let value = value_for_copy.clone();
+                                move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        value.to_string(),
+                                    ));
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("edit-set", idx))
+                            .icon(IconName::Edit)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let member = value_for_edit.clone();
+                                move |_, window, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.show_set_edit_dialog(member.to_string(), window, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("delete-set", idx))
+                            .icon(IconName::Remove)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let member = value_for_delete.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.delete_set_element(member.to_string(), cx);
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// 渲染 ZSet 视图
-    fn render_zset_view(&self, items: &[ZSetMember], cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity().clone();
-        // 应用筛选和排序
-        let filtered_items = self.apply_filter_zset(items);
-
-        // 计算分数范围用于可视化
-        let (min_score, max_score) = if filtered_items.is_empty() {
-            (0.0, 1.0)
-        } else {
-            let min = filtered_items
-                .iter()
-                .map(|(_, m)| m.score)
-                .fold(f64::INFINITY, f64::min);
-            let max = filtered_items
-                .iter()
-                .map(|(_, m)| m.score)
-                .fold(f64::NEG_INFINITY, f64::max);
-            if (max - min).abs() < f64::EPSILON {
-                (min - 1.0, max + 1.0)
-            } else {
-                (min, max)
-            }
-        };
+    fn render_zset_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let row_count = self.filtered_content.zset.len();
+        // 分数范围随筛选结果一起缓存，避免每帧全量遍历
+        let (min_score, max_score) = self.filtered_content.zset_score_range;
 
         v_flex()
             .id("zset-value-scroll")
             .size_full()
-            .overflow_scroll()
             .child(self.render_table_header(
                 vec![
                     (t!("KeyValueView.column_rank").to_string(), 50.0),
@@ -2693,197 +2857,215 @@ impl KeyValueView {
                 ],
                 cx,
             ))
-            .children(filtered_items.into_iter().enumerate().map({
-                let view = view.clone();
-                move |(display_idx, (original_idx, item))| {
-                    let view = view.clone();
-                    let value_for_copy = format!("{}: {}", item.score, item.member);
-                    let member_for_edit = item.member.clone();
-                    let score_for_edit = item.score;
-                    let member_for_delete = item.member.clone();
-                    let member_for_preview = item.member.clone();
-                    let preview_title = large_text_preview_title(
-                        "ZSet member",
-                        Some(&format!("score {:.2}", item.score)),
-                    );
+            .child(
+                uniform_list(
+                    "zset-value-rows",
+                    row_count,
+                    cx.processor(
+                        move |this: &mut Self, visible_range: Range<usize>, _window, cx| {
+                            visible_range
+                                .map(|ix| this.render_zset_row(ix, min_score, max_score, cx))
+                                .collect()
+                        },
+                    ),
+                )
+                .flex_1()
+                .size_full(),
+            )
+    }
 
-                    // 计算分数百分比用于可视化柱状图 (0.0-1.0)
-                    let score_ratio = if (max_score - min_score).abs() < f64::EPSILON {
-                        0.5
+    /// 渲染 ZSet 单行
+    fn render_zset_row(
+        &mut self,
+        ix: usize,
+        min_score: f64,
+        max_score: f64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let view = cx.entity().clone();
+        let Some((original_idx, item)) = self.filtered_content.zset.get(ix) else {
+            return div().into_any_element();
+        };
+        let original_idx = *original_idx;
+        let score = item.score;
+        // SharedString 的克隆只是引用计数，值本身只拷贝一次
+        let member = SharedString::from(item.member.clone());
+        let member_for_edit = member.clone();
+        let member_for_delete = member.clone();
+        let member_for_preview = member.clone();
+        let display_idx = ix;
+
+        // 计算分数百分比用于可视化柱状图 (0.0-1.0)
+        let score_ratio = if (max_score - min_score).abs() < f64::EPSILON {
+            0.5
+        } else {
+            ((score - min_score) / (max_score - min_score)).clamp(0.05, 1.0)
+        };
+
+        // 排名徽章
+        let rank_display = match display_idx {
+            0 => "🥇".to_string(),
+            1 => "🥈".to_string(),
+            2 => "🥉".to_string(),
+            n => format!("{}", n + 1),
+        };
+
+        h_flex()
+            .id(("zset-row", original_idx))
+            .group("zset-row")
+            .w_full()
+            .min_h(px(40.0))
+            .px_2()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .hover(|this| this.bg(cx.theme().muted))
+            // 排名徽章
+            .child(
+                div()
+                    .w(px(50.0))
+                    .text_sm()
+                    .font_weight(if display_idx < 3 {
+                        gpui::FontWeight::BOLD
                     } else {
-                        ((item.score - min_score) / (max_score - min_score)).clamp(0.05, 1.0)
-                    };
-
-                    // 排名徽章
-                    let rank_display = match display_idx {
-                        0 => "🥇".to_string(),
-                        1 => "🥈".to_string(),
-                        2 => "🥉".to_string(),
-                        n => format!("{}", n + 1),
-                    };
-
-                    h_flex()
-                        .id(("zset-row", original_idx))
-                        .group("zset-row")
-                        .w_full()
-                        .min_h(px(40.0))
-                        .px_2()
-                        .items_center()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
-                        .hover(|this| this.bg(cx.theme().muted))
-                        // 排名徽章
-                        .child(
-                            div()
-                                .w(px(50.0))
-                                .text_sm()
-                                .font_weight(if display_idx < 3 {
-                                    gpui::FontWeight::BOLD
-                                } else {
-                                    gpui::FontWeight::NORMAL
-                                })
-                                .text_color(if display_idx < 3 {
-                                    cx.theme().primary
-                                } else {
-                                    cx.theme().muted_foreground
-                                })
-                                .child(rank_display),
-                        )
-                        // 分数可视化柱状图
-                        .child(
-                            h_flex()
-                                .w(px(140.0))
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .h(px(16.0))
-                                        .w(px(60.0))
-                                        .rounded(px(2.0))
-                                        .bg(cx.theme().muted)
-                                        .child(
-                                            div()
-                                                .h_full()
-                                                .w(relative(score_ratio as f32))
-                                                .rounded(px(2.0))
-                                                .bg(cx.theme().primary),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(cx.theme().primary)
-                                        .child(format!("{:.2}", item.score)),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .text_base()
-                                        .truncate()
-                                        .child(item.member.clone()),
-                                )
-                                .child(
-                                    Button::new(("preview-zset", original_idx))
-                                        .icon(IconName::Maximize)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .tooltip(t!("KeyValueView.view_full_value_tooltip"))
-                                        .on_click({
-                                            let view = view.clone();
-                                            let title = preview_title.clone();
-                                            let value = member_for_preview.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_large_text_preview_dialog(
-                                                        title.clone(),
-                                                        value.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .w(px(120.0))
-                                .justify_end()
-                                .gap_1()
-                                .opacity(0.)
-                                .group_hover("zset-row", |this| this.opacity(1.))
-                                .child(
-                                    Button::new(("copy-zset", original_idx))
-                                        .icon(IconName::Copy)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let value = value_for_copy.clone();
-                                            move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    value.clone(),
-                                                ));
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("edit-zset", original_idx))
-                                        .icon(IconName::Edit)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let member = member_for_edit.clone();
-                                            let score = score_for_edit;
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_zset_edit_dialog(
-                                                        member.clone(),
-                                                        score,
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("delete-zset", original_idx))
-                                        .icon(IconName::Remove)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let member = member_for_delete.clone();
-                                            move |_, _, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.delete_zset_element(member.clone(), cx);
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                }
-            }))
+                        gpui::FontWeight::NORMAL
+                    })
+                    .text_color(if display_idx < 3 {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(rank_display),
+            )
+            // 分数可视化柱状图
+            .child(
+                h_flex()
+                    .w(px(140.0))
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .h(px(16.0))
+                            .w(px(60.0))
+                            .rounded(px(2.0))
+                            .bg(cx.theme().muted)
+                            .child(
+                                div()
+                                    .h_full()
+                                    .w(relative(score_ratio as f32))
+                                    .rounded(px(2.0))
+                                    .bg(cx.theme().primary),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().primary)
+                            .child(format!("{:.2}", score)),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1()
+                    .items_center()
+                    .child(div().flex_1().text_base().truncate().child(member.clone()))
+                    .child(
+                        Button::new(("preview-zset", original_idx))
+                            .icon(IconName::Maximize)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .tooltip(t!("KeyValueView.view_full_value_tooltip"))
+                            .on_click({
+                                let view = view.clone();
+                                let value = member_for_preview.clone();
+                                move |_, window, cx| {
+                                    let title = large_text_preview_title(
+                                        "ZSet member",
+                                        Some(&format!("score {:.2}", score)),
+                                    );
+                                    view.update(cx, |v, cx| {
+                                        v.show_large_text_preview_dialog(
+                                            title,
+                                            value.to_string(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w(px(120.0))
+                    .justify_end()
+                    .gap_1()
+                    .opacity(0.)
+                    .group_hover("zset-row", |this| this.opacity(1.))
+                    .child(
+                        Button::new(("copy-zset", original_idx))
+                            .icon(IconName::Copy)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let value = member_for_preview.clone();
+                                move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(format!(
+                                        "{}: {}",
+                                        score,
+                                        value.as_str()
+                                    )));
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("edit-zset", original_idx))
+                            .icon(IconName::Edit)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let member = member_for_edit.clone();
+                                move |_, window, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.show_zset_edit_dialog(
+                                            member.to_string(),
+                                            score,
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("delete-zset", original_idx))
+                            .icon(IconName::Remove)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let member = member_for_delete.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.delete_zset_element(member.to_string(), cx);
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// 渲染 Hash 视图
-    fn render_hash_view(&self, items: &[HashField], cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity().clone();
-        // 应用筛选
-        let items = self.apply_filter_hash(items);
+    fn render_hash_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let row_count = self.filtered_content.hash.len();
 
         v_flex()
             .id("hash-value-scroll")
             .size_full()
-            .overflow_scroll()
             .child(self.render_table_header(
                 vec![
                     (t!("KeyValueView.column_field").to_string(), 150.0),
@@ -2892,131 +3074,152 @@ impl KeyValueView {
                 ],
                 cx,
             ))
-            .children(items.into_iter().map({
-                let view = view.clone();
-                move |(idx, item)| {
-                    let view = view.clone();
-                    let field_for_copy = format!("{}: {}", item.field, item.value);
-                    let field_for_edit = item.field.clone();
-                    let value_for_edit = item.value.clone();
-                    let field_for_delete = item.field.clone();
-                    let value_for_preview = item.value.clone();
-                    let preview_title = large_text_preview_title("Hash value", Some(&item.field));
+            .child(
+                uniform_list(
+                    "hash-value-rows",
+                    row_count,
+                    cx.processor(
+                        move |this: &mut Self, visible_range: Range<usize>, _window, cx| {
+                            visible_range
+                                .map(|ix| this.render_hash_row(ix, cx))
+                                .collect()
+                        },
+                    ),
+                )
+                .flex_1()
+                .size_full(),
+            )
+    }
 
-                    h_flex()
-                        .id(("hash-row", idx))
-                        .group("hash-row")
-                        .w_full()
-                        .min_h(px(40.0))
-                        .px_2()
-                        .items_center()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
-                        .hover(|this| this.bg(cx.theme().muted))
-                        .child(
-                            div()
-                                .w(px(150.0))
-                                .text_base()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .truncate()
-                                .child(item.field.clone()),
-                        )
-                        .child(
-                            h_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .text_base()
-                                        .truncate()
-                                        .child(item.value.clone()),
-                                )
-                                .child(
-                                    Button::new(("preview-hash", idx))
-                                        .icon(IconName::Maximize)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .tooltip(t!("KeyValueView.view_full_value_tooltip"))
-                                        .on_click({
-                                            let view = view.clone();
-                                            let title = preview_title.clone();
-                                            let value = value_for_preview.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_large_text_preview_dialog(
-                                                        title.clone(),
-                                                        value.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                        .child(
-                            h_flex()
-                                .w(px(120.0))
-                                .justify_end()
-                                .gap_1()
-                                .opacity(0.)
-                                .group_hover("hash-row", |this| this.opacity(1.))
-                                .child(
-                                    Button::new(("copy-hash", idx))
-                                        .icon(IconName::Copy)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let value = field_for_copy.clone();
-                                            move |_, _, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    value.clone(),
-                                                ));
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("edit-hash", idx))
-                                        .icon(IconName::Edit)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let field = field_for_edit.clone();
-                                            let value = value_for_edit.clone();
-                                            move |_, window, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.show_hash_edit_dialog(
-                                                        field.clone(),
-                                                        value.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    Button::new(("delete-hash", idx))
-                                        .icon(IconName::Remove)
-                                        .ghost()
-                                        .with_size(Size::Medium)
-                                        .on_click({
-                                            let view = view.clone();
-                                            let field = field_for_delete.clone();
-                                            move |_, _, cx| {
-                                                view.update(cx, |v, cx| {
-                                                    v.delete_hash_field(field.clone(), cx);
-                                                });
-                                            }
-                                        }),
-                                ),
-                        )
-                }
-            }))
+    /// 渲染 Hash 单行
+    fn render_hash_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity().clone();
+        let Some((idx, item)) = self.filtered_content.hash.get(ix) else {
+            return div().into_any_element();
+        };
+        let idx = *idx;
+        // SharedString 的克隆只是引用计数，值本身只拷贝一次
+        let field = SharedString::from(item.field.clone());
+        let value = SharedString::from(item.value.clone());
+        let field_for_edit = field.clone();
+        let value_for_edit = value.clone();
+        let field_for_delete = field.clone();
+        let value_for_preview = value.clone();
+
+        h_flex()
+            .id(("hash-row", idx))
+            .group("hash-row")
+            .w_full()
+            .min_h(px(40.0))
+            .px_2()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .hover(|this| this.bg(cx.theme().muted))
+            .child(
+                div()
+                    .w(px(150.0))
+                    .text_base()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(field.clone()),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1()
+                    .items_center()
+                    .child(div().flex_1().text_base().truncate().child(value.clone()))
+                    .child(
+                        Button::new(("preview-hash", idx))
+                            .icon(IconName::Maximize)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .tooltip(t!("KeyValueView.view_full_value_tooltip"))
+                            .on_click({
+                                let view = view.clone();
+                                let field = field.clone();
+                                let value = value_for_preview.clone();
+                                move |_, window, cx| {
+                                    let title = large_text_preview_title(
+                                        "Hash value",
+                                        Some(field.as_str()),
+                                    );
+                                    view.update(cx, |v, cx| {
+                                        v.show_large_text_preview_dialog(
+                                            title,
+                                            value.to_string(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w(px(120.0))
+                    .justify_end()
+                    .gap_1()
+                    .opacity(0.)
+                    .group_hover("hash-row", |this| this.opacity(1.))
+                    .child(
+                        Button::new(("copy-hash", idx))
+                            .icon(IconName::Copy)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let field = field.clone();
+                                let value = value.clone();
+                                move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(format!(
+                                        "{}: {}",
+                                        field.as_str(),
+                                        value.as_str()
+                                    )));
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("edit-hash", idx))
+                            .icon(IconName::Edit)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let field = field_for_edit.clone();
+                                let value = value_for_edit.clone();
+                                move |_, window, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.show_hash_edit_dialog(
+                                            field.to_string(),
+                                            value.to_string(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new(("delete-hash", idx))
+                            .icon(IconName::Remove)
+                            .ghost()
+                            .with_size(Size::Medium)
+                            .on_click({
+                                let view = view.clone();
+                                let field = field_for_delete.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        v.delete_hash_field(field.to_string(), cx);
+                                    });
+                                }
+                            }),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// 渲染表格头部
@@ -3213,6 +3416,8 @@ impl Render for KeyValueView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 应用异步加载后的待设置值
         self.apply_pending_editor_value(window, cx);
+        // 筛选/排序结果只在条件变化时重算
+        self.refresh_filtered_content();
 
         v_flex()
             .size_full()
@@ -3246,7 +3451,86 @@ impl EventEmitter<TabContentEvent> for KeyValueView {}
 
 #[cfg(test)]
 mod tests {
-    use super::{large_text_preview_title, should_replace_set_member};
+    use super::{
+        SortOrder, ZSetSortBy, filter_hash_fields, filter_strings, filter_zset_members,
+        large_text_preview_title, should_replace_set_member,
+    };
+    use crate::{HashField, ZSetMember};
+
+    #[test]
+    fn filter_strings_空筛选保留全部与原始下标() {
+        let items = vec!["alpha".to_string(), "beta".to_string()];
+
+        let filtered = filter_strings(&items, "", false);
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0], (0, "alpha".to_string()));
+        assert_eq!(filtered[1], (1, "beta".to_string()));
+    }
+
+    #[test]
+    fn filter_strings_模糊匹配忽略大小写() {
+        let items = vec!["Alpha".to_string(), "beta".to_string()];
+
+        let filtered = filter_strings(&items, "alp", false);
+
+        assert_eq!(filtered, vec![(0, "Alpha".to_string())]);
+    }
+
+    #[test]
+    fn filter_strings_精确匹配区分大小写() {
+        let items = vec!["Alpha".to_string(), "beta".to_string()];
+
+        assert!(filter_strings(&items, "alp", true).is_empty());
+        assert_eq!(
+            filter_strings(&items, "Alpha", true),
+            vec![(0, "Alpha".to_string())]
+        );
+    }
+
+    #[test]
+    fn filter_hash_fields_匹配字段与值() {
+        let items = vec![
+            HashField {
+                field: "name".to_string(),
+                value: "Alice".to_string(),
+            },
+            HashField {
+                field: "age".to_string(),
+                value: "30".to_string(),
+            },
+        ];
+
+        assert_eq!(filter_hash_fields(&items, "ali", false).len(), 1);
+        assert_eq!(filter_hash_fields(&items, "age", false).len(), 1);
+        assert!(filter_hash_fields(&items, "bob", false).is_empty());
+    }
+
+    #[test]
+    fn filter_zset_members_按分数与成员排序() {
+        let items = vec![
+            ZSetMember {
+                member: "b".to_string(),
+                score: 2.0,
+            },
+            ZSetMember {
+                member: "a".to_string(),
+                score: 1.0,
+            },
+        ];
+
+        let by_score = filter_zset_members(&items, "", false, ZSetSortBy::Score, SortOrder::Asc);
+        assert_eq!(by_score[0].1.member, "a");
+        assert_eq!(by_score[1].1.member, "b");
+
+        let by_score_desc =
+            filter_zset_members(&items, "", false, ZSetSortBy::Score, SortOrder::Desc);
+        assert_eq!(by_score_desc[0].1.member, "b");
+
+        let by_member = filter_zset_members(&items, "", false, ZSetSortBy::Member, SortOrder::Asc);
+        assert_eq!(by_member[0].1.member, "a");
+        assert_eq!(by_member[0].0, 1, "排序后仍保留原始下标");
+    }
 
     #[test]
     fn large_text_preview_title_formats_context() {
